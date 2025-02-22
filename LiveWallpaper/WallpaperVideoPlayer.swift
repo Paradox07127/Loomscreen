@@ -1,4 +1,3 @@
-// WallpaperVideoPlayer.swift
 import AppKit
 import AVKit
 
@@ -7,6 +6,11 @@ class WallpaperVideoPlayer {
     private weak var window: VideoWallpaperWindow?
     private weak var videoView: VideoContainerView?
     private var itemObservation: NSKeyValueObservation?
+    private var loopObserver: Any?
+    
+    var isPlaying: Bool {
+        return player?.rate != 0
+    }
     
     init(url: URL, frame: CGRect) {
         setupVideo(url: url, frame: frame)
@@ -20,35 +24,53 @@ class WallpaperVideoPlayer {
         player?.actionAtItemEnd = .none
         player?.volume = 0
         
-        // Observe player item status
-        itemObservation = playerItem.observe(\.status) { [weak self] item, _ in
-            if item.status == .readyToPlay {
-                self?.start()
+        // Create views and window
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            
+            let videoView = VideoContainerView(frame: frame)
+            let window = VideoWallpaperWindow(frame: frame)
+            
+            // Set up window first
+            window.contentView = videoView
+            window.orderBack(nil)
+            
+            // Then set up video view
+            videoView.setPlayer(self.player)
+            
+            self.videoView = videoView
+            self.window = window
+            
+            // Observe player item status
+            self.itemObservation = playerItem.observe(\.status) { [weak self] item, _ in
+                if item.status == .readyToPlay {
+                    self?.start()
+                }
             }
+            
+            self.setupLooping()
         }
-        
-        let videoView = VideoContainerView(frame: frame)
-        let window = VideoWallpaperWindow(frame: frame)
-        window.contentView = videoView
-        
-        videoView.setPlayer(player)
-        
-        self.videoView = videoView
-        self.window = window
-        
-        setupLooping()
-        window.orderBack(nil)
     }
     
+//    private func setupLooping() {
+//        NotificationCenter.default.addObserver(
+//            forName: .AVPlayerItemDidPlayToEndTime,
+//            object: player?.currentItem,
+//            queue: .main
+//        ) { [weak self] _ in
+//            guard let self = self else { return }
+//            self.player?.seek(to: .zero)
+//            self.player?.play()
+//        }
+//    }
     private func setupLooping() {
-        NotificationCenter.default.addObserver(
+        loopObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: player?.currentItem,
             queue: .main
         ) { [weak self] _ in
-            guard let self = self else { return }
-            self.player?.seek(to: .zero)
-            self.player?.play()
+            self?.player?.seek(to: .zero)
+            self?.player?.play()
         }
     }
     
@@ -59,14 +81,35 @@ class WallpaperVideoPlayer {
     
     func stop() {
         itemObservation?.invalidate()
-        NotificationCenter.default.removeObserver(self)
-        
+        if let observer = loopObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
         player?.pause()
         player = nil
         
         window?.close()
         window = nil
         videoView = nil
+    }
+    
+    func pause() {
+        player?.pause()
+    }
+    
+    func play() {
+        player?.play()
+    }
+    
+    func togglePlayback() {
+        if isPlaying {
+            pause()
+        } else {
+            play()
+        }
+    }
+    
+    func setPlaybackSpeed(_ speed: Double) {
+        player?.rate = Float(speed)
     }
     
     deinit {
