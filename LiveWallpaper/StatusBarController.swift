@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 
 class StatusBarController: NSObject, NSMenuDelegate {
-    private var statusItem: NSStatusItem
+    private let statusItem: NSStatusItem
     private var screenManager: ScreenManager
     private var mainWindow: NSWindow?
     
@@ -11,12 +11,14 @@ class StatusBarController: NSObject, NSMenuDelegate {
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         
         super.init()
-        
+        configureStatusItem()
+    }
+    
+    private func configureStatusItem() {
         if let button = statusItem.button {
             button.image = NSImage(systemSymbolName: "play.circle", accessibilityDescription: "Live Wallpaper")
             button.image?.isTemplate = true
         }
-        
         setupMenu()
     }
     
@@ -55,16 +57,21 @@ class StatusBarController: NSObject, NSMenuDelegate {
             .environmentObject(screenManager)
         
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 800, height: 500),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
         
-        window.title = "Settings"
+        // Remove the "Settings" title
+        window.title = ""
+        window.titlebarAppearsTransparent = false
+        window.toolbarStyle = .unified
+        window.titleVisibility = .visible
+        
         window.contentView = NSHostingView(rootView: contentView)
         window.center()
-        window.setFrameAutosaveName("SettingsWindow")
+        window.setFrameAutosaveName("MainWindow")
         window.makeKeyAndOrderFront(nil)
         
         self.mainWindow = window
