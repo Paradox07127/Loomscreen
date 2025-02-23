@@ -24,9 +24,8 @@ struct LiveWallpaperApp: App {
                     .environmentObject(screenManager)
             }
         }
-        .windowStyle(.hiddenTitleBar)
-        .windowResizability(.contentSize)
-        // Prevent automatic window creation at launch
+        .windowStyle(.automatic)  // Change to automatic window style
+        .windowToolbarStyle(.unified)  // Add unified toolbar style
         .defaultSize(width: 0, height: 0)
     }
 }

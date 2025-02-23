@@ -3,11 +3,11 @@ import AVFoundation
 
 class ScreenManager: ObservableObject {
     @Published private(set) var screens: [Screen] = []
-    private var bookmarkData: [Int: Data] = [:]
     
     init() {
         refreshScreens()
         setupScreenObserver()
+        loadSavedConfigurations()
     }
     
     func refreshScreens() {
@@ -26,6 +26,32 @@ class ScreenManager: ObservableObject {
     @objc private func screensDidChange() {
         DispatchQueue.main.async {
             self.refreshScreens()
+            self.loadSavedConfigurations()
+        }
+    }
+    
+    private func loadSavedConfigurations() {
+        let configurations = SettingsManager.shared.loadConfigurations()
+        
+        for configuration in configurations {
+            if let screen = screens.first(where: { $0.id == configuration.screenID }) {
+                do {
+                    var isStale = false
+                    let url = try URL(
+                        resolvingBookmarkData: configuration.videoBookmarkData,
+                        options: .withSecurityScope,
+                        relativeTo: nil,
+                        bookmarkDataIsStale: &isStale
+                    )
+                    
+                    if url.startAccessingSecurityScopedResource() {
+                        setVideo(url: url, bookmarkData: configuration.videoBookmarkData, for: screen)
+                        screen.videoPlayer?.setPlaybackSpeed(configuration.playbackSpeed)
+                    }
+                } catch {
+                    print("Error loading saved configuration: \(error)")
+                }
+            }
         }
     }
     
@@ -38,7 +64,12 @@ class ScreenManager: ObservableObject {
             return
         }
         
-        self.bookmarkData[screenIndex] = bookmarkData
+        // Save the configuration
+        let configuration = ScreenConfiguration(
+            screenID: selectedScreen.id,
+            videoBookmarkData: bookmarkData
+        )
+        SettingsManager.shared.saveConfiguration(configuration)
         
         DispatchQueue.main.async {
             // Stop existing players if any
@@ -51,28 +82,15 @@ class ScreenManager: ObservableObject {
             self.screens[screenIndex].previewPlayer = nil
             
             do {
-                var isStale = false
-                let resolvedURL = try URL(
-                    resolvingBookmarkData: bookmarkData,
-                    options: .withSecurityScope,
-                    relativeTo: nil,
-                    bookmarkDataIsStale: &isStale
-                )
-                
-                guard resolvedURL.startAccessingSecurityScopedResource() else {
-                    print("Error: Could not access the file")
-                    return
-                }
-                
                 // Create wallpaper player
                 print("Creating new video player")
                 let player = WallpaperVideoPlayer(
-                    url: resolvedURL,
+                    url: url,
                     frame: selectedScreen.frame
                 )
                 
                 // Create preview player
-                let previewPlayer = AVPlayer(url: resolvedURL)
+                let previewPlayer = AVPlayer(url: url)
                 previewPlayer.volume = 0
                 
                 // Update the screen
@@ -87,9 +105,18 @@ class ScreenManager: ObservableObject {
                 player.start()
                 previewPlayer.play()
                 
-            } catch {
-                print("Error setting up video: \(error)")
             }
+        }
+    }
+    
+    func updatePlaybackSpeed(_ speed: Double, for screen: Screen) {
+        if let configuration = SettingsManager.shared.getConfiguration(for: screen.id) {
+            let updatedConfiguration = ScreenConfiguration(
+                screenID: configuration.screenID,
+                videoBookmarkData: configuration.videoBookmarkData,
+                playbackSpeed: speed
+            )
+            SettingsManager.shared.saveConfiguration(updatedConfiguration)
         }
     }
     

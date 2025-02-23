@@ -13,7 +13,14 @@ class Screen: Identifiable, Hashable, ObservableObject {
     init(nsScreen: NSScreen) {
         self.nsScreen = nsScreen
         self.id = nsScreen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID ?? 0
-        self.name = "Display \(id)"
+        
+        let screenName = nsScreen.localizedName
+        if !screenName.isEmpty {
+            self.name = screenName
+        } else {
+            self.name = "Display \(id)"
+        }
+        
         self.frame = nsScreen.frame
     }
     
@@ -25,29 +32,5 @@ class Screen: Identifiable, Hashable, ObservableObject {
     // Implement Equatable
     static func == (lhs: Screen, rhs: Screen) -> Bool {
         lhs.id == rhs.id
-    }
-}
-
-struct ScreenRowView: View {
-    @ObservedObject var screen: Screen
-    
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading) {
-                Text(screen.name)
-                    .font(.headline)
-                Text("Resolution: \(Int(screen.frame.width))×\(Int(screen.frame.height))")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-            }
-            
-            Spacer()
-            
-            if screen.videoPlayer != nil {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundColor(.green)
-            }
-        }
-        .padding(.vertical, 4)
     }
 }
