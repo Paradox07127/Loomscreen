@@ -1,74 +1,86 @@
 import Foundation
 import IOKit.ps
 
-class PowerMonitor {
+final class PowerMonitor {
     static let shared = PowerMonitor()
     static let powerSourceDidChangeNotification = Notification.Name("com.livewallpaper.powerSourceDidChange")
     
-    private(set) var isOnBattery: Bool = false
-    private var notificationToken: NSObjectProtocol?
+    enum PowerSource {
+        case internalBattery
+        case externalUnlimited
+        case externalUPS
+        
+        var isOnBattery: Bool { self == .internalBattery }
+        
+        init(identifier: String) {
+            switch identifier {
+            case kIOPMBatteryPowerKey:
+                self = .internalBattery
+            case kIOPMACPowerKey:
+                self = .externalUnlimited
+            case kIOPMUPSPowerKey:
+                self = .externalUPS
+            default:
+                self = .externalUnlimited
+                assertionFailure("Unexpected power source identifier: \(identifier)")
+            }
+        }
+    }
+    
+    // Current power source. When updated, a notification is posted on the main thread.
+    private(set) var powerSource: PowerSource {
+        didSet {
+            if oldValue != powerSource {
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(
+                        name: Self.powerSourceDidChangeNotification,
+                        object: nil,
+                        userInfo: ["isOnBattery": self.powerSource.isOnBattery]
+                    )
+                }
+                print("PowerMonitor: Power source changed to \(powerSource) (isOnBattery: \(powerSource.isOnBattery))")
+            }
+        }
+    }
+    
+    // Run loop source for power notifications.
+    private var runLoopSource: CFRunLoopSource?
     
     private init() {
-        updatePowerState()
-        setupObserver()
+        // Get the initial power source.
+        let initialIdentifier = (IOPSGetProvidingPowerSourceType(nil)?.takeRetainedValue() as? String) ?? kIOPMACPowerKey
+        self.powerSource = PowerSource(identifier: initialIdentifier)
+        setupPowerNotification()
     }
     
-    private func updatePowerState() {
-        let oldState = isOnBattery
-        let newState = checkBatteryState()
-        
-        if oldState != newState {
-            isOnBattery = newState
-            NotificationCenter.default.post(
-                name: Self.powerSourceDidChangeNotification,
-                object: nil,
-                userInfo: ["isOnBattery": newState]
-            )
+    private func setupPowerNotification() {
+        let callback: IOPowerSourceCallbackType = { context in
+            // Retrieve self from context.
+            let monitor = Unmanaged<PowerMonitor>.fromOpaque(context!).takeUnretainedValue()
+            monitor.handlePowerChange()
         }
+        
+        // Create the run loop source to watch for power changes.
+        guard let rlSource = IOPSCreateLimitedPowerNotification(callback, Unmanaged.passUnretained(self).toOpaque())?.takeRetainedValue() else {
+            print("PowerMonitor: Failed to create power notification run loop source")
+            return
+        }
+        self.runLoopSource = rlSource
+        CFRunLoopAddSource(CFRunLoopGetCurrent(), rlSource, .defaultMode)
+        print("PowerMonitor: Power notification observer set up")
     }
     
-    private func checkBatteryState() -> Bool {
-        // Get power source information
-        guard let powerInfo = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
-              let powerSourcesList = IOPSCopyPowerSourcesList(powerInfo)?.takeRetainedValue() as NSArray? else {
-            return false
-        }
-        
-        // Check each power source
-        for powerSource in powerSourcesList {
-            guard let description = IOPSGetPowerSourceDescription(powerInfo, powerSource as! CFTypeRef)?.takeRetainedValue() as? [String: Any] else {
-                continue
-            }
-            
-            // Check if it's a present internal battery
-            guard description[kIOPSIsPresentKey] as? Bool == true,
-                  description[kIOPSTypeKey] as? String == kIOPSInternalBatteryType else {
-                continue
-            }
-            
-            // Check power state
-            let currentState = description[kIOPSPowerSourceStateKey] as? String ?? ""
-            if currentState == kIOPSBatteryPowerValue {
-                return true
-            }
-        }
-        
-        return false
-    }
-    
-    private func setupObserver() {
-        notificationToken = NotificationCenter.default.addObserver(
-            forName: Notification.Name(kIOPSNotifyPowerSource as String),
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            self?.updatePowerState()
+    private func handlePowerChange() {
+        // Get the updated power source identifier.
+        if let identifier = (IOPSGetProvidingPowerSourceType(nil)?.takeRetainedValue() as? String) {
+            let newSource = PowerSource(identifier: identifier)
+            self.powerSource = newSource
         }
     }
     
     deinit {
-        if let token = notificationToken {
-            NotificationCenter.default.removeObserver(token)
+        if let source = runLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .defaultMode)
         }
     }
 }

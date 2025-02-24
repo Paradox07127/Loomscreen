@@ -70,6 +70,6 @@ struct GeneralSettingsView: View {
     private func resetAllSettings() {
         SettingsManager.shared.cleanAllSettings()
         globalPauseOnBattery = true  // Reset to default
-        screenManager.handleSettingsReset()
+        screenManager.refreshScreens()
     }
 }

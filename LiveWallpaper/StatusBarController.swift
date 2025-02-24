@@ -9,7 +9,6 @@ class StatusBarController: NSObject, NSMenuDelegate {
     init(screenManager: ScreenManager) {
         self.screenManager = screenManager
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        
         super.init()
         configureStatusItem()
     }
@@ -33,12 +32,12 @@ class StatusBarController: NSObject, NSMenuDelegate {
             keyEquivalent: ","
         )
         
-        // Display submenu
+        // Displays submenu
         let displaysMenu = NSMenu()
         let displaysItem = NSMenuItem(title: "Displays", action: nil, keyEquivalent: "")
         displaysItem.submenu = displaysMenu
         
-        // Playback control
+        // Playback control item
         let playPauseItem = createMenuItem(
             title: "Play/Pause All",
             action: #selector(togglePlayback),
@@ -53,7 +52,7 @@ class StatusBarController: NSObject, NSMenuDelegate {
         )
         quitItem.target = NSApp
         
-        // Add items to menu
+        // Assemble menu
         menu.addItem(settingsItem)
         menu.addItem(displaysItem)
         menu.addItem(NSMenuItem.separator())
@@ -70,18 +69,25 @@ class StatusBarController: NSObject, NSMenuDelegate {
         return item
     }
     
+    // MARK: - Settings Window Management
+    
     @objc private func showSettings() {
-        // Return if window already exists and just needs to be shown
+        // If the settings window already exists, show it.
         if let windowController = settingsWindowController {
             windowController.showWindow(nil)
-            NSApp.activate(ignoringOtherApps: true)
+            activateApp()
             return
         }
         
-        // Create new settings window
-        let contentView = ContentView()
-            .environmentObject(screenManager)
-        
+        // Otherwise, create a new settings window.
+        let window = createSettingsWindow()
+        settingsWindowController = NSWindowController(window: window)
+        settingsWindowController?.showWindow(nil)
+        activateApp()
+    }
+    
+    private func createSettingsWindow() -> NSWindow {
+        let contentView = ContentView().environmentObject(screenManager)
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -89,31 +95,34 @@ class StatusBarController: NSObject, NSMenuDelegate {
             defer: false
         )
         
-        // Configure window appearance
+        // Window appearance configuration
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.toolbar = nil
         window.center()
-        
-        // Set up content
         window.contentView = NSHostingView(rootView: contentView)
         window.delegate = self
         
-        // Create and store window controller
-        let windowController = NSWindowController(window: window)
-        settingsWindowController = windowController
-        
-        windowController.showWindow(nil)
+        return window
+    }
+    
+    private func activateApp() {
         NSApp.activate(ignoringOtherApps: true)
     }
     
+    // MARK: - Playback Control
+    
     @objc private func togglePlayback() {
-        screenManager.screens.forEach { screen in
+        for screen in screenManager.screens {
             screen.videoPlayer?.togglePlayback()
         }
+        print("Playback toggled for all screens.")
     }
     
+    // MARK: - Menu Delegate
+    
     func menuWillOpen(_ menu: NSMenu) {
+        print("Status bar menu will open.")
         updateDisplaysMenu()
         updatePlaybackMenuState()
     }
@@ -123,20 +132,16 @@ class StatusBarController: NSObject, NSMenuDelegate {
               let displaysItem = menu.items.first(where: { $0.title == "Displays" }),
               let displaysMenu = displaysItem.submenu else { return }
         
-        // Clear existing items
         displaysMenu.removeAllItems()
-        
-        // Add items for each screen
         for screen in screenManager.screens {
             let item = NSMenuItem(title: screen.name, action: nil, keyEquivalent: "")
             item.isEnabled = true
-            
             if screen.videoPlayer != nil {
                 item.state = .on
             }
-            
             displaysMenu.addItem(item)
         }
+        print("Displays menu updated with \(screenManager.screens.count) screens.")
     }
     
     private func updatePlaybackMenuState() {
@@ -145,11 +150,15 @@ class StatusBarController: NSObject, NSMenuDelegate {
         
         let isAnyPlaying = screenManager.screens.contains { $0.videoPlayer?.isPlaying ?? false }
         playPauseItem.title = isAnyPlaying ? "Pause All" : "Play All"
+        print("Playback menu state updated: \(playPauseItem.title)")
     }
 }
+
+// MARK: - NSWindowDelegate
 
 extension StatusBarController: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         settingsWindowController = nil
+        print("Settings window closed.")
     }
 }

@@ -15,15 +15,19 @@ class ScreenManager: ObservableObject {
         loadSavedConfigurations()
         
         let globalSettings = SettingsManager.shared.loadGlobalSettings()
-        if globalSettings.globalPauseOnBattery && PowerMonitor.shared.isOnBattery {
+        // Use the new powerSource property from PowerMonitor
+        if globalSettings.globalPauseOnBattery && PowerMonitor.shared.powerSource.isOnBattery {
             for screen in screens {
                 screen.videoPlayer?.pause()
             }
+            print("Initial pause due to battery mode.")
         }
     }
     
+    // MARK: - Screen Refresh and Configuration
+    
     func refreshScreens() {
-        // Store current screen states for comparison
+        // Capture current screen states for comparison.
         let oldScreenStates = Dictionary(uniqueKeysWithValues: screens.map { screen in
             (screen.id, (frame: screen.frame, scale: screen.nsScreen.backingScaleFactor))
         })
@@ -33,7 +37,7 @@ class ScreenManager: ObservableObject {
             (screen.id, (frame: screen.frame, scale: screen.nsScreen.backingScaleFactor))
         })
         
-        // Find removed screens
+        // Cleanup removed screens.
         let removedScreenIDs = Set(oldScreenStates.keys).subtracting(newScreenStates.keys)
         for screenID in removedScreenIDs {
             if let screen = screens.first(where: { $0.id == screenID }) {
@@ -41,33 +45,35 @@ class ScreenManager: ObservableObject {
             }
         }
         
-        // Update screens array
         screens = newScreens
         
-        // Handle resolution and scale changes for existing screens
+        // For each new or changed screen, load or reload configuration.
         for screen in screens {
             let oldState = oldScreenStates[screen.id]
             let newState = newScreenStates[screen.id]
             
-            if oldState?.frame != newState?.frame || oldState?.scale != newState?.scale {
-                // Resolution or scale has changed, reload the video
+            if let oldState = oldState, let newState = newState,
+               (oldState.frame != newState.frame || oldState.scale != newState.scale) {
+                // Screen resolution or scale changed.
                 reloadVideoForScreen(screen)
-            } else if oldScreenStates[screen.id] == nil {
-                // New screen, load its configuration
+            } else if oldState == nil {
+                // New screen detected.
                 loadConfigurationForScreen(screen)
             }
         }
+        
+        print("Screens refreshed. Total screens: \(screens.count)")
     }
     
     private func cleanupScreen(_ screen: Screen) {
         screen.videoPlayer?.stop()
         screen.previewPlayer?.pause()
         screen.previewPlayer = nil
+        print("Cleaned up screen \(screen.id)")
     }
     
     private func loadSavedConfigurations() {
         let configurations = SettingsManager.shared.loadConfigurations()
-        
         for configuration in configurations {
             if let screen = screens.first(where: { $0.id == configuration.screenID }) {
                 loadConfigurationForScreen(screen)
@@ -77,77 +83,69 @@ class ScreenManager: ObservableObject {
     
     private func loadConfigurationForScreen(_ screen: Screen) {
         guard let configuration = SettingsManager.shared.getConfiguration(for: screen.id) else { return }
-        
-        do {
-            var isStale = false
-            let url = try URL(
-                resolvingBookmarkData: configuration.videoBookmarkData,
-                options: .withSecurityScope,
-                relativeTo: nil,
-                bookmarkDataIsStale: &isStale
-            )
-            
-            if url.startAccessingSecurityScopedResource() {
-                setVideo(url: url, bookmarkData: configuration.videoBookmarkData, for: screen)
-                screen.videoPlayer?.setPlaybackSpeed(configuration.playbackSpeed)
-                
-                // If pause on battery is enabled and we're on battery, pause the video
-                if configuration.pauseOnBattery && PowerMonitor.shared.isOnBattery {
-                    screen.videoPlayer?.pause()
-                }
-                
-                url.stopAccessingSecurityScopedResource()
-            }
-        } catch {
-            print("Error loading configuration for screen \(screen.id): \(error)")
-        }
+        applyConfiguration(configuration, to: screen)
     }
     
     func reloadVideoForScreen(_ screen: Screen) {
         if let config = SettingsManager.shared.getConfiguration(for: screen.id) {
-            do {
-                var isStale = false
-                let url = try URL(
-                    resolvingBookmarkData: config.videoBookmarkData,
-                    options: .withSecurityScope,
-                    relativeTo: nil,
-                    bookmarkDataIsStale: &isStale
-                )
-                
-                if url.startAccessingSecurityScopedResource() {
-                    // Store playback state
-                    let wasPlaying = screen.videoPlayer?.isPlaying ?? false
-                    let currentTime = screen.videoPlayer?.player?.currentTime() ?? .zero
-                    
-                    // Recreate video player with new frame
-                    cleanupScreen(screen)
-                    
-                    // Create new video player
-                    let player = WallpaperVideoPlayer(
-                        url: url,
-                        frame: screen.frame
-                    )
-                    screen.videoPlayer = player
-                    
-                    // Restore playback state
-                    player.setPlaybackSpeed(config.playbackSpeed)
-                    player.player?.seek(to: currentTime)
-                    
-                    // Check if we should play based on power state
-                    let shouldPlay = wasPlaying && (!config.pauseOnBattery || !PowerMonitor.shared.isOnBattery)
-                    if shouldPlay {
-                        player.play()
-                    } else {
-                        player.pause()
-                    }
-                    
-                    url.stopAccessingSecurityScopedResource()
-                }
-            } catch {
-                print("Error reloading video for screen \(screen.id): \(error)")
-            }
+            // Preserve the playback state during a reload.
+            applyConfiguration(config, to: screen, preservingState: true)
         }
     }
+    
+    // MARK: - Configuration Helpers
+    
+    private func resolveURL(from configuration: ScreenConfiguration) throws -> URL {
+        var isStale = false
+        return try URL(
+            resolvingBookmarkData: configuration.videoBookmarkData,
+            options: .withSecurityScope,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        )
+    }
+    
+    private func applyConfiguration(_ configuration: ScreenConfiguration, to screen: Screen, preservingState: Bool = false) {
+        do {
+            let url = try resolveURL(from: configuration)
+            guard url.startAccessingSecurityScopedResource() else {
+                print("Unable to access resource for screen \(screen.id)")
+                return
+            }
+            
+            // Optionally preserve the current playback time.
+            let previousTime = preservingState ? screen.videoPlayer?.player?.currentTime() ?? .zero : .zero
+            
+            // Clean up any existing video player.
+            cleanupScreen(screen)
+            
+            // Create and configure a new video player.
+            let player = WallpaperVideoPlayer(url: url, frame: screen.frame)
+            screen.videoPlayer = player
+            player.setPlaybackSpeed(configuration.playbackSpeed)
+            if preservingState {
+                player.player?.seek(to: previousTime)
+            }
+            
+            // Adjust playback based on battery settings using new power source property.
+            if configuration.pauseOnBattery && PowerMonitor.shared.powerSource.isOnBattery {
+                player.pause()
+                print("Player paused due to battery mode.")
+            } else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    player.play()
+                    print("Playback started after delay on AC power.")
+                }
+            }
+            
+            url.stopAccessingSecurityScopedResource()
+            print("Applied configuration for screen \(screen.id)")
+        } catch {
+            print("Error applying configuration for screen \(screen.id): \(error)")
+        }
+    }
+    
+    // MARK: - Observer Registration
     
     private func setupScreenObserver() {
         NotificationCenter.default.addObserver(
@@ -156,10 +154,11 @@ class ScreenManager: ObservableObject {
             name: NSApplication.didChangeScreenParametersNotification,
             object: nil
         )
+        print("Screen observer set up.")
     }
     
     private func setupPowerObserver() {
-        // Observe wake from sleep
+        // Observe wake from sleep.
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(handleWakeFromSleep),
@@ -167,17 +166,17 @@ class ScreenManager: ObservableObject {
             object: nil
         )
         
-        // Observe power source changes
+        // Observe changes in power source.
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(handlePowerSourceChange),
             name: PowerMonitor.powerSourceDidChangeNotification,
             object: nil
         )
+        print("Power observer set up.")
     }
     
     @objc private func handleWakeFromSleep() {
-        // On wake, refresh screens and check power state
         DispatchQueue.main.async { [weak self] in
             self?.refreshScreens()
             self?.handlePowerStateChange()
@@ -185,45 +184,31 @@ class ScreenManager: ObservableObject {
     }
     
     @objc private func handlePowerSourceChange() {
+        print("Received power source change notification")
         handlePowerStateChange()
     }
     
     func handleGlobalPauseOnBatteryChange(_ pauseOnBattery: Bool) {
-        let isOnBattery = PowerMonitor.shared.isOnBattery
-        
+        let isOnBattery = PowerMonitor.shared.powerSource.isOnBattery
         if isOnBattery && pauseOnBattery {
-            // Pause all videos if we're on battery and the setting is enabled
             for screen in screens {
                 screen.videoPlayer?.pause()
             }
+            print("Paused all videos due to battery mode.")
         } else if !isOnBattery {
-            // Only resume videos if we're on AC power
             for screen in screens {
                 let screenConfig = SettingsManager.shared.getConfiguration(for: screen.id)
-                // Don't resume if screen-specific pause on battery is enabled
                 if !(screenConfig?.pauseOnBattery ?? false) {
                     screen.videoPlayer?.play()
                 }
             }
+            print("Resumed videos on AC power.")
         }
-    }
-    
-    func handleSettingsReset() {
-        // Stop all video players
-        for screen in screens {
-            screen.videoPlayer?.stop()
-            screen.videoPlayer = nil
-            screen.previewPlayer?.pause()
-            screen.previewPlayer = nil
-        }
-        
-        // Notify observers that screens need to be refreshed
-        objectWillChange.send()
     }
     
     private func handlePowerStateChange() {
         let globalSettings = SettingsManager.shared.loadGlobalSettings()
-        let isOnBattery = PowerMonitor.shared.isOnBattery
+        let isOnBattery = PowerMonitor.shared.powerSource.isOnBattery
         
         for screen in screens {
             guard let player = screen.videoPlayer,
@@ -232,7 +217,6 @@ class ScreenManager: ObservableObject {
             }
             
             let shouldPause = (globalSettings.globalPauseOnBattery || configuration.pauseOnBattery) && isOnBattery
-            
             DispatchQueue.main.async {
                 if shouldPause {
                     player.pause()
@@ -241,6 +225,7 @@ class ScreenManager: ObservableObject {
                 }
             }
         }
+        print("Handled power state change: isOnBattery = \(isOnBattery)")
     }
     
     @objc private func screensDidChange() {
@@ -249,16 +234,18 @@ class ScreenManager: ObservableObject {
         }
     }
     
+    // MARK: - Video Setup via User Interaction
+    
     func setVideo(url: URL, bookmarkData: Data, for selectedScreen: Screen) {
         guard let screenIndex = screens.firstIndex(where: { $0.id == selectedScreen.id }) else { return }
         
         Task {
             do {
-                // Create and verify asset
+                // Create asset and ensure it's playable.
                 let asset = AVURLAsset(url: url)
-                let playableStatus = try await asset.load(.isPlayable)
+                let _ = try await asset.load(.isPlayable)
                 
-                // Save configuration
+                // Save configuration.
                 let existingConfig = SettingsManager.shared.getConfiguration(for: selectedScreen.id)
                 let configuration = ScreenConfiguration(
                     screenID: selectedScreen.id,
@@ -267,43 +254,32 @@ class ScreenManager: ObservableObject {
                     pauseOnBattery: existingConfig?.pauseOnBattery ?? false
                 )
                 SettingsManager.shared.saveConfiguration(configuration)
-                
-                // Store configuration for reloading
-                screenConfigurations[selectedScreen.id] = (url: url, bookmarkData: bookmarkData)
+                self.screenConfigurations[selectedScreen.id] = (url: url, bookmarkData: bookmarkData)
                 
                 await MainActor.run {
-                    // Clean up existing players
-                    screens[screenIndex].videoPlayer?.stop()
-                    screens[screenIndex].previewPlayer?.pause()
-                    screens[screenIndex].previewPlayer = nil
+                    cleanupScreen(screens[screenIndex])
                     
-                    // Create and configure preview player
+                    // Set up a preview player.
                     let previewPlayer = AVPlayer(playerItem: AVPlayerItem(asset: asset))
                     previewPlayer.volume = 0
                     
-                    // Create wallpaper player
-                    let player = WallpaperVideoPlayer(
-                        url: url,
-                        frame: selectedScreen.frame
-                    )
-                    
-                    // Update screen with new players
+                    // Create wallpaper video player.
+                    let player = WallpaperVideoPlayer(url: url, frame: selectedScreen.frame)
                     screens[screenIndex].videoPlayer = player
                     screens[screenIndex].previewPlayer = previewPlayer
                     
-                    // Handle playback based on power state
-                    let shouldPause = SettingsManager.shared.loadGlobalSettings().globalPauseOnBattery
-                        && PowerMonitor.shared.isOnBattery
-                    
+                    let shouldPause = SettingsManager.shared.loadGlobalSettings().globalPauseOnBattery &&
+                    PowerMonitor.shared.powerSource.isOnBattery
                     if !shouldPause {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                             player.play()
                             previewPlayer.play()
                         }
                     }
                 }
+                print("Video set for screen \(selectedScreen.id)")
             } catch {
-                print("Failed to setup video: \(error)")
+                print("Failed to setup video for screen \(selectedScreen.id): \(error)")
             }
         }
     }
@@ -318,6 +294,7 @@ class ScreenManager: ObservableObject {
             )
             SettingsManager.shared.saveConfiguration(updatedConfiguration)
             screen.videoPlayer?.setPlaybackSpeed(speed)
+            print("Updated playback speed for screen \(screen.id) to \(speed)x")
         }
     }
     
@@ -327,5 +304,6 @@ class ScreenManager: ObservableObject {
         }
         NotificationCenter.default.removeObserver(self)
         screens.forEach { cleanupScreen($0) }
+        print("ScreenManager deinitialized.")
     }
 }
