@@ -2,23 +2,44 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleDocumentTypes</key>
-    <array>
-        <dict>
-            <key>CFBundleTypeName</key>
-            <string>Movie</string>
-            <key>LSHandlerRank</key>
-            <string>Default</string>
-            <key>LSItemContentTypes</key>
-            <array>
-                <string>public.movie</string>
-            </array>
-        </dict>
-    </array>
-    <key>NSAppTransportSecurity</key>
-    <dict>
-        <key>NSAllowsArbitraryLoads</key>
-        <true/>
-    </dict>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Movie</string>
+			<key>LSHandlerRank</key>
+			<string>Default</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.movie</string>
+				<string>public.audiovisual-content</string>
+				<string>public.avi</string>
+				<string>public.mpeg</string>
+				<string>com.apple.quicktime-movie</string>
+				<string>public.mpeg-4</string>
+			</array>
+			<key>NSDocumentClass</key>
+			<string>FileDocument</string>
+		</dict>
+	</array>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+	<key>NSPowerMonitorUsageDescription</key>
+	<string>This app needs to monitor power status to manage video playback based on battery state.</string>
+	<key>NSSystemPreferencesUsageDescription</key>
+	<string>This app needs to access System Settings to help you enable power monitoring permissions.</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>Access to desktop is needed to play video files stored there.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Access to documents is needed to play video files stored there.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Access to downloads is needed to play video files stored there.</string>
+	<key>NSSecurityScopedBookmarksUsageDescription</key>
+	<string>Bookmarks are used to maintain access to your selected video files.</string>
+	<key>LSUIElement</key>
+	<true/>
 </dict>
 </plist>

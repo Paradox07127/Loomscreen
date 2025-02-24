@@ -1,68 +1,75 @@
 import SwiftUI
-import UniformTypeIdentifiers
+import AppKit
 import AVKit
 
 struct ContentView: View {
     @EnvironmentObject private var screenManager: ScreenManager
-    @State private var selectedScreen: Screen?
+    @State private var selectedNavigation: Navigation?
     
     var body: some View {
         NavigationSplitView {
-            // Sidebar without the "Settings" title
-            List(selection: $selectedScreen) {
-                ForEach(screenManager.screens) { screen in
-                    ScreenRowView(screen: screen)
-                        .contentShape(Rectangle())
-                        .tag(screen)
-                        .padding(.vertical, 4)
-                }
-            }
-            .listStyle(SidebarListStyle())
+            Sidebar(selection: $selectedNavigation)
         } detail: {
-            if let screen = selectedScreen {
-                ScreenDetailView(screen: screen)
-            } else {
-                VStack(spacing: 20) {
-                    Image(systemName: "display")
-                        .font(.system(size: 48))
-                        .foregroundColor(.secondary)
-                    Text("Select a display to configure")
-                        .font(.title2)
-                        .foregroundColor(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(NSColor.windowBackgroundColor))
-            }
+            DetailContent(selection: selectedNavigation)
         }
-        .navigationSplitViewColumnWidth(min: 280, ideal: 320, max: 400)
-        .toolbar {
-            ToolbarItem(placement: .automatic) {
-                if let screen = selectedScreen {
-                    Text(screen.name)
-                        .font(.system(size: 18, weight: .medium))
-                }
-            }
-            
-            ToolbarItem(placement: .automatic) {
-                Button(action: {
-                    withAnimation { screenManager.refreshScreens() }
-                }) {
-                    Image(systemName: "arrow.clockwise")
-                }
-            }
-        }
+        .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 900, minHeight: 600)
     }
 }
 
-struct ScreenRowView: View {
+// MARK: - Navigation Enum
+enum Navigation: Hashable {
+    case general
+    case screen(CGDirectDisplayID)
+    
+    var title: String {
+        switch self {
+        case .general: return "General"
+        case .screen: return "Screen"
+        }
+    }
+    
+    var icon: String {
+        switch self {
+        case .general: return "gearshape"
+        case .screen: return "display"
+        }
+    }
+}
+
+// MARK: - Sidebar View
+private struct Sidebar: View {
+    @Binding var selection: Navigation?
+    @EnvironmentObject private var screenManager: ScreenManager
+    
+    var body: some View {
+        List(selection: $selection) {
+            NavigationLink(value: Navigation.general) {
+                Label("General", systemImage: "gearshape")
+            }
+            
+            Section("Displays") {
+                ForEach(screenManager.screens, id: \.id) { screen in
+                    NavigationLink(value: Navigation.screen(screen.id)) {
+                        ScreenRow(screen: screen)
+                    }
+                }
+            }
+        }
+        .listStyle(.sidebar)
+        .frame(minWidth: 200)
+    }
+}
+
+// MARK: - Screen Row
+private struct ScreenRow: View {
     @ObservedObject var screen: Screen
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(screen.name)
-                    .font(.headline)
+                    .fontWeight(.medium)
                     .lineLimit(1)
                 
                 Spacer()
@@ -70,7 +77,7 @@ struct ScreenRowView: View {
                 if screen.videoPlayer != nil {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(.green)
-                        .imageScale(.medium)
+                        .imageScale(.small)
                 }
             }
             
@@ -78,54 +85,101 @@ struct ScreenRowView: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 2)
     }
 }
 
-struct ScreenDetailView: View {
+// MARK: - Detail Content
+private struct DetailContent: View {
+    let selection: Navigation?
+    @EnvironmentObject private var screenManager: ScreenManager
+    
+    var body: some View {
+        Group {
+            switch selection {
+            case .general:
+                GeneralSettingsView()
+            case .screen(let screenId):
+                if let screen = screenManager.screens.first(where: { $0.id == screenId }) {
+                    ScreenDetailView(screen: screen)
+                } else {
+                    EmptyStateView(message: "Screen not found")
+                }
+            case .none:
+                EmptyStateView(message: "Select a display to configure")
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.windowBackgroundColor))
+    }
+}
+
+// MARK: - Empty State View
+private struct EmptyStateView: View {
+    let message: String
+    
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "display")
+                .font(.system(size: 48))
+                .foregroundColor(.secondary)
+            
+            Text(message)
+                .font(.title3)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct ScreenDetailView: View {
     @ObservedObject var screen: Screen
     @EnvironmentObject private var screenManager: ScreenManager
     @State private var playbackSpeed: Double = 1.0
     
     var body: some View {
         ScrollView {
-            VStack(spacing: 0) {
-                // Main content
-                VStack(alignment: .leading, spacing: 24) {
-                    // Header
-                    displayHeader
-                    
-                    // Video preview section
-                    videoPreviewSection
-                    
-                    // Playback controls section
-                    if screen.videoPlayer != nil {
-                        playbackControlsSection
-                    }
-                    
-                    Spacer()
+            VStack(spacing: 24) {
+                displayHeader
+                videoPreviewSection
+                if screen.videoPlayer != nil {
+                    playbackControlsSection
                 }
-                .padding(24)
+                Spacer()
             }
+            .padding(24)
         }
         .background(Color(NSColor.windowBackgroundColor))
     }
     
     private var displayHeader: some View {
         HStack(alignment: .center, spacing: 16) {
-            Image(systemName: "display")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 44, height: 44)
-                .foregroundColor(.accentColor)
-            
-            VStack(alignment: .leading, spacing: 4) {
-                Text(screen.name)
-                    .font(.system(size: 24, weight: .medium))
-                Text("\(Int(screen.frame.width))×\(Int(screen.frame.height))")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
+            HStack(spacing: 16) {
+                Image(systemName: "display")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 44, height: 44)
+                    .foregroundColor(.accentColor)
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(screen.name)
+                        .font(.system(size: 24, weight: .medium))
+                    Text("\(Int(screen.frame.width))×\(Int(screen.frame.height))")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
             }
+            
+            Spacer()
+            
+            Button(action: {
+                screenManager.reloadVideoForScreen(screen)
+            }) {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 18))
+            }
+            .buttonStyle(.plain)
+            .help("Reload Video")
         }
         .padding(.bottom, 8)
     }
@@ -160,7 +214,6 @@ struct ScreenDetailView: View {
                     .font(.headline)
                 
                 VStack(spacing: 20) {
-                    // Control buttons
                     HStack(spacing: 16) {
                         Button(action: showFilePicker) {
                             Label("Change Video", systemImage: "photo.on.rectangle")
@@ -169,20 +222,27 @@ struct ScreenDetailView: View {
                         
                         Spacer()
                         
+                        // Updated playback toggle
                         Button(action: {
-                            screen.videoPlayer?.togglePlayback()
+                            if screen.videoPlayer?.isPlaying ?? false {
+                                screen.videoPlayer?.pause()
+                            } else {
+                                screen.videoPlayer?.play()
+                            }
+                            screen.objectWillChange.send()
                         }) {
-                            Label(
-                                screen.videoPlayer?.isPlaying == true ? "Pause" : "Play",
-                                systemImage: screen.videoPlayer?.isPlaying == true ? "pause.fill" : "play.fill"
-                            )
+                            HStack(spacing: 8) {
+                                Image(systemName: screen.videoPlayer?.isPlaying ?? false ? "pause.circle.fill" : "play.circle.fill")
+                                    .font(.system(size: 20))
+                                Text(screen.videoPlayer?.isPlaying ?? false ? "Pause" : "Play")
+                            }
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                     }
                     
                     Divider()
                     
-                    // Playback speed control
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Playback Speed: \(String(format: "%.1fx", playbackSpeed))")
                             .font(.subheadline)
@@ -223,26 +283,53 @@ struct ScreenDetailView: View {
     }
     
     private func handleSelectedFile(url: URL) {
-        guard url.startAccessingSecurityScopedResource() else {
+        // First, check if we can access the file
+        let canAccess = url.startAccessingSecurityScopedResource()
+        
+        guard canAccess else {
             print("Failed to access file at \(url)")
+            // You might want to show an alert to the user here
             return
         }
-        defer { url.stopAccessingSecurityScopedResource() }
         
         do {
+            // Create security-scoped bookmark
             let bookmarkData = try url.bookmarkData(
                 options: [.withSecurityScope, .securityScopeAllowOnlyReadAccess],
-                includingResourceValuesForKeys: nil,
+                includingResourceValuesForKeys: [
+                    .isReadableKey,
+                    .fileSizeKey,
+                    .contentTypeKey
+                ],
                 relativeTo: nil
             )
+            
+            // Verify we can resolve the bookmark
+            var isStale = false
+            let _ = try URL(
+                resolvingBookmarkData: bookmarkData,
+                options: .withSecurityScope,
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            )
+            
+            if isStale {
+                print("Warning: Bookmark is stale, but resolved successfully")
+            }
+            
+            // If everything is okay, set the video
             screenManager.setVideo(url: url, bookmarkData: bookmarkData, for: screen)
+            
         } catch {
             print("Error creating security-scoped bookmark: \(error)")
+            // You might want to show an alert to the user here
         }
+        
+        url.stopAccessingSecurityScopedResource()
     }
 }
 
-struct FileSelectView: View {
+private struct FileSelectView: View {
     var action: () -> Void
     
     var body: some View {
@@ -270,3 +357,11 @@ struct FileSelectView: View {
         .buttonStyle(.plain)
     }
 }
+
+
+// MARK: - Preview Provider
+#Preview {
+    ContentView()
+        .environmentObject(ScreenManager())
+}
+
