@@ -11,25 +11,33 @@ class WallpaperVideoPlayer {
     var isPlaying: Bool { player?.rate != 0 }
     
     init(url: URL, frame: CGRect) {
-        guard url.startAccessingSecurityScopedResource() else { return }
+        // Attempt to start accessing the security-scoped resource.
+        guard url.startAccessingSecurityScopedResource() else {
+            print("Failed to start accessing security scoped resource for \(url)")
+            return
+        }
         
         Task {
             do {
                 let asset = AVURLAsset(url: url)
-                try await asset.load(.isPlayable)
+                // Use the result of load(.isPlayable) to determine playability.
+                let playable = try await asset.load(.isPlayable)
                 
-                guard asset.isPlayable else {
+                guard playable else {
+                    print("Asset is not playable for \(url)")
                     url.stopAccessingSecurityScopedResource()
                     return
                 }
                 
-                await MainActor.run {
-                    setupPlayer(with: asset, frame: frame)
-                    setupLooping()
-                    setupFrameObserver(frame: frame)
+                // UI setup must happen on the main actor.
+                await MainActor.run { [weak self] in
+                    guard let self = self else { return }
+                    self.setupPlayer(with: asset, frame: frame)
+                    self.setupLooping()
+                    self.setupFrameObserver(initialFrame: frame)
                 }
             } catch {
-                print("Failed to load video: \(error)")
+                print("Failed to load video asset: \(error)")
                 url.stopAccessingSecurityScopedResource()
             }
         }
@@ -37,18 +45,20 @@ class WallpaperVideoPlayer {
     
     private func setupPlayer(with asset: AVURLAsset, frame: CGRect) {
         let playerItem = AVPlayerItem(asset: asset)
-        player = AVPlayer(playerItem: playerItem)
-        player?.volume = 0
+        self.player = AVPlayer(playerItem: playerItem)
+        self.player?.volume = 0
         
-        let window = VideoWallpaperWindow(frame: frame)
-        let videoView = VideoContainerView(frame: frame)
+        let videoWindow = VideoWallpaperWindow(frame: frame)
+        let containerView = VideoContainerView(frame: frame)
         
-        window.contentView = videoView
-        videoView.setPlayer(player)
-        window.orderBack(nil)
+        videoWindow.contentView = containerView
+        containerView.setPlayer(player)
+        videoWindow.orderBack(nil)
         
-        self.window = window
-        self.videoView = videoView
+        self.window = videoWindow
+        self.videoView = containerView
+        
+        print("Video player setup complete with frame: \(frame)")
     }
     
     private func setupLooping() {
@@ -57,49 +67,73 @@ class WallpaperVideoPlayer {
             object: player?.currentItem,
             queue: .main
         ) { [weak self] _ in
-            self?.player?.seek(to: .zero)
-            self?.player?.play()
+            guard let self = self else { return }
+            self.player?.seek(to: .zero)
+            self.player?.play()
+            print("Looping video: restarted playback.")
         }
     }
     
-    private func setupFrameObserver(frame: CGRect) {
+    private func setupFrameObserver(initialFrame: CGRect) {
         frameObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            guard let self = self,
-                  let window = self.window,
-                  let screen = NSScreen.screens.first(where: { $0.frame.intersects(window.frame) }) else { return }
-            
-            if screen.frame != frame {
-                window.setFrame(screen.frame, display: true)
-                videoView?.frame = screen.frame
+            guard let self = self, let window = self.window else { return }
+            // Find the screen intersecting the window's frame.
+            if let screen = NSScreen.screens.first(where: { $0.frame.intersects(window.frame) }) {
+                if screen.frame != initialFrame {
+                    window.setFrame(screen.frame, display: true)
+                    self.videoView?.frame = screen.frame
+                    print("Updated window and video view frame to: \(screen.frame)")
+                }
             }
         }
     }
     
-    func play() { player?.play() }
-    func pause() { player?.pause() }
-    func togglePlayback() { isPlaying ? pause() : play() }
+    func play() {
+        player?.play()
+        print("Playback started.")
+    }
+    
+    func pause() {
+        player?.pause()
+        print("Playback paused.")
+    }
+    
+    func togglePlayback() {
+        isPlaying ? pause() : play()
+    }
     
     func setPlaybackSpeed(_ speed: Double) {
         player?.rate = Float(speed)
+        print("Playback speed set to \(speed)x")
     }
     
     func stop() {
-        [loopObserver, frameObserver].compactMap { $0 }.forEach {
-            NotificationCenter.default.removeObserver($0)
+        [loopObserver, frameObserver].forEach { observer in
+            if let observer = observer {
+                NotificationCenter.default.removeObserver(observer)
+            }
+        }
+        player?.pause()
+        
+        // Ensure that closing the window and UI cleanup occur on the main thread.
+        DispatchQueue.main.async { [weak self] in
+            self?.window?.close()
+            self?.window = nil
+            self?.videoView = nil
+            print("UI cleanup complete on main thread.")
         }
         
-        player?.pause()
         player = nil
-        window?.close()
-        window = nil
-        videoView = nil
+        print("WallpaperVideoPlayer stopped and cleaned up.")
     }
+
     
     deinit {
         stop()
+        print("WallpaperVideoPlayer deinitialized.")
     }
 }

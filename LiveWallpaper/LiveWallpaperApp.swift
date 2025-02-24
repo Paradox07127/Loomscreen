@@ -5,10 +5,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var screenManager: ScreenManager?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
+        print("App launching: initializing ScreenManager.")
         screenManager = ScreenManager()
-        statusBarController = StatusBarController(screenManager: screenManager!)
+        if let manager = screenManager {
+            print("Initializing StatusBarController.")
+            statusBarController = StatusBarController(screenManager: manager)
+        } else {
+            print("Error: ScreenManager failed to initialize.")
+        }
         
-        // Hide dock icon since we're primarily a menu bar app
+        // Hide dock icon for a menu-bar app
         NSApp.setActivationPolicy(.accessory)
     }
 }
@@ -18,14 +24,8 @@ struct LiveWallpaperApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     
     var body: some Scene {
-        WindowGroup {
-            if let screenManager = appDelegate.screenManager {
-                ContentView()
-                    .environmentObject(screenManager)
-            }
+        Settings {
+            EmptyView()  // No content is shown by default
         }
-//        .windowStyle(.automatic)  // Change to automatic window style
-//        .windowToolbarStyle(.unified)  // Add unified toolbar style
-//        .defaultSize(width: 0, height: 0)
     }
 }
