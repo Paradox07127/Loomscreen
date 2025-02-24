@@ -24,8 +24,8 @@ struct LiveWallpaperApp: App {
                     .environmentObject(screenManager)
             }
         }
-        .windowStyle(.automatic)  // Change to automatic window style
-        .windowToolbarStyle(.unified)  // Add unified toolbar style
-        .defaultSize(width: 0, height: 0)
+//        .windowStyle(.automatic)  // Change to automatic window style
+//        .windowToolbarStyle(.unified)  // Add unified toolbar style
+//        .defaultSize(width: 0, height: 0)
     }
 }
