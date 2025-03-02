@@ -5,29 +5,88 @@ class StatusBarController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem
     private let screenManager: ScreenManager
     private var settingsWindowController: NSWindowController?
+    private let powerMonitor = PowerMonitor.shared
+    private var menuUpdateTimer: Timer?
+    
+    // Keep track of power status to update icon
+    private var isOnBattery: Bool = false
     
     init(screenManager: ScreenManager) {
         self.screenManager = screenManager
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         super.init()
         configureStatusItem()
+        setupPowerMonitoring()
+        startPeriodicMenuUpdates()
     }
     
     private func configureStatusItem() {
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "photo.fill", accessibilityDescription: "Live Wallpaper")
+            updateStatusBarIcon()
             button.image?.isTemplate = true
+            
+            // Add tooltip with app name
+            button.toolTip = "LiveWallpaper - Click for options"
         }
         setupMenu()
+    }
+    
+    private func updateStatusBarIcon() {
+        guard let button = statusItem.button else { return }
+        
+        let isAnyPlaying = screenManager.screens.contains { $0.videoPlayer?.isPlaying ?? false }
+        let symbolName: String
+        
+        if isOnBattery {
+            // On battery
+            symbolName = isAnyPlaying ? "photo.fill.on.rectangle.fill" : "photo.on.rectangle"
+        } else {
+            // On power adapter
+            symbolName = isAnyPlaying ? "play.rectangle.fill" : "play.rectangle"
+        }
+        
+        button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "LiveWallpaper")
+    }
+    
+    private func setupPowerMonitoring() {
+        // Subscribe to power source changes
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handlePowerSourceChange),
+            name: PowerMonitor.powerSourceDidChangeNotification,
+            object: nil
+        )
+        
+        // Set initial state
+        isOnBattery = powerMonitor.currentPowerSource.isOnBattery
+        updateStatusBarIcon()
+    }
+    
+    @objc private func handlePowerSourceChange(_ notification: Notification) {
+        if let isOnBattery = notification.userInfo?["isOnBattery"] as? Bool {
+            self.isOnBattery = isOnBattery
+            updateStatusBarIcon()
+        }
     }
     
     private func setupMenu() {
         let menu = NSMenu()
         menu.delegate = self
         
+        // Header item with app name (non-interactive)
+        let headerItem = NSMenuItem(title: "LiveWallpaper", action: nil, keyEquivalent: "")
+        headerItem.isEnabled = false
+        headerItem.attributedTitle = NSAttributedString(
+            string: "LiveWallpaper",
+            attributes: [
+                .font: NSFont.boldSystemFont(ofSize: 14),
+                .foregroundColor: NSColor.labelColor
+            ]
+        )
+        
         // Settings menu item
         let settingsItem = createMenuItem(
-            title: "Settings",
+            title: "Open Settings...",
             action: #selector(showSettings),
             keyEquivalent: ","
         )
@@ -37,26 +96,34 @@ class StatusBarController: NSObject, NSMenuDelegate {
         let displaysItem = NSMenuItem(title: "Displays", action: nil, keyEquivalent: "")
         displaysItem.submenu = displaysMenu
         
-        // Playback control item
+        // Playback control items
         let playPauseItem = createMenuItem(
             title: "Play/Pause All",
             action: #selector(togglePlayback),
             keyEquivalent: "p"
         )
         
+        // Power status indicator
+        let powerStatusItem = NSMenuItem(title: "On AC Power", action: nil, keyEquivalent: "")
+        powerStatusItem.isEnabled = false
+        
         // Quit item
         let quitItem = createMenuItem(
-            title: "Quit",
+            title: "Quit LiveWallpaper",
             action: #selector(NSApplication.terminate),
             keyEquivalent: "q"
         )
         quitItem.target = NSApp
         
         // Assemble menu
-        menu.addItem(settingsItem)
-        menu.addItem(displaysItem)
+        menu.addItem(headerItem)
         menu.addItem(NSMenuItem.separator())
+        menu.addItem(settingsItem)
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(displaysItem)
         menu.addItem(playPauseItem)
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(powerStatusItem)
         menu.addItem(NSMenuItem.separator())
         menu.addItem(quitItem)
         
@@ -79,29 +146,57 @@ class StatusBarController: NSObject, NSMenuDelegate {
             return
         }
         
-        // Otherwise, create a new settings window.
+        // Otherwise, create a new settings window
         let window = createSettingsWindow()
         settingsWindowController = NSWindowController(window: window)
         settingsWindowController?.showWindow(nil)
         activateApp()
     }
     
-    private func createSettingsWindow() -> NSWindow {
-        let contentView = ContentView().environmentObject(screenManager)
+    private func showSettingsForScreen(screenID: CGDirectDisplayID) {
+        // If the settings window already exists, show it and navigate to the screen
+        if let windowController = settingsWindowController {
+            windowController.showWindow(nil)
+            
+            // Notify the ContentView to navigate to the selected screen
+            NotificationCenter.default.post(
+                name: .init("SelectScreenInSettings"),
+                object: nil,
+                userInfo: ["screenID": screenID]
+            )
+            
+            activateApp()
+            return
+        }
+        
+        // Otherwise, create a new settings window with the initial screen selection
+        let window = createSettingsWindow(initialScreenID: screenID)
+        settingsWindowController = NSWindowController(window: window)
+        settingsWindowController?.showWindow(nil)
+        activateApp()
+    }
+    
+    private func createSettingsWindow(initialScreenID: CGDirectDisplayID? = nil) -> NSWindow {
+        // Create content view with initial navigation if a screen ID is provided
+        let initialNavigation: Navigation? = initialScreenID.map { .screen($0) }
+        let contentView = ContentView(initialNavigation: initialNavigation).environmentObject(screenManager)
+        
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 650),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
         
         // Window appearance configuration
+        window.title = "LiveWallpaper Settings"
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.toolbar = nil
         window.center()
         window.contentView = NSHostingView(rootView: contentView)
         window.delegate = self
+        window.setFrameAutosaveName("LiveWallpaperSettingsWindow")
         
         return window
     }
@@ -113,18 +208,29 @@ class StatusBarController: NSObject, NSMenuDelegate {
     // MARK: - Playback Control
     
     @objc private func togglePlayback() {
+        // Check if any videos are playing
+        let isAnyPlaying = screenManager.screens.contains { $0.videoPlayer?.isPlaying ?? false }
+        
+        // Toggle playback based on current state
         for screen in screenManager.screens {
-            screen.videoPlayer?.togglePlayback()
+            if let player = screen.videoPlayer {
+                if isAnyPlaying {
+                    player.pause()
+                } else {
+                    player.play()
+                }
+            }
         }
-        print("Playback toggled for all screens.")
+        
+        updateStatusBarIcon()
     }
     
     // MARK: - Menu Delegate
     
     func menuWillOpen(_ menu: NSMenu) {
-        print("Status bar menu will open.")
         updateDisplaysMenu()
         updatePlaybackMenuState()
+        updatePowerStatusItem()
     }
     
     private func updateDisplaysMenu() {
@@ -133,15 +239,41 @@ class StatusBarController: NSObject, NSMenuDelegate {
               let displaysMenu = displaysItem.submenu else { return }
         
         displaysMenu.removeAllItems()
+        
+        if screenManager.screens.isEmpty {
+            let noDisplaysItem = NSMenuItem(title: "No displays detected", action: nil, keyEquivalent: "")
+            noDisplaysItem.isEnabled = false
+            displaysMenu.addItem(noDisplaysItem)
+            return
+        }
+        
         for screen in screenManager.screens {
-            let item = NSMenuItem(title: screen.name, action: nil, keyEquivalent: "")
-            item.isEnabled = true
+            let item = NSMenuItem(title: screen.name, action: #selector(selectDisplay(_:)), keyEquivalent: "")
+            item.tag = Int(screen.id) // Store the screen ID in the tag
+            item.target = self
+            
+            // Show status icon in the menu
             if screen.videoPlayer != nil {
-                item.state = .on
+                let isPlaying = screen.videoPlayer?.isPlaying ?? false
+                item.image = NSImage(
+                    systemSymbolName: isPlaying ? "play.circle.fill" : "pause.circle.fill",
+                    accessibilityDescription: isPlaying ? "Playing" : "Paused"
+                )
+            } else {
+                item.image = NSImage(
+                    systemSymbolName: "questionmark.circle",
+                    accessibilityDescription: "Not configured"
+                )
             }
+            
             displaysMenu.addItem(item)
         }
-        print("Displays menu updated with \(screenManager.screens.count) screens.")
+        
+        // Add refresh option
+        displaysMenu.addItem(NSMenuItem.separator())
+        let refreshItem = NSMenuItem(title: "Refresh Displays", action: #selector(refreshDisplays), keyEquivalent: "r")
+        refreshItem.target = self
+        displaysMenu.addItem(refreshItem)
     }
     
     private func updatePlaybackMenuState() {
@@ -149,16 +281,102 @@ class StatusBarController: NSObject, NSMenuDelegate {
               let playPauseItem = menu.items.first(where: { $0.action == #selector(togglePlayback) }) else { return }
         
         let isAnyPlaying = screenManager.screens.contains { $0.videoPlayer?.isPlaying ?? false }
-        playPauseItem.title = isAnyPlaying ? "Pause All" : "Play All"
-        print("Playback menu state updated: \(playPauseItem.title)")
+        
+        if isAnyPlaying {
+            playPauseItem.title = "Pause All Videos"
+            playPauseItem.image = NSImage(systemSymbolName: "pause.circle", accessibilityDescription: "Pause")
+        } else {
+            playPauseItem.title = "Play All Videos"
+            playPauseItem.image = NSImage(systemSymbolName: "play.circle", accessibilityDescription: "Play")
+        }
+    }
+    
+    private func updatePowerStatusItem() {
+        guard let menu = statusItem.menu,
+              let powerStatusItem = menu.items.first(where: { !$0.isEnabled && $0.title.contains("Power") || $0.title.contains("Battery") }) else { return }
+        
+        let isOnBattery = powerMonitor.currentPowerSource.isOnBattery
+        
+        if isOnBattery {
+            if case .internalBattery(let level) = powerMonitor.currentPowerSource {
+                let batteryPercentage = Int(level * 100)
+                let batteryStatus = batteryPercentage < 20 ? "Low" : (batteryPercentage < 50 ? "Medium" : "Good")
+                
+                powerStatusItem.title = "Battery: \(batteryPercentage)% (\(batteryStatus))"
+                
+                // Set appropriate icon based on battery level
+                let iconName = batteryPercentage < 20 ? "battery.25" :
+                batteryPercentage < 50 ? "battery.50" :
+                batteryPercentage < 75 ? "battery.75" : "battery.100"
+                
+                powerStatusItem.image = NSImage(systemSymbolName: iconName, accessibilityDescription: "Battery")
+            } else {
+                powerStatusItem.title = "On Battery Power"
+                powerStatusItem.image = NSImage(systemSymbolName: "battery.50", accessibilityDescription: "Battery")
+            }
+        } else {
+            powerStatusItem.title = "Connected to Power"
+            powerStatusItem.image = NSImage(systemSymbolName: "power.circle", accessibilityDescription: "AC Power")
+        }
+    }
+    
+    @objc private func selectDisplay(_ sender: NSMenuItem) {
+        let screenID = CGDirectDisplayID(sender.tag)
+        showSettingsForScreen(screenID: screenID)
+    }
+    
+    @objc private func refreshDisplays() {
+        screenManager.refreshScreens()
+        // Show animation in the menu bar when screens refresh
+        showBriefAnimation("arrow.triangle.2.circlepath")
+    }
+    
+    // MARK: - Animations & Visual Feedback
+    
+    /// Show status icon animation for brief visual feedback
+    func showBriefAnimation(_ symbolName: String = "play.circle.fill") {
+        guard let button = statusItem.button else { return }
+        
+        // Store the original image
+        let originalImage = button.image
+        
+        // Show brief animation
+        button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Action")
+        
+        // Restore original image after delay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self = self else { return }
+            self.updateStatusBarIcon()
+        }
+    }
+    
+    // MARK: - Menu Auto Update
+    func startPeriodicMenuUpdates() {
+        // Update menu items that might change over time (e.g., battery percentage)
+        menuUpdateTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            
+            // Always update the icon when timer fires
+            self.updateStatusBarIcon()
+            
+            // Check if menu might be open (button is highlighted)
+            if self.statusItem.button?.isHighlighted == true {
+                // Update menu items that might have changed
+                self.updatePowerStatusItem()
+                self.updatePlaybackMenuState()
+            }
+        }
+    }
+    
+    deinit {
+        menuUpdateTimer?.invalidate()
+        NotificationCenter.default.removeObserver(self)
     }
 }
 
 // MARK: - NSWindowDelegate
-
 extension StatusBarController: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         settingsWindowController = nil
-        print("Settings window closed.")
     }
 }

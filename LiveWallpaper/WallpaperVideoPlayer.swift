@@ -1,139 +1,255 @@
 import AppKit
 import AVKit
+import Combine
 
-class WallpaperVideoPlayer {
+/// Video player class responsible for playing videos as desktop wallpaper
+final class WallpaperVideoPlayer {
+    // MARK: - Properties
     private(set) var player: AVPlayer?
     private weak var window: VideoWallpaperWindow?
     private weak var videoView: VideoContainerView?
-    private var loopObserver: NSObjectProtocol?
-    private var frameObserver: NSObjectProtocol?
+    private var cleanupTasks: Set<AnyCancellable> = []
+    private var periodicTimeObserver: Any?
+    private var accessToken: Bool = false // Tracks if we're accessing a security-scoped resource
     
-    var isPlaying: Bool { player?.rate != 0 }
+    @Published private(set) var isPlaying: Bool = false
+    @Published private(set) var loadingError: Error? = nil
+    @Published private(set) var currentTime: Double = 0
+    @Published private(set) var duration: Double = 0
     
-    init(url: URL, frame: CGRect) {
-        // Attempt to start accessing the security-scoped resource.
-        guard url.startAccessingSecurityScopedResource() else {
-            print("Failed to start accessing security scoped resource for \(url)")
+    private let initialFrame: CGRect
+    private var fitMode: VideoFitMode = .aspectFill
+    private var videoURL: URL?
+    
+    // MARK: - Initialization
+    init(url: URL, frame: CGRect, fitMode: VideoFitMode = .aspectFill) {
+        self.initialFrame = frame
+        self.fitMode = fitMode
+        self.videoURL = url
+        
+        // Validate frame
+        guard !frame.isEmpty else {
+            loadingError = NSError(
+                domain: "WallpaperVideoPlayer",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Invalid frame provided"]
+            )
+            return
+        }
+        
+        setupPlayer(with: url)
+    }
+    
+    // MARK: - Video Player Setup
+    private func setupPlayer(with url: URL) {
+        // Ensure we have a valid security-scoped resource
+        accessToken = url.startAccessingSecurityScopedResource()
+        guard accessToken else {
+            loadingError = NSError(
+                domain: "WallpaperVideoPlayer",
+                code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to access security scoped resource"]
+            )
             return
         }
         
         Task {
             do {
                 let asset = AVURLAsset(url: url)
-                // Use the result of load(.isPlayable) to determine playability.
-                let playable = try await asset.load(.isPlayable)
                 
-                guard playable else {
-                    print("Asset is not playable for \(url)")
-                    url.stopAccessingSecurityScopedResource()
+                // Load essential properties asynchronously
+                async let playable = asset.load(.isPlayable)
+                async let duration = asset.load(.duration)
+                
+                // Check if asset is playable
+                guard try await playable else {
+                    stopAccessingResource()
+                    loadingError = NSError(
+                        domain: "WallpaperVideoPlayer",
+                        code: 3,
+                        userInfo: [NSLocalizedDescriptionKey: "Video is not playable"]
+                    )
                     return
                 }
                 
-                // UI setup must happen on the main actor.
+                // Get duration
+                self.duration = try await CMTimeGetSeconds(duration)
+                
                 await MainActor.run { [weak self] in
                     guard let self = self else { return }
-                    self.setupPlayer(with: asset, frame: frame)
-                    self.setupLooping()
-                    self.setupFrameObserver(initialFrame: frame)
+                    self.configurePlaybackComponents(with: asset)
                 }
             } catch {
-                print("Failed to load video asset: \(error)")
-                url.stopAccessingSecurityScopedResource()
+                stopAccessingResource()
+                loadingError = error
             }
         }
     }
     
-    private func setupPlayer(with asset: AVURLAsset, frame: CGRect) {
+    private func configurePlaybackComponents(with asset: AVURLAsset) {
+        // Create an optimized player item with playback settings
         let playerItem = AVPlayerItem(asset: asset)
+        
+        // Set up quality of service for better performance
+        playerItem.preferredForwardBufferDuration = 5.0
+        playerItem.canUseNetworkResourcesForLiveStreamingWhilePaused = false
+        
+        // Configure player
         self.player = AVPlayer(playerItem: playerItem)
+        self.player?.automaticallyWaitsToMinimizeStalling = true
         self.player?.volume = 0
+        self.player?.actionAtItemEnd = .none // We'll handle looping manually
         
-        let videoWindow = VideoWallpaperWindow(frame: frame)
-        let containerView = VideoContainerView(frame: frame)
+        // Create and configure window
+        let videoWindow = VideoWallpaperWindow(frame: initialFrame)
+        let containerView = VideoContainerView(frame: initialFrame)
         
+        // Configure view with fit mode
+        containerView.wantsLayer = true
+        containerView.fitMode = fitMode
         videoWindow.contentView = containerView
         containerView.setPlayer(player)
+        
+        // Ensure proper window level and ordering
+        videoWindow.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)) - 1)
         videoWindow.orderBack(nil)
         
         self.window = videoWindow
         self.videoView = containerView
         
-        print("Video player setup complete with frame: \(frame)")
-    }
-    
-    private func setupLooping() {
-        loopObserver = NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemDidPlayToEndTime,
-            object: player?.currentItem,
-            queue: .main
-        ) { [weak self] _ in
-            guard let self = self else { return }
-            self.player?.seek(to: .zero)
-            self.player?.play()
-            print("Looping video: restarted playback.")
+        // Setup observers
+        setupPlaybackObservers()
+        setupFrameObserver()
+        setupTimeObserver()
+        
+        // Start playback with a slight delay to ensure proper initialization
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.play()
         }
     }
     
-    private func setupFrameObserver(initialFrame: CGRect) {
-        frameObserver = NotificationCenter.default.addObserver(
-            forName: NSApplication.didChangeScreenParametersNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            guard let self = self, let window = self.window else { return }
-            // Find the screen intersecting the window's frame.
-            if let screen = NSScreen.screens.first(where: { $0.frame.intersects(window.frame) }) {
-                if screen.frame != initialFrame {
-                    window.setFrame(screen.frame, display: true)
-                    self.videoView?.frame = screen.frame
-                    print("Updated window and video view frame to: \(screen.frame)")
+    // MARK: - Observers
+    private func setupPlaybackObservers() {
+        // Monitor playback status
+        player?.publisher(for: \.timeControlStatus)
+            .sink { [weak self] status in
+                self?.isPlaying = status == .playing
+            }
+            .store(in: &cleanupTasks)
+        
+        // Monitor for errors
+        NotificationCenter.default.publisher(for: .AVPlayerItemFailedToPlayToEndTime, object: player?.currentItem)
+            .sink { [weak self] notification in
+                if let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error {
+                    self?.loadingError = error
                 }
             }
+            .store(in: &cleanupTasks)
+        
+        // Setup looping
+        NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime, object: player?.currentItem)
+            .sink { [weak self] _ in
+                self?.player?.seek(to: .zero)
+                self?.player?.play()
+            }
+            .store(in: &cleanupTasks)
+    }
+    
+    private func setupFrameObserver() {
+        NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
+            .throttle(for: .seconds(0.5), scheduler: DispatchQueue.main, latest: true) // Throttle rapid changes
+            .sink { [weak self] _ in
+                guard let self = self,
+                      let window = self.window,
+                      let screen = NSScreen.screens.first(where: { $0.frame.intersects(window.frame) }) else {
+                    return
+                }
+                
+                let newFrame = screen.frame
+                
+                guard !newFrame.isEmpty else { return }
+                
+                window.updateFrame(newFrame, animate: true)
+                self.videoView?.frame = newFrame
+            }
+            .store(in: &cleanupTasks)
+    }
+    
+    private func setupTimeObserver() {
+        // Add periodic time observer to track current playback position
+        let interval = CMTime(seconds: 0.5, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+        
+        periodicTimeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+            let seconds = CMTimeGetSeconds(time)
+            self?.currentTime = seconds.isNaN ? 0 : seconds
         }
     }
     
+    // MARK: - Playback Controls
     func play() {
-        player?.play()
-        print("Playback started.")
+        if let player = player, player.timeControlStatus != .playing {
+            player.play()
+        }
     }
     
     func pause() {
-        player?.pause()
-        print("Playback paused.")
+        if let player = player, player.timeControlStatus == .playing {
+            player.pause()
+        }
     }
     
     func togglePlayback() {
-        isPlaying ? pause() : play()
+        if isPlaying {
+            pause()
+        } else {
+            play()
+        }
+    }
+    
+    func seek(to time: Double) {
+        player?.seek(to: CMTime(seconds: time, preferredTimescale: CMTimeScale(NSEC_PER_SEC)))
     }
     
     func setPlaybackSpeed(_ speed: Double) {
         player?.rate = Float(speed)
-        print("Playback speed set to \(speed)x")
     }
     
-    func stop() {
-        [loopObserver, frameObserver].forEach { observer in
-            if let observer = observer {
-                NotificationCenter.default.removeObserver(observer)
-            }
-        }
-        player?.pause()
+    func setVideoFitMode(_ mode: VideoFitMode) {
+        guard mode != fitMode else { return } // Skip if no change
         
-        // Ensure that closing the window and UI cleanup occur on the main thread.
-        DispatchQueue.main.async { [weak self] in
-            self?.window?.close()
-            self?.window = nil
-            self?.videoView = nil
-            print("UI cleanup complete on main thread.")
-        }
-        
-        player = nil
-        print("WallpaperVideoPlayer stopped and cleaned up.")
+        self.fitMode = mode
+        videoView?.fitMode = mode
     }
-
+    
+    // Properly release security-scoped resource access
+    private func stopAccessingResource() {
+        if accessToken, let url = videoURL {
+            url.stopAccessingSecurityScopedResource()
+            accessToken = false
+        }
+    }
+    
+    // MARK: - Cleanup
+    func cleanup() {
+        pause()
+        
+        if let timeObserver = periodicTimeObserver, let player = player {
+            player.removeTimeObserver(timeObserver)
+        }
+        periodicTimeObserver = nil
+        
+        cleanupTasks.removeAll()
+        
+        window?.close()
+        window = nil
+        videoView = nil
+        player = nil
+        
+        // Stop accessing security-scoped resource
+        stopAccessingResource()
+    }
     
     deinit {
-        stop()
-        print("WallpaperVideoPlayer deinitialized.")
+        cleanup()
     }
 }

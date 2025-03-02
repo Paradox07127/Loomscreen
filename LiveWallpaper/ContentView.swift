@@ -6,14 +6,38 @@ struct ContentView: View {
     @EnvironmentObject private var screenManager: ScreenManager
     @State private var selectedNavigation: Navigation?
     
+    init(initialNavigation: Navigation? = nil) {
+        self._selectedNavigation = State(initialValue: initialNavigation)
+    }
+    
     var body: some View {
         NavigationSplitView {
             Sidebar(selection: $selectedNavigation)
+                .onReceive(NotificationCenter.default.publisher(for: .init("SelectScreenInSettings"))) { notification in
+                    if let screenID = notification.userInfo?["screenID"] as? CGDirectDisplayID {
+                        selectedNavigation = .screen(screenID)
+                    }
+                }
         } detail: {
             DetailContent(selection: selectedNavigation)
         }
         .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 900, minHeight: 600)
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                HStack {
+                    Image(systemName: "photo.on.rectangle.fill")
+                        .font(.title2)
+                        .imageScale(.large)
+                        .foregroundColor(.accentColor)
+                    
+                    Text("LiveWallpaper")
+                        .font(.title3)
+                        .fontWeight(.semibold)
+                }
+                .padding(.top, 6)
+            }
+        }
     }
 }
 
@@ -24,73 +48,278 @@ enum Navigation: Hashable {
     
     var title: String {
         switch self {
-        case .general: return "General"
-        case .screen: return "Screen"
+        case .general:
+            return "General Settings"
+        case .screen(let id):
+            return "Display \(id)"
         }
     }
     
     var icon: String {
         switch self {
-        case .general: return "gearshape"
-        case .screen: return "display"
+        case .general:
+            return "gearshape.fill"
+        case .screen:
+            return "display"
         }
     }
 }
 
 // MARK: - Sidebar View
-private struct Sidebar: View {
+struct Sidebar: View {
     @Binding var selection: Navigation?
     @EnvironmentObject private var screenManager: ScreenManager
+    @State private var isRefreshing = false
     
     var body: some View {
         List(selection: $selection) {
-            NavigationLink(value: Navigation.general) {
-                Label("General", systemImage: "gearshape")
+            Section {
+                NavigationLink(value: Navigation.general) {
+                    HStack {
+                        Image(systemName: "gearshape.fill")
+                            .foregroundColor(.blue)
+                            .imageScale(.large)
+                            .frame(width: 24, height: 24)
+                        
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("General Settings")
+                                .fontWeight(.medium)
+                            
+                            Text("Global app preferences")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
             }
             
-            Section("Displays") {
-                ForEach(screenManager.screens, id: \.id) { screen in
-                    NavigationLink(value: Navigation.screen(screen.id)) {
-                        ScreenRow(screen: screen)
+            Section {
+                HStack {
+                    Text("Displays")
+                        .font(.headline)
+                        .foregroundColor(.secondary)
+                    
+                    Spacer()
+                    
+                    Button(action: refreshDisplays) {
+                        Image(systemName: isRefreshing ? "arrow.triangle.2.circlepath.circle.fill" : "arrow.triangle.2.circlepath")
+                            .imageScale(.medium)
+                            .rotationEffect(isRefreshing ? .degrees(360) : .degrees(0))
+                            .animation(isRefreshing ? Animation.linear(duration: 1).repeatForever(autoreverses: false) : .default, value: isRefreshing)
                     }
+                    .buttonStyle(.plain)
+                    .help("Refresh display list")
+                }
+                .padding(.vertical, 6)
+                
+                if screenManager.screens.isEmpty {
+                    HStack {
+                        Image(systemName: "display.slash")
+                            .foregroundColor(.secondary)
+                        Text("No displays detected")
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 8)
+                } else {
+                    ForEach(screenManager.screens, id: \.id) { screen in
+                        NavigationLink(value: Navigation.screen(screen.id)) {
+                            ScreenRow(screen: screen)
+                        }
+                    }
+                }
+            }
+            
+            Section {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Battery Status")
+                        .font(.headline)
+                        .foregroundColor(.secondary)
+                        .padding(.top, 6)
+                    
+                    BatteryStatusView()
                 }
             }
         }
         .listStyle(.sidebar)
-        .frame(minWidth: 200)
+        .frame(minWidth: 250)
+    }
+    
+    private func refreshDisplays() {
+        withAnimation {
+            isRefreshing = true
+        }
+        
+        screenManager.refreshScreens()
+        
+        // Reset the animation after a delay
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            withAnimation {
+                isRefreshing = false
+            }
+        }
+    }
+}
+
+// MARK: - Battery Status View
+struct BatteryStatusView: View {
+    @State private var powerSource: PowerMonitor.PowerSource = PowerMonitor.shared.currentPowerSource
+    private let powerMonitor = PowerMonitor.shared
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: powerStatusIcon)
+                .font(.title3)
+                .foregroundColor(powerStatusColor)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(powerStatusText)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                
+                if case .internalBattery(let level) = powerSource {
+                    // Battery level indicator
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(Color.gray.opacity(0.3))
+                                .frame(width: geo.size.width, height: 6)
+                            
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(batteryLevelColor(level))
+                                .frame(width: geo.size.width * CGFloat(level), height: 6)
+                        }
+                    }
+                    .frame(height: 6)
+                }
+            }
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 4)
+        .background(Color.gray.opacity(0.1))
+        .cornerRadius(8)
+        .onAppear {
+            setupPowerMonitoring()
+        }
+    }
+    
+    // Power status information computed properties
+    private var powerStatusIcon: String {
+        switch powerSource {
+        case .internalBattery(let level):
+            if level <= 0.1 {
+                return "battery.0"
+            } else if level <= 0.25 {
+                return "battery.25"
+            } else if level <= 0.5 {
+                return "battery.50"
+            } else if level <= 0.75 {
+                return "battery.75"
+            } else {
+                return "battery.100"
+            }
+        case .externalUnlimited:
+            return "power.circle.fill"
+        case .externalUPS:
+            return "bolt.circle.fill"
+        }
+    }
+    
+    private var powerStatusText: String {
+        switch powerSource {
+        case .internalBattery(let level):
+            return "Battery: \(Int(level * 100))%"
+        case .externalUnlimited:
+            return "Connected to Power"
+        case .externalUPS:
+            return "Connected to UPS"
+        }
+    }
+    
+    private var powerStatusColor: Color {
+        switch powerSource {
+        case .internalBattery(let level):
+            return batteryLevelColor(level)
+        case .externalUnlimited:
+            return .green
+        case .externalUPS:
+            return .orange
+        }
+    }
+    
+    private func batteryLevelColor(_ level: Double) -> Color {
+        if level <= 0.2 {
+            return .red
+        } else if level <= 0.5 {
+            return .orange
+        } else {
+            return .green
+        }
+    }
+    
+    private func setupPowerMonitoring() {
+        // Update initial power source
+        powerSource = powerMonitor.currentPowerSource
+        
+        // Subscribe to power source changes
+        NotificationCenter.default.addObserver(
+            forName: PowerMonitor.powerSourceDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { notification in
+            if let newSource = notification.userInfo?["newSource"] as? PowerMonitor.PowerSource {
+                self.powerSource = newSource
+            }
+        }
     }
 }
 
 // MARK: - Screen Row
-private struct ScreenRow: View {
+struct ScreenRow: View {
     @ObservedObject var screen: Screen
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color.gray.opacity(0.1))
+                    .frame(width: 32, height: 24)
+                
+                Image(systemName: screen.videoPlayer != nil ? "display.and.arrow.down" : "display")
+                    .foregroundColor(screen.videoPlayer != nil ? .blue : .gray)
+            }
+            
+            VStack(alignment: .leading, spacing: 4) {
                 Text(screen.name)
                     .fontWeight(.medium)
                     .lineLimit(1)
                 
-                Spacer()
-                
-                if screen.videoPlayer != nil {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
-                        .imageScale(.small)
+                HStack(spacing: 6) {
+                    Text("\(Int(screen.frame.width))×\(Int(screen.frame.height))")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    if screen.videoPlayer != nil {
+                        HStack(spacing: 2) {
+                            Circle()
+                                .fill(screen.videoPlayer?.isPlaying ?? false ? Color.green : Color.orange)
+                                .frame(width: 6, height: 6)
+                            
+                            Text(screen.videoPlayer?.isPlaying ?? false ? "Playing" : "Paused")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
                 }
             }
-            
-            Text("\(Int(screen.frame.width))×\(Int(screen.frame.height))")
-                .font(.caption)
-                .foregroundColor(.secondary)
         }
         .padding(.vertical, 2)
     }
 }
 
 // MARK: - Detail Content
-private struct DetailContent: View {
+struct DetailContent: View {
     let selection: Navigation?
     @EnvironmentObject private var screenManager: ScreenManager
     
@@ -99,269 +328,58 @@ private struct DetailContent: View {
             switch selection {
             case .general:
                 GeneralSettingsView()
+                    .transition(.opacity)
+                
             case .screen(let screenId):
                 if let screen = screenManager.screens.first(where: { $0.id == screenId }) {
                     ScreenDetailView(screen: screen)
+                        .transition(.opacity)
                 } else {
-                    EmptyStateView(message: "Screen not found")
+                    EmptyStateView(
+                        icon: "display.trianglebadge.exclamationmark",
+                        title: "Display Not Found",
+                        message: "The selected display is no longer available."
+                    )
                 }
+                
             case .none:
-                EmptyStateView(message: "Select a display to configure")
+                EmptyStateView(
+                    icon: "arrow.left.circle",
+                    title: "Select a Display",
+                    message: "Choose a display from the sidebar to configure your live wallpaper."
+                )
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.windowBackgroundColor))
+        .animation(.easeInOut, value: selection)
     }
 }
 
 // MARK: - Empty State View
-private struct EmptyStateView: View {
+struct EmptyStateView: View {
+    let icon: String
+    let title: String
     let message: String
     
     var body: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "display")
-                .font(.system(size: 48))
-                .foregroundColor(.secondary)
+        VStack(spacing: 20) {
+            Image(systemName: icon)
+                .font(.system(size: 64))
+                .foregroundColor(.secondary.opacity(0.7))
+            
+            Text(title)
+                .font(.title2)
+                .fontWeight(.semibold)
+                .foregroundColor(.primary)
             
             Text(message)
-                .font(.title3)
+                .font(.body)
                 .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 300)
         }
+        .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
-
-private struct ScreenDetailView: View {
-    @ObservedObject var screen: Screen
-    @EnvironmentObject private var screenManager: ScreenManager
-    @State private var playbackSpeed: Double = 1.0
-    
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 24) {
-                displayHeader
-                videoPreviewSection
-                if screen.videoPlayer != nil {
-                    playbackControlsSection
-                }
-                Spacer()
-            }
-            .padding(24)
-        }
-        .background(Color(NSColor.windowBackgroundColor))
-    }
-    
-    private var displayHeader: some View {
-        HStack(alignment: .center, spacing: 16) {
-            HStack(spacing: 16) {
-                Image(systemName: "display")
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 44, height: 44)
-                    .foregroundColor(.accentColor)
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(screen.name)
-                        .font(.system(size: 24, weight: .medium))
-                    Text("\(Int(screen.frame.width))×\(Int(screen.frame.height))")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-            }
-            
-            Spacer()
-            
-            Button(action: {
-                screenManager.reloadVideoForScreen(screen)
-            }) {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 18))
-            }
-            .buttonStyle(.plain)
-            .help("Reload Video")
-        }
-        .padding(.bottom, 8)
-    }
-    
-    private var videoPreviewSection: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 16) {
-                Label("Video Preview", systemImage: "film")
-                    .font(.headline)
-                
-                if let player = screen.previewPlayer {
-                    VideoPlayer(player: player)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 300)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .strokeBorder(Color.gray.opacity(0.2), lineWidth: 1)
-                        )
-                } else {
-                    FileSelectView(action: showFilePicker)
-                }
-            }
-            .padding(16)
-        }
-    }
-    
-    private var playbackControlsSection: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 16) {
-                Label("Playback Controls", systemImage: "slider.horizontal.3")
-                    .font(.headline)
-                
-                VStack(spacing: 20) {
-                    HStack(spacing: 16) {
-                        Button(action: showFilePicker) {
-                            Label("Change Video", systemImage: "photo.on.rectangle")
-                        }
-                        .buttonStyle(.plain)
-                        
-                        Spacer()
-                        
-                        // Updated playback toggle
-                        Button(action: {
-                            if screen.videoPlayer?.isPlaying ?? false {
-                                screen.videoPlayer?.pause()
-                            } else {
-                                screen.videoPlayer?.play()
-                            }
-                            screen.objectWillChange.send()
-                        }) {
-                            HStack(spacing: 8) {
-                                Image(systemName: screen.videoPlayer?.isPlaying ?? false ? "pause.circle.fill" : "play.circle.fill")
-                                    .font(.system(size: 20))
-                                Text(screen.videoPlayer?.isPlaying ?? false ? "Pause" : "Play")
-                            }
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    
-                    Divider()
-                    
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Playback Speed: \(String(format: "%.1fx", playbackSpeed))")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        
-                        HStack(spacing: 12) {
-                            Image(systemName: "tortoise")
-                                .foregroundColor(.secondary)
-                            
-                            Slider(value: $playbackSpeed, in: 0.5...2.0, step: 0.1)
-                                .onChange(of: playbackSpeed) { oldValue, newValue in
-                                    screen.videoPlayer?.setPlaybackSpeed(newValue)
-                                    screenManager.updatePlaybackSpeed(newValue, for: screen)
-                                }
-                            
-                            Image(systemName: "hare")
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                }
-            }
-            .padding(16)
-        }
-    }
-    
-    private func showFilePicker() {
-        let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        panel.canChooseFiles = true
-        panel.allowedContentTypes = [.movie]
-        
-        panel.begin { response in
-            if response == .OK, let url = panel.url {
-                handleSelectedFile(url: url)
-            }
-        }
-    }
-    
-    private func handleSelectedFile(url: URL) {
-        // First, check if we can access the file
-        let canAccess = url.startAccessingSecurityScopedResource()
-        
-        guard canAccess else {
-            print("Failed to access file at \(url)")
-            // You might want to show an alert to the user here
-            return
-        }
-        
-        do {
-            // Create security-scoped bookmark
-            let bookmarkData = try url.bookmarkData(
-                options: [.withSecurityScope, .securityScopeAllowOnlyReadAccess],
-                includingResourceValuesForKeys: [
-                    .isReadableKey,
-                    .fileSizeKey,
-                    .contentTypeKey
-                ],
-                relativeTo: nil
-            )
-            
-            // Verify we can resolve the bookmark
-            var isStale = false
-            let _ = try URL(
-                resolvingBookmarkData: bookmarkData,
-                options: .withSecurityScope,
-                relativeTo: nil,
-                bookmarkDataIsStale: &isStale
-            )
-            
-            if isStale {
-                print("Warning: Bookmark is stale, but resolved successfully")
-            }
-            
-            // If everything is okay, set the video
-            screenManager.setVideo(url: url, bookmarkData: bookmarkData, for: screen)
-            
-        } catch {
-            print("Error creating security-scoped bookmark: \(error)")
-            // You might want to show an alert to the user here
-        }
-        
-        url.stopAccessingSecurityScopedResource()
-    }
-}
-
-private struct FileSelectView: View {
-    var action: () -> Void
-    
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 12) {
-                Image(systemName: "plus.rectangle.on.rectangle")
-                    .font(.system(size: 32))
-                    .foregroundColor(.accentColor)
-                
-                Text("Select Video")
-                    .font(.headline)
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 200)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.gray.opacity(0.1))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [6]))
-                    .foregroundColor(.accentColor.opacity(0.5))
-            )
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-
-// MARK: - Preview Provider
-#Preview {
-    ContentView()
-        .environmentObject(ScreenManager())
-}
-

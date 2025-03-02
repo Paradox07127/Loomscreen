@@ -1,64 +1,108 @@
 import AppKit
 import AVKit
+import Combine
 
+/// Container view for video playback that handles the AVPlayerLayer
 class VideoContainerView: NSView {
+    // MARK: - Properties
     private var playerLayer: AVPlayerLayer?
-    private var frameObserver: Any?
+    private var cleanupTasks: Set<AnyCancellable> = []
+    private var currentPlayer: AVPlayer?
     
+    var fitMode: VideoFitMode = .aspectFill {
+        didSet {
+            if oldValue != fitMode {
+                playerLayer?.videoGravity = fitMode.avLayerVideoGravity
+            }
+        }
+    }
+    
+    // MARK: - Initialization
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        setup()
+        
+        setupView()
     }
     
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
     
-    private func setup() {
+    private func setupView() {
+        // Ensure proper layer initialization
         wantsLayer = true
         layer?.backgroundColor = .clear
         
-        // Observe frame changes
-        frameObserver = NotificationCenter.default.addObserver(
-            forName: NSView.frameDidChangeNotification,
-            object: self,
-            queue: .main
-        ) { [weak self] _ in
-            self?.updatePlayerLayerFrame()
+        // Configure view for optimal video rendering
+        layerContentsRedrawPolicy = .onSetNeedsDisplay
+        
+        // Adjust for high-DPI displays
+        if let window = window {
+            layer?.contentsScale = window.backingScaleFactor
         }
     }
     
+    // MARK: - Player Configuration
+    /// Set the player for this view
     func setPlayer(_ player: AVPlayer?) {
+        // Skip update if it's the same player
+        if player === currentPlayer { return }
+        
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             
-            // Remove existing player layer first
-            self.playerLayer?.removeFromSuperlayer()
+            // Remove existing player layer
+            self.cleanupPlayerLayer()
+            self.currentPlayer = player
             
-            if let player = player {
-                let layer = AVPlayerLayer(player: player)
-                layer.frame = self.bounds
-                layer.videoGravity = .resizeAspectFill
-                layer.contentsScale = self.window?.backingScaleFactor ?? 2.0
-                
-                // Add layer and store reference
-                self.layer?.addSublayer(layer)
-                self.playerLayer = layer
-                
-                // Initial frame update
-                self.updatePlayerLayerFrame()
+            guard let player = player else {
+                self.playerLayer = nil
+                return
             }
+            
+            // Create and configure new player layer
+            let newLayer = AVPlayerLayer(player: player)
+            newLayer.frame = self.bounds
+            newLayer.videoGravity = self.fitMode.avLayerVideoGravity
+            
+            // Apply performance optimizations
+            newLayer.drawsAsynchronously = true
+            
+            // Use rasterization for static content but not for video
+            // as it can cause performance issues with moving content
+            newLayer.shouldRasterize = false
+            
+            // Set proper scale factor for Retina displays
+            let scale = self.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
+            newLayer.contentsScale = scale
+            
+            // Add layer and store reference
+            self.layer?.addSublayer(newLayer)
+            self.playerLayer = newLayer
+            
+            // Ensure proper initial frame
+            self.updatePlayerLayerFrame()
         }
     }
     
+    private func cleanupPlayerLayer() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        
+        playerLayer?.removeFromSuperlayer()
+        playerLayer = nil
+        
+        CATransaction.commit()
+    }
+    
+    // MARK: - Layout & Scaling
     private func updatePlayerLayerFrame() {
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            self.playerLayer?.frame = self.bounds
-            CATransaction.commit()
-        }
+        guard !bounds.isEmpty else { return }
+        
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        playerLayer?.frame = bounds
+        CATransaction.commit()
     }
     
     override func layout() {
@@ -68,16 +112,92 @@ class VideoContainerView: NSView {
     
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
-        DispatchQueue.main.async { [weak self] in
-            if let scale = self?.window?.backingScaleFactor {
-                self?.playerLayer?.contentsScale = scale
-            }
+        
+        if let scale = window?.backingScaleFactor {
+            playerLayer?.contentsScale = scale
+        }
+    }
+    
+    // MARK: - Memory Management
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        
+        if newWindow == nil {
+            // View is being removed from window, clean up resources
+            cleanupPlayerLayer()
+            currentPlayer = nil
         }
     }
     
     deinit {
-        if let observer = frameObserver {
-            NotificationCenter.default.removeObserver(observer)
+        cleanupTasks.removeAll()
+        cleanupPlayerLayer()
+    }
+}
+
+// MARK: - Animation Extensions
+/// Optional animation capabilities for VideoContainerView
+extension VideoContainerView {
+    /// Apply a fade in animation to the video
+    func fadeIn(duration: TimeInterval = 0.5) {
+        guard let layer = playerLayer else { return }
+        
+        layer.opacity = 0
+        
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(duration)
+        layer.opacity = 1.0
+        CATransaction.commit()
+    }
+    
+    /// Apply a fade out animation to the video
+    func fadeOut(duration: TimeInterval = 0.5, completion: (() -> Void)? = nil) {
+        guard let layer = playerLayer else {
+            completion?()
+            return
         }
+        
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(duration)
+        CATransaction.setCompletionBlock {
+            completion?()
+        }
+        layer.opacity = 0
+        CATransaction.commit()
+    }
+    
+    /// Crossfade to a new player
+    func crossfade(to newPlayer: AVPlayer, duration: TimeInterval = 0.5, completion: (() -> Void)? = nil) {
+        // Skip if it's the same player
+        if newPlayer === currentPlayer {
+            completion?()
+            return
+        }
+        
+        // Create temporary container for the new player
+        let tempContainer = VideoContainerView(frame: bounds)
+        tempContainer.fitMode = self.fitMode
+        tempContainer.setPlayer(newPlayer)
+        tempContainer.layer?.opacity = 0
+        
+        // Add to parent
+        if let superlayer = layer?.superlayer {
+            superlayer.addSublayer(tempContainer.layer!)
+        }
+        
+        // Fade out current player
+        fadeOut(duration: duration) {
+            // Replace player and clean up
+            self.setPlayer(newPlayer)
+            tempContainer.layer?.removeFromSuperlayer()
+            self.fadeIn(duration: 0.2)
+            completion?()
+        }
+        
+        // Fade in new player in temporary container
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(duration)
+        tempContainer.layer?.opacity = 1.0
+        CATransaction.commit()
     }
 }
