@@ -133,7 +133,7 @@ struct GeneralSettingsView: View {
                                     .font(.headline)
                                     .foregroundColor(
                                         (minimumBatteryLevel ?? 0.2) < 0.2 ? .red :
-                                            (minimumBatteryLevel ?? 0.2) < 0.3 ? .orange : .green
+                                        (minimumBatteryLevel ?? 0.2) < 0.3 ? .orange : .green
                                     )
                                     .frame(width: 44, alignment: .trailing)
                             }

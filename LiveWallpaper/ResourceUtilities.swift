@@ -59,7 +59,7 @@ class ResourceUtilities {
     
     // MARK: - AVPlayer utilities
     
-    /// Create an AVPlayer from a URL with proper setup
+    // Create an AVPlayer from a URL with proper setup
     static func createPlayer(from url: URL, looping: Bool = true, volume: Float = 0.0) -> AVPlayer? {
         let asset = AVURLAsset(url: url)
         let playerItem = AVPlayerItem(asset: asset)
@@ -71,6 +71,7 @@ class ResourceUtilities {
         let player = AVPlayer(playerItem: playerItem)
         player.automaticallyWaitsToMinimizeStalling = true
         player.volume = volume
+        player.allowsExternalPlayback = false // Optimization to prevent AirPlay detection
         
         // Set up looping if requested
         if looping {
@@ -106,6 +107,9 @@ class ResourceUtilities {
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
         panel.allowedContentTypes = [.movie]
+        panel.title = "Select Video for Wallpaper"
+                panel.prompt = "Choose Video"
+                panel.message = "Select a video file to use as your desktop wallpaper"
         
         // Try to use the last directory
         if let lastDirectory = SettingsManager.shared.getLastUsedDirectory() {

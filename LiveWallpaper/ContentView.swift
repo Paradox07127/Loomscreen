@@ -36,6 +36,12 @@ struct ContentView: View {
                         .fontWeight(.semibold)
                 }
                 .padding(.top, 6)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color(.windowBackgroundColor).opacity(0.8))
+                )
             }
         }
     }
@@ -73,7 +79,7 @@ struct Sidebar: View {
     
     var body: some View {
         List(selection: $selection) {
-            Section {
+            Section(header: Text("General").font(.caption).bold().foregroundColor(.secondary)) {
                 NavigationLink(value: Navigation.general) {
                     HStack {
                         Image(systemName: "gearshape.fill")
@@ -94,9 +100,9 @@ struct Sidebar: View {
                 }
             }
             
-            Section {
+            Section(header: Text("Displays").font(.caption).bold().foregroundColor(.secondary)) {
                 HStack {
-                    Text("Displays")
+                    Text("Display Management")
                         .font(.headline)
                         .foregroundColor(.secondary)
                     
@@ -131,7 +137,7 @@ struct Sidebar: View {
                 }
             }
             
-            Section {
+            Section(header: Text("Info").font(.caption).bold().foregroundColor(.secondary)) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Battery Status")
                         .font(.headline)

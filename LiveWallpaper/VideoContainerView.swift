@@ -2,7 +2,7 @@ import AppKit
 import AVKit
 import Combine
 
-/// Container view for video playback that handles the AVPlayerLayer
+// Container view for video playback that handles the AVPlayerLayer
 class VideoContainerView: NSView {
     // MARK: - Properties
     private var playerLayer: AVPlayerLayer?
@@ -43,7 +43,7 @@ class VideoContainerView: NSView {
     }
     
     // MARK: - Player Configuration
-    /// Set the player for this view
+    // Set the player for this view
     func setPlayer(_ player: AVPlayer?) {
         // Skip update if it's the same player
         if player === currentPlayer { return }
@@ -132,72 +132,5 @@ class VideoContainerView: NSView {
     deinit {
         cleanupTasks.removeAll()
         cleanupPlayerLayer()
-    }
-}
-
-// MARK: - Animation Extensions
-/// Optional animation capabilities for VideoContainerView
-extension VideoContainerView {
-    /// Apply a fade in animation to the video
-    func fadeIn(duration: TimeInterval = 0.5) {
-        guard let layer = playerLayer else { return }
-        
-        layer.opacity = 0
-        
-        CATransaction.begin()
-        CATransaction.setAnimationDuration(duration)
-        layer.opacity = 1.0
-        CATransaction.commit()
-    }
-    
-    /// Apply a fade out animation to the video
-    func fadeOut(duration: TimeInterval = 0.5, completion: (() -> Void)? = nil) {
-        guard let layer = playerLayer else {
-            completion?()
-            return
-        }
-        
-        CATransaction.begin()
-        CATransaction.setAnimationDuration(duration)
-        CATransaction.setCompletionBlock {
-            completion?()
-        }
-        layer.opacity = 0
-        CATransaction.commit()
-    }
-    
-    /// Crossfade to a new player
-    func crossfade(to newPlayer: AVPlayer, duration: TimeInterval = 0.5, completion: (() -> Void)? = nil) {
-        // Skip if it's the same player
-        if newPlayer === currentPlayer {
-            completion?()
-            return
-        }
-        
-        // Create temporary container for the new player
-        let tempContainer = VideoContainerView(frame: bounds)
-        tempContainer.fitMode = self.fitMode
-        tempContainer.setPlayer(newPlayer)
-        tempContainer.layer?.opacity = 0
-        
-        // Add to parent
-        if let superlayer = layer?.superlayer {
-            superlayer.addSublayer(tempContainer.layer!)
-        }
-        
-        // Fade out current player
-        fadeOut(duration: duration) {
-            // Replace player and clean up
-            self.setPlayer(newPlayer)
-            tempContainer.layer?.removeFromSuperlayer()
-            self.fadeIn(duration: 0.2)
-            completion?()
-        }
-        
-        // Fade in new player in temporary container
-        CATransaction.begin()
-        CATransaction.setAnimationDuration(duration)
-        tempContainer.layer?.opacity = 1.0
-        CATransaction.commit()
     }
 }
