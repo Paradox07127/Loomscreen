@@ -160,7 +160,6 @@ final class PowerMonitor {
         }
     }
     
-    // Add a function to manually check current power status
     func refreshPowerStatus() {
         if let source = IOPSGetProvidingPowerSourceType(nil)?.takeRetainedValue() as? String {
             let newSource = PowerSource(identifier: source)
@@ -214,11 +213,4 @@ extension PowerMonitor {
             .map(\.isOnBattery)
             .eraseToAnyPublisher()
     }
-    
-    //    func isBatteryBelowThreshold(_ threshold: Double) -> Bool {
-    //        if case .internalBattery(let level) = currentPowerSource, level < threshold {
-    //            return true
-    //        }
-    //        return false
-    //    }
 }

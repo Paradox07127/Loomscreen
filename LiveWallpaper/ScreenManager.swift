@@ -27,7 +27,7 @@ class MemoryMonitor {
     }
 }
 
-/// Manages video playback on multiple screens
+// Manages video playback on multiple screens
 final class ScreenManager: ObservableObject {
     // MARK: - Properties
     @Published private(set) var screens: [Screen] = []
@@ -39,6 +39,8 @@ final class ScreenManager: ObservableObject {
     private var configurationCache: [CGDirectDisplayID: ScreenConfiguration] = [:]
     private let powerMonitor: PowerMonitor = .shared
     private let memoryMonitor = MemoryMonitor()
+    private var lastAppliedConfigHashes: [CGDirectDisplayID: Int] = [:]
+    private var configUpdateLock = NSLock()
     
     // MARK: - Initialization
     init() {
@@ -90,6 +92,8 @@ final class ScreenManager: ObservableObject {
     private func setupScreenObservers() {
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .debounce(for: .seconds(0.5), scheduler: DispatchQueue.main)
+            // Use a more aggressive throttling for intensive screen changes
+            .throttle(for: .seconds(1.0), scheduler: DispatchQueue.main, latest: true)
             .sink { [weak self] _ in
                 self?.refreshScreens()
             }
@@ -584,54 +588,6 @@ final class ScreenManager: ObservableObject {
                 applyConfiguration(configuration, to: screen, preservingState: false)
             }
         }
-    }
-    
-    // Add these properties to the ScreenManager class
-    private var lastAppliedConfigHashes: [CGDirectDisplayID: Int] = [:]
-    private var configUpdateLock = NSLock()
-    
-    // Add this method to the ScreenManager class to determine if config needs updating
-    private func shouldUpdateConfiguration(_ configuration: ScreenConfiguration, for screen: Screen) -> Bool {
-        configUpdateLock.lock()
-        defer { configUpdateLock.unlock() }
-        
-        // Create a hash of the current configuration
-        var hasher = Hasher()
-        hasher.combine(configuration.screenID)
-        hasher.combine(configuration.playbackSpeed)
-        hasher.combine(configuration.fitMode)
-        hasher.combine(configuration.pauseOnBattery)
-        
-        let configHash = hasher.finalize()
-        
-        // Check if this configuration is different from the last applied one
-        let lastHash = lastAppliedConfigHashes[screen.id]
-        let needsUpdate = lastHash == nil || lastHash != configHash
-        
-        // Update the last applied hash if needed
-        if needsUpdate {
-            lastAppliedConfigHashes[screen.id] = configHash
-        }
-        
-        return needsUpdate
-    }
-    
-    
-    
-    // Add this method to efficiently apply updates to a running video player without restarting it
-    private func updateExistingPlayer(_ player: WallpaperVideoPlayer, with configuration: ScreenConfiguration) -> Bool {
-        var changed = false
-        
-        // Update playback speed if needed
-        if abs(Float(configuration.playbackSpeed) - (player.player?.rate ?? 1.0)) > 0.01 {
-            player.setPlaybackSpeed(configuration.playbackSpeed)
-            changed = true
-        }
-        
-        player.setVideoFitMode(configuration.fitMode)
-        
-        
-        return changed
     }
     
     // MARK: - Cleanup
