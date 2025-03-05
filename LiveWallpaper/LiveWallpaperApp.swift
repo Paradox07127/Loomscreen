@@ -107,7 +107,7 @@ struct LiveWallpaperApp: App {
     
     var body: some Scene {
         Settings {
-            EmptyView()  // No content is shown by default
+            EmptyView()
         }
     }
 }

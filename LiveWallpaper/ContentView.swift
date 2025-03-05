@@ -35,9 +35,7 @@ struct ContentView: View {
                         .font(.title3)
                         .fontWeight(.semibold)
                 }
-                .padding(.top, 6)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 6)
+                .padding(.all, 12)
                 .background(
                     RoundedRectangle(cornerRadius: 6)
                         .fill(Color(.windowBackgroundColor).opacity(0.8))
@@ -139,12 +137,8 @@ struct Sidebar: View {
             
             Section(header: Text("Info").font(.caption).bold().foregroundColor(.secondary)) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Battery Status")
-                        .font(.headline)
-                        .foregroundColor(.secondary)
-                        .padding(.top, 6)
-                    
                     BatteryStatusView()
+                    SystemMonitorView()
                 }
             }
         }
@@ -163,119 +157,6 @@ struct Sidebar: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             withAnimation {
                 isRefreshing = false
-            }
-        }
-    }
-}
-
-// MARK: - Battery Status View
-struct BatteryStatusView: View {
-    @State private var powerSource: PowerMonitor.PowerSource = PowerMonitor.shared.currentPowerSource
-    private let powerMonitor = PowerMonitor.shared
-    
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: powerStatusIcon)
-                .font(.title3)
-                .foregroundColor(powerStatusColor)
-            
-            VStack(alignment: .leading, spacing: 2) {
-                Text(powerStatusText)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                
-                if case .internalBattery(let level) = powerSource {
-                    // Battery level indicator
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(Color.gray.opacity(0.3))
-                                .frame(width: geo.size.width, height: 6)
-                            
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(batteryLevelColor(level))
-                                .frame(width: geo.size.width * CGFloat(level), height: 6)
-                        }
-                    }
-                    .frame(height: 6)
-                }
-            }
-        }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 4)
-        .background(Color.gray.opacity(0.1))
-        .cornerRadius(8)
-        .onAppear {
-            setupPowerMonitoring()
-        }
-    }
-    
-    // Power status information computed properties
-    private var powerStatusIcon: String {
-        switch powerSource {
-        case .internalBattery(let level):
-            if level <= 0.1 {
-                return "battery.0"
-            } else if level <= 0.25 {
-                return "battery.25"
-            } else if level <= 0.5 {
-                return "battery.50"
-            } else if level <= 0.75 {
-                return "battery.75"
-            } else {
-                return "battery.100"
-            }
-        case .externalUnlimited:
-            return "power.circle.fill"
-        case .externalUPS:
-            return "bolt.circle.fill"
-        }
-    }
-    
-    private var powerStatusText: String {
-        switch powerSource {
-        case .internalBattery(let level):
-            return "Battery: \(Int(level * 100))%"
-        case .externalUnlimited:
-            return "Connected to Power"
-        case .externalUPS:
-            return "Connected to UPS"
-        }
-    }
-    
-    private var powerStatusColor: Color {
-        switch powerSource {
-        case .internalBattery(let level):
-            return batteryLevelColor(level)
-        case .externalUnlimited:
-            return .green
-        case .externalUPS:
-            return .orange
-        }
-    }
-    
-    private func batteryLevelColor(_ level: Double) -> Color {
-        if level <= 0.2 {
-            return .red
-        } else if level <= 0.5 {
-            return .orange
-        } else {
-            return .green
-        }
-    }
-    
-    private func setupPowerMonitoring() {
-        // Update initial power source
-        powerSource = powerMonitor.currentPowerSource
-        
-        // Subscribe to power source changes
-        NotificationCenter.default.addObserver(
-            forName: PowerMonitor.powerSourceDidChangeNotification,
-            object: nil,
-            queue: .main
-        ) { notification in
-            if let newSource = notification.userInfo?["newSource"] as? PowerMonitor.PowerSource {
-                self.powerSource = newSource
             }
         }
     }

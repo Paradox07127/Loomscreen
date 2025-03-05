@@ -5,18 +5,13 @@ class StatusBarController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem
     private let screenManager: ScreenManager
     private var settingsWindowController: NSWindowController?
-    private let powerMonitor = PowerMonitor.shared
     private var menuUpdateTimer: Timer?
-    
-    // Keep track of power status to update icon
-    private var isOnBattery: Bool = false
     
     init(screenManager: ScreenManager) {
         self.screenManager = screenManager
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         super.init()
         configureStatusItem()
-        setupPowerMonitoring()
         startPeriodicMenuUpdates()
     }
     
@@ -24,9 +19,7 @@ class StatusBarController: NSObject, NSMenuDelegate {
         if let button = statusItem.button {
             updateStatusBarIcon()
             button.image?.isTemplate = true
-            
-            // Add tooltip with app name
-            button.toolTip = "LiveWallpaper - Click for options"
+            button.toolTip = "LiveWallpaper"
         }
         setupMenu()
     }
@@ -35,38 +28,9 @@ class StatusBarController: NSObject, NSMenuDelegate {
         guard let button = statusItem.button else { return }
         
         let isAnyPlaying = screenManager.screens.contains { $0.videoPlayer?.isPlaying ?? false }
-        let symbolName: String
-        
-        if isOnBattery {
-            // On battery
-            symbolName = isAnyPlaying ? "photo.fill.on.rectangle.fill" : "photo.on.rectangle"
-        } else {
-            // On power adapter
-            symbolName = isAnyPlaying ? "play.rectangle.fill" : "play.rectangle"
-        }
+        let symbolName = isAnyPlaying ? "play.rectangle.fill" : "photo.on.rectangle"
         
         button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "LiveWallpaper")
-    }
-    
-    private func setupPowerMonitoring() {
-        // Subscribe to power source changes
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handlePowerSourceChange),
-            name: PowerMonitor.powerSourceDidChangeNotification,
-            object: nil
-        )
-        
-        // Set initial state
-        isOnBattery = powerMonitor.currentPowerSource.isOnBattery
-        updateStatusBarIcon()
-    }
-    
-    @objc private func handlePowerSourceChange(_ notification: Notification) {
-        if let isOnBattery = notification.userInfo?["isOnBattery"] as? Bool {
-            self.isOnBattery = isOnBattery
-            updateStatusBarIcon()
-        }
     }
     
     private func setupMenu() {
@@ -90,6 +54,7 @@ class StatusBarController: NSObject, NSMenuDelegate {
             action: #selector(showSettings),
             keyEquivalent: ","
         )
+        settingsItem.image = NSImage(systemSymbolName: "gear", accessibilityDescription: "Settings")
         
         // Displays submenu
         let displaysMenu = NSMenu()
@@ -103,16 +68,13 @@ class StatusBarController: NSObject, NSMenuDelegate {
             keyEquivalent: "p"
         )
         
-        // Power status indicator
-        let powerStatusItem = NSMenuItem(title: "On AC Power", action: nil, keyEquivalent: "")
-        powerStatusItem.isEnabled = false
-        
         // Quit item
         let quitItem = createMenuItem(
             title: "Quit LiveWallpaper",
             action: #selector(NSApplication.terminate),
             keyEquivalent: "q"
         )
+        quitItem.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Quit")
         quitItem.target = NSApp
         
         // Assemble menu
@@ -122,8 +84,6 @@ class StatusBarController: NSObject, NSMenuDelegate {
         menu.addItem(NSMenuItem.separator())
         menu.addItem(displaysItem)
         menu.addItem(playPauseItem)
-        menu.addItem(NSMenuItem.separator())
-        menu.addItem(powerStatusItem)
         menu.addItem(NSMenuItem.separator())
         menu.addItem(quitItem)
         
@@ -145,6 +105,8 @@ class StatusBarController: NSObject, NSMenuDelegate {
             activateApp()
             return
         }
+        
+        
         
         // Otherwise, create a new settings window
         let window = createSettingsWindow()
@@ -222,7 +184,9 @@ class StatusBarController: NSObject, NSMenuDelegate {
             }
         }
         
-        updateStatusBarIcon()
+        DispatchQueue.main.async {
+            self.updateStatusBarIcon()
+        }
     }
     
     // MARK: - Menu Delegate
@@ -230,7 +194,6 @@ class StatusBarController: NSObject, NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         updateDisplaysMenu()
         updatePlaybackMenuState()
-        updatePowerStatusItem()
     }
     
     private func updateDisplaysMenu() {
@@ -239,6 +202,7 @@ class StatusBarController: NSObject, NSMenuDelegate {
               let displaysMenu = displaysItem.submenu else { return }
         
         displaysMenu.removeAllItems()
+        displaysItem.image = NSImage(systemSymbolName: "display", accessibilityDescription: "display icon")
         
         if screenManager.screens.isEmpty {
             let noDisplaysItem = NSMenuItem(title: "No displays detected", action: nil, keyEquivalent: "")
@@ -272,6 +236,7 @@ class StatusBarController: NSObject, NSMenuDelegate {
         // Add refresh option
         displaysMenu.addItem(NSMenuItem.separator())
         let refreshItem = NSMenuItem(title: "Refresh Displays", action: #selector(refreshDisplays), keyEquivalent: "r")
+        refreshItem.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Refresh")
         refreshItem.target = self
         displaysMenu.addItem(refreshItem)
     }
@@ -288,35 +253,6 @@ class StatusBarController: NSObject, NSMenuDelegate {
         } else {
             playPauseItem.title = "Play All Videos"
             playPauseItem.image = NSImage(systemSymbolName: "play.circle", accessibilityDescription: "Play")
-        }
-    }
-    
-    private func updatePowerStatusItem() {
-        guard let menu = statusItem.menu,
-              let powerStatusItem = menu.items.first(where: { !$0.isEnabled && $0.title.contains("Power") || $0.title.contains("Battery") }) else { return }
-        
-        let isOnBattery = powerMonitor.currentPowerSource.isOnBattery
-        
-        if isOnBattery {
-            if case .internalBattery(let level) = powerMonitor.currentPowerSource {
-                let batteryPercentage = Int(level * 100)
-                let batteryStatus = batteryPercentage < 20 ? "Low" : (batteryPercentage < 50 ? "Medium" : "Good")
-                
-                powerStatusItem.title = "Battery: \(batteryPercentage)% (\(batteryStatus))"
-                
-                // Set appropriate icon based on battery level
-                let iconName = batteryPercentage < 20 ? "battery.25" :
-                batteryPercentage < 50 ? "battery.50" :
-                batteryPercentage < 75 ? "battery.75" : "battery.100"
-                
-                powerStatusItem.image = NSImage(systemSymbolName: iconName, accessibilityDescription: "Battery")
-            } else {
-                powerStatusItem.title = "On Battery Power"
-                powerStatusItem.image = NSImage(systemSymbolName: "battery.50", accessibilityDescription: "Battery")
-            }
-        } else {
-            powerStatusItem.title = "Connected to Power"
-            powerStatusItem.image = NSImage(systemSymbolName: "power.circle", accessibilityDescription: "AC Power")
         }
     }
     
@@ -352,7 +288,7 @@ class StatusBarController: NSObject, NSMenuDelegate {
     
     // MARK: - Menu Auto Update
     func startPeriodicMenuUpdates() {
-        // Update menu items that might change over time (e.g., battery percentage)
+        // Update menu items that might change over time
         menuUpdateTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             
@@ -362,7 +298,6 @@ class StatusBarController: NSObject, NSMenuDelegate {
             // Check if menu might be open (button is highlighted)
             if self.statusItem.button?.isHighlighted == true {
                 // Update menu items that might have changed
-                self.updatePowerStatusItem()
                 self.updatePlaybackMenuState()
             }
         }

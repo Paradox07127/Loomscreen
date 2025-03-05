@@ -10,6 +10,9 @@ struct ScreenDetailView: View {
     @State private var pauseOnBattery: Bool = false
     @State private var isLoading: Bool = false
     
+    // New state variables for tracking playback
+    @State private var isPlayerPlaying: Bool = false
+    
     @State private var showErrorAlert = false
     @State private var errorMessage = ""
     
@@ -38,6 +41,9 @@ struct ScreenDetailView: View {
             .onAppear {
                 isViewActive = true
                 loadScreenConfiguration()
+                // Initialize playback state on appearance
+                isPlayerPlaying = screen.videoPlayer?.isPlaying ?? false
+                setupPlaybackStateObserver()
             }
             .onDisappear {
                 isViewActive = false
@@ -66,9 +72,20 @@ struct ScreenDetailView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(screen.name)
                         .font(.system(size: 24, weight: .semibold))
-                    Text("\(Int(screen.frame.width))×\(Int(screen.frame.height))")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
+                    
+                    HStack(spacing: 8) {
+                        Text("Resolution: \(Int(screen.frame.width))×\(Int(screen.frame.height))")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        
+                        Text("•")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        
+                        Text("Refresh Rate: \(getScreenRefreshRate()) Hz")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
             
@@ -121,13 +138,13 @@ struct ScreenDetailView: View {
                             .frame(height: 300)
                             .clipShape(RoundedRectangle(cornerRadius: 12))
                             .overlay(
-                                RoundedRectangle(cornerRadius: 12)
+                                RoundedRectangle(cornerRadius: 6)
                                     .strokeBorder(Color.gray.opacity(0.2), lineWidth: 1)
                             )
                             .shadow(radius: 3, y: 2)
                         
                         // Video information
-                        VideoInformationView(player: player)
+                        VideoInformationView(player: player, screenRefreshRate: getScreenRefreshRate())
                     }
                 } else {
                     // Fixed width file select view that matches video player width
@@ -158,10 +175,18 @@ struct ScreenDetailView: View {
                         .buttonStyle(.bordered)
                         .controlSize(.regular)
                         
+                        Button(action: clearVideo) {
+                            Label("Clear Video", systemImage: "xmark.circle")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.regular)
+                        .foregroundColor(.red)
+                        .help("Remove this video and its configuration")
+                        
                         Spacer()
                         
                         PlaybackButton(
-                            isPlaying: screen.videoPlayer?.isPlaying ?? false,
+                            isPlaying: isPlayerPlaying,
                             action: togglePlayback
                         )
                     }
@@ -204,6 +229,29 @@ struct ScreenDetailView: View {
         .groupBoxStyle(ContainerGroupBoxStyle())
     }
     
+    private func clearVideo() {
+        // Show confirmation dialog
+        let alert = NSAlert()
+        alert.messageText = "Clear Wallpaper Video"
+        alert.informativeText = "Are you sure you want to remove this video? This will delete all configuration for this screen."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Clear Video")
+        alert.addButton(withTitle: "Cancel")
+        
+        // Use the first button as the destructive action
+        alert.buttons.first?.hasDestructiveAction = true
+        
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            // User confirmed
+            cleanupPreviewPlayer()
+            screenManager.clearVideoForScreen(screen)
+            
+            // Reset local state
+            isPlayerPlaying = false
+        }
+    }
+    
     private var videoOptionsSection: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 16) {
@@ -222,6 +270,30 @@ struct ScreenDetailView: View {
                             screenManager.updateFitMode(newMode, for: screen)
                         }
                     )
+                }
+                
+                Divider()
+                
+                // Frame Rate Options - only show if we have a video player
+                if let player = screen.videoPlayer, player.videoFrameRate > 0 {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Frame Rate Management")
+                            .font(.subheadline)
+                            .foregroundColor(.primary)
+                        
+                        Button(action: {
+                            optimizeVideoFrameRate()
+                        }) {
+                            Label("Optimize Frame Rate", systemImage: "speedometer")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .help("Limit video frame rate to match your display refresh rate to reduce GPU usage")
+                        
+                        Text("Original video: \(Int(player.videoFrameRate)) FPS, Screen: \(getScreenRefreshRate()) Hz")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
             .padding(16)
@@ -254,6 +326,24 @@ struct ScreenDetailView: View {
     }
     
     // MARK: - Helper Methods
+    
+    private func setupPlaybackStateObserver() {
+        // Add periodic observation of playing state
+        if let videoPlayer = screen.videoPlayer {
+            // Create a timer to check the playback state
+            Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { timer in
+                if !isViewActive {
+                    timer.invalidate()
+                    return
+                }
+                
+                let currentPlaying = videoPlayer.isPlaying
+                if isPlayerPlaying != currentPlaying {
+                    isPlayerPlaying = currentPlaying
+                }
+            }
+        }
+    }
     
     private func loadScreenConfiguration() {
         if let config = screenManager.getConfiguration(for: screen) {
@@ -378,10 +468,42 @@ struct ScreenDetailView: View {
     }
     
     private func togglePlayback() {
-        if screen.videoPlayer?.isPlaying ?? false {
-            screen.videoPlayer?.pause()
+        if let player = screen.videoPlayer {
+            if player.isPlaying {
+                player.pause()
+                isPlayerPlaying = false
+            } else {
+                player.play()
+                isPlayerPlaying = true
+            }
+        }
+    }
+    
+    // Get screen refresh rate for the current display
+    private func getScreenRefreshRate() -> Int {
+        // Use CGDisplayMode to get accurate refresh rate
+        guard let displayID = screen.id as CGDirectDisplayID?,
+              let mode = CGDisplayCopyDisplayMode(displayID) else {
+            return 60 // Default to 60Hz if we can't determine
+        }
+        
+        let refreshRate = mode.refreshRate
+        return refreshRate > 0 ? Int(refreshRate) : 60
+    }
+    
+    // Optimize video frame rate to match display refresh rate
+    private func optimizeVideoFrameRate() {
+        guard let player = screen.videoPlayer, player.videoFrameRate > 0 else { return }
+        
+        let screenRate = Float(getScreenRefreshRate())
+        let videoRate = Float(player.videoFrameRate)
+        
+        // Only limit if video rate is higher than screen rate
+        if videoRate > screenRate && screenRate > 0 {
+            player.setFrameRateLimit(screenRate)
         } else {
-            screen.videoPlayer?.play()
+            // Use original frame rate
+            player.setFrameRateLimit(videoRate)
         }
     }
 }
@@ -502,61 +624,79 @@ struct FitModeOption: View {
 // MARK: - Video Information View
 struct VideoInformationView: View {
     let player: AVPlayer
+    let screenRefreshRate: Int
+    
     @State private var videoDuration: Double = 0
     @State private var videoResolution: (width: Int, height: Int)? = nil
     @State private var videoName: String = ""
+    @State private var videoFrameRate: Double = 0
     
     var body: some View {
-        HStack(spacing: 16) {
-            // Video file info
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
-                    Image(systemName: "film.fill")
-                        .foregroundColor(.secondary)
-                    Text(videoName.isEmpty ? "Unnamed Video" : videoName)
-                        .fontWeight(.medium)
-                        .lineLimit(1)
-                }
+        VStack(alignment: .leading, spacing: 12) {
+            // Title Section
+            HStack {
+                Image(systemName: "film.fill")
+                    .font(.title2)
+                    .foregroundColor(.accentColor)
+                Text(videoName.isEmpty ? "Unnamed Video" : videoName)
+                    .font(.headline)
+                    .lineLimit(1)
+                Spacer()
+            }
+            
+            // Duration and Aspect Ratio Section
+            HStack {
+                Image(systemName: "timer")
+                    .foregroundColor(.secondary)
+                Text(formatDuration(videoDuration))
+                    .foregroundColor(.secondary)
                 
-                HStack(spacing: 8) {
-                    Image(systemName: "timer")
-                        .foregroundColor(.secondary)
-                    Text(formatDuration(videoDuration))
-                        .foregroundColor(.secondary)
+                Spacer()
+                
+                if let resolution = videoResolution,
+                   resolution.width > 0, resolution.height > 0 {
+                    HStack(spacing: 4) {
+                        Image(systemName: "aspectratio")
+                            .foregroundColor(.secondary)
+                        Text(calculateAspectRatio(width: resolution.width, height: resolution.height))
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
             
-            Spacer()
+            Divider()
             
-            // Resolution info
-            if let resolution = videoResolution {
-                VStack(alignment: .trailing, spacing: 3) {
-                    HStack(spacing: 8) {
+            // Resolution and Frame Rate Section
+            HStack {
+                if let resolution = videoResolution {
+                    HStack(spacing: 4) {
                         Image(systemName: "rectangle.and.pencil.and.ellipsis")
                             .foregroundColor(.secondary)
                         Text("\(resolution.width) × \(resolution.height)")
                             .foregroundColor(.secondary)
                     }
-                    
-                    // Video aspect ratio
-                    if resolution.width > 0 && resolution.height > 0 {
-                        HStack(spacing: 8) {
-                            Image(systemName: "aspectratio")
-                                .foregroundColor(.secondary)
-                            Text(calculateAspectRatio(width: resolution.width, height: resolution.height))
-                                .foregroundColor(.secondary)
-                        }
+                }
+                
+                Spacer()
+                
+                if videoFrameRate > 0 {
+                    HStack(spacing: 4) {
+                        Image(systemName: "speedometer")
+                            .foregroundColor(.secondary)
+                        Text("\(Int(videoFrameRate)) FPS")
+                            .foregroundColor(.secondary)
                     }
                 }
             }
         }
         .font(.caption)
-        .padding(10)
+        .padding()
         .background(Color.secondary.opacity(0.1))
-        .cornerRadius(8)
+        .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
         .onAppear {
             loadVideoInformation()
         }
+
     }
     
     private func loadVideoInformation() {
@@ -571,7 +711,7 @@ struct VideoInformationView: View {
             videoName = urlAsset.url.lastPathComponent
         }
         
-        // Get video resolution using modern API
+        // Get video resolution and frame rate using modern API
         if #available(macOS 13.0, *) {
             // Use modern async API
             Task {
@@ -587,9 +727,13 @@ struct VideoInformationView: View {
                         // Apply transform to size
                         let size = naturalSize.applying(preferredTransform)
                         
+                        // Get frame rate
+                        let nominalFrameRate = try await track.load(.nominalFrameRate)
+                        
                         // Update on main thread
                         await MainActor.run {
                             videoResolution = (width: abs(Int(size.width)), height: abs(Int(size.height)))
+                            videoFrameRate = Double(nominalFrameRate)
                         }
                     }
                 } catch {
@@ -601,6 +745,7 @@ struct VideoInformationView: View {
             if let track = playerItem.asset.tracks(withMediaType: .video).first {
                 let size = track.naturalSize.applying(track.preferredTransform)
                 videoResolution = (width: abs(Int(size.width)), height: abs(Int(size.height)))
+                videoFrameRate = Double(track.nominalFrameRate)
             }
         }
     }

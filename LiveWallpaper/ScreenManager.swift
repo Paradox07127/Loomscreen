@@ -152,6 +152,27 @@ final class ScreenManager: ObservableObject {
         objectWillChange.send()
     }
     
+    func clearVideoForScreen(_ screen: Screen) {
+        // Clean up existing video player
+        screen.videoPlayer?.cleanup()
+        screen.videoPlayer = nil
+        
+        // Clean up preview player
+        screen.previewPlayer?.pause()
+        screen.previewPlayer = nil
+        
+        // Remove configuration from settings
+        SettingsManager.shared.cleanSettingsForScreen(screen.id)
+        
+        // Remove from cache
+        configLock.lock()
+        configurationCache.removeValue(forKey: screen.id)
+        configLock.unlock()
+        
+        // Notify UI of change
+        objectWillChange.send()
+    }
+    
     private func cleanupScreen(_ screen: Screen) {
         screen.videoPlayer?.cleanup()
         screen.previewPlayer?.pause()
@@ -595,6 +616,60 @@ final class ScreenManager: ObservableObject {
         cleanupTasks.removeAll()
         for screen in screens {
             cleanupScreen(screen)
+        }
+    }
+}
+
+extension ScreenManager {
+    // Set the frame rate limit for a specific screen
+    func setFrameRateLimit(_ framesPerSecond: Float, for screen: Screen) {
+        guard framesPerSecond > 0, let player = screen.videoPlayer else { return }
+        
+        // Apply frame rate limit to player
+        player.setFrameRateLimit(framesPerSecond)
+        
+        // Note: We're not saving this setting since there's no current field in ScreenConfiguration
+        // If you want to persist this setting, add a frameRateLimit property to ScreenConfiguration
+    }
+    
+    /// Update all screens to use optimal frame rates based on their content and display
+    func optimizeFrameRates() {
+        for screen in screens {
+            guard let player = screen.videoPlayer, player.videoFrameRate > 0 else { continue }
+            
+            // Get screen refresh rate (default to 60 if cannot determine)
+            var screenRefreshRate: Float = 60
+            if let nsScreen = NSScreen.screens.first(where: { $0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID == screen.id }),
+               let refreshRateValue = nsScreen.deviceDescription[NSDeviceDescriptionKey("NSScreenRefreshRate")] as? NSNumber {
+                screenRefreshRate = refreshRateValue.floatValue
+            }
+            
+            // Set optimal frame rate - either match video's natural rate or cap at display refresh rate
+            let videoFrameRate = Float(player.videoFrameRate)
+            let optimalFrameRate = min(videoFrameRate, screenRefreshRate)
+            
+            // Only apply if it would make a difference
+            if optimalFrameRate < videoFrameRate && optimalFrameRate > 0 {
+                player.setFrameRateLimit(optimalFrameRate)
+            }
+        }
+    }
+    
+    /// Fix any inconsistent playback states
+    func synchronizePlaybackStates() {
+        for screen in screens {
+            guard let player = screen.videoPlayer else { continue }
+            
+            // Check if actual playback state matches the reported state
+            let actuallyPlaying = player.player?.timeControlStatus == .playing
+            if player.isPlaying != actuallyPlaying {
+                // Synchronize the state
+                if actuallyPlaying {
+                    player.play()
+                } else {
+                    player.pause()
+                }
+            }
         }
     }
 }
