@@ -19,20 +19,15 @@ final class PowerMonitor {
         }
         
         init(identifier: String) {
-            print("PowerMonitor: Initializing power source with identifier: \(identifier)")
             switch identifier {
             case kIOPMBatteryPowerKey:
                 let batteryLevel = PowerMonitor.getCurrentBatteryLevel()
-                print("PowerMonitor: Battery power detected. Level: \(batteryLevel * 100)%")
                 self = .internalBattery(batteryLevel: batteryLevel)
             case kIOPMACPowerKey:
-                print("PowerMonitor: AC power detected")
                 self = .externalUnlimited
             case kIOPMUPSPowerKey:
-                print("PowerMonitor: UPS power detected")
                 self = .externalUPS
             default:
-                print("PowerMonitor: Unknown power source. Defaulting to external unlimited")
                 self = .externalUnlimited
             }
         }
@@ -71,7 +66,6 @@ final class PowerMonitor {
         }
         
         guard let source = IOPSCreateLimitedPowerNotification(callback, Unmanaged.passUnretained(self).toOpaque())?.takeRetainedValue() else {
-            print("PowerMonitor: Failed to create power notification source")
             return
         }
         
@@ -89,8 +83,6 @@ final class PowerMonitor {
         if let source = IOPSGetProvidingPowerSourceType(nil)?.takeRetainedValue() as? String {
             let newSource = PowerSource(identifier: source)
             let oldSource = powerSourceSubject.value
-            
-            print("PowerMonitor: Power source changing from \(oldSource) to \(newSource)")
             
             // Only notify if the power source actually changed
             if newSource != powerSourceSubject.value {
@@ -128,12 +120,10 @@ final class PowerMonitor {
               let maxCapacity = description[kIOPSMaxCapacityKey] as? Int,
               maxCapacity > 0
         else {
-            print("PowerMonitor: Failed to get battery level, defaulting to 100%")
             return 1.0
         }
         
         let level = Double(currentCapacity) / Double(maxCapacity)
-        print("PowerMonitor: Current battery level: \(level * 100)%")
         return level
     }
     

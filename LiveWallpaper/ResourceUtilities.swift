@@ -20,7 +20,6 @@ class ResourceUtilities {
             )
             return bookmarkData
         } catch {
-            print("Failed to create bookmark: \(error.localizedDescription)")
             return nil
         }
     }
@@ -48,11 +47,9 @@ class ResourceUtilities {
                 }
                 return (url, cleanup)
             } else {
-                print("Failed to access security-scoped resource")
                 return (nil, cleanup)
             }
         } catch {
-            print("Failed to resolve bookmark: \(error.localizedDescription)")
             return (nil, cleanup)
         }
     }
@@ -108,8 +105,8 @@ class ResourceUtilities {
         panel.canChooseFiles = true
         panel.allowedContentTypes = [.movie]
         panel.title = "Select Video for Wallpaper"
-                panel.prompt = "Choose Video"
-                panel.message = "Select a video file to use as your desktop wallpaper"
+        panel.prompt = "Choose Video"
+        panel.message = "Select a video file to use as your desktop wallpaper"
         
         // Try to use the last directory
         if let lastDirectory = SettingsManager.shared.getLastUsedDirectory() {

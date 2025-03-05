@@ -78,10 +78,6 @@ struct ScreenDetailView: View {
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                         
-                        Text("•")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        
                         Text("Refresh Rate: \(getScreenRefreshRate()) Hz")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
@@ -133,7 +129,16 @@ struct ScreenDetailView: View {
                 if let player = screen.previewPlayer {
                     VStack(spacing: 8) {
                         // Video player with consistent width
-                        VideoPlayer(player: player)
+                        //                        VideoPlayer(player: player)
+                        //                            .frame(maxWidth: .infinity)
+                        //                            .frame(height: 300)
+                        //                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                        //                            .overlay(
+                        //                                RoundedRectangle(cornerRadius: 6)
+                        //                                    .strokeBorder(Color.gray.opacity(0.2), lineWidth: 1)
+                        //                            )
+                        //                            .shadow(radius: 3, y: 2)
+                        CustomVideoPlayer(player: player, fitMode: selectedFitMode)
                             .frame(maxWidth: .infinity)
                             .frame(height: 300)
                             .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -386,17 +391,19 @@ struct ScreenDetailView: View {
                 return
             }
             
-            // Create a new preview player
+            // Create a new preview player with more robust initialization
             let asset = AVURLAsset(url: url)
             let playerItem = AVPlayerItem(asset: asset)
+            
+            // Set up quality of service for better performance
+            playerItem.preferredForwardBufferDuration = 5.0
+            
             let previewPlayer = AVPlayer(playerItem: playerItem)
             previewPlayer.volume = 0
+            previewPlayer.automaticallyWaitsToMinimizeStalling = true
             
-            // Set the preview player and start playback
             screen.previewPlayer = previewPlayer
-            previewPlayer.play()
             
-            // Stop accessing the resource when done with setup
             url.stopAccessingSecurityScopedResource()
         } catch {
             print("Failed to set up preview player: \(error.localizedDescription)")
@@ -696,13 +703,13 @@ struct VideoInformationView: View {
         .onAppear {
             loadVideoInformation()
         }
-
+        
     }
     
     private func loadVideoInformation() {
         guard let playerItem = player.currentItem else { return }
         
-        // Get video duration
+        // Get video duration safely
         let duration = playerItem.duration
         videoDuration = duration.isValid ? CMTimeGetSeconds(duration) : 0
         
@@ -711,44 +718,29 @@ struct VideoInformationView: View {
             videoName = urlAsset.url.lastPathComponent
         }
         
-        // Get video resolution and frame rate using modern API
-        if #available(macOS 13.0, *) {
-            // Use modern async API
-            Task {
-                do {
-                    // Load tracks
-                    let tracks = try await playerItem.asset.loadTracks(withMediaType: .video)
-                    
-                    if let track = tracks.first {
-                        // Load natural size and preferred transform
-                        let naturalSize = try await track.load(.naturalSize)
-                        let preferredTransform = try await track.load(.preferredTransform)
-                        
-                        // Apply transform to size
-                        let size = naturalSize.applying(preferredTransform)
-                        
-                        // Get frame rate
-                        let nominalFrameRate = try await track.load(.nominalFrameRate)
-                        
-                        // Update on main thread
-                        await MainActor.run {
-                            videoResolution = (width: abs(Int(size.width)), height: abs(Int(size.height)))
-                            videoFrameRate = Double(nominalFrameRate)
-                        }
-                    }
-                } catch {
-                    print("Error loading video track information: \(error.localizedDescription)")
-                }
-            }
-        } else {
-            // Fallback for older macOS versions
-            if let track = playerItem.asset.tracks(withMediaType: .video).first {
-                let size = track.naturalSize.applying(track.preferredTransform)
-                videoResolution = (width: abs(Int(size.width)), height: abs(Int(size.height)))
-                videoFrameRate = Double(track.nominalFrameRate)
+        // Load video details asynchronously
+        Task {
+            do {
+                // Asynchronously load video tracks
+                let videoTracks = try await playerItem.asset.loadTracks(withMediaType: .video)
+                guard let track = videoTracks.first else { return }
+                
+                // Asynchronously load the needed properties
+                let naturalSize = try await track.load(.naturalSize)
+                let preferredTransform = try await track.load(.preferredTransform)
+                let nominalFrameRate = try await track.load(.nominalFrameRate)
+                
+                // Apply the transform to the natural size to get the actual video dimensions
+                let transformedSize = naturalSize.applying(preferredTransform)
+                videoResolution = (width: abs(Int(transformedSize.width)),
+                                   height: abs(Int(transformedSize.height)))
+                videoFrameRate = Double(nominalFrameRate)
+            } catch {
+                print("Error loading video details: \(error)")
             }
         }
     }
+    
     
     private func formatDuration(_ seconds: Double) -> String {
         // Handle invalid values

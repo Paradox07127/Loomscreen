@@ -5,8 +5,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var screenManager: ScreenManager?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
-        print("App launching: initializing ScreenManager.")
-        
         // Register for sleep/wake notifications early
         NSWorkspace.shared.notificationCenter.addObserver(
             self,
@@ -18,13 +16,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         screenManager = ScreenManager()
         
         if let manager = screenManager {
-            print("Initializing StatusBarController.")
             statusBarController = StatusBarController(screenManager: manager)
             
-            // Validate configurations on startup with a delay to ensure system is ready
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                print("Performing startup configuration validation")
-                self.validateConfigurations()
+            // Initialize screens after a short delay to ensure system is ready
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                manager.refreshScreens()
             }
         } else {
             print("Error: ScreenManager failed to initialize.")
@@ -58,46 +54,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @objc private func handleWakeNotification() {
-        print("System woke from sleep")
         // Give the system a moment to stabilize
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.screenManager?.refreshScreens()
             // Refresh power status as well
             PowerMonitor.shared.refreshPowerStatus()
         }
-    }
-    
-    private func validateConfigurations() {
-        guard let screenManager = screenManager else { return }
-        
-        // Get all screen configurations
-        let configurations = SettingsManager.shared.loadConfigurations()
-        print("Found \(configurations.count) configurations to validate")
-        
-        var validConfigs = 0
-        var invalidConfigs = 0
-        
-        // Validate each configuration
-        for config in configurations {
-            if SettingsManager.shared.validateConfiguration(for: config.screenID) {
-                validConfigs += 1
-            } else {
-                invalidConfigs += 1
-                print("Invalid configuration found for screen \(config.screenID)")
-            }
-        }
-        
-        print("Startup validation complete: \(validConfigs) valid, \(invalidConfigs) invalid configurations")
-        
-        // Check if current screens match configuration
-        let configuredScreenIDs = Set(configurations.map { $0.screenID })
-        let connectedScreenIDs = Set(screenManager.screens.map { $0.id })
-        
-        let unconfiguredScreens = connectedScreenIDs.subtracting(configuredScreenIDs)
-        let disconnectedConfigs = configuredScreenIDs.subtracting(connectedScreenIDs)
-        
-        print("Unconfigured screens: \(unconfiguredScreens.count)")
-        print("Configurations for disconnected screens: \(disconnectedConfigs.count)")
     }
 }
 
