@@ -272,8 +272,6 @@ final class WallpaperVideoPlayer {
                         
                         // Apply to the player item
                         playerItem.videoComposition = composition
-                        
-                        print("Set frame rate limit to \(framesPerSecond) FPS")
                     }
                 } catch {
                     print("Error applying frame rate limit: \(error.localizedDescription)")
@@ -301,8 +299,6 @@ final class WallpaperVideoPlayer {
             
             // Apply to the player item
             playerItem.videoComposition = composition
-            
-            print("Set frame rate limit to \(framesPerSecond) FPS")
         }
     }
     

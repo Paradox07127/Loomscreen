@@ -263,27 +263,6 @@ class StatusBarController: NSObject, NSMenuDelegate {
     
     @objc private func refreshDisplays() {
         screenManager.refreshScreens()
-        // Show animation in the menu bar when screens refresh
-        showBriefAnimation("arrow.triangle.2.circlepath")
-    }
-    
-    // MARK: - Animations & Visual Feedback
-    
-    /// Show status icon animation for brief visual feedback
-    func showBriefAnimation(_ symbolName: String = "play.circle.fill") {
-        guard let button = statusItem.button else { return }
-        
-        // Store the original image
-        let originalImage = button.image
-        
-        // Show brief animation
-        button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Action")
-        
-        // Restore original image after delay
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            guard let self = self else { return }
-            self.updateStatusBarIcon()
-        }
     }
     
     // MARK: - Menu Auto Update

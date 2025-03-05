@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import AVKit
 
 struct ContentView: View {
     @EnvironmentObject private var screenManager: ScreenManager
@@ -154,7 +153,7 @@ struct Sidebar: View {
         screenManager.refreshScreens()
         
         // Reset the animation after a delay
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             withAnimation {
                 isRefreshing = false
             }

@@ -205,12 +205,12 @@ class SettingsManager {
     
     // MARK: - User Preferences
     
-    /// Save the last used directory for file picker
+    // Save the last used directory for file picker
     func saveLastUsedDirectory(_ url: URL) {
         UserDefaults.standard.set(url.path, forKey: "lastUsedDirectory")
     }
     
-    /// Get the last used directory for file picker
+    // Get the last used directory for file picker
     func getLastUsedDirectory() -> URL? {
         if let path = UserDefaults.standard.string(forKey: "lastUsedDirectory") {
             let url = URL(fileURLWithPath: path)
@@ -224,7 +224,7 @@ class SettingsManager {
 
 // MARK: - URL Extension
 extension URL {
-    /// Check if URL exists
+    // Check if URL exists
     var exists: Bool {
         FileManager.default.fileExists(atPath: path)
     }

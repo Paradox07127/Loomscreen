@@ -92,7 +92,7 @@ final class ScreenManager: ObservableObject {
     private func setupScreenObservers() {
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .debounce(for: .seconds(0.5), scheduler: DispatchQueue.main)
-            // Use a more aggressive throttling for intensive screen changes
+        // Use a more aggressive throttling for intensive screen changes
             .throttle(for: .seconds(1.0), scheduler: DispatchQueue.main, latest: true)
             .sink { [weak self] _ in
                 self?.refreshScreens()
@@ -313,7 +313,6 @@ final class ScreenManager: ObservableObject {
                     cacheConfiguration(updatedConfig)
                     SettingsManager.shared.saveConfiguration(updatedConfig)
                 } catch {
-                    // Log but continue with existing configuration
                     print("Failed to update stale bookmark: \(error.localizedDescription)")
                 }
             }
