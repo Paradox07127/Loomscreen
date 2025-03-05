@@ -25,16 +25,17 @@ struct GeneralSettingsView: View {
     
     var body: some View {
         ScrollView {
-            VStack(spacing: 24) {
-                welcomeSection
+            VStack(spacing: 16) {
                 powerSettingsSection
-                startupSection
-                configValidationSection
-                resetSettingsSection
                 
-                Spacer(minLength: 20)
+                HStack(spacing: 16) {
+                    startupSection
+                    configValidationSection
+                }
+                
+                resetSettingsSection
             }
-            .padding(24)
+            .padding(16)
         }
         .background(Color(NSColor.windowBackgroundColor))
         .alert("Reset Settings", isPresented: $showingResetAlert) {
@@ -52,21 +53,9 @@ struct GeneralSettingsView: View {
         }
     }
     
-    private var welcomeSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("LiveWallpaper Settings")
-                .font(.largeTitle)
-                .fontWeight(.bold)
-            
-            Text("Configure global settings that apply to all your displays")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-        }
-    }
-    
     private var powerSettingsSection: some View {
         GroupBox {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Image(systemName: "bolt.circle.fill")
                         .font(.title2)
@@ -77,7 +66,7 @@ struct GeneralSettingsView: View {
                 }
                 .padding(.bottom, 4)
                 
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 12) {
                     // Global pause on battery
                     Toggle(isOn: $globalPauseOnBattery) {
                         VStack(alignment: .leading, spacing: 4) {
@@ -133,7 +122,7 @@ struct GeneralSettingsView: View {
                                     .font(.headline)
                                     .foregroundColor(
                                         (minimumBatteryLevel ?? 0.2) < 0.2 ? .red :
-                                        (minimumBatteryLevel ?? 0.2) < 0.3 ? .orange : .green
+                                            (minimumBatteryLevel ?? 0.2) < 0.3 ? .orange : .green
                                     )
                                     .frame(width: 44, alignment: .trailing)
                             }
@@ -146,7 +135,7 @@ struct GeneralSettingsView: View {
                                 }
                             ), in: 0.05...0.5, step: 0.05)
                         }
-                        .padding(.leading, 24)
+                        .padding(.leading, 16)
                         .disabled(!useBatteryThreshold)
                         .animation(.easeOut, value: useBatteryThreshold)
                     }
@@ -169,14 +158,14 @@ struct GeneralSettingsView: View {
                     }
                 }
             }
-            .padding(16)
+            .padding(12)
         }
         .groupBoxStyle(ContainerGroupBoxStyle())
     }
     
     private var startupSection: some View {
         GroupBox {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Image(systemName: "power.circle.fill")
                         .font(.title2)
@@ -191,66 +180,60 @@ struct GeneralSettingsView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Start at login")
                             .font(.body)
-                        
-                        Text("LiveWallpaper will automatically start when you log in")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
                     }
                 }
                 .onChange(of: startOnLogin) { oldValue, newValue in
                     updateGlobalSettings()
                 }
             }
-            .padding(16)
+            .padding(12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         }
         .groupBoxStyle(ContainerGroupBoxStyle())
     }
     
+    
     private var configValidationSection: some View {
         GroupBox {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.title2)
                         .foregroundColor(.blue)
                     
-                    Text("Configuration Management")
+                    Text("Stored Configuration")
                         .font(.headline)
                 }
                 .padding(.bottom, 4)
                 
-                Text("Check if your video configurations are valid and reload screens if needed")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                
-                HStack(spacing: 16) {
+                HStack(spacing: 12) {
                     Button(action: {
                         validateConfigurations()
                     }) {
-                        Label("Validate Configurations", systemImage: "doc.text.magnifyingglass")
-                            .frame(minWidth: 200)
+                        Label("Validate Settings", systemImage: "doc.text.magnifyingglass")
+                            .frame(minWidth: 140)
                     }
-                    .buttonStyle(.bordered)
-                    
-                    Spacer()
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
                     
                     Button(action: {
                         screenManager.reloadAllScreens()
                     }) {
                         Label("Reload All Screens", systemImage: "arrow.triangle.2.circlepath")
-                            .frame(minWidth: 200)
+                            .frame(minWidth: 140)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
                 }
             }
-            .padding(16)
+            .padding(12)
         }
         .groupBoxStyle(ContainerGroupBoxStyle())
     }
     
     private var resetSettingsSection: some View {
         GroupBox {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.title2)
@@ -259,26 +242,29 @@ struct GeneralSettingsView: View {
                     Text("Reset Settings")
                         .font(.headline)
                 }
-                .padding(.bottom, 4)
                 
                 Text("If you're experiencing issues, you can reset all settings to their defaults")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                 
-                Button(action: {
-                    showingResetAlert = true
-                }) {
-                    HStack {
-                        Image(systemName: "arrow.counterclockwise.circle")
-                        Text("Reset All Settings")
+                HStack {
+                    Spacer()
+                    Button(action: {
+                        showingResetAlert = true
+                    }) {
+                        HStack {
+                            Image(systemName: "arrow.counterclockwise.circle")
+                            Text("Reset All Settings")
+                        }
+                        .frame(minWidth: 180)
                     }
-                    .frame(minWidth: 180)
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                    .controlSize(.large)
+                    Spacer()
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.red)
-                .controlSize(.large)
             }
-            .padding(16)
+            .padding(12)
         }
         .groupBoxStyle(ContainerGroupBoxStyle())
     }
@@ -379,4 +365,8 @@ struct BatteryLevelIndicator: View {
                 .frame(width: 4, height: 16)
         }
     }
+}
+
+#Preview {
+    GeneralSettingsView()
 }

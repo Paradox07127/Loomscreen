@@ -16,10 +16,12 @@ final class WallpaperVideoPlayer {
     @Published private(set) var loadingError: Error? = nil
     @Published private(set) var currentTime: Double = 0
     @Published private(set) var duration: Double = 0
+    @Published private(set) var videoFrameRate: Double = 0
     
     private let initialFrame: CGRect
     private var fitMode: VideoFitMode = .aspectFill
     private var videoURL: URL?
+    private var playbackStateObserver: NSKeyValueObservation?
     
     // MARK: - Initialization
     init(url: URL, frame: CGRect, fitMode: VideoFitMode = .aspectFill) {
@@ -74,6 +76,14 @@ final class WallpaperVideoPlayer {
                 
                 // Get duration
                 self.duration = try await CMTimeGetSeconds(duration)
+                
+                // Get video frame rate
+                if let videoTrack = try await asset.loadTracks(withMediaType: .video).first {
+                    let frameRate = try await videoTrack.load(.nominalFrameRate)
+                    await MainActor.run {
+                        self.videoFrameRate = Double(frameRate)
+                    }
+                }
                 
                 await MainActor.run { [weak self] in
                     guard let self = self else { return }
@@ -130,12 +140,16 @@ final class WallpaperVideoPlayer {
     
     // MARK: - Observers
     private func setupPlaybackObservers() {
-        // Monitor playback status
-        player?.publisher(for: \.timeControlStatus)
-            .sink { [weak self] status in
-                self?.isPlaying = status == .playing
+        // Monitor playback status with more reliable KVO
+        if let player = player {
+            playbackStateObserver = player.observe(\.timeControlStatus, options: [.new, .initial]) { [weak self] player, change in
+                guard let self = self else { return }
+                let isCurrentlyPlaying = player.timeControlStatus == .playing
+                if self.isPlaying != isCurrentlyPlaying {
+                    self.isPlaying = isCurrentlyPlaying
+                }
             }
-            .store(in: &cleanupTasks)
+        }
         
         // Monitor for errors
         NotificationCenter.default.publisher(for: .AVPlayerItemFailedToPlayToEndTime, object: player?.currentItem)
@@ -221,6 +235,77 @@ final class WallpaperVideoPlayer {
         videoView?.fitMode = mode
     }
     
+    // Apply frame rate limit if supported
+    func setFrameRateLimit(_ framesPerSecond: Float) {
+        guard let playerItem = player?.currentItem,
+              framesPerSecond > 0 else {
+            return
+        }
+        
+        // For modern macOS versions, use async API
+        if #available(macOS 13.0, *) {
+            Task {
+                do {
+                    let videoTracks = try await playerItem.asset.loadTracks(withMediaType: .video)
+                    
+                    guard let videoTrack = videoTracks.first else { return }
+                    
+                    // Load track properties
+                    let naturalSize = try await videoTrack.load(.naturalSize)
+                    
+                    await MainActor.run {
+                        // Create a new video composition
+                        let composition = AVMutableVideoComposition()
+                        composition.frameDuration = CMTime(value: 1, timescale: CMTimeScale(framesPerSecond))
+                        composition.renderSize = naturalSize
+                        
+                        // Create an instruction
+                        let instruction = AVMutableVideoCompositionInstruction()
+                        instruction.timeRange = CMTimeRange(
+                            start: .zero,
+                            duration: CMTime(value: 1, timescale: 1)
+                        )
+                        
+                        let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: videoTrack)
+                        instruction.layerInstructions = [layerInstruction]
+                        composition.instructions = [instruction]
+                        
+                        // Apply to the player item
+                        playerItem.videoComposition = composition
+                        
+                        print("Set frame rate limit to \(framesPerSecond) FPS")
+                    }
+                } catch {
+                    print("Error applying frame rate limit: \(error.localizedDescription)")
+                }
+            }
+        } else {
+            // For older macOS versions, use synchronous API
+            guard let videoTrack = playerItem.asset.tracks(withMediaType: .video).first else { return }
+            
+            // Create a new video composition
+            let composition = AVMutableVideoComposition()
+            composition.frameDuration = CMTime(value: 1, timescale: CMTimeScale(framesPerSecond))
+            composition.renderSize = videoTrack.naturalSize
+            
+            // Create an instruction
+            let instruction = AVMutableVideoCompositionInstruction()
+            instruction.timeRange = CMTimeRange(
+                start: .zero,
+                duration: CMTime(value: 1, timescale: 1)
+            )
+            
+            let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: videoTrack)
+            instruction.layerInstructions = [layerInstruction]
+            composition.instructions = [instruction]
+            
+            // Apply to the player item
+            playerItem.videoComposition = composition
+            
+            print("Set frame rate limit to \(framesPerSecond) FPS")
+        }
+    }
+    
     // Properly release security-scoped resource access
     private func stopAccessingResource() {
         if accessToken, let url = videoURL {
@@ -232,6 +317,9 @@ final class WallpaperVideoPlayer {
     // MARK: - Cleanup
     func cleanup() {
         pause()
+        
+        playbackStateObserver?.invalidate()
+        playbackStateObserver = nil
         
         if let timeObserver = periodicTimeObserver, let player = player {
             player.removeTimeObserver(timeObserver)
