@@ -33,7 +33,7 @@ class Screen: Identifiable, Hashable, ObservableObject {
                     
                     // Set up observation for player status
                     previewPlayerObserver = newPlayer.publisher(for: \.status)
-                        .sink { [weak self] status in
+                        .sink { [] status in
                             if status == .readyToPlay {
                                 newPlayer.play()
                             }

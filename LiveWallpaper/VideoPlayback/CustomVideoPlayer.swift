@@ -10,13 +10,18 @@ struct CustomVideoPlayer: NSViewRepresentable {
     func makeNSView(context: Context) -> AVPlayerView {
         let playerView = AVPlayerView()
         playerView.player = player
-        playerView.controlsStyle = .none
+        playerView.controlsStyle = .inline  // Use inline controls to show progress bar
         
         // Apply video gravity based on fit mode
         playerView.videoGravity = fitMode.avLayerVideoGravity
         
-        // Configure for better performance
+        // Performance optimizations
         playerView.allowsPictureInPicturePlayback = false
+        playerView.showsFullScreenToggleButton = false
+        
+        // Additional playback optimizations for the player itself
+        player.automaticallyWaitsToMinimizeStalling = true
+        player.allowsExternalPlayback = false
         
         return playerView
     }
@@ -31,26 +36,17 @@ struct CustomVideoPlayer: NSViewRepresentable {
         nsView.videoGravity = fitMode.avLayerVideoGravity
     }
     
-    // Implement Coordinator for handling player notifications if needed
+    // Implement Coordinator for handling player notifications and events
     class Coordinator: NSObject {
         var parent: CustomVideoPlayer
         
         init(_ parent: CustomVideoPlayer) {
             self.parent = parent
+            super.init()
         }
     }
     
     func makeCoordinator() -> Coordinator {
-        Coordinator(self)
-    }
-}
-
-// Optional extension for additional configuration
-extension CustomVideoPlayer {
-    // Sets the video fit mode
-    func videoFitMode(_ mode: VideoFitMode) -> CustomVideoPlayer {
-        var view = self
-        view.fitMode = mode
-        return view
+        return Coordinator(self)
     }
 }

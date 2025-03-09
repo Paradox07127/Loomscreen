@@ -19,7 +19,7 @@ struct BatteryStatusView: View {
             }
             
             // Only show battery level indicator when on battery
-            if case .internalBattery(let level) = powerSource {
+            if case .battery(let level) = powerSource {
                 // Battery level indicator
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
@@ -49,7 +49,7 @@ struct BatteryStatusView: View {
     // Power status information computed properties
     private var powerStatusIcon: String {
         switch powerSource {
-        case .internalBattery(let level):
+        case .battery(let level):
             if level <= 0.1 {
                 return "battery.0"
             } else if level <= 0.25 {
@@ -61,32 +61,26 @@ struct BatteryStatusView: View {
             } else {
                 return "battery.100"
             }
-        case .externalUnlimited:
+        case .external:
             return "power.circle.fill"
-        case .externalUPS:
-            return "bolt.circle.fill"
         }
     }
     
     private var powerStatusText: String {
         switch powerSource {
-        case .internalBattery(let level):
+        case .battery(let level):
             return "Battery: \(Int(level * 100))%"
-        case .externalUnlimited:
+        case .external:
             return "Connected to Power"
-        case .externalUPS:
-            return "Connected to UPS"
         }
     }
     
     private var powerStatusColor: Color {
         switch powerSource {
-        case .internalBattery(let level):
+        case .battery(let level):
             return batteryLevelColor(level)
-        case .externalUnlimited:
+        case .external:
             return .green
-        case .externalUPS:
-            return .orange
         }
     }
     

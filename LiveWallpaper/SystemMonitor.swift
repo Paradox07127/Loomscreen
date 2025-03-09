@@ -1,10 +1,8 @@
 import Foundation
 import Combine
-
-// Import necessary system frameworks
 import Darwin
 
-/// Monitors system and application resource usage
+// Monitors system and application resource usage
 class SystemMonitor: ObservableObject {
     static let shared = SystemMonitor()
     

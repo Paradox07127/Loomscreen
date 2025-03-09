@@ -36,6 +36,10 @@ class VideoContainerView: NSView {
         // Configure view for optimal video rendering
         layerContentsRedrawPolicy = .onSetNeedsDisplay
         
+        // Add these lines for better performance
+        layer?.drawsAsynchronously = true
+        layer?.masksToBounds = true  // Prevent drawing outside bounds
+        
         // Adjust for high-DPI displays
         if let window = window {
             layer?.contentsScale = window.backingScaleFactor
@@ -64,14 +68,12 @@ class VideoContainerView: NSView {
             let newLayer = AVPlayerLayer(player: player)
             newLayer.frame = self.bounds
             newLayer.videoGravity = self.fitMode.avLayerVideoGravity
-            
+
             // Apply performance optimizations
             newLayer.drawsAsynchronously = true
-            
-            // Use rasterization for static content but not for video
-            // as it can cause performance issues with moving content
-            newLayer.shouldRasterize = false
-            
+            newLayer.shouldRasterize = false  // Don't rasterize video content
+            newLayer.allowsEdgeAntialiasing = true  // Smoother edges
+
             // Set proper scale factor for Retina displays
             let scale = self.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
             newLayer.contentsScale = scale

@@ -9,12 +9,11 @@ final class PowerMonitor {
     
     // MARK: - Power Source Types
     enum PowerSource: Equatable {
-        case internalBattery(batteryLevel: Double)
-        case externalUnlimited
-        case externalUPS
+        case battery(level: Double)
+        case external
         
         var isOnBattery: Bool {
-            if case .internalBattery = self { return true }
+            if case .battery = self { return true }
             return false
         }
         
@@ -22,19 +21,17 @@ final class PowerMonitor {
             switch identifier {
             case kIOPMBatteryPowerKey:
                 let batteryLevel = PowerMonitor.getCurrentBatteryLevel()
-                self = .internalBattery(batteryLevel: batteryLevel)
-            case kIOPMACPowerKey:
-                self = .externalUnlimited
-            case kIOPMUPSPowerKey:
-                self = .externalUPS
+                self = .battery(level: batteryLevel)
+            case kIOPMACPowerKey, kIOPMUPSPowerKey:
+                self = .external
             default:
-                self = .externalUnlimited
+                self = .external
             }
         }
     }
     
     // MARK: - Properties
-    private let powerSourceSubject = CurrentValueSubject<PowerSource, Never>(.externalUnlimited)
+    private let powerSourceSubject = CurrentValueSubject<PowerSource, Never>(.external)
     private var cleanupTasks: Set<AnyCancellable> = []
     private var runLoopSource: CFRunLoopSource?
     private var batteryCheckTimer: Timer?
@@ -73,7 +70,7 @@ final class PowerMonitor {
         CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .defaultMode)
         
         // Additional monitoring for battery level changes
-        if case .internalBattery = currentPowerSource {
+        if case .battery = currentPowerSource {
             startBatteryMonitoring()
         }
     }
@@ -86,6 +83,7 @@ final class PowerMonitor {
             
             // Only notify if the power source actually changed
             if newSource != powerSourceSubject.value {
+                Logger.debug("Power source changing from \(oldSource) to \(newSource)", category: .powerMonitor)
                 powerSourceSubject.send(newSource)
                 
                 // Post notification with additional info
@@ -99,8 +97,15 @@ final class PowerMonitor {
                     ]
                 )
                 
+                // Log the power change with the specialized method
+                if case .battery(let level) = newSource {
+                    Logger.powerSourceChanged(isOnBattery: true, level: level)
+                } else {
+                    Logger.powerSourceChanged(isOnBattery: false, level: nil)
+                }
+                
                 // Update battery monitoring
-                if case .internalBattery = newSource {
+                if case .battery = newSource {
                     startBatteryMonitoring()
                 } else {
                     stopBatteryMonitoring()
@@ -144,9 +149,10 @@ final class PowerMonitor {
     }
     
     private func updateBatteryLevel() {
-        if case .internalBattery = currentPowerSource {
+        if case .battery = currentPowerSource {
             let batteryLevel = Self.getCurrentBatteryLevel()
-            powerSourceSubject.send(.internalBattery(batteryLevel: batteryLevel))
+            Logger.debug("Battery level updated: \(Int(batteryLevel * 100))%", category: .powerMonitor)
+            powerSourceSubject.send(.battery(level: batteryLevel))
         }
     }
     
@@ -169,7 +175,7 @@ final class PowerMonitor {
             }
             
             // Always update battery level when requested
-            if case .internalBattery = newSource {
+            if case .battery = newSource {
                 updateBatteryLevel()
             }
         }
@@ -182,25 +188,5 @@ final class PowerMonitor {
         }
         stopBatteryMonitoring()
         cleanupTasks.removeAll()
-    }
-}
-
-// MARK: - Publisher Extensions
-extension PowerMonitor {
-    var batteryLevelPublisher: AnyPublisher<Double, Never> {
-        powerSourcePublisher
-            .compactMap { powerSource -> Double? in
-                if case .internalBattery(let level) = powerSource {
-                    return level
-                }
-                return nil
-            }
-            .eraseToAnyPublisher()
-    }
-    
-    var isOnBatteryPublisher: AnyPublisher<Bool, Never> {
-        powerSourcePublisher
-            .map(\.isOnBattery)
-            .eraseToAnyPublisher()
     }
 }
