@@ -7,7 +7,6 @@ struct ScreenDetailView: View {
     
     @State private var playbackSpeed: Double = 1.0
     @State private var selectedFitMode: VideoFitMode = .aspectFill
-    @State private var pauseOnBattery: Bool = false
     @State private var isLoading: Bool = false
     
     // New state variables for tracking playback
@@ -30,7 +29,6 @@ struct ScreenDetailView: View {
                     videoPreviewSection
                     playbackControlsSection
                     videoOptionsSection
-                    powerManagementSection
                 } else {
                     emptyStateView
                 }
@@ -128,16 +126,6 @@ struct ScreenDetailView: View {
                 
                 if let player = screen.previewPlayer {
                     VStack(spacing: 8) {
-                        // Video player with consistent width
-                        //                        VideoPlayer(player: player)
-                        //                            .frame(maxWidth: .infinity)
-                        //                            .frame(height: 300)
-                        //                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                        //                            .overlay(
-                        //                                RoundedRectangle(cornerRadius: 6)
-                        //                                    .strokeBorder(Color.gray.opacity(0.2), lineWidth: 1)
-                        //                            )
-                        //                            .shadow(radius: 3, y: 2)
                         CustomVideoPlayer(player: player, fitMode: selectedFitMode)
                             .frame(maxWidth: .infinity)
                             .frame(height: 300)
@@ -279,50 +267,11 @@ struct ScreenDetailView: View {
                 
                 Divider()
                 
-                // Frame Rate Options - only show if we have a video player
+                // Add Frame Rate Control section here
                 if let player = screen.videoPlayer, player.videoFrameRate > 0 {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Frame Rate Management")
-                            .font(.subheadline)
-                            .foregroundColor(.primary)
-                        
-                        Button(action: {
-                            optimizeVideoFrameRate()
-                        }) {
-                            Label("Optimize Frame Rate", systemImage: "speedometer")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.bordered)
-                        .help("Limit video frame rate to match your display refresh rate to reduce GPU usage")
-                        
-                        Text("Original video: \(Int(player.videoFrameRate)) FPS, Screen: \(getScreenRefreshRate()) Hz")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-            }
-            .padding(16)
-        }
-        .groupBoxStyle(ContainerGroupBoxStyle())
-    }
-    
-    private var powerManagementSection: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 16) {
-                Label("Power Management", systemImage: "bolt.circle")
-                    .font(.headline)
-                
-                VStack(alignment: .leading, spacing: 12) {
-                    Toggle("Pause this video when on battery power", isOn: $pauseOnBattery)
-                        .onChange(of: pauseOnBattery) { oldValue, newValue in
-                            if oldValue != newValue {
-                                screenManager.updatePowerSettings(pauseOnBattery: newValue, for: screen)
-                            }
-                        }
+                    FrameRateControlView(screen: screen)
                     
-                    Text("This helps conserve battery life when your Mac is unplugged")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    Divider()
                 }
             }
             .padding(16)
@@ -360,10 +309,6 @@ struct ScreenDetailView: View {
             
             if selectedFitMode != config.fitMode {
                 selectedFitMode = config.fitMode
-            }
-            
-            if pauseOnBattery != config.pauseOnBattery {
-                pauseOnBattery = config.pauseOnBattery
             }
             
             // Create preview player if none exists
@@ -419,18 +364,23 @@ struct ScreenDetailView: View {
     }
     
     private func showFilePicker() {
+        Logger.debug("Opening video file picker", category: .ui)
         let panel = ResourceUtilities.configureVideoOpenPanel()
         
         panel.begin { response in
             if response == .OK, let url = panel.url {
+                Logger.info("Video file selected: \(url.lastPathComponent)", category: .ui)
                 // Save directory for next time
                 SettingsManager.shared.saveLastUsedDirectory(url.deletingLastPathComponent())
                 handleSelectedFile(url: url)
+            } else {
+                Logger.debug("File picker canceled or no file selected", category: .ui)
             }
         }
     }
     
     private func handleSelectedFile(url: URL) {
+        Logger.functionStart(category: .ui)
         // Display loading state first
         isLoading = true
         
@@ -439,6 +389,8 @@ struct ScreenDetailView: View {
         
         // First, create a preview player immediately to show feedback
         if url.startAccessingSecurityScopedResource() {
+            Logger.debug("Security-scoped resource access granted for: \(url.lastPathComponent)", category: .fileAccess)
+            
             // Create a preview player immediately
             let asset = AVURLAsset(url: url)
             let playerItem = AVPlayerItem(asset: asset)
@@ -448,29 +400,34 @@ struct ScreenDetailView: View {
             // Update the UI with the new preview player
             DispatchQueue.main.async {
                 // Set the new preview player
-                screen.previewPlayer = previewPlayer
+                self.screen.previewPlayer = previewPlayer
                 // Start preview playback
                 previewPlayer.play()
+                Logger.debug("Preview player created and started", category: .ui)
             }
             
             // Now create the security-scoped bookmark for permanent access
             if let bookmarkData = ResourceUtilities.createBookmark(for: url) {
                 // If everything is okay, set the video for the wallpaper
                 screenManager.setVideo(url: url, bookmarkData: bookmarkData, for: screen)
+                Logger.info("Video bookmark created and set for screen \(screen.id)", category: .fileAccess)
             } else {
                 errorMessage = "Error creating secure bookmark. Please try selecting a different video file."
                 showErrorAlert = true
+                Logger.error("Failed to create bookmark for: \(url.lastPathComponent)", category: .fileAccess)
             }
             
             url.stopAccessingSecurityScopedResource()
         } else {
             errorMessage = "Failed to access the selected file. Please try selecting it again."
             showErrorAlert = true
+            Logger.error("Security-scoped resource access denied for: \(url.lastPathComponent)", category: .fileAccess)
         }
         
         // Remove loading state
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             self.isLoading = false
+            Logger.functionEnd(category: .ui)
         }
     }
     
@@ -496,22 +453,6 @@ struct ScreenDetailView: View {
         
         let refreshRate = mode.refreshRate
         return refreshRate > 0 ? Int(refreshRate) : 60
-    }
-    
-    // Optimize video frame rate to match display refresh rate
-    private func optimizeVideoFrameRate() {
-        guard let player = screen.videoPlayer, player.videoFrameRate > 0 else { return }
-        
-        let screenRate = Float(getScreenRefreshRate())
-        let videoRate = Float(player.videoFrameRate)
-        
-        // Only limit if video rate is higher than screen rate
-        if videoRate > screenRate && screenRate > 0 {
-            player.setFrameRateLimit(screenRate)
-        } else {
-            // Use original frame rate
-            player.setFrameRateLimit(videoRate)
-        }
     }
 }
 

@@ -22,25 +22,6 @@ struct ContentView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 900, minHeight: 600)
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                HStack {
-                    Image(systemName: "photo.on.rectangle.fill")
-                        .font(.title2)
-                        .imageScale(.large)
-                        .foregroundColor(.accentColor)
-                    
-                    Text("LiveWallpaper")
-                        .font(.title3)
-                        .fontWeight(.semibold)
-                }
-                .padding(.all, 12)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color(.windowBackgroundColor).opacity(0.8))
-                )
-            }
-        }
     }
 }
 
@@ -88,7 +69,7 @@ struct Sidebar: View {
                             Text("General Settings")
                                 .fontWeight(.medium)
                             
-                            Text("Global app preferences")
+                            Text("App preferences")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -114,7 +95,7 @@ struct Sidebar: View {
                     .buttonStyle(.plain)
                     .help("Refresh display list")
                 }
-                .padding(.vertical, 6)
+                .padding(.vertical, 8)
                 
                 if screenManager.screens.isEmpty {
                     HStack {
@@ -134,11 +115,12 @@ struct Sidebar: View {
                 }
             }
             
-            Section(header: Text("Info").font(.caption).bold().foregroundColor(.secondary)) {
-                VStack(alignment: .leading, spacing: 4) {
+            Section(header: Text("System").font(.caption).bold().foregroundColor(.secondary)) {
+                VStack(alignment: .leading, spacing: 8) {
                     BatteryStatusView()
                     SystemMonitorView()
                 }
+                .padding(.vertical, 8)
             }
         }
         .listStyle(.sidebar)
