@@ -54,6 +54,7 @@ struct Sidebar: View {
     @Binding var selection: Navigation?
     @EnvironmentObject private var screenManager: ScreenManager
     @State private var isRefreshing = false
+    @State private var refreshID = UUID()
     
     var body: some View {
         List(selection: $selection) {
@@ -125,6 +126,11 @@ struct Sidebar: View {
         }
         .listStyle(.sidebar)
         .frame(minWidth: 250)
+        .id(refreshID)
+        .onReceive(NotificationCenter.default.publisher(for: WallpaperVideoPlayer.didChangePlaybackStateNotification)) { _ in
+            // Create a new UUID to force the view to refresh
+            refreshID = UUID()
+        }
     }
     
     private func refreshDisplays() {
@@ -146,6 +152,7 @@ struct Sidebar: View {
 // MARK: - Screen Row
 struct ScreenRow: View {
     @ObservedObject var screen: Screen
+    @State private var isPlaying: Bool = false
     
     var body: some View {
         HStack(spacing: 12) {
@@ -171,10 +178,10 @@ struct ScreenRow: View {
                     if screen.videoPlayer != nil {
                         HStack(spacing: 2) {
                             Circle()
-                                .fill(screen.videoPlayer?.isPlaying ?? false ? Color.green : Color.orange)
+                                .fill(isPlaying ? Color.green : Color.orange)
                                 .frame(width: 6, height: 6)
                             
-                            Text(screen.videoPlayer?.isPlaying ?? false ? "Playing" : "Paused")
+                            Text(isPlaying ? "Playing" : "Paused")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -183,6 +190,41 @@ struct ScreenRow: View {
             }
         }
         .padding(.vertical, 2)
+        .onAppear {
+            updatePlaybackState()
+            setupObserver()
+        }
+    }
+    
+    private func setupObserver() {
+        // Create a notification observer to monitor playback state changes
+        NotificationCenter.default.addObserver(
+            forName: WallpaperVideoPlayer.didChangePlaybackStateNotification,
+            object: nil,
+            queue: .main
+        ) { [weak screen] notification in
+            guard let videoPlayer = notification.object as? WallpaperVideoPlayer,
+                  videoPlayer === screen?.videoPlayer else {
+                return
+            }
+            
+            if let isPlaying = notification.userInfo?["isPlaying"] as? Bool {
+                self.isPlaying = isPlaying
+            }
+        }
+        
+        // Also observe screen changes
+        NotificationCenter.default.addObserver(
+            forName: .init("ScreensRefreshed"),
+            object: nil,
+            queue: .main
+        ) { _ in
+            updatePlaybackState()
+        }
+    }
+    
+    private func updatePlaybackState() {
+        isPlaying = screen.videoPlayer?.isPlaying ?? false
     }
 }
 

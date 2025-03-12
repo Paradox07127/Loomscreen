@@ -16,16 +16,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
         Logger.debug("Registered for wake notifications", category: .startup)
         
+        // Initialize and keep reference to ScreenManager
         screenManager = ScreenManager()
         
         if let manager = screenManager {
+            Logger.info("ScreenManager initialized", category: .startup)
+            
+            // Initialize screens first
+            Logger.debug("Performing initial screen configuration", category: .screenManager)
+            manager.refreshScreens()
+            
+            // Now that screens are configured, set up the status bar
             statusBarController = StatusBarController(screenManager: manager)
             Logger.info("Status bar controller initialized", category: .startup)
             
-            // Initialize screens after a short delay to ensure system is ready
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                Logger.debug("Performing initial screen refresh", category: .screenManager)
-                manager.refreshScreens()
+            // Load and apply configurations after a short delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                Logger.debug("Loading saved configurations", category: .screenManager)
+                manager.reloadAllScreens()
             }
         } else {
             Logger.error("ScreenManager failed to initialize", category: .startup)
