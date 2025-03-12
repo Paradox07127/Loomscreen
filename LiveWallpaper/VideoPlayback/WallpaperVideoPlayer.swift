@@ -6,7 +6,7 @@ import Combine
 final class WallpaperVideoPlayer {
     // MARK: - Static Notifications
     static let didChangePlaybackStateNotification = Notification.Name("WallpaperVideoPlayerDidChangePlaybackState")
- 
+    
     // MARK: - Properties
     private(set) var player: AVPlayer?
     private weak var window: VideoWallpaperWindow?
@@ -27,7 +27,7 @@ final class WallpaperVideoPlayer {
             }
         }
     }
-
+    
     @Published private(set) var loadingError: Error? = nil
     @Published private(set) var currentTime: Double = 0
     @Published private(set) var duration: Double = 0
@@ -137,11 +137,24 @@ final class WallpaperVideoPlayer {
         playerItem.preferredForwardBufferDuration = 5.0
         playerItem.canUseNetworkResourcesForLiveStreamingWhilePaused = false
         
+        //        if let audioTracks = try? asset.loadTracks(withMediaType: .audio) {
+        //                for audioTrack in audioTracks {
+        //                    let audioTrackID = audioTrack.trackID
+        //                    let audioParams = AVMutableAudioMixInputParameters(track: audioTrack)
+        //                    audioParams.setVolume(0.0, at: .zero)
+        //
+        //                    let audioMix = AVMutableAudioMix()
+        //                    audioMix.inputParameters = [audioParams]
+        //                    playerItem.audioMix = audioMix
+        //                }
+        //            }
+        
         // Configure player
         self.player = AVPlayer(playerItem: playerItem)
         self.player?.automaticallyWaitsToMinimizeStalling = true
-        self.player?.volume = 0
-        self.player?.actionAtItemEnd = .none // We'll handle looping manually
+        self.player?.volume = 0  // Already set to 0, but keep it
+        self.player?.isMuted = true  // Add explicit muting
+        self.player?.actionAtItemEnd = .none
         
         // Create and configure window
         let videoWindow = VideoWallpaperWindow(frame: initialFrame)
@@ -243,7 +256,7 @@ final class WallpaperVideoPlayer {
                 self.updateWindowPositionForCurrentScreen()
             }
             .store(in: &cleanupTasks)
-            
+        
         // Also set up a periodic check to ensure window stays in position
         // This helps catch cases where the window might drift
         let timer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
@@ -350,10 +363,14 @@ final class WallpaperVideoPlayer {
             return
         }
         
+        // Check if the frame is significantly different from the current frame
+        // to avoid unnecessary updates
         if let window = window as? VideoWallpaperWindow {
-            // Log the update with coordinates
-            Logger.debug("Updating video window frame to \(newFrame) (x:\(newFrame.origin.x), y:\(newFrame.origin.y), w:\(newFrame.width), h:\(newFrame.height))", category: .videoPlayer)
-            window.updateFrame(newFrame, animate: false)
+            if !areFramesEquivalent(window.frame, newFrame) {
+                // Log the update with coordinates
+                Logger.debug("Updating video window frame to \(newFrame) (x:\(newFrame.origin.x), y:\(newFrame.origin.y), w:\(newFrame.width), h:\(newFrame.height))", category: .videoPlayer)
+                window.updateFrame(newFrame, animate: false)
+            }
         }
         
         // Update video view if present
@@ -362,7 +379,15 @@ final class WallpaperVideoPlayer {
             videoView.needsLayout = true
         }
     }
-
+    
+    // Add a helper method to check if frames are close enough to be considered equivalent
+    private func areFramesEquivalent(_ frame1: CGRect, _ frame2: CGRect, tolerance: CGFloat = 1.0) -> Bool {
+        return abs(frame1.origin.x - frame2.origin.x) < tolerance &&
+        abs(frame1.origin.y - frame2.origin.y) < tolerance &&
+        abs(frame1.width - frame2.width) < tolerance &&
+        abs(frame1.height - frame2.height) < tolerance
+    }
+    
     // Public method to check if this player is associated with a screen ID
     public func isAssociatedWithScreen(_ screenID: CGDirectDisplayID) -> Bool {
         // Try to get the screen ID from the window
@@ -373,14 +398,14 @@ final class WallpaperVideoPlayer {
         }
         return false
     }
-
+    
     // Public method to handle screen parameter changes
     public func handleScreenParameterChange(_ screenFrame: CGRect) {
         updateWindowFrame(screenFrame)
     }
     
     // Apply frame rate limit if supported
-
+    
     enum FrameRateLimit: Int, CaseIterable, Identifiable, Codable {
         case fps30 = 30
         case fps60 = 60
@@ -433,9 +458,9 @@ final class WallpaperVideoPlayer {
             return rawLimit
         }
     }
-
+    
     // PART 2: Let's update the WallpaperVideoPlayer's setFrameRateLimit implementation:
-
+    
     // In WallpaperVideoPlayer.swift, ensure the setFrameRateLimit method is fully implemented:
     func setFrameRateLimit(_ framesPerSecond: Float) {
         guard let playerItem = player?.currentItem else {

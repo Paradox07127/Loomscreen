@@ -9,92 +9,72 @@ struct FrameRateControlView: View {
     
     init(screen: Screen) {
         self.screen = screen
-        
-        // Initialize with default value - will be updated in onAppear
         _selectedLimit = State(initialValue: .fps60)
     }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Header
-            Label("Frame Rate Control", systemImage: "gauge.high")
-                .font(.headline)
-                .padding(.bottom, 8)
-            
-            // Information section
-            if let videoPlayer = screen.videoPlayer, videoPlayer.videoFrameRate > 0 {
-                HStack(spacing: 20) {
-                    HStack {
-                        Image(systemName: "film")
-                        Text("Video: \(Int(videoPlayer.videoFrameRate)) FPS")
-                    }
-                    .foregroundColor(.secondary)
-                    
-                    HStack {
-                        Image(systemName: "display")
-                        Text("Screen: \(screenRefreshRate) Hz")
-                    }
-                    .foregroundColor(.secondary)
-                }
-                .padding(.bottom, 4)
+        VStack(alignment: .leading, spacing: 10) {
+            // Header with effective rate
+            HStack {
+                Label("Frame Rate", systemImage: "gauge.high")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
                 
-                // Show effective frame rate after limiting
+                Spacer()
+                
                 if let effectiveRate = getEffectiveRate() {
-                    HStack {
-                        Image(systemName: "speedometer")
-                            .foregroundColor(.blue)
-                        Text("Effective rate: \(effectiveRate)")
+                    HStack(spacing: 4) {
+                        Text("Effective:")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(effectiveRate)
+                            .font(.caption)
+                            .fontWeight(.medium)
                             .foregroundColor(.primary)
                     }
-                    .padding(.bottom, 8)
                 }
             }
             
-            // Control options
-            Text("Select frame rate limit:")
-                .font(.subheadline)
-            
-            HStack(spacing: 12) {
+            // Frame rate selection with compact buttons
+            HStack(spacing: 8) {
                 ForEach(FrameRateLimit.allCases) { option in
                     Button(action: {
                         selectedLimit = option
                         screenManager.updateFrameRateLimit(option, for: screen)
                     }) {
-                        VStack(spacing: 6) {
+                        VStack(spacing: 4) {
                             Image(systemName: option.iconName)
-                                .font(.system(size: 20))
-                                .foregroundColor(selectedLimit == option ? .blue : .gray)
-                                .frame(width: 36, height: 36)
-                                .background(
-                                    Circle()
-                                        .fill(selectedLimit == option ? Color.blue.opacity(0.1) : Color.clear)
-                                )
-                            
+                                .font(.system(size: 14))
+                                .foregroundColor(selectedLimit == option ? .accentColor : .gray)
                             Text(option.description)
-                                .font(.callout)
+                                .font(.caption2)
                         }
-                        .frame(width: 80, height: 80)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(selectedLimit == option ? Color.blue.opacity(0.1) : Color.gray.opacity(0.1))
-                        )
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                        .background(selectedLimit == option ? Color.accentColor.opacity(0.15) : Color.gray.opacity(0.07))
+                        .cornerRadius(6)
                         .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(selectedLimit == option ? Color.blue : Color.clear, lineWidth: 2)
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(selectedLimit == option ? Color.accentColor : Color.clear, lineWidth: 1)
                         )
                     }
-                    .buttonStyle(PlainButtonStyle())
+                    .buttonStyle(.plain)
                 }
             }
-            .padding(.vertical, 4)
             
-            // Simple explanation
-            Text("Lower frame rates use less system resources but may appear less smooth.")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .padding(.top, 8)
+            // Source info
+            if let videoPlayer = screen.videoPlayer, videoPlayer.videoFrameRate > 0 {
+                HStack(spacing: 10) {
+                    Text("Video: \(Int(videoPlayer.videoFrameRate)) FPS")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    Text("Screen: \(screenRefreshRate) Hz")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
         }
-        .padding()
         .onAppear {
             // Get screen refresh rate
             screenRefreshRate = screenManager.getScreenRefreshRate(for: screen.id)
@@ -126,7 +106,6 @@ struct FrameRateControlView: View {
         }
     }
 }
-
 // Preview provider
 struct FrameRateControlView_Previews: PreviewProvider {
     static var previews: some View {

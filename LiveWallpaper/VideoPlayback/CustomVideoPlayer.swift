@@ -10,7 +10,9 @@ struct CustomVideoPlayer: NSViewRepresentable {
     func makeNSView(context: Context) -> AVPlayerView {
         let playerView = AVPlayerView()
         playerView.player = player
-        playerView.controlsStyle = .inline  // Use inline controls to show progress bar
+        
+        // Change this line to hide all native controls
+        playerView.controlsStyle = .none  // Hide all native controls
         
         // Apply video gravity based on fit mode
         playerView.videoGravity = fitMode.avLayerVideoGravity

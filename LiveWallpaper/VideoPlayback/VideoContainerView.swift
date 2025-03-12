@@ -68,12 +68,12 @@ class VideoContainerView: NSView {
             let newLayer = AVPlayerLayer(player: player)
             newLayer.frame = self.bounds
             newLayer.videoGravity = self.fitMode.avLayerVideoGravity
-
+            
             // Apply performance optimizations
             newLayer.drawsAsynchronously = true
             newLayer.shouldRasterize = false  // Don't rasterize video content
             newLayer.allowsEdgeAntialiasing = true  // Smoother edges
-
+            
             // Set proper scale factor for Retina displays
             let scale = self.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
             newLayer.contentsScale = scale
@@ -88,6 +88,14 @@ class VideoContainerView: NSView {
     }
     
     private func cleanupPlayerLayer() {
+        // Ensure we're on the main thread for layer manipulation
+        if !Thread.isMainThread {
+            DispatchQueue.main.async { [weak self] in
+                self?.cleanupPlayerLayer()
+            }
+            return
+        }
+        
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         
@@ -99,7 +107,11 @@ class VideoContainerView: NSView {
     
     // MARK: - Layout & Scaling
     private func updatePlayerLayerFrame() {
-        guard !bounds.isEmpty else { return }
+        // Add validation to prevent empty bounds
+        guard !bounds.isEmpty && bounds.width > 0 && bounds.height > 0 else {
+            Logger.warning("Attempted to update player layer with invalid bounds: \(bounds)", category: .videoPlayer)
+            return
+        }
         
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -107,7 +119,7 @@ class VideoContainerView: NSView {
         // Ensure player layer covers the full bounds
         playerLayer?.frame = bounds
         
-        // Log frame updates for debugging
+        // Only log when dimensions actually change to reduce log spam
         Logger.debug("Updated player layer frame to \(bounds)", category: .videoPlayer)
         
         CATransaction.commit()
@@ -117,16 +129,17 @@ class VideoContainerView: NSView {
         super.layout()
         updatePlayerLayerFrame()
     }
-
+    
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         updatePlayerLayerFrame()
     }
-
+    
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
         
         if let scale = window?.backingScaleFactor {
+            layer?.contentsScale = scale
             playerLayer?.contentsScale = scale
         }
     }
