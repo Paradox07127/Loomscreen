@@ -35,18 +35,4 @@ struct CustomVideoPlayer: NSViewRepresentable {
         // Update video gravity if fit mode has changed
         nsView.videoGravity = fitMode.avLayerVideoGravity
     }
-    
-    // Implement Coordinator for handling player notifications and events
-    class Coordinator: NSObject {
-        var parent: CustomVideoPlayer
-        
-        init(_ parent: CustomVideoPlayer) {
-            self.parent = parent
-            super.init()
-        }
-    }
-    
-    func makeCoordinator() -> Coordinator {
-        return Coordinator(self)
-    }
 }

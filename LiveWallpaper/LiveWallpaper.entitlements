@@ -29,5 +29,7 @@
     </array>
     <key>com.apple.security.device.power</key>
     <true/>
+    <key>com.apple.security.automation.startup-items</key>
+    <true/>
 </dict>
 </plist>

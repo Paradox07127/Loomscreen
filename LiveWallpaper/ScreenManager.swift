@@ -1039,25 +1039,6 @@ final class ScreenManager: ObservableObject {
         }
     }
     
-    // Apply a visual filter to a screen
-    func applyFilter(_ filterName: String?, for screen: Screen) {
-        guard var configuration = getCachedConfiguration(for: screen.id) else { return }
-        
-        let _ = filterName != nil ? [filterName!] : []
-        
-        configuration = ScreenConfiguration(
-            screenID: configuration.screenID,
-            videoBookmarkData: configuration.videoBookmarkData,
-            playbackSpeed: configuration.playbackSpeed,
-            fitMode: configuration.fitMode,
-            pauseOnBattery: configuration.pauseOnBattery,
-            frameRateLimit: configuration.frameRateLimit
-        )
-        
-        cacheConfiguration(configuration)
-        SettingsManager.shared.saveConfiguration(configuration)
-    }
-    
     // Get the saved configuration for a screen
     func getConfiguration(for screen: Screen) -> ScreenConfiguration? {
         return getCachedConfiguration(for: screen.id) ?? SettingsManager.shared.getConfiguration(for: screen.id)
@@ -1162,12 +1143,6 @@ final class ScreenManager: ObservableObject {
         
         Logger.debug("Detected refresh rate: \(Int(refreshRate))Hz for screen \(screenID)", category: .screenManager)
         return Int(refreshRate)
-    }
-    
-    func applyInitialFrameRateLimit(for screen: Screen) {
-        guard let config = getCachedConfiguration(for: screen.id) else { return }
-        
-        applyFrameRateLimit(config.frameRateLimit, to: screen)
     }
     
     // MARK: - Cleanup
