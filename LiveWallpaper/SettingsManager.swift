@@ -2,6 +2,7 @@ import Foundation
 import CoreGraphics
 import AppKit
 import AVFoundation
+import ServiceManagement
 
 // Configuration for a single screen's video wallpaper
 struct ScreenConfiguration: Codable, Equatable {
@@ -101,10 +102,6 @@ class SettingsManager {
     private let globalSettingsKey = "globalSettings"
     private let lastUsedDirectoryKey = "lastUsedDirectory"
     private let settingsLock = NSLock()
-    
-    private init() {
-        migrateSettingsIfNeeded()
-    }
     
     // MARK: - Screen Configurations
     
@@ -207,13 +204,37 @@ class SettingsManager {
     }
     
     private func applyStartOnLoginSetting(_ startOnLogin: Bool) {
-        // In a real implementation, this would add/remove the app from login items
-        // For macOS, this typically involves using the ServiceManagement framework
-        // or LaunchServices API to add the app to login items
         Logger.debug("Setting 'Start at Login' to \(startOnLogin)", category: .settings)
         
-        // Sample implementation using LaunchServices API would go here
-        // This is a placeholder for the actual implementation
+        if #available(macOS 13, *) {
+            do {
+                let service = SMAppService.mainApp
+                
+                if startOnLogin {
+                    try service.register()
+                    Logger.info("Successfully added to login items using SMAppService", category: .settings)
+                } else {
+                    try service.unregister()
+                    Logger.info("Successfully removed from login items using SMAppService", category: .settings)
+                }
+            } catch {
+                Logger.error("Failed to \(startOnLogin ? "add to" : "remove from") login items: \(error.localizedDescription)", category: .settings)
+            }
+        } else {
+            // For older macOS versions, use the classic SMLoginItemSetEnabled API
+            guard let bundleIdentifier = Bundle.main.bundleIdentifier else {
+                Logger.error("Failed to get bundle identifier", category: .settings)
+                return
+            }
+            
+            let loginItemSuccess = SMLoginItemSetEnabled(bundleIdentifier as CFString, startOnLogin)
+            
+            if loginItemSuccess {
+                Logger.info("Successfully \(startOnLogin ? "added to" : "removed from") login items", category: .settings)
+            } else {
+                Logger.error("Failed to \(startOnLogin ? "add to" : "remove from") login items", category: .settings)
+            }
+        }
     }
     
     // MARK: - Clean Settings
@@ -306,89 +327,6 @@ class SettingsManager {
             }
         }
         return nil
-    }
-    
-    // MARK: - Settings Migration
-    
-    private func migrateSettingsIfNeeded() {
-        // Check for old version settings and migrate if needed
-        if needsMigration() {
-            Logger.notice("Migrating settings to new format", category: .settings)
-            migrateSettings()
-        }
-    }
-    
-    private func needsMigration() -> Bool {
-        // Check if settings need migration based on version or structure
-        // This is a placeholder for actual migration detection logic
-        return false
-    }
-    
-    private func migrateSettings() {
-        // Implement migration logic here
-        // This would handle converting older setting formats to newer ones
-    }
-    
-    // MARK: - Backup and Restore
-    
-    // Export settings to a file
-    func exportSettings(to url: URL) -> Bool {
-        Logger.info("Exporting settings to \(url.lastPathComponent)", category: .settings)
-        
-        settingsLock.lock()
-        let configurations = loadConfigurationsUnsafe()
-        let globalSettings = loadGlobalSettings()
-        settingsLock.unlock()
-        
-        // Create export data structure
-        let exportData = SettingsExport(
-            configurations: configurations,
-            globalSettings: globalSettings,
-            exportDate: Date(),
-            appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
-        )
-        
-        do {
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = .prettyPrinted
-            let data = try encoder.encode(exportData)
-            try data.write(to: url)
-            Logger.info("Settings exported successfully", category: .settings)
-            return true
-        } catch {
-            Logger.error("Failed to export settings: \(error.localizedDescription)", category: .settings)
-            return false
-        }
-    }
-    
-    // Import settings from a file
-    func importSettings(from url: URL) -> Bool {
-        Logger.info("Importing settings from \(url.lastPathComponent)", category: .settings)
-        
-        do {
-            let data = try Data(contentsOf: url)
-            let decoder = JSONDecoder()
-            let importData = try decoder.decode(SettingsExport.self, from: data)
-            
-            settingsLock.lock()
-            defer { settingsLock.unlock() }
-            
-            // Apply imported settings
-            saveUnsafe(importData.configurations)
-            
-            do {
-                let globalSettingsData = try JSONEncoder().encode(importData.globalSettings)
-                UserDefaults.standard.set(globalSettingsData, forKey: globalSettingsKey)
-            } catch {
-                Logger.error("Failed to save imported global settings: \(error.localizedDescription)", category: .settings)
-            }
-            
-            Logger.info("Settings imported successfully (from app version \(importData.appVersion))", category: .settings)
-            return true
-        } catch {
-            Logger.error("Failed to import settings: \(error.localizedDescription)", category: .settings)
-            return false
-        }
     }
 }
 

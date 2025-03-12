@@ -246,21 +246,7 @@ class StatusBarController: NSObject, NSMenuDelegate {
     // MARK: - Playback Control
     
     @objc private func togglePlayback() {
-        // Check if any videos are playing
-        let isAnyPlaying = screenManager.screens.contains { $0.videoPlayer?.isPlaying ?? false }
-        let action = isAnyPlaying ? "pausing" : "playing"
-        Logger.info("\(action) all videos", category: .videoPlayer)
-        
-        // Toggle playback based on current state
-        for screen in screenManager.screens {
-            if let player = screen.videoPlayer {
-                if isAnyPlaying {
-                    player.pause()
-                } else {
-                    player.play()
-                }
-            }
-        }
+        screenManager.togglePlayback()
     }
     
     // MARK: - Menu Delegate

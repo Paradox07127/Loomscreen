@@ -131,17 +131,6 @@ class VideoContainerView: NSView {
         }
     }
     
-    func handleScreenParameterChange(_ newFrame: CGRect) {
-        // Update our frame to match
-        if let window = window as? VideoWallpaperWindow {
-            window.updateFrame(newFrame, animate: true)
-        }
-        
-        // Force layout update
-        setFrameSize(newFrame.size)
-        needsLayout = true
-    }
-    
     // MARK: - Memory Management
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         super.viewWillMove(toWindow: newWindow)

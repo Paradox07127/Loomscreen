@@ -35,7 +35,7 @@ final class WallpaperVideoPlayer {
     
     private let initialFrame: CGRect
     private var fitMode: VideoFitMode = .aspectFill
-    private var videoURL: URL?
+    var videoURL: URL?
     private var playbackStateObserver: NSKeyValueObservation?
     
     // MARK: - Initialization
@@ -324,14 +324,6 @@ final class WallpaperVideoPlayer {
             player.pause()
             isPlaying = false
             Logger.debug("Video playback paused", category: .videoPlayer)
-        }
-    }
-    
-    func togglePlayback() {
-        if isPlaying {
-            pause()
-        } else {
-            play()
         }
     }
     
