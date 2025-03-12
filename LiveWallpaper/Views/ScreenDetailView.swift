@@ -21,29 +21,28 @@ struct ScreenDetailView: View {
     
     var body: some View {
         ScrollView {
-            VStack(spacing: 20) {
+            VStack(spacing: 16) { // Reduced spacing from 20 to 16
                 displayHeader
                 
                 if isLoading {
                     loadingView
                 } else if screen.videoPlayer != nil || screen.previewPlayer != nil {
-                    // Use different layouts based on screen size
-                    if useCompactLayout {
-                        // Compact layout for smaller screens
-                        VStack(spacing: 20) {
-                            videoPreviewSection
-                            playbackControlsSection
-                            videoOptionsSection
-                        }
-                    } else {
-                        // Two-column layout for larger screens
-                        VStack(spacing: 20) {
-                            videoPreviewSection
-                            
-                            // Side-by-side controls and options
-                            HStack(alignment: .top, spacing: 20) {
+                    // Use grid layout for better space distribution
+                    VStack(spacing: 16) {
+                        videoPreviewSection
+                            .frame(minHeight: 280, maxHeight: 380)
+                        
+                        if useCompactLayout {
+                            VStack(spacing: 16) {
                                 playbackControlsSection
                                 videoOptionsSection
+                            }
+                        } else {
+                            HStack(alignment: .top, spacing: 16) {
+                                playbackControlsSection
+                                    .frame(maxWidth: .infinity)
+                                videoOptionsSection
+                                    .frame(maxWidth: .infinity)
                             }
                         }
                     }
@@ -51,115 +50,85 @@ struct ScreenDetailView: View {
                     enhancedEmptyStateView
                 }
             }
-            .padding(24)
-            .animation(.easeInOut(duration: 0.2), value: useCompactLayout)
-            .animation(.easeInOut(duration: 0.2), value: isLoading)
-            .onAppear {
-                isViewActive = true
-                loadScreenConfiguration()
-                isPlayerPlaying = screen.videoPlayer?.isPlaying ?? false
-                setupPlaybackStateObserver()
-                setupVideoProgressObserver()
-                
-                // Check screen size to determine layout
-                if let screenWidth = NSScreen.main?.frame.width {
-                    useCompactLayout = screenWidth < 1200
-                }
-                
-                // Set up observer for video reload notifications
-                NotificationCenter.default.addObserver(
-                    forName: NSApplication.didChangeScreenParametersNotification,
-                    object: nil,
-                    queue: .main
-                ) { _ in
-                    if screen.previewPlayer == nil {
-                        setupPreviewPlayer()
-                    }
-                }
-            }
-            .onDisappear {
-                isViewActive = false
-                cleanupPreviewPlayer()
-            }
+            .padding(20)
+            // Reduced animation duration for snappier UI
+            .animation(.easeInOut(duration: 0.15), value: useCompactLayout)
+            .animation(.easeInOut(duration: 0.15), value: isLoading)
         }
         .background(Color(NSColor.windowBackgroundColor))
-        .alert("Error", isPresented: $showErrorAlert) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(errorMessage)
-        }
+        
     }
-    
     // MARK: - UI Components
     
     private var displayHeader: some View {
-        VStack(spacing: 12) {
-            HStack(alignment: .center, spacing: 16) {
+        HStack(alignment: .center, spacing: 14) {
+            // Display icon
+            ZStack {
+                Circle()
+                    .fill(Color.accentColor.opacity(0.1))
+                    .frame(width: 50, height: 50)
+                
                 Image(systemName: "display")
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 44, height: 44)
+                    .font(.system(size: 20))
                     .foregroundColor(.accentColor)
-                    .background(
-                        Circle()
-                            .fill(Color.accentColor.opacity(0.1))
-                            .frame(width: 60, height: 60)
-                    )
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(screen.name)
-                        .font(.system(size: 24, weight: .semibold))
-                    
-                    HStack(spacing: 12) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.up.left.and.arrow.down.right")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Text("\(Int(screen.frame.width))×\(Int(screen.frame.height))")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                        }
-                        
-                        HStack(spacing: 4) {
-                            Image(systemName: "gauge.medium")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Text("\(getScreenRefreshRate()) Hz")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                        }
-                        
-                        if let player = screen.videoPlayer, player.isPlaying {
-                            HStack(spacing: 4) {
-                                Circle()
-                                    .fill(Color.green)
-                                    .frame(width: 8, height: 8)
-                                Text("Playing")
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    }
-                }
-                
-                Spacer()
+            }
+            
+            // Display information
+            VStack(alignment: .leading, spacing: 2) {
+                Text(screen.name)
+                    .font(.system(size: 20, weight: .semibold))
+                    .lineLimit(1)
                 
                 HStack(spacing: 10) {
-                    Button(action: {
-                        screenManager.reloadVideoForScreen(screen)
-                    }) {
-                        Label("Reload", systemImage: "arrow.clockwise")
-                            .frame(minWidth: 80)
+                    // Resolution
+                    HStack(spacing: 2) {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        Text("\(Int(screen.frame.width))×\(Int(screen.frame.height))")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.regular)
-                    .help("Reload video for this display")
+                    
+                    // Refresh rate
+                    HStack(spacing: 2) {
+                        Image(systemName: "gauge.medium")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        Text("\(getScreenRefreshRate()) Hz")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    // Playback status indicator
+                    if let player = screen.videoPlayer {
+                        HStack(spacing: 2) {
+                            Circle()
+                                .fill(player.isPlaying ? Color.green : Color.orange)
+                                .frame(width: 6, height: 6)
+                            Text(player.isPlaying ? "Playing" : "Paused")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
                 }
             }
             
-            Divider()
-                .padding(.vertical, 4)
+            Spacer()
+            
+            // Reload button
+            Button(action: {
+                screenManager.reloadVideoForScreen(screen)
+            }) {
+                Label("Reload", systemImage: "arrow.clockwise")
+                    .labelStyle(.iconOnly)
+                    .font(.system(size: 14))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help("Reload video for this display")
         }
+        .padding(.bottom, 10)
     }
     
     private var loadingView: some View {
@@ -229,22 +198,25 @@ struct ScreenDetailView: View {
     private var videoPreviewSection: some View {
         VStack(spacing: 0) {
             if let player = screen.previewPlayer {
-                // Video player with progress slider
+                // Modernized video display with controls
                 ZStack(alignment: .bottom) {
-                    // Video display
+                    // Video display with improved styling
+                    // In your videoPreviewSection:
                     CustomVideoPlayer(player: player, fitMode: selectedFitMode)
                         .aspectRatio(16/9, contentMode: .fit)
                         .frame(maxWidth: .infinity)
-                        .frame(minHeight: 300, maxHeight: 400)
-                        .cornerRadius(12)
-                        .clipped()
+                        .cornerRadius(10)
                         .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(Color(.separatorColor), lineWidth: 1)
                         )
-                        .shadow(color: Color.black.opacity(0.2), radius: 5, x: 0, y: 2)
+                        .shadow(color: Color.black.opacity(0.15), radius: 4, x: 0, y: 2)
+                    // Add tap gesture to toggle play/pause
+                        .onTapGesture(count: 1) {
+                            togglePlayback()
+                        }
                     
-                    // Playback controls overlay
+                    // Simplified overlay controls
                     VStack(spacing: 8) {
                         // Progress slider
                         Slider(
@@ -261,13 +233,13 @@ struct ScreenDetailView: View {
                         // Time display
                         HStack {
                             Text(formatTime(currentVideoPosition))
-                                .font(.caption2)
+                                .font(.system(size: 11))
                                 .foregroundColor(.white)
                             
                             Spacer()
                             
                             Text(formatTime(videoDuration))
-                                .font(.caption2)
+                                .font(.system(size: 11))
                                 .foregroundColor(.white)
                         }
                         .padding(.horizontal, 20)
@@ -281,17 +253,18 @@ struct ScreenDetailView: View {
                             endPoint: .bottom
                         )
                     )
-                    .cornerRadius(12, corners: [.bottomLeft, .bottomRight])
+                    .cornerRadius(10, corners: [.bottomLeft, .bottomRight])
                 }
                 
-                // Video information
+                // Compact video information
                 VideoInformationView(player: player, screenRefreshRate: getScreenRefreshRate())
-                    .padding(.top, 12)
+                    .padding(.top, 8)
+                    .padding(.horizontal, 2) // Reduce padding to save space
             } else if screen.videoPlayer != nil {
-                // Display a message when preview is unavailable
-                VStack(spacing: 16) {
+                // Display a cleaner message when preview is unavailable
+                VStack(spacing: 14) {
                     Image(systemName: "play.slash")
-                        .font(.system(size: 40))
+                        .font(.system(size: 36))
                         .foregroundColor(.secondary)
                     
                     Text("Video is playing as wallpaper")
@@ -305,69 +278,63 @@ struct ScreenDetailView: View {
                         setupPreviewPlayer()
                     }
                     .buttonStyle(.borderedProminent)
-                    .padding(.top, 8)
+                    .controlSize(.small) // Smaller button to save space
+                    .padding(.top, 4)
                 }
                 .frame(maxWidth: .infinity)
-                .frame(minHeight: 300)
-                .background(Color.gray.opacity(0.1))
-                .cornerRadius(12)
+                .frame(minHeight: 280)
+                .background(Color.gray.opacity(0.07))
+                .cornerRadius(10)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color(.separatorColor), lineWidth: 1)
                 )
-                .onAppear {
-                    setupPreviewPlayer()
-                }
             } else {
                 // No player configured
                 FileSelectView(action: showFilePicker)
-                    .frame(minHeight: 300)
+                    .frame(minHeight: 280)
             }
         }
-        .transition(.opacity.combined(with: .move(edge: .top)))
     }
     
     private var playbackControlsSection: some View {
         GroupBox {
-            VStack(alignment: .leading, spacing: 20) {
-                // Section header
-                Label("Playback Controls", systemImage: "slider.horizontal.3")
-                    .font(.headline)
-                
-                // Play/Pause button
+            VStack(alignment: .leading, spacing: 16) {
+                // Header with integrated play/pause button
                 HStack {
+                    Label("Playback Controls", systemImage: "slider.horizontal.3")
+                        .font(.headline)
+                    
                     Spacer()
-                    PlaybackButton(
-                        isPlaying: isPlayerPlaying,
-                        action: togglePlayback
-                    )
-                    .scaleEffect(1.2)
-                    .padding(.vertical, 6)
-                    Spacer()
+                    
+                    PlaybackToggleButton(isPlaying: isPlayerPlaying) {
+                        togglePlayback()
+                    }
                 }
                 
                 Divider()
                 
-                // Playback speed control
-                VStack(alignment: .leading, spacing: 8) {
+                // Playback speed control with compact layout
+                VStack(alignment: .leading, spacing: 6) {
                     HStack {
-                        Text("Playback Speed")
+                        Text("Speed")
                             .font(.subheadline)
                             .fontWeight(.medium)
                         
                         Spacer()
                         
                         Text(String(format: "%.1fx", playbackSpeed))
-                            .font(.subheadline)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
+                            .font(.system(size: 13))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
                             .background(Color.accentColor.opacity(0.1))
-                            .cornerRadius(8)
+                            .cornerRadius(6)
                     }
                     
-                    HStack(spacing: 12) {
+                    // Speed slider
+                    HStack(spacing: 8) {
                         Text("0.5x")
-                            .font(.caption)
+                            .font(.caption2)
                             .foregroundColor(.secondary)
                         
                         Slider(value: $playbackSpeed, in: 0.5...2.0, step: 0.1)
@@ -379,157 +346,180 @@ struct ScreenDetailView: View {
                             }
                         
                         Text("2.0x")
-                            .font(.caption)
+                            .font(.caption2)
                             .foregroundColor(.secondary)
                     }
                     
-                    // Speed presets
-                    HStack(spacing: 8) {
-                        ForEach([0.5, 0.75, 1.0, 1.5, 2.0], id: \.self) { speed in
-                            Button(action: {
-                                playbackSpeed = speed
-                                screen.videoPlayer?.setPlaybackSpeed(speed)
-                                screenManager.updatePlaybackSpeed(speed, for: screen)
-                            }) {
-                                Text(speed == 1.0 ? "Normal" : "\(String(format: "%.1f", speed))x")
-                                    .font(.caption2)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 4)
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            .background(playbackSpeed == speed ? Color.accentColor.opacity(0.2) : Color.clear)
-                            .cornerRadius(4)
-                        }
+                    // Speed presets as a compact segmented control
+                    SegmentedSpeedPicker(selectedSpeed: $playbackSpeed) { speed in
+                        screen.videoPlayer?.setPlaybackSpeed(speed)
+                        screenManager.updatePlaybackSpeed(speed, for: screen)
                     }
-                    .padding(.top, 4)
+                    .padding(.top, 2)
                 }
                 
                 Divider()
                 
-                // File actions
-                HStack(spacing: 16) {
+                // File actions in a row
+                HStack(spacing: 12) {
                     Button(action: showFilePicker) {
                         Label("Change Video", systemImage: "photo.on.rectangle")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
-                    .controlSize(.large)
+                    .controlSize(.small)
                     
                     Button(action: clearVideo) {
-                        Label("Clear", systemImage: "xmark.circle")
+                        Label("Remove", systemImage: "xmark.circle")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
-                    .controlSize(.large)
+                    .controlSize(.small)
                     .foregroundColor(.red)
-                    .help("Remove this video and its configuration")
                 }
-                .padding(.top, 4)
+                .padding(.top, 2)
             }
-            .padding(16)
+            .padding(14)
         }
         .groupBoxStyle(ContainerGroupBoxStyle())
-        .frame(minWidth: useCompactLayout ? nil : 300)
-        .transition(.opacity.combined(with: .move(edge: .leading)))
+    }
+    
+    // New segmented control for speed presets
+    struct SegmentedSpeedPicker: View {
+        @Binding var selectedSpeed: Double
+        var onChange: (Double) -> Void
+        
+        private let speeds: [Double] = [0.5, 0.75, 1.0, 1.5, 2.0]
+        
+        var body: some View {
+            HStack(spacing: 4) {
+                ForEach(speeds, id: \.self) { speed in
+                    Button(action: {
+                        selectedSpeed = speed
+                        onChange(speed)
+                    }) {
+                        Text(speed == 1.0 ? "1.0" : "\(String(format: "%.1f", speed))x")
+                            .font(.system(size: 11))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.plain)
+                    .background(selectedSpeed == speed ? Color.accentColor.opacity(0.2) : Color.gray.opacity(0.1))
+                    .cornerRadius(4)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 4)
+                            .stroke(selectedSpeed == speed ? Color.accentColor : Color.clear, lineWidth: 1)
+                    )
+                }
+            }
+        }
+    }
+    
+    // Improved play/pause toggle button
+    struct PlaybackToggleButton: View {
+        var isPlaying: Bool
+        var action: () -> Void
+        
+        var body: some View {
+            Button(action: action) {
+                Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                    .resizable()
+                    .frame(width: 24, height: 24)
+                    .foregroundColor(.accentColor)
+            }
+            .buttonStyle(.plain)
+            .help(isPlaying ? "Pause" : "Play")
+        }
     }
     
     private var videoOptionsSection: some View {
         GroupBox {
-            VStack(alignment: .leading, spacing: 20) {
-                // Section header
+            VStack(alignment: .leading, spacing: 16) {
                 Label("Video Options", systemImage: "rectangle.3.group")
                     .font(.headline)
                 
-                // Video fit mode
-                VStack(alignment: .leading, spacing: 12) {
+                Divider()
+                
+                // Video fit mode with visual indicators
+                VStack(alignment: .leading, spacing: 10) {
                     Text("Video Fit Mode")
                         .font(.subheadline)
                         .fontWeight(.medium)
                     
                     // Visual fit mode selector
-                    VStack(spacing: 16) {
-                        // Preview thumbnails for each fit mode
-                        HStack(spacing: 20) {
-                            ForEach(VideoFitMode.allCases) { mode in
-                                VStack(spacing: 8) {
-                                    // Visual preview
-                                    ZStack {
-                                        // Background
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .fill(selectedFitMode == mode ? Color.accentColor.opacity(0.2) : Color.gray.opacity(0.1))
-                                            .frame(width: 100, height: 70)
-                                        
-                                        // Screen outline
-                                        RoundedRectangle(cornerRadius: 4)
-                                            .stroke(Color.gray, lineWidth: 1)
-                                            .frame(width: 90, height: 60)
-                                        
-                                        // "Video" content
-                                        ZStack {
-                                            RoundedRectangle(cornerRadius: 2)
-                                                .fill(Color.accentColor.opacity(0.7))
-                                                .frame(
-                                                    width: mode == .stretch ? 80 : (mode == .aspectFill ? 90 : 60),
-                                                    height: mode == .stretch ? 50 : (mode == .aspectFill ? 50 : 40)
-                                                )
-                                            
-                                            Image(systemName: "play.fill")
-                                                .foregroundColor(.white)
-                                                .font(.system(size: 12))
-                                        }
-                                    }
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .stroke(selectedFitMode == mode ? Color.accentColor : Color.clear, lineWidth: 2)
-                                    )
-                                    .onTapGesture {
-                                        withAnimation {
-                                            selectedFitMode = mode
-                                            screenManager.updateFitMode(mode, for: screen)
-                                        }
-                                    }
-                                    
-                                    Text(mode.rawValue)
-                                        .font(.caption)
-                                        .foregroundColor(selectedFitMode == mode ? .primary : .secondary)
+                    HStack(spacing: 10) {
+                        ForEach(VideoFitMode.allCases) { mode in
+                            FitModeButton(
+                                mode: mode,
+                                isSelected: selectedFitMode == mode,
+                                action: {
+                                    selectedFitMode = mode
+                                    screenManager.updateFitMode(mode, for: screen)
                                 }
-                            }
+                            )
                         }
-                        .padding(.vertical, 4)
-                        
-                        // Description of selected mode
-                        Text(selectedFitMode.description)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .center)
                     }
+                    
+                    // Description
+                    Text(selectedFitMode.description)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.top, 2)
                 }
                 
                 Divider()
                 
-                // Add Frame Rate Control section if applicable
+                // Frame rate control
                 if let player = screen.videoPlayer, player.videoFrameRate > 0 {
                     FrameRateControlView(screen: screen)
+                        .frame(maxHeight: 120) // Limit height to save space
                 } else {
-                    // Show placeholder for when frame rate info is not available
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("Frame Rate Control", systemImage: "gauge.high")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
+                    HStack {
+                        Image(systemName: "speedometer")
+                            .foregroundColor(.secondary)
                         
-                        Text("Frame rate information is unavailable or video is not loaded")
+                        Text("Frame rate information unavailable")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
-                    .padding(.vertical, 8)
+                    .padding(.vertical, 4)
                 }
             }
-            .padding(16)
+            .padding(14)
         }
         .groupBoxStyle(ContainerGroupBoxStyle())
-        .frame(minWidth: useCompactLayout ? nil : 300)
-        .transition(.opacity.combined(with: .move(edge: .trailing)))
+    }
+    
+    // New compact fit mode button component
+    struct FitModeButton: View {
+        let mode: VideoFitMode
+        let isSelected: Bool
+        let action: () -> Void
+        
+        var body: some View {
+            Button(action: action) {
+                VStack(spacing: 6) {
+                    // Icon with background
+                    ZStack {
+                        Circle()
+                            .fill(isSelected ? Color.accentColor.opacity(0.2) : Color.gray.opacity(0.1))
+                            .frame(width: 44, height: 44)
+                        
+                        Image(systemName: mode.iconName)
+                            .font(.system(size: 16))
+                            .foregroundColor(isSelected ? .accentColor : .gray)
+                    }
+                    
+                    // Label
+                    Text(mode.rawValue)
+                        .font(.caption2)
+                        .foregroundColor(isSelected ? .primary : .secondary)
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.plain)
+        }
     }
     
     // MARK: - Helper Methods

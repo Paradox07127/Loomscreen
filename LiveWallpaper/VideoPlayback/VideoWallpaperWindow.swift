@@ -87,6 +87,7 @@ extension VideoWallpaperWindow {
         ignoresMouseEvents = true
     }
     
+    // In VideoWallpaperWindow.swift
     func updateFrame(_ frame: CGRect, animate: Bool = false) {
         // Skip if frame is invalid
         guard !frame.isEmpty && frame.width > 0 && frame.height > 0 else {
@@ -94,8 +95,12 @@ extension VideoWallpaperWindow {
             return
         }
         
+        // Skip if the frame hasn't actually changed
+        if NSEqualRects(self.frame, frame) {
+            return
+        }
+        
         // Explicitly use the entire frame including origin
-        // This is crucial for external displays which may have non-zero origins
         let targetFrame = frame
         
         Logger.debug("Updating window frame from \(self.frame) to \(targetFrame)", category: .ui)
@@ -117,11 +122,6 @@ extension VideoWallpaperWindow {
         if let contentView = contentView {
             contentView.frame = NSRect(origin: .zero, size: targetFrame.size)
             contentView.needsLayout = true
-        }
-        
-        // Verify position after update
-        if !NSEqualRects(frame, self.frame) {
-            Logger.warning("Window frame mismatch after update. Expected: \(frame), Actual: \(self.frame)", category: .ui)
         }
     }
     
