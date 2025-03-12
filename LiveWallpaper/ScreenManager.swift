@@ -226,11 +226,11 @@ final class ScreenManager: ObservableObject {
         Logger.debug("Setting up screen change observers", category: .screenManager)
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .debounce(for: .seconds(0.5), scheduler: DispatchQueue.main)
-        // Use a more aggressive throttling for intensive screen changes
+            // Use a more aggressive throttling for intensive screen changes
             .throttle(for: .seconds(1.0), scheduler: DispatchQueue.main, latest: true)
             .sink { [weak self] _ in
                 Logger.info("Screen parameters changed, refreshing screens", category: .screenManager)
-                self?.refreshScreens()
+                self?.handleScreenParameterChange()
             }
             .store(in: &cleanupTasks)
         
@@ -239,6 +239,72 @@ final class ScreenManager: ObservableObject {
                 self?.handleSystemWake()
             }
             .store(in: &cleanupTasks)
+    }
+    
+    private func handleScreenParameterChange() {
+        Logger.info("Screen parameters changed - updating all windows", category: .screenManager)
+        
+        // First update screen information without recreating video players
+        refreshScreens(preserveVideoPlayers: true)
+        
+        // Force a delay to ensure screen information is fully updated
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            guard let self = self else { return }
+            
+            // Then update window frames for each video player using the exact frame of each screen
+            for screen in self.screens {
+                if let player = screen.videoPlayer {
+                    // Get the actual NSScreen object for this screen ID
+                    if let nsScreen = NSScreen.screens.first(where: {
+                        ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID) == screen.id
+                    }) {
+                        // Use the exact frame from NSScreen including origin coordinates
+                        let exactFrame = nsScreen.frame
+                        
+                        // Log detailed screen information
+                        Logger.debug("Screen \(screen.id) (\(nsScreen.localizedName)) frame: \(exactFrame) origin: (\(exactFrame.origin.x), \(exactFrame.origin.y))", category: .screenManager)
+                        
+                        // Use the player's method to update window with exact coordinates
+                        player.handleScreenParameterChange(exactFrame)
+                        
+                        Logger.info("Updated window frame for screen \(screen.id) to exact coordinates: \(exactFrame)", category: .screenManager)
+                    } else {
+                        // Fallback if we can't find the screen
+                        Logger.warning("Could not find NSScreen for screen ID \(screen.id), using stored frame", category: .screenManager)
+                        player.handleScreenParameterChange(screen.frame)
+                    }
+                }
+            }
+            
+            // Add an additional check after a short delay to ensure windows stay in position
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.verifyWindowPositions()
+            }
+        }
+        
+        // Notify UI of changes
+        objectWillChange.send()
+    }
+    
+    // New method to verify window positions match their screens
+    private func verifyWindowPositions() {
+        for screen in screens {
+            if let player = screen.videoPlayer {
+                // Get the actual NSScreen object for this screen ID
+                if let nsScreen = NSScreen.screens.first(where: {
+                    ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID) == screen.id
+                }) {
+                    // Get the exact frame from NSScreen including origin coordinates
+                    let exactFrame = nsScreen.frame
+                    
+                    // Instead of directly checking the window frame, just reapply the correct frame
+                    // This ensures the window is in the right position without accessing private members
+                    player.updateWindowFrame(exactFrame)
+                    
+                    Logger.debug("Verified position for screen \(screen.id) (\(nsScreen.localizedName)): \(exactFrame)", category: .screenManager)
+                }
+            }
+        }
     }
     
     private func setupMemoryMonitoring() {
@@ -258,7 +324,7 @@ final class ScreenManager: ObservableObject {
     }
     
     // MARK: - Screen Management
-    func refreshScreens() {
+    func refreshScreens(preserveVideoPlayers: Bool = true) {
         Logger.functionStart(category: .screenManager)
         let timer = PerformanceTimer(description: "Screen refresh", category: .screenManager)
         
@@ -270,7 +336,8 @@ final class ScreenManager: ObservableObject {
         
         // Thread-safe access to screen IDs
         screensLock.lock()
-        let oldScreenIDs = Set(_screens.map(\.id))
+        let oldScreens = _screens
+        let oldScreenIDs = Set(oldScreens.map(\.id))
         screensLock.unlock()
         
         let newScreenIDs = Set(newScreens.map(\.id))
@@ -278,7 +345,7 @@ final class ScreenManager: ObservableObject {
         // Clean up removed screens
         for screenID in oldScreenIDs.subtracting(newScreenIDs) {
             screensLock.lock()
-            let screenToCleanup = _screens.first(where: { $0.id == screenID })
+            let screenToCleanup = oldScreens.first(where: { $0.id == screenID })
             screensLock.unlock()
             
             if let screen = screenToCleanup {
@@ -292,14 +359,30 @@ final class ScreenManager: ObservableObject {
             configUpdateLock.unlock()
         }
         
+        // Preserve existing video players for screens that are still present
+        var updatedScreens = [Screen]()
+        
+        for newScreen in newScreens {
+            // Check if this screen existed before
+            if preserveVideoPlayers, let existingScreen = oldScreens.first(where: { $0.id == newScreen.id }) {
+                // Preserve the video player from the existing screen
+                newScreen.videoPlayer = existingScreen.videoPlayer
+                newScreen.previewPlayer = existingScreen.previewPlayer
+                
+                Logger.debug("Preserved video player for existing screen \(newScreen.id)", category: .screenManager)
+            }
+            
+            updatedScreens.append(newScreen)
+        }
+        
         // Thread-safe update of screens array
         screensLock.lock()
-        _screens = newScreens
+        _screens = updatedScreens
         screensLock.unlock()
         
         timer.checkpoint("Screens mapped")
         
-        // Configure newly added screens
+        // Configure newly added screens (only those that weren't present before)
         for screen in newScreens where newScreenIDs.subtracting(oldScreenIDs).contains(screen.id) {
             Logger.info("Configuring new screen \(screen.id)", category: .screenManager)
             loadConfigurationForScreen(screen)
@@ -367,11 +450,30 @@ final class ScreenManager: ObservableObject {
     }
     
     private func loadConfigurationForScreen(_ screen: Screen) {
+        Logger.debug("Loading configuration for screen \(screen.id)", category: .screenManager)
+        
+        // If screen already has a video player, just update settings
+        if screen.videoPlayer != nil {
+            Logger.debug("Screen \(screen.id) already has a video player, updating settings only", category: .screenManager)
+            if let cachedConfig = getCachedConfiguration(for: screen.id) {
+                // Apply configuration without recreating the player
+                applyConfiguration(cachedConfig, to: screen, preservingState: true)
+            }
+            return
+        }
+        
+        // Try to get configuration from cache first
         if let cachedConfig = getCachedConfiguration(for: screen.id) {
+            Logger.debug("Found cached configuration for screen \(screen.id)", category: .screenManager)
             applyConfiguration(cachedConfig, to: screen)
-        } else if let savedConfig = SettingsManager.shared.getConfiguration(for: screen.id) {
+        }
+        // If not in cache, try to load from settings
+        else if let savedConfig = SettingsManager.shared.getConfiguration(for: screen.id) {
+            Logger.debug("Found saved configuration for screen \(screen.id)", category: .screenManager)
             cacheConfiguration(savedConfig)
             applyConfiguration(savedConfig, to: screen)
+        } else {
+            Logger.debug("No configuration found for screen \(screen.id)", category: .screenManager)
         }
     }
     
@@ -507,14 +609,59 @@ final class ScreenManager: ObservableObject {
             // Check if we need to update the player at all
             let needsNewPlayer = screen.videoPlayer == nil
             
-            // Save current playback position if preserving state
-            let currentTime = preservingState ? screen.videoPlayer?.player?.currentTime() : .zero
-            let wasPlaying = screen.videoPlayer?.isPlaying ?? false
-            
-            if needsNewPlayer {
-                // Clean up existing player
-                screen.videoPlayer?.cleanup()
+            // If we already have a player, use the existing one
+            if !needsNewPlayer {
+                Logger.debug("Existing video player found for screen \(screen.id), applying updates only", category: .videoPlayer)
                 
+                // Save current playback position if preserving state
+                let currentTime = preservingState ? screen.videoPlayer?.player?.currentTime() : .zero
+                let wasPlaying = screen.videoPlayer?.isPlaying ?? false
+                
+                // Apply settings to existing player
+                if let player = screen.videoPlayer {
+                    // Always update the fit mode - the method will handle if it hasn't changed
+                    player.setVideoFitMode(configuration.fitMode)
+                    
+                    // No need to update playback speed if it hasn't changed
+                    if abs(Float(configuration.playbackSpeed) - (player.player?.rate ?? 1.0)) > 0.01 {
+                        player.setPlaybackSpeed(configuration.playbackSpeed)
+                    }
+                    
+                    // Update frame rate limit if needed
+                    if player.videoFrameRate > 0 {
+                        // Get screen refresh rate
+                        let screenRefreshRate = getScreenRefreshRate(for: screen.id)
+                        // Calculate actual frame rate limit
+                        let limit = configuration.frameRateLimit.getEffectiveLimit(
+                            videoFrameRate: player.videoFrameRate,
+                            screenRefreshRate: Double(screenRefreshRate)
+                        )
+                        
+                        if limit > 0 && limit < Float(player.videoFrameRate) {
+                            Logger.debug("Limiting frame rate to \(limit) FPS for screen \(screen.id)", category: .videoPlayer)
+                            player.setFrameRateLimit(limit)
+                        }
+                    }
+                    
+                    // Restore playback position if needed
+                    if let currentTime = currentTime {
+                        player.player?.seek(to: currentTime)
+                    }
+                    
+                    // Check if we should pause based on power state
+                    let shouldPause = powerMonitor.currentPowerSource.isOnBattery &&
+                    (SettingsManager.shared.loadGlobalSettings().globalPauseOnBattery || configuration.pauseOnBattery)
+                    
+                    if shouldPause && wasPlaying {
+                        player.pause()
+                    } else if !shouldPause && !wasPlaying {
+                        // Small delay to ensure proper initialization
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                            player.play()
+                        }
+                    }
+                }
+            } else {
                 // Create new player with the configuration settings
                 let player = WallpaperVideoPlayer(
                     url: url,
@@ -542,45 +689,16 @@ final class ScreenManager: ObservableObject {
                     }
                 }
                 
-                // Restore playback position if needed
-                if let currentTime = currentTime {
-                    player.player?.seek(to: currentTime)
-                }
-                
-                // Check if we should pause based on power state
+                // Check if we should play based on power state
                 let shouldPause = powerMonitor.currentPowerSource.isOnBattery &&
                 (SettingsManager.shared.loadGlobalSettings().globalPauseOnBattery || configuration.pauseOnBattery)
                 
                 if shouldPause {
                     player.pause()
-                } else if wasPlaying {
+                } else {
                     // Small delay to ensure proper initialization
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                         player.play()
-                    }
-                }
-            } else {
-                // Just update existing player settings if needed
-                if let player = screen.videoPlayer {
-                    // No need to update playback speed if it hasn't changed
-                    if abs(Float(configuration.playbackSpeed) - (player.player?.rate ?? 1.0)) > 0.01 {
-                        player.setPlaybackSpeed(configuration.playbackSpeed)
-                    }
-                    
-                    // Update frame rate limit if needed
-                    if player.videoFrameRate > 0 {
-                        // Get screen refresh rate
-                        let screenRefreshRate = getScreenRefreshRate(for: screen.id)
-                        // Calculate actual frame rate limit
-                        let limit = configuration.frameRateLimit.getEffectiveLimit(
-                            videoFrameRate: player.videoFrameRate,
-                            screenRefreshRate: Double(screenRefreshRate)
-                        )
-                        
-                        if limit > 0 && limit < Float(player.videoFrameRate) {
-                            Logger.debug("Limiting frame rate to \(limit) FPS for screen \(screen.id)", category: .videoPlayer)
-                            player.setFrameRateLimit(limit)
-                        }
                     }
                 }
             }

@@ -90,6 +90,23 @@ class StatusBarController: NSObject, NSMenuDelegate {
                 self?.updateStatusBarIcon(isPlaying: self?.screenManager.isAnyScreenPlaying)
             }
             .store(in: &cleanupTasks)
+        
+        // Monitor initial state notification to update status
+        NotificationCenter.default.publisher(for: WallpaperVideoPlayer.didChangePlaybackStateNotification)
+            .throttle(for: .milliseconds(250), scheduler: DispatchQueue.main, latest: true)
+            .sink { [weak self] notification in
+                if let isPlaying = notification.userInfo?["isPlaying"] as? Bool {
+                    self?.updateStatusBarIcon(isPlaying: isPlaying)
+                } else {
+                    self?.updateStatusBarIcon()
+                }
+            }
+            .store(in: &cleanupTasks)
+        
+        // Initial icon update
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.updateStatusBarIcon(isPlaying: self?.screenManager.isAnyScreenPlaying)
+        }
     }
     
     private func setupMenu() {

@@ -9,8 +9,32 @@ class Screen: Identifiable, Hashable, ObservableObject {
     let frame: CGRect
     let nsScreen: NSScreen
     
-    // Use private(set) for videoPlayer to control access
-    var videoPlayer: WallpaperVideoPlayer?
+    // A method to notify observers of playback state changes
+    @objc func notifyPlaybackStateChanged() {
+        objectWillChange.send()
+    }
+
+    // Update videoPlayer property with observer connections
+    var videoPlayer: WallpaperVideoPlayer? {
+        didSet {
+            // If old player exists, remove observation
+            if let oldPlayer = oldValue {
+                NotificationCenter.default.removeObserver(self,
+                    name: WallpaperVideoPlayer.didChangePlaybackStateNotification,
+                    object: oldPlayer)
+            }
+            
+            // Setup observation for new player
+            if let newPlayer = videoPlayer {
+                NotificationCenter.default.addObserver(
+                    self,
+                    selector: #selector(notifyPlaybackStateChanged),
+                    name: WallpaperVideoPlayer.didChangePlaybackStateNotification,
+                    object: newPlayer
+                )
+            }
+        }
+    }
     
     // Track if a preview player change should trigger UI updates
     private var skipPreviewPlayerNotification = false
@@ -30,6 +54,16 @@ class Screen: Identifiable, Hashable, ObservableObject {
                 // Set up new player
                 if let newPlayer = previewPlayer {
                     newPlayer.volume = 0
+                    
+                    // Disable audio session to prevent AirPods from connecting
+                                    if let playerItem = newPlayer.currentItem {
+                                        playerItem.audioTimePitchAlgorithm = AVAudioTimePitchAlgorithm.spectral
+                                        // Make sure audio is disabled in all tracks
+                                        let audioTracks = playerItem.tracks.filter { $0.assetTrack?.mediaType == .audio }
+                                        for track in audioTracks {
+                                            track.isEnabled = false
+                                        }
+                                    }
                     
                     // Set up observation for player status
                     previewPlayerObserver = newPlayer.publisher(for: \.status)
@@ -64,11 +98,13 @@ class Screen: Identifiable, Hashable, ObservableObject {
         if !screenName.isEmpty {
             self.name = screenName
         } else {
-            // Create a more descriptive fallback name
+            // Create a more descriptive fallback name with position info
+            let origin = nsScreen.frame.origin
             let resolution = String(format: "%.0fx%.0f", nsScreen.frame.width, nsScreen.frame.height)
-            self.name = "Display \(resolution)"
+            self.name = "Display \(resolution) at (\(Int(origin.x)),\(Int(origin.y)))"
         }
         
+        // Store the exact frame including origin coordinates
         self.frame = nsScreen.frame
     }
     

@@ -103,7 +103,13 @@ class VideoContainerView: NSView {
         
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+        
+        // Ensure player layer covers the full bounds
         playerLayer?.frame = bounds
+        
+        // Log frame updates for debugging
+        Logger.debug("Updated player layer frame to \(bounds)", category: .videoPlayer)
+        
         CATransaction.commit()
     }
     
@@ -111,13 +117,29 @@ class VideoContainerView: NSView {
         super.layout()
         updatePlayerLayerFrame()
     }
-    
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        updatePlayerLayerFrame()
+    }
+
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
         
         if let scale = window?.backingScaleFactor {
             playerLayer?.contentsScale = scale
         }
+    }
+    
+    func handleScreenParameterChange(_ newFrame: CGRect) {
+        // Update our frame to match
+        if let window = window as? VideoWallpaperWindow {
+            window.updateFrame(newFrame, animate: true)
+        }
+        
+        // Force layout update
+        setFrameSize(newFrame.size)
+        needsLayout = true
     }
     
     // MARK: - Memory Management

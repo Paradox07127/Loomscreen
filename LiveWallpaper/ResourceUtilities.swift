@@ -9,7 +9,7 @@ class ResourceUtilities {
     // - Returns: Bookmark data or nil if failed
     static func createBookmark(for url: URL) -> Data? {
         do {
-            let timer = PerformanceTimer(description: "Create bookmark", category: .fileAccess)
+            let _ = PerformanceTimer(description: "Create bookmark", category: .fileAccess)
             let bookmarkData = try url.bookmarkData(
                 options: [.withSecurityScope, .securityScopeAllowOnlyReadAccess],
                 includingResourceValuesForKeys: [

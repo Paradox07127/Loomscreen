@@ -49,6 +49,12 @@ class VideoWallpaperWindow: NSWindow {
     override var canBecomeMain: Bool { false }
     
     override func setFrame(_ frameRect: NSRect, display flag: Bool) {
+        // Additional validation to prevent invalid frames
+        guard frameRect.width > 0 && frameRect.height > 0 else {
+            Logger.warning("Prevented setting invalid frame: \(frameRect)", category: .ui)
+            return
+        }
+        
         super.setFrame(frameRect, display: flag)
         
         // Ensure window maintains correct level after frame changes
@@ -70,26 +76,55 @@ class VideoWallpaperWindow: NSWindow {
 // MARK: - Window Management Extensions
 extension VideoWallpaperWindow {
     func ensureProperWindowLevel() {
-        // Ensure window is at the correct level and position
+        // Reset to proper level and order
         level = NSWindow.Level(rawValue: Self.wallpaperWindowLevel)
         orderBack(nil)
+        
+        // Make sure collectionBehavior includes proper settings for desktop wallpaper
+        collectionBehavior = [.canJoinAllSpaces, .stationary]
+        
+        // Disable interaction with the window
+        ignoresMouseEvents = true
     }
     
     func updateFrame(_ frame: CGRect, animate: Bool = false) {
+        // Skip if frame is invalid
+        guard !frame.isEmpty && frame.width > 0 && frame.height > 0 else {
+            Logger.warning("Attempted to set invalid frame: \(frame)", category: .ui)
+            return
+        }
+        
+        // Explicitly use the entire frame including origin
+        // This is crucial for external displays which may have non-zero origins
+        let targetFrame = frame
+        
+        Logger.debug("Updating window frame from \(self.frame) to \(targetFrame)", category: .ui)
+        
         if animate {
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.3
                 context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                animator().setFrame(frame, display: true)
+                animator().setFrame(targetFrame, display: true, animate: true)
             }
         } else {
-            setFrame(frame, display: true)
+            setFrame(targetFrame, display: true)
+        }
+        
+        // Ensure window maintains correct level and ordering after frame change
+        ensureProperWindowLevel()
+        
+        // Force layout update
+        if let contentView = contentView {
+            contentView.frame = NSRect(origin: .zero, size: targetFrame.size)
+            contentView.needsLayout = true
+        }
+        
+        // Verify position after update
+        if !NSEqualRects(frame, self.frame) {
+            Logger.warning("Window frame mismatch after update. Expected: \(frame), Actual: \(self.frame)", category: .ui)
         }
     }
-}
-
-// MARK: - Space and Display Management
-extension VideoWallpaperWindow {
+    
     override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
         // Allow the window to be positioned anywhere
         frameRect
