@@ -5,11 +5,11 @@ import Darwin
 class SystemMonitor: ObservableObject {
     static let shared = SystemMonitor()
     
-    @Published private(set) var appCpuUsage: Double = 0
-    @Published private(set) var appMemoryUsage: UInt64 = 0
-    @Published private(set) var systemMemoryUsage: Double = 0
+    @Published private(set) var cpuUsage: Double = 0
+    @Published private(set) var memoryUsage: UInt64 = 0
     @Published private(set) var totalMemory: UInt64 = 0
     @Published private(set) var isMemoryLow: Bool = false
+    @Published private(set) var systemMemoryUsage: Double = 0
     
     private let memoryWarningThreshold: Double = 0.85 // 85% memory usage
     private var updateInterval: TimeInterval = 2.0 // Update every 2 seconds
@@ -40,19 +40,11 @@ class SystemMonitor: ObservableObject {
         updateTimer = nil
     }
     
-    // Set the update interval for monitoring
-    func setUpdateInterval(_ interval: TimeInterval) {
-        updateInterval = max(0.5, interval) // Enforce minimum interval of 0.5 seconds
-        if updateTimer != nil {
-            startMonitoring()
-        }
-    }
-    
     // MARK: - Formatted Output Methods
     
-    // Get formatted app memory usage
-    func formattedAppMemoryUsage() -> String {
-        return formatBytes(appMemoryUsage)
+    // Get formatted memory usage - for compatibility with original code
+    func formattedMemoryUsage() -> String {
+        return formatBytes(memoryUsage)
     }
     
     // Get formatted total memory
@@ -60,26 +52,18 @@ class SystemMonitor: ObservableObject {
         return formatBytes(totalMemory)
     }
     
-    // Get app memory usage as percentage
-    func appMemoryPercentage() -> Double {
+    // Get memory usage as percentage - for compatibility with original code
+    func memoryPercentage() -> Double {
         guard totalMemory > 0 else { return 0 }
-        return Double(appMemoryUsage) / Double(totalMemory) * 100.0
-    }
-    
-    // Get system memory usage as percentage
-    func systemMemoryPercentage() -> Double {
-        return systemMemoryUsage * 100.0
+        return Double(memoryUsage) / Double(totalMemory) * 100.0
     }
     
     // MARK: - Private Implementation
     
     private func updateResourceUsage() {
-        // Update all metrics
-        appCpuUsage = getAppCPUUsage()
-        appMemoryUsage = getAppMemoryUsage()
+        cpuUsage = getAppCPUUsage()
+        memoryUsage = getAppMemoryUsage()
         systemMemoryUsage = getSystemMemoryUsage()
-        
-        // Check for low memory condition
         checkMemoryWarning()
     }
     
@@ -122,7 +106,7 @@ class SystemMonitor: ObservableObject {
     private func getSystemMemoryUsage() -> Double {
         var pageSize: vm_size_t = 0
         let hostPort = mach_host_self()
-        var host_size = mach_msg_type_number_t(MemoryLayout<vm_statistics64_data_t>.stride / MemoryLayout<integer_t>.stride)
+        var host_size = mach_msg_type_number_t(MemoryLayout<vm_statistics64_data_t>.stride / MemoryLayout<integer_t>.size)
         var vmStats = vm_statistics64_data_t()
         
         host_page_size(hostPort, &pageSize)

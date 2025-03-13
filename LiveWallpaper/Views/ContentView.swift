@@ -118,7 +118,6 @@ struct Sidebar: View {
             
             Section(header: Text("System").font(.caption).bold().foregroundColor(.secondary)) {
                 VStack(alignment: .leading, spacing: 8) {
-                    BatteryStatusView()
                     SystemMonitorView()
                 }
                 .padding(.vertical, 8)
