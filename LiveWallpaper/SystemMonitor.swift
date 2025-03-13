@@ -2,47 +2,105 @@ import Foundation
 import Combine
 import Darwin
 
-// Monitors system and application resource usage
 class SystemMonitor: ObservableObject {
     static let shared = SystemMonitor()
     
-    @Published private(set) var cpuUsage: Double = 0
-    @Published private(set) var memoryUsage: UInt64 = 0
+    @Published private(set) var appCpuUsage: Double = 0
+    @Published private(set) var appMemoryUsage: UInt64 = 0
+    @Published private(set) var systemMemoryUsage: Double = 0
     @Published private(set) var totalMemory: UInt64 = 0
+    @Published private(set) var isMemoryLow: Bool = false
     
-    private var updateTimer: Timer?
+    private let memoryWarningThreshold: Double = 0.85 // 85% memory usage
     private var updateInterval: TimeInterval = 2.0 // Update every 2 seconds
+    private var updateTimer: Timer?
     
     private init() {
-        // Get total physical memory once
-        totalMemory = getTotalMemory()
-        startMonitoring()
+        totalMemory = ProcessInfo.processInfo.physicalMemory
+        Logger.debug("System monitor initialized. Total memory: \(formatBytes(totalMemory))", category: .memory)
     }
     
+    // MARK: - Public Methods
+    
+    // Start monitoring system resources
     func startMonitoring() {
-        // Stop any existing timer
         stopMonitoring()
         
-        // Create a new timer
         updateTimer = Timer.scheduledTimer(withTimeInterval: updateInterval, repeats: true) { [weak self] _ in
             self?.updateResourceUsage()
         }
         
-        // Force an immediate update
+        // Force immediate update
         updateResourceUsage()
     }
     
+    // Stop monitoring system resources
     func stopMonitoring() {
         updateTimer?.invalidate()
         updateTimer = nil
     }
     
-    private func updateResourceUsage() {
-        cpuUsage = getAppCPUUsage()
-        memoryUsage = getAppMemoryUsage()
+    // Set the update interval for monitoring
+    func setUpdateInterval(_ interval: TimeInterval) {
+        updateInterval = max(0.5, interval) // Enforce minimum interval of 0.5 seconds
+        if updateTimer != nil {
+            startMonitoring()
+        }
     }
     
-    // MARK: - Memory Usage Monitoring
+    // MARK: - Formatted Output Methods
+    
+    // Get formatted app memory usage
+    func formattedAppMemoryUsage() -> String {
+        return formatBytes(appMemoryUsage)
+    }
+    
+    // Get formatted total memory
+    func formattedTotalMemory() -> String {
+        return formatBytes(totalMemory)
+    }
+    
+    // Get app memory usage as percentage
+    func appMemoryPercentage() -> Double {
+        guard totalMemory > 0 else { return 0 }
+        return Double(appMemoryUsage) / Double(totalMemory) * 100.0
+    }
+    
+    // Get system memory usage as percentage
+    func systemMemoryPercentage() -> Double {
+        return systemMemoryUsage * 100.0
+    }
+    
+    // MARK: - Private Implementation
+    
+    private func updateResourceUsage() {
+        // Update all metrics
+        appCpuUsage = getAppCPUUsage()
+        appMemoryUsage = getAppMemoryUsage()
+        systemMemoryUsage = getSystemMemoryUsage()
+        
+        // Check for low memory condition
+        checkMemoryWarning()
+    }
+    
+    private func checkMemoryWarning() {
+        let isLow = systemMemoryUsage > memoryWarningThreshold
+        
+        if isLow != isMemoryLow {
+            isMemoryLow = isLow
+            if isLow {
+                Logger.warning("System memory usage is high: \(Int(systemMemoryUsage * 100))%", category: .memory)
+                // Post notification for low memory warning
+                NotificationCenter.default.post(
+                    name: Notification.Name("SystemMemoryWarning"),
+                    object: nil,
+                    userInfo: ["memoryUsage": systemMemoryUsage]
+                )
+            }
+        }
+    }
+    
+    // MARK: - Resource Monitoring Implementation
     
     private func getAppMemoryUsage() -> UInt64 {
         var info = task_vm_info_data_t()
@@ -61,12 +119,34 @@ class SystemMonitor: ObservableObject {
         return 0
     }
     
-    private func getTotalMemory() -> UInt64 {
-        let physicalMemory = ProcessInfo.processInfo.physicalMemory
-        return physicalMemory
+    private func getSystemMemoryUsage() -> Double {
+        var pageSize: vm_size_t = 0
+        let hostPort = mach_host_self()
+        var host_size = mach_msg_type_number_t(MemoryLayout<vm_statistics64_data_t>.stride / MemoryLayout<integer_t>.stride)
+        var vmStats = vm_statistics64_data_t()
+        
+        host_page_size(hostPort, &pageSize)
+        
+        let status = withUnsafeMutablePointer(to: &vmStats) { vmStatsPointer in
+            vmStatsPointer.withMemoryRebound(to: integer_t.self, capacity: Int(host_size)) { pointer in
+                host_statistics64(hostPort, HOST_VM_INFO64, pointer, &host_size)
+            }
+        }
+        
+        guard status == KERN_SUCCESS else {
+            Logger.error("Failed to get memory statistics", category: .memory)
+            return 0.0
+        }
+        
+        let active = Double(vmStats.active_count) * Double(pageSize)
+        let wired = Double(vmStats.wire_count) * Double(pageSize)
+        let compressed = Double(vmStats.compressor_page_count) * Double(pageSize)
+        
+        let used = active + wired + compressed
+        let total = Double(ProcessInfo.processInfo.physicalMemory)
+        
+        return used / total
     }
-    
-    // MARK: - CPU Usage Monitoring
     
     private func getAppCPUUsage() -> Double {
         var totalUsageOfCPU: Double = 0.0
@@ -99,21 +179,6 @@ class SystemMonitor: ObservableObject {
         }
         
         return min(totalUsageOfCPU * 100, 100.0) // Return as percentage, capped at 100%
-    }
-    
-    // MARK: - Helper Methods
-    
-    func formattedMemoryUsage() -> String {
-        return formatBytes(memoryUsage)
-    }
-    
-    func formattedTotalMemory() -> String {
-        return formatBytes(totalMemory)
-    }
-    
-    func memoryPercentage() -> Double {
-        guard totalMemory > 0 else { return 0 }
-        return Double(memoryUsage) / Double(totalMemory) * 100.0
     }
     
     private func formatBytes(_ bytes: UInt64) -> String {

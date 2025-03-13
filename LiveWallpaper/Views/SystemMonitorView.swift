@@ -13,7 +13,7 @@ struct SystemMonitorView: View {
                     Text("CPU Usage")
                         .font(.subheadline)
                     Spacer()
-                    Text("\(Int(monitor.cpuUsage))%")
+                    Text("\(Int(monitor.appCpuUsage))%")
                         .font(.subheadline)
                         .fontWeight(.medium)
                         .foregroundColor(cpuColor)
@@ -29,7 +29,7 @@ struct SystemMonitorView: View {
                         
                         Rectangle()
                             .fill(cpuColor)
-                            .frame(width: geo.size.width * CGFloat(monitor.cpuUsage / 100.0), height: 8)
+                            .frame(width: geo.size.width * CGFloat(monitor.appCpuUsage / 100.0), height: 8)
                             .cornerRadius(4)
                     }
                 }
@@ -37,18 +37,18 @@ struct SystemMonitorView: View {
             }
             .padding(.bottom, 4)
             
-            // Memory Usage
+            // App Memory Usage
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Image(systemName: "memorychip")
-                        .foregroundColor(memoryColor)
-                    Text("Memory")
+                        .foregroundColor(appMemoryColor)
+                    Text("App Memory")
                         .font(.subheadline)
                     Spacer()
-                    Text("\(monitor.formattedMemoryUsage()) / \(monitor.formattedTotalMemory())")
+                    Text("\(monitor.formattedAppMemoryUsage()) / \(monitor.formattedTotalMemory())")
                         .font(.subheadline)
                         .fontWeight(.medium)
-                        .foregroundColor(memoryColor)
+                        .foregroundColor(appMemoryColor)
                 }
                 
                 // Memory Usage Bar
@@ -60,8 +60,40 @@ struct SystemMonitorView: View {
                             .cornerRadius(4)
                         
                         Rectangle()
-                            .fill(memoryColor)
-                            .frame(width: geo.size.width * CGFloat(monitor.memoryPercentage() / 100.0), height: 8)
+                            .fill(appMemoryColor)
+                            .frame(width: geo.size.width * CGFloat(monitor.appMemoryPercentage() / 100.0), height: 8)
+                            .cornerRadius(4)
+                    }
+                }
+                .frame(height: 8)
+            }
+            .padding(.bottom, 4)
+            
+            // System Memory Usage
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Image(systemName: "server.rack")
+                        .foregroundColor(systemMemoryColor)
+                    Text("System Memory")
+                        .font(.subheadline)
+                    Spacer()
+                    Text("\(Int(monitor.systemMemoryPercentage()))%")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundColor(systemMemoryColor)
+                }
+                
+                // Memory Usage Bar
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Rectangle()
+                            .fill(Color.gray.opacity(0.3))
+                            .frame(width: geo.size.width, height: 8)
+                            .cornerRadius(4)
+                        
+                        Rectangle()
+                            .fill(systemMemoryColor)
+                            .frame(width: geo.size.width * CGFloat(monitor.systemMemoryPercentage() / 100.0), height: 8)
                             .cornerRadius(4)
                     }
                 }
@@ -84,7 +116,7 @@ struct SystemMonitorView: View {
     }
     
     private var cpuColor: Color {
-        let usage = monitor.cpuUsage
+        let usage = monitor.appCpuUsage
         if usage >= 80 {
             return .red
         } else if usage >= 50 {
@@ -94,8 +126,19 @@ struct SystemMonitorView: View {
         }
     }
     
-    private var memoryColor: Color {
-        let usage = monitor.memoryPercentage()
+    private var appMemoryColor: Color {
+        let usage = monitor.appMemoryPercentage()
+        if usage >= 80 {
+            return .red
+        } else if usage >= 50 {
+            return .orange
+        } else {
+            return .green
+        }
+    }
+    
+    private var systemMemoryColor: Color {
+        let usage = monitor.systemMemoryPercentage()
         if usage >= 80 {
             return .red
         } else if usage >= 50 {

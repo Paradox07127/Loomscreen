@@ -3,77 +3,6 @@ import Combine
 import AVKit
 import os.log
 
-// Monitors system memory usage and provides alerts when memory is low
-class MemoryMonitor {
-    private let memoryWarningThreshold: Double = 0.85 // 85% memory usage
-    
-    @Published private(set) var isMemoryLow: Bool = false
-    @Published private(set) var currentMemoryUsage: Double = 0.0
-    
-    func checkMemoryUsage() -> Bool {
-        let memoryUsage = getSystemMemoryUsage()
-        
-        let isLow = memoryUsage > memoryWarningThreshold
-        
-        if isLow != isMemoryLow {
-            isMemoryLow = isLow
-            if isLow {
-                Logger.warning("System memory usage is high: \(Int(memoryUsage * 100))%", category: .memory)
-            }
-        }
-        
-        return isLow
-    }
-    
-    // Get the actual system memory usage percentage
-    func getSystemMemoryUsage() -> Double {
-        var pageSize: vm_size_t = 0
-        let hostPort = mach_host_self()
-        var host_size = mach_msg_type_number_t(MemoryLayout<vm_statistics64_data_t>.stride / MemoryLayout<integer_t>.stride)
-        var vmStats = vm_statistics64_data_t()
-        
-        host_page_size(hostPort, &pageSize)
-        
-        let status = withUnsafeMutablePointer(to: &vmStats) { vmStatsPointer in
-            vmStatsPointer.withMemoryRebound(to: integer_t.self, capacity: Int(host_size)) { pointer in
-                host_statistics64(hostPort, HOST_VM_INFO64, pointer, &host_size)
-            }
-        }
-        
-        guard status == KERN_SUCCESS else {
-            Logger.error("Failed to get memory statistics", category: .memory)
-            return 0.0
-        }
-        
-        let active = Double(vmStats.active_count) * Double(pageSize)
-        let wired = Double(vmStats.wire_count) * Double(pageSize)
-        let compressed = Double(vmStats.compressor_page_count) * Double(pageSize)
-        
-        let used = active + wired + compressed
-        let total = Double(ProcessInfo.processInfo.physicalMemory)
-        
-        return used / total
-    }
-    
-    private func formatByteSize(_ bytes: UInt64) -> String {
-        let kb = Double(bytes) / 1024.0
-        let mb = kb / 1024.0
-        let gb = mb / 1024.0
-        
-        if gb >= 1.0 {
-            return String(format: "%.2f GB", gb)
-        } else if mb >= 1.0 {
-            return String(format: "%.1f MB", mb)
-        } else {
-            return String(format: "%.0f KB", kb)
-        }
-    }
-    
-    // Get system memory usage formatted as a string
-    func getFormattedMemoryUsage() -> String {
-        return "\(Int(currentMemoryUsage * 100))%"
-    }
-}
 
 // Represents frame rate limitation options
 enum FrameRateLimit: Int, CaseIterable, Identifiable, Codable {
@@ -159,7 +88,6 @@ final class ScreenManager: ObservableObject {
     private let configLock = NSLock()
     private var configurationCache: [CGDirectDisplayID: ScreenConfiguration] = [:]
     private let powerMonitor: PowerMonitor = .shared
-    private let memoryMonitor = MemoryMonitor()
     private var lastAppliedConfigHashes: [CGDirectDisplayID: Int] = [:]
     private var configUpdateLock = NSLock()
     private let playbackStateSubject = CurrentValueSubject<Bool, Never>(false)
@@ -309,16 +237,14 @@ final class ScreenManager: ObservableObject {
     
     private func setupMemoryMonitoring() {
         Logger.debug("Setting up memory monitoring", category: .screenManager)
-        // Check memory usage periodically
-        Timer.publish(every: 30, on: .main, in: .common)
-            .autoconnect()
+        
+        // Use SystemMonitor instead of MemoryMonitor
+        SystemMonitor.shared.startMonitoring()
+        
+        // Monitor for low memory notifications
+        NotificationCenter.default.publisher(for: Notification.Name("SystemMemoryWarning"))
             .sink { [weak self] _ in
-                guard let self = self else { return }
-                
-                // Check current memory usage
-                if self.memoryMonitor.checkMemoryUsage() {
-                    self.handleLowMemory()
-                }
+                self?.handleLowMemory()
             }
             .store(in: &cleanupTasks)
     }
