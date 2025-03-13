@@ -756,50 +756,58 @@ final class ScreenManager: ObservableObject {
     // MARK: - Power Management
     private func handlePowerStateChange(_ powerSource: PowerMonitor.PowerSource) {
         Logger.info("Handling power state change", category: .powerMonitor)
-        let globalSettings = SettingsManager.shared.loadGlobalSettings()
-        let isOnBattery = powerSource.isOnBattery
         
-        // Batch updates to avoid multiple UI updates
-        var updatedScreens = false
-        
-        // Thread-safe access to screens
-        screensLock.lock()
-        for screen in _screens {
-            guard let player = screen.videoPlayer else {
-                continue
-            }
+        // Use DispatchQueue.main to ensure UI updates happen on the main thread
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
             
-            let configuration = getCachedConfiguration(for: screen.id)
-            let shouldPause = (globalSettings.globalPauseOnBattery || configuration?.pauseOnBattery == true) && isOnBattery
+            let globalSettings = SettingsManager.shared.loadGlobalSettings()
+            let isOnBattery = powerSource.isOnBattery
             
-            if let batteryLevel = globalSettings.minimumBatteryLevel, isOnBattery {
-                if case .battery(let level) = powerSource, level < batteryLevel {
-                    // Force pause if battery is below the threshold
-                    if player.isPlaying {
-                        Logger.debug("Pausing screen \(screen.id) due to low battery level (\(Int(level * 100))%)", category: .powerMonitor)
-                        player.pause()
-                        updatedScreens = true
-                    }
+            // Batch updates to avoid multiple UI updates
+            var updatedScreens = false
+            
+            // Thread-safe access to screens
+            self.screensLock.lock()
+            let screensToProcess = self._screens // Create a local copy to work with
+            self.screensLock.unlock()
+            
+            for screen in screensToProcess {
+                guard let player = screen.videoPlayer else {
                     continue
+                }
+                
+                let configuration = self.getCachedConfiguration(for: screen.id)
+                let shouldPause = (globalSettings.globalPauseOnBattery || configuration?.pauseOnBattery == true) && isOnBattery
+                
+                if let batteryLevel = globalSettings.minimumBatteryLevel, isOnBattery {
+                    if case .battery(let level) = powerSource, level < batteryLevel {
+                        // Force pause if battery is below the threshold
+                        if player.isPlaying {
+                            Logger.debug("Pausing screen \(screen.id) due to low battery level (\(Int(level * 100))%)", category: .powerMonitor)
+                            player.pause()
+                            updatedScreens = true
+                        }
+                        continue
+                    }
+                }
+                
+                let currentlyPlaying = player.isPlaying
+                if shouldPause && currentlyPlaying {
+                    Logger.debug("Pausing screen \(screen.id) due to battery power", category: .powerMonitor)
+                    player.pause()
+                    updatedScreens = true
+                } else if !shouldPause && !currentlyPlaying && !isOnBattery {
+                    Logger.debug("Resuming screen \(screen.id) due to external power", category: .powerMonitor)
+                    player.play()
+                    updatedScreens = true
                 }
             }
             
-            let currentlyPlaying = player.isPlaying
-            if shouldPause && currentlyPlaying {
-                Logger.debug("Pausing screen \(screen.id) due to battery power", category: .powerMonitor)
-                player.pause()
-                updatedScreens = true
-            } else if !shouldPause && !currentlyPlaying && !isOnBattery {
-                Logger.debug("Resuming screen \(screen.id) due to external power", category: .powerMonitor)
-                player.play()
-                updatedScreens = true
+            if updatedScreens {
+                self.objectWillChange.send()
+                self.updatePlaybackState()
             }
-        }
-        screensLock.unlock()
-        
-        if updatedScreens {
-            objectWillChange.send()
-            updatePlaybackState()
         }
     }
     
