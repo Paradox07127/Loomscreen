@@ -330,14 +330,6 @@ class SettingsManager {
     }
 }
 
-// MARK: - Settings Export Structure
-struct SettingsExport: Codable {
-    let configurations: [ScreenConfiguration]
-    let globalSettings: GlobalSettings
-    let exportDate: Date
-    let appVersion: String
-}
-
 // MARK: - URL Extension
 extension URL {
     // Check if URL exists
