@@ -3,62 +3,8 @@ import Combine
 import AVKit
 import os.log
 
-
-// Represents frame rate limitation options
-enum FrameRateLimit: Int, CaseIterable, Identifiable, Codable {
-    case fps30 = 30
-    case fps60 = 60
-    case unlimited = 0
-    
-    var id: Int { rawValue }
-    
-    var description: String {
-        switch self {
-        case .fps30: return "30 FPS"
-        case .fps60: return "60 FPS"
-        case .unlimited: return "Unlimited"
-        }
-    }
-    
-    var iconName: String {
-        switch self {
-        case .fps30: return "tortoise"
-        case .fps60: return "hare"
-        case .unlimited: return "infinity"
-        }
-    }
-    
-    // Calculate the effective limit taking into account both the video's native frame rate and the screen refresh rate
-    func getEffectiveLimit(videoFrameRate: Double, screenRefreshRate: Double) -> Float {
-        // Handle unlimited case
-        if self == .unlimited {
-            // When unlimited is selected, respect screen refresh rate as the maximum
-            // to avoid wasting GPU resources on frames that won't be visible
-            if screenRefreshRate > 0 && videoFrameRate > screenRefreshRate {
-                return Float(screenRefreshRate)
-            }
-            return 0 // No limit (will use video's native frame rate)
-        }
-        
-        // Get the raw limit value
-        let rawLimit = Float(self.rawValue)
-        
-        // If screen refresh rate is lower than the selected limit, cap at screen refresh rate
-        if screenRefreshRate > 0 && screenRefreshRate < Double(rawLimit) {
-            return Float(screenRefreshRate)
-        }
-        
-        // If original frame rate is lower than the limit, no need to limit
-        if videoFrameRate > 0 && videoFrameRate < Double(rawLimit) {
-            return 0 // No limit needed (already below threshold)
-        }
-        
-        // Apply the selected limit
-        return rawLimit
-    }
-}
-
 // Manages video playback on multiple screens
+@MainActor
 final class ScreenManager: ObservableObject {
     // MARK: - Properties
     
@@ -1080,13 +1026,9 @@ final class ScreenManager: ObservableObject {
     }
     
     // MARK: - Cleanup
-    deinit {
+    nonisolated deinit {
         Logger.debug("ScreenManager deinitializing", category: .lifecycle)
-        cleanupTasks.removeAll()
-        screensLock.lock()
-        for screen in _screens {
-            cleanupScreen(screen)
-        }
-        screensLock.unlock()
+        // Note: We cannot call MainActor-isolated methods from deinit
+        // The resources will be cleaned up by ARC when the Screen objects are deallocated
     }
 }

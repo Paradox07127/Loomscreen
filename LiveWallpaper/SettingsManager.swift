@@ -4,97 +4,6 @@ import AppKit
 import AVFoundation
 import ServiceManagement
 
-// Configuration for a single screen's video wallpaper
-struct ScreenConfiguration: Codable, Equatable {
-    let screenID: UInt32
-    let videoBookmarkData: Data
-    let playbackSpeed: Double
-    let fitMode: VideoFitMode
-    let pauseOnBattery: Bool
-    let frameRateLimit: FrameRateLimit
-    
-    init(
-        screenID: CGDirectDisplayID,
-        videoBookmarkData: Data,
-        playbackSpeed: Double = 1.0,
-        fitMode: VideoFitMode = .aspectFill,
-        pauseOnBattery: Bool = false,
-        frameRateLimit: FrameRateLimit = .fps60
-    ) {
-        self.screenID = screenID
-        self.videoBookmarkData = videoBookmarkData
-        self.playbackSpeed = playbackSpeed
-        self.fitMode = fitMode
-        self.pauseOnBattery = pauseOnBattery
-        self.frameRateLimit = frameRateLimit
-    }
-    
-    static func == (lhs: ScreenConfiguration, rhs: ScreenConfiguration) -> Bool {
-        lhs.screenID == rhs.screenID &&
-        lhs.videoBookmarkData == rhs.videoBookmarkData &&
-        lhs.playbackSpeed == rhs.playbackSpeed &&
-        lhs.fitMode == rhs.fitMode &&
-        lhs.pauseOnBattery == rhs.pauseOnBattery &&
-        lhs.frameRateLimit == rhs.frameRateLimit
-    }
-}
-
-// Video fit modes
-enum VideoFitMode: String, Codable, CaseIterable, Identifiable {
-    case aspectFill = "Fill"
-    case aspectFit = "Fit"
-    case stretch = "Stretch"
-    
-    var id: String { rawValue }
-    
-    var description: String {
-        switch self {
-        case .aspectFill: return "Fill screen (may crop video)"
-        case .aspectFit: return "Fit entire video (may show borders)"
-        case .stretch: return "Stretch to fill screen (may distort)"
-        }
-    }
-    
-    var iconName: String {
-        switch self {
-        case .aspectFill: return "rectangle.fill"
-        case .aspectFit: return "rectangle"
-        case .stretch: return "arrow.up.left.and.arrow.down.right"
-        }
-    }
-    
-    var avLayerVideoGravity: AVLayerVideoGravity {
-        switch self {
-        case .aspectFill: return .resizeAspectFill
-        case .aspectFit: return .resizeAspect
-        case .stretch: return .resize
-        }
-    }
-}
-
-// Global application settings
-struct GlobalSettings: Codable {
-    var globalPauseOnBattery: Bool
-    var preservePlaybackOnLock: Bool
-    var startOnLogin: Bool
-    var minimumBatteryLevel: Double?
-    var defaultFrameRateLimit: FrameRateLimit
-    
-    init(
-            globalPauseOnBattery: Bool = true,
-            preservePlaybackOnLock: Bool = false,
-            startOnLogin: Bool = false,
-            minimumBatteryLevel: Double? = nil,
-            defaultFrameRateLimit: FrameRateLimit = .fps60
-        ) {
-            self.globalPauseOnBattery = globalPauseOnBattery
-            self.preservePlaybackOnLock = preservePlaybackOnLock
-            self.startOnLogin = startOnLogin
-            self.minimumBatteryLevel = minimumBatteryLevel
-            self.defaultFrameRateLimit = defaultFrameRateLimit
-        }
-}
-
 // Manager for persisting and retrieving settings
 class SettingsManager {
     static let shared = SettingsManager()
@@ -205,36 +114,29 @@ class SettingsManager {
     
     private func applyStartOnLoginSetting(_ startOnLogin: Bool) {
         Logger.debug("Setting 'Start at Login' to \(startOnLogin)", category: .settings)
-        
-        if #available(macOS 13, *) {
-            do {
-                let service = SMAppService.mainApp
-                
-                if startOnLogin {
+
+        do {
+            let service = SMAppService.mainApp
+
+            if startOnLogin {
+                if service.status == .notRegistered {
                     try service.register()
-                    Logger.info("Successfully added to login items using SMAppService", category: .settings)
-                } else {
-                    try service.unregister()
-                    Logger.info("Successfully removed from login items using SMAppService", category: .settings)
+                    Logger.info("Successfully added to login items", category: .settings)
                 }
-            } catch {
-                Logger.error("Failed to \(startOnLogin ? "add to" : "remove from") login items: \(error.localizedDescription)", category: .settings)
-            }
-        } else {
-            // For older macOS versions, use the classic SMLoginItemSetEnabled API
-            guard let bundleIdentifier = Bundle.main.bundleIdentifier else {
-                Logger.error("Failed to get bundle identifier", category: .settings)
-                return
-            }
-            
-            let loginItemSuccess = SMLoginItemSetEnabled(bundleIdentifier as CFString, startOnLogin)
-            
-            if loginItemSuccess {
-                Logger.info("Successfully \(startOnLogin ? "added to" : "removed from") login items", category: .settings)
             } else {
-                Logger.error("Failed to \(startOnLogin ? "add to" : "remove from") login items", category: .settings)
+                if service.status == .enabled {
+                    try service.unregister()
+                    Logger.info("Successfully removed from login items", category: .settings)
+                }
             }
+        } catch {
+            Logger.error("Failed to \(startOnLogin ? "add to" : "remove from") login items: \(error.localizedDescription)", category: .settings)
         }
+    }
+
+    /// Check if the app is currently set to start at login
+    func isStartOnLoginEnabled() -> Bool {
+        return SMAppService.mainApp.status == .enabled
     }
     
     // MARK: - Clean Settings

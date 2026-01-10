@@ -152,34 +152,34 @@ struct Sidebar: View {
 struct ScreenRow: View {
     @ObservedObject var screen: Screen
     @State private var isPlaying: Bool = false
-    
+
     var body: some View {
         HStack(spacing: 12) {
             ZStack {
                 RoundedRectangle(cornerRadius: 4)
                     .fill(Color.gray.opacity(0.1))
                     .frame(width: 32, height: 24)
-                
+
                 Image(systemName: screen.videoPlayer != nil ? "display.and.arrow.down" : "display")
                     .foregroundColor(screen.videoPlayer != nil ? .blue : .gray)
             }
-            
+
             VStack(alignment: .leading, spacing: 4) {
                 Text(screen.name)
                     .fontWeight(.medium)
                     .lineLimit(1)
-                
+
                 HStack(spacing: 6) {
                     Text("\(Int(screen.frame.width))×\(Int(screen.frame.height))")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    
+
                     if screen.videoPlayer != nil {
                         HStack(spacing: 2) {
                             Circle()
                                 .fill(isPlaying ? Color.green : Color.orange)
                                 .frame(width: 6, height: 6)
-                            
+
                             Text(isPlaying ? "Playing" : "Paused")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
@@ -191,37 +191,25 @@ struct ScreenRow: View {
         .padding(.vertical, 2)
         .onAppear {
             updatePlaybackState()
-            setupObserver()
         }
-    }
-    
-    private func setupObserver() {
-        // Create a notification observer to monitor playback state changes
-        NotificationCenter.default.addObserver(
-            forName: WallpaperVideoPlayer.didChangePlaybackStateNotification,
-            object: nil,
-            queue: .main
-        ) { [weak screen] notification in
+        .onReceive(NotificationCenter.default.publisher(for: WallpaperVideoPlayer.didChangePlaybackStateNotification)) { notification in
             guard let videoPlayer = notification.object as? WallpaperVideoPlayer,
-                  videoPlayer === screen?.videoPlayer else {
+                  videoPlayer === screen.videoPlayer else {
                 return
             }
-            
-            if let isPlaying = notification.userInfo?["isPlaying"] as? Bool {
-                self.isPlaying = isPlaying
+            if let playing = notification.userInfo?["isPlaying"] as? Bool {
+                isPlaying = playing
             }
         }
-        
-        // Also observe screen changes
-        NotificationCenter.default.addObserver(
-            forName: .init("ScreensRefreshed"),
-            object: nil,
-            queue: .main
-        ) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: .init("ScreensRefreshed"))) { _ in
             updatePlaybackState()
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(screen.name), \(Int(screen.frame.width)) by \(Int(screen.frame.height)) pixels")
+        .accessibilityValue(screen.videoPlayer != nil ? (isPlaying ? "Playing video" : "Video paused") : "No video configured")
+        .accessibilityHint("Double-tap to configure this display")
     }
-    
+
     private func updatePlaybackState() {
         isPlaying = screen.videoPlayer?.isPlaying ?? false
     }

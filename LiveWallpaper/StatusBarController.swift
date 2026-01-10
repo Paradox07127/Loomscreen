@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import Combine
 
+@MainActor
 class StatusBarController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem
     private let screenManager: ScreenManager
@@ -112,7 +113,7 @@ class StatusBarController: NSObject, NSMenuDelegate {
     private func setupMenu() {
         let menu = NSMenu()
         menu.delegate = self
-        
+
         // Header item with app name (non-interactive)
         let headerItem = NSMenuItem(title: "LiveWallpaper", action: nil, keyEquivalent: "")
         headerItem.isEnabled = false
@@ -123,36 +124,49 @@ class StatusBarController: NSObject, NSMenuDelegate {
                 .foregroundColor: NSColor.labelColor
             ]
         )
-        
-        // Settings menu item
+
+        // Settings menu item (⌘,)
         let settingsItem = createMenuItem(
             title: "Open Settings...",
             action: #selector(showSettings),
-            keyEquivalent: ","
+            keyEquivalent: ",",
+            modifiers: .command
         )
         settingsItem.image = NSImage(systemSymbolName: "gear", accessibilityDescription: "Settings")
-        
+
         // Displays submenu
         let displaysMenu = NSMenu()
         let displaysItem = NSMenuItem(title: "Displays", action: nil, keyEquivalent: "")
         displaysItem.submenu = displaysMenu
-        
-        // Playback control items
+
+        // Playback control items (⌘P)
         let playPauseItem = createMenuItem(
             title: "Play/Pause All",
             action: #selector(togglePlayback),
-            keyEquivalent: "p"
+            keyEquivalent: "p",
+            modifiers: .command
         )
-        
-        // Quit item
+        playPauseItem.image = NSImage(systemSymbolName: "playpause", accessibilityDescription: "Play/Pause")
+
+        // Reload all videos (⌘R)
+        let reloadItem = createMenuItem(
+            title: "Reload All Videos",
+            action: #selector(reloadAllVideos),
+            keyEquivalent: "r",
+            modifiers: .command
+        )
+        reloadItem.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Reload")
+
+        // Quit item (⌘Q)
         let quitItem = createMenuItem(
             title: "Quit LiveWallpaper",
             action: #selector(NSApplication.terminate),
-            keyEquivalent: "q"
+            keyEquivalent: "q",
+            modifiers: .command
         )
         quitItem.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Quit")
         quitItem.target = NSApp
-        
+
         // Assemble menu
         menu.addItem(headerItem)
         menu.addItem(NSMenuItem.separator())
@@ -160,14 +174,16 @@ class StatusBarController: NSObject, NSMenuDelegate {
         menu.addItem(NSMenuItem.separator())
         menu.addItem(displaysItem)
         menu.addItem(playPauseItem)
+        menu.addItem(reloadItem)
         menu.addItem(NSMenuItem.separator())
         menu.addItem(quitItem)
-        
+
         statusItem.menu = menu
     }
     
-    private func createMenuItem(title: String, action: Selector?, keyEquivalent: String) -> NSMenuItem {
+    private func createMenuItem(title: String, action: Selector?, keyEquivalent: String, modifiers: NSEvent.ModifierFlags = .command) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: keyEquivalent)
+        item.keyEquivalentModifierMask = modifiers
         item.target = self
         return item
     }
@@ -244,9 +260,14 @@ class StatusBarController: NSObject, NSMenuDelegate {
     }
     
     // MARK: - Playback Control
-    
+
     @objc private func togglePlayback() {
         screenManager.togglePlayback()
+    }
+
+    @objc private func reloadAllVideos() {
+        Logger.info("Reloading all videos via menu shortcut", category: .ui)
+        screenManager.reloadAllScreens()
     }
     
     // MARK: - Menu Delegate
