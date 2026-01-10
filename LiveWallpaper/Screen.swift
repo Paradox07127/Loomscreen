@@ -8,7 +8,7 @@ class Screen: Identifiable, Hashable, ObservableObject {
     let name: String
     let frame: CGRect
     let nsScreen: NSScreen
-    
+
     // A method to notify observers of playback state changes
     @objc func notifyPlaybackStateChanged() {
         objectWillChange.send()
@@ -23,7 +23,7 @@ class Screen: Identifiable, Hashable, ObservableObject {
                     name: WallpaperVideoPlayer.didChangePlaybackStateNotification,
                     object: oldPlayer)
             }
-            
+
             // Setup observation for new player
             if let newPlayer = videoPlayer {
                 NotificationCenter.default.addObserver(
@@ -32,14 +32,18 @@ class Screen: Identifiable, Hashable, ObservableObject {
                     name: WallpaperVideoPlayer.didChangePlaybackStateNotification,
                     object: newPlayer
                 )
+
+                // Sync preview player with wallpaper player if both exist
+                syncPreviewToWallpaper()
             }
         }
     }
-    
+
     // Track if a preview player change should trigger UI updates
     private var skipPreviewPlayerNotification = false
     private var previewPlayerObserver: AnyCancellable?
-    
+    private var syncTimer: Timer?
+
     @Published var previewPlayer: AVPlayer? {
         willSet {
             if !skipPreviewPlayerNotification {
@@ -47,6 +51,9 @@ class Screen: Identifiable, Hashable, ObservableObject {
                 if let oldPlayer = previewPlayer {
                     oldPlayer.pause()
                 }
+                // Stop sync timer
+                syncTimer?.invalidate()
+                syncTimer = nil
             }
         }
         didSet {
@@ -54,26 +61,67 @@ class Screen: Identifiable, Hashable, ObservableObject {
                 // Set up new player
                 if let newPlayer = previewPlayer {
                     newPlayer.volume = 0
-                    
+                    newPlayer.isMuted = true
+
                     // Disable audio session to prevent AirPods from connecting
-                                    if let playerItem = newPlayer.currentItem {
-                                        playerItem.audioTimePitchAlgorithm = AVAudioTimePitchAlgorithm.spectral
-                                        // Make sure audio is disabled in all tracks
-                                        let audioTracks = playerItem.tracks.filter { $0.assetTrack?.mediaType == .audio }
-                                        for track in audioTracks {
-                                            track.isEnabled = false
-                                        }
-                                    }
-                    
+                    if let playerItem = newPlayer.currentItem {
+                        playerItem.audioTimePitchAlgorithm = AVAudioTimePitchAlgorithm.spectral
+                        // Make sure audio is disabled in all tracks
+                        let audioTracks = playerItem.tracks.filter { $0.assetTrack?.mediaType == .audio }
+                        for track in audioTracks {
+                            track.isEnabled = false
+                        }
+                    }
+
                     // Set up observation for player status
                     previewPlayerObserver = newPlayer.publisher(for: \.status)
-                        .sink { [] status in
+                        .sink { [weak self] status in
                             if status == .readyToPlay {
                                 newPlayer.play()
+                                // Sync with wallpaper player once ready
+                                self?.syncPreviewToWallpaper()
                             }
                         }
+
+                    // Start periodic sync with wallpaper player
+                    startSyncTimer()
                 }
             }
+        }
+    }
+
+    /// Sync preview player position to match wallpaper player
+    func syncPreviewToWallpaper() {
+        guard let wallpaperPlayer = videoPlayer?.player,
+              let preview = previewPlayer else { return }
+
+        let wallpaperTime = wallpaperPlayer.currentTime()
+        if wallpaperTime.isValid && !wallpaperTime.seconds.isNaN {
+            preview.seek(to: wallpaperTime, toleranceBefore: .zero, toleranceAfter: .zero)
+        }
+
+        // Match playback rate
+        if let rate = videoPlayer?.player?.rate {
+            preview.rate = rate
+        }
+    }
+
+    /// Sync wallpaper player position to match preview (for seeking in UI)
+    func syncWallpaperToPreview() {
+        guard let wallpaperPlayer = videoPlayer?.player,
+              let preview = previewPlayer else { return }
+
+        let previewTime = preview.currentTime()
+        if previewTime.isValid && !previewTime.seconds.isNaN {
+            wallpaperPlayer.seek(to: previewTime, toleranceBefore: .zero, toleranceAfter: .zero)
+        }
+    }
+
+    private func startSyncTimer() {
+        syncTimer?.invalidate()
+        // Sync every 5 seconds to keep players roughly aligned
+        syncTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+            self?.syncPreviewToWallpaper()
         }
     }
     
@@ -124,6 +172,8 @@ class Screen: Identifiable, Hashable, ObservableObject {
     }
     
     deinit {
+        syncTimer?.invalidate()
+        syncTimer = nil
         previewPlayerObserver?.cancel()
         previewPlayer?.pause()
         previewPlayer = nil

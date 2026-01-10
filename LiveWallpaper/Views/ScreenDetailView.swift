@@ -1,37 +1,44 @@
 import SwiftUI
 import AVKit
+import Combine
+import UniformTypeIdentifiers
 
 struct ScreenDetailView: View {
     @ObservedObject var screen: Screen
     @EnvironmentObject private var screenManager: ScreenManager
-    
+
     @State private var playbackSpeed: Double = 1.0
     @State private var selectedFitMode: VideoFitMode = .aspectFill
     @State private var isLoading: Bool = false
     @State private var isPlayerPlaying: Bool = false
     @State private var showErrorAlert = false
     @State private var errorMessage = ""
-    @State private var isViewActive = false
     @State private var currentVideoPosition: Double = 0
     @State private var videoDuration: Double = 1.0
-    
+
+    // Timer management
+    @State private var playbackStateTimer: Timer?
+    @State private var videoProgressTimer: Timer?
+
+    // Drag and drop
+    @State private var isDraggingOver = false
+
     // Layout variables
     @State private var useCompactLayout = false
     @Environment(\.colorScheme) private var colorScheme
-    
+
     var body: some View {
         ScrollView {
-            VStack(spacing: 16) { // Reduced spacing from 20 to 16
+            VStack(spacing: 16) {
                 displayHeader
-                
+
                 if isLoading {
                     loadingView
                 } else if screen.videoPlayer != nil || screen.previewPlayer != nil {
-                    // Use grid layout for better space distribution
                     VStack(spacing: 16) {
                         videoPreviewSection
                             .frame(minHeight: 280, maxHeight: 380)
-                        
+
                         if useCompactLayout {
                             VStack(spacing: 16) {
                                 playbackControlsSection
@@ -51,12 +58,97 @@ struct ScreenDetailView: View {
                 }
             }
             .padding(20)
-            // Reduced animation duration for snappier UI
             .animation(.easeInOut(duration: 0.15), value: useCompactLayout)
             .animation(.easeInOut(duration: 0.15), value: isLoading)
         }
         .background(Color(NSColor.windowBackgroundColor))
-        
+        .onAppear {
+            loadScreenConfiguration()
+            startTimers()
+        }
+        .onDisappear {
+            stopTimers()
+        }
+        .alert("Error", isPresented: $showErrorAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(errorMessage)
+        }
+        .onDrop(of: [.movie, .video, .mpeg4Movie, .quickTimeMovie, .avi], isTargeted: $isDraggingOver) { providers in
+            handleDrop(providers: providers)
+            return true
+        }
+    }
+
+    // MARK: - Drag and Drop
+
+    private func handleDrop(providers: [NSItemProvider]) -> Bool {
+        guard let provider = providers.first else { return false }
+
+        // Handle file URLs
+        if provider.hasItemConformingToTypeIdentifier(UTType.movie.identifier) {
+            provider.loadItem(forTypeIdentifier: UTType.movie.identifier, options: nil) { item, error in
+                DispatchQueue.main.async {
+                    if let error = error {
+                        self.errorMessage = "Failed to load dropped file: \(error.localizedDescription)"
+                        self.showErrorAlert = true
+                        return
+                    }
+
+                    var url: URL?
+                    if let data = item as? Data {
+                        url = URL(dataRepresentation: data, relativeTo: nil)
+                    } else if let itemURL = item as? URL {
+                        url = itemURL
+                    }
+
+                    if let videoURL = url {
+                        self.handleSelectedFile(url: videoURL)
+                    }
+                }
+            }
+            return true
+        }
+
+        return false
+    }
+
+    // MARK: - Timer Management
+
+    private func startTimers() {
+        // Playback state observer timer
+        playbackStateTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+            if let videoPlayer = screen.videoPlayer {
+                let currentPlaying = videoPlayer.isPlaying
+                if isPlayerPlaying != currentPlaying {
+                    withAnimation {
+                        isPlayerPlaying = currentPlaying
+                    }
+                }
+            }
+        }
+
+        // Video progress observer timer
+        videoProgressTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+            if let player = screen.previewPlayer {
+                let currentTime = player.currentTime().seconds
+                if !currentTime.isNaN && !currentTime.isInfinite {
+                    currentVideoPosition = currentTime
+                }
+
+                let duration = player.currentItem?.duration.seconds ?? 0
+                if !duration.isNaN && !duration.isInfinite && duration > 0 {
+                    videoDuration = duration
+                }
+            }
+        }
+    }
+
+    private func stopTimers() {
+        playbackStateTimer?.invalidate()
+        playbackStateTimer = nil
+        videoProgressTimer?.invalidate()
+        videoProgressTimer = nil
     }
     // MARK: - UI Components
     
@@ -155,43 +247,58 @@ struct ScreenDetailView: View {
     
     private var enhancedEmptyStateView: some View {
         VStack(spacing: 24) {
-            Image(systemName: "film")
+            Image(systemName: isDraggingOver ? "arrow.down.doc.fill" : "film")
                 .font(.system(size: 60))
-                .foregroundColor(.accentColor)
+                .foregroundColor(isDraggingOver ? .green : .accentColor)
                 .padding(.bottom, 10)
-            
-            Text("No Video Selected")
+                .animation(.easeInOut(duration: 0.2), value: isDraggingOver)
+
+            Text(isDraggingOver ? "Drop Video Here" : "No Video Selected")
                 .font(.title2)
                 .fontWeight(.medium)
-            
-            Text("Choose a video file to display as your desktop wallpaper")
+                .animation(.easeInOut(duration: 0.2), value: isDraggingOver)
+
+            Text(isDraggingOver ? "Release to set as wallpaper" : "Drag and drop a video file or click to browse")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 300)
-            
-            Button(action: showFilePicker) {
-                Label("Select Video File", systemImage: "plus.circle.fill")
-                    .font(.headline)
-                    .padding(.vertical, 12)
-                    .padding(.horizontal, 24)
-                    .background(Color.accentColor)
-                    .foregroundColor(.white)
-                    .cornerRadius(10)
+                .animation(.easeInOut(duration: 0.2), value: isDraggingOver)
+
+            if !isDraggingOver {
+                Button(action: showFilePicker) {
+                    Label("Select Video File", systemImage: "plus.circle.fill")
+                        .font(.headline)
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 24)
+                        .background(Color.accentColor)
+                        .foregroundColor(.white)
+                        .cornerRadius(10)
+                }
+                .buttonStyle(.plain)
+                .shadow(color: Color.accentColor.opacity(0.3), radius: 5, x: 0, y: 2)
+                .padding(.top, 10)
+
+                Text("Supported formats: MP4, MOV, M4V, AVI")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .padding(.top, 4)
             }
-            .buttonStyle(.plain)
-            .shadow(color: Color.accentColor.opacity(0.3), radius: 5, x: 0, y: 2)
-            .padding(.top, 10)
-            
-            Text("Supported formats: MP4, MOV, M4V")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .padding(.top, 4)
         }
         .padding(40)
         .frame(maxWidth: .infinity, minHeight: 400)
-        .background(Color(colorScheme == .dark ? NSColor.darkGray : NSColor.lightGray).opacity(0.1))
-        .cornerRadius(16)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color(colorScheme == .dark ? NSColor.darkGray : NSColor.lightGray).opacity(isDraggingOver ? 0.2 : 0.1))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(
+                    isDraggingOver ? Color.green : Color.clear,
+                    style: StrokeStyle(lineWidth: 3, dash: isDraggingOver ? [] : [8])
+                )
+        )
+        .animation(.easeInOut(duration: 0.2), value: isDraggingOver)
         .transition(.opacity)
     }
     
@@ -523,48 +630,7 @@ struct ScreenDetailView: View {
     }
     
     // MARK: - Helper Methods
-    
-    private func setupPlaybackStateObserver() {
-        // Create a timer to check the playback state
-        Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { timer in
-            if !isViewActive {
-                timer.invalidate()
-                return
-            }
-            
-            if let videoPlayer = screen.videoPlayer {
-                let currentPlaying = videoPlayer.isPlaying
-                if isPlayerPlaying != currentPlaying {
-                    withAnimation {
-                        isPlayerPlaying = currentPlaying
-                    }
-                }
-            }
-        }
-    }
-    
-    private func setupVideoProgressObserver() {
-        // Update the time position for the slider
-        Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { timer in
-            if !isViewActive {
-                timer.invalidate()
-                return
-            }
-            
-            if let player = screen.previewPlayer {
-                let currentTime = player.currentTime().seconds
-                if !currentTime.isNaN && !currentTime.isInfinite {
-                    currentVideoPosition = currentTime
-                }
-                
-                let duration = player.currentItem?.duration.seconds ?? 0
-                if !duration.isNaN && !duration.isInfinite && duration > 0 {
-                    videoDuration = duration
-                }
-            }
-        }
-    }
-    
+
     func setupPreviewPlayer() {
         // Only create a preview player if it doesn't already exist
         guard screen.previewPlayer == nil else {
@@ -821,7 +887,7 @@ struct FileSelectView: View {
 struct PlaybackButton: View {
     let isPlaying: Bool
     let action: () -> Void
-    
+
     var body: some View {
         Button(action: action) {
             VStack(spacing: 8) {
@@ -831,13 +897,13 @@ struct PlaybackButton: View {
                         .fill(Color.accentColor)
                         .frame(width: 60, height: 60)
                         .shadow(color: Color.accentColor.opacity(0.3), radius: 4, x: 0, y: 2)
-                    
+
                     Image(systemName: isPlaying ? "pause.fill" : "play.fill")
                         .font(.system(size: 24))
                         .foregroundColor(.white)
-                        .offset(x: isPlaying ? 0 : 2) // Slight offset for play icon to appear centered
+                        .offset(x: isPlaying ? 0 : 2)
                 }
-                
+
                 // Label text
                 Text(isPlaying ? "Pause" : "Play")
                     .font(.callout)
@@ -848,6 +914,8 @@ struct PlaybackButton: View {
         }
         .buttonStyle(.plain)
         .transition(.scale.combined(with: .opacity))
+        .accessibilityLabel(isPlaying ? "Pause video" : "Play video")
+        .accessibilityHint(isPlaying ? "Double-tap to pause the wallpaper video" : "Double-tap to play the wallpaper video")
     }
 }
 
@@ -877,14 +945,14 @@ struct FitModeOption: View {
     let mode: VideoFitMode
     let isSelected: Bool
     let action: () -> Void
-    
+
     var body: some View {
         VStack(spacing: 8) {
             ZStack {
                 RoundedRectangle(cornerRadius: 8)
                     .fill(isSelected ? Color.accentColor.opacity(0.2) : Color.gray.opacity(0.1))
                     .frame(width: 80, height: 60)
-                
+
                 Image(systemName: mode.iconName)
                     .font(.system(size: 24))
                     .foregroundColor(isSelected ? .accentColor : .gray)
@@ -893,11 +961,11 @@ struct FitModeOption: View {
                 RoundedRectangle(cornerRadius: 8)
                     .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
             )
-            
+
             Text(mode.rawValue)
                 .font(.caption)
                 .foregroundColor(isSelected ? .primary : .secondary)
-            
+
             Text(mode.description)
                 .font(.caption2)
                 .foregroundColor(.secondary)
@@ -909,6 +977,11 @@ struct FitModeOption: View {
         .onTapGesture {
             action()
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(mode.rawValue) mode")
+        .accessibilityValue(isSelected ? "Selected" : "Not selected")
+        .accessibilityHint(mode.description)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 

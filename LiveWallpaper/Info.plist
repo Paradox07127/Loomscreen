@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
@@ -22,11 +24,6 @@
 			<string>FileDocument</string>
 		</dict>
 	</array>
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<key>NSAllowsArbitraryLoads</key>
-		<true/>
-	</dict>
 	<key>NSPowerMonitorUsageDescription</key>
 	<string>This app needs to monitor power status to manage video playback based on battery state.</string>
 	<key>NSSystemPreferencesUsageDescription</key>
