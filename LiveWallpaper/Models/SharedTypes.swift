@@ -99,10 +99,10 @@ enum VideoFitMode: String, Codable, CaseIterable, Identifiable {
 struct ScreenConfiguration: Codable, Equatable {
     let screenID: UInt32
     let videoBookmarkData: Data
-    let playbackSpeed: Double
-    let fitMode: VideoFitMode
-    let pauseOnBattery: Bool
-    let frameRateLimit: FrameRateLimit
+    var playbackSpeed: Double
+    var fitMode: VideoFitMode
+    var pauseOnBattery: Bool
+    var frameRateLimit: FrameRateLimit
 
     init(
         screenID: CGDirectDisplayID,
@@ -120,31 +120,18 @@ struct ScreenConfiguration: Codable, Equatable {
         self.frameRateLimit = frameRateLimit
     }
 
-    static func == (lhs: ScreenConfiguration, rhs: ScreenConfiguration) -> Bool {
-        lhs.screenID == rhs.screenID &&
-        lhs.videoBookmarkData == rhs.videoBookmarkData &&
-        lhs.playbackSpeed == rhs.playbackSpeed &&
-        lhs.fitMode == rhs.fitMode &&
-        lhs.pauseOnBattery == rhs.pauseOnBattery &&
-        lhs.frameRateLimit == rhs.frameRateLimit
-    }
-
-    /// Create a copy with updated values
-    func with(
-        videoBookmarkData: Data? = nil,
-        playbackSpeed: Double? = nil,
-        fitMode: VideoFitMode? = nil,
-        pauseOnBattery: Bool? = nil,
-        frameRateLimit: FrameRateLimit? = nil
-    ) -> ScreenConfiguration {
-        ScreenConfiguration(
-            screenID: self.screenID,
-            videoBookmarkData: videoBookmarkData ?? self.videoBookmarkData,
-            playbackSpeed: playbackSpeed ?? self.playbackSpeed,
-            fitMode: fitMode ?? self.fitMode,
-            pauseOnBattery: pauseOnBattery ?? self.pauseOnBattery,
-            frameRateLimit: frameRateLimit ?? self.frameRateLimit
+    /// Create a copy with updated bookmark data (for stale bookmark refresh)
+    func withUpdatedBookmark(_ bookmarkData: Data) -> ScreenConfiguration {
+        var copy = self
+        copy = ScreenConfiguration(
+            screenID: screenID,
+            videoBookmarkData: bookmarkData,
+            playbackSpeed: playbackSpeed,
+            fitMode: fitMode,
+            pauseOnBattery: pauseOnBattery,
+            frameRateLimit: frameRateLimit
         )
+        return copy
     }
 }
 

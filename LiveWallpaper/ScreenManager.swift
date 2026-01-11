@@ -45,28 +45,21 @@ final class ScreenManager: ObservableObject {
     }
     
     // MARK: - Configuration Cache Management
+
     private func cacheConfiguration(_ configuration: ScreenConfiguration) {
-        configLock.lock()
-        defer { configLock.unlock() }
         configurationCache[configuration.screenID] = configuration
     }
-    
+
     private func getCachedConfiguration(for screenID: CGDirectDisplayID) -> ScreenConfiguration? {
-        configLock.lock()
-        defer { configLock.unlock() }
-        return configurationCache[screenID]
+        configurationCache[screenID]
     }
-    
+
     private func removeCachedConfiguration(for screenID: CGDirectDisplayID) {
-        configLock.lock()
-        defer { configLock.unlock() }
         configurationCache.removeValue(forKey: screenID)
     }
-    
+
     private func getAllCachedScreenIDs() -> [CGDirectDisplayID] {
-        configLock.lock()
-        defer { configLock.unlock() }
-        return Array(configurationCache.keys)
+        Array(configurationCache.keys)
     }
     
     // MARK: - Observers Setup
@@ -104,67 +97,43 @@ final class ScreenManager: ObservableObject {
     
     private func handleScreenParameterChange() {
         Logger.info("Screen parameters changed - updating all windows", category: .screenManager)
-        
+
         // First update screen information without recreating video players
         refreshScreens(preserveVideoPlayers: true)
-        
-        // Force a delay to ensure screen information is fully updated
+
+        // Delay to ensure screen information is fully updated
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-            guard let self = self else { return }
-            
-            // Then update window frames for each video player using the exact frame of each screen
-            for screen in self.screens {
-                if let player = screen.videoPlayer {
-                    // Get the actual NSScreen object for this screen ID
-                    if let nsScreen = NSScreen.screens.first(where: {
-                        ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID) == screen.id
-                    }) {
-                        // Use the exact frame from NSScreen including origin coordinates
-                        let exactFrame = nsScreen.frame
-                        
-                        // Log detailed screen information
-                        Logger.debug("Screen \(screen.id) (\(nsScreen.localizedName)) frame: \(exactFrame) origin: (\(exactFrame.origin.x), \(exactFrame.origin.y))", category: .screenManager)
-                        
-                        // Use the player's method to update window with exact coordinates
-                        player.handleScreenParameterChange(exactFrame)
-                        
-                        Logger.info("Updated window frame for screen \(screen.id) to exact coordinates: \(exactFrame)", category: .screenManager)
-                    } else {
-                        // Fallback if we can't find the screen
-                        Logger.warning("Could not find NSScreen for screen ID \(screen.id), using stored frame", category: .screenManager)
-                        player.handleScreenParameterChange(screen.frame)
-                    }
-                }
-            }
-            
-            // Add an additional check after a short delay to ensure windows stay in position
+            self?.updateAllWindowFrames()
+
+            // Additional check after a short delay to ensure windows stay in position
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                self?.verifyWindowPositions()
+                self?.updateAllWindowFrames()
             }
         }
-        
-        // Notify UI of changes
+
         objectWillChange.send()
     }
-    
-    // New method to verify window positions match their screens
-    private func verifyWindowPositions() {
+
+    /// Updates all video player window frames to match their screen positions
+    private func updateAllWindowFrames() {
         for screen in screens {
-            if let player = screen.videoPlayer {
-                // Get the actual NSScreen object for this screen ID
-                if let nsScreen = NSScreen.screens.first(where: {
-                    ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID) == screen.id
-                }) {
-                    // Get the exact frame from NSScreen including origin coordinates
-                    let exactFrame = nsScreen.frame
-                    
-                    // Instead of directly checking the window frame, just reapply the correct frame
-                    // This ensures the window is in the right position without accessing private members
-                    player.updateWindowFrame(exactFrame)
-                    
-                    Logger.debug("Verified position for screen \(screen.id) (\(nsScreen.localizedName)): \(exactFrame)", category: .screenManager)
-                }
+            guard let player = screen.videoPlayer else { continue }
+
+            if let nsScreen = findNSScreen(for: screen.id) {
+                let frame = nsScreen.frame
+                Logger.debug("Screen \(screen.id) (\(nsScreen.localizedName)) frame: \(frame)", category: .screenManager)
+                player.updateWindowFrame(frame)
+            } else {
+                Logger.warning("Could not find NSScreen for screen ID \(screen.id), using stored frame", category: .screenManager)
+                player.updateWindowFrame(screen.frame)
             }
+        }
+    }
+
+    /// Finds the NSScreen object for a given display ID
+    private func findNSScreen(for screenID: CGDirectDisplayID) -> NSScreen? {
+        NSScreen.screens.first { nsScreen in
+            (nsScreen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID) == screenID
         }
     }
     
@@ -205,9 +174,7 @@ final class ScreenManager: ObservableObject {
             }
             
             // Also remove from last applied configuration cache
-            configUpdateLock.lock()
             lastAppliedConfigHashes.removeValue(forKey: screenID)
-            configUpdateLock.unlock()
         }
         
         // Preserve existing video players for screens that are still present
@@ -264,9 +231,7 @@ final class ScreenManager: ObservableObject {
         SettingsManager.shared.cleanSettingsForScreen(screen.id)
 
         // Remove from cache
-        configLock.lock()
         configurationCache.removeValue(forKey: screen.id)
-        configLock.unlock()
 
         // Remove from power management tracking
         screensPausedByPowerManagement.remove(screen.id)
@@ -393,18 +358,9 @@ final class ScreenManager: ObservableObject {
     }
     
     private func updateExistingVideoConfiguration(_ existingConfig: ScreenConfiguration, url: URL, bookmarkData: Data, for screen: Screen) {
-        // Just update the bookmark data and preserve other settings
-        let updatedConfig = ScreenConfiguration(
-            screenID: existingConfig.screenID,
-            videoBookmarkData: bookmarkData,
-            playbackSpeed: existingConfig.playbackSpeed,
-            fitMode: existingConfig.fitMode,
-            pauseOnBattery: existingConfig.pauseOnBattery,
-            frameRateLimit: existingConfig.frameRateLimit
-        )
-        
-        cacheConfiguration(updatedConfig)
-        SettingsManager.shared.saveConfiguration(updatedConfig)
+        // Update the bookmark data while preserving other settings
+        let updatedConfig = existingConfig.withUpdatedBookmark(bookmarkData)
+        saveConfiguration(updatedConfig)
     }
     
     private func applyConfiguration(_ configuration: ScreenConfiguration, to screen: Screen, preservingState: Bool = false) {
@@ -435,18 +391,8 @@ final class ScreenManager: ObservableObject {
                         includingResourceValuesForKeys: nil,
                         relativeTo: nil
                     )
-                    
-                    let updatedConfig = ScreenConfiguration(
-                        screenID: configuration.screenID,
-                        videoBookmarkData: updatedBookmarkData,
-                        playbackSpeed: configuration.playbackSpeed,
-                        fitMode: configuration.fitMode,
-                        pauseOnBattery: configuration.pauseOnBattery,
-                        frameRateLimit: configuration.frameRateLimit
-                    )
-                    
-                    cacheConfiguration(updatedConfig)
-                    SettingsManager.shared.saveConfiguration(updatedConfig)
+                    let updatedConfig = configuration.withUpdatedBookmark(updatedBookmarkData)
+                    saveConfiguration(updatedConfig)
                 } catch {
                     Logger.error("Failed to update stale bookmark: \(error.localizedDescription)", category: .fileAccess)
                 }
@@ -778,79 +724,47 @@ final class ScreenManager: ObservableObject {
         }
     }
     
+    // MARK: - Configuration Update Helpers
+
+    /// Saves and caches the updated configuration
+    private func saveConfiguration(_ configuration: ScreenConfiguration) {
+        cacheConfiguration(configuration)
+        SettingsManager.shared.saveConfiguration(configuration)
+    }
+
     // Update the playback speed for a screen
     func updatePlaybackSpeed(_ speed: Double, for screen: Screen) {
-        guard var configuration = getCachedConfiguration(for: screen.id) else { return }
-        
-        // Skip update if value hasn't changed
-        guard speed != configuration.playbackSpeed else { return }
-        
+        guard var configuration = getCachedConfiguration(for: screen.id),
+              speed != configuration.playbackSpeed else { return }
+
         Logger.debug("Updating playback speed to \(speed)x for screen \(screen.id)", category: .videoPlayer)
-        
-        configuration = ScreenConfiguration(
-            screenID: configuration.screenID,
-            videoBookmarkData: configuration.videoBookmarkData,
-            playbackSpeed: speed,
-            fitMode: configuration.fitMode,
-            pauseOnBattery: configuration.pauseOnBattery,
-            frameRateLimit: configuration.frameRateLimit
-        )
-        
-        cacheConfiguration(configuration)
-        SettingsManager.shared.saveConfiguration(configuration)
+        configuration.playbackSpeed = speed
+        saveConfiguration(configuration)
         screen.videoPlayer?.setPlaybackSpeed(speed)
     }
-    
+
     // Update the fit mode for a screen
     func updateFitMode(_ fitMode: VideoFitMode, for screen: Screen) {
-        guard var configuration = getCachedConfiguration(for: screen.id) else { return }
-        
-        // Skip update if value hasn't changed
-        guard fitMode != configuration.fitMode else { return }
-        
+        guard var configuration = getCachedConfiguration(for: screen.id),
+              fitMode != configuration.fitMode else { return }
+
         Logger.debug("Updating fit mode to \(fitMode.rawValue) for screen \(screen.id)", category: .videoPlayer)
-        
-        configuration = ScreenConfiguration(
-            screenID: configuration.screenID,
-            videoBookmarkData: configuration.videoBookmarkData,
-            playbackSpeed: configuration.playbackSpeed,
-            fitMode: fitMode,
-            pauseOnBattery: configuration.pauseOnBattery,
-            frameRateLimit: configuration.frameRateLimit
-        )
-        
-        cacheConfiguration(configuration)
-        SettingsManager.shared.saveConfiguration(configuration)
+        configuration.fitMode = fitMode
+        saveConfiguration(configuration)
         screen.videoPlayer?.setVideoFitMode(fitMode)
     }
-    
+
     // Update the frame rate limit for a screen
     func updateFrameRateLimit(_ frameRateLimit: FrameRateLimit, for screen: Screen) {
         guard var configuration = getCachedConfiguration(for: screen.id) else {
             Logger.warning("Cannot update frame rate limit: No configuration found for screen \(screen.id)", category: .videoPlayer)
             return
         }
-        
-        // Skip update if value hasn't changed
         guard frameRateLimit != configuration.frameRateLimit else { return }
-        
+
         Logger.debug("Updating frame rate limit to \(frameRateLimit.description) for screen \(screen.id)", category: .videoPlayer)
-        
-        // Create updated configuration
-        configuration = ScreenConfiguration(
-            screenID: configuration.screenID,
-            videoBookmarkData: configuration.videoBookmarkData,
-            playbackSpeed: configuration.playbackSpeed,
-            fitMode: configuration.fitMode,
-            pauseOnBattery: configuration.pauseOnBattery,
-            frameRateLimit: frameRateLimit
-        )
-        
-        // Save configuration
-        cacheConfiguration(configuration)
-        SettingsManager.shared.saveConfiguration(configuration)
-        
-        // Apply the frame rate limit to the player
+        configuration.frameRateLimit = frameRateLimit
+        saveConfiguration(configuration)
         applyFrameRateLimit(frameRateLimit, to: screen)
     }
     
@@ -888,29 +802,18 @@ final class ScreenManager: ObservableObject {
     
     // Update power settings for a screen
     func updatePowerSettings(pauseOnBattery: Bool, for screen: Screen) {
-        guard var configuration = getConfiguration(for: screen) else { return }
-        
-        // Skip update if value hasn't changed
-        guard pauseOnBattery != configuration.pauseOnBattery else { return }
-        
+        guard var configuration = getConfiguration(for: screen),
+              pauseOnBattery != configuration.pauseOnBattery else { return }
+
         Logger.debug("Updating power settings (pauseOnBattery: \(pauseOnBattery)) for screen \(screen.id)", category: .powerMonitor)
-        
-        configuration = ScreenConfiguration(
-            screenID: configuration.screenID,
-            videoBookmarkData: configuration.videoBookmarkData,
-            playbackSpeed: configuration.playbackSpeed,
-            fitMode: configuration.fitMode,
-            pauseOnBattery: pauseOnBattery,
-            frameRateLimit: configuration.frameRateLimit
-        )
-        
-        cacheConfiguration(configuration)
-        SettingsManager.shared.saveConfiguration(configuration)
-        
-        // Apply the new setting immediately if on battery
-        if powerMonitor.currentPowerSource.isOnBattery && pauseOnBattery {
+        configuration.pauseOnBattery = pauseOnBattery
+        saveConfiguration(configuration)
+
+        // Apply the new setting immediately based on power state
+        let isOnBattery = powerMonitor.currentPowerSource.isOnBattery
+        if isOnBattery && pauseOnBattery {
             screen.videoPlayer?.pause()
-        } else if powerMonitor.currentPowerSource.isOnBattery == false && !pauseOnBattery {
+        } else if !isOnBattery {
             screen.videoPlayer?.play()
         }
     }
