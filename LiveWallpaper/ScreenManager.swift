@@ -8,35 +8,22 @@ import os.log
 final class ScreenManager: ObservableObject {
     // MARK: - Properties
     
-    // Thread-safe access to screens array
-    private let screensLock = NSLock()
-    private var _screens: [Screen] = []
-    
+    // Note: Since ScreenManager is @MainActor, all access is serialized on the main thread.
+    // No locks are needed for thread safety.
+    @Published private(set) var screens: [Screen] = []
+
     @Published private(set) var isLoading: Bool = false
     @Published private(set) var lastError: Error?
     
-    var screens: [Screen] {
-        get {
-            screensLock.lock()
-            defer { screensLock.unlock() }
-            return _screens
-        }
-        set {
-            screensLock.lock()
-            _screens = newValue
-            screensLock.unlock()
-            // Trigger UI updates whenever screens array changes
-            objectWillChange.send()
-        }
-    }
-    
     private var cleanupTasks: Set<AnyCancellable> = []
-    private let configLock = NSLock()
     private var configurationCache: [CGDirectDisplayID: ScreenConfiguration] = [:]
     private let powerMonitor: PowerMonitor = .shared
     private var lastAppliedConfigHashes: [CGDirectDisplayID: Int] = [:]
-    private var configUpdateLock = NSLock()
     private let playbackStateSubject = CurrentValueSubject<Bool, Never>(false)
+
+    // Track screens that were paused by power management (not manually by user)
+    // Only these screens should be resumed when AC power is reconnected
+    private var screensPausedByPowerManagement: Set<CGDirectDisplayID> = []
 
     // MARK: - Initialization
     init() {
@@ -205,22 +192,14 @@ final class ScreenManager: ObservableObject {
         // Get all current screens from system
         let newScreens = NSScreen.screens.map { Screen(nsScreen: $0) }
         Logger.screensDetected(newScreens.count)
-        
-        // Thread-safe access to screen IDs
-        screensLock.lock()
-        let oldScreens = _screens
+
+        let oldScreens = screens
         let oldScreenIDs = Set(oldScreens.map(\.id))
-        screensLock.unlock()
-        
         let newScreenIDs = Set(newScreens.map(\.id))
-        
+
         // Clean up removed screens
         for screenID in oldScreenIDs.subtracting(newScreenIDs) {
-            screensLock.lock()
-            let screenToCleanup = oldScreens.first(where: { $0.id == screenID })
-            screensLock.unlock()
-            
-            if let screen = screenToCleanup {
+            if let screen = oldScreens.first(where: { $0.id == screenID }) {
                 Logger.info("Cleaning up removed screen \(screenID)", category: .screenManager)
                 cleanupScreen(screen)
             }
@@ -246,12 +225,10 @@ final class ScreenManager: ObservableObject {
             
             updatedScreens.append(newScreen)
         }
-        
-        // Thread-safe update of screens array
-        screensLock.lock()
-        _screens = updatedScreens
-        screensLock.unlock()
-        
+
+        // Update screens array
+        screens = updatedScreens
+
         timer.checkpoint("Screens mapped")
         
         // Configure newly added screens (only those that weren't present before)
@@ -278,28 +255,30 @@ final class ScreenManager: ObservableObject {
         // Clean up existing video player
         screen.videoPlayer?.cleanup()
         screen.videoPlayer = nil
-        
+
         // Clean up preview player
         screen.previewPlayer?.pause()
         screen.previewPlayer = nil
-        
+
         // Remove configuration from settings
         SettingsManager.shared.cleanSettingsForScreen(screen.id)
-        
+
         // Remove from cache
         configLock.lock()
         configurationCache.removeValue(forKey: screen.id)
         configLock.unlock()
-        
-        // Notify UI of change
-        objectWillChange.send()
+
+        // Remove from power management tracking
+        screensPausedByPowerManagement.remove(screen.id)
     }
-    
+
     private func cleanupScreen(_ screen: Screen) {
         Logger.debug("Cleaning up screen \(screen.id)", category: .screenManager)
         screen.videoPlayer?.cleanup()
         screen.previewPlayer?.pause()
         screen.previewPlayer = nil
+        // Remove from power management tracking
+        screensPausedByPowerManagement.remove(screen.id)
     }
     
     // MARK: - Configuration Management
@@ -309,13 +288,8 @@ final class ScreenManager: ObservableObject {
         
         for configuration in configurations {
             cacheConfiguration(configuration)
-            
-            // Thread-safe access to screens
-            screensLock.lock()
-            let screenToLoad = _screens.first(where: { $0.id == configuration.screenID })
-            screensLock.unlock()
-            
-            if let screen = screenToLoad {
+
+            if let screen = screens.first(where: { $0.id == configuration.screenID }) {
                 loadConfigurationForScreen(screen)
             }
         }
@@ -603,16 +577,15 @@ final class ScreenManager: ObservableObject {
             fitMode: configuration?.fitMode ?? .aspectFill
         )
         
-        // Thread-safe update of screen properties
-        screensLock.lock()
-        if let index = _screens.firstIndex(where: { $0.id == screen.id }) {
-            _screens[index].videoPlayer = player
-            _screens[index].previewPlayer = previewPlayer
-            
+        // Update screen properties
+        if let index = screens.firstIndex(where: { $0.id == screen.id }) {
+            screens[index].videoPlayer = player
+            screens[index].previewPlayer = previewPlayer
+
             // Check if we should pause based on power state
             let shouldPause = powerMonitor.currentPowerSource.isOnBattery &&
             SettingsManager.shared.loadGlobalSettings().globalPauseOnBattery
-            
+
             if shouldPause {
                 player.pause()
             } else {
@@ -620,31 +593,26 @@ final class ScreenManager: ObservableObject {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                     player.play()
                     previewPlayer.play()
-                    
+
                     // Update playback state after playback begins
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                         self.updatePlaybackState()
                     }
                 }
             }
-            
-            screensLock.unlock()
-            
+
             // Apply frame rate limit if configured
             if player.videoFrameRate > 0,
                let frameRateLimit = configuration?.frameRateLimit {
-                
+
                 // Delay frame rate limit application slightly to ensure video properties are loaded
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     self.applyFrameRateLimit(frameRateLimit, to: screen)
                 }
             }
-            
-            // Notify observers of the change immediately
-            objectWillChange.send()
+
             Logger.info("Video player setup complete for screen \(screen.id)", category: .screenManager)
         } else {
-            screensLock.unlock()
             // Handle the case where the screen wasn't found
             Logger.warning("Screen with ID \(screen.id) not found in screens array", category: .screenManager)
         }
@@ -662,39 +630,34 @@ final class ScreenManager: ObservableObject {
     
     // Method to check and publish global playback state
     private func updatePlaybackState() {
-        // Thread-safe access to screens
-        screensLock.lock()
-        let isAnyPlaying = _screens.contains { $0.videoPlayer?.isPlaying ?? false }
-        screensLock.unlock()
-        
+        let isAnyPlaying = screens.contains { $0.videoPlayer?.isPlaying ?? false }
+
         // Only publish if the state actually changed
         if playbackStateSubject.value != isAnyPlaying {
             Logger.debug("Global playback state changed to: \(isAnyPlaying ? "playing" : "paused")", category: .videoPlayer)
             playbackStateSubject.send(isAnyPlaying)
         }
     }
-    
+
     func togglePlayback() {
-        // Thread-safe check if any videos are playing
-        screensLock.lock()
-        let isAnyPlaying = _screens.contains { $0.videoPlayer?.isPlaying ?? false }
-        screensLock.unlock()
-        
+        let isAnyPlaying = screens.contains { $0.videoPlayer?.isPlaying ?? false }
+
         Logger.info("Toggling global playback: \(isAnyPlaying ? "pausing" : "playing") all videos", category: .videoPlayer)
-        
+
         // Toggle playback based on current state
-        screensLock.lock()
-        for screen in _screens {
+        for screen in screens {
             if let player = screen.videoPlayer {
                 if isAnyPlaying {
+                    // When user manually pauses, remove from power management tracking
+                    // so it won't auto-resume when AC power reconnects
+                    screensPausedByPowerManagement.remove(screen.id)
                     player.pause()
                 } else {
                     player.play()
                 }
             }
         }
-        screensLock.unlock()
-        
+
         // Update the playback state
         updatePlaybackState()
     }
@@ -702,58 +665,62 @@ final class ScreenManager: ObservableObject {
     // MARK: - Power Management
     private func handlePowerStateChange(_ powerSource: PowerMonitor.PowerSource) {
         Logger.info("Handling power state change", category: .powerMonitor)
-        
-        // Use DispatchQueue.main to ensure UI updates happen on the main thread
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            
-            let globalSettings = SettingsManager.shared.loadGlobalSettings()
-            let isOnBattery = powerSource.isOnBattery
-            
-            // Batch updates to avoid multiple UI updates
-            var updatedScreens = false
-            
-            // Thread-safe access to screens
-            self.screensLock.lock()
-            let screensToProcess = self._screens // Create a local copy to work with
-            self.screensLock.unlock()
-            
-            for screen in screensToProcess {
-                guard let player = screen.videoPlayer else {
-                    continue
+
+        let globalSettings = SettingsManager.shared.loadGlobalSettings()
+        let isOnBattery = powerSource.isOnBattery
+
+        // Batch updates to avoid multiple UI updates
+        var updatedScreens = false
+
+        for screen in screens {
+            guard let player = screen.videoPlayer else {
+                continue
+            }
+
+            let configuration = getCachedConfiguration(for: screen.id)
+            let shouldPauseForPower = (globalSettings.globalPauseOnBattery || configuration?.pauseOnBattery == true) && isOnBattery
+
+            // Check for low battery threshold
+            var shouldPauseForLowBattery = false
+            if let batteryLevel = globalSettings.minimumBatteryLevel, isOnBattery {
+                if case .battery(let level) = powerSource, level < batteryLevel {
+                    shouldPauseForLowBattery = true
                 }
-                
-                let configuration = self.getCachedConfiguration(for: screen.id)
-                let shouldPause = (globalSettings.globalPauseOnBattery || configuration?.pauseOnBattery == true) && isOnBattery
-                
-                if let batteryLevel = globalSettings.minimumBatteryLevel, isOnBattery {
-                    if case .battery(let level) = powerSource, level < batteryLevel {
-                        // Force pause if battery is below the threshold
-                        if player.isPlaying {
-                            Logger.debug("Pausing screen \(screen.id) due to low battery level (\(Int(level * 100))%)", category: .powerMonitor)
-                            player.pause()
-                            updatedScreens = true
-                        }
-                        continue
-                    }
-                }
-                
-                let currentlyPlaying = player.isPlaying
-                if shouldPause && currentlyPlaying {
+            }
+
+            let currentlyPlaying = player.isPlaying
+
+            // Handle pausing when on battery power
+            if (shouldPauseForPower || shouldPauseForLowBattery) && currentlyPlaying {
+                if shouldPauseForLowBattery {
+                    Logger.debug("Pausing screen \(screen.id) due to low battery level", category: .powerMonitor)
+                } else {
                     Logger.debug("Pausing screen \(screen.id) due to battery power", category: .powerMonitor)
-                    player.pause()
-                    updatedScreens = true
-                } else if !shouldPause && !currentlyPlaying && !isOnBattery {
-                    Logger.debug("Resuming screen \(screen.id) due to external power", category: .powerMonitor)
-                    player.play()
-                    updatedScreens = true
                 }
+                player.pause()
+                // Track that this screen was paused by power management
+                screensPausedByPowerManagement.insert(screen.id)
+                updatedScreens = true
             }
-            
-            if updatedScreens {
-                self.objectWillChange.send()
-                self.updatePlaybackState()
+            // Handle resuming when AC power is connected
+            // ONLY resume screens that were paused by power management, not manually paused screens
+            else if !isOnBattery && !currentlyPlaying && screensPausedByPowerManagement.contains(screen.id) {
+                Logger.debug("Resuming screen \(screen.id) due to external power (was paused by power management)", category: .powerMonitor)
+                player.play()
+                // Remove from tracking set since we've resumed it
+                screensPausedByPowerManagement.remove(screen.id)
+                updatedScreens = true
             }
+        }
+
+        // When switching to AC power, clear any remaining tracked screens that no longer exist
+        if !isOnBattery {
+            let currentScreenIDs = Set(screens.map(\.id))
+            screensPausedByPowerManagement = screensPausedByPowerManagement.intersection(currentScreenIDs)
+        }
+
+        if updatedScreens {
+            updatePlaybackState()
         }
     }
     
@@ -770,25 +737,20 @@ final class ScreenManager: ObservableObject {
     // MARK: - Memory Management
     private func handleLowMemory() {
         Logger.warning("Low memory condition detected, optimizing resource usage", category: .memory)
-        
-        // Thread-safe access to screens
-        screensLock.lock()
-        
+
         // If memory is low, pause all videos that aren't visible or active
-        for screen in _screens {
+        for screen in screens {
             if let player = screen.videoPlayer, player.isPlaying {
                 // Check if this screen is currently visible/active
                 let isActive = NSScreen.screens.contains { $0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID == screen.id }
-                
+
                 if !isActive {
                     Logger.debug("Pausing background video on screen \(screen.id) to conserve memory", category: .memory)
                     player.pause()
                 }
             }
         }
-        
-        screensLock.unlock()
-        
+
         // Release unused resources
         autoreleasepool {
             // Clear any image caches if needed
@@ -987,14 +949,9 @@ final class ScreenManager: ObservableObject {
         }
         
         timer.checkpoint("Configuration validation")
-        
-        // Thread-safe access to screens
-        screensLock.lock()
-        let currentScreens = _screens
-        screensLock.unlock()
-        
+
         // Then reload all screens
-        for screen in currentScreens {
+        for screen in screens {
             if let configuration = SettingsManager.shared.getConfiguration(for: screen.id) {
                 cacheConfiguration(configuration)
                 applyConfiguration(configuration, to: screen, preservingState: false)
