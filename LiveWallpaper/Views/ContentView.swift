@@ -4,18 +4,17 @@ import AppKit
 struct ContentView: View {
     @EnvironmentObject private var screenManager: ScreenManager
     @State private var selectedNavigation: Navigation?
-    
+
     init(initialNavigation: Navigation? = nil) {
-        self._selectedNavigation = State(initialValue: initialNavigation)
+        _selectedNavigation = State(initialValue: initialNavigation)
     }
-    
+
     var body: some View {
         NavigationSplitView {
             Sidebar(selection: $selectedNavigation)
                 .onReceive(NotificationCenter.default.publisher(for: .init("SelectScreenInSettings"))) { notification in
-                    if let screenID = notification.userInfo?["screenID"] as? CGDirectDisplayID {
-                        selectedNavigation = .screen(screenID)
-                    }
+                    guard let screenID = notification.userInfo?["screenID"] as? CGDirectDisplayID else { return }
+                    selectedNavigation = .screen(screenID)
                 }
         } detail: {
             DetailContent(selection: selectedNavigation)
@@ -25,26 +24,23 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Navigation Enum
+// MARK: - Navigation
+
 enum Navigation: Hashable {
     case general
     case screen(CGDirectDisplayID)
-    
+
     var title: String {
         switch self {
-        case .general:
-            return "General Settings"
-        case .screen(let id):
-            return "Display \(id)"
+        case .general: return "General Settings"
+        case .screen(let id): return "Display \(id)"
         }
     }
-    
+
     var icon: String {
         switch self {
-        case .general:
-            return "gearshape.fill"
-        case .screen:
-            return "display"
+        case .general: return "gearshape.fill"
+        case .screen: return "display"
         }
     }
 }

@@ -9,7 +9,9 @@ class StatusBarController: NSObject, NSMenuDelegate {
     private var settingsWindowController: NSWindowController?
     private var menuUpdateTimer: Timer?
     private var cleanupTasks = Set<AnyCancellable>()
-    
+
+    // MARK: - Initialization
+
     init(screenManager: ScreenManager) {
         self.screenManager = screenManager
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -18,92 +20,82 @@ class StatusBarController: NSObject, NSMenuDelegate {
         setupPlaybackObservers()
         startPeriodicMenuUpdates()
     }
-    
+
     private func configureStatusItem() {
-        if let button = statusItem.button {
-            updateStatusBarIcon()
-            button.image?.isTemplate = true
-            button.toolTip = "LiveWallpaper"
-        }
+        guard let button = statusItem.button else { return }
+        updateStatusBarIcon()
+        button.image?.isTemplate = true
+        button.toolTip = "LiveWallpaper"
         setupMenu()
     }
-    
+
+    // MARK: - Status Bar Icon
+
     private func updateStatusBarIcon(isPlaying: Bool? = nil) {
         guard let button = statusItem.button else { return }
-        
-        // If no state is provided, determine it
+
         let isAnyPlaying = isPlaying ?? screenManager.screens.contains { $0.videoPlayer?.isPlaying ?? false }
-        
-        // Choose appropriate icon based on state
-        let symbolName: String
-        if screenManager.screens.allSatisfy({ $0.videoPlayer == nil }) {
-            // No videos configured
-            symbolName = "photo.on.rectangle"
-        } else if isAnyPlaying {
-            // At least one video is playing
-            symbolName = "play.rectangle.fill"
-        } else {
-            // Videos are configured but paused
-            symbolName = "pause.rectangle.fill"
+        let symbolName = determineStatusBarIcon(isAnyPlaying: isAnyPlaying)
+
+        guard button.image?.name() != symbolName else { return }
+
+        Logger.debug("Updating status bar icon to \(symbolName)", category: .ui)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.2
+            context.allowsImplicitAnimation = true
+            button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "LiveWallpaper")
+            button.image?.isTemplate = true
         }
-        
-        // Only update the image if needed to avoid unnecessary UI updates
-        let currentImageName = button.image?.name()
-        if currentImageName != symbolName {
-            Logger.debug("Updating status bar icon to \(symbolName)", category: .ui)
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.2
-                context.allowsImplicitAnimation = true
-                
-                button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "LiveWallpaper")
-                button.image?.isTemplate = true
-            }
+    }
+
+    private func determineStatusBarIcon(isAnyPlaying: Bool) -> String {
+        if screenManager.screens.allSatisfy({ $0.videoPlayer == nil }) {
+            return "photo.on.rectangle"
+        } else if isAnyPlaying {
+            return "play.rectangle.fill"
+        } else {
+            return "pause.rectangle.fill"
         }
     }
     
+    // MARK: - Observers
+
     private func setupPlaybackObservers() {
-        // Single subscription to the ScreenManager's playback state
+        // Playback state changes
         screenManager.playbackStatePublisher
             .receive(on: DispatchQueue.main)
             .removeDuplicates()
-            .sink { [weak self] isPlaying in
-                self?.updateStatusBarIcon(isPlaying: isPlaying)
-            }
+            .sink { [weak self] isPlaying in self?.updateStatusBarIcon(isPlaying: isPlaying) }
             .store(in: &cleanupTasks)
-        
-        // Monitor screen refresh events to update the menu
+
+        // Screen refresh events
         NotificationCenter.default.publisher(for: .init("ScreensRefreshed"))
             .throttle(for: .milliseconds(250), scheduler: DispatchQueue.main, latest: true)
             .sink { [weak self] _ in
                 self?.updateStatusBarIcon()
-                // Also update the displays menu if it's open
                 if self?.statusItem.button?.isHighlighted == true {
                     self?.updateDisplaysMenu()
                 }
             }
             .store(in: &cleanupTasks)
-        
-        // Monitor power state changes which might affect playback
+
+        // Power state changes
         NotificationCenter.default.publisher(for: PowerMonitor.powerSourceDidChangeNotification)
             .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
             .sink { [weak self] _ in
-                // Just request a status update from ScreenManager
                 self?.updateStatusBarIcon(isPlaying: self?.screenManager.isAnyScreenPlaying)
             }
             .store(in: &cleanupTasks)
-        
-        // Monitor initial state notification to update status
+
+        // Video player state changes
         NotificationCenter.default.publisher(for: WallpaperVideoPlayer.didChangePlaybackStateNotification)
             .throttle(for: .milliseconds(250), scheduler: DispatchQueue.main, latest: true)
             .sink { [weak self] notification in
-                if let isPlaying = notification.userInfo?["isPlaying"] as? Bool {
-                    self?.updateStatusBarIcon(isPlaying: isPlaying)
-                } else {
-                    self?.updateStatusBarIcon()
-                }
+                let isPlaying = notification.userInfo?["isPlaying"] as? Bool
+                self?.updateStatusBarIcon(isPlaying: isPlaying)
             }
             .store(in: &cleanupTasks)
-        
+
         // Initial icon update
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.updateStatusBarIcon(isPlaying: self?.screenManager.isAnyScreenPlaying)

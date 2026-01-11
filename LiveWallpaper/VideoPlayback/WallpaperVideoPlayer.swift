@@ -2,45 +2,47 @@ import AppKit
 import AVKit
 import Combine
 
-// Video player class responsible for playing videos as desktop wallpaper
+/// Video player class responsible for playing videos as desktop wallpaper
 final class WallpaperVideoPlayer {
-    // MARK: - Static Notifications
-    static let didChangePlaybackStateNotification = Notification.Name("WallpaperVideoPlayerDidChangePlaybackState")
-    
-    // MARK: - Properties
-    private(set) var player: AVPlayer?
-    private weak var window: VideoWallpaperWindow?
-    private weak var videoView: VideoContainerView?
-    private var cleanupTasks: Set<AnyCancellable> = []
-    private var periodicTimeObserver: Any?
-    private var accessToken: Bool = false // Tracks if we're accessing a security-scoped resource
+    // MARK: - Notifications
 
-    // Track async Tasks for proper cancellation
-    private var loadingTask: Task<Void, Never>?
-    private var frameRateLimitTask: Task<Void, Never>?
-    
-    // Update the isPlaying property to post notifications when changed
+    static let didChangePlaybackStateNotification = Notification.Name("WallpaperVideoPlayerDidChangePlaybackState")
+
+    // MARK: - Published Properties
+
     @Published private(set) var isPlaying: Bool = false {
         didSet {
-            if oldValue != isPlaying {
-                NotificationCenter.default.post(
-                    name: Self.didChangePlaybackStateNotification,
-                    object: self,
-                    userInfo: ["isPlaying": isPlaying]
-                )
-            }
+            guard oldValue != isPlaying else { return }
+            NotificationCenter.default.post(
+                name: Self.didChangePlaybackStateNotification,
+                object: self,
+                userInfo: ["isPlaying": isPlaying]
+            )
         }
     }
-    
-    @Published private(set) var loadingError: Error? = nil
+
+    @Published private(set) var loadingError: Error?
     @Published private(set) var currentTime: Double = 0
     @Published private(set) var duration: Double = 0
     @Published private(set) var videoFrameRate: Double = 0
-    
+
+    // MARK: - Public Properties
+
+    private(set) var player: AVPlayer?
+    var videoURL: URL?
+
+    // MARK: - Private Properties
+
+    private weak var window: VideoWallpaperWindow?
+    private weak var videoView: VideoContainerView?
+    private var cleanupTasks = Set<AnyCancellable>()
+    private var periodicTimeObserver: Any?
+    private var playbackStateObserver: NSKeyValueObservation?
+    private var loadingTask: Task<Void, Never>?
+    private var frameRateLimitTask: Task<Void, Never>?
+    private var accessToken = false
     private let initialFrame: CGRect
     private var fitMode: VideoFitMode = .aspectFill
-    var videoURL: URL?
-    private var playbackStateObserver: NSKeyValueObservation?
     
     // MARK: - Initialization
     init(url: URL, frame: CGRect, fitMode: VideoFitMode = .aspectFill) {
@@ -154,24 +156,12 @@ final class WallpaperVideoPlayer {
         // Set up quality of service for better performance
         playerItem.preferredForwardBufferDuration = 5.0
         playerItem.canUseNetworkResourcesForLiveStreamingWhilePaused = false
-        
-        //        if let audioTracks = try? asset.loadTracks(withMediaType: .audio) {
-        //                for audioTrack in audioTracks {
-        //                    let audioTrackID = audioTrack.trackID
-        //                    let audioParams = AVMutableAudioMixInputParameters(track: audioTrack)
-        //                    audioParams.setVolume(0.0, at: .zero)
-        //
-        //                    let audioMix = AVMutableAudioMix()
-        //                    audioMix.inputParameters = [audioParams]
-        //                    playerItem.audioMix = audioMix
-        //                }
-        //            }
-        
-        // Configure player
+
+        // Configure player with muted audio for wallpaper playback
         self.player = AVPlayer(playerItem: playerItem)
         self.player?.automaticallyWaitsToMinimizeStalling = true
-        self.player?.volume = 0  // Already set to 0, but keep it
-        self.player?.isMuted = true  // Add explicit muting
+        self.player?.volume = 0
+        self.player?.isMuted = true
         self.player?.actionAtItemEnd = .none
         
         // Create and configure window
@@ -195,41 +185,35 @@ final class WallpaperVideoPlayer {
         setupPlaybackObservers()
         setupFrameObserver()
         setupTimeObserver()
-        
+
         // Wait for player to be ready, then start playback
-        let keyPath = \AVPlayer.status
-        
-        // Create a wrapper to store the observer so we can reference it inside the closure
-        class ObserverWrapper {
-            var observer: NSKeyValueObservation?
-        }
-        
-        let wrapper = ObserverWrapper()
-        
-        wrapper.observer = player?.observe(keyPath, options: [.new, .initial]) { [weak self, weak wrapper] player, change in
-            guard let self = self else { return }
-            
-            if player.status == .readyToPlay {
-                Logger.debug("Player is ready to play", category: .videoPlayer)
-                
-                // Start playback with a slight delay to ensure proper initialization
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-                    if let self = self {
-                        self.play()
-                        Logger.debug("Auto-starting video playback", category: .videoPlayer)
-                    }
-                }
-                
-                // Remove this observer since we only need to handle this once
-                wrapper?.observer?.invalidate()
+        setupPlayerReadyObserver()
+    }
+
+    private func setupPlayerReadyObserver() {
+        guard let player = player else { return }
+
+        var statusObserver: NSKeyValueObservation?
+        statusObserver = player.observe(\.status, options: [.new, .initial]) { [weak self] observedPlayer, _ in
+            guard observedPlayer.status == .readyToPlay else { return }
+
+            Logger.debug("Player is ready to play", category: .videoPlayer)
+
+            // Start playback with a slight delay to ensure proper initialization
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                self?.play()
+                Logger.debug("Auto-starting video playback", category: .videoPlayer)
             }
+
+            // Remove this one-time observer
+            statusObserver?.invalidate()
+            statusObserver = nil
         }
-        
-        // Store the observer in cleanupTasks to prevent it from being deallocated
-        if wrapper.observer != nil {
-            // Convert KVO token to a Cancellable that we can store
-            let cancellable = AnyCancellable { [weak wrapper] in
-                wrapper?.observer?.invalidate()
+
+        // Store the observer for cleanup
+        if let observer = statusObserver {
+            let cancellable = AnyCancellable {
+                observer.invalidate()
             }
             cleanupTasks.insert(cancellable)
         }
@@ -287,48 +271,28 @@ final class WallpaperVideoPlayer {
         })
     }
     
-    // New method for finding the correct screen and updating position
+    /// Finds the associated screen and updates the window position to match
     private func updateWindowPositionForCurrentScreen() {
-        // We need to find the appropriate screen for this player
-        
-        // Try to find by display ID if we can determine it
-        var screenID: CGDirectDisplayID?
-        
-        // Use isAssociatedWithScreen to check all available screens
-        // This avoids directly accessing private window property
-        for screen in NSScreen.screens {
-            if let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID,
-               self.isAssociatedWithScreen(id) {
-                screenID = id
-                break
+        // Find the screen this player is associated with
+        let associatedScreen = NSScreen.screens.first { screen in
+            guard let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else {
+                return false
             }
+            return isAssociatedWithScreen(id)
         }
-        
-        // Find the appropriate screen
-        var targetScreen: NSScreen?
-        
-        // Try by ID if we have it
-        if let screenID = screenID {
-            targetScreen = NSScreen.screens.first(where: {
-                ($0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID) == screenID
-            })
-        }
-        
-        // Last resort, use main screen
-        if targetScreen == nil {
-            targetScreen = NSScreen.main
+
+        let targetScreen: NSScreen
+        if let screen = associatedScreen {
+            targetScreen = screen
+        } else if let mainScreen = NSScreen.main {
             Logger.warning("Could not find matching screen for video player, using main screen as fallback", category: .screenManager)
+            targetScreen = mainScreen
+        } else {
+            return
         }
-        
-        // Update window frame to match target screen
-        if let screen = targetScreen {
-            let newFrame = screen.frame
-            
-            Logger.debug("Updating window frame to match screen \(screen.localizedName): \(newFrame)", category: .screenManager)
-            
-            // Use the public method to update the window frame with the EXACT screen coordinates
-            self.updateWindowFrame(newFrame)
-        }
+
+        Logger.debug("Updating window frame to match screen \(targetScreen.localizedName): \(targetScreen.frame)", category: .screenManager)
+        updateWindowFrame(targetScreen.frame)
     }
     
     private func setupTimeObserver() {
@@ -342,83 +306,73 @@ final class WallpaperVideoPlayer {
     }
     
     // MARK: - Playback Controls
+
     func play() {
-        if let player = player, player.timeControlStatus != .playing {
-            player.play()
-            isPlaying = true
-            Logger.debug("Video playback started", category: .videoPlayer)
-        }
+        guard let player = player, player.timeControlStatus != .playing else { return }
+        player.play()
+        isPlaying = true
+        Logger.debug("Video playback started", category: .videoPlayer)
     }
-    
+
     func pause() {
-        if let player = player, player.timeControlStatus == .playing {
-            player.pause()
-            isPlaying = false
-            Logger.debug("Video playback paused", category: .videoPlayer)
-        }
+        guard let player = player, player.timeControlStatus == .playing else { return }
+        player.pause()
+        isPlaying = false
+        Logger.debug("Video playback paused", category: .videoPlayer)
     }
-    
+
     func seek(to time: Double) {
         player?.seek(to: CMTime(seconds: time, preferredTimescale: CMTimeScale(NSEC_PER_SEC)))
     }
-    
+
     func setPlaybackSpeed(_ speed: Double) {
         player?.rate = Float(speed)
     }
-    
+
     func setVideoFitMode(_ mode: VideoFitMode) {
-        guard mode != fitMode else { return } // Skip if no change
-        
-        self.fitMode = mode
+        guard mode != fitMode else { return }
+        fitMode = mode
         videoView?.fitMode = mode
     }
     
-    // Public method to update the window frame
-    public func updateWindowFrame(_ newFrame: CGRect) {
-        // Validate frame
-        guard !newFrame.isEmpty && newFrame.width > 0 && newFrame.height > 0 else {
+    // MARK: - Window Management
+
+    func updateWindowFrame(_ newFrame: CGRect) {
+        guard isValidFrame(newFrame) else {
             Logger.warning("Invalid frame provided to updateWindowFrame: \(newFrame)", category: .videoPlayer)
             return
         }
-        
-        // Check if the frame is significantly different from the current frame
-        // to avoid unnecessary updates
-        if let window = window as? VideoWallpaperWindow {
-            if !areFramesEquivalent(window.frame, newFrame) {
-                // Log the update with coordinates
-                Logger.debug("Updating video window frame to \(newFrame) (x:\(newFrame.origin.x), y:\(newFrame.origin.y), w:\(newFrame.width), h:\(newFrame.height))", category: .videoPlayer)
-                window.updateFrame(newFrame, animate: false)
-            }
+
+        if let window = window, !areFramesEquivalent(window.frame, newFrame) {
+            Logger.debug("Updating video window frame to \(newFrame)", category: .videoPlayer)
+            window.updateFrame(newFrame, animate: false)
         }
-        
-        // Update video view if present
+
         if let videoView = videoView {
             videoView.frame = NSRect(x: 0, y: 0, width: newFrame.width, height: newFrame.height)
             videoView.needsLayout = true
         }
     }
-    
-    // Add a helper method to check if frames are close enough to be considered equivalent
+
+    private func isValidFrame(_ frame: CGRect) -> Bool {
+        !frame.isEmpty && frame.width > 0 && frame.height > 0
+    }
+
     private func areFramesEquivalent(_ frame1: CGRect, _ frame2: CGRect, tolerance: CGFloat = 1.0) -> Bool {
-        return abs(frame1.origin.x - frame2.origin.x) < tolerance &&
+        abs(frame1.origin.x - frame2.origin.x) < tolerance &&
         abs(frame1.origin.y - frame2.origin.y) < tolerance &&
         abs(frame1.width - frame2.width) < tolerance &&
         abs(frame1.height - frame2.height) < tolerance
     }
     
-    // Public method to check if this player is associated with a screen ID
-    public func isAssociatedWithScreen(_ screenID: CGDirectDisplayID) -> Bool {
-        // Try to get the screen ID from the window
-        if let window = window,
-           let screenDesc = window.screen?.deviceDescription,
-           let windowScreenID = screenDesc[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID {
-            return windowScreenID == screenID
-        }
-        return false
+    func isAssociatedWithScreen(_ screenID: CGDirectDisplayID) -> Bool {
+        guard let window = window,
+              let windowScreenID = window.screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
+        else { return false }
+        return windowScreenID == screenID
     }
-    
-    // Public method to handle screen parameter changes
-    public func handleScreenParameterChange(_ screenFrame: CGRect) {
+
+    func handleScreenParameterChange(_ screenFrame: CGRect) {
         updateWindowFrame(screenFrame)
     }
     
