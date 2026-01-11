@@ -14,6 +14,10 @@ final class WallpaperVideoPlayer {
     private var cleanupTasks: Set<AnyCancellable> = []
     private var periodicTimeObserver: Any?
     private var accessToken: Bool = false // Tracks if we're accessing a security-scoped resource
+
+    // Track async Tasks for proper cancellation
+    private var loadingTask: Task<Void, Never>?
+    private var frameRateLimitTask: Task<Void, Never>?
     
     // Update the isPlaying property to post notifications when changed
     @Published private(set) var isPlaying: Bool = false {
@@ -77,32 +81,40 @@ final class WallpaperVideoPlayer {
             return
         }
         
-        Task {
+        loadingTask = Task { [weak self] in
+            guard let self = self else { return }
+
             do {
                 let timer = PerformanceTimer(description: "Loading video asset", category: .videoPlayer)
                 let asset = AVURLAsset(url: url)
-                
+
+                // Check for cancellation early
+                try Task.checkCancellation()
+
                 // Load essential properties asynchronously
                 async let playable = asset.load(.isPlayable)
                 async let duration = asset.load(.duration)
-                
+
                 // Check if asset is playable
                 guard try await playable else {
-                    stopAccessingResource()
+                    self.stopAccessingResource()
                     let error = NSError(
                         domain: "WallpaperVideoPlayer",
                         code: 3,
                         userInfo: [NSLocalizedDescriptionKey: "Video is not playable"]
                     )
                     Logger.error("Video is not playable: \(url.lastPathComponent)", category: .videoPlayer)
-                    loadingError = error
+                    self.loadingError = error
                     return
                 }
-                
+
+                // Check for cancellation before continuing
+                try Task.checkCancellation()
+
                 // Get duration
                 self.duration = try await CMTimeGetSeconds(duration)
                 Logger.debug("Video duration: \(self.duration)s", category: .videoPlayer)
-                
+
                 // Get video frame rate
                 if let videoTrack = try await asset.loadTracks(withMediaType: .video).first {
                     let frameRate = try await videoTrack.load(.nominalFrameRate)
@@ -111,20 +123,26 @@ final class WallpaperVideoPlayer {
                         Logger.debug("Video frame rate: \(self.videoFrameRate) FPS", category: .videoPlayer)
                     }
                 }
-                
+
+                // Check for cancellation before UI work
+                try Task.checkCancellation()
+
                 timer.checkpoint("Properties loaded")
-                
+
                 await MainActor.run { [weak self] in
                     guard let self = self else { return }
                     self.configurePlaybackComponents(with: asset)
                     timer.checkpoint("Playback configured")
                 }
-                
+
                 Logger.videoLoaded(url: url, screenID: UInt32(0)) // Will be updated later with correct screen ID
+            } catch is CancellationError {
+                Logger.debug("Video loading task was cancelled", category: .videoPlayer)
+                self.stopAccessingResource()
             } catch {
-                stopAccessingResource()
+                self.stopAccessingResource()
                 Logger.error("Error loading video: \(error.localizedDescription)", category: .videoPlayer)
-                loadingError = error
+                self.loadingError = error
             }
         }
     }
@@ -419,39 +437,55 @@ final class WallpaperVideoPlayer {
             return
         }
         
-        Task {
+        // Cancel any previous frame rate limit task
+        frameRateLimitTask?.cancel()
+
+        frameRateLimitTask = Task { [weak self] in
             do {
+                // Check for cancellation early
+                try Task.checkCancellation()
+
                 let videoTracks = try await playerItem.asset.loadTracks(withMediaType: .video)
                 guard let videoTrack = videoTracks.first else {
                     Logger.warning("Cannot set frame rate limit: No video track found", category: .videoPlayer)
                     return
                 }
-                
+
+                // Check for cancellation before loading more data
+                try Task.checkCancellation()
+
                 // Load natural video size for composition
                 let naturalSize = try await videoTrack.load(.naturalSize)
-                
-                await MainActor.run {
+
+                // Check for cancellation before UI work
+                try Task.checkCancellation()
+
+                await MainActor.run { [weak self] in
+                    guard self != nil else { return }
+
                     // Create and apply video composition with the specified frame rate
                     let composition = AVMutableVideoComposition()
                     composition.frameDuration = CMTime(value: 1, timescale: CMTimeScale(framesPerSecond))
                     composition.renderSize = naturalSize
-                    
+
                     // Create instruction
                     let instruction = AVMutableVideoCompositionInstruction()
                     instruction.timeRange = CMTimeRange(
                         start: .zero,
                         duration: CMTime(value: 1, timescale: 1)
                     )
-                    
+
                     let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: videoTrack)
                     instruction.layerInstructions = [layerInstruction]
                     composition.instructions = [instruction]
-                    
+
                     // Apply to player item
                     playerItem.videoComposition = composition
-                    
+
                     Logger.info("Frame rate limit set to \(Int(framesPerSecond)) FPS", category: .videoPlayer)
                 }
+            } catch is CancellationError {
+                Logger.debug("Frame rate limit task was cancelled", category: .videoPlayer)
             } catch {
                 Logger.error("Failed to set frame rate limit: \(error.localizedDescription)", category: .videoPlayer)
             }
@@ -469,16 +503,23 @@ final class WallpaperVideoPlayer {
     // MARK: - Cleanup
     func cleanup() {
         Logger.debug("Cleaning up video player resources", category: .videoPlayer)
+
+        // Cancel any pending async Tasks first
+        loadingTask?.cancel()
+        loadingTask = nil
+        frameRateLimitTask?.cancel()
+        frameRateLimitTask = nil
+
         pause()
-        
+
         playbackStateObserver?.invalidate()
         playbackStateObserver = nil
-        
+
         if let timeObserver = periodicTimeObserver, let player = player {
             player.removeTimeObserver(timeObserver)
         }
         periodicTimeObserver = nil
-        
+
         cleanupTasks.removeAll()
         
         // Move UI operations to the main thread
