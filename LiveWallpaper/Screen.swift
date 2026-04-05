@@ -13,6 +13,21 @@ class Screen: Identifiable, Hashable, ObservableObject {
     private var syncTimer: Timer?
     private var skipPreviewPlayerNotification = false
 
+    // MARK: - Active Wallpaper Window (any type)
+
+    /// The currently active wallpaper window (video, HTML, or shader).
+    /// Managed by ScreenManager — set to nil to close.
+    var activeWallpaperWindow: NSWindow? {
+        willSet {
+            if let old = activeWallpaperWindow, old !== newValue {
+                old.close()
+            }
+        }
+    }
+
+    /// Current wallpaper type for this screen
+    var activeWallpaperType: WallpaperType = .video
+
     // MARK: - Video Player
 
     var videoPlayer: WallpaperVideoPlayer? {
@@ -96,16 +111,6 @@ class Screen: Identifiable, Hashable, ObservableObject {
         preview.rate = wallpaperPlayer.rate
     }
 
-    func syncWallpaperToPreview() {
-        guard let wallpaperPlayer = videoPlayer?.player,
-              let preview = previewPlayer else { return }
-
-        let previewTime = preview.currentTime()
-        if previewTime.isValid && !previewTime.seconds.isNaN {
-            wallpaperPlayer.seek(to: previewTime, toleranceBefore: .zero, toleranceAfter: .zero)
-        }
-    }
-
     private func startSyncTimer() {
         stopSyncTimer()
         syncTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
@@ -143,12 +148,6 @@ class Screen: Identifiable, Hashable, ObservableObject {
                screen.frame.height).hash
     }
 
-    func setPreviewPlayer(_ player: AVPlayer?, skipNotification: Bool = false) {
-        skipPreviewPlayerNotification = skipNotification
-        defer { skipPreviewPlayerNotification = false }
-        previewPlayer = player
-    }
-
     // MARK: - Hashable
 
     func hash(into hasher: inout Hasher) {
@@ -166,5 +165,7 @@ class Screen: Identifiable, Hashable, ObservableObject {
         previewPlayerObserver?.cancel()
         previewPlayer?.pause()
         previewPlayer = nil
+        activeWallpaperWindow?.close()
+        activeWallpaperWindow = nil
     }
 }

@@ -26,11 +26,11 @@ struct FrameRateControlView: View {
                     HStack(spacing: 4) {
                         Text("Effective:")
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                         Text(effectiveRate)
                             .font(.caption)
                             .fontWeight(.medium)
-                            .foregroundColor(.primary)
+                            .foregroundStyle(.primary)
                     }
                 }
             }
@@ -45,14 +45,14 @@ struct FrameRateControlView: View {
                         VStack(spacing: 4) {
                             Image(systemName: option.iconName)
                                 .font(.system(size: 14))
-                                .foregroundColor(selectedLimit == option ? .accentColor : .gray)
+                                .foregroundStyle(selectedLimit == option ? Color.accentColor : Color.gray)
                             Text(option.description)
                                 .font(.caption2)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 6)
                         .background(selectedLimit == option ? Color.accentColor.opacity(0.15) : Color.gray.opacity(0.07))
-                        .cornerRadius(6)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
                         .overlay(
                             RoundedRectangle(cornerRadius: 6)
                                 .stroke(selectedLimit == option ? Color.accentColor : Color.clear, lineWidth: 1)
@@ -67,11 +67,11 @@ struct FrameRateControlView: View {
                 HStack(spacing: 10) {
                     Text("Video: \(Int(videoPlayer.videoFrameRate)) FPS")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                     
                     Text("Screen: \(screenRefreshRate) Hz")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
             }
         }

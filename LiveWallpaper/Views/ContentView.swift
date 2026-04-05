@@ -29,20 +29,6 @@ struct ContentView: View {
 enum Navigation: Hashable {
     case general
     case screen(CGDirectDisplayID)
-
-    var title: String {
-        switch self {
-        case .general: return "General Settings"
-        case .screen(let id): return "Display \(id)"
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .general: return "gearshape.fill"
-        case .screen: return "display"
-        }
-    }
 }
 
 // MARK: - Sidebar View
@@ -50,15 +36,14 @@ struct Sidebar: View {
     @Binding var selection: Navigation?
     @EnvironmentObject private var screenManager: ScreenManager
     @State private var isRefreshing = false
-    @State private var refreshID = UUID()
     
     var body: some View {
         List(selection: $selection) {
-            Section(header: Text("General").font(.caption).bold().foregroundColor(.secondary)) {
+            Section(header: Text("General").font(.caption).bold().foregroundStyle(.secondary)) {
                 NavigationLink(value: Navigation.general) {
                     HStack {
                         Image(systemName: "gearshape.fill")
-                            .foregroundColor(.blue)
+                            .foregroundStyle(.blue)
                             .imageScale(.large)
                             .frame(width: 24, height: 24)
                         
@@ -68,18 +53,18 @@ struct Sidebar: View {
                             
                             Text("App preferences")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                         }
                     }
                     .padding(.vertical, 4)
                 }
             }
             
-            Section(header: Text("Displays").font(.caption).bold().foregroundColor(.secondary)) {
+            Section(header: Text("Displays").font(.caption).bold().foregroundStyle(.secondary)) {
                 HStack {
                     Text("Display Management")
                         .font(.headline)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                     
                     Spacer()
                     
@@ -97,9 +82,9 @@ struct Sidebar: View {
                 if screenManager.screens.isEmpty {
                     HStack {
                         Image(systemName: "display.slash")
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                         Text("No displays detected")
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.vertical, 8)
@@ -112,7 +97,7 @@ struct Sidebar: View {
                 }
             }
             
-            Section(header: Text("System").font(.caption).bold().foregroundColor(.secondary)) {
+            Section(header: Text("System").font(.caption).bold().foregroundStyle(.secondary)) {
                 VStack(alignment: .leading, spacing: 8) {
                     SystemMonitorView()
                 }
@@ -121,11 +106,6 @@ struct Sidebar: View {
         }
         .listStyle(.sidebar)
         .frame(minWidth: 250)
-        .id(refreshID)
-        .onReceive(NotificationCenter.default.publisher(for: WallpaperVideoPlayer.didChangePlaybackStateNotification)) { _ in
-            // Create a new UUID to force the view to refresh
-            refreshID = UUID()
-        }
     }
     
     private func refreshDisplays() {
@@ -151,14 +131,9 @@ struct ScreenRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(Color.gray.opacity(0.1))
-                    .frame(width: 32, height: 24)
-
-                Image(systemName: screen.videoPlayer != nil ? "display.and.arrow.down" : "display")
-                    .foregroundColor(screen.videoPlayer != nil ? .blue : .gray)
-            }
+            Image(systemName: screen.videoPlayer != nil ? "display.and.arrow.down" : "display")
+                .foregroundStyle(screen.videoPlayer != nil ? Color.accentColor : Color.secondary)
+                .frame(width: 32, height: 24)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(screen.name)
@@ -168,7 +143,7 @@ struct ScreenRow: View {
                 HStack(spacing: 6) {
                     Text("\(Int(screen.frame.width))×\(Int(screen.frame.height))")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
 
                     if screen.videoPlayer != nil {
                         HStack(spacing: 2) {
@@ -178,7 +153,7 @@ struct ScreenRow: View {
 
                             Text(isPlaying ? "Playing" : "Paused")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -244,7 +219,7 @@ struct DetailContent: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.windowBackgroundColor))
+        .background(.clear)
         .animation(.easeInOut, value: selection)
     }
 }
@@ -254,25 +229,27 @@ struct EmptyStateView: View {
     let icon: String
     let title: String
     let message: String
-    
+
     var body: some View {
         VStack(spacing: 20) {
             Image(systemName: icon)
-                .font(.system(size: 64))
-                .foregroundColor(.secondary.opacity(0.7))
-            
+                .font(.system(size: 48))
+                .foregroundStyle(.secondary.opacity(0.7))
+                .frame(width: 80, height: 80)
+                .glassEffect(.regular, in: .circle)
+
             Text(title)
                 .font(.title2)
                 .fontWeight(.semibold)
-                .foregroundColor(.primary)
-            
+
             Text(message)
                 .font(.body)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 300)
         }
-        .padding()
+        .padding(32)
+        .glassEffect(.regular, in: .rect(cornerRadius: 20))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

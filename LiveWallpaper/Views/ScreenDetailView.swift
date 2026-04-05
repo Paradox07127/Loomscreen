@@ -16,6 +16,14 @@ struct ScreenDetailView: View {
     @State private var currentVideoPosition: Double = 0
     @State private var videoDuration: Double = 1.0
 
+    // Effects & new feature states
+    @State private var selectedWallpaperType: WallpaperType = .video
+    @State private var selectedParticleEffect: ParticleEffect = .none
+    @State private var effectConfig = VideoEffectConfig.default
+    @State private var selectedShaderPreset: MetalShaderPreset = .waves
+    @State private var htmlContent: String = ""
+    @State private var setAsLockScreen: Bool = false
+
     // Timer management
     @State private var playbackStateTimer: Timer?
     @State private var videoProgressTimer: Timer?
@@ -23,45 +31,48 @@ struct ScreenDetailView: View {
     // Drag and drop
     @State private var isDraggingOver = false
 
-    // Layout variables
-    @State private var useCompactLayout = false
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 16) {
-                displayHeader
+            GlassEffectContainer(spacing: 12) {
+                VStack(spacing: 16) {
+                    displayHeader
 
-                if isLoading {
-                    loadingView
-                } else if screen.videoPlayer != nil || screen.previewPlayer != nil {
-                    VStack(spacing: 16) {
-                        videoPreviewSection
-                            .frame(minHeight: 280, maxHeight: 380)
+                    // Wallpaper type picker — always visible
+                    wallpaperTypePicker
 
-                        if useCompactLayout {
+                    if selectedWallpaperType == .video {
+                        if isLoading {
+                            loadingView
+                        } else if screen.videoPlayer != nil || screen.previewPlayer != nil {
                             VStack(spacing: 16) {
-                                playbackControlsSection
-                                videoOptionsSection
+                                videoPreviewSection
+                                    .frame(minHeight: 280, maxHeight: 380)
+
+                                HStack(alignment: .top, spacing: 16) {
+                                    playbackControlsSection
+                                        .frame(maxWidth: .infinity)
+                                    videoOptionsSection
+                                        .frame(maxWidth: .infinity)
+                                }
+
+                                effectsSection
                             }
                         } else {
-                            HStack(alignment: .top, spacing: 16) {
-                                playbackControlsSection
-                                    .frame(maxWidth: .infinity)
-                                videoOptionsSection
-                                    .frame(maxWidth: .infinity)
-                            }
+                            enhancedEmptyStateView
                         }
+                    } else if selectedWallpaperType == .html {
+                        htmlWallpaperSection
+                    } else if selectedWallpaperType == .metalShader {
+                        shaderWallpaperSection
                     }
-                } else {
-                    enhancedEmptyStateView
                 }
+                .padding(20)
+                .animation(.easeInOut(duration: 0.15), value: isLoading)
             }
-            .padding(20)
-            .animation(.easeInOut(duration: 0.15), value: useCompactLayout)
-            .animation(.easeInOut(duration: 0.15), value: isLoading)
         }
-        .background(Color(NSColor.windowBackgroundColor))
+        .background(.clear)
         .onAppear {
             loadScreenConfiguration()
             startTimers()
@@ -69,14 +80,19 @@ struct ScreenDetailView: View {
         .onDisappear {
             stopTimers()
         }
+        .onChange(of: screen.id) { _ in
+            // Reset state when switching between screens
+            stopTimers()
+            loadScreenConfiguration()
+            startTimers()
+        }
         .alert("Error", isPresented: $showErrorAlert) {
             Button("OK", role: .cancel) { }
         } message: {
             Text(errorMessage)
         }
         .onDrop(of: [.movie, .video, .mpeg4Movie, .quickTimeMovie, .avi], isTargeted: $isDraggingOver) { providers in
-            handleDrop(providers: providers)
-            return true
+            return handleDrop(providers: providers)
         }
     }
 
@@ -157,12 +173,11 @@ struct ScreenDetailView: View {
             // Display icon
             ZStack {
                 Circle()
-                    .fill(Color.accentColor.opacity(0.1))
+                    .fill(Color.accentColor.opacity(0.15))
                     .frame(width: 50, height: 50)
-                
                 Image(systemName: "display")
                     .font(.system(size: 20))
-                    .foregroundColor(.accentColor)
+                    .foregroundStyle(Color.accentColor)
             }
             
             // Display information
@@ -176,20 +191,20 @@ struct ScreenDetailView: View {
                     HStack(spacing: 2) {
                         Image(systemName: "arrow.up.left.and.arrow.down.right")
                             .font(.caption2)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                         Text("\(Int(screen.frame.width))×\(Int(screen.frame.height))")
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                     }
                     
                     // Refresh rate
                     HStack(spacing: 2) {
                         Image(systemName: "gauge.medium")
                             .font(.caption2)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                         Text("\(getScreenRefreshRate()) Hz")
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                     }
                     
                     // Playback status indicator
@@ -200,7 +215,7 @@ struct ScreenDetailView: View {
                                 .frame(width: 6, height: 6)
                             Text(player.isPlaying ? "Playing" : "Paused")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -216,7 +231,7 @@ struct ScreenDetailView: View {
                     .labelStyle(.iconOnly)
                     .font(.system(size: 14))
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.glass)
             .controlSize(.small)
             .help("Reload video for this display")
         }
@@ -231,17 +246,17 @@ struct ScreenDetailView: View {
             
             Text("Loading video...")
                 .font(.headline)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
             
             Text("This may take a moment depending on the file size")
                 .font(.subheadline)
-                .foregroundColor(.secondary.opacity(0.8))
+                .foregroundStyle(.secondary.opacity(0.8))
                 .multilineTextAlignment(.center)
         }
         .padding(40)
         .frame(maxWidth: .infinity, minHeight: 300)
         .background(Color(colorScheme == .dark ? NSColor.darkGray : NSColor.lightGray).opacity(0.15))
-        .cornerRadius(16)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
         .transition(.opacity)
     }
     
@@ -249,7 +264,7 @@ struct ScreenDetailView: View {
         VStack(spacing: 24) {
             Image(systemName: isDraggingOver ? "arrow.down.doc.fill" : "film")
                 .font(.system(size: 60))
-                .foregroundColor(isDraggingOver ? .green : .accentColor)
+                .foregroundStyle(isDraggingOver ? Color.green : Color.accentColor)
                 .padding(.bottom, 10)
                 .animation(.easeInOut(duration: 0.2), value: isDraggingOver)
 
@@ -260,7 +275,7 @@ struct ScreenDetailView: View {
 
             Text(isDraggingOver ? "Release to set as wallpaper" : "Drag and drop a video file or click to browse")
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 300)
                 .animation(.easeInOut(duration: 0.2), value: isDraggingOver)
@@ -272,8 +287,8 @@ struct ScreenDetailView: View {
                         .padding(.vertical, 12)
                         .padding(.horizontal, 24)
                         .background(Color.accentColor)
-                        .foregroundColor(.white)
-                        .cornerRadius(10)
+                        .foregroundStyle(.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
                 .buttonStyle(.plain)
                 .shadow(color: Color.accentColor.opacity(0.3), radius: 5, x: 0, y: 2)
@@ -281,7 +296,7 @@ struct ScreenDetailView: View {
 
                 Text("Supported formats: MP4, MOV, M4V, AVI")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                     .padding(.top, 4)
             }
         }
@@ -312,7 +327,7 @@ struct ScreenDetailView: View {
                     CustomVideoPlayer(player: player, fitMode: selectedFitMode)
                         .aspectRatio(16/9, contentMode: .fit)
                         .frame(maxWidth: .infinity)
-                        .cornerRadius(10)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
                         .overlay(
                             RoundedRectangle(cornerRadius: 10)
                                 .stroke(Color(.separatorColor), lineWidth: 1)
@@ -339,15 +354,15 @@ struct ScreenDetailView: View {
                         
                         // Time display
                         HStack {
-                            Text(formatTime(currentVideoPosition))
+                            Text(FormatUtils.formatDuration(currentVideoPosition))
                                 .font(.system(size: 11))
-                                .foregroundColor(.white)
+                                .foregroundStyle(.white)
                             
                             Spacer()
                             
-                            Text(formatTime(videoDuration))
+                            Text(FormatUtils.formatDuration(videoDuration))
                                 .font(.system(size: 11))
-                                .foregroundColor(.white)
+                                .foregroundStyle(.white)
                         }
                         .padding(.horizontal, 20)
                         .padding(.bottom, 8)
@@ -360,7 +375,7 @@ struct ScreenDetailView: View {
                             endPoint: .bottom
                         )
                     )
-                    .cornerRadius(10, corners: [.bottomLeft, .bottomRight])
+                    .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: 10, bottomTrailingRadius: 10))
                 }
                 
                 // Compact video information
@@ -372,14 +387,14 @@ struct ScreenDetailView: View {
                 VStack(spacing: 14) {
                     Image(systemName: "play.slash")
                         .font(.system(size: 36))
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                     
                     Text("Video is playing as wallpaper")
                         .font(.headline)
                     
                     Text("Preview unavailable")
                         .font(.subheadline)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                     
                     Button("Reload Preview") {
                         setupPreviewPlayer()
@@ -391,15 +406,11 @@ struct ScreenDetailView: View {
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: 280)
                 .background(Color.gray.opacity(0.07))
-                .cornerRadius(10)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
                 .overlay(
                     RoundedRectangle(cornerRadius: 10)
                         .stroke(Color(.separatorColor), lineWidth: 1)
                 )
-            } else {
-                // No player configured
-                FileSelectView(action: showFilePicker)
-                    .frame(minHeight: 280)
             }
         }
     }
@@ -435,14 +446,14 @@ struct ScreenDetailView: View {
                             .padding(.horizontal, 8)
                             .padding(.vertical, 3)
                             .background(Color.accentColor.opacity(0.1))
-                            .cornerRadius(6)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
                     
                     // Speed slider
                     HStack(spacing: 8) {
                         Text("0.5x")
                             .font(.caption2)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                         
                         Slider(value: $playbackSpeed, in: 0.5...2.0, step: 0.1)
                             .onChange(of: playbackSpeed) { oldValue, newValue in
@@ -454,7 +465,7 @@ struct ScreenDetailView: View {
                         
                         Text("2.0x")
                             .font(.caption2)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                     }
                     
                     // Speed presets as a compact segmented control
@@ -482,7 +493,7 @@ struct ScreenDetailView: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .foregroundColor(.red)
+                    .foregroundStyle(.red)
                 }
                 .padding(.top, 2)
             }
@@ -513,7 +524,7 @@ struct ScreenDetailView: View {
                     }
                     .buttonStyle(.plain)
                     .background(selectedSpeed == speed ? Color.accentColor.opacity(0.2) : Color.gray.opacity(0.1))
-                    .cornerRadius(4)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
                     .overlay(
                         RoundedRectangle(cornerRadius: 4)
                             .stroke(selectedSpeed == speed ? Color.accentColor : Color.clear, lineWidth: 1)
@@ -533,7 +544,7 @@ struct ScreenDetailView: View {
                 Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
                     .resizable()
                     .frame(width: 24, height: 24)
-                    .foregroundColor(.accentColor)
+                    .foregroundStyle(Color.accentColor)
             }
             .buttonStyle(.plain)
             .help(isPlaying ? "Pause" : "Play")
@@ -571,7 +582,7 @@ struct ScreenDetailView: View {
                     // Description
                     Text(selectedFitMode.description)
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                         .padding(.top, 2)
                 }
                 
@@ -584,11 +595,11 @@ struct ScreenDetailView: View {
                 } else {
                     HStack {
                         Image(systemName: "speedometer")
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                         
                         Text("Frame rate information unavailable")
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                     }
                     .padding(.vertical, 4)
                 }
@@ -615,13 +626,13 @@ struct ScreenDetailView: View {
                         
                         Image(systemName: mode.iconName)
                             .font(.system(size: 16))
-                            .foregroundColor(isSelected ? .accentColor : .gray)
+                            .foregroundStyle(isSelected ? Color.accentColor : Color.gray)
                     }
                     
                     // Label
                     Text(mode.rawValue)
                         .font(.caption2)
-                        .foregroundColor(isSelected ? .primary : .secondary)
+                        .foregroundStyle(isSelected ? .primary : .secondary)
                 }
                 .frame(maxWidth: .infinity)
             }
@@ -629,6 +640,230 @@ struct ScreenDetailView: View {
         }
     }
     
+    // MARK: - Effects Section
+
+    private var effectsSection: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 12) {
+                Label("Effects & Overlays", systemImage: "wand.and.stars")
+                    .font(.headline)
+
+                Divider()
+
+                // Particle Effect Picker
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Particle Overlay")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+
+                    Picker("Particle", selection: $selectedParticleEffect) {
+                        ForEach(ParticleEffect.allCases) { effect in
+                            Label(effect.rawValue, systemImage: effect.iconName)
+                                .tag(effect)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .onChange(of: selectedParticleEffect) { _, newValue in
+                        updateParticleEffect(newValue)
+                    }
+                }
+
+                Divider()
+
+                // Video Effects
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Video Effects")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+
+                    // Blur
+                    HStack {
+                        Image(systemName: "aqi.medium")
+                            .frame(width: 20)
+                        Text("Blur")
+                        Spacer()
+                        Slider(value: $effectConfig.blurRadius, in: 0...30, step: 1)
+                            .frame(width: 150)
+                        Text("\(Int(effectConfig.blurRadius))")
+                            .frame(width: 30, alignment: .trailing)
+                            .font(.caption)
+                    }
+
+                    // Brightness
+                    HStack {
+                        Image(systemName: "sun.max")
+                            .frame(width: 20)
+                        Text("Brightness")
+                        Spacer()
+                        Slider(value: $effectConfig.brightness, in: -0.5...0.5, step: 0.05)
+                            .frame(width: 150)
+                        Text("\(Int(effectConfig.brightness * 100))%")
+                            .frame(width: 40, alignment: .trailing)
+                            .font(.caption)
+                    }
+
+                    // Saturation
+                    HStack {
+                        Image(systemName: "drop.halffull")
+                            .frame(width: 20)
+                        Text("Saturation")
+                        Spacer()
+                        Slider(value: $effectConfig.saturation, in: 0...2, step: 0.1)
+                            .frame(width: 150)
+                        Text(String(format: "%.1f", effectConfig.saturation))
+                            .frame(width: 30, alignment: .trailing)
+                            .font(.caption)
+                    }
+
+                    // Warmth
+                    HStack {
+                        Image(systemName: "thermometer.medium")
+                            .frame(width: 20)
+                        Text("Warmth")
+                        Spacer()
+                        Slider(value: $effectConfig.warmth, in: 2500...8000, step: 250)
+                            .frame(width: 150)
+                        Text("\(Int(effectConfig.warmth))K")
+                            .frame(width: 50, alignment: .trailing)
+                            .font(.caption)
+                    }
+
+                    // Vignette
+                    HStack {
+                        Image(systemName: "circle.dashed")
+                            .frame(width: 20)
+                        Text("Vignette")
+                        Spacer()
+                        Slider(value: $effectConfig.vignetteIntensity, in: 0...5, step: 0.5)
+                            .frame(width: 150)
+                        Text(String(format: "%.1f", effectConfig.vignetteIntensity))
+                            .frame(width: 30, alignment: .trailing)
+                            .font(.caption)
+                    }
+
+                    // Auto time-of-day tint
+                    Toggle("Auto warm tint by time of day", isOn: $effectConfig.autoTimeTint)
+                        .font(.caption)
+                }
+                .onChange(of: effectConfig) { _, _ in
+                    applyEffects()
+                }
+
+                Divider()
+
+                // Lock Screen
+                Toggle(isOn: $setAsLockScreen) {
+                    Label("Set as Lock Screen wallpaper", systemImage: "lock.display")
+                }
+                .onChange(of: setAsLockScreen) { _, newValue in
+                    if newValue {
+                        screenManager.extractLockScreenFrame(for: screen)
+                    }
+                }
+            }
+            .padding(14)
+        }
+        .groupBoxStyle(ContainerGroupBoxStyle())
+    }
+
+    // MARK: - Wallpaper Type Picker
+
+    private var wallpaperTypePicker: some View {
+        Picker("Wallpaper Type", selection: $selectedWallpaperType) {
+            ForEach(WallpaperType.allCases) { type in
+                Label(type.rawValue, systemImage: type.iconName).tag(type)
+            }
+        }
+        .pickerStyle(.segmented)
+        .padding(.bottom, 4)
+        .onChange(of: selectedWallpaperType) { _, newType in
+            if newType == .video {
+                screenManager.switchToVideoWallpaper(for: screen)
+            }
+        }
+    }
+
+    // MARK: - HTML Wallpaper Section
+
+    private var htmlWallpaperSection: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 12) {
+                Label("Web / HTML Wallpaper", systemImage: "globe")
+                    .font(.headline)
+
+                Divider()
+
+                HStack {
+                    TextField("Enter URL (https://...) or local HTML path", text: $htmlContent)
+                        .textFieldStyle(.roundedBorder)
+
+                    Button("Load") {
+                        guard !htmlContent.isEmpty else { return }
+                        screenManager.setHTMLWallpaper(url: htmlContent, for: screen)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(htmlContent.isEmpty)
+                }
+
+                Text("Supports web URLs, local .html files, or inline HTML code")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(14)
+        }
+        .groupBoxStyle(ContainerGroupBoxStyle())
+    }
+
+    // MARK: - Shader Wallpaper Section
+
+    private var shaderWallpaperSection: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 12) {
+                Label("Shader Wallpaper", systemImage: "wand.and.stars")
+                    .font(.headline)
+
+                Divider()
+
+                Text("GPU-rendered procedural animations")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack(spacing: 10) {
+                    ForEach(MetalShaderPreset.allCases) { preset in
+                        Button {
+                            selectedShaderPreset = preset
+                            screenManager.setShaderWallpaper(preset: preset, for: screen)
+                        } label: {
+                            VStack(spacing: 6) {
+                                Image(systemName: preset.iconName)
+                                    .font(.title2)
+                                    .frame(width: 44, height: 44)
+                                    .background(selectedShaderPreset == preset ? Color.accentColor.opacity(0.2) : Color.gray.opacity(0.1))
+                                    .clipShape(Circle())
+                                Text(preset.rawValue)
+                                    .font(.caption2)
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding(14)
+        }
+        .groupBoxStyle(ContainerGroupBoxStyle())
+    }
+
+    // MARK: - Effects Helpers
+
+    private func updateParticleEffect(_ effect: ParticleEffect) {
+        screenManager.updateParticleEffect(effect, for: screen)
+    }
+
+    private func applyEffects() {
+        screenManager.updateEffectConfig(effectConfig, for: screen)
+    }
+
     // MARK: - Helper Methods
 
     func setupPreviewPlayer() {
@@ -691,11 +926,21 @@ struct ScreenDetailView: View {
             if playbackSpeed != config.playbackSpeed {
                 playbackSpeed = config.playbackSpeed
             }
-            
+
             if selectedFitMode != config.fitMode {
                 selectedFitMode = config.fitMode
             }
-            
+
+            // Load new feature fields
+            selectedParticleEffect = config.particleEffect
+            effectConfig = config.effectConfig
+            setAsLockScreen = config.setAsLockScreen
+            if let preset = config.shaderPreset {
+                selectedShaderPreset = preset
+            }
+            selectedWallpaperType = config.wallpaperType
+            htmlContent = config.htmlContent ?? ""
+
             // Create preview player if none exists
             setupPreviewPlayer()
         }
@@ -818,170 +1063,8 @@ struct ScreenDetailView: View {
         }
     }
     
-    // Get screen refresh rate for the current display
     private func getScreenRefreshRate() -> Int {
-        // Use CGDisplayMode to get accurate refresh rate
-        guard let displayID = screen.id as CGDirectDisplayID?,
-              let mode = CGDisplayCopyDisplayMode(displayID) else {
-            return 60 // Default to 60Hz if we can't determine
-        }
-        
-        let refreshRate = mode.refreshRate
-        return refreshRate > 0 ? Int(refreshRate) : 60
-    }
-    
-    // Format time for video playback display
-    private func formatTime(_ seconds: Double) -> String {
-        guard seconds.isFinite, !seconds.isNaN else { return "0:00" }
-        
-        let totalSeconds = Int(seconds)
-        let minutes = totalSeconds / 60
-        let remainingSeconds = totalSeconds % 60
-        
-        return String(format: "%d:%02d", minutes, remainingSeconds)
-    }
-}
-
-// MARK: - Helper Views
-struct FileSelectView: View {
-    var action: () -> Void
-    @Environment(\.colorScheme) private var colorScheme
-    
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 20) {
-                Image(systemName: "plus.rectangle.on.rectangle")
-                    .font(.system(size: 40))
-                    .foregroundColor(.accentColor)
-                
-                Text("Select Video")
-                    .font(.headline)
-                
-                Text("Choose a video file to display as your wallpaper")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
-                    .frame(maxWidth: 250)
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 300)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.gray.opacity(0.1))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(
-                        style: StrokeStyle(lineWidth: 2, dash: [6]),
-                        antialiased: true
-                    )
-                    .foregroundColor(.accentColor.opacity(0.6))
-            )
-        }
-        .buttonStyle(.plain)
-        .contentShape(Rectangle())
-    }
-}
-
-struct PlaybackButton: View {
-    let isPlaying: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 8) {
-                // Play/pause icon in circle
-                ZStack {
-                    Circle()
-                        .fill(Color.accentColor)
-                        .frame(width: 60, height: 60)
-                        .shadow(color: Color.accentColor.opacity(0.3), radius: 4, x: 0, y: 2)
-
-                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 24))
-                        .foregroundColor(.white)
-                        .offset(x: isPlaying ? 0 : 2)
-                }
-
-                // Label text
-                Text(isPlaying ? "Pause" : "Play")
-                    .font(.callout)
-                    .fontWeight(.medium)
-            }
-            .frame(minWidth: 100)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .transition(.scale.combined(with: .opacity))
-        .accessibilityLabel(isPlaying ? "Pause video" : "Play video")
-        .accessibilityHint(isPlaying ? "Double-tap to pause the wallpaper video" : "Double-tap to play the wallpaper video")
-    }
-}
-
-struct FitModePicker: View {
-    @Binding var selection: VideoFitMode
-    let onChange: (VideoFitMode) -> Void
-    
-    var body: some View {
-        HStack(spacing: 12) {
-            ForEach(VideoFitMode.allCases) { mode in
-                FitModeOption(
-                    mode: mode,
-                    isSelected: selection == mode,
-                    action: {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            selection = mode
-                            onChange(mode)
-                        }
-                    }
-                )
-            }
-        }
-    }
-}
-
-struct FitModeOption: View {
-    let mode: VideoFitMode
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        VStack(spacing: 8) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(isSelected ? Color.accentColor.opacity(0.2) : Color.gray.opacity(0.1))
-                    .frame(width: 80, height: 60)
-
-                Image(systemName: mode.iconName)
-                    .font(.system(size: 24))
-                    .foregroundColor(isSelected ? .accentColor : .gray)
-            }
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
-            )
-
-            Text(mode.rawValue)
-                .font(.caption)
-                .foregroundColor(isSelected ? .primary : .secondary)
-
-            Text(mode.description)
-                .font(.caption2)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(width: 100)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.vertical, 4)
-        .onTapGesture {
-            action()
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(mode.rawValue) mode")
-        .accessibilityValue(isSelected ? "Selected" : "Not selected")
-        .accessibilityHint(mode.description)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        screenManager.getScreenRefreshRate(for: screen.id)
     }
 }
 
@@ -1003,7 +1086,7 @@ struct VideoInformationView: View {
             HStack {
                 HStack(spacing: 6) {
                     Image(systemName: "film.fill")
-                        .foregroundColor(.accentColor)
+                        .foregroundStyle(Color.accentColor)
                     Text(videoName.isEmpty ? "Unnamed Video" : videoName)
                         .font(.subheadline)
                         .fontWeight(.medium)
@@ -1018,7 +1101,7 @@ struct VideoInformationView: View {
                     }
                 }) {
                     Image(systemName: isInfoExpanded ? "chevron.up.circle.fill" : "chevron.down.circle.fill")
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
             }
@@ -1037,12 +1120,12 @@ struct VideoInformationView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Duration")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                             HStack(spacing: 4) {
                                 Image(systemName: "clock")
                                     .font(.caption2)
-                                    .foregroundColor(.secondary)
-                                Text(formatDuration(videoDuration))
+                                    .foregroundStyle(.secondary)
+                                Text(FormatUtils.formatDuration(videoDuration))
                                     .font(.caption)
                                     .fontWeight(.medium)
                             }
@@ -1052,11 +1135,11 @@ struct VideoInformationView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Resolution")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                             HStack(spacing: 4) {
                                 Image(systemName: "rectangle.3.group")
                                     .font(.caption2)
-                                    .foregroundColor(.secondary)
+                                    .foregroundStyle(.secondary)
                                 if let resolution = videoResolution {
                                     Text("\(resolution.width)×\(resolution.height)")
                                         .font(.caption)
@@ -1065,7 +1148,7 @@ struct VideoInformationView: View {
                                     Text("Unknown")
                                         .font(.caption)
                                         .fontWeight(.medium)
-                                        .foregroundColor(.secondary)
+                                        .foregroundStyle(.secondary)
                                 }
                             }
                         }
@@ -1074,11 +1157,11 @@ struct VideoInformationView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Frame Rate")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                             HStack(spacing: 4) {
                                 Image(systemName: "speedometer")
                                     .font(.caption2)
-                                    .foregroundColor(.secondary)
+                                    .foregroundStyle(.secondary)
                                 if videoFrameRate > 0 {
                                     Text("\(Int(videoFrameRate)) FPS")
                                         .font(.caption)
@@ -1087,7 +1170,7 @@ struct VideoInformationView: View {
                                     Text("Unknown")
                                         .font(.caption)
                                         .fontWeight(.medium)
-                                        .foregroundColor(.secondary)
+                                        .foregroundStyle(.secondary)
                                 }
                             }
                         }
@@ -1096,11 +1179,11 @@ struct VideoInformationView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Aspect Ratio")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                             HStack(spacing: 4) {
                                 Image(systemName: "aspectratio")
                                     .font(.caption2)
-                                    .foregroundColor(.secondary)
+                                    .foregroundStyle(.secondary)
                                 if let resolution = videoResolution,
                                    resolution.width > 0, resolution.height > 0 {
                                     Text(calculateAspectRatio(width: resolution.width, height: resolution.height))
@@ -1110,7 +1193,7 @@ struct VideoInformationView: View {
                                     Text("Unknown")
                                         .font(.caption)
                                         .fontWeight(.medium)
-                                        .foregroundColor(.secondary)
+                                        .foregroundStyle(.secondary)
                                 }
                             }
                         }
@@ -1119,11 +1202,11 @@ struct VideoInformationView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Screen Rate")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                             HStack(spacing: 4) {
                                 Image(systemName: "display")
                                     .font(.caption2)
-                                    .foregroundColor(.secondary)
+                                    .foregroundStyle(.secondary)
                                 Text("\(screenRefreshRate) Hz")
                                     .font(.caption)
                                     .fontWeight(.medium)
@@ -1134,11 +1217,11 @@ struct VideoInformationView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("File Size")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                             HStack(spacing: 4) {
                                 Image(systemName: "doc")
                                     .font(.caption2)
-                                    .foregroundColor(.secondary)
+                                    .foregroundStyle(.secondary)
                                 Text(fileSize.isEmpty ? "Unknown" : fileSize)
                                     .font(.caption)
                                     .fontWeight(.medium)
@@ -1150,8 +1233,7 @@ struct VideoInformationView: View {
             }
         }
         .padding(12)
-        .background(Color.secondary.opacity(0.08))
-        .cornerRadius(8)
+        .glassEffect(.regular, in: .rect(cornerRadius: 8))
         .onAppear {
             loadVideoInformation()
         }
@@ -1173,7 +1255,7 @@ struct VideoInformationView: View {
             do {
                 let attributes = try FileManager.default.attributesOfItem(atPath: path)
                 if let size = attributes[.size] as? NSNumber {
-                    fileSize = formatFileSize(size.int64Value)
+                    fileSize = FormatUtils.formatBytes(size.int64Value)
                 }
             } catch {
                 print("Error getting file size: \(error)")
@@ -1203,39 +1285,6 @@ struct VideoInformationView: View {
         }
     }
     
-    private func formatDuration(_ seconds: Double) -> String {
-        // Handle invalid values
-        guard seconds.isFinite, !seconds.isNaN else {
-            return "Unknown"
-        }
-        
-        // Safely convert to integer
-        let totalSeconds = max(0, Int(seconds))
-        let hours = totalSeconds / 3600
-        let minutes = (totalSeconds % 3600) / 60
-        let seconds = totalSeconds % 60
-        
-        if hours > 0 {
-            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
-        } else {
-            return String(format: "%d:%02d", minutes, seconds)
-        }
-    }
-    
-    private func formatFileSize(_ bytes: Int64) -> String {
-        let kb = Double(bytes) / 1024.0
-        let mb = kb / 1024.0
-        let gb = mb / 1024.0
-        
-        if gb >= 1.0 {
-            return String(format: "%.2f GB", gb)
-        } else if mb >= 1.0 {
-            return String(format: "%.1f MB", mb)
-        } else {
-            return String(format: "%.0f KB", kb)
-        }
-    }
-    
     private func calculateAspectRatio(width: Int, height: Int) -> String {
         if width == 0 || height == 0 { return "Unknown" }
         
@@ -1259,108 +1308,16 @@ struct VideoInformationView: View {
     }
 }
 
-// MARK: - Custom Styles and Extensions
+// MARK: - Custom Styles
+
 struct ContainerGroupBoxStyle: GroupBoxStyle {
-    @Environment(\.colorScheme) private var colorScheme
-    
     func makeBody(configuration: Configuration) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             configuration.label
             configuration.content
         }
         .padding(4)
-        .background(colorScheme == .dark ? Color(NSColor.controlBackgroundColor) : Color(white: 0.97))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+        .glassEffect(.regular, in: .rect(cornerRadius: 12))
     }
 }
 
-// Extension to apply rounded corners to specific corners only
-extension View {
-    func cornerRadius(_ radius: CGFloat, corners: RectCorner) -> some View {
-        clipShape(RoundedCornerShape(radius: radius, corners: corners))
-    }
-}
-
-// Custom shape for rounded corners
-struct RoundedCornerShape: Shape {
-    var radius: CGFloat = .infinity
-    var corners: RectCorner = .allCorners
-    
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        
-        let topLeft = corners.contains(.topLeft)
-        let topRight = corners.contains(.topRight)
-        let bottomLeft = corners.contains(.bottomLeft)
-        let bottomRight = corners.contains(.bottomRight)
-        
-        let width = rect.width
-        let height = rect.height
-        
-        // Top left corner
-        if topLeft {
-            path.move(to: CGPoint(x: 0, y: radius))
-            path.addCurve(
-                to: CGPoint(x: radius, y: 0),
-                control1: CGPoint(x: 0, y: radius / 2),
-                control2: CGPoint(x: radius / 2, y: 0)
-            )
-        } else {
-            path.move(to: CGPoint(x: 0, y: 0))
-        }
-        
-        // Top edge and top right corner
-        if topRight {
-            path.addLine(to: CGPoint(x: width - radius, y: 0))
-            path.addCurve(
-                to: CGPoint(x: width, y: radius),
-                control1: CGPoint(x: width - radius / 2, y: 0),
-                control2: CGPoint(x: width, y: radius / 2)
-            )
-        } else {
-            path.addLine(to: CGPoint(x: width, y: 0))
-        }
-        
-        // Right edge and bottom right corner
-        if bottomRight {
-            path.addLine(to: CGPoint(x: width, y: height - radius))
-            path.addCurve(
-                to: CGPoint(x: width - radius, y: height),
-                control1: CGPoint(x: width, y: height - radius / 2),
-                control2: CGPoint(x: width - radius / 2, y: height)
-            )
-        } else {
-            path.addLine(to: CGPoint(x: width, y: height))
-        }
-        
-        // Bottom edge and bottom left corner
-        if bottomLeft {
-            path.addLine(to: CGPoint(x: radius, y: height))
-            path.addCurve(
-                to: CGPoint(x: 0, y: height - radius),
-                control1: CGPoint(x: radius / 2, y: height),
-                control2: CGPoint(x: 0, y: height - radius / 2)
-            )
-        } else {
-            path.addLine(to: CGPoint(x: 0, y: height))
-        }
-        
-        // Close the path
-        path.closeSubpath()
-        
-        return path
-    }
-}
-
-// Custom struct for UIRectCorner in macOS
-struct RectCorner: OptionSet {
-    let rawValue: Int
-    
-    static let topLeft = RectCorner(rawValue: 1 << 0)
-    static let topRight = RectCorner(rawValue: 1 << 1)
-    static let bottomRight = RectCorner(rawValue: 1 << 2)
-    static let bottomLeft = RectCorner(rawValue: 1 << 3)
-    
-    static let allCorners: RectCorner = [.topLeft, .topRight, .bottomLeft, .bottomRight]
-}

@@ -7,7 +7,6 @@ class StatusBarController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem
     private let screenManager: ScreenManager
     private var settingsWindowController: NSWindowController?
-    private var menuUpdateTimer: Timer?
     private var cleanupTasks = Set<AnyCancellable>()
 
     // MARK: - Initialization
@@ -18,7 +17,6 @@ class StatusBarController: NSObject, NSMenuDelegate {
         super.init()
         configureStatusItem()
         setupPlaybackObservers()
-        startPeriodicMenuUpdates()
     }
 
     private func configureStatusItem() {
@@ -39,7 +37,6 @@ class StatusBarController: NSObject, NSMenuDelegate {
 
         guard button.image?.name() != symbolName else { return }
 
-        Logger.debug("Updating status bar icon to \(symbolName)", category: .ui)
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.2
             context.allowsImplicitAnimation = true
@@ -84,15 +81,6 @@ class StatusBarController: NSObject, NSMenuDelegate {
             .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.updateStatusBarIcon(isPlaying: self?.screenManager.isAnyScreenPlaying)
-            }
-            .store(in: &cleanupTasks)
-
-        // Video player state changes
-        NotificationCenter.default.publisher(for: WallpaperVideoPlayer.didChangePlaybackStateNotification)
-            .throttle(for: .milliseconds(250), scheduler: DispatchQueue.main, latest: true)
-            .sink { [weak self] notification in
-                let isPlaying = notification.userInfo?["isPlaying"] as? Bool
-                self?.updateStatusBarIcon(isPlaying: isPlaying)
             }
             .store(in: &cleanupTasks)
 
@@ -248,7 +236,7 @@ class StatusBarController: NSObject, NSMenuDelegate {
     }
     
     private func activateApp() {
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
     }
     
     // MARK: - Playback Control
@@ -338,25 +326,7 @@ class StatusBarController: NSObject, NSMenuDelegate {
         screenManager.refreshScreens()
     }
     
-    // MARK: - Menu Auto Update
-    func startPeriodicMenuUpdates() {
-        // Update menu items that might change over time
-        menuUpdateTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            guard let self = self else { return }
-            
-            // Always update the icon when timer fires
-            self.updateStatusBarIcon()
-            
-            // Check if menu might be open (button is highlighted)
-            if self.statusItem.button?.isHighlighted == true {
-                // Update menu items that might have changed
-                self.updatePlaybackMenuState()
-            }
-        }
-    }
-    
     deinit {
-        menuUpdateTimer?.invalidate()
         cleanupTasks.removeAll()
         NotificationCenter.default.removeObserver(self)
     }

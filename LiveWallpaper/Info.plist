@@ -23,6 +23,21 @@
 			<key>NSDocumentClass</key>
 			<string>FileDocument</string>
 		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>HTML Document</string>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>html</string>
+				<string>htm</string>
+			</array>
+			<key>LSHandlerRank</key>
+			<string>Default</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.html</string>
+			</array>
+		</dict>
 	</array>
 	<key>NSPowerMonitorUsageDescription</key>
 	<string>This app needs to monitor power status to manage video playback based on battery state.</string>

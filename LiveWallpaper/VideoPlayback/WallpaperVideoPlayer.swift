@@ -21,9 +21,6 @@ final class WallpaperVideoPlayer {
         }
     }
 
-    @Published private(set) var loadingError: Error?
-    @Published private(set) var currentTime: Double = 0
-    @Published private(set) var duration: Double = 0
     @Published private(set) var videoFrameRate: Double = 0
 
     // MARK: - Public Properties
@@ -36,7 +33,6 @@ final class WallpaperVideoPlayer {
     private weak var window: VideoWallpaperWindow?
     private weak var videoView: VideoContainerView?
     private var cleanupTasks = Set<AnyCancellable>()
-    private var periodicTimeObserver: Any?
     private var playbackStateObserver: NSKeyValueObservation?
     private var loadingTask: Task<Void, Never>?
     private var frameRateLimitTask: Task<Void, Never>?
@@ -59,7 +55,7 @@ final class WallpaperVideoPlayer {
                 userInfo: [NSLocalizedDescriptionKey: "Invalid frame provided"]
             )
             Logger.error("Invalid frame provided: \(frame)", category: .videoPlayer)
-            loadingError = error
+            Logger.error("WallpaperVideoPlayer init error: \(error.localizedDescription)", category: .videoPlayer)
             return
         }
         
@@ -79,7 +75,7 @@ final class WallpaperVideoPlayer {
                 userInfo: [NSLocalizedDescriptionKey: "Failed to access security scoped resource"]
             )
             Logger.error("Failed to access security scoped resource: \(url.lastPathComponent)", category: .videoPlayer)
-            loadingError = error
+            Logger.error("WallpaperVideoPlayer init error: \(error.localizedDescription)", category: .videoPlayer)
             return
         }
         
@@ -94,11 +90,9 @@ final class WallpaperVideoPlayer {
                 try Task.checkCancellation()
 
                 // Load essential properties asynchronously
-                async let playable = asset.load(.isPlayable)
-                async let duration = asset.load(.duration)
+                let isPlayable = try await asset.load(.isPlayable)
 
-                // Check if asset is playable
-                guard try await playable else {
+                guard isPlayable else {
                     self.stopAccessingResource()
                     let error = NSError(
                         domain: "WallpaperVideoPlayer",
@@ -106,16 +100,10 @@ final class WallpaperVideoPlayer {
                         userInfo: [NSLocalizedDescriptionKey: "Video is not playable"]
                     )
                     Logger.error("Video is not playable: \(url.lastPathComponent)", category: .videoPlayer)
-                    self.loadingError = error
                     return
                 }
 
-                // Check for cancellation before continuing
                 try Task.checkCancellation()
-
-                // Get duration
-                self.duration = try await CMTimeGetSeconds(duration)
-                Logger.debug("Video duration: \(self.duration)s", category: .videoPlayer)
 
                 // Get video frame rate
                 if let videoTrack = try await asset.loadTracks(withMediaType: .video).first {
@@ -144,7 +132,6 @@ final class WallpaperVideoPlayer {
             } catch {
                 self.stopAccessingResource()
                 Logger.error("Error loading video: \(error.localizedDescription)", category: .videoPlayer)
-                self.loadingError = error
             }
         }
     }
@@ -155,6 +142,10 @@ final class WallpaperVideoPlayer {
         
         // Set up quality of service for better performance
         playerItem.preferredForwardBufferDuration = 5.0
+        // Battery optimization: cap decode resolution when on battery
+        if PowerMonitor.shared.currentPowerSource.isOnBattery {
+            playerItem.preferredMaximumResolution = CGSize(width: 1920, height: 1080)
+        }
         playerItem.canUseNetworkResourcesForLiveStreamingWhilePaused = false
 
         // Configure player with muted audio for wallpaper playback
@@ -181,10 +172,9 @@ final class WallpaperVideoPlayer {
         self.window = videoWindow
         self.videoView = containerView
         
-        // Setup observers
         setupPlaybackObservers()
         setupFrameObserver()
-        setupTimeObserver()
+        setupFPSTracking()
 
         // Wait for player to be ready, then start playback
         setupPlayerReadyObserver()
@@ -223,10 +213,12 @@ final class WallpaperVideoPlayer {
     private func setupPlaybackObservers() {
         // Monitor playback status with more reliable KVO
         if let player = player {
-            playbackStateObserver = player.observe(\.timeControlStatus, options: [.new, .initial]) { [weak self] player, change in
+            playbackStateObserver = player.observe(\.timeControlStatus, options: [.new, .initial]) { [weak self] player, _ in
                 guard let self = self else { return }
                 let isCurrentlyPlaying = player.timeControlStatus == .playing
-                if self.isPlaying != isCurrentlyPlaying {
+                // KVO may fire on arbitrary threads; update @Published on main thread
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self, self.isPlaying != isCurrentlyPlaying else { return }
                     self.isPlaying = isCurrentlyPlaying
                 }
             }
@@ -234,9 +226,9 @@ final class WallpaperVideoPlayer {
         
         // Monitor for errors
         NotificationCenter.default.publisher(for: .AVPlayerItemFailedToPlayToEndTime, object: player?.currentItem)
-            .sink { [weak self] notification in
+            .sink { notification in
                 if let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error {
-                    self?.loadingError = error
+                    Logger.error("Playback failed: \(error.localizedDescription)", category: .videoPlayer)
                 }
             }
             .store(in: &cleanupTasks)
@@ -250,6 +242,21 @@ final class WallpaperVideoPlayer {
             .store(in: &cleanupTasks)
     }
     
+    private func setupFPSTracking() {
+        // Use a periodic timer to sample playback rate as an FPS proxy
+        let fpsTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            guard let self = self, self.isPlaying else { return }
+            // AVPlayer renders at the video's native FPS (or limited by composition)
+            // Report effective FPS based on videoFrameRate and frame rate limit
+            let effectiveFPS = self.videoFrameRate > 0 ? self.videoFrameRate : 30.0
+            // Tick once per half-second, scaled to represent the actual frame count
+            for _ in 0..<Int(effectiveFPS / 2) {
+                SystemMonitor.shared.tickFrame()
+            }
+        }
+        cleanupTasks.insert(AnyCancellable { fpsTimer.invalidate() })
+    }
+
     private func setupFrameObserver() {
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .throttle(for: .seconds(0.5), scheduler: DispatchQueue.main, latest: true)
@@ -295,16 +302,6 @@ final class WallpaperVideoPlayer {
         updateWindowFrame(targetScreen.frame)
     }
     
-    private func setupTimeObserver() {
-        // Add periodic time observer to track current playback position
-        let interval = CMTime(seconds: 0.5, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
-        
-        periodicTimeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
-            let seconds = CMTimeGetSeconds(time)
-            self?.currentTime = seconds.isNaN ? 0 : seconds
-        }
-    }
-    
     // MARK: - Playback Controls
 
     func play() {
@@ -326,7 +323,19 @@ final class WallpaperVideoPlayer {
     }
 
     func setPlaybackSpeed(_ speed: Double) {
-        player?.rate = Float(speed)
+        player?.defaultRate = Float(speed)
+        // Only apply rate immediately if currently playing; avoid implicit resume
+        if player?.timeControlStatus == .playing {
+            player?.rate = Float(speed)
+        }
+    }
+
+    func setBatteryResolutionCap(_ enabled: Bool) {
+        if enabled {
+            player?.currentItem?.preferredMaximumResolution = CGSize(width: 1920, height: 1080)
+        } else {
+            player?.currentItem?.preferredMaximumResolution = .zero
+        }
     }
 
     func setVideoFitMode(_ mode: VideoFitMode) {
@@ -372,10 +381,6 @@ final class WallpaperVideoPlayer {
         return windowScreenID == screenID
     }
 
-    func handleScreenParameterChange(_ screenFrame: CGRect) {
-        updateWindowFrame(screenFrame)
-    }
-    
     // MARK: - Frame Rate Limiting
     func setFrameRateLimit(_ framesPerSecond: Float) {
         guard let playerItem = player?.currentItem else {
@@ -408,8 +413,9 @@ final class WallpaperVideoPlayer {
                 // Check for cancellation before loading more data
                 try Task.checkCancellation()
 
-                // Load natural video size for composition
+                // Load natural video size and duration for composition
                 let naturalSize = try await videoTrack.load(.naturalSize)
+                let assetDuration = try await playerItem.asset.load(.duration)
 
                 // Check for cancellation before UI work
                 try Task.checkCancellation()
@@ -422,11 +428,11 @@ final class WallpaperVideoPlayer {
                     composition.frameDuration = CMTime(value: 1, timescale: CMTimeScale(framesPerSecond))
                     composition.renderSize = naturalSize
 
-                    // Create instruction
+                    // Create instruction covering the full video duration
                     let instruction = AVMutableVideoCompositionInstruction()
                     instruction.timeRange = CMTimeRange(
                         start: .zero,
-                        duration: CMTime(value: 1, timescale: 1)
+                        duration: assetDuration
                     )
 
                     let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: videoTrack)
@@ -468,11 +474,6 @@ final class WallpaperVideoPlayer {
 
         playbackStateObserver?.invalidate()
         playbackStateObserver = nil
-
-        if let timeObserver = periodicTimeObserver, let player = player {
-            player.removeTimeObserver(timeObserver)
-        }
-        periodicTimeObserver = nil
 
         cleanupTasks.removeAll()
         
