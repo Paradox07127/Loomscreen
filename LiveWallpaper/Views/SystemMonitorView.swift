@@ -1,61 +1,106 @@
 import SwiftUI
 
 struct SystemMonitorView: View {
-    @ObservedObject private var monitor = SystemMonitor.shared
+    private var monitor = SystemMonitor.shared
     @State private var powerSource: PowerMonitor.PowerSource = PowerMonitor.shared.currentPowerSource
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            BatteryStatusIndicator(powerSource: powerSource)
-                .padding(.bottom, 2)
-
-            Divider()
-
-            // CPU
-            MetricRow(icon: "cpu", label: "CPU", value: "\(Int(monitor.cpuUsage))%",
-                      progress: monitor.cpuUsage / 100, color: colorForPercent(monitor.cpuUsage))
-
-            // GPU
-            MetricRow(icon: "gpu", label: "GPU", value: "\(Int(monitor.gpuUsage))%",
-                      progress: monitor.gpuUsage / 100, color: colorForPercent(monitor.gpuUsage))
-
-            // Memory
-            MetricRow(icon: "memorychip", label: "Memory",
-                      value: "\(monitor.formattedMemoryUsage()) / \(monitor.formattedTotalMemory())",
-                      progress: monitor.memoryPercentage() / 100,
-                      color: colorForPercent(monitor.memoryPercentage()))
-
-            Divider()
-
-            // Thermal + FPS row
-            HStack(spacing: 16) {
-                // Thermal state
+        VStack(spacing: 12) {
+            // Container for 4 widgets (2x2 Grid)
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 14) {
+                // CPU
+                MiniGaugeCard(title: "CPU", value: monitor.cpuUsage, color: colorForPercent(monitor.cpuUsage), icon: "cpu")
+                
+                // GPU
+                MiniGaugeCard(title: "GPU", value: monitor.gpuUsage, color: colorForPercent(monitor.gpuUsage), icon: "square.stack.3d.up.fill")
+                
+                // RAM
+                MiniGaugeCard(title: "RAM", value: monitor.memoryPercentage(), color: colorForPercent(monitor.memoryPercentage()), icon: "memorychip")
+                
+                // Power
+                VStack(spacing: 2) {
+                    ZStack {
+                        Circle()
+                            .trim(from: 0.0, to: 0.75)
+                            .stroke(Color.gray.opacity(0.15), style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                            .rotationEffect(.degrees(135))
+                        
+                        if case .battery(let level) = powerSource {
+                            Circle()
+                                .trim(from: 0.0, to: CGFloat(level) * 0.75)
+                                .stroke(powerStatusColor, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                                .rotationEffect(.degrees(135))
+                        } else {
+                            Circle()
+                                .trim(from: 0.0, to: 0.75)
+                                .stroke(powerStatusColor, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                                .rotationEffect(.degrees(135))
+                        }
+                        
+                        Image(systemName: powerStatusIcon)
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundStyle(powerStatusColor)
+                        
+                        VStack(spacing: 0) {
+                            Text(powerStatusTextShort)
+                                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                .foregroundStyle(.secondary)
+                            Text(powerStatusTextValue)
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                        }
+                        .offset(y: 28)
+                    }
+                    .aspectRatio(1, contentMode: .fit)
+                    .frame(maxWidth: 100)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .padding(14)
+            .background(Color(NSColor.windowBackgroundColor).opacity(0.8))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .shadow(color: Color.black.opacity(0.06), radius: 3, x: 0, y: 1)
+            
+            // FPS, Memory & Thermal Info row
+            VStack(spacing: 6) {
+                HStack(spacing: 12) {
+                    if monitor.videoFPS > 0 {
+                        HStack(spacing: 4) {
+                            Image(systemName: "speedometer")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Text("\(Int(monitor.videoFPS)) FPS")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                        }
+                    }
+                    
+                    Spacer(minLength: 0)
+                    
+                    HStack(spacing: 4) {
+                        Image(systemName: "thermometer.medium")
+                            .font(.caption2)
+                            .foregroundStyle(thermalColor)
+                        Text(monitor.thermalStateDescription)
+                            .font(.caption)
+                            .foregroundStyle(thermalColor)
+                    }
+                }
+                
                 HStack(spacing: 4) {
-                    Image(systemName: thermalIcon)
-                        .foregroundStyle(thermalColor)
-                        .font(.caption)
-                    Text(monitor.thermalStateDescription)
+                    Image(systemName: "memorychip")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text("RAM Usage: \(monitor.formattedMemoryUsage()) / \(monitor.formattedTotalMemory())")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-
-                Spacer()
-
-                // Render FPS
-                if monitor.videoFPS > 0 {
-                    HStack(spacing: 4) {
-                        Image(systemName: "gauge.with.dots.needle.33percent")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text("\(Int(monitor.videoFPS)) FPS")
-                            .font(.caption)
-                            .fontWeight(.medium)
-                    }
-                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .padding(.horizontal, 2)
         }
-        .padding(.all, 8)
-        .glassEffect(.regular, in: .rect(cornerRadius: 8))
+        .padding(.horizontal, 0)
+        .padding(.vertical, 2)
+        .frame(maxWidth: 220, alignment: .leading)
         .onAppear {
             monitor.startMonitoring()
             powerSource = PowerMonitor.shared.currentPowerSource
@@ -70,22 +115,10 @@ struct SystemMonitorView: View {
         }
     }
 
-    // MARK: - Helpers
-
     private func colorForPercent(_ pct: Double) -> Color {
         if pct >= 80 { return .red }
         if pct >= 50 { return .orange }
         return .green
-    }
-
-    private var thermalIcon: String {
-        switch monitor.thermalState {
-        case .nominal:  return "thermometer.low"
-        case .fair:     return "thermometer.medium"
-        case .serious:  return "thermometer.high"
-        case .critical: return "thermometer.sun.fill"
-        @unknown default: return "thermometer.medium"
-        }
     }
 
     private var thermalColor: Color {
@@ -97,79 +130,7 @@ struct SystemMonitorView: View {
         @unknown default: return .gray
         }
     }
-}
-
-// MARK: - Metric Row
-
-private struct MetricRow: View {
-    let icon: String
-    let label: String
-    let value: String
-    let progress: Double
-    let color: Color
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                Image(systemName: icon)
-                    .foregroundStyle(color)
-                    .frame(width: 16)
-                Text(label)
-                    .font(.subheadline)
-                Spacer()
-                Text(value)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .foregroundStyle(color)
-            }
-
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(Color.gray.opacity(0.2))
-                        .frame(height: 6)
-                    Capsule()
-                        .fill(color)
-                        .frame(width: geo.size.width * min(CGFloat(progress), 1.0), height: 6)
-                }
-            }
-            .frame(height: 6)
-        }
-    }
-}
-
-// MARK: - Battery Status
-
-struct BatteryStatusIndicator: View {
-    var powerSource: PowerMonitor.PowerSource
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Image(systemName: powerStatusIcon)
-                    .foregroundStyle(powerStatusColor)
-                Text(powerStatusText)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                Spacer()
-            }
-
-            if case .battery(let level) = powerSource {
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(Color.gray.opacity(0.2))
-                            .frame(height: 6)
-                        Capsule()
-                            .fill(batteryColor(level))
-                            .frame(width: geo.size.width * CGFloat(level), height: 6)
-                    }
-                }
-                .frame(height: 6)
-            }
-        }
-    }
-
+    
     private var powerStatusIcon: String {
         switch powerSource {
         case .battery(let level):
@@ -178,34 +139,75 @@ struct BatteryStatusIndicator: View {
             if level <= 0.5 { return "battery.50" }
             if level <= 0.75 { return "battery.75" }
             return "battery.100"
-        case .external:
-            return "power.circle.fill"
+        case .external: return "bolt.fill"
         }
     }
 
-    private var powerStatusText: String {
+    private var powerStatusTextShort: String {
         switch powerSource {
-        case .battery(let level): return "Battery: \(Int(level * 100))%"
-        case .external: return "Connected to Power"
+        case .battery: return "BATT"
+        case .external: return "PWR"
+        }
+    }
+
+    private var powerStatusTextValue: String {
+        switch powerSource {
+        case .battery(let level): return "\(Int(level * 100))%"
+        case .external: return "AC"
         }
     }
 
     private var powerStatusColor: Color {
         switch powerSource {
-        case .battery(let level): return batteryColor(level)
+        case .battery(let level): 
+            if level <= 0.2 { return .red }
+            if level <= 0.5 { return .orange }
+            return .green
         case .external: return .green
         }
     }
-
-    private func batteryColor(_ level: Double) -> Color {
-        if level <= 0.2 { return .red }
-        if level <= 0.5 { return .orange }
-        return .green
-    }
 }
 
-#Preview {
-    SystemMonitorView()
-        .frame(width: 250)
-        .padding()
+struct MiniGaugeCard: View {
+    let title: String
+    let value: Double
+    let color: Color
+    let icon: String
+    
+    var body: some View {
+        VStack(spacing: 2) {
+            ZStack {
+                // Background Track (270 degrees, from bottom-left to bottom-right)
+                Circle()
+                    .trim(from: 0.0, to: 0.75)
+                    .stroke(Color.gray.opacity(0.15), style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                    .rotationEffect(.degrees(135))
+                
+                // Foreground Track
+                Circle()
+                    .trim(from: 0.0, to: CGFloat(min(value / 100.0, 1.0)) * 0.75)
+                    .stroke(color, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                    .rotationEffect(.degrees(135))
+                    .animation(.spring(response: 0.5, dampingFraction: 0.8), value: value)
+                
+                // Icon in the center
+                Image(systemName: icon)
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(color)
+                
+                // Title and Value in the opening gap at the bottom
+                VStack(spacing: 0) {
+                    Text(title)
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                    Text("\(Int(value))%")
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                }
+                .offset(y: 26) // Pushes text into the gap
+            }
+            .aspectRatio(1, contentMode: .fit) // Keep it a perfect square
+            .frame(maxWidth: 100) // Set max width to prevent infinite scaling
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
 }

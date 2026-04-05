@@ -2,7 +2,7 @@ import Foundation
 import IOKit.ps
 import Combine
 
-final class PowerMonitor {
+final class PowerMonitor: @unchecked Sendable {
     // MARK: - Singleton & Notifications
 
     static let shared = PowerMonitor()

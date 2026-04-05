@@ -1,8 +1,8 @@
 import SwiftUI
 
 struct FrameRateControlView: View {
-    @ObservedObject var screen: Screen
-    @EnvironmentObject private var screenManager: ScreenManager
+    var screen: Screen
+    @Environment(ScreenManager.self) private var screenManager
     
     @State private var selectedLimit: FrameRateLimit
     @State private var screenRefreshRate: Int = 60
@@ -113,7 +113,7 @@ struct FrameRateControlView_Previews: PreviewProvider {
         let mockManager = ScreenManager()
         
         return FrameRateControlView(screen: mockScreen)
-            .environmentObject(mockManager)
+            .environment(mockManager)
             .frame(width: 400)
             .padding()
     }

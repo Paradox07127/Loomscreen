@@ -1,31 +1,32 @@
 import Foundation
-import Combine
+import Observation
 import Darwin
 import IOKit
 
-class SystemMonitor: ObservableObject {
+@MainActor @Observable
+final class SystemMonitor {
     static let shared = SystemMonitor()
 
-    // MARK: - Published Properties
+    // MARK: - Observed Properties
 
-    @Published private(set) var cpuUsage: Double = 0
-    @Published private(set) var memoryUsage: UInt64 = 0
-    @Published private(set) var totalMemory: UInt64 = 0
-    @Published private(set) var isMemoryLow: Bool = false
-    @Published private(set) var systemMemoryUsage: Double = 0
+    private(set) var cpuUsage: Double = 0
+    private(set) var memoryUsage: UInt64 = 0
+    private(set) var totalMemory: UInt64 = 0
+    private(set) var isMemoryLow: Bool = false
+    private(set) var systemMemoryUsage: Double = 0
 
     // New metrics
-    @Published private(set) var gpuUsage: Double = 0           // 0-100%
-    @Published private(set) var energyImpact: Double = 0       // watts (approximate)
-    @Published private(set) var thermalState: ProcessInfo.ThermalState = .nominal
-    @Published private(set) var videoFPS: Double = 0            // actual rendered FPS
+    private(set) var gpuUsage: Double = 0           // 0-100%
+    private(set) var energyImpact: Double = 0       // watts (approximate)
+    private(set) var thermalState: ProcessInfo.ThermalState = .nominal
+    private(set) var videoFPS: Double = 0            // actual rendered FPS
 
     // MARK: - Configuration
 
-    private let memoryWarningThreshold: Double = 0.85
-    private var updateInterval: TimeInterval = 2.0
-    private var updateTimer: Timer?
-    private var fpsCounter = FPSCounter()
+    @ObservationIgnored private let memoryWarningThreshold: Double = 0.85
+    @ObservationIgnored private var updateInterval: TimeInterval = 2.0
+    @ObservationIgnored private var updateTimer: Timer?
+    @ObservationIgnored private var fpsCounter = FPSCounter()
 
     private init() {
         totalMemory = ProcessInfo.processInfo.physicalMemory

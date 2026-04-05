@@ -1,6 +1,7 @@
 import Foundation
 import AVKit
 
+@MainActor
 class ResourceUtilities {
     // MARK: - Security-Scoped Bookmarks
 

@@ -3,10 +3,11 @@ import AVKit
 import Combine
 
 /// Video player class responsible for playing videos as desktop wallpaper
+@MainActor
 final class WallpaperVideoPlayer {
     // MARK: - Notifications
 
-    static let didChangePlaybackStateNotification = Notification.Name("WallpaperVideoPlayerDidChangePlaybackState")
+    nonisolated static let didChangePlaybackStateNotification = Notification.Name("WallpaperVideoPlayerDidChangePlaybackState")
 
     // MARK: - Published Properties
 
@@ -25,13 +26,14 @@ final class WallpaperVideoPlayer {
 
     // MARK: - Public Properties
 
-    private(set) var player: AVPlayer?
+    private(set) var player: AVQueuePlayer?
     var videoURL: URL?
 
     // MARK: - Private Properties
 
     private weak var window: VideoWallpaperWindow?
     private weak var videoView: VideoContainerView?
+    private var playerLooper: AVPlayerLooper?
     private var cleanupTasks = Set<AnyCancellable>()
     private var playbackStateObserver: NSKeyValueObservation?
     private var loadingTask: Task<Void, Never>?
@@ -149,11 +151,14 @@ final class WallpaperVideoPlayer {
         playerItem.canUseNetworkResourcesForLiveStreamingWhilePaused = false
 
         // Configure player with muted audio for wallpaper playback
-        self.player = AVPlayer(playerItem: playerItem)
-        self.player?.automaticallyWaitsToMinimizeStalling = true
-        self.player?.volume = 0
-        self.player?.isMuted = true
-        self.player?.actionAtItemEnd = .none
+        // Use AVQueuePlayer + AVPlayerLooper for seamless zero-cost looping
+        // (avoids seek-to-zero which flushes the decode pipeline)
+        let queuePlayer = AVQueuePlayer()
+        queuePlayer.automaticallyWaitsToMinimizeStalling = true
+        queuePlayer.volume = 0
+        queuePlayer.isMuted = true
+        self.player = queuePlayer
+        self.playerLooper = AVPlayerLooper(player: queuePlayer, templateItem: playerItem)
         
         // Create and configure window
         let videoWindow = VideoWallpaperWindow(frame: initialFrame)
@@ -233,13 +238,7 @@ final class WallpaperVideoPlayer {
             }
             .store(in: &cleanupTasks)
         
-        // Setup looping
-        NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime, object: player?.currentItem)
-            .sink { [weak self] _ in
-                self?.player?.seek(to: .zero)
-                self?.player?.play()
-            }
-            .store(in: &cleanupTasks)
+        // Looping is handled by AVPlayerLooper — no manual seek needed
     }
     
     private func setupFPSTracking() {
@@ -399,12 +398,13 @@ final class WallpaperVideoPlayer {
         // Cancel any previous frame rate limit task
         frameRateLimitTask?.cancel()
 
+        let asset = playerItem.asset
         frameRateLimitTask = Task { [weak self] in
             do {
                 // Check for cancellation early
                 try Task.checkCancellation()
 
-                let videoTracks = try await playerItem.asset.loadTracks(withMediaType: .video)
+                let videoTracks = try await asset.loadTracks(withMediaType: .video)
                 guard let videoTrack = videoTracks.first else {
                     Logger.warning("Cannot set frame rate limit: No video track found", category: .videoPlayer)
                     return
@@ -415,7 +415,7 @@ final class WallpaperVideoPlayer {
 
                 // Load natural video size and duration for composition
                 let naturalSize = try await videoTrack.load(.naturalSize)
-                let assetDuration = try await playerItem.asset.load(.duration)
+                let assetDuration = try await asset.load(.duration)
 
                 // Check for cancellation before UI work
                 try Task.checkCancellation()
@@ -475,13 +475,12 @@ final class WallpaperVideoPlayer {
         playbackStateObserver?.invalidate()
         playbackStateObserver = nil
 
+        playerLooper?.disableLooping()
+        playerLooper = nil
+
         cleanupTasks.removeAll()
-        
-        // Move UI operations to the main thread
-        let windowToClose = window
-        DispatchQueue.main.async {
-            windowToClose?.close()
-        }
+
+        window?.close()
         
         window = nil
         videoView = nil
@@ -492,7 +491,5 @@ final class WallpaperVideoPlayer {
         Logger.debug("Video player resources cleaned up", category: .videoPlayer)
     }
     
-    deinit {
-        cleanup()
-    }
+    nonisolated deinit {}
 }
