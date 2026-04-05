@@ -1,12 +1,10 @@
 import AppKit
 import AVKit
-import Combine
 
 // Container view for video playback that handles the AVPlayerLayer
 class VideoContainerView: NSView {
     // MARK: - Properties
     private var playerLayer: AVPlayerLayer?
-    private var cleanupTasks: Set<AnyCancellable> = []
     private var currentPlayer: AVPlayer?
     
     var fitMode: VideoFitMode = .aspectFill {
@@ -88,14 +86,6 @@ class VideoContainerView: NSView {
     }
     
     private func cleanupPlayerLayer() {
-        // Ensure we're on the main thread for layer manipulation
-        if !Thread.isMainThread {
-            DispatchQueue.main.async { [weak self] in
-                self?.cleanupPlayerLayer()
-            }
-            return
-        }
-        
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         
@@ -116,12 +106,8 @@ class VideoContainerView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         
-        // Ensure player layer covers the full bounds
         playerLayer?.frame = bounds
-        
-        // Only log when dimensions actually change to reduce log spam
-        Logger.debug("Updated player layer frame to \(bounds)", category: .videoPlayer)
-        
+
         CATransaction.commit()
     }
     
@@ -156,7 +142,6 @@ class VideoContainerView: NSView {
     }
     
     deinit {
-        cleanupTasks.removeAll()
         cleanupPlayerLayer()
     }
 }

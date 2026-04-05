@@ -12,18 +12,17 @@ final class ScreenManager: ObservableObject {
     // No locks are needed for thread safety.
     @Published private(set) var screens: [Screen] = []
 
-    @Published private(set) var isLoading: Bool = false
-    @Published private(set) var lastError: Error?
-    
     private var cleanupTasks: Set<AnyCancellable> = []
     private var configurationCache: [CGDirectDisplayID: ScreenConfiguration] = [:]
     private let powerMonitor: PowerMonitor = .shared
-    private var lastAppliedConfigHashes: [CGDirectDisplayID: Int] = [:]
     private let playbackStateSubject = CurrentValueSubject<Bool, Never>(false)
+    private let fullScreenDetector = FullScreenDetector()
+    private let effectsManager = VideoEffectsManager()
 
     // Track screens that were paused by power management (not manually by user)
     // Only these screens should be resumed when AC power is reconnected
     private var screensPausedByPowerManagement: Set<CGDirectDisplayID> = []
+    private var screensPausedByFullScreen: Set<CGDirectDisplayID> = []
 
     // MARK: - Initialization
     init() {
@@ -31,7 +30,8 @@ final class ScreenManager: ObservableObject {
         setupPowerMonitoring()
         setupScreenObservers()
         setupMemoryMonitoring()
-        
+        setupFullScreenDetection()
+
         // Add notification observer for video player playback state changes
         NotificationCenter.default.publisher(for: WallpaperVideoPlayer.didChangePlaybackStateNotification)
             .sink { [weak self] _ in
@@ -64,7 +64,6 @@ final class ScreenManager: ObservableObject {
     
     // MARK: - Observers Setup
     private func setupPowerMonitoring() {
-        Logger.debug("Setting up power monitoring", category: .screenManager)
         powerMonitor.powerSourcePublisher
             .sink { [weak self] powerSource in
                 self?.handlePowerStateChange(powerSource)
@@ -77,13 +76,11 @@ final class ScreenManager: ObservableObject {
     }
     
     private func setupScreenObservers() {
-        Logger.debug("Setting up screen change observers", category: .screenManager)
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .debounce(for: .seconds(0.5), scheduler: DispatchQueue.main)
             // Use a more aggressive throttling for intensive screen changes
             .throttle(for: .seconds(1.0), scheduler: DispatchQueue.main, latest: true)
             .sink { [weak self] _ in
-                Logger.info("Screen parameters changed, refreshing screens", category: .screenManager)
                 self?.handleScreenParameterChange()
             }
             .store(in: &cleanupTasks)
@@ -96,9 +93,7 @@ final class ScreenManager: ObservableObject {
     }
     
     private func handleScreenParameterChange() {
-        Logger.info("Screen parameters changed - updating all windows", category: .screenManager)
-
-        // First update screen information without recreating video players
+        // Update screen information without recreating video players
         refreshScreens(preserveVideoPlayers: true)
 
         // Delay to ensure screen information is fully updated
@@ -120,9 +115,7 @@ final class ScreenManager: ObservableObject {
             guard let player = screen.videoPlayer else { continue }
 
             if let nsScreen = findNSScreen(for: screen.id) {
-                let frame = nsScreen.frame
-                Logger.debug("Screen \(screen.id) (\(nsScreen.localizedName)) frame: \(frame)", category: .screenManager)
-                player.updateWindowFrame(frame)
+                player.updateWindowFrame(nsScreen.frame)
             } else {
                 Logger.warning("Could not find NSScreen for screen ID \(screen.id), using stored frame", category: .screenManager)
                 player.updateWindowFrame(screen.frame)
@@ -138,26 +131,45 @@ final class ScreenManager: ObservableObject {
     }
     
     private func setupMemoryMonitoring() {
-        Logger.debug("Setting up memory monitoring", category: .screenManager)
-        
-        // Use SystemMonitor instead of MemoryMonitor
         SystemMonitor.shared.startMonitoring()
-        
-        // Monitor for low memory notifications
+
         NotificationCenter.default.publisher(for: Notification.Name("SystemMemoryWarning"))
             .sink { [weak self] _ in
                 self?.handleLowMemory()
             }
             .store(in: &cleanupTasks)
     }
-    
+
+    private func setupFullScreenDetection() {
+        fullScreenDetector.$hiddenScreens
+            .removeDuplicates()
+            .sink { [weak self] hiddenScreens in
+                self?.handleFullScreenChange(hiddenScreens)
+            }
+            .store(in: &cleanupTasks)
+    }
+
+    private func handleFullScreenChange(_ hiddenScreens: [CGDirectDisplayID: Bool]) {
+        let globalSettings = SettingsManager.shared.loadGlobalSettings()
+        guard globalSettings.pauseOnFullScreen else { return }
+
+        for screen in screens {
+            guard let player = screen.videoPlayer else { continue }
+            let isHidden = hiddenScreens[screen.id] ?? false
+
+            if isHidden && player.isPlaying {
+                player.pause()
+                screensPausedByFullScreen.insert(screen.id)
+            } else if !isHidden && screensPausedByFullScreen.contains(screen.id) {
+                player.play()
+                screensPausedByFullScreen.remove(screen.id)
+            }
+        }
+        updatePlaybackState()
+    }
+
     // MARK: - Screen Management
     func refreshScreens(preserveVideoPlayers: Bool = true) {
-        Logger.functionStart(category: .screenManager)
-        let timer = PerformanceTimer(description: "Screen refresh", category: .screenManager)
-        
-        isLoading = true
-        
         // Get all current screens from system
         let newScreens = NSScreen.screens.map { Screen(nsScreen: $0) }
         Logger.screensDetected(newScreens.count)
@@ -173,8 +185,6 @@ final class ScreenManager: ObservableObject {
                 cleanupScreen(screen)
             }
             
-            // Also remove from last applied configuration cache
-            lastAppliedConfigHashes.removeValue(forKey: screenID)
         }
         
         // Preserve existing video players for screens that are still present
@@ -187,7 +197,6 @@ final class ScreenManager: ObservableObject {
                 newScreen.videoPlayer = existingScreen.videoPlayer
                 newScreen.previewPlayer = existingScreen.previewPlayer
                 
-                Logger.debug("Preserved video player for existing screen \(newScreen.id)", category: .screenManager)
             }
             
             updatedScreens.append(newScreen)
@@ -196,25 +205,17 @@ final class ScreenManager: ObservableObject {
         // Update screens array
         screens = updatedScreens
 
-        timer.checkpoint("Screens mapped")
-        
         // Configure newly added screens (only those that weren't present before)
         for screen in newScreens where newScreenIDs.subtracting(oldScreenIDs).contains(screen.id) {
             Logger.info("Configuring new screen \(screen.id)", category: .screenManager)
             loadConfigurationForScreen(screen)
         }
         
-        // Finish loading
-        isLoading = false
         objectWillChange.send()
-        
-        // Update playback state
         updatePlaybackState()
-        timer.checkpoint("Playback state updated")
         
         // Post notification that screens were refreshed
         NotificationCenter.default.post(name: .init("ScreensRefreshed"), object: nil)
-        Logger.functionEnd(category: .screenManager)
     }
     
     func clearVideoForScreen(_ screen: Screen) {
@@ -235,20 +236,21 @@ final class ScreenManager: ObservableObject {
 
         // Remove from power management tracking
         screensPausedByPowerManagement.remove(screen.id)
+        screensPausedByFullScreen.remove(screen.id)
     }
 
     private func cleanupScreen(_ screen: Screen) {
-        Logger.debug("Cleaning up screen \(screen.id)", category: .screenManager)
         screen.videoPlayer?.cleanup()
+        screen.videoPlayer = nil
         screen.previewPlayer?.pause()
         screen.previewPlayer = nil
         // Remove from power management tracking
         screensPausedByPowerManagement.remove(screen.id)
+        screensPausedByFullScreen.remove(screen.id)
     }
     
     // MARK: - Configuration Management
     private func loadSavedConfigurations() {
-        Logger.debug("Loading saved configurations", category: .screenManager)
         let configurations = SettingsManager.shared.loadConfigurations()
         
         for configuration in configurations {
@@ -261,11 +263,8 @@ final class ScreenManager: ObservableObject {
     }
     
     private func loadConfigurationForScreen(_ screen: Screen) {
-        Logger.debug("Loading configuration for screen \(screen.id)", category: .screenManager)
-        
         // If screen already has a video player, just update settings
         if screen.videoPlayer != nil {
-            Logger.debug("Screen \(screen.id) already has a video player, updating settings only", category: .screenManager)
             if let cachedConfig = getCachedConfiguration(for: screen.id) {
                 // Apply configuration without recreating the player
                 applyConfiguration(cachedConfig, to: screen, preservingState: true)
@@ -273,18 +272,11 @@ final class ScreenManager: ObservableObject {
             return
         }
         
-        // Try to get configuration from cache first
         if let cachedConfig = getCachedConfiguration(for: screen.id) {
-            Logger.debug("Found cached configuration for screen \(screen.id)", category: .screenManager)
             applyConfiguration(cachedConfig, to: screen)
-        }
-        // If not in cache, try to load from settings
-        else if let savedConfig = SettingsManager.shared.getConfiguration(for: screen.id) {
-            Logger.debug("Found saved configuration for screen \(screen.id)", category: .screenManager)
+        } else if let savedConfig = SettingsManager.shared.getConfiguration(for: screen.id) {
             cacheConfiguration(savedConfig)
             applyConfiguration(savedConfig, to: screen)
-        } else {
-            Logger.debug("No configuration found for screen \(screen.id)", category: .screenManager)
         }
     }
     
@@ -301,8 +293,6 @@ final class ScreenManager: ObservableObject {
                 relativeTo: nil,
                 bookmarkDataIsStale: &isStale
             ), existingURL == url {
-                // Same URL, just update configurations if needed
-                Logger.debug("Same video URL detected, updating existing configuration", category: .screenManager)
                 updateExistingVideoConfiguration(existingConfig, url: url, bookmarkData: bookmarkData, for: screen)
                 return
             }
@@ -323,7 +313,6 @@ final class ScreenManager: ObservableObject {
         
         cacheConfiguration(configuration)
         SettingsManager.shared.saveConfiguration(configuration)
-        Logger.debug("New configuration created and saved for screen \(screen.id)", category: .screenManager)
         
         // Validate configuration was saved correctly
         if SettingsManager.shared.validateConfiguration(for: screen.id) {
@@ -339,20 +328,15 @@ final class ScreenManager: ObservableObject {
                     }
                     
                     await MainActor.run { [weak self] in
-                        Logger.debug("Video asset loaded, setting up playback", category: .screenManager)
                         self?.setupVideoPlayback(asset: asset, screen: screen)
                     }
                 } catch {
-                    await MainActor.run { [weak self] in
+                    await MainActor.run {
                         Logger.error("Failed to setup video: \(error.localizedDescription)", category: .screenManager)
-                        self?.lastError = error
                     }
                 }
             }
         } else {
-            lastError = NSError(domain: "ScreenManager", code: 500, userInfo: [
-                NSLocalizedDescriptionKey: "Failed to save video configuration."
-            ])
             Logger.error("Failed to save video configuration for screen \(screen.id)", category: .screenManager)
         }
     }
@@ -403,8 +387,6 @@ final class ScreenManager: ObservableObject {
             
             // If we already have a player, use the existing one
             if !needsNewPlayer {
-                Logger.debug("Existing video player found for screen \(screen.id), applying updates only", category: .videoPlayer)
-                
                 // Save current playback position if preserving state
                 let currentTime = preservingState ? screen.videoPlayer?.player?.currentTime() : .zero
                 let wasPlaying = screen.videoPlayer?.isPlaying ?? false
@@ -414,8 +396,10 @@ final class ScreenManager: ObservableObject {
                     // Always update the fit mode - the method will handle if it hasn't changed
                     player.setVideoFitMode(configuration.fitMode)
                     
-                    // No need to update playback speed if it hasn't changed
-                    if abs(Float(configuration.playbackSpeed) - (player.player?.rate ?? 1.0)) > 0.01 {
+                    // Update playback speed only if it has changed
+                    // Compare against stored speed, not player.rate (which is 0 when paused)
+                    let currentSpeed = player.player?.defaultRate ?? 1.0
+                    if abs(Float(configuration.playbackSpeed) - currentSpeed) > 0.01 {
                         player.setPlaybackSpeed(configuration.playbackSpeed)
                     }
                     
@@ -430,8 +414,7 @@ final class ScreenManager: ObservableObject {
                         )
                         
                         if limit > 0 && limit < Float(player.videoFrameRate) {
-                            Logger.debug("Limiting frame rate to \(limit) FPS for screen \(screen.id)", category: .videoPlayer)
-                            player.setFrameRateLimit(limit)
+                                player.setFrameRateLimit(limit)
                         }
                     }
                     
@@ -476,7 +459,6 @@ final class ScreenManager: ObservableObject {
                     )
                     
                     if limit > 0 && limit < Float(player.videoFrameRate) {
-                        Logger.debug("Limiting frame rate to \(limit) FPS for screen \(screen.id)", category: .videoPlayer)
                         player.setFrameRateLimit(limit)
                     }
                 }
@@ -501,7 +483,6 @@ final class ScreenManager: ObservableObject {
             }
             
         } catch {
-            lastError = error
             Logger.error("Failed to apply configuration: \(error.localizedDescription)", category: .screenManager)
         }
     }
@@ -536,23 +517,20 @@ final class ScreenManager: ObservableObject {
                 player.pause()
             } else {
                 // Delay playback to ensure proper initialization
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
                     player.play()
                     previewPlayer.play()
-
-                    // Update playback state after playback begins
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        self.updatePlaybackState()
-                    }
+                    self?.updatePlaybackState()
                 }
             }
 
             // Apply frame rate limit if configured
-            if player.videoFrameRate > 0,
-               let frameRateLimit = configuration?.frameRateLimit {
-
-                // Delay frame rate limit application slightly to ensure video properties are loaded
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            if let frameRateLimit = configuration?.frameRateLimit {
+                let screenID = screen.id
+                // Delay frame rate limit application to ensure video properties are loaded
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    guard let self = self,
+                          let screen = self.screens.first(where: { $0.id == screenID }) else { return }
                     self.applyFrameRateLimit(frameRateLimit, to: screen)
                 }
             }
@@ -580,7 +558,6 @@ final class ScreenManager: ObservableObject {
 
         // Only publish if the state actually changed
         if playbackStateSubject.value != isAnyPlaying {
-            Logger.debug("Global playback state changed to: \(isAnyPlaying ? "playing" : "paused")", category: .videoPlayer)
             playbackStateSubject.send(isAnyPlaying)
         }
     }
@@ -610,8 +587,6 @@ final class ScreenManager: ObservableObject {
     
     // MARK: - Power Management
     private func handlePowerStateChange(_ powerSource: PowerMonitor.PowerSource) {
-        Logger.info("Handling power state change", category: .powerMonitor)
-
         let globalSettings = SettingsManager.shared.loadGlobalSettings()
         let isOnBattery = powerSource.isOnBattery
 
@@ -665,6 +640,13 @@ final class ScreenManager: ObservableObject {
             screensPausedByPowerManagement = screensPausedByPowerManagement.intersection(currentScreenIDs)
         }
 
+        // Apply battery resolution cap
+        if globalSettings.batteryResolutionCap {
+            for screen in screens {
+                screen.videoPlayer?.setBatteryResolutionCap(isOnBattery)
+            }
+        }
+
         if updatedScreens {
             updatePlaybackState()
         }
@@ -697,22 +679,15 @@ final class ScreenManager: ObservableObject {
             }
         }
 
-        // Release unused resources
-        autoreleasepool {
-            // Clear any image caches if needed
-            Logger.debug("Clearing cached resources to free memory", category: .memory)
-        }
     }
     
     // MARK: - System Events
     private func handleSystemWake() {
         Logger.info("System wake detected", category: .lifecycle)
-        Task { @MainActor in
-            refreshScreens()
-            powerMonitor.refreshPowerStatus()
-            handlePowerStateChange(powerMonitor.currentPowerSource)
-            Logger.debug("System wake handling complete", category: .lifecycle)
-        }
+        // Already on @MainActor, no need for extra Task hop
+        refreshScreens()
+        powerMonitor.refreshPowerStatus()
+        handlePowerStateChange(powerMonitor.currentPowerSource)
     }
     
     // MARK: - Public Interface
@@ -737,7 +712,6 @@ final class ScreenManager: ObservableObject {
         guard var configuration = getCachedConfiguration(for: screen.id),
               speed != configuration.playbackSpeed else { return }
 
-        Logger.debug("Updating playback speed to \(speed)x for screen \(screen.id)", category: .videoPlayer)
         configuration.playbackSpeed = speed
         saveConfiguration(configuration)
         screen.videoPlayer?.setPlaybackSpeed(speed)
@@ -748,7 +722,6 @@ final class ScreenManager: ObservableObject {
         guard var configuration = getCachedConfiguration(for: screen.id),
               fitMode != configuration.fitMode else { return }
 
-        Logger.debug("Updating fit mode to \(fitMode.rawValue) for screen \(screen.id)", category: .videoPlayer)
         configuration.fitMode = fitMode
         saveConfiguration(configuration)
         screen.videoPlayer?.setVideoFitMode(fitMode)
@@ -762,7 +735,6 @@ final class ScreenManager: ObservableObject {
         }
         guard frameRateLimit != configuration.frameRateLimit else { return }
 
-        Logger.debug("Updating frame rate limit to \(frameRateLimit.description) for screen \(screen.id)", category: .videoPlayer)
         configuration.frameRateLimit = frameRateLimit
         saveConfiguration(configuration)
         applyFrameRateLimit(frameRateLimit, to: screen)
@@ -770,10 +742,7 @@ final class ScreenManager: ObservableObject {
     
     // Apply frame rate limit to a screen's video player
     private func applyFrameRateLimit(_ frameRateLimit: FrameRateLimit, to screen: Screen) {
-        guard let player = screen.videoPlayer, player.videoFrameRate > 0 else {
-            Logger.debug("Cannot apply frame rate limit: No active player with valid frame rate", category: .videoPlayer)
-            return
-        }
+        guard let player = screen.videoPlayer, player.videoFrameRate > 0 else { return }
         
         // Get screen refresh rate
         let screenRefreshRate = getScreenRefreshRate(for: screen.id)
@@ -805,7 +774,6 @@ final class ScreenManager: ObservableObject {
         guard var configuration = getConfiguration(for: screen),
               pauseOnBattery != configuration.pauseOnBattery else { return }
 
-        Logger.debug("Updating power settings (pauseOnBattery: \(pauseOnBattery)) for screen \(screen.id)", category: .powerMonitor)
         configuration.pauseOnBattery = pauseOnBattery
         saveConfiguration(configuration)
 
@@ -813,14 +781,13 @@ final class ScreenManager: ObservableObject {
         let isOnBattery = powerMonitor.currentPowerSource.isOnBattery
         if isOnBattery && pauseOnBattery {
             screen.videoPlayer?.pause()
-        } else if !isOnBattery {
-            screen.videoPlayer?.play()
+            screensPausedByPowerManagement.insert(screen.id)
         }
+        // Don't unconditionally resume when on AC — respect manual pause state
     }
     
     // Validate all saved configurations
     func validateAllConfigurations() -> (valid: Int, invalid: Int) {
-        Logger.debug("Validating all screen configurations", category: .settings)
         let screenIDs = getAllCachedScreenIDs()
         var validConfigCount = 0
         var invalidConfigCount = 0
@@ -841,9 +808,8 @@ final class ScreenManager: ObservableObject {
     // Reload all screens
     func reloadAllScreens() {
         Logger.notice("Reloading all screens", category: .screenManager)
-        let timer = PerformanceTimer(description: "Reload all screens", category: .performance)
-        
-        // First invalidate cached bookmark data to force a fresh reload
+
+        // Invalidate cached bookmark data to force a fresh reload
         for screenID in getAllCachedScreenIDs() {
             if !SettingsManager.shared.validateConfiguration(for: screenID) {
                 Logger.warning("Removing invalid configuration for screen \(screenID)", category: .settings)
@@ -851,9 +817,7 @@ final class ScreenManager: ObservableObject {
             }
         }
         
-        timer.checkpoint("Configuration validation")
-
-        // Then reload all screens
+        // Reload all screens
         for screen in screens {
             if let configuration = SettingsManager.shared.getConfiguration(for: screen.id) {
                 cacheConfiguration(configuration)
@@ -861,12 +825,186 @@ final class ScreenManager: ObservableObject {
             }
         }
         
-        timer.checkpoint("Applied configurations")
         Logger.notice("All screens reloaded", category: .screenManager)
     }
     
+    // MARK: - Lock Screen Wallpaper
+
+    func extractLockScreenFrame(for screen: Screen) {
+        guard let player = screen.videoPlayer?.player,
+              let currentItem = player.currentItem else { return }
+
+        let asset = currentItem.asset
+        let imageGenerator = AVAssetImageGenerator(asset: asset)
+        imageGenerator.appliesPreferredTrackTransform = true
+        imageGenerator.requestedTimeToleranceBefore = .zero
+        imageGenerator.requestedTimeToleranceAfter = CMTime(seconds: 1, preferredTimescale: 600)
+
+        let currentTime = player.currentTime()
+
+        Task {
+            do {
+                let (cgImage, _) = try await imageGenerator.image(at: currentTime)
+                let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+
+                // Save to a temp file
+                let tempURL = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("LiveWallpaper_LockScreen_\(screen.id).png")
+
+                if let tiffData = nsImage.tiffRepresentation,
+                   let bitmap = NSBitmapImageRep(data: tiffData),
+                   let pngData = bitmap.representation(using: .png, properties: [:]) {
+                    try pngData.write(to: tempURL)
+
+                    // Set as desktop wallpaper (visible on lock screen)
+                    if let nsScreen = findNSScreen(for: screen.id) {
+                        try NSWorkspace.shared.setDesktopImageURL(tempURL, for: nsScreen, options: [:])
+                        Logger.info("Set lock screen wallpaper for screen \(screen.id)", category: .screenManager)
+                    }
+                }
+            } catch {
+                Logger.error("Failed to extract lock screen frame: \(error.localizedDescription)", category: .screenManager)
+            }
+        }
+    }
+
+    // MARK: - Video Effects
+
+    func updateEffectConfig(_ effectConfig: VideoEffectConfig, for screen: Screen) {
+        guard var config = getCachedConfiguration(for: screen.id) else { return }
+        config.effectConfig = effectConfig
+        saveConfiguration(config)
+        applyVideoEffects(for: screen, config: config)
+    }
+
+    func updateParticleEffect(_ effect: ParticleEffect, for screen: Screen) {
+        guard var config = getCachedConfiguration(for: screen.id) else { return }
+        config.particleEffect = effect
+        saveConfiguration(config)
+        // Particle overlay is managed by the view layer
+    }
+
+    func updateVideoEffects(for screen: Screen) {
+        guard let config = getCachedConfiguration(for: screen.id) else { return }
+        applyVideoEffects(for: screen, config: config)
+    }
+
+    private func applyVideoEffects(for screen: Screen, config: ScreenConfiguration) {
+        guard let player = screen.videoPlayer,
+              let playerItem = player.player?.currentItem else {
+            Logger.warning("Cannot apply effects: no active player for screen \(screen.id)", category: .videoPlayer)
+            return
+        }
+
+        let hasEffects = config.effectConfig.hasActiveEffect || config.effectConfig.autoTimeTint
+        Logger.info("Applying effects for screen \(screen.id): hasEffects=\(hasEffects)", category: .videoPlayer)
+
+        if !hasEffects {
+            // No effects — reapply plain frame rate limiting (or clear composition)
+            applyFrameRateLimit(config.frameRateLimit, to: screen)
+            return
+        }
+
+        // Effects active — build CIFilter composition (also handles frame rate via frameDuration)
+        effectsManager.updateConfig(config.effectConfig)
+
+        Task {
+            do {
+                let fps = config.frameRateLimit == .unlimited ? 60 : config.frameRateLimit.rawValue
+                let frameDuration = CMTime(value: 1, timescale: CMTimeScale(fps))
+                let composition = try await effectsManager.buildComposition(
+                    for: playerItem.asset,
+                    config: config.effectConfig,
+                    frameDuration: frameDuration
+                )
+                await MainActor.run {
+                    playerItem.videoComposition = composition
+                }
+            } catch {
+                Logger.error("Failed to apply video effects: \(error.localizedDescription)", category: .videoPlayer)
+            }
+        }
+    }
+
+    // MARK: - Wallpaper Type Switching
+
+    /// Close any non-video wallpaper window and restore the video player
+    func switchToVideoWallpaper(for screen: Screen) {
+        screen.activeWallpaperWindow = nil  // closes old window via willSet
+        screen.activeWallpaperType = .video
+
+        guard var config = getCachedConfiguration(for: screen.id) else { return }
+        config.wallpaperType = .video
+        saveConfiguration(config)
+
+        // Restore video player from saved config
+        loadConfigurationForScreen(screen)
+        objectWillChange.send()
+    }
+
+    // MARK: - HTML Wallpaper
+
+    func setHTMLWallpaper(url: String, for screen: Screen) {
+        // Save config (create one if it doesn't exist yet)
+        var config = getCachedConfiguration(for: screen.id) ?? ScreenConfiguration(
+            screenID: screen.id, videoBookmarkData: Data()
+        )
+        config.wallpaperType = .html
+        config.htmlContent = url
+        saveConfiguration(config)
+
+        // Clean up existing wallpaper (video + old window)
+        cleanupScreen(screen)
+
+        // Create HTML wallpaper
+        let window = VideoWallpaperWindow(frame: screen.frame)
+        let htmlView = HTMLWallpaperView(frame: screen.frame)
+        window.contentView = htmlView
+
+        if let parsedURL = URL(string: url), url.hasPrefix("http") {
+            htmlView.loadURL(parsedURL)
+        } else if FileManager.default.fileExists(atPath: url) {
+            htmlView.loadFile(URL(fileURLWithPath: url))
+        } else {
+            htmlView.loadHTML(url)
+        }
+
+        window.orderBack(nil)
+        screen.activeWallpaperWindow = window
+        screen.activeWallpaperType = .html
+
+        Logger.info("Set HTML wallpaper for screen \(screen.id)", category: .screenManager)
+        objectWillChange.send()
+    }
+
+    // MARK: - Metal Shader Wallpaper
+
+    func setShaderWallpaper(preset: MetalShaderPreset, for screen: Screen) {
+        var config = getCachedConfiguration(for: screen.id) ?? ScreenConfiguration(
+            screenID: screen.id, videoBookmarkData: Data()
+        )
+        config.wallpaperType = .metalShader
+        config.shaderPreset = preset
+        saveConfiguration(config)
+
+        // Clean up existing wallpaper
+        cleanupScreen(screen)
+
+        let window = VideoWallpaperWindow(frame: screen.frame)
+        let metalView = MetalWallpaperView(frame: screen.frame)
+        metalView.setPreset(preset)
+        window.contentView = metalView
+        window.orderBack(nil)
+
+        screen.activeWallpaperWindow = window
+        screen.activeWallpaperType = .metalShader
+
+        Logger.info("Set shader wallpaper (\(preset.rawValue)) for screen \(screen.id)", category: .screenManager)
+        objectWillChange.send()
+    }
+
     // MARK: - Helper Methods
-    
+
     // Get screen refresh rate for a specific display ID
     func getScreenRefreshRate(for screenID: CGDirectDisplayID) -> Int {
         // Use CGDisplayMode to get accurate refresh rate
@@ -881,14 +1019,8 @@ final class ScreenManager: ObservableObject {
             return 60 // Handle invalid values
         }
         
-        Logger.debug("Detected refresh rate: \(Int(refreshRate))Hz for screen \(screenID)", category: .screenManager)
         return Int(refreshRate)
     }
     
-    // MARK: - Cleanup
-    nonisolated deinit {
-        Logger.debug("ScreenManager deinitializing", category: .lifecycle)
-        // Note: We cannot call MainActor-isolated methods from deinit
-        // The resources will be cleaned up by ARC when the Screen objects are deallocated
-    }
+    nonisolated deinit {}
 }

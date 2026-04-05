@@ -7,12 +7,12 @@ struct GeneralSettingsView: View {
     @State private var preservePlaybackOnLock: Bool
     @State private var minimumBatteryLevel: Double?
     @State private var useBatteryThreshold: Bool
+    @State private var pauseOnFullScreen: Bool
+    @State private var batteryResolutionCap: Bool
     
     @State private var showingResetAlert = false
     @State private var showingValidationResults = false
     @State private var validationMessage = ""
-    @State private var validationIcon = ""
-    @State private var validationColor: Color = .green
     
     init() {
         let settings = SettingsManager.shared.loadGlobalSettings()
@@ -21,6 +21,8 @@ struct GeneralSettingsView: View {
         _preservePlaybackOnLock = State(initialValue: settings.preservePlaybackOnLock)
         _minimumBatteryLevel = State(initialValue: settings.minimumBatteryLevel)
         _useBatteryThreshold = State(initialValue: settings.minimumBatteryLevel != nil)
+        _pauseOnFullScreen = State(initialValue: settings.pauseOnFullScreen)
+        _batteryResolutionCap = State(initialValue: settings.batteryResolutionCap)
     }
     
     var body: some View {
@@ -37,7 +39,7 @@ struct GeneralSettingsView: View {
             }
             .padding(16)
         }
-        .background(Color(NSColor.windowBackgroundColor))
+        .background(.clear)
         .alert("Reset Settings", isPresented: $showingResetAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Reset All", role: .destructive) {
@@ -59,7 +61,7 @@ struct GeneralSettingsView: View {
                 HStack {
                     Image(systemName: "bolt.circle.fill")
                         .font(.title2)
-                        .foregroundColor(.yellow)
+                        .foregroundStyle(.yellow)
                     
                     Text("Power Management")
                         .font(.headline)
@@ -75,7 +77,7 @@ struct GeneralSettingsView: View {
                             
                             Text("Automatically pauses all wallpapers when your Mac is unplugged")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                         }
                     }
                     .onChange(of: globalPauseOnBattery) { oldValue, newValue in
@@ -93,7 +95,7 @@ struct GeneralSettingsView: View {
                             
                             Text("Pause videos when battery drops below a specific level")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                         }
                     }
                     .onChange(of: useBatteryThreshold) { oldValue, newValue in
@@ -116,11 +118,11 @@ struct GeneralSettingsView: View {
                             HStack {
                                 Text("Pause when battery below:")
                                     .font(.subheadline)
-                                    .foregroundColor(.primary)
+                                    .foregroundStyle(.primary)
                                 
                                 Text("\(Int((minimumBatteryLevel ?? 0.2) * 100))%")
                                     .font(.headline)
-                                    .foregroundColor(
+                                    .foregroundStyle(
                                         (minimumBatteryLevel ?? 0.2) < 0.2 ? .red :
                                             (minimumBatteryLevel ?? 0.2) < 0.3 ? .orange : .green
                                     )
@@ -147,13 +149,47 @@ struct GeneralSettingsView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Preserve playback state when screen is locked")
                                 .font(.body)
-                            
+
                             Text("Keep videos playing when your screen is locked")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(.secondary)
                         }
                     }
                     .onChange(of: preservePlaybackOnLock) { oldValue, newValue in
+                        updateGlobalSettings()
+                    }
+
+                    Divider()
+
+                    // Pause on full-screen apps
+                    Toggle(isOn: $pauseOnFullScreen) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Pause on full-screen apps")
+                                .font(.body)
+
+                            Text("Automatically pause wallpapers when a full-screen app is active")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .onChange(of: pauseOnFullScreen) { oldValue, newValue in
+                        updateGlobalSettings()
+                    }
+
+                    Divider()
+
+                    // Reduce quality on battery
+                    Toggle(isOn: $batteryResolutionCap) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Reduce quality on battery")
+                                .font(.body)
+
+                            Text("Lower decode resolution when running on battery to save power")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .onChange(of: batteryResolutionCap) { oldValue, newValue in
                         updateGlobalSettings()
                     }
                 }
@@ -169,7 +205,7 @@ struct GeneralSettingsView: View {
                 HStack {
                     Image(systemName: "power.circle.fill")
                         .font(.title2)
-                        .foregroundColor(.green)
+                        .foregroundStyle(.green)
                     
                     Text("Startup Options")
                         .font(.headline)
@@ -199,7 +235,7 @@ struct GeneralSettingsView: View {
                 HStack {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.title2)
-                        .foregroundColor(.blue)
+                        .foregroundStyle(.blue)
                     
                     Text("Stored Configuration")
                         .font(.headline)
@@ -237,7 +273,7 @@ struct GeneralSettingsView: View {
                 HStack {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.title2)
-                        .foregroundColor(.red)
+                        .foregroundStyle(.red)
                     
                     Text("Reset Settings")
                         .font(.headline)
@@ -245,7 +281,7 @@ struct GeneralSettingsView: View {
                 
                 Text("If you're experiencing issues, you can reset all settings to their defaults")
                     .font(.subheadline)
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
                 
                 HStack {
                     Spacer()
@@ -274,7 +310,9 @@ struct GeneralSettingsView: View {
             globalPauseOnBattery: globalPauseOnBattery,
             preservePlaybackOnLock: preservePlaybackOnLock,
             startOnLogin: startOnLogin,
-            minimumBatteryLevel: useBatteryThreshold ? minimumBatteryLevel : nil
+            minimumBatteryLevel: useBatteryThreshold ? minimumBatteryLevel : nil,
+            pauseOnFullScreen: pauseOnFullScreen,
+            batteryResolutionCap: batteryResolutionCap
         )
         SettingsManager.shared.saveGlobalSettings(settings)
     }
@@ -288,6 +326,8 @@ struct GeneralSettingsView: View {
         preservePlaybackOnLock = false
         minimumBatteryLevel = nil
         useBatteryThreshold = false
+        pauseOnFullScreen = true
+        batteryResolutionCap = true
         
         // Refresh screens in the screen manager
         screenManager.refreshScreens()
@@ -310,8 +350,6 @@ struct GeneralSettingsView: View {
         // Create detailed validation message
         if invalid == 0 {
             validationMessage = "✅ All \(valid) configurations are valid."
-            validationIcon = "checkmark.circle.fill"
-            validationColor = .green
         } else {
             validationMessage = "Validation complete: \(valid) of \(valid + invalid) configurations are valid.\n\n"
             
@@ -324,10 +362,8 @@ struct GeneralSettingsView: View {
                 validationMessage += "\nYou may need to reconfigure these screens."
             }
             
-            validationIcon = "exclamationmark.triangle.fill"
-            validationColor = .orange
         }
-        
+
         showingValidationResults = true
     }
 }

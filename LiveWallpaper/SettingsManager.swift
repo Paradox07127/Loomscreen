@@ -27,7 +27,6 @@ class SettingsManager {
     // MARK: - Screen Configurations
 
     func saveConfiguration(_ configuration: ScreenConfiguration) {
-        Logger.debug("Saving configuration for screen \(configuration.screenID)", category: .settings)
         withLock {
             var configurations = loadConfigurationsUnsafe()
             if let index = configurations.firstIndex(where: { $0.screenID == configuration.screenID }) {
@@ -44,7 +43,6 @@ class SettingsManager {
     }
 
     func getConfiguration(for screenID: CGDirectDisplayID) -> ScreenConfiguration? {
-        Logger.debug("Getting configuration for screen \(screenID)", category: .settings)
         return withLock { loadConfigurationsUnsafe().first { $0.screenID == screenID } }
     }
 
@@ -74,7 +72,6 @@ class SettingsManager {
     // MARK: - Global Settings
 
     func saveGlobalSettings(_ settings: GlobalSettings) {
-        Logger.debug("Saving global settings", category: .settings)
         withLock {
             do {
                 let data = try JSONEncoder().encode(settings)
@@ -102,8 +99,6 @@ class SettingsManager {
     }
     
     private func applyStartOnLoginSetting(_ startOnLogin: Bool) {
-        Logger.debug("Setting 'Start at Login' to \(startOnLogin)", category: .settings)
-
         do {
             let service = SMAppService.mainApp
 
@@ -123,15 +118,9 @@ class SettingsManager {
         }
     }
 
-    /// Check if the app is currently set to start at login
-    func isStartOnLoginEnabled() -> Bool {
-        return SMAppService.mainApp.status == .enabled
-    }
-    
     // MARK: - Clean Settings
 
     func cleanSettingsForScreen(_ screenID: CGDirectDisplayID) {
-        Logger.debug("Cleaning settings for screen \(screenID)", category: .settings)
         withLock {
             var configurations = loadConfigurationsUnsafe()
             configurations.removeAll { $0.screenID == screenID }
@@ -151,8 +140,6 @@ class SettingsManager {
     // MARK: - Validation
 
     func validateConfiguration(for screenID: CGDirectDisplayID) -> Bool {
-        Logger.debug("Validating configuration for screen \(screenID)", category: .settings)
-
         let configuration = withLock { loadConfigurationsUnsafe().first { $0.screenID == screenID } }
         guard let configuration = configuration else { return false }
 
@@ -166,8 +153,24 @@ class SettingsManager {
             )
 
             let canAccess = url.startAccessingSecurityScopedResource()
-            if isStale {
-                Logger.warning("Stale bookmark detected for screen \(screenID)", category: .fileAccess)
+            if isStale && canAccess {
+                Logger.warning("Stale bookmark detected for screen \(screenID), refreshing", category: .fileAccess)
+                // Regenerate the stale bookmark to prevent future access failures
+                if let updatedBookmark = try? url.bookmarkData(
+                    options: [.withSecurityScope, .securityScopeAllowOnlyReadAccess],
+                    includingResourceValuesForKeys: nil,
+                    relativeTo: nil
+                ) {
+                    let updatedConfig = configuration.withUpdatedBookmark(updatedBookmark)
+                    withLock {
+                        var configs = loadConfigurationsUnsafe()
+                        if let index = configs.firstIndex(where: { $0.screenID == screenID }) {
+                            configs[index] = updatedConfig
+                            saveConfigurationsUnsafe(configs)
+                        }
+                    }
+                    Logger.info("Refreshed stale bookmark for screen \(screenID)", category: .fileAccess)
+                }
             }
             if canAccess {
                 url.stopAccessingSecurityScopedResource()
@@ -184,8 +187,7 @@ class SettingsManager {
     // MARK: - User Preferences
 
     func saveLastUsedDirectory(_ url: URL) {
-        Logger.debug("Saving last used directory: \(url.lastPathComponent)", category: .settings)
-        UserDefaults.standard.set(url.path, forKey: Keys.lastUsedDirectory)
+        UserDefaults.standard.set(url.path(percentEncoded: false), forKey: Keys.lastUsedDirectory)
     }
 
     func getLastUsedDirectory() -> URL? {
@@ -205,6 +207,6 @@ class SettingsManager {
 extension URL {
     // Check if URL exists
     var exists: Bool {
-        FileManager.default.fileExists(atPath: path)
+        FileManager.default.fileExists(atPath: path(percentEncoded: false))
     }
 }

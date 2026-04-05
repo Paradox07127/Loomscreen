@@ -48,7 +48,8 @@ final class PowerMonitor {
     // MARK: - Initialization
 
     private init() {
-        let source = IOPSGetProvidingPowerSourceType(nil)?.takeRetainedValue() as? String ?? kIOPMACPowerKey
+        // IOPSGetProvidingPowerSourceType uses "Get" semantics (unretained)
+        let source = IOPSGetProvidingPowerSourceType(nil)?.takeUnretainedValue() as? String ?? kIOPMACPowerKey
         powerSourceSubject.send(PowerSource(identifier: source))
         setupPowerNotification()
     }
@@ -77,7 +78,7 @@ final class PowerMonitor {
     // MARK: - Power State Management
 
     private func handlePowerSourceChange() {
-        guard let sourceString = IOPSGetProvidingPowerSourceType(nil)?.takeRetainedValue() as? String else { return }
+        guard let sourceString = IOPSGetProvidingPowerSourceType(nil)?.takeUnretainedValue() as? String else { return }
 
         let newSource = PowerSource(identifier: sourceString)
         let oldSource = powerSourceSubject.value
@@ -147,7 +148,7 @@ final class PowerMonitor {
     }
 
     func refreshPowerStatus() {
-        guard let sourceString = IOPSGetProvidingPowerSourceType(nil)?.takeRetainedValue() as? String else { return }
+        guard let sourceString = IOPSGetProvidingPowerSourceType(nil)?.takeUnretainedValue() as? String else { return }
 
         let newSource = PowerSource(identifier: sourceString)
         let oldSource = powerSourceSubject.value
