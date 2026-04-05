@@ -5,8 +5,15 @@ import AVFoundation
 import ServiceManagement
 
 // Manager for persisting and retrieving settings
-class SettingsManager {
+@MainActor
+final class SettingsManager {
     static let shared = SettingsManager()
+
+    // Cached instances — avoid re-allocating on every encode/decode
+    private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
+    private var cachedGlobalSettings: GlobalSettings?
+    private var cachedConfigurations: [ScreenConfiguration]?
 
     private enum Keys {
         static let screenConfigurations = "screenConfigurations"
@@ -14,55 +21,39 @@ class SettingsManager {
         static let lastUsedDirectory = "lastUsedDirectory"
     }
 
-    private let settingsLock = NSLock()
-
-    // MARK: - Thread-Safe Helper
-
-    private func withLock<T>(_ operation: () -> T) -> T {
-        settingsLock.lock()
-        defer { settingsLock.unlock() }
-        return operation()
-    }
-
     // MARK: - Screen Configurations
 
     func saveConfiguration(_ configuration: ScreenConfiguration) {
-        withLock {
-            var configurations = loadConfigurationsUnsafe()
-            if let index = configurations.firstIndex(where: { $0.screenID == configuration.screenID }) {
-                configurations[index] = configuration
-            } else {
-                configurations.append(configuration)
-            }
-            saveConfigurationsUnsafe(configurations)
+        var configs = loadConfigurations()
+        if let index = configs.firstIndex(where: { $0.screenID == configuration.screenID }) {
+            configs[index] = configuration
+        } else {
+            configs.append(configuration)
         }
+        cachedConfigurations = configs
+        persistConfigurations(configs)
     }
 
     func loadConfigurations() -> [ScreenConfiguration] {
-        withLock { loadConfigurationsUnsafe() }
-    }
-
-    func getConfiguration(for screenID: CGDirectDisplayID) -> ScreenConfiguration? {
-        return withLock { loadConfigurationsUnsafe().first { $0.screenID == screenID } }
-    }
-
-    // MARK: - Private Configuration Helpers
-
-    private func loadConfigurationsUnsafe() -> [ScreenConfiguration] {
-        guard let data = UserDefaults.standard.data(forKey: Keys.screenConfigurations) else {
-            return []
-        }
+        if let cached = cachedConfigurations { return cached }
+        guard let data = UserDefaults.standard.data(forKey: Keys.screenConfigurations) else { return [] }
         do {
-            return try JSONDecoder().decode([ScreenConfiguration].self, from: data)
+            let configs = try decoder.decode([ScreenConfiguration].self, from: data)
+            cachedConfigurations = configs
+            return configs
         } catch {
             Logger.error("Failed to decode screen configurations: \(error.localizedDescription)", category: .settings)
             return []
         }
     }
 
-    private func saveConfigurationsUnsafe(_ configurations: [ScreenConfiguration]) {
+    func getConfiguration(for screenID: CGDirectDisplayID) -> ScreenConfiguration? {
+        loadConfigurations().first { $0.screenID == screenID }
+    }
+
+    private func persistConfigurations(_ configs: [ScreenConfiguration]) {
         do {
-            let data = try JSONEncoder().encode(configurations)
+            let data = try encoder.encode(configs)
             UserDefaults.standard.set(data, forKey: Keys.screenConfigurations)
         } catch {
             Logger.error("Failed to encode screen configurations: \(error.localizedDescription)", category: .settings)
@@ -72,29 +63,33 @@ class SettingsManager {
     // MARK: - Global Settings
 
     func saveGlobalSettings(_ settings: GlobalSettings) {
-        withLock {
-            do {
-                let data = try JSONEncoder().encode(settings)
-                UserDefaults.standard.set(data, forKey: Keys.globalSettings)
-                applyStartOnLoginSetting(settings.startOnLogin)
-                Logger.settingsChanged(setting: "globalSettings", value: "Updated global settings")
-            } catch {
-                Logger.error("Failed to encode global settings: \(error.localizedDescription)", category: .settings)
-            }
+        cachedGlobalSettings = settings
+        do {
+            let data = try encoder.encode(settings)
+            UserDefaults.standard.set(data, forKey: Keys.globalSettings)
+            applyStartOnLoginSetting(settings.startOnLogin)
+            Logger.settingsChanged(setting: "globalSettings", value: "Updated global settings")
+        } catch {
+            Logger.error("Failed to encode global settings: \(error.localizedDescription)", category: .settings)
         }
     }
 
     func loadGlobalSettings() -> GlobalSettings {
-        withLock {
-            guard let data = UserDefaults.standard.data(forKey: Keys.globalSettings) else {
-                return GlobalSettings()
-            }
-            do {
-                return try JSONDecoder().decode(GlobalSettings.self, from: data)
-            } catch {
-                Logger.error("Failed to decode global settings: \(error.localizedDescription)", category: .settings)
-                return GlobalSettings()
-            }
+        if let cached = cachedGlobalSettings { return cached }
+        guard let data = UserDefaults.standard.data(forKey: Keys.globalSettings) else {
+            let defaults = GlobalSettings()
+            cachedGlobalSettings = defaults
+            return defaults
+        }
+        do {
+            let settings = try decoder.decode(GlobalSettings.self, from: data)
+            cachedGlobalSettings = settings
+            return settings
+        } catch {
+            Logger.error("Failed to decode global settings: \(error.localizedDescription)", category: .settings)
+            let defaults = GlobalSettings()
+            cachedGlobalSettings = defaults
+            return defaults
         }
     }
     
@@ -121,27 +116,24 @@ class SettingsManager {
     // MARK: - Clean Settings
 
     func cleanSettingsForScreen(_ screenID: CGDirectDisplayID) {
-        withLock {
-            var configurations = loadConfigurationsUnsafe()
-            configurations.removeAll { $0.screenID == screenID }
-            saveConfigurationsUnsafe(configurations)
-        }
+        var configs = loadConfigurations()
+        configs.removeAll { $0.screenID == screenID }
+        cachedConfigurations = configs
+        persistConfigurations(configs)
     }
 
     func cleanAllSettings() {
-        Logger.notice("Cleaning all settings", category: .settings)
-        withLock {
-            UserDefaults.standard.removeObject(forKey: Keys.screenConfigurations)
-            UserDefaults.standard.removeObject(forKey: Keys.globalSettings)
-            applyStartOnLoginSetting(false)
-        }
+        cachedGlobalSettings = nil
+        cachedConfigurations = nil
+        UserDefaults.standard.removeObject(forKey: Keys.screenConfigurations)
+        UserDefaults.standard.removeObject(forKey: Keys.globalSettings)
+        applyStartOnLoginSetting(false)
     }
     
     // MARK: - Validation
 
     func validateConfiguration(for screenID: CGDirectDisplayID) -> Bool {
-        let configuration = withLock { loadConfigurationsUnsafe().first { $0.screenID == screenID } }
-        guard let configuration = configuration else { return false }
+        guard let configuration = loadConfigurations().first(where: { $0.screenID == screenID }) else { return false }
 
         do {
             var isStale = false
@@ -156,19 +148,16 @@ class SettingsManager {
             if isStale && canAccess {
                 Logger.warning("Stale bookmark detected for screen \(screenID), refreshing", category: .fileAccess)
                 // Regenerate the stale bookmark to prevent future access failures
+                let bookmarkOptions: URL.BookmarkCreationOptions = [.withSecurityScope, .securityScopeAllowOnlyReadAccess]
+                let noKeys: Set<URLResourceKey>? = nil
+                let noRelative: URL? = nil
                 if let updatedBookmark = try? url.bookmarkData(
-                    options: [.withSecurityScope, .securityScopeAllowOnlyReadAccess],
-                    includingResourceValuesForKeys: nil,
-                    relativeTo: nil
+                    options: bookmarkOptions,
+                    includingResourceValuesForKeys: noKeys,
+                    relativeTo: noRelative
                 ) {
                     let updatedConfig = configuration.withUpdatedBookmark(updatedBookmark)
-                    withLock {
-                        var configs = loadConfigurationsUnsafe()
-                        if let index = configs.firstIndex(where: { $0.screenID == screenID }) {
-                            configs[index] = updatedConfig
-                            saveConfigurationsUnsafe(configs)
-                        }
-                    }
+                    saveConfiguration(updatedConfig)
                     Logger.info("Refreshed stale bookmark for screen \(screenID)", category: .fileAccess)
                 }
             }

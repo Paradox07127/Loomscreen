@@ -303,7 +303,7 @@ struct GlobalSettings: Codable {
 // MARK: - Shared Utilities
 
 enum FormatUtils {
-    private static let byteFormatter: ByteCountFormatter = {
+    nonisolated(unsafe) private static let byteFormatter: ByteCountFormatter = {
         let f = ByteCountFormatter()
         f.countStyle = .memory
         return f

@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct GeneralSettingsView: View {
-    @EnvironmentObject private var screenManager: ScreenManager
+    @Environment(ScreenManager.self) private var screenManager
     @State private var globalPauseOnBattery: Bool
     @State private var startOnLogin: Bool
     @State private var preservePlaybackOnLock: Bool
@@ -26,85 +26,109 @@ struct GeneralSettingsView: View {
     }
     
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                powerSettingsSection
-                
-                HStack(spacing: 16) {
-                    startupSection
-                    configValidationSection
+        TabView {
+            // General Tab
+            Form {
+                Section {
+                    SettingRow(icon: "power.circle.fill", iconColor: .green, title: "Start at login", subtitle: "Automatically launch LiveWallpaper when you log in") {
+                        Toggle("", isOn: $startOnLogin)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .onChange(of: startOnLogin) { _, _ in updateGlobalSettings() }
+                    }
+                    
+                    SettingRow(icon: "lock.display", iconColor: .blue, title: "Preserve playback on lock screen", subtitle: "Keep videos playing when your screen is locked") {
+                        Toggle("", isOn: $preservePlaybackOnLock)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .onChange(of: preservePlaybackOnLock) { _, _ in updateGlobalSettings() }
+                    }
+                    
+                    SettingRow(icon: "macwindow.badge.plus", iconColor: .purple, title: "Pause on full-screen apps", subtitle: "Automatically pause wallpapers when a full-screen app is active") {
+                        Toggle("", isOn: $pauseOnFullScreen)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .onChange(of: pauseOnFullScreen) { _, _ in updateGlobalSettings() }
+                    }
+                } header: {
+                    Text("Behavior")
                 }
                 
-                resetSettingsSection
-            }
-            .padding(16)
-        }
-        .background(.clear)
-        .alert("Reset Settings", isPresented: $showingResetAlert) {
-            Button("Cancel", role: .cancel) { }
-            Button("Reset All", role: .destructive) {
-                resetAllSettings()
-            }
-        } message: {
-            Text("This will reset all settings including screen configurations. This action cannot be undone.")
-        }
-        .alert("Configuration Validation", isPresented: $showingValidationResults) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(validationMessage)
-        }
-    }
-    
-    private var powerSettingsSection: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Image(systemName: "bolt.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(.yellow)
-                    
-                    Text("Power Management")
-                        .font(.headline)
+                Section {
+                    HStack(spacing: 16) {
+                        Button(action: {
+                            validateConfigurations()
+                        }) {
+                            Label("Validate Settings", systemImage: "doc.text.magnifyingglass")
+                                .frame(maxWidth: .infinity)
+                        }
+                        
+                        Button(action: {
+                            screenManager.reloadAllScreens()
+                        }) {
+                            Label("Reload All Screens", systemImage: "arrow.triangle.2.circlepath")
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .padding(.vertical, 8)
+                } header: {
+                    Text("Troubleshooting")
+                } footer: {
+                    HStack {
+                        Spacer()
+                        Button("Reset All Settings to Default") {
+                            showingResetAlert = true
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.red)
+                        .padding(.top, 16)
+                        Spacer()
+                    }
                 }
-                .padding(.bottom, 4)
+            }
+            .formStyle(.grouped)
+            .tabItem {
+                Label("General", systemImage: "gearshape")
+            }
+            
+            // Power Management Tab
+            Form {
+                Section {
+                    SettingRow(icon: "bolt.circle.fill", iconColor: .yellow, title: "Pause on battery", subtitle: "Automatically pause all wallpapers when your Mac is unplugged") {
+                        Toggle("", isOn: $globalPauseOnBattery)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .onChange(of: globalPauseOnBattery) { _, newValue in
+                                updateGlobalSettings()
+                                screenManager.handleGlobalPauseOnBatteryChange(newValue)
+                            }
+                    }
+                    
+                    SettingRow(icon: "battery.100.bolt", iconColor: .green, title: "Reduce quality on battery", subtitle: "Lower decode resolution when running on battery to save power") {
+                        Toggle("", isOn: $batteryResolutionCap)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .onChange(of: batteryResolutionCap) { _, _ in updateGlobalSettings() }
+                    }
+                } header: {
+                    Text("Power Saving")
+                }
                 
-                VStack(alignment: .leading, spacing: 12) {
-                    // Global pause on battery
-                    Toggle(isOn: $globalPauseOnBattery) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Pause all videos when on battery")
-                                .font(.body)
-                            
-                            Text("Automatically pauses all wallpapers when your Mac is unplugged")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .onChange(of: globalPauseOnBattery) { oldValue, newValue in
-                        updateGlobalSettings()
-                        screenManager.handleGlobalPauseOnBatteryChange(newValue)
-                    }
-                    
-                    Divider()
-                    
-                    // Battery threshold settings
-                    Toggle(isOn: $useBatteryThreshold) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Use battery level threshold")
-                                .font(.body)
-                            
-                            Text("Pause videos when battery drops below a specific level")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .onChange(of: useBatteryThreshold) { oldValue, newValue in
-                        if !newValue {
-                            minimumBatteryLevel = nil
-                        } else if minimumBatteryLevel == nil {
-                            minimumBatteryLevel = 0.2 // Default to 20%
-                        }
-                        updateGlobalSettings()
+                Section {
+                    SettingRow(icon: "battery.50", iconColor: .orange, title: "Use battery threshold", subtitle: "Pause videos when battery drops below a specific level") {
+                        Toggle("", isOn: $useBatteryThreshold)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .onChange(of: useBatteryThreshold) { _, newValue in
+                                if !newValue {
+                                    minimumBatteryLevel = nil
+                                } else if minimumBatteryLevel == nil {
+                                    minimumBatteryLevel = 0.2 // Default to 20%
+                                }
+                                updateGlobalSettings()
+                            }
                     }
                     
                     if useBatteryThreshold {
@@ -119,7 +143,7 @@ struct GeneralSettingsView: View {
                                 Text("Pause when battery below:")
                                     .font(.subheadline)
                                     .foregroundStyle(.primary)
-                                
+                                Spacer()
                                 Text("\(Int((minimumBatteryLevel ?? 0.2) * 100))%")
                                     .font(.headline)
                                     .foregroundStyle(
@@ -137,172 +161,35 @@ struct GeneralSettingsView: View {
                                 }
                             ), in: 0.05...0.5, step: 0.05)
                         }
-                        .padding(.leading, 16)
+                        .padding(.leading, 52)
+                        .padding(.bottom, 8)
                         .disabled(!useBatteryThreshold)
                         .animation(.easeOut, value: useBatteryThreshold)
                     }
-                    
-                    Divider()
-                    
-                    // Screen lock behavior
-                    Toggle(isOn: $preservePlaybackOnLock) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Preserve playback state when screen is locked")
-                                .font(.body)
-
-                            Text("Keep videos playing when your screen is locked")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .onChange(of: preservePlaybackOnLock) { oldValue, newValue in
-                        updateGlobalSettings()
-                    }
-
-                    Divider()
-
-                    // Pause on full-screen apps
-                    Toggle(isOn: $pauseOnFullScreen) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Pause on full-screen apps")
-                                .font(.body)
-
-                            Text("Automatically pause wallpapers when a full-screen app is active")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .onChange(of: pauseOnFullScreen) { oldValue, newValue in
-                        updateGlobalSettings()
-                    }
-
-                    Divider()
-
-                    // Reduce quality on battery
-                    Toggle(isOn: $batteryResolutionCap) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Reduce quality on battery")
-                                .font(.body)
-
-                            Text("Lower decode resolution when running on battery to save power")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .onChange(of: batteryResolutionCap) { oldValue, newValue in
-                        updateGlobalSettings()
-                    }
+                } header: {
+                    Text("Battery Threshold")
                 }
             }
-            .padding(12)
-        }
-        .groupBoxStyle(ContainerGroupBoxStyle())
-    }
-    
-    private var startupSection: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Image(systemName: "power.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(.green)
-                    
-                    Text("Startup Options")
-                        .font(.headline)
-                }
-                .padding(.bottom, 4)
-                
-                Toggle(isOn: $startOnLogin) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Start at login")
-                            .font(.body)
-                    }
-                }
-                .onChange(of: startOnLogin) { oldValue, newValue in
-                    updateGlobalSettings()
-                }
+            .formStyle(.grouped)
+            .tabItem {
+                Label("Power", systemImage: "bolt.batteryblock")
             }
-            .padding(12)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         }
-        .groupBoxStyle(ContainerGroupBoxStyle())
-    }
-    
-    
-    private var configValidationSection: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(.blue)
-                    
-                    Text("Stored Configuration")
-                        .font(.headline)
-                }
-                .padding(.bottom, 4)
-                
-                HStack(spacing: 12) {
-                    Button(action: {
-                        validateConfigurations()
-                    }) {
-                        Label("Validate Settings", systemImage: "doc.text.magnifyingglass")
-                            .frame(minWidth: 140)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    
-                    Button(action: {
-                        screenManager.reloadAllScreens()
-                    }) {
-                        Label("Reload All Screens", systemImage: "arrow.triangle.2.circlepath")
-                            .frame(minWidth: 140)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                }
+        .padding()
+        .frame(minWidth: 500, minHeight: 400)
+        .alert("Reset Settings", isPresented: $showingResetAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Reset All", role: .destructive) {
+                resetAllSettings()
             }
-            .padding(12)
+        } message: {
+            Text("This will reset all settings including screen configurations. This action cannot be undone.")
         }
-        .groupBoxStyle(ContainerGroupBoxStyle())
-    }
-    
-    private var resetSettingsSection: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.title2)
-                        .foregroundStyle(.red)
-                    
-                    Text("Reset Settings")
-                        .font(.headline)
-                }
-                
-                Text("If you're experiencing issues, you can reset all settings to their defaults")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                
-                HStack {
-                    Spacer()
-                    Button(action: {
-                        showingResetAlert = true
-                    }) {
-                        HStack {
-                            Image(systemName: "arrow.counterclockwise.circle")
-                            Text("Reset All Settings")
-                        }
-                        .frame(minWidth: 180)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.red)
-                    .controlSize(.large)
-                    Spacer()
-                }
-            }
-            .padding(12)
+        .alert("Configuration Validation", isPresented: $showingValidationResults) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(validationMessage)
         }
-        .groupBoxStyle(ContainerGroupBoxStyle())
     }
     
     private func updateGlobalSettings() {

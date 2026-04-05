@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 
 struct ContentView: View {
-    @EnvironmentObject private var screenManager: ScreenManager
+    @Environment(ScreenManager.self) private var screenManager
     @State private var selectedNavigation: Navigation?
 
     init(initialNavigation: Navigation? = nil) {
@@ -17,10 +17,20 @@ struct ContentView: View {
                     selectedNavigation = .screen(screenID)
                 }
         } detail: {
-            DetailContent(selection: selectedNavigation)
+            DetailContent(selection: $selectedNavigation)
+                .toolbar {
+                    ToolbarItem(placement: .navigation) {
+                        Button(action: {
+                            selectedNavigation = .general
+                        }) {
+                            Image(systemName: "gearshape")
+                        }
+                        .help("Preferences")
+                    }
+                }
         }
         .navigationSplitViewStyle(.balanced)
-        .frame(minWidth: 900, minHeight: 600)
+        .frame(minWidth: 1000, minHeight: 650)
     }
 }
 
@@ -34,51 +44,23 @@ enum Navigation: Hashable {
 // MARK: - Sidebar View
 struct Sidebar: View {
     @Binding var selection: Navigation?
-    @EnvironmentObject private var screenManager: ScreenManager
+    @Environment(ScreenManager.self) private var screenManager
     @State private var isRefreshing = false
     
     var body: some View {
         List(selection: $selection) {
-            Section(header: Text("General").font(.caption).bold().foregroundStyle(.secondary)) {
-                NavigationLink(value: Navigation.general) {
-                    HStack {
-                        Image(systemName: "gearshape.fill")
-                            .foregroundStyle(.blue)
-                            .imageScale(.large)
-                            .frame(width: 24, height: 24)
-                        
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("General Settings")
-                                .fontWeight(.medium)
-                            
-                            Text("App preferences")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-            }
-            
-            Section(header: Text("Displays").font(.caption).bold().foregroundStyle(.secondary)) {
-                HStack {
-                    Text("Display Management")
-                        .font(.headline)
+            Section(header: HStack(spacing: 4) {
+                Text("Displays").font(.caption).bold().foregroundStyle(.secondary)
+                Button(action: refreshDisplays) {
+                    Image(systemName: isRefreshing ? "arrow.triangle.2.circlepath.circle.fill" : "arrow.triangle.2.circlepath")
+                        .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.secondary)
-                    
-                    Spacer()
-                    
-                    Button(action: refreshDisplays) {
-                        Image(systemName: isRefreshing ? "arrow.triangle.2.circlepath.circle.fill" : "arrow.triangle.2.circlepath")
-                            .imageScale(.medium)
-                            .rotationEffect(isRefreshing ? .degrees(360) : .degrees(0))
-                            .animation(isRefreshing ? Animation.linear(duration: 1).repeatForever(autoreverses: false) : .default, value: isRefreshing)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Refresh display list")
+                        .rotationEffect(isRefreshing ? .degrees(360) : .degrees(0))
+                        .animation(isRefreshing ? Animation.linear(duration: 1).repeatForever(autoreverses: false) : .default, value: isRefreshing)
                 }
-                .padding(.vertical, 8)
-                
+                .buttonStyle(.plain)
+                .help("Refresh display list")
+            }) {
                 if screenManager.screens.isEmpty {
                     HStack {
                         Image(systemName: "display.slash")
@@ -97,15 +79,16 @@ struct Sidebar: View {
                 }
             }
             
-            Section(header: Text("System").font(.caption).bold().foregroundStyle(.secondary)) {
-                VStack(alignment: .leading, spacing: 8) {
-                    SystemMonitorView()
-                }
-                .padding(.vertical, 8)
+            Section(header: VStack(alignment: .leading, spacing: 6) {
+                Divider()
+                Text("Dashboard").font(.caption).bold().foregroundStyle(.secondary)
+            }) {
+                SystemMonitorView()
+                    .padding(.vertical, 4)
             }
         }
         .listStyle(.sidebar)
-        .frame(minWidth: 250)
+        .frame(minWidth: 230)
     }
     
     private func refreshDisplays() {
@@ -126,7 +109,7 @@ struct Sidebar: View {
 
 // MARK: - Screen Row
 struct ScreenRow: View {
-    @ObservedObject var screen: Screen
+    var screen: Screen
     @State private var isPlaying: Bool = false
 
     var body: some View {
@@ -172,9 +155,6 @@ struct ScreenRow: View {
                 isPlaying = playing
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .init("ScreensRefreshed"))) { _ in
-            updatePlaybackState()
-        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(screen.name), \(Int(screen.frame.width)) by \(Int(screen.frame.height)) pixels")
         .accessibilityValue(screen.videoPlayer != nil ? (isPlaying ? "Playing video" : "Video paused") : "No video configured")
@@ -188,9 +168,9 @@ struct ScreenRow: View {
 
 // MARK: - Detail Content
 struct DetailContent: View {
-    let selection: Navigation?
-    @EnvironmentObject private var screenManager: ScreenManager
-    
+    @Binding var selection: Navigation?
+    @Environment(ScreenManager.self) private var screenManager
+
     var body: some View {
         Group {
             switch selection {
@@ -219,7 +199,7 @@ struct DetailContent: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.clear)
+        .background(Color(NSColor.underPageBackgroundColor))
         .animation(.easeInOut, value: selection)
     }
 }

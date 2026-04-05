@@ -2,16 +2,18 @@ import AppKit
 import SwiftUI
 import AVKit
 import Combine
+import Observation
 
-class Screen: Identifiable, Hashable, ObservableObject {
+@MainActor @Observable
+class Screen: Identifiable, Hashable {
     let id: CGDirectDisplayID
     let name: String
     let frame: CGRect
     let nsScreen: NSScreen
 
-    private var previewPlayerObserver: AnyCancellable?
-    private var syncTimer: Timer?
-    private var skipPreviewPlayerNotification = false
+    @ObservationIgnored private var previewPlayerObserver: AnyCancellable?
+    @ObservationIgnored private var syncTimer: Timer?
+    @ObservationIgnored private var skipPreviewPlayerNotification = false
 
     // MARK: - Active Wallpaper Window (any type)
 
@@ -56,13 +58,17 @@ class Screen: Identifiable, Hashable, ObservableObject {
         }
     }
 
+    /// Incremented whenever the video player's playback state changes,
+    /// triggering @Observable updates for any SwiftUI view reading it.
+    var playbackStateVersion: Int = 0
+
     @objc private func notifyPlaybackStateChanged() {
-        objectWillChange.send()
+        playbackStateVersion += 1
     }
 
     // MARK: - Preview Player
 
-    @Published var previewPlayer: AVPlayer? {
+    var previewPlayer: AVPlayer? {
         willSet {
             guard !skipPreviewPlayerNotification else { return }
             previewPlayer?.pause()
@@ -80,7 +86,6 @@ class Screen: Identifiable, Hashable, ObservableObject {
 
         // Disable audio tracks to prevent AirPods from connecting
         if let playerItem = player.currentItem {
-            playerItem.audioTimePitchAlgorithm = .spectral
             playerItem.tracks
                 .filter { $0.assetTrack?.mediaType == .audio }
                 .forEach { $0.isEnabled = false }
@@ -150,22 +155,15 @@ class Screen: Identifiable, Hashable, ObservableObject {
 
     // MARK: - Hashable
 
-    func hash(into hasher: inout Hasher) {
+    nonisolated func hash(into hasher: inout Hasher) {
         hasher.combine(id)
     }
 
-    static func == (lhs: Screen, rhs: Screen) -> Bool {
+    nonisolated static func == (lhs: Screen, rhs: Screen) -> Bool {
         lhs.id == rhs.id
     }
 
     // MARK: - Cleanup
 
-    deinit {
-        stopSyncTimer()
-        previewPlayerObserver?.cancel()
-        previewPlayer?.pause()
-        previewPlayer = nil
-        activeWallpaperWindow?.close()
-        activeWallpaperWindow = nil
-    }
+    nonisolated deinit {}
 }

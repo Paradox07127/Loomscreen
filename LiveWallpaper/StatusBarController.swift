@@ -213,7 +213,7 @@ class StatusBarController: NSObject, NSMenuDelegate {
     private func createSettingsWindow(initialScreenID: CGDirectDisplayID? = nil) -> NSWindow {
         // Create content view with initial navigation if a screen ID is provided
         let initialNavigation: Navigation? = initialScreenID.map { .screen($0) }
-        let contentView = ContentView(initialNavigation: initialNavigation).environmentObject(screenManager)
+        let contentView = ContentView(initialNavigation: initialNavigation).environment(screenManager)
         
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 900, height: 650),
@@ -326,10 +326,7 @@ class StatusBarController: NSObject, NSMenuDelegate {
         screenManager.refreshScreens()
     }
     
-    deinit {
-        cleanupTasks.removeAll()
-        NotificationCenter.default.removeObserver(self)
-    }
+    nonisolated deinit {}
 }
 
 // MARK: - NSWindowDelegate

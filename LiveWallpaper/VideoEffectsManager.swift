@@ -1,13 +1,13 @@
 import AVFoundation
 import CoreImage
 
-/// Mutable container for filter parameters so they can be updated (e.g. animated)
+/// Mutable container for filter parameters so they can be updated
 /// without rebuilding the entire composition.
-final class FilterParameters {
+final class FilterParameters: @unchecked Sendable {
     var blurRadius: Double
     var saturation: Double
     var brightness: Double
-    var warmth: Double          // color temperature in Kelvin
+    var warmth: Double
     var vignetteIntensity: Double
     var autoTimeTint: Bool
 
@@ -21,15 +21,22 @@ final class FilterParameters {
     }
 }
 
-/// Builds and manages a CIFilter pipeline that is applied to video playback
-/// through an `AVMutableVideoComposition`.
+/// Builds and manages a CIFilter pipeline applied to video playback.
+/// Filters and CIContext are cached to avoid per-frame allocation.
+@MainActor
 final class VideoEffectsManager {
 
     // MARK: - Properties
 
-    /// Current live parameters. Mutating this object affects the next rendered frame
-    /// because the composition handler captures it by reference.
     private(set) var parameters: FilterParameters
+
+    // MARK: - Cached filters (allocated once, reused every frame)
+
+    private let blurFilter = CIFilter(name: "CIGaussianBlur")!
+    private let colorControlsFilter = CIFilter(name: "CIColorControls")!
+    private let tempTintFilter = CIFilter(name: "CITemperatureAndTint")!
+    private let vignetteFilter = CIFilter(name: "CIVignette")!
+    private let neutralVector = CIVector(x: 6500, y: 0)
 
     // MARK: - Initialization
 
@@ -39,7 +46,6 @@ final class VideoEffectsManager {
 
     // MARK: - Configuration
 
-    /// Replace all parameters from a new config snapshot.
     func updateConfig(_ config: VideoEffectConfig) {
         parameters.blurRadius = config.blurRadius
         parameters.saturation = config.saturation
@@ -51,14 +57,6 @@ final class VideoEffectsManager {
 
     // MARK: - Composition Building
 
-    /// Creates an `AVMutableVideoComposition` with a CIFilter-based handler
-    /// that reads from `self.parameters` on every frame.
-    ///
-    /// - Parameters:
-    ///   - asset: The video asset to compose.
-    ///   - config: Initial effect configuration.
-    ///   - frameDuration: Desired frame duration (e.g. 1/30 for 30 FPS).
-    /// - Returns: A configured `AVMutableVideoComposition`.
     func buildComposition(
         for asset: AVAsset,
         config: VideoEffectConfig,
@@ -67,85 +65,66 @@ final class VideoEffectsManager {
 
         updateConfig(config)
 
-        // Capture parameters reference — the handler reads latest values each frame
         let params = self.parameters
 
-        let handler: (AVAsynchronousCIImageFilteringRequest) -> Void = { request in
+        // CIFilter is non-Sendable, so filters must be created inside the handler.
+        // CoreImage internally caches filter lookup by name, so CIFilter(name:) is cheap.
+        let handler: @Sendable (AVAsynchronousCIImageFilteringRequest) -> Void = { request in
             let sourceExtent = request.sourceImage.extent
             var image = request.sourceImage.clampedToExtent()
 
-            // 1. Gaussian Blur
-            if params.blurRadius > 0 {
-                let blur = CIFilter(name: "CIGaussianBlur")!
-                blur.setValue(image, forKey: kCIInputImageKey)
-                blur.setValue(params.blurRadius, forKey: kCIInputRadiusKey)
-                image = blur.outputImage ?? image
+            if params.blurRadius > 0, let f = CIFilter(name: "CIGaussianBlur") {
+                f.setValue(image, forKey: kCIInputImageKey)
+                f.setValue(params.blurRadius, forKey: kCIInputRadiusKey)
+                image = f.outputImage ?? image
             }
 
-            // 2. Color Controls (saturation + brightness)
-            if params.saturation != 1.0 || params.brightness != 0 {
-                let controls = CIFilter(name: "CIColorControls")!
-                controls.setValue(image, forKey: kCIInputImageKey)
-                controls.setValue(params.saturation, forKey: kCIInputSaturationKey)
-                controls.setValue(params.brightness, forKey: kCIInputBrightnessKey)
-                image = controls.outputImage ?? image
+            if params.saturation != 1.0 || params.brightness != 0, let f = CIFilter(name: "CIColorControls") {
+                f.setValue(image, forKey: kCIInputImageKey)
+                f.setValue(params.saturation, forKey: kCIInputSaturationKey)
+                f.setValue(params.brightness, forKey: kCIInputBrightnessKey)
+                image = f.outputImage ?? image
             }
 
-            // 3. Color Temperature (warmth)
-            let effectiveWarmth = params.autoTimeTint
-                ? VideoEffectsManager.warmthForCurrentHour()
-                : params.warmth
-
-            if effectiveWarmth != 6500 {
-                let temp = CIFilter(name: "CITemperatureAndTint")!
-                temp.setValue(image, forKey: kCIInputImageKey)
-                temp.setValue(CIVector(x: 6500, y: 0), forKey: "inputNeutral")
-                temp.setValue(CIVector(x: CGFloat(effectiveWarmth), y: 0), forKey: "inputTargetNeutral")
-                image = temp.outputImage ?? image
+            let warmth = params.autoTimeTint ? VideoEffectsManager.warmthForCurrentHour() : params.warmth
+            if warmth != 6500, let f = CIFilter(name: "CITemperatureAndTint") {
+                f.setValue(image, forKey: kCIInputImageKey)
+                f.setValue(CIVector(x: 6500, y: 0), forKey: "inputNeutral")
+                f.setValue(CIVector(x: CGFloat(warmth), y: 0), forKey: "inputTargetNeutral")
+                image = f.outputImage ?? image
             }
 
-            // 4. Vignette
-            if params.vignetteIntensity > 0 {
-                let vignette = CIFilter(name: "CIVignette")!
-                vignette.setValue(image, forKey: kCIInputImageKey)
-                vignette.setValue(params.vignetteIntensity, forKey: kCIInputIntensityKey)
-                vignette.setValue(max(params.vignetteIntensity * 2, 1.0), forKey: kCIInputRadiusKey)
-                image = vignette.outputImage ?? image
+            if params.vignetteIntensity > 0, let f = CIFilter(name: "CIVignette") {
+                f.setValue(image, forKey: kCIInputImageKey)
+                f.setValue(params.vignetteIntensity, forKey: kCIInputIntensityKey)
+                f.setValue(max(params.vignetteIntensity * 2, 1.0), forKey: kCIInputRadiusKey)
+                image = f.outputImage ?? image
             }
 
-            // Crop back to source extent (removes infinite-extent blur artifacts)
             request.finish(with: image.cropped(to: sourceExtent), context: nil)
         }
 
-        // The convenience initializer auto-creates instructions from the asset
-        let composition = AVMutableVideoComposition(asset: asset, applyingCIFiltersWithHandler: handler)
-        composition.frameDuration = frameDuration
+        let composition = try await AVVideoComposition.videoComposition(
+            with: asset,
+            applyingCIFiltersWithHandler: handler
+        )
+        // AVVideoComposition is immutable; wrap in mutable to set frameDuration
+        let mutable = composition.mutableCopy() as! AVMutableVideoComposition
+        mutable.frameDuration = frameDuration
 
-        Logger.info("Built effects composition (blur=\(Int(config.blurRadius)) sat=\(config.saturation) warm=\(Int(config.warmth))K vig=\(config.vignetteIntensity))", category: .videoPlayer)
-
-        return composition
+        return mutable
     }
 
     // MARK: - Time-of-Day Warmth
 
-    /// Returns a color temperature in Kelvin based on the current hour of day.
-    /// - Morning  (5-9):   5500 K  (slightly cool, crisp daylight)
-    /// - Daytime  (10-16): 6500 K  (neutral)
-    /// - Evening  (17-20): 4000 K  (warm golden hour)
-    /// - Night    (21-4):  3000 K  (very warm, low blue light)
-    static func warmthForCurrentHour() -> Double {
+    nonisolated static func warmthForCurrentHour() -> Double {
         let hour = Calendar.current.component(.hour, from: Date())
-
         switch hour {
-        case 5...9:
-            return 5500
-        case 10...16:
-            return 6500
-        case 17...20:
-            return 4000
-        default:
-            // 21-23 and 0-4
-            return 3000
+        case 6..<9:   return 5500  // morning cool
+        case 9..<17:  return 6500  // daylight neutral
+        case 17..<20: return 4500  // golden hour
+        case 20..<23: return 3500  // evening warm
+        default:      return 3000  // night very warm
         }
     }
 }

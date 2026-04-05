@@ -1,20 +1,21 @@
 import AppKit
 import Combine
+import Observation
 
 /// Detects when a full-screen app covers the desktop on each display.
 /// Uses CGWindowListCopyWindowInfo (no permission required) + workspace notifications.
-@MainActor
-final class FullScreenDetector: ObservableObject {
+@MainActor @Observable
+final class FullScreenDetector {
 
-    // MARK: - Published State
+    // MARK: - Observed State
 
-    @Published private(set) var hiddenScreens: [CGDirectDisplayID: Bool] = [:]
+    private(set) var hiddenScreens: [CGDirectDisplayID: Bool] = [:]
 
     // MARK: - Private Properties
 
-    private var cancellables = Set<AnyCancellable>()
-    private var pollTimer: AnyCancellable?
-    private let pollInterval: TimeInterval
+    @ObservationIgnored private var cancellables = Set<AnyCancellable>()
+    @ObservationIgnored private var pollTimer: AnyCancellable?
+    @ObservationIgnored private let pollInterval: TimeInterval
 
     // MARK: - Initialization
 
