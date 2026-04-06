@@ -160,11 +160,8 @@ final class MetalWallpaperView: NSView, MTKViewDelegate {
     // MARK: - Cleanup
 
     deinit {
-        metalView?.delegate = nil
-        metalView?.removeFromSuperview()
-        metalView = nil
-        pipelineState = nil
-        commandQueue = nil
-        device = nil
+        // AppKit handles subview cleanup when the view is deallocated.
+        // Mutating delegate and calling removeFromSuperview() from nonisolated
+        // deinit is not allowed under strict concurrency.
     }
 }

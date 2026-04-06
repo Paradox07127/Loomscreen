@@ -1,15 +1,14 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import CoreImage
 
-/// Mutable container for filter parameters so they can be updated
-/// without rebuilding the entire composition.
-final class FilterParameters: @unchecked Sendable {
-    var blurRadius: Double
-    var saturation: Double
-    var brightness: Double
-    var warmth: Double
-    var vignetteIntensity: Double
-    var autoTimeTint: Bool
+/// Immutable snapshot of filter parameters, safe to share across threads.
+struct FilterParameters: Sendable {
+    let blurRadius: Double
+    let saturation: Double
+    let brightness: Double
+    let warmth: Double
+    let vignetteIntensity: Double
+    let autoTimeTint: Bool
 
     init(from config: VideoEffectConfig) {
         self.blurRadius = config.blurRadius
@@ -47,12 +46,7 @@ final class VideoEffectsManager {
     // MARK: - Configuration
 
     func updateConfig(_ config: VideoEffectConfig) {
-        parameters.blurRadius = config.blurRadius
-        parameters.saturation = config.saturation
-        parameters.brightness = config.brightness
-        parameters.warmth = config.warmth
-        parameters.vignetteIntensity = config.vignetteIntensity
-        parameters.autoTimeTint = config.autoTimeTint
+        parameters = FilterParameters(from: config)
     }
 
     // MARK: - Composition Building
@@ -61,7 +55,7 @@ final class VideoEffectsManager {
         for asset: AVAsset,
         config: VideoEffectConfig,
         frameDuration: CMTime
-    ) async throws -> AVMutableVideoComposition {
+    ) async throws -> AVVideoComposition {
 
         updateConfig(config)
 
@@ -104,15 +98,20 @@ final class VideoEffectsManager {
             request.finish(with: image.cropped(to: sourceExtent), context: nil)
         }
 
-        let composition = try await AVVideoComposition.videoComposition(
+        // Use the async factory method for CIFilter composition.
+        // Then re-wrap via Configuration to update frameDuration safely
+        // (AVMutableVideoComposition is deprecated in macOS 26).
+        let base = try await AVVideoComposition.videoComposition(
             with: asset,
             applyingCIFiltersWithHandler: handler
         )
-        // AVVideoComposition is immutable; wrap in mutable to set frameDuration
-        let mutable = composition.mutableCopy() as! AVMutableVideoComposition
-        mutable.frameDuration = frameDuration
 
-        return mutable
+        var config = AVVideoComposition.Configuration()
+        config.frameDuration = frameDuration
+        config.renderSize = base.renderSize
+        config.instructions = base.instructions
+        config.sourceTrackIDForFrameTiming = base.sourceTrackIDForFrameTiming
+        return AVVideoComposition(configuration: config)
     }
 
     // MARK: - Time-of-Day Warmth

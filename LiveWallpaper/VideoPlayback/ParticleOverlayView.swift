@@ -364,7 +364,8 @@ final class ParticleOverlayView: NSView {
     // MARK: - Cleanup
 
     deinit {
-        currentEmitter?.removeFromParent()
-        skView.presentScene(nil)
+        // SpriteKit handles scene and emitter cleanup when the view is deallocated.
+        // Calling removeFromParent() and presentScene() from nonisolated deinit
+        // is not allowed under strict concurrency.
     }
 }

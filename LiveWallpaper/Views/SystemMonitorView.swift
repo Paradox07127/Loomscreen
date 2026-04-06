@@ -5,17 +5,23 @@ struct SystemMonitorView: View {
     @State private var powerSource: PowerMonitor.PowerSource = PowerMonitor.shared.currentPowerSource
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 8) {
             // Container for 4 widgets (2x2 Grid)
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 14) {
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
                 // CPU
                 MiniGaugeCard(title: "CPU", value: monitor.cpuUsage, color: colorForPercent(monitor.cpuUsage), icon: "cpu")
-                
+                    .accessibilityLabel("CPU usage")
+                    .accessibilityValue("\(Int(monitor.cpuUsage)) percent")
+
                 // GPU
                 MiniGaugeCard(title: "GPU", value: monitor.gpuUsage, color: colorForPercent(monitor.gpuUsage), icon: "square.stack.3d.up.fill")
-                
+                    .accessibilityLabel("GPU usage")
+                    .accessibilityValue("\(Int(monitor.gpuUsage)) percent")
+
                 // RAM
                 MiniGaugeCard(title: "RAM", value: monitor.memoryPercentage(), color: colorForPercent(monitor.memoryPercentage()), icon: "memorychip")
+                    .accessibilityLabel("RAM usage")
+                    .accessibilityValue("\(Int(monitor.memoryPercentage())) percent")
                 
                 // Power
                 VStack(spacing: 2) {
@@ -38,24 +44,26 @@ struct SystemMonitorView: View {
                         }
                         
                         Image(systemName: powerStatusIcon)
-                            .font(.system(size: 20, weight: .bold))
+                            .font(.system(size: 16, weight: .bold))
                             .foregroundStyle(powerStatusColor)
                         
                         VStack(spacing: 0) {
                             Text(powerStatusTextShort)
-                                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                .font(.system(size: 9, weight: .semibold, design: .rounded))
                                 .foregroundStyle(.secondary)
                             Text(powerStatusTextValue)
-                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                .font(.system(size: 10, weight: .bold, design: .rounded))
                         }
-                        .offset(y: 28)
+                        .offset(y: 24)
                     }
                     .aspectRatio(1, contentMode: .fit)
-                    .frame(maxWidth: 100)
+                    .frame(maxWidth: 80)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityLabel("Power source")
+                .accessibilityValue(powerStatusTextShort == "PWR" ? "AC power" : "Battery at \(powerStatusTextValue)")
             }
-            .padding(14)
+            .padding(10)
             .background(Color(NSColor.windowBackgroundColor).opacity(0.8))
             .clipShape(RoundedRectangle(cornerRadius: 14))
             .shadow(color: Color.black.opacity(0.06), radius: 3, x: 0, y: 1)
@@ -192,21 +200,21 @@ struct MiniGaugeCard: View {
                 
                 // Icon in the center
                 Image(systemName: icon)
-                    .font(.system(size: 20, weight: .bold))
+                    .font(.system(size: 16, weight: .bold))
                     .foregroundStyle(color)
                 
                 // Title and Value in the opening gap at the bottom
                 VStack(spacing: 0) {
                     Text(title)
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
                         .foregroundStyle(.secondary)
                     Text("\(Int(value))%")
-                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
                 }
-                .offset(y: 26) // Pushes text into the gap
+                .offset(y: 24) // Pushes text into the gap
             }
             .aspectRatio(1, contentMode: .fit) // Keep it a perfect square
-            .frame(maxWidth: 100) // Set max width to prevent infinite scaling
+            .frame(maxWidth: 80) // Set max width to prevent infinite scaling
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

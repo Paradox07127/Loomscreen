@@ -25,6 +25,10 @@ struct ScreenDetailView: View {
     @State private var htmlContent: String = ""
     @State private var setAsLockScreen: Bool = false
 
+    @State private var playlistBookmarks: [Data] = []
+    @State private var shufflePlaylist: Bool = false
+    @State private var scheduleSlots: [ScheduleSlot] = []
+
     @State private var isDraggingOver = false
     @State private var showColorAdjustments = false
 
@@ -49,6 +53,8 @@ struct ScreenDetailView: View {
                         }
                         .buttonStyle(.plain)
                         .help("Reload display content")
+                        .accessibilityLabel("Reload display")
+                        .accessibilityHint("Reloads the wallpaper content for this screen")
                     }
                     HStack(spacing: 8) {
                         InfoBadge(icon: "arrow.up.left.and.arrow.down.right", text: "\(Int(screen.frame.width))×\(Int(screen.frame.height))")
@@ -77,6 +83,8 @@ struct ScreenDetailView: View {
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(Color.accentColor)
+                        .accessibilityLabel("Select video")
+                        .accessibilityHint("Opens a file picker to choose a wallpaper video")
                         
                         Button(action: clearVideo) {
                             Image(systemName: "trash")
@@ -86,11 +94,13 @@ struct ScreenDetailView: View {
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(.red)
+                        .accessibilityLabel("Clear video")
+                        .accessibilityHint("Removes the current wallpaper video from this screen")
                     }
                 }
             }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 16)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
             
             Divider()
             
@@ -104,11 +114,48 @@ struct ScreenDetailView: View {
                         if isLoading {
                             loadingView
                         } else if screen.videoPlayer != nil || screen.previewPlayer != nil {
-                            videoPreviewSection
-                                .padding(8)
+                            VStack(spacing: 20) {
+                                Spacer()
+                                videoPreviewSection
+                                    .aspectRatio(16/9, contentMode: .fit)
+                                    .frame(maxWidth: 640)
+                                    .shadow(color: Color.black.opacity(0.15), radius: 10, x: 0, y: 4)
+                                
+                                HStack(spacing: 24) {
+                                    HStack(spacing: 12) {
+                                        ForEach(VideoFitMode.allCases) { mode in
+                                            FitModeButton(mode: mode, isSelected: selectedFitMode == mode, action: {
+                                                selectedFitMode = mode
+                                                screenManager.updateFitMode(mode, for: screen)
+                                            })
+                                        }
+                                    }
+                                    
+                                    Divider()
+                                        .frame(height: 24)
+                                    
+                                    HStack(spacing: 12) {
+                                        Text("Speed")
+                                            .font(.system(size: 13, weight: .medium))
+                                            .foregroundStyle(.secondary)
+                                        SegmentedSpeedPicker(selectedSpeed: $playbackSpeed) { speed in
+                                            screen.videoPlayer?.setPlaybackSpeed(speed)
+                                            screenManager.updatePlaybackSpeed(speed, for: screen)
+                                        }
+                                        .frame(width: 180)
+                                    }
+                                }
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 12)
+                                .background(Color(NSColor.windowBackgroundColor))
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                                
+                                Spacer()
+                            }
+                            .padding(24)
                         } else {
                             enhancedEmptyStateView
-                                .padding(8)
+                                .padding(24)
                         }
                     } else if selectedWallpaperType == .html {
                         HTMLWallpaperSection(screen: screen, htmlContent: $htmlContent)
@@ -126,42 +173,35 @@ struct ScreenDetailView: View {
                 if selectedWallpaperType == .video {
                     ScrollView {
                         VStack(spacing: 20) {
-                            // Playback Group
+                            // Playlist Group
                             GroupBox {
-                                VStack(alignment: .leading, spacing: 16) {
-                                    HStack(spacing: 12) {
-                                        ForEach(VideoFitMode.allCases) { mode in
-                                            FitModeButton(mode: mode, isSelected: selectedFitMode == mode, action: {
-                                                selectedFitMode = mode
-                                                screenManager.updateFitMode(mode, for: screen)
-                                            })
-                                        }
-                                    }
-                                    
-                                    Divider()
-                                    
-                                    VStack(spacing: 8) {
-                                        HStack {
-                                            Text("Speed")
-                                                .font(.system(size: 13, weight: .medium))
-                                            Spacer()
-                                            Text(String(format: "%.1fx", playbackSpeed))
-                                                .font(.system(size: 13, design: .monospaced))
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        SegmentedSpeedPicker(selectedSpeed: $playbackSpeed) { speed in
-                                            screen.videoPlayer?.setPlaybackSpeed(speed)
-                                            screenManager.updatePlaybackSpeed(speed, for: screen)
-                                        }
-                                    }
-                                }
+                                PlaylistSection(
+                                    playlistBookmarks: $playlistBookmarks,
+                                    shufflePlaylist: $shufflePlaylist,
+                                    screen: screen,
+                                    screenManager: screenManager
+                                )
                                 .padding(8)
                             } label: {
-                                Label("Playback", systemImage: "play.rectangle")
+                                Label("Playlist", systemImage: "list.bullet")
                                     .font(.system(size: 13, weight: .medium))
                                     .foregroundStyle(.secondary)
                             }
-                            
+
+                            // Schedule Group
+                            GroupBox {
+                                ScheduleSection(
+                                    scheduleSlots: $scheduleSlots,
+                                    screen: screen,
+                                    screenManager: screenManager
+                                )
+                                .padding(8)
+                            } label: {
+                                Label("Schedule", systemImage: "clock")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                            }
+
                             // Effects Group
                             GroupBox {
                                 VStack(spacing: 14) {
@@ -176,6 +216,9 @@ struct ScreenDetailView: View {
                                         .onChange(of: selectedParticleEffect) { _, newValue in
                                             screenManager.updateParticleEffect(newValue, for: screen)
                                         }
+                                        .accessibilityLabel("Particle effect")
+                                        .accessibilityValue(selectedParticleEffect.rawValue)
+                                        .accessibilityHint("Choose a particle overlay effect")
                                     }
                                     
                                     Divider()
@@ -187,35 +230,13 @@ struct ScreenDetailView: View {
                                             .onChange(of: setAsLockScreen) { _, newValue in
                                                 if newValue { screenManager.extractLockScreenFrame(for: screen) }
                                             }
+                                            .accessibilityLabel("Set as lock screen")
+                                            .accessibilityHint("Uses a frame from the video as your lock screen wallpaper")
                                     }
                                     
                                     Divider()
                                     
-                                    Button {
-                                        showColorAdjustments.toggle()
-                                    } label: {
-                                        HStack {
-                                            ZStack {
-                                                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                                    .fill(Color.orange.opacity(0.15))
-                                                    .frame(width: 26, height: 26)
-                                                Image(systemName: "slider.horizontal.3")
-                                                    .font(.system(size: 13, weight: .medium))
-                                                    .foregroundStyle(.orange)
-                                            }
-                                            Text("Color Adjustments")
-                                                .font(.system(size: 13, weight: .medium))
-                                            Spacer()
-                                            Image(systemName: "chevron.right")
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        .padding(.vertical, 4)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .popover(isPresented: $showColorAdjustments, arrowEdge: .trailing) {
-                                        ColorAdjustmentsPopover(effectConfig: $effectConfig, screen: screen, screenManager: screenManager)
-                                    }
+                                    ColorAdjustmentsView(effectConfig: $effectConfig, screen: screen, screenManager: screenManager)
                                 }
                                 .padding(8)
                             } label: {
@@ -224,9 +245,9 @@ struct ScreenDetailView: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
-                        .padding(20)
+                        .padding(16)
                     }
-                    .frame(width: 320)
+                    .frame(width: 280)
                     .background(Color(NSColor.windowBackgroundColor))
                 }
             }
@@ -240,6 +261,8 @@ struct ScreenDetailView: View {
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 280)
+                .accessibilityLabel("Wallpaper type")
+                .accessibilityHint("Choose between video, HTML, or Metal shader wallpaper")
                 .onChange(of: selectedWallpaperType) { _, newType in
                     if newType == .video {
                         screenManager.switchToVideoWallpaper(for: screen)
@@ -259,7 +282,7 @@ struct ScreenDetailView: View {
             }
         }
         .onAppear { loadScreenConfiguration() }
-        .onChange(of: screen.id) { _ in loadScreenConfiguration() }
+        .onChange(of: screen.id) { loadScreenConfiguration() }
         .alert("Error", isPresented: $showErrorAlert) {
             Button("OK", role: .cancel) { }
         } message: { Text(errorMessage) }
@@ -279,7 +302,7 @@ struct ScreenDetailView: View {
                 else { resolvedURL = nil }
                 
                 let errorDesc = error?.localizedDescription
-                DispatchQueue.main.async {
+                Task { @MainActor in
                     if let errorDesc {
                         self.errorMessage = "Failed to load dropped file: \(errorDesc)"
                         self.showErrorAlert = true
@@ -334,6 +357,8 @@ struct ScreenDetailView: View {
                 .buttonStyle(.plain)
                 .shadow(color: Color.accentColor.opacity(0.3), radius: 5, x: 0, y: 2)
                 .padding(.top, 10)
+                .accessibilityLabel("Select video file")
+                .accessibilityHint("Opens a file picker to choose a wallpaper video")
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -385,6 +410,9 @@ struct ScreenDetailView: View {
                     )
                     .padding(.horizontal, 24)
                     .controlSize(.small)
+                    .accessibilityLabel("Video position")
+                    .accessibilityValue("\(FormatUtils.formatDuration(currentVideoPosition)) of \(FormatUtils.formatDuration(videoDuration))")
+                    .accessibilityHint("Scrub through the video timeline")
                     
                     HStack {
                         Text(FormatUtils.formatDuration(currentVideoPosition))
@@ -427,6 +455,8 @@ struct ScreenDetailView: View {
                     Button("Reload Preview") { setupPreviewPlayer() }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
+                        .accessibilityLabel("Reload preview")
+                        .accessibilityHint("Attempts to reload the video preview")
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(NSColor.windowBackgroundColor))
@@ -473,6 +503,8 @@ struct ScreenDetailView: View {
                         RoundedRectangle(cornerRadius: 6)
                             .stroke(selectedSpeed == speed ? Color.accentColor : Color.clear, lineWidth: 1)
                     )
+                    .accessibilityLabel("Speed \(String(format: "%.1f", speed))x")
+                    .accessibilityHint(selectedSpeed == speed ? "Currently selected" : "Set playback speed to \(String(format: "%.1f", speed))x")
                 }
             }
         }
@@ -490,6 +522,8 @@ struct ScreenDetailView: View {
             }
             .buttonStyle(.plain)
             .help(isPlaying ? "Pause" : "Play")
+            .accessibilityLabel(isPlaying ? "Pause" : "Play")
+            .accessibilityHint(isPlaying ? "Pauses video playback" : "Resumes video playback")
         }
     }
     
@@ -516,22 +550,32 @@ struct ScreenDetailView: View {
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("\(mode.rawValue) fit mode")
+            .accessibilityHint(isSelected ? "Currently selected" : "Tap to switch to \(mode.rawValue) fit mode")
         }
     }
 
-    struct ColorAdjustmentsPopover: View {
+    struct ColorAdjustmentsView: View {
         @Binding var effectConfig: VideoEffectConfig
         var screen: Screen
         var screenManager: ScreenManager
         
         var body: some View {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Video Color Adjustments")
-                    .font(.system(size: 13, weight: .medium))
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 8) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Color.orange.opacity(0.15))
+                            .frame(width: 26, height: 26)
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.orange)
+                    }
+                    Text("Color Adjustments")
+                        .font(.system(size: 13, weight: .medium))
+                }
                 
-                Divider()
-                
-                VStack(spacing: 16) {
+                VStack(spacing: 12) {
                     effectSlider(title: "Blur", value: $effectConfig.blurRadius, in: 0...30, format: "%.0f")
                     effectSlider(title: "Brightness", value: $effectConfig.brightness, in: -0.5...0.5, format: "%.2f")
                     effectSlider(title: "Saturation", value: $effectConfig.saturation, in: 0...2, format: "%.1f")
@@ -547,11 +591,11 @@ struct ScreenDetailView: View {
                         Toggle("", isOn: $effectConfig.autoTimeTint)
                             .labelsHidden()
                             .toggleStyle(.switch)
+                            .accessibilityLabel("Auto warm tint")
+                            .accessibilityHint("Automatically adjusts color warmth based on time of day")
                     }
                 }
             }
-            .padding(20)
-            .frame(width: 280)
             .onChange(of: effectConfig) { _, _ in
                 screenManager.updateEffectConfig(effectConfig, for: screen)
             }
@@ -562,10 +606,12 @@ struct ScreenDetailView: View {
                 Text(title)
                     .font(.system(size: 13))
                     .frame(width: 70, alignment: .leading)
-                
+
                 Slider(value: value, in: range)
                     .controlSize(.small)
-                
+                    .accessibilityLabel(title)
+                    .accessibilityValue(String(format: format, value.wrappedValue))
+
                 Text(String(format: format, value.wrappedValue))
                     .font(.system(size: 12, design: .monospaced))
                     .foregroundStyle(.secondary)
@@ -619,6 +665,9 @@ struct ScreenDetailView: View {
             selectedParticleEffect = config.particleEffect
             effectConfig = config.effectConfig
             setAsLockScreen = config.setAsLockScreen
+            playlistBookmarks = config.playlistBookmarks ?? []
+            shufflePlaylist = config.shufflePlaylist
+            scheduleSlots = config.scheduleSlots ?? []
             if let preset = config.shaderPreset { selectedShaderPreset = preset }
             selectedWallpaperType = config.wallpaperType
             htmlContent = config.htmlContent ?? ""
@@ -653,7 +702,7 @@ struct ScreenDetailView: View {
             let previewPlayer = AVPlayer(playerItem: playerItem)
             previewPlayer.volume = 0
             
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 self.screen.previewPlayer = previewPlayer
                 previewPlayer.play()
             }
@@ -670,8 +719,9 @@ struct ScreenDetailView: View {
             showErrorAlert = true
         }
         
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            withAnimation { self.isLoading = false }
+        Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            withAnimation { isLoading = false }
         }
     }
     

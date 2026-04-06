@@ -248,7 +248,7 @@ struct ScreenConfiguration: Codable, Equatable {
     }
 
     func withUpdatedBookmark(_ bookmarkData: Data) -> ScreenConfiguration {
-        var copy = self
+        let copy = self
         // Use reflection-free approach: create new with all existing values
         return ScreenConfiguration(
             screenID: screenID,

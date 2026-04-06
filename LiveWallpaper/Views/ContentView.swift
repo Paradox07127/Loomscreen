@@ -12,7 +12,7 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             Sidebar(selection: $selectedNavigation)
-                .onReceive(NotificationCenter.default.publisher(for: .init("SelectScreenInSettings"))) { notification in
+                .onReceive(NotificationCenter.default.publisher(for: .selectScreenInSettings)) { notification in
                     guard let screenID = notification.userInfo?["screenID"] as? CGDirectDisplayID else { return }
                     selectedNavigation = .screen(screenID)
                 }
@@ -88,7 +88,7 @@ struct Sidebar: View {
             }
         }
         .listStyle(.sidebar)
-        .frame(minWidth: 230)
+        .frame(minWidth: 200)
     }
     
     private func refreshDisplays() {
@@ -99,7 +99,8 @@ struct Sidebar: View {
         screenManager.refreshScreens()
         
         // Reset the animation after a delay
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+        Task {
+            try? await Task.sleep(for: .milliseconds(500))
             withAnimation {
                 isRefreshing = false
             }

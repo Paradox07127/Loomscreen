@@ -25,7 +25,7 @@ final class SystemMonitor {
 
     @ObservationIgnored private let memoryWarningThreshold: Double = 0.85
     @ObservationIgnored private var updateInterval: TimeInterval = 2.0
-    @ObservationIgnored private var updateTimer: Timer?
+    @ObservationIgnored private var updateTask: Task<Void, Never>?
     @ObservationIgnored private var fpsCounter = FPSCounter()
 
     private init() {
@@ -36,15 +36,19 @@ final class SystemMonitor {
 
     func startMonitoring() {
         stopMonitoring()
-        updateTimer = Timer.scheduledTimer(withTimeInterval: updateInterval, repeats: true) { [weak self] _ in
-            self?.updateResourceUsage()
+        let interval = updateInterval
+        updateTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(interval))
+                self?.updateResourceUsage()
+            }
         }
         updateResourceUsage()
     }
 
     func stopMonitoring() {
-        updateTimer?.invalidate()
-        updateTimer = nil
+        updateTask?.cancel()
+        updateTask = nil
     }
 
     /// Call this from the video player's render loop to track actual FPS
@@ -99,7 +103,7 @@ final class SystemMonitor {
             if isLow {
                 Logger.warning("System memory usage is high: \(Int(systemMemoryUsage * 100))%", category: .memory)
                 NotificationCenter.default.post(
-                    name: Notification.Name("SystemMemoryWarning"),
+                    name: .systemMemoryWarning,
                     object: nil,
                     userInfo: ["memoryUsage": systemMemoryUsage]
                 )
