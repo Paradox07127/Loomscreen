@@ -66,7 +66,7 @@ class StatusBarController: NSObject, NSMenuDelegate {
             .store(in: &cleanupTasks)
 
         // Screen refresh events
-        NotificationCenter.default.publisher(for: .init("ScreensRefreshed"))
+        NotificationCenter.default.publisher(for: .screensRefreshed)
             .throttle(for: .milliseconds(250), scheduler: DispatchQueue.main, latest: true)
             .sink { [weak self] _ in
                 self?.updateStatusBarIcon()
@@ -85,7 +85,8 @@ class StatusBarController: NSObject, NSMenuDelegate {
             .store(in: &cleanupTasks)
 
         // Initial icon update
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
             self?.updateStatusBarIcon(isPlaying: self?.screenManager.isAnyScreenPlaying)
         }
     }
@@ -194,7 +195,7 @@ class StatusBarController: NSObject, NSMenuDelegate {
             
             // Notify the ContentView to navigate to the selected screen
             NotificationCenter.default.post(
-                name: .init("SelectScreenInSettings"),
+                name: .selectScreenInSettings,
                 object: nil,
                 userInfo: ["screenID": screenID]
             )

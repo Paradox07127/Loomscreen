@@ -50,36 +50,36 @@ class VideoContainerView: NSView {
         // Skip update if it's the same player
         if player === currentPlayer { return }
         
-        DispatchQueue.main.async { [weak self] in
+        Task { @MainActor [weak self] in
             guard let self = self else { return }
-            
+
             // Remove existing player layer
             self.cleanupPlayerLayer()
             self.currentPlayer = player
-            
+
             guard let player = player else {
                 self.playerLayer = nil
                 return
             }
-            
+
             // Create and configure new player layer
             let newLayer = AVPlayerLayer(player: player)
             newLayer.frame = self.bounds
             newLayer.videoGravity = self.fitMode.avLayerVideoGravity
-            
+
             // Apply performance optimizations
             newLayer.drawsAsynchronously = true
             newLayer.shouldRasterize = false  // Don't rasterize video content
             newLayer.allowsEdgeAntialiasing = true  // Smoother edges
-            
+
             // Set proper scale factor for Retina displays
             let scale = self.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
             newLayer.contentsScale = scale
-            
+
             // Add layer and store reference
             self.layer?.addSublayer(newLayer)
             self.playerLayer = newLayer
-            
+
             // Ensure proper initial frame
             self.updatePlayerLayerFrame()
         }
@@ -142,6 +142,7 @@ class VideoContainerView: NSView {
     }
     
     deinit {
-        cleanupPlayerLayer()
+        // Cleanup is handled in viewWillMove(toWindow:) when the view is removed.
+        // Calling main-actor-isolated methods from deinit is not allowed under strict concurrency.
     }
 }

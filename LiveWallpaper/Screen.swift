@@ -12,7 +12,7 @@ class Screen: Identifiable, Hashable {
     let nsScreen: NSScreen
 
     @ObservationIgnored private var previewPlayerObserver: AnyCancellable?
-    @ObservationIgnored private var syncTimer: Timer?
+    @ObservationIgnored private var syncTask: Task<Void, Never>?
     @ObservationIgnored private var skipPreviewPlayerNotification = false
 
     // MARK: - Active Wallpaper Window (any type)
@@ -118,14 +118,17 @@ class Screen: Identifiable, Hashable {
 
     private func startSyncTimer() {
         stopSyncTimer()
-        syncTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
-            self?.syncPreviewToWallpaper()
+        syncTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(5))
+                self?.syncPreviewToWallpaper()
+            }
         }
     }
 
     private func stopSyncTimer() {
-        syncTimer?.invalidate()
-        syncTimer = nil
+        syncTask?.cancel()
+        syncTask = nil
     }
     
     // MARK: - Initialization

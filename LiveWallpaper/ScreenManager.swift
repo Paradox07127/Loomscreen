@@ -38,9 +38,24 @@ final class ScreenManager {
                 self?.updatePlaybackState()
             }
             .store(in: &cleanupTasks)
-        
+
+        // Auto-advance playlist when a video completes a loop
+        NotificationCenter.default.publisher(for: .videoDidCompleteLoop)
+            .sink { [weak self] notification in
+                guard let self = self,
+                      let videoPlayer = notification.object as? WallpaperVideoPlayer else { return }
+                // Find the screen this player belongs to
+                if let screen = self.screens.first(where: { $0.videoPlayer === videoPlayer }),
+                   let config = self.configRepo.get(for: screen.id),
+                   config.playlistBookmarks != nil, !(config.playlistBookmarks?.isEmpty ?? true) {
+                    self.advancePlaylist(for: screen)
+                }
+            }
+            .store(in: &cleanupTasks)
+
         refreshScreens()
         loadSavedConfigurations()
+        startScheduleMonitoring()
         Logger.notice("ScreenManager initialization complete", category: .screenManager)
     }
     
@@ -79,13 +94,12 @@ final class ScreenManager {
         refreshScreens(preserveVideoPlayers: true)
 
         // Delay to ensure screen information is fully updated
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(100))
             self?.updateAllWindowFrames()
-
             // Additional check after a short delay to ensure windows stay in position
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                self?.updateAllWindowFrames()
-            }
+            try? await Task.sleep(for: .milliseconds(500))
+            self?.updateAllWindowFrames()
         }
 
 
@@ -115,7 +129,7 @@ final class ScreenManager {
     private func setupMemoryMonitoring() {
         SystemMonitor.shared.startMonitoring()
 
-        NotificationCenter.default.publisher(for: Notification.Name("SystemMemoryWarning"))
+        NotificationCenter.default.publisher(for: .systemMemoryWarning)
             .sink { [weak self] _ in
                 self?.handleLowMemory()
             }
@@ -208,7 +222,7 @@ final class ScreenManager {
         updatePlaybackState()
         
         // Post notification that screens were refreshed
-        NotificationCenter.default.post(name: .init("ScreensRefreshed"), object: nil)
+        NotificationCenter.default.post(name: .screensRefreshed, object: nil)
     }
     
     func clearVideoForScreen(_ screen: Screen) {
@@ -416,7 +430,8 @@ final class ScreenManager {
                         player.pause()
                     } else if !shouldPause && !wasPlaying {
                         // Small delay to ensure proper initialization
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        Task {
+                            try? await Task.sleep(for: .milliseconds(200))
                             player.play()
                         }
                     }
@@ -456,12 +471,13 @@ final class ScreenManager {
                     player.pause()
                 } else {
                     // Small delay to ensure proper initialization
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    Task {
+                        try? await Task.sleep(for: .milliseconds(200))
                         player.play()
                     }
                 }
             }
-            
+
             // Only notify of changes if something important changed
             if needsNewPlayer {
         
@@ -502,7 +518,8 @@ final class ScreenManager {
                 player.pause()
             } else {
                 // Delay playback to ensure proper initialization
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                Task { [weak self] in
+                    try? await Task.sleep(for: .milliseconds(200))
                     player.play()
                     previewPlayer.play()
                     self?.updatePlaybackState()
@@ -513,7 +530,8 @@ final class ScreenManager {
             if let frameRateLimit = configuration?.frameRateLimit {
                 let screenID = screen.id
                 // Delay frame rate limit application to ensure video properties are loaded
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                Task { [weak self] in
+                    try? await Task.sleep(for: .milliseconds(500))
                     guard let self = self,
                           let screen = self.screens.first(where: { $0.id == screenID }) else { return }
                     self.applyFrameRateLimit(frameRateLimit, to: screen)
@@ -825,10 +843,11 @@ final class ScreenManager {
         imageGenerator.requestedTimeToleranceAfter = CMTime(seconds: 1, preferredTimescale: 600)
 
         let currentTime = player.currentTime()
+        nonisolated(unsafe) let generator = imageGenerator
 
         Task {
             do {
-                let (cgImage, _) = try await imageGenerator.image(at: currentTime)
+                let (cgImage, _) = try await generator.image(at: currentTime)
                 let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
 
                 // Save to a temp file
@@ -1001,5 +1020,98 @@ final class ScreenManager {
         return rate
     }
     
+    // MARK: - Playlist Management
+
+    func updatePlaylistBookmarks(_ bookmarks: [Data], for screen: Screen) {
+        guard var config = configRepo.get(for: screen.id) else { return }
+        config.playlistBookmarks = bookmarks.isEmpty ? nil : bookmarks
+        saveConfiguration(config)
+    }
+
+    func updateShufflePlaylist(_ shuffle: Bool, for screen: Screen) {
+        guard var config = configRepo.get(for: screen.id) else { return }
+        config.shufflePlaylist = shuffle
+        saveConfiguration(config)
+    }
+
+    /// Advance to the next video in the playlist for the given screen.
+    func advancePlaylist(for screen: Screen) {
+        guard let config = configRepo.get(for: screen.id),
+              let bookmarks = config.playlistBookmarks,
+              !bookmarks.isEmpty else { return }
+
+        // Pick next bookmark (random if shuffle, else sequential round-robin)
+        let nextBookmark: Data
+        if config.shufflePlaylist {
+            nextBookmark = bookmarks.randomElement() ?? bookmarks[0]
+        } else {
+            // Find the current video's index in the playlist, advance to next
+            let currentIndex = bookmarks.firstIndex(of: config.videoBookmarkData) ?? -1
+            let nextIndex = (currentIndex + 1) % bookmarks.count
+            nextBookmark = bookmarks[nextIndex]
+        }
+
+        var isStale = false
+        guard let url = try? URL(
+            resolvingBookmarkData: nextBookmark,
+            options: .withSecurityScope,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        ) else { return }
+
+        setVideo(url: url, bookmarkData: nextBookmark, for: screen)
+    }
+
+    // MARK: - Schedule Management
+
+    func updateScheduleSlots(_ slots: [ScheduleSlot]?, for screen: Screen) {
+        guard var config = configRepo.get(for: screen.id) else { return }
+        config.scheduleSlots = slots
+        saveConfiguration(config)
+
+        if slots != nil {
+            checkAndApplySchedule(for: screen)
+        }
+    }
+
+    /// Check the current hour and switch to the scheduled video if needed.
+    func checkAndApplySchedule(for screen: Screen) {
+        guard let config = configRepo.get(for: screen.id),
+              let slots = config.scheduleSlots,
+              !slots.isEmpty else { return }
+
+        let currentHour = Calendar.current.component(.hour, from: Date())
+
+        guard let activeSlot = slots.first(where: { $0.containsHour(currentHour) }),
+              let bookmarkData = activeSlot.videoBookmarkData else { return }
+
+        // Skip if the scheduled video is already playing
+        guard config.videoBookmarkData != bookmarkData else { return }
+
+        var isStale = false
+        guard let url = try? URL(
+            resolvingBookmarkData: bookmarkData,
+            options: .withSecurityScope,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        ) else { return }
+
+        Logger.info("Schedule: switching to \(activeSlot.label) wallpaper for screen \(screen.id)", category: .screenManager)
+        setVideo(url: url, bookmarkData: bookmarkData, for: screen)
+    }
+
+    /// Periodically checks all screens for schedule-based wallpaper changes.
+    func startScheduleMonitoring() {
+        Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(60))
+                guard let self = self else { return }
+                for screen in self.screens {
+                    self.checkAndApplySchedule(for: screen)
+                }
+            }
+        }
+    }
+
     nonisolated deinit {}
 }

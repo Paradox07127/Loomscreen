@@ -35,6 +35,8 @@ struct GeneralSettingsView: View {
                             .labelsHidden()
                             .toggleStyle(.switch)
                             .onChange(of: startOnLogin) { _, _ in updateGlobalSettings() }
+                            .accessibilityLabel("Start at login")
+                            .accessibilityHint("Automatically launch LiveWallpaper when you log in")
                     }
                     
                     SettingRow(icon: "lock.display", iconColor: .blue, title: "Preserve playback on lock screen", subtitle: "Keep videos playing when your screen is locked") {
@@ -42,6 +44,8 @@ struct GeneralSettingsView: View {
                             .labelsHidden()
                             .toggleStyle(.switch)
                             .onChange(of: preservePlaybackOnLock) { _, _ in updateGlobalSettings() }
+                            .accessibilityLabel("Preserve playback on lock screen")
+                            .accessibilityHint("Keep videos playing when your screen is locked")
                     }
                     
                     SettingRow(icon: "macwindow.badge.plus", iconColor: .purple, title: "Pause on full-screen apps", subtitle: "Automatically pause wallpapers when a full-screen app is active") {
@@ -49,6 +53,8 @@ struct GeneralSettingsView: View {
                             .labelsHidden()
                             .toggleStyle(.switch)
                             .onChange(of: pauseOnFullScreen) { _, _ in updateGlobalSettings() }
+                            .accessibilityLabel("Pause on full-screen apps")
+                            .accessibilityHint("Automatically pause wallpapers when a full-screen app is active")
                     }
                 } header: {
                     Text("Behavior")
@@ -62,13 +68,17 @@ struct GeneralSettingsView: View {
                             Label("Validate Settings", systemImage: "doc.text.magnifyingglass")
                                 .frame(maxWidth: .infinity)
                         }
-                        
+                        .accessibilityLabel("Validate settings")
+                        .accessibilityHint("Checks all screen configurations for errors")
+
                         Button(action: {
                             screenManager.reloadAllScreens()
                         }) {
                             Label("Reload All Screens", systemImage: "arrow.triangle.2.circlepath")
                                 .frame(maxWidth: .infinity)
                         }
+                        .accessibilityLabel("Reload all screens")
+                        .accessibilityHint("Refreshes wallpaper playback on all connected screens")
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.large)
@@ -84,6 +94,8 @@ struct GeneralSettingsView: View {
                         .buttonStyle(.plain)
                         .foregroundStyle(.red)
                         .padding(.top, 16)
+                        .accessibilityLabel("Reset all settings to default")
+                        .accessibilityHint("Erases all configurations and restores factory defaults")
                         Spacer()
                     }
                 }
@@ -104,6 +116,8 @@ struct GeneralSettingsView: View {
                                 updateGlobalSettings()
                                 screenManager.handleGlobalPauseOnBatteryChange(newValue)
                             }
+                            .accessibilityLabel("Pause on battery")
+                            .accessibilityHint("Automatically pause all wallpapers when your Mac is unplugged")
                     }
                     
                     SettingRow(icon: "battery.100.bolt", iconColor: .green, title: "Reduce quality on battery", subtitle: "Lower decode resolution when running on battery to save power") {
@@ -111,6 +125,8 @@ struct GeneralSettingsView: View {
                             .labelsHidden()
                             .toggleStyle(.switch)
                             .onChange(of: batteryResolutionCap) { _, _ in updateGlobalSettings() }
+                            .accessibilityLabel("Reduce quality on battery")
+                            .accessibilityHint("Lower decode resolution when running on battery to save power")
                     }
                 } header: {
                     Text("Power Saving")
@@ -129,6 +145,8 @@ struct GeneralSettingsView: View {
                                 }
                                 updateGlobalSettings()
                             }
+                            .accessibilityLabel("Use battery threshold")
+                            .accessibilityHint("Pause videos when battery drops below a specific level")
                     }
                     
                     if useBatteryThreshold {
@@ -160,6 +178,9 @@ struct GeneralSettingsView: View {
                                     updateGlobalSettings()
                                 }
                             ), in: 0.05...0.5, step: 0.05)
+                            .accessibilityLabel("Minimum battery level")
+                            .accessibilityValue("\(Int((minimumBatteryLevel ?? 0.2) * 100)) percent")
+                            .accessibilityHint("Set the battery level below which wallpapers will pause")
                         }
                         .padding(.leading, 52)
                         .padding(.bottom, 8)

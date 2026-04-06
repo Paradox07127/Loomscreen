@@ -1,5 +1,5 @@
 import AppKit
-import AVKit
+@preconcurrency import AVKit
 import Combine
 
 /// Video player class responsible for playing videos as desktop wallpaper
@@ -8,6 +8,7 @@ final class WallpaperVideoPlayer {
     // MARK: - Notifications
 
     nonisolated static let didChangePlaybackStateNotification = Notification.Name("WallpaperVideoPlayerDidChangePlaybackState")
+    nonisolated static let didCompleteLoopNotification = Notification.Name.videoDidCompleteLoop
 
     // MARK: - Published Properties
 
@@ -35,10 +36,10 @@ final class WallpaperVideoPlayer {
     private weak var videoView: VideoContainerView?
     private var playerLooper: AVPlayerLooper?
     private var cleanupTasks = Set<AnyCancellable>()
-    private var playbackStateObserver: NSKeyValueObservation?
     private var loadingTask: Task<Void, Never>?
     private var frameRateLimitTask: Task<Void, Never>?
     private var accessToken = false
+    private var lastObservedLoopCount: Int = 0
     private let initialFrame: CGRect
     private var fitMode: VideoFitMode = .aspectFill
     
@@ -96,11 +97,6 @@ final class WallpaperVideoPlayer {
 
                 guard isPlayable else {
                     self.stopAccessingResource()
-                    let error = NSError(
-                        domain: "WallpaperVideoPlayer",
-                        code: 3,
-                        userInfo: [NSLocalizedDescriptionKey: "Video is not playable"]
-                    )
                     Logger.error("Video is not playable: \(url.lastPathComponent)", category: .videoPlayer)
                     return
                 }
@@ -188,45 +184,31 @@ final class WallpaperVideoPlayer {
     private func setupPlayerReadyObserver() {
         guard let player = player else { return }
 
-        var statusObserver: NSKeyValueObservation?
-        statusObserver = player.observe(\.status, options: [.new, .initial]) { [weak self] observedPlayer, _ in
-            guard observedPlayer.status == .readyToPlay else { return }
-
-            Logger.debug("Player is ready to play", category: .videoPlayer)
-
-            // Start playback with a slight delay to ensure proper initialization
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+        // Use Combine instead of KVO to avoid captured-var concurrency issues
+        player.publisher(for: \.status)
+            .first(where: { $0 == .readyToPlay })
+            .delay(for: .milliseconds(200), scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in
+                Logger.debug("Player is ready to play", category: .videoPlayer)
                 self?.play()
                 Logger.debug("Auto-starting video playback", category: .videoPlayer)
             }
-
-            // Remove this one-time observer
-            statusObserver?.invalidate()
-            statusObserver = nil
-        }
-
-        // Store the observer for cleanup
-        if let observer = statusObserver {
-            let cancellable = AnyCancellable {
-                observer.invalidate()
-            }
-            cleanupTasks.insert(cancellable)
-        }
+            .store(in: &cleanupTasks)
     }
     
     // MARK: - Observers
     private func setupPlaybackObservers() {
-        // Monitor playback status with more reliable KVO
+        // Monitor playback status via Combine (avoids KVO + DispatchQueue isolation issues)
         if let player = player {
-            playbackStateObserver = player.observe(\.timeControlStatus, options: [.new, .initial]) { [weak self] player, _ in
-                guard let self = self else { return }
-                let isCurrentlyPlaying = player.timeControlStatus == .playing
-                // KVO may fire on arbitrary threads; update @Published on main thread
-                DispatchQueue.main.async { [weak self] in
-                    guard let self = self, self.isPlaying != isCurrentlyPlaying else { return }
+            player.publisher(for: \.timeControlStatus)
+                .map { $0 == .playing }
+                .removeDuplicates()
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] isCurrentlyPlaying in
+                    guard let self = self else { return }
                     self.isPlaying = isCurrentlyPlaying
                 }
-            }
+                .store(in: &cleanupTasks)
         }
         
         // Monitor for errors
@@ -242,18 +224,31 @@ final class WallpaperVideoPlayer {
     }
     
     private func setupFPSTracking() {
-        // Use a periodic timer to sample playback rate as an FPS proxy
-        let fpsTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            guard let self = self, self.isPlaying else { return }
-            // AVPlayer renders at the video's native FPS (or limited by composition)
-            // Report effective FPS based on videoFrameRate and frame rate limit
-            let effectiveFPS = self.videoFrameRate > 0 ? self.videoFrameRate : 30.0
-            // Tick once per half-second, scaled to represent the actual frame count
-            for _ in 0..<Int(effectiveFPS / 2) {
-                SystemMonitor.shared.tickFrame()
+        // Use a structured Task instead of Timer to avoid @Sendable isolation issues
+        let task = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(500))
+                guard let self = self, self.isPlaying else { continue }
+                // AVPlayer renders at the video's native FPS (or limited by composition)
+                // Report effective FPS based on videoFrameRate and frame rate limit
+                let effectiveFPS = self.videoFrameRate > 0 ? self.videoFrameRate : 30.0
+                // Tick once per half-second, scaled to represent the actual frame count
+                for _ in 0..<Int(effectiveFPS / 2) {
+                    SystemMonitor.shared.tickFrame()
+                }
+
+                // Detect loop completion via AVPlayerLooper.loopCount
+                if let loopCount = self.playerLooper?.loopCount,
+                   loopCount > self.lastObservedLoopCount {
+                    self.lastObservedLoopCount = loopCount
+                    NotificationCenter.default.post(
+                        name: Self.didCompleteLoopNotification,
+                        object: self
+                    )
+                }
             }
         }
-        cleanupTasks.insert(AnyCancellable { fpsTimer.invalidate() })
+        cleanupTasks.insert(AnyCancellable { task.cancel() })
     }
 
     private func setupFrameObserver() {
@@ -265,16 +260,15 @@ final class WallpaperVideoPlayer {
             }
             .store(in: &cleanupTasks)
         
-        // Also set up a periodic check to ensure window stays in position
-        // This helps catch cases where the window might drift
-        let timer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
-            self?.updateWindowPositionForCurrentScreen()
+        // Periodic check to ensure window stays in position
+        // Uses structured Task instead of Timer to avoid @Sendable isolation issues
+        let positionTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(30))
+                self?.updateWindowPositionForCurrentScreen()
+            }
         }
-        
-        // Store the timer in cleanupTasks for proper cleanup
-        cleanupTasks.insert(AnyCancellable {
-            timer.invalidate()
-        })
+        cleanupTasks.insert(AnyCancellable { positionTask.cancel() })
     }
     
     /// Finds the associated screen and updates the window position to match
@@ -413,36 +407,38 @@ final class WallpaperVideoPlayer {
                 // Check for cancellation before loading more data
                 try Task.checkCancellation()
 
-                // Load natural video size and duration for composition
+                // Load natural video size for composition
                 let naturalSize = try await videoTrack.load(.naturalSize)
-                let assetDuration = try await asset.load(.duration)
 
                 // Check for cancellation before UI work
                 try Task.checkCancellation()
 
+                let targetFPS = framesPerSecond
+                let duration = try await asset.load(.duration)
+
+                // Build composition entirely from Configuration API
+                // (AVMutableVideoComposition* types are deprecated in macOS 26)
+                let layerInstrConfig = AVVideoCompositionLayerInstruction.Configuration(assetTrack: videoTrack)
+
+                var instrConfig = AVVideoCompositionInstruction.Configuration()
+                instrConfig.timeRange = CMTimeRange(start: .zero, duration: duration)
+                instrConfig.layerInstructions = [AVVideoCompositionLayerInstruction(configuration: layerInstrConfig)]
+
+                var compositionConfig = AVVideoComposition.Configuration()
+                compositionConfig.frameDuration = CMTime(value: 1, timescale: CMTimeScale(targetFPS))
+                compositionConfig.renderSize = naturalSize
+                compositionConfig.instructions = [AVVideoCompositionInstruction(configuration: instrConfig)]
+                compositionConfig.sourceTrackIDForFrameTiming = videoTrack.trackID
+
+                let composition = AVVideoComposition(configuration: compositionConfig)
+
                 await MainActor.run { [weak self] in
                     guard self != nil else { return }
-
-                    // Create and apply video composition with the specified frame rate
-                    let composition = AVMutableVideoComposition()
-                    composition.frameDuration = CMTime(value: 1, timescale: CMTimeScale(framesPerSecond))
-                    composition.renderSize = naturalSize
-
-                    // Create instruction covering the full video duration
-                    let instruction = AVMutableVideoCompositionInstruction()
-                    instruction.timeRange = CMTimeRange(
-                        start: .zero,
-                        duration: assetDuration
-                    )
-
-                    let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: videoTrack)
-                    instruction.layerInstructions = [layerInstruction]
-                    composition.instructions = [instruction]
 
                     // Apply to player item
                     playerItem.videoComposition = composition
 
-                    Logger.info("Frame rate limit set to \(Int(framesPerSecond)) FPS", category: .videoPlayer)
+                    Logger.info("Frame rate limit set to \(Int(targetFPS)) FPS", category: .videoPlayer)
                 }
             } catch is CancellationError {
                 Logger.debug("Frame rate limit task was cancelled", category: .videoPlayer)
@@ -471,9 +467,6 @@ final class WallpaperVideoPlayer {
         frameRateLimitTask = nil
 
         pause()
-
-        playbackStateObserver?.invalidate()
-        playbackStateObserver = nil
 
         playerLooper?.disableLooping()
         playerLooper = nil
