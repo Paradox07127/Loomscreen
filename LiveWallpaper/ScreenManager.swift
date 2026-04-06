@@ -23,6 +23,7 @@ final class ScreenManager {
     @ObservationIgnored private let playbackStateSubject = CurrentValueSubject<Bool, Never>(false)
     @ObservationIgnored private let fullScreenDetector = FullScreenDetector()
     @ObservationIgnored private let effectsManager = VideoEffectsManager()
+    @ObservationIgnored let weatherService = WeatherReactiveService()
 
     // MARK: - Initialization
     init() {
@@ -39,23 +40,10 @@ final class ScreenManager {
             }
             .store(in: &cleanupTasks)
 
-        // Auto-advance playlist when a video completes a loop
-        NotificationCenter.default.publisher(for: .videoDidCompleteLoop)
-            .sink { [weak self] notification in
-                guard let self = self,
-                      let videoPlayer = notification.object as? WallpaperVideoPlayer else { return }
-                // Find the screen this player belongs to
-                if let screen = self.screens.first(where: { $0.videoPlayer === videoPlayer }),
-                   let config = self.configRepo.get(for: screen.id),
-                   config.playlistBookmarks != nil, !(config.playlistBookmarks?.isEmpty ?? true) {
-                    self.advancePlaylist(for: screen)
-                }
-            }
-            .store(in: &cleanupTasks)
-
         refreshScreens()
         loadSavedConfigurations()
         startScheduleMonitoring()
+        startWeatherMonitoring()
         Logger.notice("ScreenManager initialization complete", category: .screenManager)
     }
     
@@ -538,6 +526,16 @@ final class ScreenManager {
                 }
             }
 
+            // Apply saved particle effect
+            if let particleEffect = configuration?.particleEffect, particleEffect != .none {
+                player.setParticleEffect(particleEffect)
+            }
+
+            // Apply saved video effects
+            if let config = configuration, config.effectConfig.hasActiveEffect {
+                applyVideoEffects(for: screen, config: config)
+            }
+
             Logger.info("Video player setup complete for screen \(screen.id)", category: .screenManager)
         } else {
             // Handle the case where the screen wasn't found
@@ -884,7 +882,68 @@ final class ScreenManager {
         guard var config = configRepo.get(for: screen.id) else { return }
         config.particleEffect = effect
         saveConfiguration(config)
-        // Particle overlay is managed by the view layer
+        // Apply to the live wallpaper window
+        screen.videoPlayer?.setParticleEffect(effect)
+    }
+
+    // MARK: - Weather-Reactive Effects
+
+    /// Enable or disable weather-reactive mode for a screen.
+    func setWeatherReactive(_ enabled: Bool, for screen: Screen) {
+        guard var config = configRepo.get(for: screen.id) else { return }
+        config.effectConfig.weatherReactive = enabled
+        saveConfiguration(config)
+
+        if enabled {
+            weatherService.startMonitoring()
+            applyWeatherEffects(for: screen)
+        } else {
+            // Revert to manual settings
+            screen.videoPlayer?.setParticleEffect(config.particleEffect)
+            applyVideoEffects(for: screen, config: config)
+        }
+    }
+
+    /// Apply current weather conditions to a screen's effects.
+    func applyWeatherEffects(for screen: Screen) {
+        guard let config = configRepo.get(for: screen.id),
+              config.effectConfig.weatherReactive else { return }
+
+        // Apply weather-derived particle effect
+        screen.videoPlayer?.setParticleEffect(weatherService.currentParticleEffect)
+
+        // Apply weather-derived CIFilter adjustments
+        let adj = weatherService.currentEffectAdjustments
+        var weatherConfig = config.effectConfig
+        weatherConfig.saturation = adj.saturation
+        weatherConfig.brightness = adj.brightness
+        weatherConfig.warmth = adj.warmth
+        weatherConfig.blurRadius = adj.blurRadius
+        weatherConfig.vignetteIntensity = adj.vignetteIntensity
+
+        var updatedConfig = config
+        updatedConfig.effectConfig = weatherConfig
+        // Don't save — weather adjustments are transient, not persisted
+        applyVideoEffects(for: screen, config: updatedConfig)
+    }
+
+    /// Start weather monitoring and periodically apply to all weather-reactive screens.
+    func startWeatherMonitoring() {
+        Task { [weak self] in
+            // Wait for initial weather data, then apply periodically
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(900)) // 15 minutes
+                guard let self = self else { return }
+                for screen in self.screens {
+                    guard let config = self.configRepo.get(for: screen.id),
+                          config.effectConfig.weatherReactive else { continue }
+                    self.weatherService.refresh()
+                    // Small delay for weather to arrive
+                    try? await Task.sleep(for: .seconds(5))
+                    self.applyWeatherEffects(for: screen)
+                }
+            }
+        }
     }
 
     func updateVideoEffects(for screen: Screen) {
@@ -1035,21 +1094,29 @@ final class ScreenManager {
     }
 
     /// Advance to the next video in the playlist for the given screen.
+    /// Preserves all existing settings (effects, particles, playlist, etc.).
     func advancePlaylist(for screen: Screen) {
-        guard let config = configRepo.get(for: screen.id),
-              let bookmarks = config.playlistBookmarks,
-              !bookmarks.isEmpty else { return }
+        guard let config = configRepo.get(for: screen.id) else { return }
 
-        // Pick next bookmark (random if shuffle, else sequential round-robin)
+        // Build full playlist: primary video + additional videos
+        let additionalBookmarks = config.playlistBookmarks ?? []
+        let fullPlaylist = [config.videoBookmarkData] + additionalBookmarks
+        guard fullPlaylist.count > 1 else { return }
+
+        // Pick next bookmark
         let nextBookmark: Data
         if config.shufflePlaylist {
-            nextBookmark = bookmarks.randomElement() ?? bookmarks[0]
+            // Shuffle: pick random, avoid replaying current
+            let candidates = fullPlaylist.filter { $0 != config.videoBookmarkData }
+            nextBookmark = candidates.randomElement() ?? fullPlaylist[0]
         } else {
-            // Find the current video's index in the playlist, advance to next
-            let currentIndex = bookmarks.firstIndex(of: config.videoBookmarkData) ?? -1
-            let nextIndex = (currentIndex + 1) % bookmarks.count
-            nextBookmark = bookmarks[nextIndex]
+            // Sequential round-robin through full playlist
+            let currentIndex = fullPlaylist.firstIndex(of: config.videoBookmarkData) ?? 0
+            let nextIndex = (currentIndex + 1) % fullPlaylist.count
+            nextBookmark = fullPlaylist[nextIndex]
         }
+
+        guard nextBookmark != config.videoBookmarkData else { return }
 
         var isStale = false
         guard let url = try? URL(
@@ -1059,7 +1126,27 @@ final class ScreenManager {
             bookmarkDataIsStale: &isStale
         ) else { return }
 
-        setVideo(url: url, bookmarkData: nextBookmark, for: screen)
+        // Preserve all settings (effects, particles, playlist, etc.) — only swap the video
+        let updatedConfig = config.withUpdatedBookmark(nextBookmark)
+        saveConfiguration(updatedConfig)
+
+        Logger.info("Playlist: advancing to \(url.lastPathComponent) for screen \(screen.id)", category: .screenManager)
+
+        // Clean up old player and set up new one with preserved config
+        cleanupScreen(screen)
+
+        Task {
+            do {
+                let asset = AVURLAsset(url: url)
+                let isPlayable = try await asset.load(.isPlayable)
+                guard isPlayable else { return }
+                await MainActor.run { [weak self] in
+                    self?.setupVideoPlayback(asset: asset, screen: screen)
+                }
+            } catch {
+                Logger.error("Playlist advance failed: \(error.localizedDescription)", category: .screenManager)
+            }
+        }
     }
 
     // MARK: - Schedule Management
@@ -1100,8 +1187,9 @@ final class ScreenManager {
         setVideo(url: url, bookmarkData: bookmarkData, for: screen)
     }
 
-    /// Periodically checks all screens for schedule-based wallpaper changes.
+    /// Periodically checks all screens for schedule and playlist rotation.
     func startScheduleMonitoring() {
+        // Schedule-based switching (check every 60s)
         Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(60))
@@ -1111,6 +1199,45 @@ final class ScreenManager {
                 }
             }
         }
+
+        // Playlist time-based rotation (check every 60s)
+        Task { [weak self] in
+            // Track when each screen last rotated
+            var lastRotation: [CGDirectDisplayID: Date] = [:]
+
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(60))
+                guard let self = self else { return }
+
+                let now = Date()
+                for screen in self.screens {
+                    guard let config = self.configRepo.get(for: screen.id),
+                          let rotationMinutes = config.playlistRotationMinutes,
+                          rotationMinutes > 0,
+                          let bookmarks = config.playlistBookmarks,
+                          !bookmarks.isEmpty else { continue }
+
+                    let lastTime = lastRotation[screen.id] ?? now
+                    if lastRotation[screen.id] == nil {
+                        // First check — initialize timestamp
+                        lastRotation[screen.id] = now
+                        continue
+                    }
+
+                    let elapsed = now.timeIntervalSince(lastTime)
+                    if elapsed >= Double(rotationMinutes) * 60.0 {
+                        lastRotation[screen.id] = now
+                        self.advancePlaylist(for: screen)
+                    }
+                }
+            }
+        }
+    }
+
+    func updatePlaylistRotationMinutes(_ minutes: Int?, for screen: Screen) {
+        guard var config = configRepo.get(for: screen.id) else { return }
+        config.playlistRotationMinutes = minutes
+        saveConfiguration(config)
     }
 
     nonisolated deinit {}

@@ -71,17 +71,21 @@ struct SystemMonitorView: View {
             // FPS, Memory & Thermal Info row
             VStack(spacing: 6) {
                 HStack(spacing: 12) {
-                    if monitor.videoFPS > 0 {
-                        HStack(spacing: 4) {
-                            Image(systemName: "speedometer")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        Image(systemName: "speedometer")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        if monitor.videoFPS > 0 {
                             Text("\(Int(monitor.videoFPS)) FPS")
                                 .font(.caption)
                                 .fontWeight(.medium)
+                        } else {
+                            Text("Paused")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                     }
-                    
+
                     Spacer(minLength: 0)
                     
                     HStack(spacing: 4) {

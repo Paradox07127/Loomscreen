@@ -27,6 +27,7 @@ struct ScreenDetailView: View {
 
     @State private var playlistBookmarks: [Data] = []
     @State private var shufflePlaylist: Bool = false
+    @State private var playlistRotationMinutes: Int? = nil
     @State private var scheduleSlots: [ScheduleSlot] = []
 
     @State private var isDraggingOver = false
@@ -178,6 +179,7 @@ struct ScreenDetailView: View {
                                 PlaylistSection(
                                     playlistBookmarks: $playlistBookmarks,
                                     shufflePlaylist: $shufflePlaylist,
+                                    rotationMinutes: $playlistRotationMinutes,
                                     screen: screen,
                                     screenManager: screenManager
                                 )
@@ -235,7 +237,25 @@ struct ScreenDetailView: View {
                                     }
                                     
                                     Divider()
-                                    
+
+                                    // Weather-Reactive toggle
+                                    SettingRow(icon: "cloud.sun", iconColor: .cyan, title: "Weather") {
+                                        Toggle("", isOn: $effectConfig.weatherReactive)
+                                            .labelsHidden()
+                                            .toggleStyle(.switch)
+                                            .onChange(of: effectConfig.weatherReactive) { _, newValue in
+                                                screenManager.setWeatherReactive(newValue, for: screen)
+                                            }
+                                            .accessibilityLabel("Weather-reactive effects")
+                                            .accessibilityHint("Automatically adjust particles and color based on real-time weather")
+                                    }
+
+                                    if effectConfig.weatherReactive {
+                                        WeatherStatusBadge(weatherService: screenManager.weatherService)
+                                    }
+
+                                    Divider()
+
                                     ColorAdjustmentsView(effectConfig: $effectConfig, screen: screen, screenManager: screenManager)
                                 }
                                 .padding(8)
@@ -667,6 +687,7 @@ struct ScreenDetailView: View {
             setAsLockScreen = config.setAsLockScreen
             playlistBookmarks = config.playlistBookmarks ?? []
             shufflePlaylist = config.shufflePlaylist
+            playlistRotationMinutes = config.playlistRotationMinutes
             scheduleSlots = config.scheduleSlots ?? []
             if let preset = config.shaderPreset { selectedShaderPreset = preset }
             selectedWallpaperType = config.wallpaperType
@@ -753,5 +774,68 @@ struct ScreenDetailView: View {
     
     private func getScreenRefreshRate() -> Int {
         screenManager.getScreenRefreshRate(for: screen.id)
+    }
+}
+
+// MARK: - Weather Status Badge
+
+struct WeatherStatusBadge: View {
+    var weatherService: WeatherReactiveService
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: weatherIcon)
+                .font(.system(size: 11))
+                .foregroundStyle(statusColor)
+
+            VStack(alignment: .leading, spacing: 1) {
+                if let condition = weatherService.currentCondition {
+                    Text(condition.rawValue.capitalized)
+                        .font(.system(size: 11, weight: .medium))
+                } else {
+                    Text(weatherService.locationStatus.rawValue)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+
+                if let error = weatherService.lastError {
+                    Text(error)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.red)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer()
+
+            if weatherService.currentParticleEffect != .none {
+                Image(systemName: weatherService.currentParticleEffect.iconName)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Weather status: \(weatherService.currentCondition?.rawValue ?? "loading")")
+    }
+
+    private var weatherIcon: String {
+        switch weatherService.locationStatus {
+        case .available: return "cloud.sun.fill"
+        case .fetching: return "arrow.triangle.2.circlepath"
+        case .denied: return "location.slash"
+        case .error: return "exclamationmark.triangle"
+        default: return "cloud.fill"
+        }
+    }
+
+    private var statusColor: Color {
+        switch weatherService.locationStatus {
+        case .available: return .cyan
+        case .fetching: return .orange
+        case .denied: return .red
+        case .error: return .red
+        default: return .secondary
+        }
     }
 }

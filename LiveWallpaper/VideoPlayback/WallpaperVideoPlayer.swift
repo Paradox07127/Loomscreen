@@ -34,6 +34,7 @@ final class WallpaperVideoPlayer {
 
     private weak var window: VideoWallpaperWindow?
     private weak var videoView: VideoContainerView?
+    private var particleOverlay: ParticleOverlayView?
     private var playerLooper: AVPlayerLooper?
     private var cleanupTasks = Set<AnyCancellable>()
     private var loadingTask: Task<Void, Never>?
@@ -170,9 +171,15 @@ final class WallpaperVideoPlayer {
         videoWindow.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)) - 1)
         videoWindow.orderBack(nil)
         
+        // Create particle overlay (transparent SpriteKit layer above video)
+        let overlay = ParticleOverlayView(frame: initialFrame)
+        overlay.autoresizingMask = [.width, .height]
+        containerView.addSubview(overlay)
+        self.particleOverlay = overlay
+
         self.window = videoWindow
         self.videoView = containerView
-        
+
         setupPlaybackObservers()
         setupFrameObserver()
         setupFPSTracking()
@@ -336,7 +343,11 @@ final class WallpaperVideoPlayer {
         fitMode = mode
         videoView?.fitMode = mode
     }
-    
+
+    func setParticleEffect(_ effect: ParticleEffect) {
+        particleOverlay?.setEffect(effect)
+    }
+
     // MARK: - Window Management
 
     func updateWindowFrame(_ newFrame: CGRect) {
@@ -473,8 +484,12 @@ final class WallpaperVideoPlayer {
 
         cleanupTasks.removeAll()
 
+        particleOverlay?.setEffect(.none)
+        particleOverlay?.removeFromSuperview()
+        particleOverlay = nil
+
         window?.close()
-        
+
         window = nil
         videoView = nil
         player = nil
