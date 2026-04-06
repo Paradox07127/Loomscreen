@@ -52,12 +52,13 @@ struct VideoEffectConfig: Codable, Equatable {
     var warmth: Double = 6500  // color temperature in Kelvin (6500 = neutral)
     var vignetteIntensity: Double = 0
     var autoTimeTint: Bool = false  // auto-adjust warmth by time of day
+    var weatherReactive: Bool = false // auto-adjust effects based on real-time weather
 
     static let `default` = VideoEffectConfig()
 
     var hasActiveEffect: Bool {
         blurRadius > 0 || saturation != 1.0 || brightness != 0 ||
-        warmth != 6500 || vignetteIntensity > 0 || autoTimeTint
+        warmth != 6500 || vignetteIntensity > 0 || autoTimeTint || weatherReactive
     }
 }
 
@@ -211,6 +212,7 @@ struct ScreenConfiguration: Codable, Equatable {
     var scheduleSlots: [ScheduleSlot]?
     var playlistBookmarks: [Data]?     // additional videos for playlist mode
     var shufflePlaylist: Bool
+    var playlistRotationMinutes: Int?  // nil = no auto-rotation, >0 = rotate every N minutes
     var setAsLockScreen: Bool          // extract frame for lock screen
 
     init(
@@ -228,6 +230,7 @@ struct ScreenConfiguration: Codable, Equatable {
         scheduleSlots: [ScheduleSlot]? = nil,
         playlistBookmarks: [Data]? = nil,
         shufflePlaylist: Bool = false,
+        playlistRotationMinutes: Int? = nil,
         setAsLockScreen: Bool = false
     ) {
         self.screenID = screenID
@@ -244,6 +247,7 @@ struct ScreenConfiguration: Codable, Equatable {
         self.scheduleSlots = scheduleSlots
         self.playlistBookmarks = playlistBookmarks
         self.shufflePlaylist = shufflePlaylist
+        self.playlistRotationMinutes = playlistRotationMinutes
         self.setAsLockScreen = setAsLockScreen
     }
 
@@ -265,6 +269,7 @@ struct ScreenConfiguration: Codable, Equatable {
             scheduleSlots: copy.scheduleSlots,
             playlistBookmarks: copy.playlistBookmarks,
             shufflePlaylist: copy.shufflePlaylist,
+            playlistRotationMinutes: copy.playlistRotationMinutes,
             setAsLockScreen: copy.setAsLockScreen
         )
     }

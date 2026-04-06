@@ -1,27 +1,51 @@
 import SwiftUI
 
-/// Playlist management UI for adding/removing videos and controlling shuffle mode.
+/// Playlist management UI showing the primary video + additional videos,
+/// with shuffle, drag-to-reorder, and time-based rotation interval.
 struct PlaylistSection: View {
     @Binding var playlistBookmarks: [Data]
     @Binding var shufflePlaylist: Bool
+    @Binding var rotationMinutes: Int?
     var screen: Screen
     var screenManager: ScreenManager
 
+    @State private var primaryVideoName: String = "Current Video"
     @State private var resolvedNames: [String] = []
+
+    private let rotationOptions: [(String, Int?)] = [
+        ("Off", nil),
+        ("15 min", 15),
+        ("30 min", 30),
+        ("1 hour", 60),
+        ("2 hours", 120),
+        ("4 hours", 240),
+    ]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Playlist items
-            if playlistBookmarks.isEmpty {
-                HStack {
+            // Now Playing (primary video)
+            if screen.videoPlayer != nil {
+                HStack(spacing: 8) {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.green)
+                    Text(primaryVideoName)
+                        .font(.system(size: 12, weight: .medium))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                     Spacer()
-                    Text("No additional videos")
-                        .font(.caption)
+                    Text("Now Playing")
+                        .font(.system(size: 10))
                         .foregroundStyle(.secondary)
-                    Spacer()
                 }
-                .padding(.vertical, 4)
-            } else {
+                .padding(.vertical, 2)
+                .accessibilityLabel("Now playing: \(primaryVideoName)")
+            }
+
+            // Additional playlist items
+            if !playlistBookmarks.isEmpty {
+                Divider()
+
                 List {
                     ForEach(Array(resolvedNames.enumerated()), id: \.offset) { index, name in
                         HStack(spacing: 8) {
@@ -68,23 +92,59 @@ struct PlaylistSection: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Add videos to playlist")
-            .accessibilityHint("Opens a file picker to select additional videos")
 
-            Divider()
+            // Controls (only shown when playlist has items)
+            if !playlistBookmarks.isEmpty {
+                Divider()
 
-            // Shuffle toggle
-            SettingRow(icon: "shuffle", iconColor: .purple, title: "Shuffle") {
-                Toggle("", isOn: $shufflePlaylist)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .onChange(of: shufflePlaylist) { _, newValue in
-                        screenManager.updateShufflePlaylist(newValue, for: screen)
+                // Manual advance button
+                Button(action: { screenManager.advancePlaylist(for: screen) }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "forward.fill")
+                        Text("Next Video")
                     }
-                    .accessibilityLabel("Shuffle playlist")
-                    .accessibilityHint("Randomize the playback order of playlist videos")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Color.accentColor)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Skip to next video")
+
+                Divider()
+
+                // Rotation interval
+                SettingRow(icon: "timer", iconColor: .orange, title: "Rotate") {
+                    Picker("", selection: Binding(
+                        get: { rotationMinutes },
+                        set: { newValue in
+                            rotationMinutes = newValue
+                            screenManager.updatePlaylistRotationMinutes(newValue, for: screen)
+                        }
+                    )) {
+                        ForEach(rotationOptions, id: \.1) { label, value in
+                            Text(label).tag(value)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 90)
+                    .accessibilityLabel("Rotation interval")
+                }
+
+                // Shuffle toggle
+                SettingRow(icon: "shuffle", iconColor: .purple, title: "Shuffle") {
+                    Toggle("", isOn: $shufflePlaylist)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .onChange(of: shufflePlaylist) { _, newValue in
+                            screenManager.updateShufflePlaylist(newValue, for: screen)
+                        }
+                        .accessibilityLabel("Shuffle playlist")
+                }
             }
         }
-        .onAppear { resolveBookmarkNames() }
+        .onAppear {
+            resolvePrimaryVideoName()
+            resolveBookmarkNames()
+        }
         .onChange(of: playlistBookmarks) { resolveBookmarkNames() }
     }
 
@@ -118,6 +178,19 @@ struct PlaylistSection: View {
         playlistBookmarks.remove(at: index)
         screenManager.updatePlaylistBookmarks(playlistBookmarks, for: screen)
         resolveBookmarkNames()
+    }
+
+    private func resolvePrimaryVideoName() {
+        guard let config = screenManager.getConfiguration(for: screen) else { return }
+        var isStale = false
+        if let url = try? URL(
+            resolvingBookmarkData: config.videoBookmarkData,
+            options: .withSecurityScope,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        ) {
+            primaryVideoName = url.lastPathComponent
+        }
     }
 
     private func resolveBookmarkNames() {

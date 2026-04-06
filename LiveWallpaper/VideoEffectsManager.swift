@@ -106,12 +106,15 @@ final class VideoEffectsManager {
             applyingCIFiltersWithHandler: handler
         )
 
-        var config = AVVideoComposition.Configuration()
-        config.frameDuration = frameDuration
-        config.renderSize = base.renderSize
-        config.instructions = base.instructions
-        config.sourceTrackIDForFrameTiming = base.sourceTrackIDForFrameTiming
-        return AVVideoComposition(configuration: config)
+        // CIFilter compositions use internal AVCoreImageFilterVideoCompositionInstruction
+        // objects that cannot be transferred to AVVideoComposition.Configuration (crashes
+        // with -[... dictionaryRepresentation]: unrecognized selector). Use the deprecated
+        // mutableCopy path until Apple provides a CIFilter-aware Configuration API.
+        guard let mutable = base.mutableCopy() as? AVMutableVideoComposition else {
+            return base
+        }
+        mutable.frameDuration = frameDuration
+        return mutable
     }
 
     // MARK: - Time-of-Day Warmth
