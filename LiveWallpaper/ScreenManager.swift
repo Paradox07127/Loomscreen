@@ -1240,5 +1240,23 @@ final class ScreenManager {
         saveConfiguration(config)
     }
 
+    func applySettingsToAllScreens(from sourceScreen: Screen) {
+        guard let sourceConfig = configRepo.get(for: sourceScreen.id) else { return }
+        for screen in screens where screen.id != sourceScreen.id {
+            guard var targetConfig = configRepo.get(for: screen.id) else { continue }
+            targetConfig.effectConfig = sourceConfig.effectConfig
+            targetConfig.particleEffect = sourceConfig.particleEffect
+            targetConfig.fitMode = sourceConfig.fitMode
+            targetConfig.playbackSpeed = sourceConfig.playbackSpeed
+            targetConfig.frameRateLimit = sourceConfig.frameRateLimit
+            saveConfiguration(targetConfig)
+            // Apply live
+            screen.videoPlayer?.setVideoFitMode(sourceConfig.fitMode)
+            screen.videoPlayer?.setPlaybackSpeed(sourceConfig.playbackSpeed)
+            screen.videoPlayer?.setParticleEffect(sourceConfig.particleEffect)
+            applyVideoEffects(for: screen, config: targetConfig)
+        }
+    }
+
     nonisolated deinit {}
 }

@@ -76,8 +76,8 @@ class VideoContainerView: NSView {
             let scale = self.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2.0
             newLayer.contentsScale = scale
 
-            // Add layer and store reference
-            self.layer?.addSublayer(newLayer)
+            // Insert at index 0 so any subviews (e.g. particle overlay) render ABOVE the video
+            self.layer?.insertSublayer(newLayer, at: 0)
             self.playerLayer = newLayer
 
             // Ensure proper initial frame

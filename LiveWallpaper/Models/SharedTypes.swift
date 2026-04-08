@@ -60,6 +60,20 @@ struct VideoEffectConfig: Codable, Equatable {
         blurRadius > 0 || saturation != 1.0 || brightness != 0 ||
         warmth != 6500 || vignetteIntensity > 0 || autoTimeTint || weatherReactive
     }
+
+    // Custom decoder: tolerate missing keys from older saved configs
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        blurRadius = try container.decodeIfPresent(Double.self, forKey: .blurRadius) ?? 0
+        saturation = try container.decodeIfPresent(Double.self, forKey: .saturation) ?? 1.0
+        brightness = try container.decodeIfPresent(Double.self, forKey: .brightness) ?? 0
+        warmth = try container.decodeIfPresent(Double.self, forKey: .warmth) ?? 6500
+        vignetteIntensity = try container.decodeIfPresent(Double.self, forKey: .vignetteIntensity) ?? 0
+        autoTimeTint = try container.decodeIfPresent(Bool.self, forKey: .autoTimeTint) ?? false
+        weatherReactive = try container.decodeIfPresent(Bool.self, forKey: .weatherReactive) ?? false
+    }
+
+    init() {}
 }
 
 // MARK: - Schedule Slot
@@ -251,6 +265,27 @@ struct ScreenConfiguration: Codable, Equatable {
         self.setAsLockScreen = setAsLockScreen
     }
 
+    // Custom decoder: tolerate missing keys from older saved configs
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        screenID = try c.decode(UInt32.self, forKey: .screenID)
+        videoBookmarkData = try c.decode(Data.self, forKey: .videoBookmarkData)
+        playbackSpeed = try c.decodeIfPresent(Double.self, forKey: .playbackSpeed) ?? 1.0
+        fitMode = try c.decodeIfPresent(VideoFitMode.self, forKey: .fitMode) ?? .aspectFill
+        pauseOnBattery = try c.decodeIfPresent(Bool.self, forKey: .pauseOnBattery) ?? false
+        frameRateLimit = try c.decodeIfPresent(FrameRateLimit.self, forKey: .frameRateLimit) ?? .fps60
+        wallpaperType = try c.decodeIfPresent(WallpaperType.self, forKey: .wallpaperType) ?? .video
+        particleEffect = try c.decodeIfPresent(ParticleEffect.self, forKey: .particleEffect) ?? .none
+        effectConfig = try c.decodeIfPresent(VideoEffectConfig.self, forKey: .effectConfig) ?? .default
+        htmlContent = try c.decodeIfPresent(String.self, forKey: .htmlContent)
+        shaderPreset = try c.decodeIfPresent(MetalShaderPreset.self, forKey: .shaderPreset)
+        scheduleSlots = try c.decodeIfPresent([ScheduleSlot].self, forKey: .scheduleSlots)
+        playlistBookmarks = try c.decodeIfPresent([Data].self, forKey: .playlistBookmarks)
+        shufflePlaylist = try c.decodeIfPresent(Bool.self, forKey: .shufflePlaylist) ?? false
+        playlistRotationMinutes = try c.decodeIfPresent(Int.self, forKey: .playlistRotationMinutes)
+        setAsLockScreen = try c.decodeIfPresent(Bool.self, forKey: .setAsLockScreen) ?? false
+    }
+
     func withUpdatedBookmark(_ bookmarkData: Data) -> ScreenConfiguration {
         let copy = self
         // Use reflection-free approach: create new with all existing values
@@ -302,6 +337,18 @@ struct GlobalSettings: Codable {
         self.defaultFrameRateLimit = defaultFrameRateLimit
         self.pauseOnFullScreen = pauseOnFullScreen
         self.batteryResolutionCap = batteryResolutionCap
+    }
+
+    // Custom decoder: tolerate missing keys from older saved configs
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        globalPauseOnBattery = try c.decodeIfPresent(Bool.self, forKey: .globalPauseOnBattery) ?? true
+        preservePlaybackOnLock = try c.decodeIfPresent(Bool.self, forKey: .preservePlaybackOnLock) ?? false
+        startOnLogin = try c.decodeIfPresent(Bool.self, forKey: .startOnLogin) ?? false
+        minimumBatteryLevel = try c.decodeIfPresent(Double.self, forKey: .minimumBatteryLevel)
+        defaultFrameRateLimit = try c.decodeIfPresent(FrameRateLimit.self, forKey: .defaultFrameRateLimit) ?? .fps60
+        pauseOnFullScreen = try c.decodeIfPresent(Bool.self, forKey: .pauseOnFullScreen) ?? true
+        batteryResolutionCap = try c.decodeIfPresent(Bool.self, forKey: .batteryResolutionCap) ?? true
     }
 }
 

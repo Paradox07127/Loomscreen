@@ -32,6 +32,10 @@ struct ScreenDetailView: View {
 
     @State private var isDraggingOver = false
     @State private var showColorAdjustments = false
+    @State private var screenPauseOnBattery: Bool = false
+    @State private var lockScreenExtracted: Bool = false
+    @State private var particleDensity: Double = 1.0
+    @State private var selectedFrameRateLimit: FrameRateLimit = .fps60
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -84,6 +88,7 @@ struct ScreenDetailView: View {
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(Color.accentColor)
+                        .help("Choose a video file for this display")
                         .accessibilityLabel("Select video")
                         .accessibilityHint("Opens a file picker to choose a wallpaper video")
                         
@@ -95,6 +100,7 @@ struct ScreenDetailView: View {
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(.red)
+                        .help("Remove wallpaper video")
                         .accessibilityLabel("Clear video")
                         .accessibilityHint("Removes the current wallpaper video from this screen")
                     }
@@ -221,21 +227,65 @@ struct ScreenDetailView: View {
                                         .accessibilityLabel("Particle effect")
                                         .accessibilityValue(selectedParticleEffect.rawValue)
                                         .accessibilityHint("Choose a particle overlay effect")
+                                        .help("Overlay particle effects on the wallpaper")
                                     }
-                                    
+
+                                    if selectedParticleEffect != .none {
+                                        SettingRow(icon: "circle.hexagongrid", iconColor: .purple, title: "Density") {
+                                            HStack(spacing: 8) {
+                                                Slider(value: $particleDensity, in: 0.2...3.0)
+                                                    .controlSize(.small)
+                                                    .frame(width: 80)
+                                                Text(String(format: "%.1f", particleDensity))
+                                                    .font(.system(size: 12, design: .monospaced))
+                                                    .foregroundStyle(.secondary)
+                                                    .frame(width: 28, alignment: .trailing)
+                                            }
+                                            // TODO: Wire to WallpaperVideoPlayer.setParticleDensity() when available
+                                        }
+                                    }
+
                                     Divider()
                                     
                                     SettingRow(icon: "lock.display", iconColor: .blue, title: "Lock Screen") {
-                                        Toggle("", isOn: $setAsLockScreen)
+                                        HStack(spacing: 6) {
+                                            if lockScreenExtracted {
+                                                Image(systemName: "checkmark.circle.fill")
+                                                    .foregroundStyle(.green)
+                                                    .transition(.scale.combined(with: .opacity))
+                                            }
+                                            Toggle("", isOn: $setAsLockScreen)
+                                                .labelsHidden()
+                                                .toggleStyle(.switch)
+                                                .onChange(of: setAsLockScreen) { _, newValue in
+                                                    if newValue {
+                                                        screenManager.extractLockScreenFrame(for: screen)
+                                                        withAnimation { lockScreenExtracted = true }
+                                                        Task {
+                                                            try? await Task.sleep(for: .seconds(2))
+                                                            withAnimation { lockScreenExtracted = false }
+                                                        }
+                                                    }
+                                                }
+                                                .accessibilityLabel("Set as lock screen")
+                                                .accessibilityHint("Uses a frame from the video as your lock screen wallpaper")
+                                                .help("Set the current frame as the lock screen wallpaper")
+                                        }
+                                    }
+
+                                    Divider()
+
+                                    SettingRow(icon: "battery.75percent.bolt", iconColor: .yellow, title: "Pause on Battery") {
+                                        Toggle("", isOn: $screenPauseOnBattery)
                                             .labelsHidden()
                                             .toggleStyle(.switch)
-                                            .onChange(of: setAsLockScreen) { _, newValue in
-                                                if newValue { screenManager.extractLockScreenFrame(for: screen) }
+                                            .onChange(of: screenPauseOnBattery) { _, newValue in
+                                                screenManager.updatePowerSettings(pauseOnBattery: newValue, for: screen)
                                             }
-                                            .accessibilityLabel("Set as lock screen")
-                                            .accessibilityHint("Uses a frame from the video as your lock screen wallpaper")
+                                            .accessibilityLabel("Pause on battery")
+                                            .accessibilityHint("Pauses wallpaper playback when running on battery power")
                                     }
-                                    
+
                                     Divider()
 
                                     // Weather-Reactive toggle
@@ -246,6 +296,7 @@ struct ScreenDetailView: View {
                                             .onChange(of: effectConfig.weatherReactive) { _, newValue in
                                                 screenManager.setWeatherReactive(newValue, for: screen)
                                             }
+                                            .help("Adjust effects based on real-time weather conditions")
                                             .accessibilityLabel("Weather-reactive effects")
                                             .accessibilityHint("Automatically adjust particles and color based on real-time weather")
                                     }
@@ -261,6 +312,31 @@ struct ScreenDetailView: View {
                                 .padding(8)
                             } label: {
                                 Label("Effects", systemImage: "wand.and.stars")
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            // Frame Rate Group
+                            GroupBox {
+                                VStack(spacing: 14) {
+                                    SettingRow(icon: "gauge.with.dots.needle.bottom.50percent", iconColor: .blue, title: "Frame Rate") {
+                                        Picker("", selection: $selectedFrameRateLimit) {
+                                            ForEach(FrameRateLimit.allCases) { limit in
+                                                Text(limit.description).tag(limit)
+                                            }
+                                        }
+                                        .labelsHidden()
+                                        .frame(width: 110)
+                                        .onChange(of: selectedFrameRateLimit) { _, newValue in
+                                            screenManager.updateFrameRateLimit(newValue, for: screen)
+                                        }
+                                        .accessibilityLabel("Frame rate limit")
+                                        .accessibilityValue(selectedFrameRateLimit.description)
+                                    }
+                                }
+                                .padding(8)
+                            } label: {
+                                Label("Frame Rate", systemImage: "gauge.with.dots.needle.bottom.50percent")
                                     .font(.system(size: 13, weight: .medium))
                                     .foregroundStyle(.secondary)
                             }
@@ -403,9 +479,6 @@ struct ScreenDetailView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .clipShape(RoundedRectangle(cornerRadius: 16))
                     .shadow(color: Color.black.opacity(0.15), radius: 10, x: 0, y: 4)
-                    .onTapGesture(count: 1) {
-                        togglePlayback()
-                    }
                 
                 // Top Overlay for Video Info
                 VStack {
@@ -484,6 +557,10 @@ struct ScreenDetailView: View {
                 .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separatorColor), lineWidth: 1))
             }
         }
+        .contentShape(Rectangle())
+        .onTapGesture(count: 1) {
+            togglePlayback()
+        }
     }
     
     // MARK: - View Components
@@ -523,6 +600,7 @@ struct ScreenDetailView: View {
                         RoundedRectangle(cornerRadius: 6)
                             .stroke(selectedSpeed == speed ? Color.accentColor : Color.clear, lineWidth: 1)
                     )
+                    .help("Playback speed: \(String(format: "%.1f", speed))x")
                     .accessibilityLabel("Speed \(String(format: "%.1f", speed))x")
                     .accessibilityHint(selectedSpeed == speed ? "Currently selected" : "Set playback speed to \(String(format: "%.1f", speed))x")
                 }
@@ -570,8 +648,17 @@ struct ScreenDetailView: View {
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(.plain)
+            .help(fitModeTooltip)
             .accessibilityLabel("\(mode.rawValue) fit mode")
             .accessibilityHint(isSelected ? "Currently selected" : "Tap to switch to \(mode.rawValue) fit mode")
+        }
+
+        private var fitModeTooltip: String {
+            switch mode {
+            case .aspectFill: return "Fill: crop to fill screen"
+            case .aspectFit: return "Fit: show entire video"
+            case .stretch: return "Stretch: distort to fill"
+            }
         }
     }
 
@@ -611,8 +698,26 @@ struct ScreenDetailView: View {
                         Toggle("", isOn: $effectConfig.autoTimeTint)
                             .labelsHidden()
                             .toggleStyle(.switch)
+                            .help("Automatically adjust color temperature by time of day")
                             .accessibilityLabel("Auto warm tint")
                             .accessibilityHint("Automatically adjusts color warmth based on time of day")
+                    }
+
+                    Divider()
+
+                    HStack {
+                        Spacer()
+                        Button(action: {
+                            effectConfig = .default
+                            screenManager.updateEffectConfig(effectConfig, for: screen)
+                        }) {
+                            Label("Reset to Default", systemImage: "arrow.counterclockwise")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Color.accentColor)
+                        .help("Reset all color adjustments to default values")
+                        Spacer()
                     }
                 }
             }
@@ -632,10 +737,21 @@ struct ScreenDetailView: View {
                     .accessibilityLabel(title)
                     .accessibilityValue(String(format: format, value.wrappedValue))
 
-                Text(String(format: format, value.wrappedValue))
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 35, alignment: .trailing)
+                TextField(
+                    "",
+                    value: Binding(
+                        get: { value.wrappedValue },
+                        set: { newVal in
+                            value.wrappedValue = min(max(newVal, range.lowerBound), range.upperBound)
+                        }
+                    ),
+                    format: .number
+                )
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .frame(width: 35, alignment: .trailing)
+                .multilineTextAlignment(.trailing)
+                .textFieldStyle(.plain)
             }
         }
     }
@@ -685,6 +801,8 @@ struct ScreenDetailView: View {
             selectedParticleEffect = config.particleEffect
             effectConfig = config.effectConfig
             setAsLockScreen = config.setAsLockScreen
+            screenPauseOnBattery = config.pauseOnBattery
+            selectedFrameRateLimit = config.frameRateLimit
             playlistBookmarks = config.playlistBookmarks ?? []
             shufflePlaylist = config.shufflePlaylist
             playlistRotationMinutes = config.playlistRotationMinutes

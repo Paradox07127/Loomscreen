@@ -29,6 +29,8 @@ struct ScheduleSection: View {
                 }
                 .padding(.vertical, 4)
             } else {
+                ScheduleTimelineBar(slots: scheduleSlots, currentHour: currentHour)
+
                 ForEach($scheduleSlots) { $slot in
                     ScheduleSlotRow(
                         slot: $slot,
@@ -119,12 +121,19 @@ struct ScheduleSlotRow: View {
                     .frame(width: 8, height: 8)
 
                 // Slot label + time (tap to edit)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(slot.label)
-                        .font(.system(size: 12, weight: isActive ? .semibold : .regular))
-                    Text("\(formatHour(slot.startHour)) – \(formatHour(slot.endHour))")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                HStack(spacing: 4) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(slot.label)
+                            .font(.system(size: 12, weight: isActive ? .semibold : .regular))
+                        Text("\(formatHour(slot.startHour)) – \(formatHour(slot.endHour))")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(isEditingTime ? .degrees(90) : .degrees(0))
+                        .animation(.easeInOut(duration: 0.2), value: isEditingTime)
                 }
                 .frame(width: 90, alignment: .leading)
                 .onTapGesture { withAnimation { isEditingTime.toggle() } }
@@ -239,5 +248,50 @@ struct ScheduleSlotRow: View {
         if h == 0 { return "12AM" }
         if h == 12 { return "12PM" }
         return h < 12 ? "\(h)AM" : "\(h-12)PM"
+    }
+}
+
+// MARK: - Schedule Timeline Bar
+
+struct ScheduleTimelineBar: View {
+    let slots: [ScheduleSlot]
+    let currentHour: Int
+
+    private let slotColors: [Color] = [.blue, .orange, .green, .purple]
+
+    var body: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+
+            ZStack(alignment: .leading) {
+                // Background
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color.gray.opacity(0.15))
+
+                // Slot segments
+                ForEach(Array(slots.enumerated()), id: \.element.id) { index, slot in
+                    let startFraction = CGFloat(slot.startHour) / 24.0
+                    let endFraction = CGFloat(slot.endHour) / 24.0
+                    let segmentWidth = (endFraction - startFraction) * width
+
+                    if segmentWidth > 0 {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(slotColors[index % slotColors.count].opacity(0.6))
+                            .frame(width: segmentWidth)
+                            .offset(x: startFraction * width)
+                    }
+                }
+
+                // Current hour marker
+                let markerX = CGFloat(currentHour) / 24.0 * width
+                Rectangle()
+                    .fill(Color.red)
+                    .frame(width: 1.5)
+                    .offset(x: markerX)
+            }
+        }
+        .frame(height: 20)
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .accessibilityLabel("Schedule timeline showing \(slots.count) time slots")
     }
 }
