@@ -129,6 +129,15 @@ class StatusBarController: NSObject, NSMenuDelegate {
         )
         playPauseItem.image = NSImage(systemSymbolName: "playpause", accessibilityDescription: "Play/Pause")
 
+        // Next Wallpaper (⌘⇧N)
+        let nextWallpaperItem = createMenuItem(
+            title: "Next Wallpaper",
+            action: #selector(nextWallpaper),
+            keyEquivalent: "n",
+            modifiers: [.command, .shift]
+        )
+        nextWallpaperItem.image = NSImage(systemSymbolName: "forward.fill", accessibilityDescription: "Next Wallpaper")
+
         // Reload all videos (⌘R)
         let reloadItem = createMenuItem(
             title: "Reload All Videos",
@@ -155,6 +164,7 @@ class StatusBarController: NSObject, NSMenuDelegate {
         menu.addItem(NSMenuItem.separator())
         menu.addItem(displaysItem)
         menu.addItem(playPauseItem)
+        menu.addItem(nextWallpaperItem)
         menu.addItem(reloadItem)
         menu.addItem(NSMenuItem.separator())
         menu.addItem(quitItem)
@@ -250,6 +260,13 @@ class StatusBarController: NSObject, NSMenuDelegate {
         Logger.info("Reloading all videos via menu shortcut", category: .ui)
         screenManager.reloadAllScreens()
     }
+
+    @objc private func nextWallpaper() {
+        Logger.info("Advancing to next wallpaper via menu shortcut", category: .ui)
+        for screen in screenManager.screens where screen.videoPlayer != nil {
+            screenManager.advancePlaylist(for: screen)
+        }
+    }
     
     // MARK: - Menu Delegate
     
@@ -290,6 +307,19 @@ class StatusBarController: NSObject, NSMenuDelegate {
                     systemSymbolName: "questionmark.circle",
                     accessibilityDescription: "Not configured"
                 )
+            }
+
+            // Show current video filename as subtitle
+            if let config = screenManager.getConfiguration(for: screen) {
+                var isStale = false
+                if let url = try? URL(
+                    resolvingBookmarkData: config.videoBookmarkData,
+                    options: .withSecurityScope,
+                    relativeTo: nil,
+                    bookmarkDataIsStale: &isStale
+                ) {
+                    item.subtitle = url.lastPathComponent
+                }
             }
             
             displaysMenu.addItem(item)

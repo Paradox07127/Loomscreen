@@ -198,6 +198,25 @@ struct GeneralSettingsView: View {
         }
         .padding()
         .frame(minWidth: 500, minHeight: 400)
+        .safeAreaInset(edge: .bottom) {
+            VStack(spacing: 6) {
+                Divider()
+                Text("LiveWallpaper")
+                    .font(.headline)
+                Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "–") (\(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "–"))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("Built with SwiftUI, Metal, and Liquid Glass")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Divider()
+                    .frame(width: 200)
+                Text("Zero Dependencies — Pure Apple Frameworks")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.bottom, 8)
+        }
         .alert("Reset Settings", isPresented: $showingResetAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Reset All", role: .destructive) {

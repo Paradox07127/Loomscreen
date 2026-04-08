@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @Environment(ScreenManager.self) private var screenManager
@@ -75,6 +76,9 @@ struct Sidebar: View {
                         NavigationLink(value: Navigation.screen(screen.id)) {
                             ScreenRow(screen: screen)
                         }
+                        .onDrop(of: [.movie, .video, .mpeg4Movie, .quickTimeMovie, .avi], isTargeted: nil) { providers in
+                            handleVideoDrop(providers: providers, for: screen)
+                        }
                     }
                 }
             }
@@ -95,9 +99,9 @@ struct Sidebar: View {
         withAnimation {
             isRefreshing = true
         }
-        
+
         screenManager.refreshScreens()
-        
+
         // Reset the animation after a delay
         Task {
             try? await Task.sleep(for: .milliseconds(500))
@@ -106,11 +110,33 @@ struct Sidebar: View {
             }
         }
     }
+
+    private func handleVideoDrop(providers: [NSItemProvider], for screen: Screen) -> Bool {
+        guard let provider = providers.first else { return false }
+        if provider.hasItemConformingToTypeIdentifier(UTType.movie.identifier) {
+            provider.loadItem(forTypeIdentifier: UTType.movie.identifier, options: nil) { item, error in
+                let resolvedURL: URL?
+                if let data = item as? Data { resolvedURL = URL(dataRepresentation: data, relativeTo: nil) }
+                else if let itemURL = item as? URL { resolvedURL = itemURL }
+                else { resolvedURL = nil }
+
+                Task { @MainActor in
+                    guard let videoURL = resolvedURL else { return }
+                    if let bookmarkData = ResourceUtilities.createBookmark(for: videoURL) {
+                        screenManager.setVideo(url: videoURL, bookmarkData: bookmarkData, for: screen)
+                    }
+                }
+            }
+            return true
+        }
+        return false
+    }
 }
 
 // MARK: - Screen Row
 struct ScreenRow: View {
     var screen: Screen
+    @Environment(ScreenManager.self) private var screenManager
     @State private var isPlaying: Bool = false
 
     var body: some View {
@@ -138,6 +164,13 @@ struct ScreenRow: View {
                             Text(isPlaying ? "Playing" : "Paused")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                        }
+
+                        if let config = screenManager.getConfiguration(for: screen),
+                           config.effectConfig.hasActiveEffect || config.particleEffect != .none {
+                            Image(systemName: "sparkles")
+                                .font(.caption2)
+                                .foregroundStyle(Color.accentColor)
                         }
                     }
                 }

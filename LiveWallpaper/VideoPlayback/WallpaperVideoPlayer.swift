@@ -174,6 +174,8 @@ final class WallpaperVideoPlayer {
         // Create particle overlay (transparent SpriteKit layer above video)
         let overlay = ParticleOverlayView(frame: initialFrame)
         overlay.autoresizingMask = [.width, .height]
+        overlay.wantsLayer = true
+        overlay.layer?.zPosition = 100 // guarantee overlay renders above the AVPlayerLayer
         containerView.addSubview(overlay)
         self.particleOverlay = overlay
 
