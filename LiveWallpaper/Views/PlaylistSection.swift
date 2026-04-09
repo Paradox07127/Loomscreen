@@ -183,27 +183,12 @@ struct PlaylistSection: View {
 
     private func resolvePrimaryVideoName() {
         guard let config = screenManager.getConfiguration(for: screen) else { return }
-        var isStale = false
-        if let url = try? URL(
-            resolvingBookmarkData: config.videoBookmarkData,
-            options: .withSecurityScope,
-            relativeTo: nil,
-            bookmarkDataIsStale: &isStale
-        ) {
-            primaryVideoName = url.lastPathComponent
-        }
+        primaryVideoName = ResourceUtilities.resolveBookmarkName(config.videoBookmarkData) ?? "Current Video"
     }
 
     private func resolveBookmarkNames() {
-        resolvedNames = playlistBookmarks.compactMap { data in
-            var isStale = false
-            guard let url = try? URL(
-                resolvingBookmarkData: data,
-                options: .withSecurityScope,
-                relativeTo: nil,
-                bookmarkDataIsStale: &isStale
-            ) else { return "Unknown" }
-            return url.lastPathComponent
+        resolvedNames = playlistBookmarks.map {
+            ResourceUtilities.resolveBookmarkName($0) ?? "Unknown"
         }
     }
 }

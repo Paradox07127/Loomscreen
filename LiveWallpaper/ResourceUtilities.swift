@@ -18,6 +18,23 @@ class ResourceUtilities {
         }
     }
 
+    // MARK: - Bookmark Resolution
+
+    /// Resolves a security-scoped bookmark to a file name.
+    /// Used by ScheduleSection, PlaylistSection, and StatusBarController
+    /// to display the video's last path component without duplicating
+    /// the resolution boilerplate.
+    static func resolveBookmarkName(_ data: Data) -> String? {
+        var isStale = false
+        guard let url = try? URL(
+            resolvingBookmarkData: data,
+            options: .withSecurityScope,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        ) else { return nil }
+        return url.lastPathComponent
+    }
+
     // MARK: - NSOpenPanel Configuration
 
     static func configureVideoOpenPanel() -> NSOpenPanel {

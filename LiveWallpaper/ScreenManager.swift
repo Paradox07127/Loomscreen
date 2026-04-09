@@ -286,7 +286,7 @@ final class ScreenManager {
     func setVideo(url: URL, bookmarkData: Data, for screen: Screen) {
         Logger.info("Setting video for screen \(screen.id): \(url.lastPathComponent)", category: .screenManager)
         
-        // Check if we're just updating the same video to avoid unnecessary reloads
+        // Skip full reload if the same video is already configured.
         if let existingConfig = configRepo.get(for: screen.id) {
             var isStale = false
             if let existingURL = try? URL(
@@ -299,11 +299,8 @@ final class ScreenManager {
                 return
             }
         }
-        
-        // Get default global settings
+
         let globalSettings = SettingsManager.shared.loadGlobalSettings()
-        
-        // Otherwise, create a new configuration
         let configuration = ScreenConfiguration(
             screenID: screen.id,
             videoBookmarkData: bookmarkData,
@@ -495,7 +492,7 @@ final class ScreenManager {
     ) {
         let screenID = screen.id
         let apply: @MainActor () -> Void = { [weak self] in
-            guard let self = self,
+            guard let self,
                   let liveScreen = self.screens.first(where: { $0.id == screenID }) else { return }
             if configuration.particleEffect != .none {
                 player.setParticleEffect(
@@ -591,7 +588,7 @@ final class ScreenManager {
                 // Delay frame rate limit application to ensure video properties are loaded
                 Task { [weak self] in
                     try? await Task.sleep(for: .milliseconds(500))
-                    guard let self = self,
+                    guard let self,
                           let screen = self.screens.first(where: { $0.id == screenID }) else { return }
                     self.applyFrameRateLimit(frameRateLimit, to: screen)
                 }
@@ -1056,7 +1053,7 @@ final class ScreenManager {
             _ = weatherService.currentEffectAdjustments
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
-                guard let self = self else { return }
+                guard let self else { return }
                 for screen in self.screens {
                     guard let config = self.configRepo.get(for: screen.id),
                           config.effectConfig.weatherReactive else { continue }
@@ -1336,7 +1333,7 @@ final class ScreenManager {
         scheduleMonitorTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(60))
-                guard let self = self else { return }
+                guard let self else { return }
                 for screen in self.screens {
                     self.checkAndApplySchedule(for: screen)
                 }
@@ -1349,7 +1346,7 @@ final class ScreenManager {
 
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(60))
-                guard let self = self else { return }
+                guard let self else { return }
 
                 let now = Date()
                 for screen in self.screens {
