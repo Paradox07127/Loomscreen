@@ -259,7 +259,7 @@ final class WeatherReactiveService: NSObject, CLLocationManagerDelegate {
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         let location = locations.last
         Task { @MainActor [weak self] in
-            guard let self = self, let location = location else { return }
+            guard let self, let location = location else { return }
             self.currentLocation = location
             self.locationStatus = .authorized
             self.locationManager.stopUpdatingLocation()
@@ -279,7 +279,7 @@ final class WeatherReactiveService: NSObject, CLLocationManagerDelegate {
     nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         let status = manager.authorizationStatus
         Task { @MainActor [weak self] in
-            guard let self = self else { return }
+            guard let self else { return }
             switch status {
             case .authorizedAlways, .authorizedWhenInUse:
                 self.locationStatus = .authorized

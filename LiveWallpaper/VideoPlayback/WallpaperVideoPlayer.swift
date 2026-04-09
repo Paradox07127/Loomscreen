@@ -86,7 +86,7 @@ final class WallpaperVideoPlayer {
         }
         
         loadingTask = Task { [weak self] in
-            guard let self = self else { return }
+            guard let self else { return }
 
             do {
                 let timer = PerformanceTimer(description: "Loading video asset", category: .videoPlayer)
@@ -121,7 +121,7 @@ final class WallpaperVideoPlayer {
                 timer.checkpoint("Properties loaded")
 
                 await MainActor.run { [weak self] in
-                    guard let self = self else { return }
+                    guard let self else { return }
                     self.configurePlaybackComponents(with: asset)
                     timer.checkpoint("Playback configured")
                 }
@@ -213,7 +213,7 @@ final class WallpaperVideoPlayer {
                 .removeDuplicates()
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] isCurrentlyPlaying in
-                    guard let self = self else { return }
+                    guard let self else { return }
                     self.isPlaying = isCurrentlyPlaying
                 }
                 .store(in: &cleanupTasks)
@@ -251,7 +251,7 @@ final class WallpaperVideoPlayer {
         let task = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(500))
-                guard let self = self, self.isPlaying else { continue }
+                guard let self, self.isPlaying else { continue }
                 // AVPlayer renders at the video's native FPS (or limited by composition)
                 // Report effective FPS based on videoFrameRate and frame rate limit
                 let effectiveFPS = self.videoFrameRate > 0 ? self.videoFrameRate : 30.0
@@ -278,7 +278,7 @@ final class WallpaperVideoPlayer {
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .throttle(for: .seconds(0.5), scheduler: DispatchQueue.main, latest: true)
             .sink { [weak self] _ in
-                guard let self = self else { return }
+                guard let self else { return }
                 self.updateWindowPositionForCurrentScreen()
             }
             .store(in: &cleanupTasks)

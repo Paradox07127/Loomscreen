@@ -311,15 +311,7 @@ class StatusBarController: NSObject, NSMenuDelegate {
 
             // Show current video filename as subtitle
             if let config = screenManager.getConfiguration(for: screen) {
-                var isStale = false
-                if let url = try? URL(
-                    resolvingBookmarkData: config.videoBookmarkData,
-                    options: .withSecurityScope,
-                    relativeTo: nil,
-                    bookmarkDataIsStale: &isStale
-                ) {
-                    item.subtitle = url.lastPathComponent
-                }
+                item.subtitle = ResourceUtilities.resolveBookmarkName(config.videoBookmarkData)
             }
             
             displaysMenu.addItem(item)

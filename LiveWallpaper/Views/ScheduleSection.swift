@@ -230,17 +230,7 @@ struct ScheduleSlotRow: View {
             videoName = nil
             return
         }
-        var isStale = false
-        if let url = try? URL(
-            resolvingBookmarkData: data,
-            options: .withSecurityScope,
-            relativeTo: nil,
-            bookmarkDataIsStale: &isStale
-        ) {
-            videoName = url.lastPathComponent
-        } else {
-            videoName = "Invalid"
-        }
+        videoName = ResourceUtilities.resolveBookmarkName(data) ?? "Invalid"
     }
 
     private func formatHour(_ hour: Int) -> String {

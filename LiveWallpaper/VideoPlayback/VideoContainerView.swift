@@ -126,7 +126,7 @@ class VideoContainerView: NSView {
         if player === currentPlayer { return }
 
         Task { @MainActor [weak self] in
-            guard let self = self else { return }
+            guard let self else { return }
             self.currentPlayer = player
             self.playerHostView.setVideoGravity(self.fitMode.avLayerVideoGravity)
             self.playerHostView.setPlayer(player)
