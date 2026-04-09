@@ -62,34 +62,28 @@ final class ParticleOverlayView: NSView {
             updateDensity(density)
             return
         }
-        
+
         currentEffect = effect
         currentDensity = density
 
-        // Fade out old emitter
+        // Remove old emitter immediately. CAEmitterLayer already lets in-flight
+        // particles live out their `lifetime` even after the layer is removed
+        // from the tree, so the visual transition is smooth without any
+        // asyncAfter delay. Removing immediately also prevents sublayer
+        // accumulation if the user switches effects rapidly.
         if let oldEmitter = activeEmitter {
             oldEmitter.birthRate = 0
-            
-            // Calculate max lifetime of current cells to know when to safely remove
-            var maxLifetime: Float = 0
-            if let cells = oldEmitter.emitterCells {
-                maxLifetime = cells.map { $0.lifetime + $0.lifetimeRange }.max() ?? 0
-            }
-            
-            DispatchQueue.main.asyncAfter(deadline: .now() + TimeInterval(maxLifetime)) { [weak oldEmitter] in
-                oldEmitter?.removeFromSuperlayer()
-            }
+            oldEmitter.removeFromSuperlayer()
             activeEmitter = nil
         }
 
         guard effect != .none else { return }
 
-        // Create new emitter
         let emitter = CAEmitterLayer()
         emitter.emitterMode = .surface
         emitter.backgroundColor = NSColor.clear.cgColor
         emitter.frame = bounds
-        
+
         let preset = preset(for: effect)
         emitter.emitterCells = preset.cells
         emitter.emitterShape = preset.shape
@@ -97,7 +91,7 @@ final class ParticleOverlayView: NSView {
         emitter.emitterPosition = preset.position(bounds)
         emitter.emitterSize = preset.size(bounds)
         emitter.birthRate = Float(max(0.05, density))
-        
+
         layer?.addSublayer(emitter)
         activeEmitter = emitter
     }

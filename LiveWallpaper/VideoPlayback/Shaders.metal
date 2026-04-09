@@ -233,3 +233,74 @@ fragment half4 fragmentShader(VertexOut in [[stage_in]],
         default: return wavesEffect(uv, uniforms.time);
     }
 }
+
+// -----------------------------------------------------------------------
+// Compute shader: Rain-on-glass displacement map (Heartfelt algorithm)
+//
+// Generates a 2-channel displacement map encoding refraction normals.
+// Red = horizontal displacement, Green = vertical displacement.
+// 0.5 is neutral (no distortion). Used with CIDisplacementDistortion.
+//
+// Replaces the deprecated CIColorKernel(source:) CIKL string that
+// previously lived in VideoEffectsManager.swift.
+// -----------------------------------------------------------------------
+
+kernel void rainDisplacementCompute(
+    texture2d<float, access::write> output [[texture(0)]],
+    constant float  &time       [[buffer(0)]],
+    constant float2 &resolution [[buffer(1)]],
+    uint2 gid [[thread_position_in_grid]])
+{
+    uint w = output.get_width();
+    uint h = output.get_height();
+    if (gid.x >= w || gid.y >= h) return;
+
+    float2 uv = float2(gid) / resolution;
+    float2 aspect = float2(resolution.x / resolution.y, 1.0);
+    float t = fmod(time * 0.2, 7200.0); // prevent overflow
+
+    float2 normal = float2(0.0);
+
+    // Two depth layers for parallax
+    for (float i = 0.0; i < 2.0; i += 1.0) {
+        float layerScale = 4.0 + i * 3.0;
+        float2 st = uv * aspect * layerScale;
+        st.y += t * (1.0 + i * 0.5);
+
+        float2 id = floor(st);
+        float2 f  = fract(st) - 0.5;
+
+        // Noise hash per grid cell
+        float2 hashP = id * float2(123.34, 345.45);
+        hashP += dot(hashP, hashP + 34.345);
+        float n = fract(hashP.x * hashP.y);
+
+        float localTime = t + n * 6.28;
+
+        // Main drop: stick-slip physics
+        float dropY = -sin(localTime + sin(localTime + sin(localTime) * 0.5)) * 0.45;
+        float2 dropCenter = float2((n - 0.5) * 0.7, dropY);
+        float2 dropPos = f - dropCenter;
+        float mainDrop = smoothstep(0.12, 0.02, length(dropPos));
+
+        // Trail drops left behind
+        float2 trailPos = f - float2(dropCenter.x, 0.0);
+        trailPos.y = (fract(trailPos.y * 6.0) - 0.5) * 0.15;
+        float trailMask = smoothstep(-dropCenter.y, 0.45, f.y);
+        float trailDrop = smoothstep(0.04, 0.01, length(trailPos)) * trailMask;
+
+        // Static background drops
+        float2 staticPos = f - float2((n - 0.5) * 0.5, (fract(n * 12.34) - 0.5) * 0.5);
+        float staticDrops = smoothstep(-0.5, 1.0, n) * smoothstep(0.05, 0.01, length(staticPos));
+
+        normal += dropPos * mainDrop + trailPos * trailDrop + staticPos * staticDrops;
+    }
+
+    // Subtle global ripple (uneven glass)
+    float ripple = sin(uv.y * 10.0 + time) * cos(uv.x * 8.0 + time) * 0.02;
+    normal.x += ripple;
+
+    // Encode: 0.5 = neutral displacement
+    float2 encoded = clamp((normal * 0.5) + 0.5, 0.0, 1.0);
+    output.write(float4(encoded.x, encoded.y, 0.0, 1.0), gid);
+}

@@ -24,6 +24,8 @@ final class ScreenManager {
     @ObservationIgnored private let fullScreenDetector = FullScreenDetector()
     @ObservationIgnored private let effectsManager = VideoEffectsManager()
     @ObservationIgnored let weatherService = WeatherReactiveService()
+    @ObservationIgnored private var scheduleMonitorTask: Task<Void, Never>?
+    @ObservationIgnored private var playlistRotationTask: Task<Void, Never>?
 
     // MARK: - Initialization
     init() {
@@ -478,11 +480,6 @@ final class ScreenManager {
                 }
             }
 
-            // Only notify of changes if something important changed
-            if needsNewPlayer {
-        
-            }
-            
         } catch {
             Logger.error("Failed to apply configuration: \(error.localizedDescription)", category: .screenManager)
         }
@@ -536,13 +533,14 @@ final class ScreenManager {
         // Safety net — if the asset never reports its frame rate (e.g. metadata
         // load error), still try to apply effects after a generous delay so the
         // user's saved state has at least one chance to land.
-        Task { @MainActor [weak self] in
+        let fallbackTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(5))
             guard self != nil, !didApply else { return }
             didApply = true
             apply()
             cancellable?.cancel()
         }
+        cleanupTasks.insert(AnyCancellable { fallbackTask.cancel() })
     }
 
     private func setupVideoPlayback(asset: AVURLAsset, screen: Screen) {
@@ -1329,9 +1327,13 @@ final class ScreenManager {
     }
 
     /// Periodically checks all screens for schedule and playlist rotation.
+    /// Both Tasks are stored so they can be cancelled on teardown.
     func startScheduleMonitoring() {
+        scheduleMonitorTask?.cancel()
+        playlistRotationTask?.cancel()
+
         // Schedule-based switching (check every 60s)
-        Task { [weak self] in
+        scheduleMonitorTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(60))
                 guard let self = self else { return }
@@ -1342,8 +1344,7 @@ final class ScreenManager {
         }
 
         // Playlist time-based rotation (check every 60s)
-        Task { [weak self] in
-            // Track when each screen last rotated
+        playlistRotationTask = Task { [weak self] in
             var lastRotation: [CGDirectDisplayID: Date] = [:]
 
             while !Task.isCancelled {
@@ -1360,7 +1361,6 @@ final class ScreenManager {
 
                     let lastTime = lastRotation[screen.id] ?? now
                     if lastRotation[screen.id] == nil {
-                        // First check — initialize timestamp
                         lastRotation[screen.id] = now
                         continue
                     }
