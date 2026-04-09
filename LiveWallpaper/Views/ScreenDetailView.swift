@@ -37,6 +37,12 @@ struct ScreenDetailView: View {
     @State private var particleDensity: Double = 1.0
     @State private var selectedFrameRateLimit: FrameRateLimit = .fps60
 
+    @AppStorage("Inspector.PlaylistExpanded") private var isPlaylistExpanded = false
+    @AppStorage("Inspector.ScheduleExpanded") private var isScheduleExpanded = false
+    @AppStorage("Inspector.EnvironmentExpanded") private var isEnvironmentExpanded = true
+    @AppStorage("Inspector.ColorExpanded") private var isColorExpanded = false
+    @AppStorage("Inspector.DisplayExpanded") private var isDisplayExpanded = false
+
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -179,174 +185,187 @@ struct ScreenDetailView: View {
                 // RIGHT: Inspector ScrollView
                 if selectedWallpaperType == .video {
                     ScrollView {
-                        VStack(spacing: 20) {
+                        VStack(spacing: 16) {
                             // Playlist Group
                             GroupBox {
-                                PlaylistSection(
-                                    playlistBookmarks: $playlistBookmarks,
-                                    shufflePlaylist: $shufflePlaylist,
-                                    rotationMinutes: $playlistRotationMinutes,
-                                    screen: screen,
-                                    screenManager: screenManager
-                                )
-                                .padding(8)
-                            } label: {
-                                Label("Playlist", systemImage: "list.bullet")
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundStyle(.secondary)
+                                DisclosureGroup(isExpanded: $isPlaylistExpanded) {
+                                    PlaylistSection(
+                                        playlistBookmarks: $playlistBookmarks,
+                                        shufflePlaylist: $shufflePlaylist,
+                                        rotationMinutes: $playlistRotationMinutes,
+                                        screen: screen,
+                                        screenManager: screenManager
+                                    )
+                                    .padding(.top, 12)
+                                } label: {
+                                    Label("Playlist", systemImage: "list.bullet")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(Color.primary)
+                                }
                             }
 
                             // Schedule Group
                             GroupBox {
-                                ScheduleSection(
-                                    scheduleSlots: $scheduleSlots,
-                                    screen: screen,
-                                    screenManager: screenManager
-                                )
-                                .padding(8)
-                            } label: {
-                                Label("Schedule", systemImage: "clock")
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundStyle(.secondary)
+                                DisclosureGroup(isExpanded: $isScheduleExpanded) {
+                                    ScheduleSection(
+                                        scheduleSlots: $scheduleSlots,
+                                        screen: screen,
+                                        screenManager: screenManager
+                                    )
+                                    .padding(.top, 12)
+                                } label: {
+                                    Label("Schedule", systemImage: "clock")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(Color.primary)
+                                }
                             }
 
-                            // Effects Group
+                            // Environment Group
                             GroupBox {
-                                VStack(spacing: 14) {
-                                    SettingRow(icon: "sparkles", iconColor: .purple, title: "Particles") {
-                                        Picker("", selection: $selectedParticleEffect) {
-                                            ForEach(ParticleEffect.allCases) { effect in
-                                                Text(effect.rawValue).tag(effect)
+                                DisclosureGroup(isExpanded: $isEnvironmentExpanded) {
+                                    VStack(spacing: 14) {
+                                        SettingRow(icon: "sparkles", iconColor: .purple, title: "Particles") {
+                                            Picker("", selection: $selectedParticleEffect) {
+                                                ForEach(ParticleEffect.allCases) { effect in
+                                                    Text(effect.rawValue).tag(effect)
+                                                }
                                             }
+                                            .labelsHidden()
+                                            .frame(width: 110)
+                                            .onChange(of: selectedParticleEffect) { _, newValue in
+                                                screenManager.updateParticleEffect(newValue, for: screen)
+                                            }
+                                            .accessibilityLabel("Particle effect")
+                                            .accessibilityValue(selectedParticleEffect.rawValue)
+                                            .accessibilityHint("Choose a particle overlay effect")
+                                            .help("Overlay particle effects on the wallpaper")
                                         }
-                                        .labelsHidden()
-                                        .frame(width: 110)
-                                        .onChange(of: selectedParticleEffect) { _, newValue in
-                                            screenManager.updateParticleEffect(newValue, for: screen)
-                                        }
-                                        .accessibilityLabel("Particle effect")
-                                        .accessibilityValue(selectedParticleEffect.rawValue)
-                                        .accessibilityHint("Choose a particle overlay effect")
-                                        .help("Overlay particle effects on the wallpaper")
-                                    }
 
-                                    if selectedParticleEffect != .none {
-                                        SettingRow(icon: "circle.hexagongrid", iconColor: .purple, title: "Density") {
-                                            HStack(spacing: 8) {
-                                                Slider(value: $particleDensity, in: 0.2...3.0)
-                                                    .controlSize(.small)
-                                                    .frame(width: 80)
-                                                    .onChange(of: particleDensity) { _, newValue in
-                                                        screenManager.updateParticleDensity(newValue, for: screen)
-                                                    }
-                                                    .accessibilityLabel("Particle density")
-                                                    .accessibilityValue(String(format: "%.1f×", particleDensity))
-                                                Text(String(format: "%.1f", particleDensity))
-                                                    .font(.system(size: 12, design: .monospaced))
-                                                    .foregroundStyle(.secondary)
-                                                    .frame(width: 28, alignment: .trailing)
+                                        if selectedParticleEffect != .none {
+                                            SettingRow(icon: "circle.hexagongrid", iconColor: .purple, title: "Density") {
+                                                HStack(spacing: 8) {
+                                                    Slider(value: $particleDensity, in: 0.2...3.0)
+                                                        .controlSize(.small)
+                                                        .frame(width: 80)
+                                                        .onChange(of: particleDensity) { _, newValue in
+                                                            screenManager.updateParticleDensity(newValue, for: screen)
+                                                        }
+                                                        .accessibilityLabel("Particle density")
+                                                        .accessibilityValue(String(format: "%.1f×", particleDensity))
+                                                    Text(String(format: "%.1f", particleDensity))
+                                                        .font(.system(size: 12, design: .monospaced))
+                                                        .foregroundStyle(.secondary)
+                                                        .frame(width: 28, alignment: .trailing)
+                                                }
                                             }
                                         }
-                                    }
 
-                                    Divider()
-                                    
-                                    // Note: macOS has no public lock screen wallpaper API.
-                                    // This applies the current frame as the desktop picture
-                                    // via NSWorkspace.setDesktopImageURL.
-                                    SettingRow(icon: "photo.on.rectangle", iconColor: .blue, title: "Desktop Picture") {
-                                        HStack(spacing: 6) {
-                                            if lockScreenExtracted {
-                                                Image(systemName: "checkmark.circle.fill")
-                                                    .foregroundStyle(.green)
-                                                    .transition(.scale.combined(with: .opacity))
-                                            }
-                                            Toggle("", isOn: $setAsLockScreen)
+                                        Divider()
+
+                                        // Weather-Reactive toggle
+                                        SettingRow(icon: "cloud.sun", iconColor: .cyan, title: "Weather") {
+                                            Toggle("", isOn: $effectConfig.weatherReactive)
                                                 .labelsHidden()
                                                 .toggleStyle(.switch)
-                                                .onChange(of: setAsLockScreen) { _, newValue in
-                                                    screenManager.updateSetAsDesktopPicture(newValue, for: screen)
-                                                    if newValue {
-                                                        screenManager.extractLockScreenFrame(for: screen)
-                                                        withAnimation { lockScreenExtracted = true }
-                                                        Task {
-                                                            try? await Task.sleep(for: .seconds(2))
-                                                            withAnimation { lockScreenExtracted = false }
-                                                        }
-                                                    }
+                                                .onChange(of: effectConfig.weatherReactive) { _, newValue in
+                                                    screenManager.setWeatherReactive(newValue, for: screen)
                                                 }
-                                                .accessibilityLabel("Set current frame as desktop picture")
-                                                .accessibilityHint("Captures the currently visible video frame and uses it as the macOS desktop picture")
-                                                .help("Apply the current video frame as the desktop picture")
+                                                .help("Adjust effects based on real-time weather conditions")
+                                                .accessibilityLabel("Weather-reactive effects")
+                                                .accessibilityHint("Automatically adjust particles and color based on real-time weather")
+                                        }
+
+                                        if effectConfig.weatherReactive {
+                                            WeatherStatusBadge(weatherService: screenManager.weatherService)
                                         }
                                     }
-
-                                    Divider()
-
-                                    SettingRow(icon: "bolt.slash", iconColor: .yellow, title: "Pause on Battery") {
-                                        Toggle("", isOn: $screenPauseOnBattery)
-                                            .labelsHidden()
-                                            .toggleStyle(.switch)
-                                            .onChange(of: screenPauseOnBattery) { _, newValue in
-                                                screenManager.updatePowerSettings(pauseOnBattery: newValue, for: screen)
-                                            }
-                                            .accessibilityLabel("Pause on battery")
-                                            .accessibilityHint("Pauses wallpaper playback when running on battery power")
-                                    }
-
-                                    Divider()
-
-                                    // Weather-Reactive toggle
-                                    SettingRow(icon: "cloud.sun", iconColor: .cyan, title: "Weather") {
-                                        Toggle("", isOn: $effectConfig.weatherReactive)
-                                            .labelsHidden()
-                                            .toggleStyle(.switch)
-                                            .onChange(of: effectConfig.weatherReactive) { _, newValue in
-                                                screenManager.setWeatherReactive(newValue, for: screen)
-                                            }
-                                            .help("Adjust effects based on real-time weather conditions")
-                                            .accessibilityLabel("Weather-reactive effects")
-                                            .accessibilityHint("Automatically adjust particles and color based on real-time weather")
-                                    }
-
-                                    if effectConfig.weatherReactive {
-                                        WeatherStatusBadge(weatherService: screenManager.weatherService)
-                                    }
-
-                                    Divider()
-
-                                    ColorAdjustmentsView(effectConfig: $effectConfig, screen: screen, screenManager: screenManager)
+                                    .padding(.top, 12)
+                                } label: {
+                                    Label("Environment", systemImage: "cloud.sun.rain")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(Color.primary)
                                 }
-                                .padding(8)
-                            } label: {
-                                Label("Effects", systemImage: "wand.and.stars")
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundStyle(.secondary)
                             }
 
-                            // Frame Rate Group
+                            // Color & Filters Group
                             GroupBox {
-                                VStack(spacing: 14) {
-                                    SettingRow(icon: "gauge.with.dots.needle.bottom.50percent", iconColor: .blue, title: "Frame Rate") {
-                                        Picker("", selection: $selectedFrameRateLimit) {
-                                            ForEach(FrameRateLimit.allCases) { limit in
-                                                Text(limit.description).tag(limit)
+                                DisclosureGroup(isExpanded: $isColorExpanded) {
+                                    ColorAdjustmentsView(effectConfig: $effectConfig, screen: screen, screenManager: screenManager)
+                                        .padding(.top, 12)
+                                } label: {
+                                    Label("Color & Filters", systemImage: "slider.horizontal.3")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(Color.primary)
+                                }
+                            }
+
+                            // Display & Power Group
+                            GroupBox {
+                                DisclosureGroup(isExpanded: $isDisplayExpanded) {
+                                    VStack(spacing: 14) {
+                                        SettingRow(icon: "gauge.with.dots.needle.bottom.50percent", iconColor: .blue, title: "Frame Rate") {
+                                            Picker("", selection: $selectedFrameRateLimit) {
+                                                ForEach(FrameRateLimit.allCases) { limit in
+                                                    Text(limit.description).tag(limit)
+                                                }
+                                            }
+                                            .labelsHidden()
+                                            .frame(width: 110)
+                                            .onChange(of: selectedFrameRateLimit) { _, newValue in
+                                                screenManager.updateFrameRateLimit(newValue, for: screen)
+                                            }
+                                            .accessibilityLabel("Frame rate limit")
+                                            .accessibilityValue(selectedFrameRateLimit.description)
+                                        }
+
+                                        Divider()
+
+                                        SettingRow(icon: "bolt.slash", iconColor: .yellow, title: "Pause on Battery") {
+                                            Toggle("", isOn: $screenPauseOnBattery)
+                                                .labelsHidden()
+                                                .toggleStyle(.switch)
+                                                .onChange(of: screenPauseOnBattery) { _, newValue in
+                                                    screenManager.updatePowerSettings(pauseOnBattery: newValue, for: screen)
+                                                }
+                                                .accessibilityLabel("Pause on battery")
+                                                .accessibilityHint("Pauses wallpaper playback when running on battery power")
+                                        }
+
+                                        Divider()
+                                        
+                                        SettingRow(icon: "photo.on.rectangle", iconColor: .blue, title: "Desktop Picture") {
+                                            HStack(spacing: 6) {
+                                                if lockScreenExtracted {
+                                                    Image(systemName: "checkmark.circle.fill")
+                                                        .foregroundStyle(.green)
+                                                        .transition(.scale.combined(with: .opacity))
+                                                }
+                                                Toggle("", isOn: $setAsLockScreen)
+                                                    .labelsHidden()
+                                                    .toggleStyle(.switch)
+                                                    .onChange(of: setAsLockScreen) { _, newValue in
+                                                        screenManager.updateSetAsDesktopPicture(newValue, for: screen)
+                                                        if newValue {
+                                                            screenManager.extractLockScreenFrame(for: screen)
+                                                            withAnimation { lockScreenExtracted = true }
+                                                            Task {
+                                                                try? await Task.sleep(for: .seconds(2))
+                                                                withAnimation { lockScreenExtracted = false }
+                                                            }
+                                                        }
+                                                    }
+                                                    .accessibilityLabel("Set current frame as desktop picture")
+                                                    .accessibilityHint("Captures the currently visible video frame and uses it as the macOS desktop picture")
+                                                    .help("Apply the current video frame as the desktop picture")
                                             }
                                         }
-                                        .labelsHidden()
-                                        .frame(width: 110)
-                                        .onChange(of: selectedFrameRateLimit) { _, newValue in
-                                            screenManager.updateFrameRateLimit(newValue, for: screen)
-                                        }
-                                        .accessibilityLabel("Frame rate limit")
-                                        .accessibilityValue(selectedFrameRateLimit.description)
                                     }
+                                    .padding(.top, 12)
+                                } label: {
+                                    Label("Display & Power", systemImage: "display.and.arrow.down")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(Color.primary)
                                 }
-                                .padding(8)
-                            } label: {
-                                Label("Frame Rate", systemImage: "gauge.with.dots.needle.bottom.50percent")
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundStyle(.secondary)
                             }
                         }
                         .padding(16)
@@ -677,19 +696,6 @@ struct ScreenDetailView: View {
         
         var body: some View {
             VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 8) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(Color.orange.opacity(0.15))
-                            .frame(width: 26, height: 26)
-                        Image(systemName: "slider.horizontal.3")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(.orange)
-                    }
-                    Text("Color Adjustments")
-                        .font(.system(size: 13, weight: .medium))
-                }
-                
                 VStack(spacing: 12) {
                     effectSlider(title: "Blur", value: $effectConfig.blurRadius, in: 0...30, format: "%.0f")
                     effectSlider(title: "Brightness", value: $effectConfig.brightness, in: -0.5...0.5, format: "%.2f")
