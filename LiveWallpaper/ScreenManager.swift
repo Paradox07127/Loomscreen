@@ -772,7 +772,8 @@ final class ScreenManager {
     func reloadVideoForScreen(_ screen: Screen) {
         Logger.info("Manually reloading video for screen \(screen.id)", category: .screenManager)
         if let configuration = configRepo.get(for: screen.id) {
-            applyConfiguration(configuration, to: screen, preservingState: true)
+            // Force recreation of player by setting preservingState to false
+            applyConfiguration(configuration, to: screen, preservingState: false)
         }
     }
     

@@ -218,7 +218,7 @@ final class WallpaperVideoPlayer {
                 }
                 .store(in: &cleanupTasks)
         }
-        
+
         // Monitor for genuine errors only.
         //
         // AVPlayerLooper rotates AVPlayerItems for seamless looping; on every
@@ -227,24 +227,25 @@ final class WallpaperVideoPlayer {
         // benign codes. Those are normal looper transitions, not real failures,
         // so we filter them out instead of spamming the log.
         //
-        // Codes from <AVFoundation/AVError.h>:
-        //   -11847  AVErrorOperationInterrupted
-        //   -11878  AVErrorOperationCancelled
-        let benignLooperCodes: Set<Int> = [-11847, -11878]
+        // -11847 AVErrorOperationInterrupted
+        // -11878 AVErrorOperationCancelled
+        // -12784 AVErrorCompositionFailed
+        // -12504 / -12509 Custom compositor errors often triggered by CIFilter pipeline recompilation
+        let benignLooperCodes: Set<Int> = [-11847, -11878, -12784, -12504, -12509]
         NotificationCenter.default.publisher(for: .AVPlayerItemFailedToPlayToEndTime, object: player?.currentItem)
             .sink { notification in
                 guard let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error else { return }
                 let nsError = error as NSError
                 if nsError.domain == AVFoundationErrorDomain && benignLooperCodes.contains(nsError.code) {
-                    return  // benign looper transition
+                    return  // benign looper transition or safe compositor drop
                 }
-                Logger.error("Playback failed: \(error.localizedDescription)", category: .videoPlayer)
+                // Only log actual fatal errors that stop playback
+                Logger.warning("Playback item failed (code: \(nsError.code)): \(error.localizedDescription)", category: .videoPlayer)
             }
             .store(in: &cleanupTasks)
 
         // Looping is handled by AVPlayerLooper — no manual seek needed
-    }
-    
+    }    
     private func setupFPSTracking() {
         // Use a structured Task instead of Timer to avoid @Sendable isolation issues
         let task = Task { [weak self] in
