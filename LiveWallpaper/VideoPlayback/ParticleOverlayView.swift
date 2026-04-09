@@ -30,15 +30,12 @@ final class ParticleOverlayView: NSView {
     private var currentEffect: ParticleEffect = .none
     private var currentDensity: CGFloat = 1.0
 
-    private var emitter: CAEmitterLayer? { layer as? CAEmitterLayer }
+    private var activeEmitter: CAEmitterLayer?
 
     // MARK: - Layer Hosting
 
     override func makeBackingLayer() -> CALayer {
-        let layer = CAEmitterLayer()
-        layer.emitterMode = .surface
-        layer.renderMode = .unordered
-        layer.birthRate = 0  // disabled until an effect is set
+        let layer = CALayer()
         layer.backgroundColor = NSColor.clear.cgColor
         return layer
     }
@@ -61,21 +58,38 @@ final class ParticleOverlayView: NSView {
     /// effective). Density-only updates do not rebuild the cells, so existing
     /// particles continue their lifecycle smoothly.
     func setEffect(_ effect: ParticleEffect, density: CGFloat = 1.0) {
-        guard let emitter = emitter else { return }
-
         if effect == currentEffect {
             updateDensity(density)
             return
         }
+        
         currentEffect = effect
         currentDensity = density
 
-        guard effect != .none else {
-            emitter.emitterCells = nil
-            emitter.birthRate = 0
-            return
+        // Fade out old emitter
+        if let oldEmitter = activeEmitter {
+            oldEmitter.birthRate = 0
+            
+            // Calculate max lifetime of current cells to know when to safely remove
+            var maxLifetime: Float = 0
+            if let cells = oldEmitter.emitterCells {
+                maxLifetime = cells.map { $0.lifetime + $0.lifetimeRange }.max() ?? 0
+            }
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + TimeInterval(maxLifetime)) { [weak oldEmitter] in
+                oldEmitter?.removeFromSuperlayer()
+            }
+            activeEmitter = nil
         }
 
+        guard effect != .none else { return }
+
+        // Create new emitter
+        let emitter = CAEmitterLayer()
+        emitter.emitterMode = .surface
+        emitter.backgroundColor = NSColor.clear.cgColor
+        emitter.frame = bounds
+        
         let preset = preset(for: effect)
         emitter.emitterCells = preset.cells
         emitter.emitterShape = preset.shape
@@ -83,20 +97,22 @@ final class ParticleOverlayView: NSView {
         emitter.emitterPosition = preset.position(bounds)
         emitter.emitterSize = preset.size(bounds)
         emitter.birthRate = Float(max(0.05, density))
+        
+        layer?.addSublayer(emitter)
+        activeEmitter = emitter
     }
 
     func updateDensity(_ density: CGFloat) {
         currentDensity = density
-        emitter?.birthRate = Float(max(0.05, density))
+        activeEmitter?.birthRate = Float(max(0.05, density))
     }
 
     // MARK: - Layout
 
     override func layout() {
         super.layout()
-        guard let emitter = emitter, currentEffect != .none else { return }
-        // CAEmitterLayer's emitterPosition / emitterSize are in the layer's
-        // own bounds coordinate space, so they must be re-derived on resize.
+        guard let emitter = activeEmitter, currentEffect != .none else { return }
+        emitter.frame = bounds
         let preset = preset(for: currentEffect)
         emitter.emitterPosition = preset.position(bounds)
         emitter.emitterSize = preset.size(bounds)
@@ -135,29 +151,35 @@ final class ParticleOverlayView: NSView {
     // MARK: - Snow
 
     private static let snowPreset: EmitterPreset = {
-        let cell = CAEmitterCell()
-        cell.contents = ParticleTextures.softCircle(radius: 4, color: NSColor.white.cgColor)
-        cell.birthRate = 40
-        cell.lifetime = 12
-        cell.lifetimeRange = 4
-        cell.velocity = 30
-        cell.velocityRange = 20
-        // emissionLongitude in CALayer math: 0 = +x (right), pi/2 = +y (up),
-        // -pi/2 = -y (down). Snow falls down → -pi/2.
-        cell.emissionLongitude = -.pi / 2
-        cell.emissionRange = .pi / 8
-        cell.scale = 0.5
-        cell.scaleRange = 0.4
-        cell.alphaRange = 0.4
-        cell.xAcceleration = 5
-        cell.yAcceleration = -10  // gravity (y-up coords)
-        cell.color = NSColor(white: 1, alpha: 0.85).cgColor
+        let createLayer = { (scale: CGFloat, velocity: CGFloat, birthRate: Float, alpha: Float, radius: CGFloat) -> CAEmitterCell in
+            let cell = CAEmitterCell()
+            cell.contents = ParticleTextures.softCircle(radius: radius, color: NSColor.white.cgColor)
+            cell.birthRate = birthRate
+            cell.lifetime = 15
+            cell.lifetimeRange = 5
+            cell.velocity = velocity
+            cell.velocityRange = velocity * 0.3
+            cell.emissionLongitude = -.pi / 2
+            cell.emissionRange = .pi / 8
+            cell.scale = scale
+            cell.scaleRange = scale * 0.3
+            cell.alphaRange = alpha * 0.3
+            cell.xAcceleration = 10 * scale // Wind affects closer particles more
+            cell.yAcceleration = -15 * scale // Gravity
+            cell.color = NSColor(white: 1, alpha: CGFloat(alpha)).cgColor
+            return cell
+        }
+
+        let near = createLayer(1.2, 50, 10, 0.6, 6.0) // Large, soft, out-of-focus
+        let mid = createLayer(0.6, 30, 30, 0.8, 3.0)  // Medium, sharp
+        let far = createLayer(0.3, 15, 60, 0.4, 2.0)  // Small, slow, dense
+
         return EmitterPreset(
-            cells: [cell],
+            cells: [near, mid, far],
             shape: .line,
             renderMode: .unordered,
-            position: { CGPoint(x: $0.midX, y: $0.maxY) },     // top center
-            size: { CGSize(width: $0.width * 1.2, height: 0) } // horizontal line
+            position: { CGPoint(x: $0.midX, y: $0.maxY) },
+            size: { CGSize(width: $0.width * 1.5, height: 0) }
         )
     }()
 
@@ -273,76 +295,88 @@ final class ParticleOverlayView: NSView {
     // MARK: - Falling Leaves
 
     private static let leavesPreset: EmitterPreset = {
-        let cell = CAEmitterCell()
-        cell.contents = ParticleTextures.leaf(
-            width: 14,
-            height: 9,
-            color: NSColor(calibratedRed: 0.85, green: 0.6, blue: 0.2, alpha: 1).cgColor
-        )
-        cell.birthRate = 10
-        cell.lifetime = 14
-        cell.lifetimeRange = 6
-        cell.velocity = 28
-        cell.velocityRange = 18
-        cell.emissionLongitude = -.pi / 2  // downward
-        cell.emissionRange = .pi / 6
-        cell.scale = 1.1
-        cell.scaleRange = 0.6
-        cell.alphaRange = 0.2
-        cell.spin = 0.6
-        cell.spinRange = 1.2
-        cell.xAcceleration = 15
-        cell.yAcceleration = -8
-        cell.redRange = 0.15
-        cell.greenRange = 0.2
-        cell.color = NSColor(calibratedRed: 0.85, green: 0.6, blue: 0.2, alpha: 1).cgColor
+        let palette: [CGColor] = [
+            NSColor(calibratedRed: 0.85, green: 0.4, blue: 0.1, alpha: 1).cgColor, // Orange
+            NSColor(calibratedRed: 0.9, green: 0.7, blue: 0.1, alpha: 1).cgColor,  // Yellow
+            NSColor(calibratedRed: 0.6, green: 0.3, blue: 0.1, alpha: 1).cgColor   // Brown
+        ]
+        
+        var cells: [CAEmitterCell] = []
+        for (i, color) in palette.enumerated() {
+            let scaleMultiplier = CGFloat(1.0 - Float(i) * 0.25) // Parallax depth mapping
+            
+            let cell = CAEmitterCell()
+            cell.contents = ParticleTextures.leaf(width: 14, height: 9, color: NSColor.white.cgColor)
+            cell.birthRate = 8 * Float(i + 1)
+            cell.lifetime = 16
+            cell.lifetimeRange = 8
+            cell.velocity = 35 * scaleMultiplier
+            cell.velocityRange = 20 * scaleMultiplier
+            cell.emissionLongitude = -.pi / 2
+            cell.emissionRange = .pi / 4
+            cell.scale = 1.2 * scaleMultiplier
+            cell.scaleRange = 0.4 * scaleMultiplier
+            cell.alphaRange = 0.3
+            cell.spin = 1.5
+            cell.spinRange = 2.0
+            cell.xAcceleration = 20 * scaleMultiplier // Wind affects foreground more
+            cell.yAcceleration = -10 * scaleMultiplier // Gravity
+            cell.color = color
+            
+            cells.append(cell)
+        }
+
         return EmitterPreset(
-            cells: [cell],
+            cells: cells,
             shape: .line,
             renderMode: .unordered,
-            position: { CGPoint(x: $0.midX, y: $0.maxY) },
-            size: { CGSize(width: $0.width * 1.2, height: 0) }
+            position: { CGPoint(x: $0.midX - $0.width * 0.2, y: $0.maxY) }, // Offset for wind drift
+            size: { CGSize(width: $0.width * 1.5, height: 0) }
         )
     }()
 
     // MARK: - Sakura
 
     private static let sakuraPreset: EmitterPreset = {
-        // Cherry-blossom petals drift slowly from the top of the screen with
-        // horizontal wind and in-place rotation. Slightly desaturated pink
-        // with subtle color jitter produces a natural palette.
-        let baseColor = NSColor(calibratedRed: 1.0, green: 0.72, blue: 0.82, alpha: 1.0)
-        let cell = CAEmitterCell()
-        cell.contents = ParticleTextures.sakuraPetal(
-            width: 16,
-            height: 14,
-            color: baseColor.cgColor
-        )
-        cell.birthRate = 18
-        cell.lifetime = 13
-        cell.lifetimeRange = 4
-        // Gentle fall: slower than leaves for a softer, more drifting feel.
-        cell.velocity = 40
-        cell.velocityRange = 18
-        cell.emissionLongitude = -.pi / 2         // downward
-        cell.emissionRange = .pi / 5              // ~36° cone for natural spread
-        cell.scale = 0.9
-        cell.scaleRange = 0.5
-        cell.alphaRange = 0.25
-        cell.spin = 0.7                           // slow rotation
-        cell.spinRange = 1.8                      // each petal spins at its own rate
-        cell.xAcceleration = 22                   // persistent soft breeze to the right
-        cell.yAcceleration = -14                  // light gravity
-        cell.redRange = 0.08
-        cell.greenRange = 0.1
-        cell.blueRange = 0.08
-        cell.color = baseColor.cgColor
+        let baseColor = NSColor(calibratedRed: 1.0, green: 0.72, blue: 0.82, alpha: 1.0).cgColor
+        
+        let createLayer = { (scale: CGFloat, velocity: CGFloat, birthRate: Float, alpha: Float, sizeOffset: CGFloat) -> CAEmitterCell in
+            let cell = CAEmitterCell()
+            cell.contents = ParticleTextures.sakuraPetal(width: 16 + sizeOffset, height: 14 + sizeOffset, color: NSColor.white.cgColor)
+            cell.birthRate = birthRate
+            cell.lifetime = 15
+            cell.lifetimeRange = 5
+            cell.velocity = velocity
+            cell.velocityRange = velocity * 0.4
+            cell.emissionLongitude = -.pi / 2
+            cell.emissionRange = .pi / 4
+            cell.scale = scale
+            cell.scaleRange = scale * 0.3
+            cell.alphaRange = alpha * 0.3
+            cell.spin = 1.0
+            cell.spinRange = 2.0
+            cell.xAcceleration = 25 * scale // persistent soft breeze to the right
+            cell.yAcceleration = -12 * scale // light gravity
+            cell.color = NSColor(cgColor: baseColor)!.withAlphaComponent(CGFloat(alpha)).cgColor
+            
+            // Add slight color variation per petal
+            cell.redRange = 0.1
+            cell.greenRange = 0.1
+            cell.blueRange = 0.1
+            
+            return cell
+        }
+
+        let near = createLayer(1.4, 55, 6, 0.7, 4.0)   // Large foreground petals
+        let mid = createLayer(0.9, 40, 15, 0.9, 0.0)   // Standard petals
+        let far = createLayer(0.5, 25, 30, 0.5, -4.0)  // Small background drift
+
         return EmitterPreset(
-            cells: [cell],
+            cells: [near, mid, far],
             shape: .line,
             renderMode: .unordered,
-            position: { CGPoint(x: $0.midX, y: $0.maxY) },
-            size: { CGSize(width: $0.width * 1.3, height: 0) }
+            position: { CGPoint(x: $0.midX - $0.width * 0.3, y: $0.maxY) }, // Start further left to drift right across screen
+            size: { CGSize(width: $0.width * 1.6, height: 0) }
         )
     }()
 }

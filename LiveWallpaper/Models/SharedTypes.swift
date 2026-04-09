@@ -56,12 +56,13 @@ struct VideoEffectConfig: Codable, Equatable {
     var autoTimeTint: Bool = false  // auto-adjust warmth by time of day
     var weatherReactive: Bool = false // auto-adjust effects based on real-time weather
     var particleDensity: Double = 1.0 // multiplier on particle birth rate (0.2 ... 3.0)
+    var glassRainEffect: Bool = false // AE/PR style refractive rain drops on glass
 
     static let `default` = VideoEffectConfig()
 
     var hasActiveEffect: Bool {
         blurRadius > 0 || saturation != 1.0 || brightness != 0 ||
-        warmth != 6500 || vignetteIntensity > 0 || autoTimeTint || weatherReactive
+        warmth != 6500 || vignetteIntensity > 0 || autoTimeTint || weatherReactive || glassRainEffect
     }
 
     // Custom decoder: tolerate missing keys from older saved configs
@@ -75,6 +76,7 @@ struct VideoEffectConfig: Codable, Equatable {
         autoTimeTint = try container.decodeIfPresent(Bool.self, forKey: .autoTimeTint) ?? false
         weatherReactive = try container.decodeIfPresent(Bool.self, forKey: .weatherReactive) ?? false
         particleDensity = try container.decodeIfPresent(Double.self, forKey: .particleDensity) ?? 1.0
+        glassRainEffect = try container.decodeIfPresent(Bool.self, forKey: .glassRainEffect) ?? false
     }
 
     init() {}

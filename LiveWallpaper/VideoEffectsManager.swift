@@ -9,6 +9,7 @@ struct FilterParameters: Sendable {
     let warmth: Double
     let vignetteIntensity: Double
     let autoTimeTint: Bool
+    let glassRainEffect: Bool
 
     init(from config: VideoEffectConfig) {
         self.blurRadius = config.blurRadius
@@ -17,6 +18,7 @@ struct FilterParameters: Sendable {
         self.warmth = config.warmth
         self.vignetteIntensity = config.vignetteIntensity
         self.autoTimeTint = config.autoTimeTint
+        self.glassRainEffect = config.glassRainEffect
     }
 }
 
@@ -71,6 +73,14 @@ final class VideoEffectsManager {
                 f.setValue(image, forKey: kCIInputImageKey)
                 f.setValue(params.blurRadius, forKey: kCIInputRadiusKey)
                 image = f.outputImage ?? image
+            }
+            
+            if params.glassRainEffect {
+                let rainFilter = RainGlassFilter()
+                rainFilter.inputImage = image
+                rainFilter.inputTime = NSNumber(value: request.compositionTime.seconds)
+                rainFilter.inputResolution = CIVector(x: sourceExtent.width, y: sourceExtent.height)
+                image = rainFilter.outputImage ?? image
             }
 
             if params.saturation != 1.0 || params.brightness != 0, let f = CIFilter(name: "CIColorControls") {
@@ -128,5 +138,104 @@ final class VideoEffectsManager {
         case 20..<23: return 3500  // evening warm
         default:      return 3000  // night very warm
         }
+    }
+}
+
+// MARK: - Rain Glass Filter
+
+/// Simulates rain drops hitting a glass surface and refracting the underlying video.
+class RainGlassFilter: CIFilter, @unchecked Sendable {
+    @objc dynamic var inputImage: CIImage?
+    @objc dynamic var inputTime: NSNumber = 0.0
+    @objc dynamic var inputResolution: CIVector = CIVector(x: 1920, y: 1080)
+
+    // Generate a displacement map procedurally using a CIColorKernel,
+    // then feed it into CIDisplacementDistortion to avoid coordinate space bounds crashes.
+    // Based on the popular "Heartfelt" rain drop algorithm.
+    static let displacementMapKernel: CIColorKernel? = {
+        let source = """
+        kernel vec4 rainDisplacementMap(float time, vec2 resolution) {
+            vec2 uv = destCoord() / resolution;
+            vec2 aspect = vec2(resolution.x / resolution.y, 1.0);
+            float t = mod(time * 0.2, 7200.0); // Prevent overflow
+            
+            vec2 normal = vec2(0.0);
+            
+            // Loop over 2 layers for depth and parallax
+            for(float i = 0.0; i < 2.0; i += 1.0) {
+                float layerScale = 4.0 + i * 3.0; // Grid scale
+                vec2 st = uv * aspect * layerScale;
+                st.y += t * (1.0 + i * 0.5); // Fall speed
+                
+                vec2 id = floor(st);
+                vec2 f = fract(st) - 0.5;
+                
+                // Noise hash per grid cell
+                vec2 hashP = id * vec2(123.34, 345.45);
+                hashP += dot(hashP, hashP + 34.345);
+                float n = fract(hashP.x * hashP.y);
+                
+                float localTime = t + n * 6.28;
+                
+                // Main drop position (stick-slip physics simulation)
+                float dropY = -sin(localTime + sin(localTime + sin(localTime) * 0.5)) * 0.45;
+                vec2 dropCenter = vec2((n - 0.5) * 0.7, dropY);
+                vec2 dropPos = f - dropCenter;
+                
+                float mainDrop = smoothstep(0.12, 0.02, length(dropPos));
+                
+                // Trail mask (leaves small drops behind the main drop)
+                vec2 trailPos = f - vec2(dropCenter.x, 0.0);
+                trailPos.y = (fract(trailPos.y * 6.0) - 0.5) * 0.15;
+                float trailMask = smoothstep(-dropCenter.y, 0.45, f.y);
+                float trailDrop = smoothstep(0.04, 0.01, length(trailPos)) * trailMask;
+                
+                // Static background drops (only show sometimes based on noise)
+                vec2 staticPos = f - vec2((n - 0.5) * 0.5, (fract(n * 12.34) - 0.5) * 0.5);
+                float staticDrops = smoothstep(-0.5, 1.0, n) * smoothstep(0.05, 0.01, length(staticPos));
+                
+                // Accumulate refraction normal
+                normal += dropPos * mainDrop + trailPos * trailDrop + staticPos * staticDrops;
+            }
+            
+            // Add slight global ripple distortion (simulates foggy or uneven glass)
+            float ripple = sin(uv.y * 10.0 + time) * cos(uv.x * 8.0 + time) * 0.02;
+            normal.x += ripple;
+            
+            // Encode normal into displacement map (0.5 is neutral)
+            vec2 encodedNormal = clamp((normal * 0.5) + 0.5, 0.0, 1.0);
+            return vec4(encodedNormal.x, encodedNormal.y, 0.0, 1.0);
+        }
+        """
+        return CIColorKernel(source: source)
+    }()
+
+    override var outputImage: CIImage? {
+        guard let inputImage = inputImage else { return nil }
+        
+        guard let kernel = Self.displacementMapKernel else {
+            return inputImage
+        }
+        
+        // Use the resolution vector to create a finite extent.
+        // If we use inputImage.extent directly when it's clamped (infinite), 
+        // it will crash the AVVideoComposition pipeline with 'Operation Stopped'.
+        let finiteExtent = CGRect(x: 0, y: 0, width: CGFloat(inputResolution.x), height: CGFloat(inputResolution.y))
+        
+        // Generate the displacement map over the finite extent
+        guard let displacementMap = kernel.apply(
+            extent: finiteExtent,
+            arguments: [inputTime, inputResolution]
+        ) else { return inputImage }
+        
+        // Apply CIDisplacementDistortion
+        // The scale determines how strongly the displacement map distorts the image.
+        // We set it relative to the height of the video to keep it resolution-independent.
+        let distortionFilter = CIFilter(name: "CIDisplacementDistortion")!
+        distortionFilter.setValue(inputImage, forKey: kCIInputImageKey)
+        distortionFilter.setValue(displacementMap, forKey: "inputDisplacementImage")
+        distortionFilter.setValue(finiteExtent.height * 0.04, forKey: kCIInputScaleKey)
+        
+        return distortionFilter.outputImage?.cropped(to: finiteExtent) ?? inputImage
     }
 }

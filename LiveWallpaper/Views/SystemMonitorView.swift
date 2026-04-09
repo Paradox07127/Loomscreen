@@ -28,36 +28,35 @@ struct SystemMonitorView: View {
                     ZStack {
                         Circle()
                             .trim(from: 0.0, to: 0.75)
-                            .stroke(Color.gray.opacity(0.15), style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                            .stroke(Color.gray.opacity(0.15), style: StrokeStyle(lineWidth: 4, lineCap: .round))
                             .rotationEffect(.degrees(135))
                         
                         if case .battery(let level) = powerSource {
                             Circle()
                                 .trim(from: 0.0, to: CGFloat(level) * 0.75)
-                                .stroke(powerStatusColor, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                                .stroke(powerStatusColor, style: StrokeStyle(lineWidth: 4, lineCap: .round))
                                 .rotationEffect(.degrees(135))
                         } else {
                             Circle()
                                 .trim(from: 0.0, to: 0.75)
-                                .stroke(powerStatusColor, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                                .stroke(powerStatusColor, style: StrokeStyle(lineWidth: 4, lineCap: .round))
                                 .rotationEffect(.degrees(135))
                         }
                         
                         Image(systemName: powerStatusIcon)
-                            .font(.system(size: 16, weight: .bold))
+                            .font(.system(size: 14, weight: .bold))
                             .foregroundStyle(powerStatusColor)
                         
                         VStack(spacing: 0) {
                             Text(powerStatusTextShort)
-                                .font(.system(size: 9, weight: .semibold, design: .rounded))
+                                .font(.system(size: 8, weight: .semibold, design: .rounded))
                                 .foregroundStyle(.secondary)
                             Text(powerStatusTextValue)
-                                .font(.system(size: 10, weight: .bold, design: .rounded))
+                                .font(.system(size: 9, weight: .bold, design: .rounded))
                         }
-                        .offset(y: 24)
+                        .offset(y: 18)
                     }
-                    .aspectRatio(1, contentMode: .fit)
-                    .frame(maxWidth: 80)
+                    .frame(width: 54, height: 54)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityLabel("Power source")
@@ -204,21 +203,20 @@ struct MiniGaugeCard: View {
                 
                 // Icon in the center
                 Image(systemName: icon)
-                    .font(.system(size: 16, weight: .bold))
+                    .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(color)
                 
                 // Title and Value in the opening gap at the bottom
                 VStack(spacing: 0) {
                     Text(title)
-                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .font(.system(size: 8, weight: .semibold, design: .rounded))
                         .foregroundStyle(.secondary)
                     Text("\(Int(value))%")
-                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
                 }
-                .offset(y: 24) // Pushes text into the gap
+                .offset(y: 18) // Pushes text into the gap
             }
-            .aspectRatio(1, contentMode: .fit) // Keep it a perfect square
-            .frame(maxWidth: 80) // Set max width to prevent infinite scaling
+            .frame(width: 54, height: 54) // Fixed size to prevent infinite scaling
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

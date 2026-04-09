@@ -68,6 +68,15 @@ struct EffectsSection: View {
                                     .labelsHidden()
                                     .toggleStyle(.switch)
                             }
+                            
+                            HStack {
+                                Text("Glass rain drops (Heavy GPU)")
+                                    .font(.system(size: 12))
+                                Spacer()
+                                Toggle("", isOn: $effectConfig.glassRainEffect)
+                                    .labelsHidden()
+                                    .toggleStyle(.switch)
+                            }
                         }
                         .padding(.bottom, 4)
                         .onChange(of: effectConfig) { _, _ in

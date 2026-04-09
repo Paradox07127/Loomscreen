@@ -714,6 +714,20 @@ struct ScreenDetailView: View {
                     Divider()
 
                     HStack {
+                        Text("Glass rain drops (Heavy GPU)")
+                            .font(.system(size: 13, weight: .medium))
+                        Spacer()
+                        Toggle("", isOn: $effectConfig.glassRainEffect)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .help("Simulate rain drops hitting glass and refracting video (High GPU usage)")
+                            .accessibilityLabel("Glass rain drops")
+                            .accessibilityHint("Adds refractive rain drops over the video")
+                    }
+
+                    Divider()
+
+                    HStack {
                         Spacer()
                         Button(action: {
                             effectConfig = .default
