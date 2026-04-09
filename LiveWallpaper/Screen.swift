@@ -73,10 +73,32 @@ class Screen: Identifiable, Hashable {
             guard !skipPreviewPlayerNotification else { return }
             previewPlayer?.pause()
             stopSyncTimer()
+            releasePreviewSecurityScope()
         }
         didSet {
             guard !skipPreviewPlayerNotification, let newPlayer = previewPlayer else { return }
             configurePreviewPlayer(newPlayer)
+        }
+    }
+
+    /// Security-scoped URL kept alive for the duration of `previewPlayer`.
+    /// AVFoundation reads file data lazily, so the scope must outlive AVAsset
+    /// construction — releasing it immediately causes "works once, then black".
+    @ObservationIgnored private var previewSecurityScopedURL: URL?
+
+    /// Begin a security scope tied to the preview player's lifetime. Any prior scope
+    /// is released first to keep the start/stop count balanced.
+    func retainPreviewSecurityScope(_ url: URL) {
+        releasePreviewSecurityScope()
+        if url.startAccessingSecurityScopedResource() {
+            previewSecurityScopedURL = url
+        }
+    }
+
+    private func releasePreviewSecurityScope() {
+        if let scoped = previewSecurityScopedURL {
+            scoped.stopAccessingSecurityScopedResource()
+            previewSecurityScopedURL = nil
         }
     }
 

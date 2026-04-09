@@ -83,10 +83,13 @@ final class WeatherReactiveService: NSObject, CLLocationManagerDelegate {
 
     func startMonitoring() {
         let status = locationManager.authorizationStatus
-        if status == .notDetermined {
+        switch status {
+        case .notDetermined:
             locationManager.requestWhenInUseAuthorization()
-        } else if status == .authorizedAlways {
+        case .authorizedAlways, .authorizedWhenInUse:
             locationManager.requestLocation()
+        default:
+            break
         }
 
         updateTask?.cancel()
@@ -278,7 +281,7 @@ final class WeatherReactiveService: NSObject, CLLocationManagerDelegate {
         Task { @MainActor [weak self] in
             guard let self = self else { return }
             switch status {
-            case .authorizedAlways:
+            case .authorizedAlways, .authorizedWhenInUse:
                 self.locationStatus = .authorized
                 self.locationManager.requestLocation()
             case .denied, .restricted:

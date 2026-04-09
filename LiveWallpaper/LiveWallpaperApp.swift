@@ -45,6 +45,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             PowerMonitor.shared.refreshPowerStatus()
         }
     }
+
+    /// Opt in to secure window state restoration (required on macOS Sonoma+).
+    /// Even though we don't restore any windows in a status-bar app, returning
+    /// `true` silences the framework's "Unable to find className=(null)" log
+    /// from `NSWindowRestoration` and is the recommended modern default.
+    nonisolated func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
+        return true
+    }
 }
 
 @main
