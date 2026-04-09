@@ -141,6 +141,7 @@ struct PlaylistSection: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear {
             resolvePrimaryVideoName()
             resolveBookmarkNames()

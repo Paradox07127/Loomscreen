@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import CoreGraphics
+import SwiftUI
 @testable import LiveWallpaper
 
 // MARK: - PowerPolicyController Tests
@@ -286,11 +287,399 @@ struct VideoEffectConfigTests {
         config.warmth = 4000
         config.vignetteIntensity = 3
         config.autoTimeTint = true
+        config.particleDensity = 2.5
 
         let data = try JSONEncoder().encode(config)
         let decoded = try JSONDecoder().decode(VideoEffectConfig.self, from: data)
 
         #expect(decoded == config)
+    }
+
+    // MARK: particleDensity (regression: previously a dead UI control)
+
+    @Test("Default particleDensity is 1.0")
+    func defaultParticleDensity() {
+        let config = VideoEffectConfig.default
+        #expect(config.particleDensity == 1.0)
+    }
+
+    @Test("particleDensity does NOT trigger hasActiveEffect")
+    func particleDensityIsNotAColorEffect() {
+        var config = VideoEffectConfig.default
+        config.particleDensity = 2.5
+        // particleDensity is a particle modifier, not a color effect — it must
+        // not flip hasActiveEffect or the CIFilter composition path will run
+        // unnecessarily and burn CPU/GPU on screens with no real effects.
+        #expect(!config.hasActiveEffect)
+    }
+
+    @Test("Legacy JSON without particleDensity decodes to 1.0")
+    func legacyJsonDefaultsParticleDensityToOne() throws {
+        // Old configs persisted before the field existed.
+        let legacyJSON = """
+        {
+            "blurRadius": 0,
+            "saturation": 1.0,
+            "brightness": 0,
+            "warmth": 6500,
+            "vignetteIntensity": 0,
+            "autoTimeTint": false,
+            "weatherReactive": false
+        }
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(VideoEffectConfig.self, from: legacyJSON)
+        #expect(decoded.particleDensity == 1.0)
+    }
+
+    @Test("particleDensity round-trip preserves arbitrary value")
+    func particleDensityRoundTrip() throws {
+        var config = VideoEffectConfig()
+        config.particleDensity = 0.3
+
+        let data = try JSONEncoder().encode(config)
+        let decoded = try JSONDecoder().decode(VideoEffectConfig.self, from: data)
+
+        #expect(decoded.particleDensity == 0.3)
+    }
+}
+
+// MARK: - ScreenConfiguration Custom Decoder Tests
+//
+// These tests pin down the backward-compat decoder added during the
+// "HTML/shader wallpapers don't survive relaunch" Critical fix.
+
+@Suite("ScreenConfiguration custom decoder")
+struct ScreenConfigurationDecoderTests {
+
+    @Test("Legacy JSON with only required fields fills all defaults")
+    func legacyJsonMinimalFields() throws {
+        // Pre-feature-creep configs only persisted screenID + bookmark.
+        let legacyJSON = """
+        {
+            "screenID": 12345,
+            "videoBookmarkData": ""
+        }
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(ScreenConfiguration.self, from: legacyJSON)
+
+        #expect(decoded.screenID == 12345)
+        #expect(decoded.playbackSpeed == 1.0)
+        #expect(decoded.fitMode == .aspectFill)
+        #expect(decoded.pauseOnBattery == false)
+        #expect(decoded.frameRateLimit == .fps60)
+        #expect(decoded.wallpaperType == .video)
+        #expect(decoded.particleEffect == .none)
+        #expect(decoded.effectConfig == .default)
+        #expect(decoded.htmlContent == nil)
+        #expect(decoded.shaderPreset == nil)
+        #expect(decoded.scheduleSlots == nil)
+        #expect(decoded.playlistBookmarks == nil)
+        #expect(decoded.shufflePlaylist == false)
+        #expect(decoded.playlistRotationMinutes == nil)
+        #expect(decoded.setAsLockScreen == false)
+    }
+
+    @Test("HTML wallpaper config round-trips correctly")
+    func htmlConfigRoundTrip() throws {
+        let original = ScreenConfiguration(
+            screenID: 42,
+            videoBookmarkData: Data(),
+            wallpaperType: .html,
+            htmlContent: "https://example.com/wallpaper"
+        )
+
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(ScreenConfiguration.self, from: data)
+
+        #expect(decoded.wallpaperType == .html)
+        #expect(decoded.htmlContent == "https://example.com/wallpaper")
+        #expect(decoded.screenID == 42)
+    }
+
+    @Test("Shader wallpaper config round-trips with preset")
+    func shaderConfigRoundTrip() throws {
+        let original = ScreenConfiguration(
+            screenID: 7,
+            videoBookmarkData: Data(),
+            wallpaperType: .metalShader,
+            shaderPreset: .aurora
+        )
+
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(ScreenConfiguration.self, from: data)
+
+        #expect(decoded.wallpaperType == .metalShader)
+        #expect(decoded.shaderPreset == .aurora)
+    }
+
+    @Test("setAsLockScreen persists across encode/decode")
+    func setAsLockScreenRoundTrip() throws {
+        let original = ScreenConfiguration(
+            screenID: 1,
+            videoBookmarkData: Data(),
+            setAsLockScreen: true
+        )
+
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(ScreenConfiguration.self, from: data)
+
+        #expect(decoded.setAsLockScreen == true)
+    }
+
+    @Test("particleDensity inside effectConfig survives full round-trip")
+    func nestedParticleDensityRoundTrip() throws {
+        var effectConfig = VideoEffectConfig()
+        effectConfig.particleDensity = 1.7
+        let original = ScreenConfiguration(
+            screenID: 99,
+            videoBookmarkData: Data(),
+            particleEffect: .snow,
+            effectConfig: effectConfig
+        )
+
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(ScreenConfiguration.self, from: data)
+
+        #expect(decoded.effectConfig.particleDensity == 1.7)
+        #expect(decoded.particleEffect == .snow)
+    }
+
+    @Test("Playlist + schedule fields round-trip")
+    func playlistAndScheduleRoundTrip() throws {
+        let slots = ScheduleSlot.defaultSlots
+        let bookmarks = [Data([0x01]), Data([0x02])]
+        let original = ScreenConfiguration(
+            screenID: 200,
+            videoBookmarkData: Data(),
+            scheduleSlots: slots,
+            playlistBookmarks: bookmarks,
+            shufflePlaylist: true,
+            playlistRotationMinutes: 15
+        )
+
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(ScreenConfiguration.self, from: data)
+
+        #expect(decoded.scheduleSlots?.count == slots.count)
+        #expect(decoded.playlistBookmarks == bookmarks)
+        #expect(decoded.shufflePlaylist == true)
+        #expect(decoded.playlistRotationMinutes == 15)
+    }
+}
+
+// MARK: - GlobalSettings Custom Decoder Tests
+
+@Suite("GlobalSettings custom decoder")
+struct GlobalSettingsDecoderTests {
+
+    @Test("Empty JSON object fills all defaults")
+    func emptyJsonDefaults() throws {
+        let emptyJSON = "{}".data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(GlobalSettings.self, from: emptyJSON)
+
+        #expect(decoded.globalPauseOnBattery == true)
+        #expect(decoded.preservePlaybackOnLock == false)
+        #expect(decoded.startOnLogin == false)
+        #expect(decoded.minimumBatteryLevel == nil)
+        #expect(decoded.defaultFrameRateLimit == .fps60)
+        #expect(decoded.pauseOnFullScreen == true)
+        #expect(decoded.batteryResolutionCap == true)
+    }
+
+    @Test("Partial JSON keeps unspecified fields at default")
+    func partialJsonRetainsDefaults() throws {
+        let partialJSON = """
+        {
+            "globalPauseOnBattery": false,
+            "minimumBatteryLevel": 0.2
+        }
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(GlobalSettings.self, from: partialJSON)
+
+        #expect(decoded.globalPauseOnBattery == false)
+        #expect(decoded.minimumBatteryLevel == 0.2)
+        // Unspecified fields keep their defaults.
+        #expect(decoded.pauseOnFullScreen == true)
+        #expect(decoded.batteryResolutionCap == true)
+        #expect(decoded.defaultFrameRateLimit == .fps60)
+    }
+
+    @Test("Full round-trip preserves every field")
+    func fullRoundTrip() throws {
+        let original = GlobalSettings(
+            globalPauseOnBattery: false,
+            preservePlaybackOnLock: true,
+            startOnLogin: true,
+            minimumBatteryLevel: 0.15,
+            defaultFrameRateLimit: .fps30,
+            pauseOnFullScreen: false,
+            batteryResolutionCap: false
+        )
+
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(GlobalSettings.self, from: data)
+
+        #expect(decoded.globalPauseOnBattery == false)
+        #expect(decoded.preservePlaybackOnLock == true)
+        #expect(decoded.startOnLogin == true)
+        #expect(decoded.minimumBatteryLevel == 0.15)
+        #expect(decoded.defaultFrameRateLimit == .fps30)
+        #expect(decoded.pauseOnFullScreen == false)
+        #expect(decoded.batteryResolutionCap == false)
+    }
+}
+
+// MARK: - ScheduleTimelineBar.segments Tests
+//
+// Regression coverage for the bug where slots wrapping midnight (e.g. 22→6)
+// produced negative segment widths and disappeared from the visualization.
+
+@Suite("ScheduleTimelineBar.segments(for:)")
+struct ScheduleTimelineBarSegmentsTests {
+
+    @Test("Normal slot produces a single segment")
+    func normalSlotSingleSegment() {
+        let slot = ScheduleSlot(startHour: 6, endHour: 12, label: "Morning")
+        let segments = ScheduleTimelineBar.segments(for: slot)
+
+        #expect(segments.count == 1)
+        #expect(segments[0].start == 6)
+        #expect(segments[0].end == 12)
+    }
+
+    @Test("Wrapping slot (22→6) produces two segments")
+    func wrappingSlotTwoSegments() {
+        let slot = ScheduleSlot(startHour: 22, endHour: 6, label: "Night")
+        let segments = ScheduleTimelineBar.segments(for: slot)
+
+        #expect(segments.count == 2)
+        #expect(segments[0].start == 22)
+        #expect(segments[0].end == 24)
+        #expect(segments[1].start == 0)
+        #expect(segments[1].end == 6)
+    }
+
+    @Test("Zero-length slot produces no segments")
+    func zeroLengthSlotIsEmpty() {
+        let slot = ScheduleSlot(startHour: 12, endHour: 12, label: "Empty")
+        let segments = ScheduleTimelineBar.segments(for: slot)
+
+        #expect(segments.isEmpty)
+    }
+
+    @Test("All default slots produce non-negative widths")
+    func defaultSlotsHaveNonNegativeWidths() {
+        for slot in ScheduleSlot.defaultSlots {
+            let segments = ScheduleTimelineBar.segments(for: slot)
+            for segment in segments {
+                #expect(segment.end > segment.start, "Segment \(segment) for slot \(slot.label) has non-positive width")
+            }
+        }
+    }
+
+    @Test("Just-after-midnight wrap (1→0) produces two segments")
+    func justAfterMidnightWrap() {
+        let slot = ScheduleSlot(startHour: 1, endHour: 0, label: "Almost full day")
+        let segments = ScheduleTimelineBar.segments(for: slot)
+
+        #expect(segments.count == 2)
+        #expect(segments[0].start == 1)
+        #expect(segments[0].end == 24)
+        #expect(segments[1].start == 0)
+        #expect(segments[1].end == 0)
+    }
+}
+
+// MARK: - FrameRateLimit.resolveCompositionFPS Tests
+//
+// Locks down the audit-fix that "Unlimited" frame rate must respect screen
+// refresh rate instead of being silently capped at 60 in the CI composition
+// path.
+
+@Suite("FrameRateLimit.resolveCompositionFPS")
+struct ResolveCompositionFPSTests {
+
+    @Test("Unlimited 120fps source on 60Hz screen → 60")
+    func unlimited120Source60Screen() {
+        let fps = FrameRateLimit.resolveCompositionFPS(
+            limit: .unlimited,
+            videoFrameRate: 120,
+            screenRefreshRate: 60
+        )
+        #expect(fps == 60)
+    }
+
+    @Test("Unlimited 120fps source on 120Hz ProMotion → 120")
+    func unlimited120SourceProMotion() {
+        let fps = FrameRateLimit.resolveCompositionFPS(
+            limit: .unlimited,
+            videoFrameRate: 120,
+            screenRefreshRate: 120
+        )
+        #expect(fps == 120)
+    }
+
+    @Test("Unlimited 30fps source on 60Hz → 30 (use native)")
+    func unlimited30SourceNative() {
+        let fps = FrameRateLimit.resolveCompositionFPS(
+            limit: .unlimited,
+            videoFrameRate: 30,
+            screenRefreshRate: 60
+        )
+        #expect(fps == 30)
+    }
+
+    @Test("Unlimited with unknown video fps falls back to screen refresh")
+    func unlimitedUnknownVideoFps() {
+        let fps = FrameRateLimit.resolveCompositionFPS(
+            limit: .unlimited,
+            videoFrameRate: 0,
+            screenRefreshRate: 144
+        )
+        #expect(fps == 144)
+    }
+
+    @Test("Unlimited with everything zero → 60 nominal fallback")
+    func unlimitedAllZeroFallback() {
+        let fps = FrameRateLimit.resolveCompositionFPS(
+            limit: .unlimited,
+            videoFrameRate: 0,
+            screenRefreshRate: 0
+        )
+        #expect(fps == 60)
+    }
+
+    @Test("60 FPS limit on 120fps source on 60Hz → 60")
+    func fps60Capped() {
+        let fps = FrameRateLimit.resolveCompositionFPS(
+            limit: .fps60,
+            videoFrameRate: 120,
+            screenRefreshRate: 60
+        )
+        #expect(fps == 60)
+    }
+
+    @Test("60 FPS limit on 30fps source → use native 30")
+    func fps60BelowSourceUsesNative() {
+        let fps = FrameRateLimit.resolveCompositionFPS(
+            limit: .fps60,
+            videoFrameRate: 30,
+            screenRefreshRate: 60
+        )
+        #expect(fps == 30)
+    }
+
+    @Test("30 FPS limit on 120fps source on 144Hz → 30")
+    func fps30AppliedToHighEverything() {
+        let fps = FrameRateLimit.resolveCompositionFPS(
+            limit: .fps30,
+            videoFrameRate: 120,
+            screenRefreshRate: 144
+        )
+        #expect(fps == 30)
     }
 }
 

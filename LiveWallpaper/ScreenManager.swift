@@ -263,7 +263,19 @@ final class ScreenManager {
             return
         }
 
-        if let config = configRepo.get(for: screen.id) {
+        guard let config = configRepo.get(for: screen.id) else { return }
+
+        // Restore non-video wallpaper modes without trying to resolve a video bookmark.
+        switch config.wallpaperType {
+        case .html:
+            if let url = config.htmlContent, !url.isEmpty {
+                setHTMLWallpaper(url: url, for: screen)
+            }
+        case .metalShader:
+            if let preset = config.shaderPreset {
+                setShaderWallpaper(preset: preset, for: screen)
+            }
+        case .video:
             applyConfiguration(config, to: screen)
         }
     }
@@ -300,20 +312,29 @@ final class ScreenManager {
         )
         
         configRepo.save(configuration)
-        
+
         // Validate configuration was saved correctly
         if SettingsManager.shared.validateConfiguration(for: screen.id) {
+            // Hold a security scope for the duration of the async asset validation —
+            // the caller's scope (if any) may be released before this Task runs.
+            let scopedURL = url
+            let didStartScope = scopedURL.startAccessingSecurityScopedResource()
             Task {
+                defer {
+                    if didStartScope {
+                        scopedURL.stopAccessingSecurityScopedResource()
+                    }
+                }
                 do {
-                    let asset = AVURLAsset(url: url)
+                    let asset = AVURLAsset(url: scopedURL)
                     let isPlayable = try await asset.load(.isPlayable)
-                    
+
                     guard isPlayable else {
                         throw NSError(domain: "ScreenManager", code: 404, userInfo: [
                             NSLocalizedDescriptionKey: "The selected video is not playable."
                         ])
                     }
-                    
+
                     await MainActor.run { [weak self] in
                         self?.setupVideoPlayback(asset: asset, screen: screen)
                     }
@@ -432,29 +453,20 @@ final class ScreenManager {
                     fitMode: configuration.fitMode
                 )
                 screen.videoPlayer = player
-                
-                // Apply settings
+
+                // Apply settings that don't depend on asset metadata immediately.
                 player.setPlaybackSpeed(configuration.playbackSpeed)
-                
-                // Apply frame rate limit if configured
-                if player.videoFrameRate > 0 {
-                    // Get screen refresh rate
-                    let screenRefreshRate = getScreenRefreshRate(for: screen.id)
-                    // Calculate actual frame rate limit
-                    let limit = configuration.frameRateLimit.getEffectiveLimit(
-                        videoFrameRate: player.videoFrameRate,
-                        screenRefreshRate: Double(screenRefreshRate)
-                    )
-                    
-                    if limit > 0 && limit < Float(player.videoFrameRate) {
-                        player.setFrameRateLimit(limit)
-                    }
-                }
-                
+
+                // Defer particle / frame-rate / effects until the asset's metadata
+                // is actually known (videoFrameRate transitions from 0). Using a
+                // readiness signal instead of a fixed delay avoids silently dropping
+                // saved state on slow loads.
+                applyConfigurationWhenAssetReady(player: player, screen: screen, configuration: configuration)
+
                 // Check if we should play based on power state
                 let shouldPause = powerMonitor.currentPowerSource.isOnBattery &&
                 (SettingsManager.shared.loadGlobalSettings().globalPauseOnBattery || configuration.pauseOnBattery)
-                
+
                 if shouldPause {
                     player.pause()
                 } else {
@@ -476,6 +488,63 @@ final class ScreenManager {
         }
     }
     
+    /// Applies configuration that depends on asset metadata once the player has
+    /// reported a non-zero `videoFrameRate`. Falls back to a short delay if the
+    /// publisher does not emit promptly so we never silently skip the state.
+    private func applyConfigurationWhenAssetReady(
+        player: WallpaperVideoPlayer,
+        screen: Screen,
+        configuration: ScreenConfiguration
+    ) {
+        let screenID = screen.id
+        let apply: @MainActor () -> Void = { [weak self] in
+            guard let self = self,
+                  let liveScreen = self.screens.first(where: { $0.id == screenID }) else { return }
+            if configuration.particleEffect != .none {
+                player.setParticleEffect(
+                    configuration.particleEffect,
+                    density: configuration.effectConfig.particleDensity
+                )
+            }
+            self.applyFrameRateLimit(configuration.frameRateLimit, to: liveScreen)
+            if configuration.effectConfig.hasActiveEffect || configuration.effectConfig.autoTimeTint {
+                self.applyVideoEffects(for: liveScreen, config: configuration)
+            }
+        }
+
+        if player.videoFrameRate > 0 {
+            apply()
+            return
+        }
+
+        // Wait for the first non-zero videoFrameRate emission with a hard 5s ceiling.
+        var cancellable: AnyCancellable?
+        var didApply = false
+        cancellable = player.$videoFrameRate
+            .first(where: { $0 > 0 })
+            .receive(on: DispatchQueue.main)
+            .sink { _ in
+                guard !didApply else { return }
+                didApply = true
+                apply()
+                cancellable?.cancel()
+            }
+        if let cancellable {
+            cleanupTasks.insert(cancellable)
+        }
+
+        // Safety net — if the asset never reports its frame rate (e.g. metadata
+        // load error), still try to apply effects after a generous delay so the
+        // user's saved state has at least one chance to land.
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(5))
+            guard self != nil, !didApply else { return }
+            didApply = true
+            apply()
+            cancellable?.cancel()
+        }
+    }
+
     private func setupVideoPlayback(asset: AVURLAsset, screen: Screen) {
         cleanupScreen(screen)
         
@@ -496,6 +565,10 @@ final class ScreenManager {
         // Update screen properties
         if let index = screens.firstIndex(where: { $0.id == screen.id }) {
             screens[index].videoPlayer = player
+            // Retain a security scope for the preview player's lifetime — AVFoundation
+            // reads file data lazily, so the scope must outlive AVAsset construction.
+            // The wallpaper player owns its own scope independently in setupPlayer().
+            screens[index].retainPreviewSecurityScope(asset.url)
             screens[index].previewPlayer = previewPlayer
 
             // Check if we should pause based on power state
@@ -526,9 +599,12 @@ final class ScreenManager {
                 }
             }
 
-            // Apply saved particle effect
+            // Apply saved particle effect (with persisted density)
             if let particleEffect = configuration?.particleEffect, particleEffect != .none {
-                player.setParticleEffect(particleEffect)
+                player.setParticleEffect(
+                    particleEffect,
+                    density: configuration?.effectConfig.particleDensity ?? 1.0
+                )
             }
 
             // Apply saved video effects
@@ -809,26 +885,48 @@ final class ScreenManager {
     func reloadAllScreens() {
         Logger.notice("Reloading all screens", category: .screenManager)
 
-        // Invalidate cached bookmark data to force a fresh reload
+        // Invalidate cached bookmark data to force a fresh reload — only for video configs.
         for screenID in configRepo.allCachedScreenIDs() {
+            guard let cached = configRepo.get(for: screenID), cached.wallpaperType == .video else { continue }
             if !SettingsManager.shared.validateConfiguration(for: screenID) {
-                Logger.warning("Removing invalid configuration for screen \(screenID)", category: .settings)
+                Logger.warning("Removing invalid video configuration for screen \(screenID)", category: .settings)
                 configRepo.remove(for: screenID)
             }
         }
 
-        // Reload all screens
+        // Reload all screens, branching on wallpaper type so HTML/shader survive.
         for screen in screens {
-            if let configuration = SettingsManager.shared.getConfiguration(for: screen.id) {
-                configRepo.save(configuration)
+            guard let configuration = SettingsManager.shared.getConfiguration(for: screen.id) else { continue }
+            configRepo.save(configuration)
+
+            switch configuration.wallpaperType {
+            case .html:
+                if let url = configuration.htmlContent, !url.isEmpty {
+                    setHTMLWallpaper(url: url, for: screen)
+                }
+            case .metalShader:
+                if let preset = configuration.shaderPreset {
+                    setShaderWallpaper(preset: preset, for: screen)
+                }
+            case .video:
                 applyConfiguration(configuration, to: screen, preservingState: false)
             }
         }
-        
+
         Logger.notice("All screens reloaded", category: .screenManager)
     }
     
-    // MARK: - Lock Screen Wallpaper
+    // MARK: - Desktop Picture from Frame
+
+    /// Persist whether the user wants the current frame applied as the desktop picture.
+    /// (macOS exposes no public lock-screen wallpaper API; the existing implementation
+    /// uses NSWorkspace.setDesktopImageURL which sets the desktop picture.)
+    func updateSetAsDesktopPicture(_ enabled: Bool, for screen: Screen) {
+        guard var config = configRepo.get(for: screen.id),
+              config.setAsLockScreen != enabled else { return }
+        config.setAsLockScreen = enabled
+        saveConfiguration(config)
+    }
 
     func extractLockScreenFrame(for screen: Screen) {
         guard let player = screen.videoPlayer?.player,
@@ -882,8 +980,22 @@ final class ScreenManager {
         guard var config = configRepo.get(for: screen.id) else { return }
         config.particleEffect = effect
         saveConfiguration(config)
-        // Apply to the live wallpaper window
-        screen.videoPlayer?.setParticleEffect(effect)
+        applyParticleEffect(effect, density: config.effectConfig.particleDensity, to: screen)
+    }
+
+    func updateParticleDensity(_ density: Double, for screen: Screen) {
+        guard var config = configRepo.get(for: screen.id) else { return }
+        let clamped = min(max(density, 0.2), 3.0)
+        guard abs(clamped - config.effectConfig.particleDensity) > 0.001 else { return }
+        config.effectConfig.particleDensity = clamped
+        saveConfiguration(config)
+        screen.videoPlayer?.setParticleDensity(clamped)
+    }
+
+    /// Centralized particle application — always pairs effect + density so callers
+    /// can never accidentally drop the persisted density.
+    private func applyParticleEffect(_ effect: ParticleEffect, density: Double, to screen: Screen) {
+        screen.videoPlayer?.setParticleEffect(effect, density: density)
     }
 
     // MARK: - Weather-Reactive Effects
@@ -898,8 +1010,8 @@ final class ScreenManager {
             weatherService.startMonitoring()
             applyWeatherEffects(for: screen)
         } else {
-            // Revert to manual settings
-            screen.videoPlayer?.setParticleEffect(config.particleEffect)
+            // Revert to manual settings — preserve persisted particle density.
+            applyParticleEffect(config.particleEffect, density: config.effectConfig.particleDensity, to: screen)
             applyVideoEffects(for: screen, config: config)
         }
     }
@@ -909,8 +1021,12 @@ final class ScreenManager {
         guard let config = configRepo.get(for: screen.id),
               config.effectConfig.weatherReactive else { return }
 
-        // Apply weather-derived particle effect
-        screen.videoPlayer?.setParticleEffect(weatherService.currentParticleEffect)
+        // Apply weather-derived particle effect with persisted density.
+        applyParticleEffect(
+            weatherService.currentParticleEffect,
+            density: config.effectConfig.particleDensity,
+            to: screen
+        )
 
         // Apply weather-derived CIFilter adjustments
         let adj = weatherService.currentEffectAdjustments
@@ -927,21 +1043,27 @@ final class ScreenManager {
         applyVideoEffects(for: screen, config: updatedConfig)
     }
 
-    /// Start weather monitoring and periodically apply to all weather-reactive screens.
+    /// Subscribe to WeatherReactiveService updates and apply them to weather-reactive
+    /// screens. WeatherReactiveService owns the polling schedule (15-min loop), so
+    /// ScreenManager only reacts when fresh data arrives instead of double-scheduling.
     func startWeatherMonitoring() {
-        Task { [weak self] in
-            // Wait for initial weather data, then apply periodically
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(900)) // 15 minutes
+        observeWeatherChanges()
+    }
+
+    private func observeWeatherChanges() {
+        withObservationTracking {
+            // Track the observable state we react to.
+            _ = weatherService.currentParticleEffect
+            _ = weatherService.currentEffectAdjustments
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
                 guard let self = self else { return }
                 for screen in self.screens {
                     guard let config = self.configRepo.get(for: screen.id),
                           config.effectConfig.weatherReactive else { continue }
-                    self.weatherService.refresh()
-                    // Small delay for weather to arrive
-                    try? await Task.sleep(for: .seconds(5))
                     self.applyWeatherEffects(for: screen)
                 }
+                self.observeWeatherChanges()
             }
         }
     }
@@ -970,10 +1092,20 @@ final class ScreenManager {
         // Effects active — build CIFilter composition (also handles frame rate via frameDuration)
         effectsManager.updateConfig(config.effectConfig)
 
+        // Compute the effective FPS via the shared helper so unlimited mode
+        // actually respects screen refresh rate (e.g. caps a 120 fps source at
+        // 60 Hz on a non-ProMotion display) instead of hard-coding 60. The
+        // helper is unit-tested in isolation.
+        let effectiveFPS = FrameRateLimit.resolveCompositionFPS(
+            limit: config.frameRateLimit,
+            videoFrameRate: player.videoFrameRate,
+            screenRefreshRate: Double(getScreenRefreshRate(for: screen.id))
+        )
+        let safeFPS = max(1.0, effectiveFPS)
+        let frameDuration = CMTime(value: 1, timescale: CMTimeScale(safeFPS))
+
         Task {
             do {
-                let fps = config.frameRateLimit == .unlimited ? 60 : config.frameRateLimit.rawValue
-                let frameDuration = CMTime(value: 1, timescale: CMTimeScale(fps))
                 let composition = try await effectsManager.buildComposition(
                     for: playerItem.asset,
                     config: config.effectConfig,
@@ -1135,7 +1267,15 @@ final class ScreenManager {
         // Clean up old player and set up new one with preserved config
         cleanupScreen(screen)
 
+        // Hold scope across the async asset validation. WallpaperVideoPlayer.setupPlayer
+        // will start its own scope; we balance ours via defer.
+        let didStartScope = url.startAccessingSecurityScopedResource()
         Task {
+            defer {
+                if didStartScope {
+                    url.stopAccessingSecurityScopedResource()
+                }
+            }
             do {
                 let asset = AVURLAsset(url: url)
                 let isPlayable = try await asset.load(.isPlayable)
@@ -1250,10 +1390,14 @@ final class ScreenManager {
             targetConfig.playbackSpeed = sourceConfig.playbackSpeed
             targetConfig.frameRateLimit = sourceConfig.frameRateLimit
             saveConfiguration(targetConfig)
-            // Apply live
+            // Apply live — pair particle effect with its density to avoid resets.
             screen.videoPlayer?.setVideoFitMode(sourceConfig.fitMode)
             screen.videoPlayer?.setPlaybackSpeed(sourceConfig.playbackSpeed)
-            screen.videoPlayer?.setParticleEffect(sourceConfig.particleEffect)
+            applyParticleEffect(
+                sourceConfig.particleEffect,
+                density: sourceConfig.effectConfig.particleDensity,
+                to: screen
+            )
             applyVideoEffects(for: screen, config: targetConfig)
         }
     }

@@ -259,6 +259,30 @@ struct ScheduleTimelineBar: View {
 
     private let slotColors: [Color] = [.blue, .orange, .green, .purple]
 
+    /// Splits a slot into one or two `(startHour, endHour)` segments so slots that
+    /// wrap midnight (e.g. 22 → 6) still render correctly.
+    ///
+    /// Exposed as `internal static` so unit tests can pin down the boundary
+    /// behavior (normal, wrapping, zero-length) without standing up a SwiftUI
+    /// view hierarchy.
+    static func segments(for slot: ScheduleSlot) -> [(start: Int, end: Int)] {
+        if slot.startHour == slot.endHour {
+            return []
+        }
+        if slot.startHour < slot.endHour {
+            return [(slot.startHour, slot.endHour)]
+        }
+        // Wraps midnight — emit [start, 24) + [0, end).
+        return [(slot.startHour, 24), (0, slot.endHour)]
+    }
+
+    private var activeSlotLabel: String {
+        if let active = slots.first(where: { $0.containsHour(currentHour) }) {
+            return active.label
+        }
+        return "no active slot"
+    }
+
     var body: some View {
         GeometryReader { geometry in
             let width = geometry.size.width
@@ -268,17 +292,19 @@ struct ScheduleTimelineBar: View {
                 RoundedRectangle(cornerRadius: 4)
                     .fill(Color.gray.opacity(0.15))
 
-                // Slot segments
+                // Slot segments (handles midnight wrap)
                 ForEach(Array(slots.enumerated()), id: \.element.id) { index, slot in
-                    let startFraction = CGFloat(slot.startHour) / 24.0
-                    let endFraction = CGFloat(slot.endHour) / 24.0
-                    let segmentWidth = (endFraction - startFraction) * width
+                    ForEach(Array(Self.segments(for: slot).enumerated()), id: \.offset) { _, segment in
+                        let startFraction = CGFloat(segment.start) / 24.0
+                        let endFraction = CGFloat(segment.end) / 24.0
+                        let segmentWidth = (endFraction - startFraction) * width
 
-                    if segmentWidth > 0 {
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(slotColors[index % slotColors.count].opacity(0.6))
-                            .frame(width: segmentWidth)
-                            .offset(x: startFraction * width)
+                        if segmentWidth > 0 {
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(slotColors[index % slotColors.count].opacity(0.6))
+                                .frame(width: segmentWidth)
+                                .offset(x: startFraction * width)
+                        }
                     }
                 }
 
@@ -292,6 +318,7 @@ struct ScheduleTimelineBar: View {
         }
         .frame(height: 20)
         .clipShape(RoundedRectangle(cornerRadius: 4))
-        .accessibilityLabel("Schedule timeline showing \(slots.count) time slots")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Schedule timeline, \(slots.count) slots, currently \(currentHour):00, active slot: \(activeSlotLabel)")
     }
 }

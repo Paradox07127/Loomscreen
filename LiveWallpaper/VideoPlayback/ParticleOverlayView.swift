@@ -1,371 +1,511 @@
 import AppKit
-import SpriteKit
+import QuartzCore
 
-/// A transparent SpriteKit-based overlay that renders particle effects
-/// (snow, rain, bokeh, fireflies, falling leaves) on top of the video wallpaper.
+/// A layer-hosting NSView whose backing layer is a `CAEmitterLayer`.
+///
+/// ## Why CAEmitterLayer (not SpriteKit)
+///
+/// The previous implementation wrapped an `SKView` (SpriteKit) inside an NSView
+/// and tried to compose it above an `AVPlayerLayer` sibling. That fails in
+/// practice on macOS because `SKView`'s backing layer is a `CAMetalLayer` with
+/// its own off-tree render pass — when both `CAMetalLayer` and `AVPlayerLayer`
+/// live as siblings under a layer-backed parent, AppKit's composition order
+/// becomes implementation-defined and the particle layer ends up rendered
+/// behind the video.
+///
+/// `CAEmitterLayer` is a plain `CALayer` subclass that participates in normal
+/// Core Animation compositing, so it composites cleanly above an
+/// `AVPlayerLayer` sibling using deterministic NSView subview ordering.
+///
+/// ## Coordinate System
+///
+/// The default macOS `CALayer` uses **bottom-left origin** (y increases up),
+/// matching NSView's default. So `(0, 0)` is bottom-left, `(width, height)`
+/// is top-right. "Falling from the sky" particles emit at `y = bounds.height`
+/// with negative y-velocity / negative `yAcceleration`.
 final class ParticleOverlayView: NSView {
 
-    // MARK: - Properties
+    // MARK: - State
 
-    private let skView: SKView
-    private let scene: SKScene
-    private var currentEmitter: SKEmitterNode?
     private var currentEffect: ParticleEffect = .none
+    private var currentDensity: CGFloat = 1.0
 
-    // MARK: - Initialization
+    private var emitter: CAEmitterLayer? { layer as? CAEmitterLayer }
+
+    // MARK: - Layer Hosting
+
+    override func makeBackingLayer() -> CALayer {
+        let layer = CAEmitterLayer()
+        layer.emitterMode = .surface
+        layer.renderMode = .unordered
+        layer.birthRate = 0  // disabled until an effect is set
+        layer.backgroundColor = NSColor.clear.cgColor
+        return layer
+    }
 
     override init(frame frameRect: NSRect) {
-        skView = SKView(frame: NSRect(origin: .zero, size: frameRect.size))
-        scene = SKScene(size: frameRect.size)
-
         super.init(frame: frameRect)
-
-        configureSKView()
-        configureScene()
-        addSubview(skView)
+        wantsLayer = true
+        layerContentsRedrawPolicy = .onSetNeedsDisplay
+        layer?.backgroundColor = NSColor.clear.cgColor
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    // MARK: - Configuration
-
-    private func configureSKView() {
-        skView.allowsTransparency = true
-        skView.preferredFramesPerSecond = 30
-        skView.ignoresSiblingOrder = true
-        skView.autoresizingMask = [.width, .height]
-
-        // Transparent background so the video shows through.
-        skView.wantsLayer = true
-        skView.layer?.backgroundColor = NSColor.clear.cgColor
-    }
-
-    private func configureScene() {
-        scene.backgroundColor = .clear
-        scene.scaleMode = .resizeFill
-        skView.presentScene(scene)
-    }
-
     // MARK: - Public API
 
-    /// Sets the active particle effect. Pass `.none` to remove all particles.
-    func setEffect(_ effect: ParticleEffect) {
-        guard effect != currentEffect else { return }
+    /// Switches the active particle effect. Pass `.none` to disable particles.
+    /// `density` is a multiplier on the emitter's master birth rate (0.05–3.0
+    /// effective). Density-only updates do not rebuild the cells, so existing
+    /// particles continue their lifecycle smoothly.
+    func setEffect(_ effect: ParticleEffect, density: CGFloat = 1.0) {
+        guard let emitter = emitter else { return }
+
+        if effect == currentEffect {
+            updateDensity(density)
+            return
+        }
         currentEffect = effect
+        currentDensity = density
 
-        // Remove existing emitter.
-        currentEmitter?.removeFromParent()
-        currentEmitter = nil
-
-        guard effect != .none else { return }
-
-        let emitter = makeEmitter(for: effect)
-        // Position the emitter at the top-center for effects that fall,
-        // or at the center for effects that float.
-        switch effect {
-        case .snow, .rain, .fallingLeaves:
-            emitter.position = CGPoint(x: scene.size.width / 2, y: scene.size.height)
-            emitter.particlePositionRange = CGVector(dx: scene.size.width * 1.2, dy: 0)
-        case .bokeh:
-            emitter.position = CGPoint(x: scene.size.width / 2, y: 0)
-            emitter.particlePositionRange = CGVector(dx: scene.size.width, dy: scene.size.height * 0.2)
-        case .fireflies:
-            emitter.position = CGPoint(x: scene.size.width / 2, y: scene.size.height / 2)
-            emitter.particlePositionRange = CGVector(dx: scene.size.width, dy: scene.size.height)
-        case .none:
-            break
+        guard effect != .none else {
+            emitter.emitterCells = nil
+            emitter.birthRate = 0
+            return
         }
 
-        scene.addChild(emitter)
-        currentEmitter = emitter
+        let preset = preset(for: effect)
+        emitter.emitterCells = preset.cells
+        emitter.emitterShape = preset.shape
+        emitter.renderMode = preset.renderMode
+        emitter.emitterPosition = preset.position(bounds)
+        emitter.emitterSize = preset.size(bounds)
+        emitter.birthRate = Float(max(0.05, density))
+    }
+
+    func updateDensity(_ density: CGFloat) {
+        currentDensity = density
+        emitter?.birthRate = Float(max(0.05, density))
     }
 
     // MARK: - Layout
 
     override func layout() {
         super.layout()
-        skView.frame = bounds
-        scene.size = bounds.size
-
-        // Re-position the emitter for the new size.
-        guard let emitter = currentEmitter else { return }
-        switch currentEffect {
-        case .snow, .rain, .fallingLeaves:
-            emitter.position = CGPoint(x: bounds.width / 2, y: bounds.height)
-            emitter.particlePositionRange = CGVector(dx: bounds.width * 1.2, dy: 0)
-        case .bokeh:
-            emitter.position = CGPoint(x: bounds.width / 2, y: 0)
-            emitter.particlePositionRange = CGVector(dx: bounds.width, dy: bounds.height * 0.2)
-        case .fireflies:
-            emitter.position = CGPoint(x: bounds.width / 2, y: bounds.height / 2)
-            emitter.particlePositionRange = CGVector(dx: bounds.width, dy: bounds.height)
-        case .none:
-            break
-        }
+        guard let emitter = emitter, currentEffect != .none else { return }
+        // CAEmitterLayer's emitterPosition / emitterSize are in the layer's
+        // own bounds coordinate space, so they must be re-derived on resize.
+        let preset = preset(for: currentEffect)
+        emitter.emitterPosition = preset.position(bounds)
+        emitter.emitterSize = preset.size(bounds)
     }
 
-    // MARK: - Emitter Factory
+    // MARK: - Effect Presets
 
-    private func makeEmitter(for effect: ParticleEffect) -> SKEmitterNode {
+    private struct EmitterPreset {
+        let cells: [CAEmitterCell]
+        let shape: CAEmitterLayerEmitterShape
+        let renderMode: CAEmitterLayerRenderMode
+        let position: (CGRect) -> CGPoint
+        let size: (CGRect) -> CGSize
+    }
+
+    private func preset(for effect: ParticleEffect) -> EmitterPreset {
         switch effect {
-        case .snow:       return makeSnowEmitter()
-        case .rain:       return makeRainEmitter()
-        case .bokeh:      return makeBokehEmitter()
-        case .fireflies:  return makeFirefliesEmitter()
-        case .fallingLeaves: return makeFallingLeavesEmitter()
-        case .none:       return SKEmitterNode()  // should not be called
+        case .none:          return Self.emptyPreset
+        case .snow:          return Self.snowPreset
+        case .rain:          return Self.rainPreset
+        case .bokeh:         return Self.bokehPreset
+        case .fireflies:     return Self.firefliesPreset
+        case .fallingLeaves: return Self.leavesPreset
+        case .sakura:        return Self.sakuraPreset
         }
     }
 
-    // MARK: Snow
+    private static let emptyPreset = EmitterPreset(
+        cells: [],
+        shape: .point,
+        renderMode: .unordered,
+        position: { _ in .zero },
+        size: { _ in .zero }
+    )
 
-    private func makeSnowEmitter() -> SKEmitterNode {
-        let emitter = SKEmitterNode()
+    // MARK: - Snow
 
-        // Use a small white circle texture.
-        emitter.particleTexture = SKTexture(image: makeCircleImage(radius: 4, color: .white))
-
-        emitter.particleBirthRate = 40
-        emitter.numParticlesToEmit = 0  // infinite
-        emitter.particleLifetime = 10
-        emitter.particleLifetimeRange = 4
-
-        emitter.particleSpeed = 30
-        emitter.particleSpeedRange = 20
-        emitter.emissionAngle = -.pi / 2    // straight down
-        emitter.emissionAngleRange = .pi / 8
-
-        emitter.particleScale = 0.8
-        emitter.particleScaleRange = 0.5
-
-        emitter.particleAlpha = 0.8
-        emitter.particleAlphaRange = 0.2
-
-        // Slight horizontal drift.
-        emitter.xAcceleration = 5
-        emitter.yAcceleration = -10
-
-        emitter.particleColor = .white
-        emitter.particleBlendMode = .alpha
-
-        return emitter
-    }
-
-    // MARK: Rain
-
-    private func makeRainEmitter() -> SKEmitterNode {
-        let emitter = SKEmitterNode()
-
-        // Thin vertical streak.
-        emitter.particleTexture = SKTexture(image: makeStreakImage(width: 1, height: 12, color: NSColor.white.withAlphaComponent(0.5)))
-
-        emitter.particleBirthRate = 100
-        emitter.numParticlesToEmit = 0
-        emitter.particleLifetime = 3
-        emitter.particleLifetimeRange = 1
-
-        emitter.particleSpeed = 400
-        emitter.particleSpeedRange = 100
-        emitter.emissionAngle = -.pi / 2
-        emitter.emissionAngleRange = .pi / 30  // nearly straight down
-
-        emitter.particleScale = 1.0
-        emitter.particleScaleRange = 0.3
-
-        emitter.particleAlpha = 0.4
-        emitter.particleAlphaRange = 0.2
-
-        emitter.yAcceleration = -200
-
-        emitter.particleColor = .white
-        emitter.particleBlendMode = .alpha
-
-        return emitter
-    }
-
-    // MARK: Bokeh
-
-    private func makeBokehEmitter() -> SKEmitterNode {
-        let emitter = SKEmitterNode()
-
-        // Large soft circle.
-        emitter.particleTexture = SKTexture(image: makeCircleImage(radius: 20, color: .white))
-
-        emitter.particleBirthRate = 5
-        emitter.numParticlesToEmit = 0
-        emitter.particleLifetime = 12
-        emitter.particleLifetimeRange = 4
-
-        emitter.particleSpeed = 15
-        emitter.particleSpeedRange = 10
-        emitter.emissionAngle = .pi / 2    // upward
-        emitter.emissionAngleRange = .pi / 4
-
-        emitter.particleScale = 0.5
-        emitter.particleScaleRange = 0.4
-
-        emitter.particleAlpha = 0.15
-        emitter.particleAlphaRange = 0.1
-        emitter.particleAlphaSpeed = -0.01
-
-        // Gentle upward float.
-        emitter.yAcceleration = 5
-        emitter.xAcceleration = 2
-
-        emitter.particleColorBlendFactor = 1.0
-        emitter.particleColor = NSColor(calibratedRed: 1, green: 0.9, blue: 0.7, alpha: 1)
-        emitter.particleColorRedRange = 0.2
-        emitter.particleColorGreenRange = 0.2
-        emitter.particleColorBlueRange = 0.3
-        emitter.particleBlendMode = .add
-
-        return emitter
-    }
-
-    // MARK: Fireflies
-
-    private func makeFirefliesEmitter() -> SKEmitterNode {
-        let emitter = SKEmitterNode()
-
-        // Tiny bright dot.
-        emitter.particleTexture = SKTexture(image: makeCircleImage(radius: 3, color: .white))
-
-        emitter.particleBirthRate = 8
-        emitter.numParticlesToEmit = 0
-        emitter.particleLifetime = 6
-        emitter.particleLifetimeRange = 3
-
-        emitter.particleSpeed = 10
-        emitter.particleSpeedRange = 15
-        emitter.emissionAngle = 0
-        emitter.emissionAngleRange = .pi * 2  // all directions
-
-        emitter.particleScale = 0.6
-        emitter.particleScaleRange = 0.3
-
-        // Pulsing alpha via alpha speed oscillation.
-        emitter.particleAlpha = 0.8
-        emitter.particleAlphaRange = 0.4
-        emitter.particleAlphaSpeed = -0.15
-
-        // Random movement via small accelerations.
-        emitter.xAcceleration = 0
-        emitter.yAcceleration = 3
-
-        emitter.particleColor = NSColor(calibratedRed: 1, green: 1, blue: 0.6, alpha: 1)
-        emitter.particleColorBlendFactor = 1.0
-        emitter.particleBlendMode = .add
-
-        return emitter
-    }
-
-    // MARK: Falling Leaves
-
-    private func makeFallingLeavesEmitter() -> SKEmitterNode {
-        let emitter = SKEmitterNode()
-
-        // Medium leaf-like shape (we use a circle with scale distortion as a stand-in).
-        emitter.particleTexture = SKTexture(image: makeLeafImage(size: CGSize(width: 12, height: 8)))
-
-        emitter.particleBirthRate = 8
-        emitter.numParticlesToEmit = 0
-        emitter.particleLifetime = 14
-        emitter.particleLifetimeRange = 6
-
-        emitter.particleSpeed = 25
-        emitter.particleSpeedRange = 15
-        emitter.emissionAngle = -.pi / 2   // downward
-        emitter.emissionAngleRange = .pi / 6
-
-        emitter.particleScale = 1.0
-        emitter.particleScaleRange = 0.5
-
-        emitter.particleAlpha = 0.7
-        emitter.particleAlphaRange = 0.2
-
-        // Swaying side-to-side via rotation + horizontal acceleration.
-        emitter.particleRotation = 0
-        emitter.particleRotationRange = .pi
-        emitter.particleRotationSpeed = 0.5
-
-        emitter.xAcceleration = 15
-        emitter.yAcceleration = -8
-
-        emitter.particleColor = NSColor(calibratedRed: 0.85, green: 0.6, blue: 0.2, alpha: 1)
-        emitter.particleColorBlendFactor = 1.0
-        emitter.particleColorRedRange = 0.15
-        emitter.particleColorGreenRange = 0.2
-        emitter.particleBlendMode = .alpha
-
-        return emitter
-    }
-
-    // MARK: - Texture Helpers
-
-    /// Creates a simple filled-circle NSImage for use as a particle texture.
-    private func makeCircleImage(radius: CGFloat, color: NSColor) -> NSImage {
-        let size = CGSize(width: radius * 2, height: radius * 2)
-        let image = NSImage(size: size)
-        image.lockFocus()
-
-        // Draw a soft radial gradient for a glow effect.
-        let gradient = NSGradient(
-            starting: color.withAlphaComponent(1.0),
-            ending: color.withAlphaComponent(0.0)
+    private static let snowPreset: EmitterPreset = {
+        let cell = CAEmitterCell()
+        cell.contents = ParticleTextures.softCircle(radius: 4, color: NSColor.white.cgColor)
+        cell.birthRate = 40
+        cell.lifetime = 12
+        cell.lifetimeRange = 4
+        cell.velocity = 30
+        cell.velocityRange = 20
+        // emissionLongitude in CALayer math: 0 = +x (right), pi/2 = +y (up),
+        // -pi/2 = -y (down). Snow falls down → -pi/2.
+        cell.emissionLongitude = -.pi / 2
+        cell.emissionRange = .pi / 8
+        cell.scale = 0.5
+        cell.scaleRange = 0.4
+        cell.alphaRange = 0.4
+        cell.xAcceleration = 5
+        cell.yAcceleration = -10  // gravity (y-up coords)
+        cell.color = NSColor(white: 1, alpha: 0.85).cgColor
+        return EmitterPreset(
+            cells: [cell],
+            shape: .line,
+            renderMode: .unordered,
+            position: { CGPoint(x: $0.midX, y: $0.maxY) },     // top center
+            size: { CGSize(width: $0.width * 1.2, height: 0) } // horizontal line
         )
-        let path = NSBezierPath(ovalIn: NSRect(origin: .zero, size: size))
-        gradient?.draw(in: path, relativeCenterPosition: .zero)
+    }()
 
-        image.unlockFocus()
-        return image
-    }
+    // MARK: - Rain
 
-    /// Creates a thin vertical streak for rain particles.
-    private func makeStreakImage(width: CGFloat, height: CGFloat, color: NSColor) -> NSImage {
-        let size = CGSize(width: max(width, 2), height: height)
-        let image = NSImage(size: size)
-        image.lockFocus()
-
-        color.setFill()
-        NSBezierPath(roundedRect: NSRect(origin: .zero, size: size), xRadius: width / 2, yRadius: width / 2).fill()
-
-        image.unlockFocus()
-        return image
-    }
-
-    /// Creates a simple leaf-shaped image.
-    private func makeLeafImage(size: CGSize) -> NSImage {
-        let image = NSImage(size: size)
-        image.lockFocus()
-
-        let path = NSBezierPath()
-        path.move(to: CGPoint(x: 0, y: size.height / 2))
-        path.curve(
-            to: CGPoint(x: size.width, y: size.height / 2),
-            controlPoint1: CGPoint(x: size.width * 0.3, y: size.height),
-            controlPoint2: CGPoint(x: size.width * 0.7, y: size.height)
+    private static let rainPreset: EmitterPreset = {
+        // Soft continuous drizzle — small round droplets falling straight down.
+        //
+        // Why round (not streak): a 2×16 streak texture made the rain look
+        // wind-blown because fast-moving elongated shapes read visually as
+        // "motion lines" even when travelling straight. A round droplet has
+        // no orientation so velocity direction is unambiguous.
+        //
+        // Why velocity = 0: the initial velocity vector used `emissionLongitude`
+        // which appeared to introduce a small horizontal drift. With velocity
+        // zero, direction is governed purely by gravity (`yAcceleration`),
+        // guaranteeing a straight-down path.
+        let cell = CAEmitterCell()
+        cell.contents = ParticleTextures.softCircle(
+            radius: 2.5,
+            color: NSColor.white.withAlphaComponent(0.7).cgColor
         )
-        path.curve(
-            to: CGPoint(x: 0, y: size.height / 2),
-            controlPoint1: CGPoint(x: size.width * 0.7, y: 0),
-            controlPoint2: CGPoint(x: size.width * 0.3, y: 0)
+        cell.birthRate = 260            // dense, steady drizzle
+        cell.lifetime = 5
+        cell.lifetimeRange = 1
+        cell.velocity = 0               // start at rest — gravity does all the work
+        cell.velocityRange = 0
+        cell.emissionLongitude = 0
+        cell.emissionRange = 0
+        cell.scale = 0.9
+        cell.scaleRange = 0.3
+        cell.alphaRange = 0.25
+        cell.yAcceleration = -160       // gentle gravity for a slow fall
+        cell.xAcceleration = 0          // no wind
+        cell.color = NSColor(white: 1.0, alpha: 0.75).cgColor
+        return EmitterPreset(
+            cells: [cell],
+            shape: .line,
+            renderMode: .unordered,
+            position: { CGPoint(x: $0.midX, y: $0.maxY) },
+            size: { CGSize(width: $0.width * 1.1, height: 0) }
         )
-        path.close()
+    }()
 
-        NSColor(calibratedRed: 0.85, green: 0.6, blue: 0.2, alpha: 1.0).setFill()
-        path.fill()
+    // MARK: - Bokeh
 
-        image.unlockFocus()
-        return image
+    private static let bokehPreset: EmitterPreset = {
+        // Bokeh is the photography effect of out-of-focus highlights appearing
+        // as soft glowing orbs. We emit multiple cells with different warm /
+        // cool / pastel colors spread across the whole screen, using additive
+        // blending to get the signature dreamy glow.
+        let palette: [CGColor] = [
+            NSColor(calibratedRed: 1.00, green: 0.90, blue: 0.70, alpha: 0.85).cgColor, // warm amber
+            NSColor(calibratedRed: 0.70, green: 0.88, blue: 1.00, alpha: 0.85).cgColor, // cool blue
+            NSColor(calibratedRed: 1.00, green: 0.75, blue: 0.90, alpha: 0.85).cgColor, // pink
+            NSColor(calibratedRed: 0.85, green: 1.00, blue: 0.85, alpha: 0.85).cgColor, // mint
+        ]
+        let cells = palette.map { color -> CAEmitterCell in
+            let cell = CAEmitterCell()
+            cell.contents = ParticleTextures.softCircle(radius: 32, color: color)
+            cell.birthRate = 0.9      // ~3.6 orbs/sec across all 4 cells — sparse by default
+            cell.lifetime = 9
+            cell.lifetimeRange = 3
+            cell.velocity = 6         // very slow drift
+            cell.velocityRange = 8
+            cell.emissionRange = .pi * 2  // random direction — orbs float freely
+            cell.scale = 1.0
+            cell.scaleRange = 0.6
+            cell.scaleSpeed = 0.04    // slow growth (emulates depth-of-field pull)
+            cell.alphaRange = 0.2
+            cell.alphaSpeed = -0.09   // fade out over lifetime
+            cell.yAcceleration = 3    // gentle upward rise
+            cell.color = color
+            return cell
+        }
+        return EmitterPreset(
+            cells: cells,
+            shape: .rectangle,
+            renderMode: .additive,
+            // Spawn over the entire screen so orbs are always visible across
+            // the whole frame instead of rising from a single edge.
+            position: { CGPoint(x: $0.midX, y: $0.midY) },
+            size: { CGSize(width: $0.width, height: $0.height) }
+        )
+    }()
+
+    // MARK: - Fireflies
+
+    private static let firefliesPreset: EmitterPreset = {
+        let cell = CAEmitterCell()
+        cell.contents = ParticleTextures.softCircle(radius: 3, color: NSColor(calibratedRed: 1, green: 1, blue: 0.6, alpha: 1).cgColor)
+        cell.birthRate = 10
+        cell.lifetime = 6
+        cell.lifetimeRange = 3
+        cell.velocity = 12
+        cell.velocityRange = 18
+        cell.emissionRange = .pi * 2  // all directions
+        cell.scale = 0.8
+        cell.scaleRange = 0.4
+        cell.alphaRange = 0.5
+        cell.alphaSpeed = -0.15
+        cell.yAcceleration = 3
+        cell.color = NSColor(calibratedRed: 1, green: 1, blue: 0.6, alpha: 1).cgColor
+        return EmitterPreset(
+            cells: [cell],
+            shape: .rectangle,
+            renderMode: .additive,
+            position: { CGPoint(x: $0.midX, y: $0.midY) },
+            size: { CGSize(width: $0.width, height: $0.height) }
+        )
+    }()
+
+    // MARK: - Falling Leaves
+
+    private static let leavesPreset: EmitterPreset = {
+        let cell = CAEmitterCell()
+        cell.contents = ParticleTextures.leaf(
+            width: 14,
+            height: 9,
+            color: NSColor(calibratedRed: 0.85, green: 0.6, blue: 0.2, alpha: 1).cgColor
+        )
+        cell.birthRate = 10
+        cell.lifetime = 14
+        cell.lifetimeRange = 6
+        cell.velocity = 28
+        cell.velocityRange = 18
+        cell.emissionLongitude = -.pi / 2  // downward
+        cell.emissionRange = .pi / 6
+        cell.scale = 1.1
+        cell.scaleRange = 0.6
+        cell.alphaRange = 0.2
+        cell.spin = 0.6
+        cell.spinRange = 1.2
+        cell.xAcceleration = 15
+        cell.yAcceleration = -8
+        cell.redRange = 0.15
+        cell.greenRange = 0.2
+        cell.color = NSColor(calibratedRed: 0.85, green: 0.6, blue: 0.2, alpha: 1).cgColor
+        return EmitterPreset(
+            cells: [cell],
+            shape: .line,
+            renderMode: .unordered,
+            position: { CGPoint(x: $0.midX, y: $0.maxY) },
+            size: { CGSize(width: $0.width * 1.2, height: 0) }
+        )
+    }()
+
+    // MARK: - Sakura
+
+    private static let sakuraPreset: EmitterPreset = {
+        // Cherry-blossom petals drift slowly from the top of the screen with
+        // horizontal wind and in-place rotation. Slightly desaturated pink
+        // with subtle color jitter produces a natural palette.
+        let baseColor = NSColor(calibratedRed: 1.0, green: 0.72, blue: 0.82, alpha: 1.0)
+        let cell = CAEmitterCell()
+        cell.contents = ParticleTextures.sakuraPetal(
+            width: 16,
+            height: 14,
+            color: baseColor.cgColor
+        )
+        cell.birthRate = 18
+        cell.lifetime = 13
+        cell.lifetimeRange = 4
+        // Gentle fall: slower than leaves for a softer, more drifting feel.
+        cell.velocity = 40
+        cell.velocityRange = 18
+        cell.emissionLongitude = -.pi / 2         // downward
+        cell.emissionRange = .pi / 5              // ~36° cone for natural spread
+        cell.scale = 0.9
+        cell.scaleRange = 0.5
+        cell.alphaRange = 0.25
+        cell.spin = 0.7                           // slow rotation
+        cell.spinRange = 1.8                      // each petal spins at its own rate
+        cell.xAcceleration = 22                   // persistent soft breeze to the right
+        cell.yAcceleration = -14                  // light gravity
+        cell.redRange = 0.08
+        cell.greenRange = 0.1
+        cell.blueRange = 0.08
+        cell.color = baseColor.cgColor
+        return EmitterPreset(
+            cells: [cell],
+            shape: .line,
+            renderMode: .unordered,
+            position: { CGPoint(x: $0.midX, y: $0.maxY) },
+            size: { CGSize(width: $0.width * 1.3, height: 0) }
+        )
+    }()
+}
+
+// MARK: - Particle Texture Factory
+//
+// CAEmitterCell.contents expects a `CGImage`. We build them with
+// CGBitmapContext directly — the older NSImage.lockFocus +
+// cgImage(forProposedRect:context:hints:) path silently returned nil in many
+// cases on macOS, which is why particle cells used to render nothing even
+// though the emitter was correctly configured.
+
+private enum ParticleTextures {
+
+    private static let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+
+    /// Creates a `CGContext` suitable for drawing a particle texture.
+    /// Returns nil only if the bitmap allocation actually fails.
+    private static func makeContext(width: Int, height: Int) -> CGContext? {
+        return CGContext(
+            data: nil,
+            width: max(width, 1),
+            height: max(height, 1),
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )
     }
 
-    // MARK: - Cleanup
+    /// Soft radial-gradient circle, white-to-transparent. Used for snow,
+    /// bokeh, fireflies — any particle that wants a glow falloff.
+    static func softCircle(radius: CGFloat, color: CGColor) -> CGImage? {
+        let diameter = max(Int(ceil(radius * 2)), 2)
+        guard let ctx = makeContext(width: diameter, height: diameter) else { return nil }
 
-    deinit {
-        // SpriteKit handles scene and emitter cleanup when the view is deallocated.
-        // Calling removeFromParent() and presentScene() from nonisolated deinit
-        // is not allowed under strict concurrency.
+        let center = CGPoint(x: CGFloat(diameter) / 2, y: CGFloat(diameter) / 2)
+        let endRadius = CGFloat(diameter) / 2
+
+        // Build a 2-stop radial gradient that fades to transparent.
+        guard let opaqueColor = color.copy(alpha: 1.0),
+              let transparent = color.copy(alpha: 0.0),
+              let gradient = CGGradient(
+                colorsSpace: colorSpace,
+                colors: [opaqueColor, transparent] as CFArray,
+                locations: [0.0, 1.0]
+              )
+        else { return nil }
+
+        ctx.drawRadialGradient(
+            gradient,
+            startCenter: center, startRadius: 0,
+            endCenter: center, endRadius: endRadius,
+            options: []
+        )
+
+        return ctx.makeImage()
+    }
+
+    /// Solid filled circle (no gradient). Slightly cheaper than `softCircle`.
+    static func solidCircle(radius: CGFloat, color: CGColor) -> CGImage? {
+        let diameter = max(Int(ceil(radius * 2)), 2)
+        guard let ctx = makeContext(width: diameter, height: diameter) else { return nil }
+        ctx.setFillColor(color)
+        ctx.fillEllipse(in: CGRect(x: 0, y: 0, width: diameter, height: diameter))
+        return ctx.makeImage()
+    }
+
+    /// Vertical streak for rain particles. Width is the streak's thickness;
+    /// the streak is drawn as a vertical pill (rounded ends).
+    static func streak(width: CGFloat, height: CGFloat, color: CGColor) -> CGImage? {
+        let w = max(Int(ceil(width)), 2)
+        let h = max(Int(ceil(height)), 2)
+        guard let ctx = makeContext(width: w, height: h) else { return nil }
+        ctx.setFillColor(color)
+        let cornerRadius = CGFloat(w) / 2
+        let rect = CGRect(x: 0, y: 0, width: w, height: h)
+        let path = CGPath(roundedRect: rect, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)
+        ctx.addPath(path)
+        ctx.fillPath()
+        return ctx.makeImage()
+    }
+
+    /// Cherry-blossom petal — a soft teardrop shape with a gentle notch at the
+    /// tip, drawn with a radial gradient to give subtle depth.
+    static func sakuraPetal(width: CGFloat, height: CGFloat, color: CGColor) -> CGImage? {
+        let w = max(Int(ceil(width)), 2)
+        let h = max(Int(ceil(height)), 2)
+        guard let ctx = makeContext(width: w, height: h) else { return nil }
+
+        let widthF = CGFloat(w)
+        let heightF = CGFloat(h)
+
+        // Build a teardrop using two symmetric bezier curves. Origin is
+        // bottom-left in the CG context.
+        let path = CGMutablePath()
+        let tipX = widthF / 2
+        path.move(to: CGPoint(x: tipX, y: 0))                    // narrow tip at bottom
+        path.addQuadCurve(
+            to: CGPoint(x: tipX, y: heightF),                    // rounded top
+            control: CGPoint(x: widthF * 1.15, y: heightF * 0.5)
+        )
+        path.addQuadCurve(
+            to: CGPoint(x: tipX, y: 0),                          // back to tip
+            control: CGPoint(x: -widthF * 0.15, y: heightF * 0.5)
+        )
+        path.closeSubpath()
+
+        // Clip to the petal path, then draw a radial gradient to get a soft
+        // center-bright / edge-soft look.
+        ctx.addPath(path)
+        ctx.clip()
+
+        guard let lightColor = color.copy(alpha: 1.0),
+              let edgeColor = color.copy(alpha: 0.55),
+              let gradient = CGGradient(
+                colorsSpace: colorSpace,
+                colors: [lightColor, edgeColor] as CFArray,
+                locations: [0.0, 1.0]
+              )
+        else {
+            // Fallback to flat fill if gradient construction fails.
+            ctx.setFillColor(color)
+            ctx.fill(CGRect(x: 0, y: 0, width: widthF, height: heightF))
+            return ctx.makeImage()
+        }
+
+        ctx.drawRadialGradient(
+            gradient,
+            startCenter: CGPoint(x: widthF * 0.5, y: heightF * 0.6),
+            startRadius: 0,
+            endCenter: CGPoint(x: widthF * 0.5, y: heightF * 0.5),
+            endRadius: max(widthF, heightF),
+            options: []
+        )
+        return ctx.makeImage()
+    }
+
+    /// Simple leaf shape — a flattened ellipse with two pointed ends.
+    static func leaf(width: CGFloat, height: CGFloat, color: CGColor) -> CGImage? {
+        let w = max(Int(ceil(width)), 2)
+        let h = max(Int(ceil(height)), 2)
+        guard let ctx = makeContext(width: w, height: h) else { return nil }
+
+        let widthF = CGFloat(w)
+        let heightF = CGFloat(h)
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: 0, y: heightF / 2))
+        path.addCurve(
+            to: CGPoint(x: widthF, y: heightF / 2),
+            control1: CGPoint(x: widthF * 0.3, y: heightF),
+            control2: CGPoint(x: widthF * 0.7, y: heightF)
+        )
+        path.addCurve(
+            to: CGPoint(x: 0, y: heightF / 2),
+            control1: CGPoint(x: widthF * 0.7, y: 0),
+            control2: CGPoint(x: widthF * 0.3, y: 0)
+        )
+        path.closeSubpath()
+
+        ctx.setFillColor(color)
+        ctx.addPath(path)
+        ctx.fillPath()
+        return ctx.makeImage()
     }
 }

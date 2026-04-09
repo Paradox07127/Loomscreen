@@ -32,10 +32,12 @@ final class WallpaperVideoPlayer {
 
     // MARK: - Private Properties
 
-    private weak var window: VideoWallpaperWindow?
-    private weak var videoView: VideoContainerView?
-    private var particleOverlay: ParticleOverlayView?
+    private var window: VideoWallpaperWindow?       // strong: NSApp window list isn't always reliable for borderless wallpaper windows
+    private var videoView: VideoContainerView?      // strong: tied to window's lifetime
     private var playerLooper: AVPlayerLooper?
+    /// Buffered particle effect requested before `videoView` was created
+    /// (e.g. user picked a video and the asset is still loading).
+    private var pendingParticleEffect: (ParticleEffect, Double)?
     private var cleanupTasks = Set<AnyCancellable>()
     private var loadingTask: Task<Void, Never>?
     private var frameRateLimitTask: Task<Void, Never>?
@@ -157,30 +159,27 @@ final class WallpaperVideoPlayer {
         self.player = queuePlayer
         self.playerLooper = AVPlayerLooper(player: queuePlayer, templateItem: playerItem)
         
-        // Create and configure window
+        // Create and configure window. VideoContainerView owns both the video
+        // host and the particle overlay internally so frame coordinates are
+        // never crossed between window-screen-space and view-local-space.
         let videoWindow = VideoWallpaperWindow(frame: initialFrame)
         let containerView = VideoContainerView(frame: initialFrame)
-        
-        // Configure view with fit mode
-        containerView.wantsLayer = true
         containerView.fitMode = fitMode
         videoWindow.contentView = containerView
         containerView.setPlayer(player)
-        
+
         // Ensure proper window level and ordering
         videoWindow.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)) - 1)
         videoWindow.orderBack(nil)
-        
-        // Create particle overlay (transparent SpriteKit layer above video)
-        let overlay = ParticleOverlayView(frame: initialFrame)
-        overlay.autoresizingMask = [.width, .height]
-        overlay.wantsLayer = true
-        overlay.layer?.zPosition = 100 // guarantee overlay renders above the AVPlayerLayer
-        containerView.addSubview(overlay)
-        self.particleOverlay = overlay
 
         self.window = videoWindow
         self.videoView = containerView
+
+        // Drain any particle request that arrived before the view was ready.
+        if let pending = pendingParticleEffect {
+            pendingParticleEffect = nil
+            containerView.setParticleEffect(pending.0, density: pending.1)
+        }
 
         setupPlaybackObservers()
         setupFrameObserver()
@@ -220,15 +219,29 @@ final class WallpaperVideoPlayer {
                 .store(in: &cleanupTasks)
         }
         
-        // Monitor for errors
+        // Monitor for genuine errors only.
+        //
+        // AVPlayerLooper rotates AVPlayerItems for seamless looping; on every
+        // rotation the *previous* item is interrupted before playing "to end"
+        // naturally, and AVF posts .AVPlayerItemFailedToPlayToEndTime with
+        // benign codes. Those are normal looper transitions, not real failures,
+        // so we filter them out instead of spamming the log.
+        //
+        // Codes from <AVFoundation/AVError.h>:
+        //   -11847  AVErrorOperationInterrupted
+        //   -11878  AVErrorOperationCancelled
+        let benignLooperCodes: Set<Int> = [-11847, -11878]
         NotificationCenter.default.publisher(for: .AVPlayerItemFailedToPlayToEndTime, object: player?.currentItem)
             .sink { notification in
-                if let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error {
-                    Logger.error("Playback failed: \(error.localizedDescription)", category: .videoPlayer)
+                guard let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error else { return }
+                let nsError = error as NSError
+                if nsError.domain == AVFoundationErrorDomain && benignLooperCodes.contains(nsError.code) {
+                    return  // benign looper transition
                 }
+                Logger.error("Playback failed: \(error.localizedDescription)", category: .videoPlayer)
             }
             .store(in: &cleanupTasks)
-        
+
         // Looping is handled by AVPlayerLooper — no manual seek needed
     }
     
@@ -346,8 +359,18 @@ final class WallpaperVideoPlayer {
         videoView?.fitMode = mode
     }
 
-    func setParticleEffect(_ effect: ParticleEffect) {
-        particleOverlay?.setEffect(effect)
+    func setParticleEffect(_ effect: ParticleEffect, density: Double = 1.0) {
+        guard let videoView = videoView else {
+            // Race: configurePlaybackComponents hasn't run yet (asset still
+            // loading). Buffer the request and apply when videoView is set.
+            pendingParticleEffect = (effect, density)
+            return
+        }
+        videoView.setParticleEffect(effect, density: density)
+    }
+
+    func setParticleDensity(_ density: Double) {
+        videoView?.setParticleDensity(density)
     }
 
     // MARK: - Window Management
@@ -486,9 +509,9 @@ final class WallpaperVideoPlayer {
 
         cleanupTasks.removeAll()
 
-        particleOverlay?.setEffect(.none)
-        particleOverlay?.removeFromSuperview()
-        particleOverlay = nil
+        // Particle overlay is owned by VideoContainerView and torn down when
+        // the window's contentView is released below.
+        videoView?.setParticleEffect(.none, density: 0)
 
         window?.close()
 

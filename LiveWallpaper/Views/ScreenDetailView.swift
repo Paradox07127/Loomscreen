@@ -236,18 +236,25 @@ struct ScreenDetailView: View {
                                                 Slider(value: $particleDensity, in: 0.2...3.0)
                                                     .controlSize(.small)
                                                     .frame(width: 80)
+                                                    .onChange(of: particleDensity) { _, newValue in
+                                                        screenManager.updateParticleDensity(newValue, for: screen)
+                                                    }
+                                                    .accessibilityLabel("Particle density")
+                                                    .accessibilityValue(String(format: "%.1f×", particleDensity))
                                                 Text(String(format: "%.1f", particleDensity))
                                                     .font(.system(size: 12, design: .monospaced))
                                                     .foregroundStyle(.secondary)
                                                     .frame(width: 28, alignment: .trailing)
                                             }
-                                            // TODO: Wire to WallpaperVideoPlayer.setParticleDensity() when available
                                         }
                                     }
 
                                     Divider()
                                     
-                                    SettingRow(icon: "lock.display", iconColor: .blue, title: "Lock Screen") {
+                                    // Note: macOS has no public lock screen wallpaper API.
+                                    // This applies the current frame as the desktop picture
+                                    // via NSWorkspace.setDesktopImageURL.
+                                    SettingRow(icon: "photo.on.rectangle", iconColor: .blue, title: "Desktop Picture") {
                                         HStack(spacing: 6) {
                                             if lockScreenExtracted {
                                                 Image(systemName: "checkmark.circle.fill")
@@ -258,6 +265,7 @@ struct ScreenDetailView: View {
                                                 .labelsHidden()
                                                 .toggleStyle(.switch)
                                                 .onChange(of: setAsLockScreen) { _, newValue in
+                                                    screenManager.updateSetAsDesktopPicture(newValue, for: screen)
                                                     if newValue {
                                                         screenManager.extractLockScreenFrame(for: screen)
                                                         withAnimation { lockScreenExtracted = true }
@@ -267,15 +275,15 @@ struct ScreenDetailView: View {
                                                         }
                                                     }
                                                 }
-                                                .accessibilityLabel("Set as lock screen")
-                                                .accessibilityHint("Uses a frame from the video as your lock screen wallpaper")
-                                                .help("Set the current frame as the lock screen wallpaper")
+                                                .accessibilityLabel("Set current frame as desktop picture")
+                                                .accessibilityHint("Captures the currently visible video frame and uses it as the macOS desktop picture")
+                                                .help("Apply the current video frame as the desktop picture")
                                         }
                                     }
 
                                     Divider()
 
-                                    SettingRow(icon: "battery.75percent.bolt", iconColor: .yellow, title: "Pause on Battery") {
+                                    SettingRow(icon: "bolt.slash", iconColor: .yellow, title: "Pause on Battery") {
                                         Toggle("", isOn: $screenPauseOnBattery)
                                             .labelsHidden()
                                             .toggleStyle(.switch)
@@ -759,8 +767,9 @@ struct ScreenDetailView: View {
     // MARK: - Helper Methods
     func setupPreviewPlayer() {
         guard screen.previewPlayer == nil else { return }
-        
-        if let config = screenManager.getConfiguration(for: screen) {
+
+        if let config = screenManager.getConfiguration(for: screen),
+           config.wallpaperType == .video {
             do {
                 var isStale = false
                 let url = try URL(
@@ -769,37 +778,42 @@ struct ScreenDetailView: View {
                     relativeTo: nil,
                     bookmarkDataIsStale: &isStale
                 )
-                
-                guard url.startAccessingSecurityScopedResource() else { return }
+
+                // Retain the scope for the lifetime of the preview player —
+                // AVFoundation reads pixel data lazily and a released scope
+                // would cause the preview to fail on subsequent access.
+                screen.retainPreviewSecurityScope(url)
+
                 let asset = AVURLAsset(url: url)
                 let playerItem = AVPlayerItem(asset: asset)
                 playerItem.preferredForwardBufferDuration = 5.0
-                
+
                 let previewPlayer = AVPlayer(playerItem: playerItem)
                 previewPlayer.volume = 0
                 previewPlayer.automaticallyWaitsToMinimizeStalling = true
                 screen.previewPlayer = previewPlayer
-                url.stopAccessingSecurityScopedResource()
             } catch { }
         } else if let videoPlayer = screen.videoPlayer, let videoURL = videoPlayer.videoURL {
-            if videoURL.startAccessingSecurityScopedResource() {
-                let asset = AVURLAsset(url: videoURL)
-                let playerItem = AVPlayerItem(asset: asset)
-                let previewPlayer = AVPlayer(playerItem: playerItem)
-                previewPlayer.volume = 0
-                screen.previewPlayer = previewPlayer
-                videoURL.stopAccessingSecurityScopedResource()
-            }
+            screen.retainPreviewSecurityScope(videoURL)
+            let asset = AVURLAsset(url: videoURL)
+            let playerItem = AVPlayerItem(asset: asset)
+            let previewPlayer = AVPlayer(playerItem: playerItem)
+            previewPlayer.volume = 0
+            screen.previewPlayer = previewPlayer
         }
     }
     
     private func loadScreenConfiguration() {
+        // Always reset transient feedback state when switching screens.
+        lockScreenExtracted = false
+
         if let config = screenManager.getConfiguration(for: screen) {
             if playbackSpeed != config.playbackSpeed { playbackSpeed = config.playbackSpeed }
             if selectedFitMode != config.fitMode { selectedFitMode = config.fitMode }
 
             selectedParticleEffect = config.particleEffect
             effectConfig = config.effectConfig
+            particleDensity = config.effectConfig.particleDensity
             setAsLockScreen = config.setAsLockScreen
             screenPauseOnBattery = config.pauseOnBattery
             selectedFrameRateLimit = config.frameRateLimit
@@ -811,6 +825,23 @@ struct ScreenDetailView: View {
             selectedWallpaperType = config.wallpaperType
             htmlContent = config.htmlContent ?? ""
             setupPreviewPlayer()
+        } else {
+            // No configuration — fall back to defaults so previously selected
+            // values from another screen don't leak in.
+            playbackSpeed = 1.0
+            selectedFitMode = .aspectFill
+            selectedParticleEffect = .none
+            effectConfig = .default
+            particleDensity = 1.0
+            setAsLockScreen = false
+            screenPauseOnBattery = false
+            selectedFrameRateLimit = .fps60
+            playlistBookmarks = []
+            shufflePlaylist = false
+            playlistRotationMinutes = nil
+            scheduleSlots = []
+            selectedWallpaperType = .video
+            htmlContent = ""
         }
     }
     
@@ -834,30 +865,27 @@ struct ScreenDetailView: View {
     private func handleSelectedFile(url: URL) {
         withAnimation { isLoading = true }
         cleanupPreviewPlayer()
-        
-        if url.startAccessingSecurityScopedResource() {
-            let asset = AVURLAsset(url: url)
-            let playerItem = AVPlayerItem(asset: asset)
-            let previewPlayer = AVPlayer(playerItem: playerItem)
-            previewPlayer.volume = 0
-            
-            Task { @MainActor in
-                self.screen.previewPlayer = previewPlayer
-                previewPlayer.play()
-            }
-            
-            if let bookmarkData = ResourceUtilities.createBookmark(for: url) {
-                screenManager.setVideo(url: url, bookmarkData: bookmarkData, for: screen)
-            } else {
-                errorMessage = "Error creating secure bookmark. Please try selecting a different video file."
-                showErrorAlert = true
-            }
-            url.stopAccessingSecurityScopedResource()
+
+        // Retain the scope for the preview player's lifetime; ScreenManager.setVideo
+        // will start its own scope for the wallpaper window separately.
+        screen.retainPreviewSecurityScope(url)
+        let asset = AVURLAsset(url: url)
+        let playerItem = AVPlayerItem(asset: asset)
+        let previewPlayer = AVPlayer(playerItem: playerItem)
+        previewPlayer.volume = 0
+
+        Task { @MainActor in
+            self.screen.previewPlayer = previewPlayer
+            previewPlayer.play()
+        }
+
+        if let bookmarkData = ResourceUtilities.createBookmark(for: url) {
+            screenManager.setVideo(url: url, bookmarkData: bookmarkData, for: screen)
         } else {
-            errorMessage = "Failed to access the selected file. Please try selecting it again."
+            errorMessage = "Error creating secure bookmark. Please try selecting a different video file."
             showErrorAlert = true
         }
-        
+
         Task {
             try? await Task.sleep(for: .milliseconds(500))
             withAnimation { isLoading = false }

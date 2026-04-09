@@ -135,6 +135,11 @@ final class SettingsManager {
     func validateConfiguration(for screenID: CGDirectDisplayID) -> Bool {
         guard let configuration = loadConfigurations().first(where: { $0.screenID == screenID }) else { return false }
 
+        // Non-video wallpapers (HTML/shader) don't carry a real bookmark — treat as valid.
+        if configuration.wallpaperType != .video {
+            return true
+        }
+
         do {
             var isStale = false
             let url = try URL(

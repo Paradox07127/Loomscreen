@@ -28,6 +28,7 @@ enum ParticleEffect: String, Codable, CaseIterable, Identifiable {
     case bokeh = "Bokeh"
     case fireflies = "Fireflies"
     case fallingLeaves = "Leaves"
+    case sakura = "Sakura"
 
     var id: String { rawValue }
 
@@ -39,6 +40,7 @@ enum ParticleEffect: String, Codable, CaseIterable, Identifiable {
         case .bokeh: return "sparkles"
         case .fireflies: return "lightbulb"
         case .fallingLeaves: return "leaf"
+        case .sakura: return "camera.macro"
         }
     }
 }
@@ -53,6 +55,7 @@ struct VideoEffectConfig: Codable, Equatable {
     var vignetteIntensity: Double = 0
     var autoTimeTint: Bool = false  // auto-adjust warmth by time of day
     var weatherReactive: Bool = false // auto-adjust effects based on real-time weather
+    var particleDensity: Double = 1.0 // multiplier on particle birth rate (0.2 ... 3.0)
 
     static let `default` = VideoEffectConfig()
 
@@ -71,6 +74,7 @@ struct VideoEffectConfig: Codable, Equatable {
         vignetteIntensity = try container.decodeIfPresent(Double.self, forKey: .vignetteIntensity) ?? 0
         autoTimeTint = try container.decodeIfPresent(Bool.self, forKey: .autoTimeTint) ?? false
         weatherReactive = try container.decodeIfPresent(Bool.self, forKey: .weatherReactive) ?? false
+        particleDensity = try container.decodeIfPresent(Double.self, forKey: .particleDensity) ?? 1.0
     }
 
     init() {}
@@ -170,6 +174,37 @@ enum FrameRateLimit: Int, CaseIterable, Identifiable, Codable {
             return 0
         }
         return rawLimit
+    }
+
+    /// Resolves a concrete frames-per-second value for use as a CIFilter
+    /// composition `frameDuration`. Unlike `getEffectiveLimit` (which returns
+    /// `0` for "use native"), this always returns a positive number so the
+    /// caller can build a non-degenerate `CMTime`.
+    ///
+    /// Resolution order:
+    ///   1. Use the result of `getEffectiveLimit` when it produces a cap.
+    ///   2. Fall back to `videoFrameRate` if known.
+    ///   3. Fall back to `screenRefreshRate` if known.
+    ///   4. Last resort: use the limit's nominal raw value (60 for unlimited).
+    static func resolveCompositionFPS(
+        limit: FrameRateLimit,
+        videoFrameRate: Double,
+        screenRefreshRate: Double
+    ) -> Double {
+        let effectiveLimit = limit.getEffectiveLimit(
+            videoFrameRate: videoFrameRate,
+            screenRefreshRate: screenRefreshRate
+        )
+        if effectiveLimit > 0 {
+            return Double(effectiveLimit)
+        }
+        if videoFrameRate > 0 {
+            return videoFrameRate
+        }
+        if screenRefreshRate > 0 {
+            return screenRefreshRate
+        }
+        return Double(limit == .unlimited ? 60 : limit.rawValue)
     }
 }
 
