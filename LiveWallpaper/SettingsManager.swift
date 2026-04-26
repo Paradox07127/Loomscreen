@@ -34,6 +34,11 @@ final class SettingsManager {
         persistConfigurations(configs)
     }
 
+    func replaceAllConfigurations(_ configurations: [ScreenConfiguration]) {
+        cachedConfigurations = configurations
+        persistConfigurations(configurations)
+    }
+
     func loadConfigurations() -> [ScreenConfiguration] {
         if let cached = cachedConfigurations { return cached }
         guard let data = UserDefaults.standard.data(forKey: Keys.screenConfigurations) else { return [] }
@@ -135,15 +140,19 @@ final class SettingsManager {
     func validateConfiguration(for screenID: CGDirectDisplayID) -> Bool {
         guard let configuration = loadConfigurations().first(where: { $0.screenID == screenID }) else { return false }
 
-        // Non-video wallpapers (HTML/shader) don't carry a real bookmark — treat as valid.
-        if configuration.wallpaperType != .video {
+        guard configuration.wallpaperType == .video else {
             return true
+        }
+
+        guard let bookmarkData = configuration.videoBookmarkData else {
+            Logger.error("Missing video bookmark for active video wallpaper on screen \(screenID)", category: .fileAccess)
+            return false
         }
 
         do {
             var isStale = false
             let url = try URL(
-                resolvingBookmarkData: configuration.videoBookmarkData,
+                resolvingBookmarkData: bookmarkData,
                 options: .withSecurityScope,
                 relativeTo: nil,
                 bookmarkDataIsStale: &isStale
@@ -161,7 +170,7 @@ final class SettingsManager {
                     includingResourceValuesForKeys: noKeys,
                     relativeTo: noRelative
                 ) {
-                    let updatedConfig = configuration.withUpdatedBookmark(updatedBookmark)
+                    let updatedConfig = configuration.withUpdatedActiveBookmark(updatedBookmark)
                     saveConfiguration(updatedConfig)
                     Logger.info("Refreshed stale bookmark for screen \(screenID)", category: .fileAccess)
                 }

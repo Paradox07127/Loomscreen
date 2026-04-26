@@ -53,11 +53,10 @@ struct Sidebar: View {
             Section(header: HStack(spacing: 4) {
                 Text("Displays").font(.caption).bold().foregroundStyle(.secondary)
                 Button(action: refreshDisplays) {
-                    Image(systemName: isRefreshing ? "arrow.triangle.2.circlepath.circle.fill" : "arrow.triangle.2.circlepath")
+                    Image(systemName: "arrow.triangle.2.circlepath")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.secondary)
-                        .rotationEffect(isRefreshing ? .degrees(360) : .degrees(0))
-                        .animation(isRefreshing ? Animation.linear(duration: 1).repeatForever(autoreverses: false) : .default, value: isRefreshing)
+                        .symbolEffect(.rotate, options: .repeat(.continuous), isActive: isRefreshing)
                 }
                 .buttonStyle(.plain)
                 .help("Refresh display list")
@@ -76,8 +75,8 @@ struct Sidebar: View {
                         NavigationLink(value: Navigation.screen(screen.id)) {
                             ScreenRow(screen: screen)
                         }
-                        .onDrop(of: [.movie, .video, .mpeg4Movie, .quickTimeMovie, .avi], isTargeted: nil) { providers in
-                            handleVideoDrop(providers: providers, for: screen)
+                        .dropDestination(for: URL.self) { urls, _ in
+                            return handleVideoDrop(urls: urls, for: screen)
                         }
                     }
                 }
@@ -88,48 +87,42 @@ struct Sidebar: View {
                 Text("Dashboard").font(.caption).bold().foregroundStyle(.secondary)
             }) {
                 SystemMonitorView()
-                    .padding(.vertical, 4)
+                    .padding(.vertical, 2)
+                    // 显式 listRowInsets 让仪表盘 row 的左右内边距与 sidebar
+                    // 视觉边界对齐；不依赖 List 默认 inset（macOS 26 下会随
+                    // sidebar 宽度动态变化，导致拉伸时内容相对漂移）。
+                    // 收紧到 4pt 横向，让 dashboard 卡片更贴近 sidebar 边缘。
+                    .listRowInsets(EdgeInsets(top: 2, leading: 4, bottom: 2, trailing: 4))
+                    .listRowBackground(Color.clear)
             }
         }
         .listStyle(.sidebar)
-        .frame(minWidth: 200)
+        // 初始宽度 220，最大 280 — 比之前更紧凑。
+        .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
     }
     
     private func refreshDisplays() {
-        withAnimation {
+        withAnimation(.snappy(duration: 0.2)) {
             isRefreshing = true
         }
 
         screenManager.refreshScreens()
 
-        // Reset the animation after a delay
         Task {
             try? await Task.sleep(for: .milliseconds(500))
-            withAnimation {
+            withAnimation(.snappy(duration: 0.2)) {
                 isRefreshing = false
             }
         }
     }
 
-    private func handleVideoDrop(providers: [NSItemProvider], for screen: Screen) -> Bool {
-        guard let provider = providers.first else { return false }
-        if provider.hasItemConformingToTypeIdentifier(UTType.movie.identifier) {
-            provider.loadItem(forTypeIdentifier: UTType.movie.identifier, options: nil) { item, error in
-                let resolvedURL: URL?
-                if let data = item as? Data { resolvedURL = URL(dataRepresentation: data, relativeTo: nil) }
-                else if let itemURL = item as? URL { resolvedURL = itemURL }
-                else { resolvedURL = nil }
-
-                Task { @MainActor in
-                    guard let videoURL = resolvedURL else { return }
-                    if let bookmarkData = ResourceUtilities.createBookmark(for: videoURL) {
-                        screenManager.setVideo(url: videoURL, bookmarkData: bookmarkData, for: screen)
-                    }
-                }
-            }
-            return true
+    private func handleVideoDrop(urls: [URL], for screen: Screen) -> Bool {
+        guard let videoURL = urls.first else { return false }
+        guard let bookmarkData = ResourceUtilities.createBookmark(for: videoURL) else {
+            return false
         }
-        return false
+        screenManager.setVideo(url: videoURL, bookmarkData: bookmarkData, for: screen)
+        return true
     }
 }
 
@@ -137,12 +130,22 @@ struct Sidebar: View {
 struct ScreenRow: View {
     var screen: Screen
     @Environment(ScreenManager.self) private var screenManager
-    @State private var isPlaying: Bool = false
+
+    /// 缓存 effect badge 状态。直接在 body 里读 config 不会响应
+    /// `.wallpaperConfigurationDidChange` 通知（@Observable screens
+    /// 数组本身没变），需要自管 state 订阅通知。
+    @State private var hasEffectBadge: Bool = false
+
+    private var sessionSummary: WallpaperSessionSummary {
+        screen.wallpaperSessionSummary
+    }
 
     var body: some View {
+        let summary = sessionSummary
+
         HStack(spacing: 12) {
-            Image(systemName: screen.videoPlayer != nil ? "display.and.arrow.down" : "display")
-                .foregroundStyle(screen.videoPlayer != nil ? Color.accentColor : Color.secondary)
+            Image(systemName: iconName(for: summary))
+                .foregroundStyle(iconColor(for: summary))
                 .frame(width: 32, height: 24)
 
             VStack(alignment: .leading, spacing: 4) {
@@ -155,48 +158,103 @@ struct ScreenRow: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                    if screen.videoPlayer != nil {
+                    if summary.isConfigured {
                         HStack(spacing: 2) {
-                            Circle()
-                                .fill(isPlaying ? Color.green : Color.orange)
-                                .frame(width: 6, height: 6)
+                            Image(systemName: "circle.fill")
+                                .font(.system(size: 6))
+                                .foregroundStyle(statusColor(for: summary))
+                                .symbolEffect(.pulse, options: .repeat(.continuous), isActive: summary.activity == .active)
 
-                            Text(isPlaying ? "Playing" : "Paused")
+                            Text(statusText(for: summary))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
 
-                        if let config = screenManager.getConfiguration(for: screen),
-                           config.effectConfig.hasActiveEffect || config.particleEffect != .none {
+                        if hasEffectBadge {
                             Image(systemName: "sparkles")
                                 .font(.caption2)
                                 .foregroundStyle(Color.accentColor)
+                                .transition(.scale.combined(with: .opacity))
                         }
                     }
                 }
             }
         }
         .padding(.vertical, 2)
-        .onAppear {
-            updatePlaybackState()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: WallpaperVideoPlayer.didChangePlaybackStateNotification)) { notification in
-            guard let videoPlayer = notification.object as? WallpaperVideoPlayer,
-                  videoPlayer === screen.videoPlayer else {
-                return
-            }
-            if let playing = notification.userInfo?["isPlaying"] as? Bool {
-                isPlaying = playing
+        .onAppear { refreshEffectBadge() }
+        .onChange(of: screen.id) { refreshEffectBadge() }
+        .onReceive(NotificationCenter.default.publisher(for: .wallpaperConfigurationDidChange)) { notification in
+            if let changedID = notification.userInfo?["screenID"] as? CGDirectDisplayID,
+               changedID == screen.id {
+                withAnimation(.snappy(duration: 0.2)) { refreshEffectBadge() }
             }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(screen.name), \(Int(screen.frame.width)) by \(Int(screen.frame.height)) pixels")
-        .accessibilityValue(screen.videoPlayer != nil ? (isPlaying ? "Playing video" : "Video paused") : "No video configured")
+        .accessibilityValue(accessibilityValue(for: summary))
         .accessibilityHint("Double-tap to configure this display")
     }
 
-    private func updatePlaybackState() {
-        isPlaying = screen.videoPlayer?.isPlaying ?? false
+    private func refreshEffectBadge() {
+        guard let config = screenManager.getConfiguration(for: screen) else {
+            hasEffectBadge = false
+            return
+        }
+        hasEffectBadge = config.effectConfig.hasActiveEffect || config.particleEffect != .none
+    }
+
+    private func iconName(for summary: WallpaperSessionSummary) -> String {
+        switch summary.wallpaperType {
+        case .video:
+            return summary.isConfigured ? "display.and.arrow.down" : "display"
+        case .html:
+            return "globe"
+        case .metalShader:
+            return "sparkles.rectangle.stack"
+        case nil:
+            return "display"
+        }
+    }
+
+    private func iconColor(for summary: WallpaperSessionSummary) -> Color {
+        summary.isConfigured ? Color.accentColor : Color.secondary
+    }
+
+    private func statusColor(for summary: WallpaperSessionSummary) -> Color {
+        switch summary.activity {
+        case .active:
+            return .green
+        case .paused:
+            return .orange
+        case .inactive:
+            return .secondary
+        }
+    }
+
+    private func statusText(for summary: WallpaperSessionSummary) -> String {
+        switch summary.wallpaperType {
+        case .html:
+            return "HTML"
+        case .metalShader:
+            return "Shader"
+        case .video:
+            return summary.activity == .active ? "Playing" : "Paused"
+        case nil:
+            return "Not configured"
+        }
+    }
+
+    private func accessibilityValue(for summary: WallpaperSessionSummary) -> String {
+        switch summary.wallpaperType {
+        case .html:
+            return "HTML wallpaper active"
+        case .metalShader:
+            return "Shader wallpaper active"
+        case .video:
+            return summary.activity == .active ? "Playing video" : "Video paused"
+        case nil:
+            return "No wallpaper configured"
+        }
     }
 }
 
@@ -234,7 +292,7 @@ struct DetailContent: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(NSColor.underPageBackgroundColor))
-        .animation(.easeInOut, value: selection)
+        .animation(.snappy(duration: 0.3), value: selection)
     }
 }
 
@@ -245,25 +303,28 @@ struct EmptyStateView: View {
     let message: String
 
     var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: icon)
-                .font(.system(size: 48))
-                .foregroundStyle(.secondary.opacity(0.7))
-                .frame(width: 80, height: 80)
-                .glassEffect(.regular, in: .circle)
+        GlassEffectContainer(spacing: 12) {
+            VStack(spacing: 20) {
+                Image(systemName: icon)
+                    .font(.system(size: 48))
+                    .foregroundStyle(.secondary.opacity(0.7))
+                    .frame(width: 80, height: 80)
+                    .glassEffect(.regular, in: .circle)
+                    .contentTransition(.symbolEffect(.replace))
 
-            Text(title)
-                .font(.title2)
-                .fontWeight(.semibold)
+                Text(title)
+                    .font(.title2)
+                    .fontWeight(.semibold)
 
-            Text(message)
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 300)
+                Text(message)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 300)
+            }
+            .padding(32)
+            .glassEffect(.regular, in: .rect(cornerRadius: 20))
         }
-        .padding(32)
-        .glassEffect(.regular, in: .rect(cornerRadius: 20))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

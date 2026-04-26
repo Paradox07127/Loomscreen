@@ -19,11 +19,9 @@ final class FullScreenDetector {
 
     // MARK: - Initialization
 
-    init(pollInterval: TimeInterval = 5.0) {
+    init(pollInterval: TimeInterval = 30.0) {
         self.pollInterval = pollInterval
         setupNotifications()
-        startPolling()
-        // Perform initial check
         checkFullScreenState()
     }
 
@@ -45,15 +43,34 @@ final class FullScreenDetector {
             .store(in: &cancellables)
     }
 
-    private func startPolling() {
+    var isFallbackPollingEnabled: Bool {
+        pollTimer != nil
+    }
+
+    func setFallbackPollingEnabled(_ enabled: Bool) {
+        if enabled {
+            startPollingIfNeeded()
+            checkFullScreenState()
+        } else {
+            stopPolling()
+        }
+    }
+
+    private func startPollingIfNeeded() {
+        guard pollTimer == nil else { return }
+
         pollTimer = Timer.publish(every: pollInterval, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in self?.checkFullScreenState() }
     }
 
-    func stop() {
+    private func stopPolling() {
         pollTimer?.cancel()
         pollTimer = nil
+    }
+
+    func stop() {
+        stopPolling()
         cancellables.removeAll()
     }
 
@@ -90,9 +107,18 @@ final class FullScreenDetector {
 
         let ownPID = ProcessInfo.processInfo.processIdentifier
 
-        // Get primary screen height for coordinate conversion
-        // CGWindowList uses top-left origin; NSScreen uses bottom-left
-        let primaryHeight = screens.first?.frame.height ?? 0
+        // Use CGDisplayBounds for each screen — it already returns the
+        // top-left-origin CG coordinate space, identical to CGWindowList.
+        // The previous code derived a "primary height" from
+        // `NSScreen.screens.first` and flipped manually; that broke on
+        // multi-monitor layouts where the first screen is not the global
+        // origin (e.g. external display above the laptop).
+        let screenFrames: [(id: CGDirectDisplayID, frame: CGRect)] = screens.compactMap { screen in
+            guard let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else {
+                return nil
+            }
+            return (id, CGDisplayBounds(id))
+        }
 
         for info in windowList {
             guard let pid = info[kCGWindowOwnerPID as String] as? pid_t,
@@ -116,24 +142,16 @@ final class FullScreenDetector {
                 height: boundsDict["Height"] ?? 0
             )
 
-            // Check against each screen
-            for screen in screens {
-                guard let screenID = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else {
-                    continue
-                }
-
-                let sf = screen.frame
-                // Convert NSScreen frame (bottom-left origin) to CG coordinates (top-left origin)
-                let cgScreenFrame = CGRect(
-                    x: sf.origin.x,
-                    y: primaryHeight - sf.origin.y - sf.height,
-                    width: sf.width,
-                    height: sf.height
-                )
-
-                // A window covering the full screen dimension indicates fullscreen
-                if windowFrame.width >= cgScreenFrame.width &&
-                   windowFrame.height >= cgScreenFrame.height {
+            for (screenID, cgScreenFrame) in screenFrames {
+                // 只比较宽高会让"屏幕 A 上的全屏窗口"误判为也覆盖了屏幕 B
+                // （当两屏分辨率相同时），从而把 B 的壁纸 orderOut。
+                // 改用与目标屏幕的相交面积：当窗口覆盖该屏幕 ≥95% 时才算
+                // 真正全屏，避免跨屏误判。
+                let intersection = windowFrame.intersection(cgScreenFrame)
+                guard !intersection.isNull else { continue }
+                let coverage = intersection.width * intersection.height
+                let screenArea = cgScreenFrame.width * cgScreenFrame.height
+                if screenArea > 0, coverage >= screenArea * 0.95 {
                     result[screenID] = true
                 }
             }

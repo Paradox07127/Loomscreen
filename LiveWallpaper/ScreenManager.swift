@@ -1,10 +1,8 @@
 import SwiftUI
 import Combine
-import AVKit
-import os.log
 import Observation
 
-// Manages video playback on multiple screens
+// Orchestrates wallpaper sessions across all connected screens.
 @MainActor @Observable
 final class ScreenManager {
     // MARK: - Properties
@@ -13,20 +11,20 @@ final class ScreenManager {
     // No locks are needed for thread safety.
     private(set) var screens: [Screen] = []
 
-    /// Last user-facing error, observed by SwiftUI views.
-    var lastError: AppError?
-
     @ObservationIgnored private var cleanupTasks: Set<AnyCancellable> = []
-    @ObservationIgnored private let configRepo = ConfigurationRepository()
+    @ObservationIgnored private let displayRegistry = DisplayRegistry()
+    @ObservationIgnored private let configurationStore = WallpaperConfigurationStore()
+    @ObservationIgnored private let ambientSessionBuilder = AmbientWallpaperSessionBuilder()
+    @ObservationIgnored private let automationCoordinator = WallpaperAutomationCoordinator()
     @ObservationIgnored private let powerPolicy = PowerPolicyController()
     @ObservationIgnored private let powerMonitor: PowerMonitor = .shared
     @ObservationIgnored private let playbackStateSubject = CurrentValueSubject<Bool, Never>(false)
     @ObservationIgnored private let fullScreenDetector = FullScreenDetector()
-    @ObservationIgnored private let effectsManager = VideoEffectsManager()
+    @ObservationIgnored private let videoEffectsApplier = VideoEffectsApplicationService()
     @ObservationIgnored let weatherService = WeatherReactiveService()
-    @ObservationIgnored private var scheduleMonitorTask: Task<Void, Never>?
-    @ObservationIgnored private var playlistRotationTask: Task<Void, Never>?
-
+    @ObservationIgnored private lazy var lockScreenSnapshotCoordinator = LockScreenSnapshotCoordinator { [weak self] in
+        self?.captureDesktopSnapshotsForLockIfNeeded()
+    }
     // MARK: - Initialization
     init() {
         Logger.notice("ScreenManager initializing", category: .screenManager)
@@ -34,6 +32,7 @@ final class ScreenManager {
         setupScreenObservers()
         setupMemoryMonitoring()
         setupFullScreenDetection()
+        _ = lockScreenSnapshotCoordinator
 
         // Add notification observer for video player playback state changes
         NotificationCenter.default.publisher(for: WallpaperVideoPlayer.didChangePlaybackStateNotification)
@@ -81,7 +80,7 @@ final class ScreenManager {
     
     private func handleScreenParameterChange() {
         refreshRateCache.removeAll()
-        refreshScreens(preserveVideoPlayers: true)
+        refreshScreens(preserveRuntimeSessions: true)
 
         // Delay to ensure screen information is fully updated
         Task { [weak self] in
@@ -95,24 +94,15 @@ final class ScreenManager {
 
     }
 
-    /// Updates all video player window frames to match their screen positions
+    /// Updates all wallpaper window frames to match their screen positions.
     private func updateAllWindowFrames() {
         for screen in screens {
-            guard let player = screen.videoPlayer else { continue }
-
-            if let nsScreen = findNSScreen(for: screen.id) {
-                player.updateWindowFrame(nsScreen.frame)
+            if let nsScreen = displayRegistry.findNSScreen(for: screen.id) {
+                screen.updateRuntimeFrame(to: nsScreen.frame)
             } else {
                 Logger.warning("Could not find NSScreen for screen ID \(screen.id), using stored frame", category: .screenManager)
-                player.updateWindowFrame(screen.frame)
+                screen.updateRuntimeFrame(to: screen.frame)
             }
-        }
-    }
-
-    /// Finds the NSScreen object for a given display ID
-    private func findNSScreen(for screenID: CGDirectDisplayID) -> NSScreen? {
-        NSScreen.screens.first { nsScreen in
-            (nsScreen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID) == screenID
         }
     }
     
@@ -130,7 +120,7 @@ final class ScreenManager {
         // Observe hiddenScreens changes from @Observable FullScreenDetector
         // using a recursive withObservationTracking loop.
         observeFullScreenChanges()
-        // Perform initial check
+        fullScreenDetector.checkNow()
         handleFullScreenChange(fullScreenDetector.hiddenScreens)
     }
 
@@ -148,27 +138,47 @@ final class ScreenManager {
 
     private func handleFullScreenChange(_ hiddenScreens: [CGDirectDisplayID: Bool]) {
         let globalSettings = SettingsManager.shared.loadGlobalSettings()
-        guard globalSettings.pauseOnFullScreen else { return }
 
         for screen in screens {
-            guard let player = screen.videoPlayer else { continue }
             let isHidden = hiddenScreens[screen.id] ?? false
+            let shouldApplyFullScreenPolicy = WallpaperPolicyEngine.shouldApplyFullScreenPolicy(
+                globalSettings: globalSettings,
+                isHiddenByFullScreen: isHidden
+            )
 
-            if isHidden && player.isPlaying {
-                player.pause()
-                powerPolicy.markPausedByFullScreen(screen.id)
-            } else if !isHidden && powerPolicy.wasPausedByFullScreen(screen.id) {
-                player.play()
-                powerPolicy.markResumedFromFullScreen(screen.id)
+            if shouldApplyFullScreenPolicy {
+                // Mark-paused-by-full-screen only when the session was ACTIVELY
+                // playing at the time. If it was already paused (e.g. by power
+                // policy), skipping the mark is correct: exit-full-screen must
+                // not "resume" something the user/power didn't want playing.
+                if let playback = screen.playbackController, playback.isPlaying {
+                    playback.pause()
+                    powerPolicy.markPausedByFullScreen(screen.id)
+                }
+                // 不再 orderOut 壁纸窗口：Mission Control / 多任务上划时
+                // 我们仍然希望看到当前帧，而不是被 orderOut 后露出系统默认
+                // 壁纸。pause + .suspended profile 已能停掉解码 / 动画。
+            } else {
+                if let playback = screen.playbackController,
+                   powerPolicy.wasPausedByFullScreen(screen.id) {
+                    playback.play()
+                    powerPolicy.markResumedFromFullScreen(screen.id)
+                }
             }
+
+            applyPerformancePolicy(
+                to: screen,
+                globalSettings: globalSettings,
+                powerSource: powerMonitor.currentPowerSource,
+                isHiddenByFullScreen: shouldApplyFullScreenPolicy
+            )
         }
         updatePlaybackState()
     }
 
     // MARK: - Screen Management
-    func refreshScreens(preserveVideoPlayers: Bool = true) {
-        // Get all current screens from system
-        let newScreens = NSScreen.screens.map { Screen(nsScreen: $0) }
+    func refreshScreens(preserveRuntimeSessions: Bool = true) {
+        let newScreens = displayRegistry.currentScreens()
         Logger.screensDetected(newScreens.count)
 
         let oldScreens = screens
@@ -179,74 +189,65 @@ final class ScreenManager {
         for screenID in oldScreenIDs.subtracting(newScreenIDs) {
             if let screen = oldScreens.first(where: { $0.id == screenID }) {
                 Logger.info("Cleaning up removed screen \(screenID)", category: .screenManager)
-                cleanupScreen(screen)
+                releaseRuntimeSession(screen)
             }
             
         }
         
-        // Preserve existing video players for screens that are still present
         var updatedScreens = [Screen]()
-        
+
         for newScreen in newScreens {
-            // Check if this screen existed before
-            if preserveVideoPlayers, let existingScreen = oldScreens.first(where: { $0.id == newScreen.id }) {
-                // Preserve the video player from the existing screen
-                newScreen.videoPlayer = existingScreen.videoPlayer
-                newScreen.previewPlayer = existingScreen.previewPlayer
-                
+            if preserveRuntimeSessions, let existingScreen = oldScreens.first(where: { $0.id == newScreen.id }) {
+                newScreen.adoptRuntimeSession(from: existingScreen)
             }
-            
+
             updatedScreens.append(newScreen)
         }
 
-        // Update screens array
         screens = updatedScreens
 
-        // Configure newly added screens (only those that weren't present before)
         for screen in newScreens where newScreenIDs.subtracting(oldScreenIDs).contains(screen.id) {
             Logger.info("Configuring new screen \(screen.id)", category: .screenManager)
             loadConfigurationForScreen(screen)
         }
-        
+
+        updateAllWindowFrames()
 
         updatePlaybackState()
-        
-        // Post notification that screens were refreshed
+        updateFullScreenFallbackPolling()
+
         NotificationCenter.default.post(name: .screensRefreshed, object: nil)
     }
-    
-    func clearVideoForScreen(_ screen: Screen) {
-        Logger.info("Clearing video for screen \(screen.id)", category: .screenManager)
-        // Clean up existing video player
-        screen.videoPlayer?.cleanup()
-        screen.videoPlayer = nil
 
-        // Clean up preview player
-        screen.previewPlayer?.pause()
-        screen.previewPlayer = nil
+    func clearWallpaperForScreen(_ screen: Screen) {
+        Logger.info("Clearing wallpaper for screen \(screen.id)", category: .screenManager)
+        screen.resetRuntimeSession()
+        configurationStore.remove(for: screen.id)
+        powerPolicy.clearTracking(for: screen.id)
+        postConfigurationDidChange(for: screen.id)
+        notifyWallpaperSessionChanged()
+    }
 
-        // Remove configuration from settings
-        SettingsManager.shared.cleanSettingsForScreen(screen.id)
-
-        // Remove from cache
-        configRepo.remove(for: screen.id)
-
-        // Remove from power management tracking
+    /// Tears down the live runtime session for a screen without touching persistence.
+    /// Use `clearWallpaperForScreen(_:)` when you also want to delete the saved
+    /// configuration for that screen.
+    private func releaseRuntimeSession(_ screen: Screen) {
+        videoEffectsApplier.cancelInflight(for: screen.id)
+        screen.resetRuntimeSession()
         powerPolicy.clearTracking(for: screen.id)
     }
 
-    private func cleanupScreen(_ screen: Screen) {
-        screen.videoPlayer?.cleanup()
-        screen.videoPlayer = nil
-        screen.previewPlayer?.pause()
-        screen.previewPlayer = nil
-        // Remove from power management tracking
-        powerPolicy.clearTracking(for: screen.id)
+    func resetAllWallpaperSessions() {
+        for screen in screens {
+            releaseRuntimeSession(screen)
+        }
+        configurationStore.clearCache()
+        notifyWallpaperSessionChanged()
     }
     
     // MARK: - Configuration Management
     private func loadSavedConfigurations() {
-        let configurations = configRepo.loadAll()
+        let configurations = configurationStore.loadAll()
 
         for configuration in configurations {
             if let screen = screens.first(where: { $0.id == configuration.screenID }) {
@@ -258,107 +259,118 @@ final class ScreenManager {
     private func loadConfigurationForScreen(_ screen: Screen) {
         // If screen already has a video player, just update settings
         if screen.videoPlayer != nil {
-            if let cachedConfig = configRepo.get(for: screen.id) {
+            if let cachedConfig = configurationStore.get(for: screen.id) {
                 // Apply configuration without recreating the player
                 applyConfiguration(cachedConfig, to: screen, preservingState: true)
             }
             return
         }
 
-        guard let config = configRepo.get(for: screen.id) else { return }
+        guard let config = configurationStore.get(for: screen.id) else { return }
+        restoreWallpaperSession(for: screen, configuration: config, preservingState: false)
+    }
 
-        // Restore non-video wallpaper modes without trying to resolve a video bookmark.
-        switch config.wallpaperType {
-        case .html:
-            if let url = config.htmlContent, !url.isEmpty {
-                setHTMLWallpaper(url: url, for: screen)
-            }
-        case .metalShader:
-            if let preset = config.shaderPreset {
-                setShaderWallpaper(preset: preset, for: screen)
-            }
+    private func restoreWallpaperSession(
+        for screen: Screen,
+        configuration: ScreenConfiguration,
+        preservingState: Bool
+    ) {
+        guard let definition = WallpaperSessionDefinition(configuration: configuration) else {
+            Logger.warning("Skipping malformed wallpaper configuration for screen \(screen.id)", category: .screenManager)
+            releaseRuntimeSession(screen)
+            return
+        }
+
+        switch definition {
         case .video:
-            applyConfiguration(config, to: screen)
+            applyConfiguration(configuration, to: screen, preservingState: preservingState)
+        case .html(let source):
+            activateAmbientWallpaper(.html(source), for: screen)
+        case .metalShader(let preset):
+            activateAmbientWallpaper(.metalShader(preset), for: screen)
         }
     }
     
     // MARK: - Video Management
+
+    /// Set (or replace) the primary video for a screen. Existing per-screen
+    /// settings — effects, playlist, schedule, fit mode, playback speed, frame
+    /// rate limit, power — are all preserved. Only the underlying video file
+    /// is swapped, honoring the "just change the video, keep my setup" UX.
     func setVideo(url: URL, bookmarkData: Data, for screen: Screen) {
         Logger.info("Setting video for screen \(screen.id): \(url.lastPathComponent)", category: .screenManager)
-        
-        // Skip full reload if the same video is already configured.
-        if let existingConfig = configRepo.get(for: screen.id) {
+
+        let globalSettings = SettingsManager.shared.loadGlobalSettings()
+        let existing = configurationStore.get(for: screen.id)
+
+        // Is the user re-picking the SAME file? If so we only need to refresh
+        // the bookmark and reapply settings on the existing player, avoiding
+        // a full reload.
+        let isSameURL: Bool = {
+            guard let existingBookmark = existing?.videoBookmarkData else { return false }
             var isStale = false
-            if let existingURL = try? URL(
-                resolvingBookmarkData: existingConfig.videoBookmarkData,
+            let resolved = try? URL(
+                resolvingBookmarkData: existingBookmark,
                 options: .withSecurityScope,
                 relativeTo: nil,
                 bookmarkDataIsStale: &isStale
-            ), existingURL == url {
-                updateExistingVideoConfiguration(existingConfig, url: url, bookmarkData: bookmarkData, for: screen)
-                return
-            }
-        }
+            )
+            return resolved == url
+        }()
 
-        let globalSettings = SettingsManager.shared.loadGlobalSettings()
-        let configuration = ScreenConfiguration(
-            screenID: screen.id,
-            videoBookmarkData: bookmarkData,
-            playbackSpeed: 1.0,
-            fitMode: .aspectFill,
-            pauseOnBattery: globalSettings.globalPauseOnBattery,
-            frameRateLimit: FrameRateLimit.fps60
-        )
-        
-        configRepo.save(configuration)
-
-        // Validate configuration was saved correctly
-        if SettingsManager.shared.validateConfiguration(for: screen.id) {
-            // Hold a security scope for the duration of the async asset validation —
-            // the caller's scope (if any) may be released before this Task runs.
-            let scopedURL = url
-            let didStartScope = scopedURL.startAccessingSecurityScopedResource()
-            Task {
-                defer {
-                    if didStartScope {
-                        scopedURL.stopAccessingSecurityScopedResource()
-                    }
-                }
-                do {
-                    let asset = AVURLAsset(url: scopedURL)
-                    let isPlayable = try await asset.load(.isPlayable)
-
-                    guard isPlayable else {
-                        throw NSError(domain: "ScreenManager", code: 404, userInfo: [
-                            NSLocalizedDescriptionKey: "The selected video is not playable."
-                        ])
-                    }
-
-                    await MainActor.run { [weak self] in
-                        self?.setupVideoPlayback(asset: asset, screen: screen)
-                    }
-                } catch {
-                    await MainActor.run {
-                        Logger.error("Failed to setup video: \(error.localizedDescription)", category: .screenManager)
-                    }
-                }
-            }
+        // Build the updated configuration. If there is no prior config, start
+        // from defaults (first-time setup); otherwise preserve everything and
+        // swap only the primary video identity.
+        var configuration: ScreenConfiguration
+        if var prior = existing {
+            prior.replacePrimaryVideo(bookmarkData: bookmarkData)
+            configuration = prior
         } else {
-            Logger.error("Failed to save video configuration for screen \(screen.id)", category: .screenManager)
+            configuration = ScreenConfiguration(
+                screenID: screen.id,
+                videoBookmarkData: bookmarkData,
+                pauseOnBattery: globalSettings.globalPauseOnBattery
+            )
         }
-    }
-    
-    private func updateExistingVideoConfiguration(_ existingConfig: ScreenConfiguration, url: URL, bookmarkData: Data, for screen: Screen) {
-        // Update the bookmark data while preserving other settings
-        let updatedConfig = existingConfig.withUpdatedBookmark(bookmarkData)
-        saveConfiguration(updatedConfig)
+        configurationStore.save(configuration)
+
+        if isSameURL, screen.videoPlayer != nil {
+            // Keep the existing player; reapply settings on it.
+            applyConfiguration(configuration, to: screen, preservingState: true)
+            return
+        }
+
+        // New URL (or no live player) — validate and set up playback.
+        guard SettingsManager.shared.validateConfiguration(for: screen.id) else {
+            Logger.error("Failed to save video configuration for screen \(screen.id)", category: .screenManager)
+            return
+        }
+
+        Task {
+            do {
+                try await PlayableVideoLoader.validatePlayableVideo(at: url)
+                await MainActor.run { [weak self] in
+                    self?.setupVideoPlayback(url: url, screen: screen)
+                }
+            } catch {
+                await MainActor.run {
+                    Logger.error("Failed to setup video: \(error.localizedDescription)", category: .screenManager)
+                }
+            }
+        }
     }
     
     private func applyConfiguration(_ configuration: ScreenConfiguration, to screen: Screen, preservingState: Bool = false) {
         do {
+            guard let bookmarkData = configuration.videoBookmarkData else {
+                throw NSError(domain: "ScreenManager", code: 400, userInfo: [
+                    NSLocalizedDescriptionKey: "No saved video bookmark is available for this screen."
+                ])
+            }
+
             var isStale = false
             let url = try URL(
-                resolvingBookmarkData: configuration.videoBookmarkData,
+                resolvingBookmarkData: bookmarkData,
                 options: .withSecurityScope,
                 relativeTo: nil,
                 bookmarkDataIsStale: &isStale
@@ -382,7 +394,7 @@ final class ScreenManager {
                         includingResourceValuesForKeys: nil,
                         relativeTo: nil
                     )
-                    let updatedConfig = configuration.withUpdatedBookmark(updatedBookmarkData)
+                    let updatedConfig = configuration.withUpdatedActiveBookmark(updatedBookmarkData)
                     saveConfiguration(updatedConfig)
                 } catch {
                     Logger.error("Failed to update stale bookmark: \(error.localizedDescription)", category: .fileAccess)
@@ -451,7 +463,8 @@ final class ScreenManager {
                     frame: screen.frame,
                     fitMode: configuration.fitMode
                 )
-                screen.videoPlayer = player
+                screen.installRuntimeSession(VideoWallpaperSession(player: player))
+                notifyWallpaperSessionChanged()
 
                 // Apply settings that don't depend on asset metadata immediately.
                 player.setPlaybackSpeed(configuration.playbackSpeed)
@@ -476,6 +489,15 @@ final class ScreenManager {
                     }
                 }
             }
+
+            let globalSettings = SettingsManager.shared.loadGlobalSettings()
+            applyPerformancePolicy(
+                to: screen,
+                globalSettings: globalSettings,
+                powerSource: powerMonitor.currentPowerSource,
+                isHiddenByFullScreen: globalSettings.pauseOnFullScreen &&
+                    fullScreenDetector.isDesktopHidden(for: screen.id)
+            )
 
         } catch {
             Logger.error("Failed to apply configuration: \(error.localizedDescription)", category: .screenManager)
@@ -540,31 +562,31 @@ final class ScreenManager {
         cleanupTasks.insert(AnyCancellable { fallbackTask.cancel() })
     }
 
-    private func setupVideoPlayback(asset: AVURLAsset, screen: Screen) {
-        cleanupScreen(screen)
-        
-        // Create preview player for settings UI
-        let previewPlayer = AVPlayer(playerItem: AVPlayerItem(asset: asset))
-        previewPlayer.volume = 0
+    private func setupVideoPlayback(url: URL, screen: Screen) {
+        releaseRuntimeSession(screen)
         
         // Get configuration
-        let configuration = configRepo.get(for: screen.id)
+        let configuration = configurationStore.get(for: screen.id)
         
         // Create wallpaper player
         let player = WallpaperVideoPlayer(
-            url: asset.url,
+            url: url,
             frame: screen.frame,
             fitMode: configuration?.fitMode ?? .aspectFill
         )
         
         // Update screen properties
         if let index = screens.firstIndex(where: { $0.id == screen.id }) {
-            screens[index].videoPlayer = player
-            // Retain a security scope for the preview player's lifetime — AVFoundation
-            // reads file data lazily, so the scope must outlive AVAsset construction.
-            // The wallpaper player owns its own scope independently in setupPlayer().
-            screens[index].retainPreviewSecurityScope(asset.url)
-            screens[index].previewPlayer = previewPlayer
+            screens[index].installRuntimeSession(VideoWallpaperSession(player: player))
+            let liveScreen = screens[index]
+            let globalSettings = SettingsManager.shared.loadGlobalSettings()
+            applyPerformancePolicy(
+                to: liveScreen,
+                globalSettings: globalSettings,
+                powerSource: powerMonitor.currentPowerSource,
+                isHiddenByFullScreen: globalSettings.pauseOnFullScreen &&
+                    fullScreenDetector.isDesktopHidden(for: liveScreen.id)
+            )
 
             // Check if we should pause based on power state
             let shouldPause = powerMonitor.currentPowerSource.isOnBattery &&
@@ -577,7 +599,6 @@ final class ScreenManager {
                 Task { [weak self] in
                     try? await Task.sleep(for: .milliseconds(200))
                     player.play()
-                    previewPlayer.play()
                     self?.updatePlaybackState()
                 }
             }
@@ -608,6 +629,7 @@ final class ScreenManager {
             }
 
             Logger.info("Video player setup complete for screen \(screen.id)", category: .screenManager)
+            notifyWallpaperSessionChanged()
         } else {
             // Handle the case where the screen wasn't found
             Logger.warning("Screen with ID \(screen.id) not found in screens array", category: .screenManager)
@@ -623,10 +645,33 @@ final class ScreenManager {
     var isAnyScreenPlaying: Bool {
         playbackStateSubject.value
     }
-    
+
+    var wallpaperSessionSummaries: [WallpaperSessionSummary] {
+        screens.map(\.wallpaperSessionSummary)
+    }
+
+    var wallpaperOverviewStatus: WallpaperOverviewStatus {
+        WallpaperStatusAggregator.overview(for: wallpaperSessionSummaries)
+    }
+
+    var hasControllableWallpaperSessions: Bool {
+        wallpaperSessionSummaries.contains { $0.isConfigured && $0.supportsPlaybackControl }
+    }
+
+    func wallpaperSummary(for screen: Screen) -> WallpaperSessionSummary {
+        screen.wallpaperSessionSummary
+    }
+
+    func wallpaperDisplayName(for screen: Screen) -> String? {
+        guard let configuration = configurationStore.get(for: screen.id),
+              let definition = WallpaperSessionDefinition(configuration: configuration) else { return nil }
+
+        return definition.displayName(using: ResourceUtilities.resolveBookmarkName)
+    }
+
     // Method to check and publish global playback state
     private func updatePlaybackState() {
-        let isAnyPlaying = screens.contains { $0.videoPlayer?.isPlaying ?? false }
+        let isAnyPlaying = screens.contains { $0.playbackController?.isPlaying ?? false }
 
         // Only publish if the state actually changed
         if playbackStateSubject.value != isAnyPlaying {
@@ -634,22 +679,30 @@ final class ScreenManager {
         }
     }
 
+    private func notifyWallpaperSessionChanged() {
+        updatePlaybackState()
+        updateFullScreenFallbackPolling()
+        NotificationCenter.default.post(name: .screensRefreshed, object: nil)
+    }
+
     func togglePlayback() {
-        let isAnyPlaying = screens.contains { $0.videoPlayer?.isPlaying ?? false }
+        guard hasControllableWallpaperSessions else { return }
+
+        let isAnyPlaying = screens.contains { $0.playbackController?.isPlaying ?? false }
 
         Logger.info("Toggling global playback: \(isAnyPlaying ? "pausing" : "playing") all videos", category: .videoPlayer)
 
         // Toggle playback based on current state
         for screen in screens {
-            if let player = screen.videoPlayer {
-                if isAnyPlaying {
-                    // When user manually pauses, remove from power management tracking
-                    // so it won't auto-resume when AC power reconnects
-                    powerPolicy.markResumedFromPower(screen.id)
-                    player.pause()
-                } else {
-                    player.play()
-                }
+            guard let playback = screen.playbackController else { continue }
+
+            if isAnyPlaying {
+                // When user manually pauses, remove from power management tracking
+                // so it won't auto-resume when AC power reconnects
+                powerPolicy.markResumedFromPower(screen.id)
+                playback.pause()
+            } else {
+                playback.play()
             }
         }
 
@@ -660,77 +713,101 @@ final class ScreenManager {
     // MARK: - Power Management
     private func handlePowerStateChange(_ powerSource: PowerMonitor.PowerSource) {
         let globalSettings = SettingsManager.shared.loadGlobalSettings()
-        let isOnBattery = powerSource.isOnBattery
 
         // Batch updates to avoid multiple UI updates
         var updatedScreens = false
 
         for screen in screens {
-            guard let player = screen.videoPlayer else {
-                continue
-            }
+            let configuration = configurationStore.get(for: screen.id)
+            let isHiddenByFullScreen = globalSettings.pauseOnFullScreen &&
+                fullScreenDetector.isDesktopHidden(for: screen.id)
 
-            let configuration = configRepo.get(for: screen.id)
-            let shouldPauseForPower = (globalSettings.globalPauseOnBattery || configuration?.pauseOnBattery == true) && isOnBattery
+            applyPerformancePolicy(
+                to: screen,
+                globalSettings: globalSettings,
+                powerSource: powerSource,
+                isHiddenByFullScreen: isHiddenByFullScreen
+            )
 
-            // Check for low battery threshold
-            var shouldPauseForLowBattery = false
-            if let batteryLevel = globalSettings.minimumBatteryLevel, isOnBattery {
-                if case .battery(let level) = powerSource, level < batteryLevel {
-                    shouldPauseForLowBattery = true
+            let shouldPauseForPower = WallpaperPolicyEngine.shouldPauseForPower(
+                globalSettings: globalSettings,
+                configuration: configuration,
+                powerSource: powerSource
+            )
+            let shouldResumeForPower = WallpaperPolicyEngine.shouldResumeFromPower(
+                powerSource: powerSource,
+                wasPausedByPower: powerPolicy.wasPausedByPower(screen.id)
+            )
+
+            if let playback = screen.playbackController {
+                // Video path — explicit pause with bookkeeping in PowerPolicyController.
+                if shouldPauseForPower && playback.isPlaying {
+                    Logger.debug("Pausing screen \(screen.id) due to power policy", category: .powerMonitor)
+                    playback.pause()
+                    powerPolicy.markPausedByPower(screen.id)
+                    updatedScreens = true
+                } else if shouldResumeForPower, !playback.isPlaying {
+                    Logger.debug("Resuming screen \(screen.id) due to external power (was paused by power management)", category: .powerMonitor)
+                    playback.play()
+                    powerPolicy.markResumedFromPower(screen.id)
+                    updatedScreens = true
                 }
-            }
-
-            let currentlyPlaying = player.isPlaying
-
-            // Handle pausing when on battery power
-            if (shouldPauseForPower || shouldPauseForLowBattery) && currentlyPlaying {
-                if shouldPauseForLowBattery {
-                    Logger.debug("Pausing screen \(screen.id) due to low battery level", category: .powerMonitor)
-                } else {
-                    Logger.debug("Pausing screen \(screen.id) due to battery power", category: .powerMonitor)
+            } else if let runtimeSession = screen.runtimeSession {
+                // Ambient (HTML/Shader) path — no playback controller, so we
+                // freeze the animation via `.suspended` and restore on AC.
+                // The user's preference is static-on-battery, not degraded
+                // animation, so this is the sole battery-saving action.
+                if shouldPauseForPower, !powerPolicy.wasPausedByPower(screen.id) {
+                    Logger.debug("Suspending ambient session for screen \(screen.id) due to power policy", category: .powerMonitor)
+                    runtimeSession.applyPerformanceProfile(.suspended)
+                    powerPolicy.markPausedByPower(screen.id)
+                } else if shouldResumeForPower {
+                    Logger.debug("Resuming ambient session for screen \(screen.id) due to external power", category: .powerMonitor)
+                    runtimeSession.applyPerformanceProfile(.quality)
+                    powerPolicy.markResumedFromPower(screen.id)
                 }
-                player.pause()
-                // Track that this screen was paused by power management
-                powerPolicy.markPausedByPower(screen.id)
-                updatedScreens = true
-            }
-            // Handle resuming when AC power is connected
-            // ONLY resume screens that were paused by power management, not manually paused screens
-            else if !isOnBattery && !currentlyPlaying && powerPolicy.wasPausedByPower(screen.id) {
-                Logger.debug("Resuming screen \(screen.id) due to external power (was paused by power management)", category: .powerMonitor)
-                player.play()
-                // Remove from tracking set since we've resumed it
-                powerPolicy.markResumedFromPower(screen.id)
-                updatedScreens = true
             }
         }
 
         // When switching to AC power, clear any remaining tracked screens that no longer exist
-        if !isOnBattery {
+        if !powerSource.isOnBattery {
             let currentScreenIDs = Set(screens.map(\.id))
             powerPolicy.cleanUpStaleEntries(currentScreenIDs: currentScreenIDs)
-        }
-
-        // Apply battery resolution cap
-        if globalSettings.batteryResolutionCap {
-            for screen in screens {
-                screen.videoPlayer?.setBatteryResolutionCap(isOnBattery)
-            }
         }
 
         if updatedScreens {
             updatePlaybackState()
         }
     }
-    
-    func handleGlobalPauseOnBatteryChange(_ pauseOnBattery: Bool) {
-        var settings = SettingsManager.shared.loadGlobalSettings()
-        settings.globalPauseOnBattery = pauseOnBattery
-        SettingsManager.shared.saveGlobalSettings(settings)
-        
-        Logger.info("Global pause on battery setting changed to \(pauseOnBattery)", category: .settings)
-        
+
+    private func applyPerformancePolicy(
+        to screen: Screen,
+        globalSettings: GlobalSettings,
+        powerSource: PowerMonitor.PowerSource,
+        isHiddenByFullScreen: Bool
+    ) {
+        let profile = WallpaperPolicyEngine.performanceProfile(
+            globalSettings: globalSettings,
+            powerSource: powerSource,
+            isHiddenByFullScreen: isHiddenByFullScreen
+        )
+        screen.runtimeSession?.applyPerformanceProfile(profile)
+    }
+
+    private func updateFullScreenFallbackPolling() {
+        let globalSettings = SettingsManager.shared.loadGlobalSettings()
+        let hasConfiguredSessions = wallpaperSessionSummaries.contains { $0.isConfigured }
+        let shouldEnablePolling = WallpaperPolicyEngine.shouldEnableFullScreenFallbackPolling(
+            globalSettings: globalSettings,
+            hasConfiguredWallpaperSessions: hasConfiguredSessions
+        )
+
+        fullScreenDetector.setFallbackPollingEnabled(shouldEnablePolling)
+    }
+
+    func handleGlobalSettingsChanged() {
+        updateFullScreenFallbackPolling()
+        handleFullScreenChange(fullScreenDetector.hiddenScreens)
         handlePowerStateChange(powerMonitor.currentPowerSource)
     }
     
@@ -761,27 +838,56 @@ final class ScreenManager {
         powerMonitor.refreshPowerStatus()
         handlePowerStateChange(powerMonitor.currentPowerSource)
     }
+
+    private func captureDesktopSnapshotsForLockIfNeeded() {
+        let globalSettings = SettingsManager.shared.loadGlobalSettings()
+        guard globalSettings.preservePlaybackOnLock else { return }
+
+        for screen in screens {
+            guard let config = configurationStore.get(for: screen.id),
+                  config.wallpaperType == .video,
+                  config.setAsLockScreen else { continue }
+            extractLockScreenFrame(for: screen)
+        }
+    }
     
     // MARK: - Public Interface
-    // Reload the video for a specific screen
-    func reloadVideoForScreen(_ screen: Screen) {
-        Logger.info("Manually reloading video for screen \(screen.id)", category: .screenManager)
-        if let configuration = configRepo.get(for: screen.id) {
-            // Force recreation of player by setting preservingState to false
-            applyConfiguration(configuration, to: screen, preservingState: false)
+    func reloadWallpaperForScreen(_ screen: Screen) {
+        Logger.info("Manually reloading wallpaper for screen \(screen.id)", category: .screenManager)
+
+        guard let configuration = configurationStore.get(for: screen.id) else {
+            releaseRuntimeSession(screen)
+            return
         }
+
+        // 用户主动 Reload 必须从配置彻底重建 runtime session：
+        // 沿用现有 player 的 reuse 分支只会更新设置，无法从卡死/失效
+        // 状态恢复（AVQueuePlayer + AVPlayerLooper 已损坏）。强制 release
+        // 让 restoreWallpaperSession 走 needsNewPlayer 分支彻底重启。
+        releaseRuntimeSession(screen)
+        restoreWallpaperSession(for: screen, configuration: configuration, preservingState: false)
     }
     
     // MARK: - Configuration Update Helpers
 
-    /// Saves and caches the updated configuration
+    /// Saves and caches the updated configuration, then notifies any view
+    /// observing this screen so it can refresh from the new persisted state.
     private func saveConfiguration(_ configuration: ScreenConfiguration) {
-        configRepo.save(configuration)
+        configurationStore.save(configuration)
+        postConfigurationDidChange(for: configuration.screenID)
+    }
+
+    private func postConfigurationDidChange(for screenID: CGDirectDisplayID) {
+        NotificationCenter.default.post(
+            name: .wallpaperConfigurationDidChange,
+            object: nil,
+            userInfo: ["screenID": screenID]
+        )
     }
 
     // Update the playback speed for a screen
     func updatePlaybackSpeed(_ speed: Double, for screen: Screen) {
-        guard var configuration = configRepo.get(for: screen.id),
+        guard var configuration = configurationStore.get(for: screen.id),
               speed != configuration.playbackSpeed else { return }
 
         configuration.playbackSpeed = speed
@@ -791,7 +897,7 @@ final class ScreenManager {
 
     // Update the fit mode for a screen
     func updateFitMode(_ fitMode: VideoFitMode, for screen: Screen) {
-        guard var configuration = configRepo.get(for: screen.id),
+        guard var configuration = configurationStore.get(for: screen.id),
               fitMode != configuration.fitMode else { return }
 
         configuration.fitMode = fitMode
@@ -801,7 +907,7 @@ final class ScreenManager {
 
     // Update the frame rate limit for a screen
     func updateFrameRateLimit(_ frameRateLimit: FrameRateLimit, for screen: Screen) {
-        guard var configuration = configRepo.get(for: screen.id) else {
+        guard var configuration = configurationStore.get(for: screen.id) else {
             Logger.warning("Cannot update frame rate limit: No configuration found for screen \(screen.id)", category: .videoPlayer)
             return
         }
@@ -838,7 +944,7 @@ final class ScreenManager {
     
     // Get the saved configuration for a screen
     func getConfiguration(for screen: Screen) -> ScreenConfiguration? {
-        return configRepo.get(for: screen.id)
+        return configurationStore.get(for: screen.id)
     }
     
     // Update power settings for a screen
@@ -852,7 +958,7 @@ final class ScreenManager {
         // Apply the new setting immediately based on power state
         let isOnBattery = powerMonitor.currentPowerSource.isOnBattery
         if isOnBattery && pauseOnBattery {
-            screen.videoPlayer?.pause()
+            screen.playbackController?.pause()
             powerPolicy.markPausedByPower(screen.id)
         }
         // Don't unconditionally resume when on AC — respect manual pause state
@@ -860,7 +966,7 @@ final class ScreenManager {
     
     // Validate all saved configurations
     func validateAllConfigurations() -> (valid: Int, invalid: Int) {
-        let screenIDs = configRepo.allCachedScreenIDs()
+        let screenIDs = configurationStore.allScreenIDs()
         var validConfigCount = 0
         var invalidConfigCount = 0
         
@@ -881,32 +987,30 @@ final class ScreenManager {
     func reloadAllScreens() {
         Logger.notice("Reloading all screens", category: .screenManager)
 
-        // Invalidate cached bookmark data to force a fresh reload — only for video configs.
-        for screenID in configRepo.allCachedScreenIDs() {
-            guard let cached = configRepo.get(for: screenID), cached.wallpaperType == .video else { continue }
-            if !SettingsManager.shared.validateConfiguration(for: screenID) {
-                Logger.warning("Removing invalid video configuration for screen \(screenID)", category: .settings)
-                configRepo.remove(for: screenID)
+        let removedScreenIDs = configurationStore.pruneInvalidVideoConfigurations(
+            using: SettingsManager.shared.validateConfiguration
+        )
+
+        for removedScreenID in removedScreenIDs {
+            if let screen = screens.first(where: { $0.id == removedScreenID }) {
+                Logger.warning("Removing invalid video configuration for screen \(removedScreenID)", category: .settings)
+                releaseRuntimeSession(screen)
             }
         }
 
-        // Reload all screens, branching on wallpaper type so HTML/shader survive.
-        for screen in screens {
-            guard let configuration = SettingsManager.shared.getConfiguration(for: screen.id) else { continue }
-            configRepo.save(configuration)
+        _ = configurationStore.loadAll()
 
-            switch configuration.wallpaperType {
-            case .html:
-                if let url = configuration.htmlContent, !url.isEmpty {
-                    setHTMLWallpaper(url: url, for: screen)
-                }
-            case .metalShader:
-                if let preset = configuration.shaderPreset {
-                    setShaderWallpaper(preset: preset, for: screen)
-                }
-            case .video:
-                applyConfiguration(configuration, to: screen, preservingState: false)
+        for screen in screens {
+            guard let configuration = configurationStore.get(for: screen.id) else {
+                releaseRuntimeSession(screen)
+                continue
             }
+
+            // 同 reloadWallpaperForScreen：批量 reload 也必须先释放 runtime
+            // session 再恢复，避免命中 applyConfiguration 的 reuse 分支让
+            // 卡死的 AVQueuePlayer 苟活下来。
+            releaseRuntimeSession(screen)
+            restoreWallpaperSession(for: screen, configuration: configuration, preservingState: false)
         }
 
         Logger.notice("All screens reloaded", category: .screenManager)
@@ -918,69 +1022,40 @@ final class ScreenManager {
     /// (macOS exposes no public lock-screen wallpaper API; the existing implementation
     /// uses NSWorkspace.setDesktopImageURL which sets the desktop picture.)
     func updateSetAsDesktopPicture(_ enabled: Bool, for screen: Screen) {
-        guard var config = configRepo.get(for: screen.id),
+        guard var config = configurationStore.get(for: screen.id),
               config.setAsLockScreen != enabled else { return }
         config.setAsLockScreen = enabled
         saveConfiguration(config)
     }
 
     func extractLockScreenFrame(for screen: Screen) {
-        guard let player = screen.videoPlayer?.player,
-              let currentItem = player.currentItem else { return }
+        guard let player = screen.videoPlayer?.player else { return }
 
-        let asset = currentItem.asset
-        let imageGenerator = AVAssetImageGenerator(asset: asset)
-        imageGenerator.appliesPreferredTrackTransform = true
-        imageGenerator.requestedTimeToleranceBefore = .zero
-        imageGenerator.requestedTimeToleranceAfter = CMTime(seconds: 1, preferredTimescale: 600)
-
-        let currentTime = player.currentTime()
-        nonisolated(unsafe) let generator = imageGenerator
-
-        Task {
-            do {
-                let (cgImage, _) = try await generator.image(at: currentTime)
-                let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
-
-                // Save to a temp file
-                let tempURL = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("LiveWallpaper_LockScreen_\(screen.id).png")
-
-                if let tiffData = nsImage.tiffRepresentation,
-                   let bitmap = NSBitmapImageRep(data: tiffData),
-                   let pngData = bitmap.representation(using: .png, properties: [:]) {
-                    try pngData.write(to: tempURL)
-
-                    // Set as desktop wallpaper (visible on lock screen)
-                    if let nsScreen = findNSScreen(for: screen.id) {
-                        try NSWorkspace.shared.setDesktopImageURL(tempURL, for: nsScreen, options: [:])
-                        Logger.info("Set lock screen wallpaper for screen \(screen.id)", category: .screenManager)
-                    }
-                }
-            } catch {
-                Logger.error("Failed to extract lock screen frame: \(error.localizedDescription)", category: .screenManager)
-            }
-        }
+        DesktopPictureFrameExtractor.applyCurrentFrame(
+            from: player,
+            screenID: screen.id,
+            nsScreen: displayRegistry.findNSScreen(for: screen.id)
+        )
     }
 
     // MARK: - Video Effects
 
     func updateEffectConfig(_ effectConfig: VideoEffectConfig, for screen: Screen) {
-        guard var config = configRepo.get(for: screen.id) else { return }
+        guard var config = configurationStore.get(for: screen.id) else { return }
         config.effectConfig = effectConfig
         saveConfiguration(config)
         applyVideoEffects(for: screen, config: config)
     }
 
     func updateParticleEffect(_ effect: ParticleEffect, for screen: Screen) {
-        guard var config = configRepo.get(for: screen.id) else { return }
+        guard var config = configurationStore.get(for: screen.id) else { return }
         config.particleEffect = effect
         saveConfiguration(config)
         applyParticleEffect(effect, density: config.effectConfig.particleDensity, to: screen)
     }
 
     func updateParticleDensity(_ density: Double, for screen: Screen) {
-        guard var config = configRepo.get(for: screen.id) else { return }
+        guard var config = configurationStore.get(for: screen.id) else { return }
         let clamped = min(max(density, 0.2), 3.0)
         guard abs(clamped - config.effectConfig.particleDensity) > 0.001 else { return }
         config.effectConfig.particleDensity = clamped
@@ -998,7 +1073,7 @@ final class ScreenManager {
 
     /// Enable or disable weather-reactive mode for a screen.
     func setWeatherReactive(_ enabled: Bool, for screen: Screen) {
-        guard var config = configRepo.get(for: screen.id) else { return }
+        guard var config = configurationStore.get(for: screen.id) else { return }
         config.effectConfig.weatherReactive = enabled
         saveConfiguration(config)
 
@@ -1014,7 +1089,7 @@ final class ScreenManager {
 
     /// Apply current weather conditions to a screen's effects.
     func applyWeatherEffects(for screen: Screen) {
-        guard let config = configRepo.get(for: screen.id),
+        guard let config = configurationStore.get(for: screen.id),
               config.effectConfig.weatherReactive else { return }
 
         // Apply weather-derived particle effect with persisted density.
@@ -1047,6 +1122,11 @@ final class ScreenManager {
     }
 
     private func observeWeatherChanges() {
+        // `withObservationTracking` is one-shot — it fires `onChange` at most
+        // once per registration. To keep reacting to weather updates we must
+        // re-register inside the handler. This is the intended pattern for
+        // `@Observable` + Combine-style reaction; do not "simplify" it to a
+        // single call or we'll only react to the first weather update.
         withObservationTracking {
             // Track the observable state we react to.
             _ = weatherService.currentParticleEffect
@@ -1055,7 +1135,7 @@ final class ScreenManager {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 for screen in self.screens {
-                    guard let config = self.configRepo.get(for: screen.id),
+                    guard let config = self.configurationStore.get(for: screen.id),
                           config.effectConfig.weatherReactive else { continue }
                     self.applyWeatherEffects(for: screen)
                 }
@@ -1064,67 +1144,32 @@ final class ScreenManager {
         }
     }
 
-    func updateVideoEffects(for screen: Screen) {
-        guard let config = configRepo.get(for: screen.id) else { return }
-        applyVideoEffects(for: screen, config: config)
-    }
-
     private func applyVideoEffects(for screen: Screen, config: ScreenConfiguration) {
-        guard let player = screen.videoPlayer,
-              let playerItem = player.player?.currentItem else {
+        guard let player = screen.videoPlayer else {
             Logger.warning("Cannot apply effects: no active player for screen \(screen.id)", category: .videoPlayer)
             return
         }
 
-        let hasEffects = config.effectConfig.hasActiveEffect || config.effectConfig.autoTimeTint
-        Logger.info("Applying effects for screen \(screen.id): hasEffects=\(hasEffects)", category: .videoPlayer)
-
-        if !hasEffects {
-            // No effects — reapply plain frame rate limiting (or clear composition)
-            applyFrameRateLimit(config.frameRateLimit, to: screen)
-            return
-        }
-
-        // Effects active — build CIFilter composition (also handles frame rate via frameDuration)
-        effectsManager.updateConfig(config.effectConfig)
-
-        // Compute the effective FPS via the shared helper so unlimited mode
-        // actually respects screen refresh rate (e.g. caps a 120 fps source at
-        // 60 Hz on a non-ProMotion display) instead of hard-coding 60. The
-        // helper is unit-tested in isolation.
-        let effectiveFPS = FrameRateLimit.resolveCompositionFPS(
-            limit: config.frameRateLimit,
-            videoFrameRate: player.videoFrameRate,
-            screenRefreshRate: Double(getScreenRefreshRate(for: screen.id))
-        )
-        let safeFPS = max(1.0, effectiveFPS)
-        let frameDuration = CMTime(value: 1, timescale: CMTimeScale(safeFPS))
-
-        Task {
-            do {
-                let composition = try await effectsManager.buildComposition(
-                    for: playerItem.asset,
-                    config: config.effectConfig,
-                    frameDuration: frameDuration
-                )
-                await MainActor.run {
-                    playerItem.videoComposition = composition
-                }
-            } catch {
-                Logger.error("Failed to apply video effects: \(error.localizedDescription)", category: .videoPlayer)
+        videoEffectsApplier.applyEffects(
+            to: player,
+            screenID: screen.id,
+            config: config,
+            screenRefreshRate: getScreenRefreshRate(for: screen.id),
+            noEffectsHandler: { [weak self, weak screen] in
+                guard let screen else { return }
+                self?.applyFrameRateLimit(config.frameRateLimit, to: screen)
             }
-        }
+        )
     }
 
     // MARK: - Wallpaper Type Switching
 
     /// Close any non-video wallpaper window and restore the video player
     func switchToVideoWallpaper(for screen: Screen) {
-        screen.activeWallpaperWindow = nil  // closes old window via willSet
-        screen.activeWallpaperType = .video
+        screen.clearWallpaperRuntimeSession()
 
-        guard var config = configRepo.get(for: screen.id) else { return }
-        config.wallpaperType = .video
+        guard var config = configurationStore.get(for: screen.id),
+              config.activateSavedVideoWallpaper() else { return }
         saveConfiguration(config)
 
         // Restore video player from saved config
@@ -1132,65 +1177,57 @@ final class ScreenManager {
 
     }
 
+    private func activateAmbientWallpaper(_ definition: WallpaperSessionDefinition, for screen: Screen) {
+        releaseRuntimeSession(screen)
+
+        let session: AmbientWallpaperSession
+
+        switch definition {
+        case .html(let source):
+            session = ambientSessionBuilder.makeHTMLSession(for: source, frame: screen.frame)
+            Logger.info("Set HTML wallpaper for screen \(screen.id)", category: .screenManager)
+        case .metalShader(let preset):
+            session = ambientSessionBuilder.makeShaderSession(preset: preset, frame: screen.frame)
+            Logger.info("Set shader wallpaper (\(preset.rawValue)) for screen \(screen.id)", category: .screenManager)
+        case .video:
+            return
+        }
+
+        screen.installRuntimeSession(session)
+        let globalSettings = SettingsManager.shared.loadGlobalSettings()
+        applyPerformancePolicy(
+            to: screen,
+            globalSettings: globalSettings,
+            powerSource: powerMonitor.currentPowerSource,
+            isHiddenByFullScreen: globalSettings.pauseOnFullScreen &&
+                fullScreenDetector.isDesktopHidden(for: screen.id)
+        )
+        notifyWallpaperSessionChanged()
+    }
+
     // MARK: - HTML Wallpaper
 
     func setHTMLWallpaper(url: String, for screen: Screen) {
         // Save config (create one if it doesn't exist yet)
-        var config = configRepo.get(for: screen.id) ?? ScreenConfiguration(
-            screenID: screen.id, videoBookmarkData: Data()
+        var config = configurationStore.get(for: screen.id) ?? ScreenConfiguration(
+            screenID: screen.id, wallpaper: .html(url)
         )
-        config.wallpaperType = .html
-        config.htmlContent = url
+        config.setHTMLWallpaper(url)
         saveConfiguration(config)
 
-        // Clean up existing wallpaper (video + old window)
-        cleanupScreen(screen)
-
-        // Create HTML wallpaper
-        let window = VideoWallpaperWindow(frame: screen.frame)
-        let htmlView = HTMLWallpaperView(frame: screen.frame)
-        window.contentView = htmlView
-
-        if let parsedURL = URL(string: url), url.hasPrefix("http") {
-            htmlView.loadURL(parsedURL)
-        } else if FileManager.default.fileExists(atPath: url) {
-            htmlView.loadFile(URL(fileURLWithPath: url))
-        } else {
-            htmlView.loadHTML(url)
-        }
-
-        window.orderBack(nil)
-        screen.activeWallpaperWindow = window
-        screen.activeWallpaperType = .html
-
-        Logger.info("Set HTML wallpaper for screen \(screen.id)", category: .screenManager)
-
+        restoreWallpaperSession(for: screen, configuration: config, preservingState: false)
     }
 
     // MARK: - Metal Shader Wallpaper
 
     func setShaderWallpaper(preset: MetalShaderPreset, for screen: Screen) {
-        var config = configRepo.get(for: screen.id) ?? ScreenConfiguration(
-            screenID: screen.id, videoBookmarkData: Data()
+        var config = configurationStore.get(for: screen.id) ?? ScreenConfiguration(
+            screenID: screen.id, wallpaper: .metalShader(preset)
         )
-        config.wallpaperType = .metalShader
-        config.shaderPreset = preset
+        config.setShaderWallpaper(preset)
         saveConfiguration(config)
 
-        // Clean up existing wallpaper
-        cleanupScreen(screen)
-
-        let window = VideoWallpaperWindow(frame: screen.frame)
-        let metalView = MetalWallpaperView(frame: screen.frame)
-        metalView.setPreset(preset)
-        window.contentView = metalView
-        window.orderBack(nil)
-
-        screen.activeWallpaperWindow = window
-        screen.activeWallpaperType = .metalShader
-
-        Logger.info("Set shader wallpaper (\(preset.rawValue)) for screen \(screen.id)", category: .screenManager)
-
+        restoreWallpaperSession(for: screen, configuration: config, preservingState: false)
     }
 
     // MARK: - Helper Methods
@@ -1210,77 +1247,151 @@ final class ScreenManager {
     // MARK: - Playlist Management
 
     func updatePlaylistBookmarks(_ bookmarks: [Data], for screen: Screen) {
-        guard var config = configRepo.get(for: screen.id) else { return }
+        guard var config = configurationStore.get(for: screen.id) else { return }
         config.playlistBookmarks = bookmarks.isEmpty ? nil : bookmarks
         saveConfiguration(config)
     }
 
+    /// 把指定 bookmark 设为 primary：旧 primary 自动加入 playlist 末尾
+    /// （除非 bookmark 已经是 primary）。primary 改变会触发 player 重建。
+    func setPrimaryVideo(bookmark: Data, for screen: Screen) {
+        guard var config = configurationStore.get(for: screen.id),
+              config.savedVideoBookmarkData != bookmark else { return }
+
+        var extras = config.playlistBookmarks ?? []
+        // 旧 primary 入 playlist（避免丢失）。
+        if let oldPrimary = config.savedVideoBookmarkData,
+           !extras.contains(oldPrimary), oldPrimary != bookmark {
+            extras.append(oldPrimary)
+        }
+        // 移除新 primary 在 extras 中的旧位置（避免重复）。
+        extras.removeAll(where: { $0 == bookmark })
+
+        config.replacePrimaryVideo(bookmarkData: bookmark)
+        config.playlistBookmarks = extras.isEmpty ? nil : extras
+        saveConfiguration(config)
+
+        // 立即重启 player 让新 primary 生效。
+        reloadWallpaperForScreen(screen)
+    }
+
+    /// 拖拽 reorder 后原子更新 primary + extras。primary identity 不变时
+    /// 仅写 playlist 顺序（不重建 player），减少不必要的播放中断。
+    func replacePlaylist(primary: Data, extras: [Data], for screen: Screen) {
+        guard var config = configurationStore.get(for: screen.id) else { return }
+
+        let primaryChanged = config.savedVideoBookmarkData != primary
+        config.savedVideoBookmarkData = primary
+        if primaryChanged {
+            config.activeWallpaper = .video(bookmarkData: primary)
+            config.playlistCursorIndex = 0
+        }
+        config.playlistBookmarks = extras.isEmpty ? nil : extras
+        saveConfiguration(config)
+
+        if primaryChanged {
+            reloadWallpaperForScreen(screen)
+        }
+    }
+
+    /// 跳到 `[primary] + playlistBookmarks` 中任意一项立即播放。
+    /// `index` 0 = primary，>0 = playlistBookmarks[index-1]。
+    func playPlaylistEntry(at index: Int, for screen: Screen) {
+        guard let config = configurationStore.get(for: screen.id),
+              let primary = config.savedVideoBookmarkData else { return }
+        let combined = [primary] + (config.playlistBookmarks ?? [])
+        guard index >= 0, index < combined.count else { return }
+        applyPlaylistCursor(index, combined: combined, screen: screen, label: "jumping")
+    }
+
     func updateShufflePlaylist(_ shuffle: Bool, for screen: Screen) {
-        guard var config = configRepo.get(for: screen.id) else { return }
+        guard var config = configurationStore.get(for: screen.id) else { return }
         config.shufflePlaylist = shuffle
         saveConfiguration(config)
     }
 
     /// Advance to the next video in the playlist for the given screen.
     /// Preserves all existing settings (effects, particles, playlist, etc.).
+    /// Cursor-based: the primary (`savedVideoBookmarkData`) stays put, only the
+    /// active-playlist cursor moves, so rotation never stalls even when the
+    /// current playing bookmark happens to coincide with one of the additional
+    /// entries.
+    ///
+    /// Validates the next bookmark BEFORE saving / releasing the live session
+    /// so a missing or unreadable file leaves the user's current wallpaper
+    /// playing instead of clearing the screen.
     func advancePlaylist(for screen: Screen) {
-        guard let config = configRepo.get(for: screen.id) else { return }
+        guard let config = configurationStore.get(for: screen.id),
+              let primary = config.savedVideoBookmarkData else { return }
 
-        // Build full playlist: primary video + additional videos
-        let additionalBookmarks = config.playlistBookmarks ?? []
-        let fullPlaylist = [config.videoBookmarkData] + additionalBookmarks
-        guard fullPlaylist.count > 1 else { return }
+        let combined = [primary] + (config.playlistBookmarks ?? [])
+        guard combined.count > 1 else { return }
 
-        // Pick next bookmark
-        let nextBookmark: Data
-        if config.shufflePlaylist {
-            // Shuffle: pick random, avoid replaying current
-            let candidates = fullPlaylist.filter { $0 != config.videoBookmarkData }
-            nextBookmark = candidates.randomElement() ?? fullPlaylist[0]
-        } else {
-            // Sequential round-robin through full playlist
-            let currentIndex = fullPlaylist.firstIndex(of: config.videoBookmarkData) ?? 0
-            let nextIndex = (currentIndex + 1) % fullPlaylist.count
-            nextBookmark = fullPlaylist[nextIndex]
-        }
+        let currentCursor = config.playlistCursorIndex ?? 0
+        guard let nextCursor = PlaylistPolicy.nextCursor(
+            currentCursor: currentCursor,
+            playlistCount: combined.count,
+            shuffle: config.shufflePlaylist
+        ) else { return }
 
-        guard nextBookmark != config.videoBookmarkData else { return }
+        applyPlaylistCursor(nextCursor, combined: combined, screen: screen, label: "advancing")
+    }
+
+    /// `advancePlaylist` 的对称版本：用户点 Previous 时回到上一首。
+    func regressPlaylist(for screen: Screen) {
+        guard let config = configurationStore.get(for: screen.id),
+              let primary = config.savedVideoBookmarkData else { return }
+
+        let combined = [primary] + (config.playlistBookmarks ?? [])
+        guard combined.count > 1 else { return }
+
+        let currentCursor = config.playlistCursorIndex ?? 0
+        guard let prevCursor = PlaylistPolicy.previousCursor(
+            currentCursor: currentCursor,
+            playlistCount: combined.count,
+            shuffle: config.shufflePlaylist
+        ) else { return }
+
+        applyPlaylistCursor(prevCursor, combined: combined, screen: screen, label: "regressing")
+    }
+
+    /// 把游标推进/回退后实际激活目标 bookmark 的共享逻辑：
+    /// 验证 → 保存配置 → 释放旧 session → setup 新 player。
+    private func applyPlaylistCursor(
+        _ cursor: Int,
+        combined: [Data],
+        screen: Screen,
+        label: String
+    ) {
+        guard cursor < combined.count else { return }
+        let targetBookmark = combined[cursor]
 
         var isStale = false
         guard let url = try? URL(
-            resolvingBookmarkData: nextBookmark,
+            resolvingBookmarkData: targetBookmark,
             options: .withSecurityScope,
             relativeTo: nil,
             bookmarkDataIsStale: &isStale
         ) else { return }
 
-        // Preserve all settings (effects, particles, playlist, etc.) — only swap the video
-        let updatedConfig = config.withUpdatedBookmark(nextBookmark)
-        saveConfiguration(updatedConfig)
+        let screenID = screen.id
 
-        Logger.info("Playlist: advancing to \(url.lastPathComponent) for screen \(screen.id)", category: .screenManager)
-
-        // Clean up old player and set up new one with preserved config
-        cleanupScreen(screen)
-
-        // Hold scope across the async asset validation. WallpaperVideoPlayer.setupPlayer
-        // will start its own scope; we balance ours via defer.
-        let didStartScope = url.startAccessingSecurityScopedResource()
-        Task {
-            defer {
-                if didStartScope {
-                    url.stopAccessingSecurityScopedResource()
-                }
-            }
+        Task { [weak self] in
             do {
-                let asset = AVURLAsset(url: url)
-                let isPlayable = try await asset.load(.isPlayable)
-                guard isPlayable else { return }
+                try await PlayableVideoLoader.validatePlayableVideo(at: url)
                 await MainActor.run { [weak self] in
-                    self?.setupVideoPlayback(asset: asset, screen: screen)
+                    guard let self,
+                          let liveScreen = self.screens.first(where: { $0.id == screenID }),
+                          var liveConfig = self.configurationStore.get(for: screenID) else { return }
+                    liveConfig.playlistCursorIndex = cursor
+                    liveConfig.activeWallpaper = .video(bookmarkData: targetBookmark)
+                    self.saveConfiguration(liveConfig)
+                    Logger.info("Playlist: \(label) to \(url.lastPathComponent) (cursor \(cursor)) for screen \(screenID)", category: .screenManager)
+                    self.releaseRuntimeSession(liveScreen)
+                    self.setupVideoPlayback(url: url, screen: liveScreen)
                 }
             } catch {
-                Logger.error("Playlist advance failed: \(error.localizedDescription)", category: .screenManager)
+                Logger.error("Playlist \(label) failed for screen \(screenID): \(error.localizedDescription)", category: .screenManager)
             }
         }
     }
@@ -1288,7 +1399,7 @@ final class ScreenManager {
     // MARK: - Schedule Management
 
     func updateScheduleSlots(_ slots: [ScheduleSlot]?, for screen: Screen) {
-        guard var config = configRepo.get(for: screen.id) else { return }
+        guard var config = configurationStore.get(for: screen.id) else { return }
         config.scheduleSlots = slots
         saveConfiguration(config)
 
@@ -1297,107 +1408,102 @@ final class ScreenManager {
         }
     }
 
-    /// Check the current hour and switch to the scheduled video if needed.
+    /// Check the current hour and apply the schedule decision (apply slot,
+    /// restore primary when the slot window ends, or no-op).
+    ///
+    /// Preserves the screen's configuration (effects, particles, playlist,
+    /// schedule slots themselves, etc.); only `activeWallpaper` is swapped.
+    /// `savedVideoBookmarkData` (the user's primary) is never touched here.
     func checkAndApplySchedule(for screen: Screen) {
-        guard let config = configRepo.get(for: screen.id),
-              let slots = config.scheduleSlots,
-              !slots.isEmpty else { return }
+        guard let config = configurationStore.get(for: screen.id) else { return }
 
         let currentHour = Calendar.current.component(.hour, from: Date())
 
-        guard let activeSlot = slots.first(where: { $0.containsHour(currentHour) }),
-              let bookmarkData = activeSlot.videoBookmarkData else { return }
+        switch SchedulePolicy.decision(for: config, hour: currentHour) {
+        case .none:
+            return
 
-        // Skip if the scheduled video is already playing
-        guard config.videoBookmarkData != bookmarkData else { return }
+        case .applySlot(let slot, let bookmark):
+            performScheduledSwitch(
+                bookmark: bookmark,
+                logLabel: "switching to \(slot.label) wallpaper",
+                for: screen
+            ) { config in
+                config.applyScheduledBookmark(bookmark)
+            }
 
+        case .restorePrimary(let bookmark):
+            performScheduledSwitch(
+                bookmark: bookmark,
+                logLabel: "slot window ended, restoring primary",
+                for: screen
+            ) { config in
+                _ = config.activateSavedVideoWallpaper()
+            }
+        }
+    }
+
+    /// Validate first; only mutate config + tear down the live session if the
+    /// new bookmark is actually playable. Avoids leaving the screen blank when
+    /// a slot/primary file is missing or unreadable.
+    private func performScheduledSwitch(
+        bookmark: Data,
+        logLabel: String,
+        for screen: Screen,
+        mutate: @escaping (inout ScreenConfiguration) -> Void
+    ) {
         var isStale = false
         guard let url = try? URL(
-            resolvingBookmarkData: bookmarkData,
+            resolvingBookmarkData: bookmark,
             options: .withSecurityScope,
             relativeTo: nil,
             bookmarkDataIsStale: &isStale
         ) else { return }
 
-        Logger.info("Schedule: switching to \(activeSlot.label) wallpaper for screen \(screen.id)", category: .screenManager)
-        setVideo(url: url, bookmarkData: bookmarkData, for: screen)
+        let screenID = screen.id
+
+        Task { [weak self] in
+            do {
+                try await PlayableVideoLoader.validatePlayableVideo(at: url)
+                await MainActor.run { [weak self] in
+                    guard let self,
+                          let liveScreen = self.screens.first(where: { $0.id == screenID }),
+                          var liveConfig = self.configurationStore.get(for: screenID) else { return }
+                    Logger.info("Schedule: \(logLabel) for screen \(screenID)", category: .screenManager)
+                    mutate(&liveConfig)
+                    self.saveConfiguration(liveConfig)
+                    self.releaseRuntimeSession(liveScreen)
+                    self.setupVideoPlayback(url: url, screen: liveScreen)
+                }
+            } catch {
+                Logger.error("Schedule transition failed for screen \(screenID): \(error.localizedDescription)", category: .screenManager)
+            }
+        }
     }
 
     /// Periodically checks all screens for schedule and playlist rotation.
     /// Both Tasks are stored so they can be cancelled on teardown.
-    func startScheduleMonitoring() {
-        scheduleMonitorTask?.cancel()
-        playlistRotationTask?.cancel()
-
-        // Schedule-based switching (check every 60s)
-        scheduleMonitorTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(60))
-                guard let self else { return }
-                for screen in self.screens {
-                    self.checkAndApplySchedule(for: screen)
-                }
+    private func startScheduleMonitoring() {
+        automationCoordinator.start(
+            screenProvider: { [weak self] in
+                self?.screens ?? []
+            },
+            configurationProvider: { [weak self] screenID in
+                self?.configurationStore.get(for: screenID)
+            },
+            scheduleHandler: { [weak self] screen in
+                self?.checkAndApplySchedule(for: screen)
+            },
+            playlistHandler: { [weak self] screen in
+                self?.advancePlaylist(for: screen)
             }
-        }
-
-        // Playlist time-based rotation (check every 60s)
-        playlistRotationTask = Task { [weak self] in
-            var lastRotation: [CGDirectDisplayID: Date] = [:]
-
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(60))
-                guard let self else { return }
-
-                let now = Date()
-                for screen in self.screens {
-                    guard let config = self.configRepo.get(for: screen.id),
-                          let rotationMinutes = config.playlistRotationMinutes,
-                          rotationMinutes > 0,
-                          let bookmarks = config.playlistBookmarks,
-                          !bookmarks.isEmpty else { continue }
-
-                    let lastTime = lastRotation[screen.id] ?? now
-                    if lastRotation[screen.id] == nil {
-                        lastRotation[screen.id] = now
-                        continue
-                    }
-
-                    let elapsed = now.timeIntervalSince(lastTime)
-                    if elapsed >= Double(rotationMinutes) * 60.0 {
-                        lastRotation[screen.id] = now
-                        self.advancePlaylist(for: screen)
-                    }
-                }
-            }
-        }
+        )
     }
 
     func updatePlaylistRotationMinutes(_ minutes: Int?, for screen: Screen) {
-        guard var config = configRepo.get(for: screen.id) else { return }
+        guard var config = configurationStore.get(for: screen.id) else { return }
         config.playlistRotationMinutes = minutes
         saveConfiguration(config)
-    }
-
-    func applySettingsToAllScreens(from sourceScreen: Screen) {
-        guard let sourceConfig = configRepo.get(for: sourceScreen.id) else { return }
-        for screen in screens where screen.id != sourceScreen.id {
-            guard var targetConfig = configRepo.get(for: screen.id) else { continue }
-            targetConfig.effectConfig = sourceConfig.effectConfig
-            targetConfig.particleEffect = sourceConfig.particleEffect
-            targetConfig.fitMode = sourceConfig.fitMode
-            targetConfig.playbackSpeed = sourceConfig.playbackSpeed
-            targetConfig.frameRateLimit = sourceConfig.frameRateLimit
-            saveConfiguration(targetConfig)
-            // Apply live — pair particle effect with its density to avoid resets.
-            screen.videoPlayer?.setVideoFitMode(sourceConfig.fitMode)
-            screen.videoPlayer?.setPlaybackSpeed(sourceConfig.playbackSpeed)
-            applyParticleEffect(
-                sourceConfig.particleEffect,
-                density: sourceConfig.effectConfig.particleDensity,
-                to: screen
-            )
-            applyVideoEffects(for: screen, config: targetConfig)
-        }
     }
 
     nonisolated deinit {}
