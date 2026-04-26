@@ -263,20 +263,24 @@ final class ParticleOverlayView: NSView {
     // MARK: - Fireflies
 
     private static let firefliesPreset: EmitterPreset = {
+        // 之前 radius=3 + scale=0.8 渲染 ~5px 的小亮点，被视频内容完全淹没。
+        // 把贴图放大到 radius=14 + scale=1.0–1.4，并提高 birthRate 让萤火虫
+        // 在画面里有真正的辉光感；color 用浅黄绿模拟夜光昆虫色温。
+        let glowColor = NSColor(calibratedRed: 1.0, green: 0.95, blue: 0.55, alpha: 1).cgColor
         let cell = CAEmitterCell()
-        cell.contents = ParticleTextures.softCircle(radius: 3, color: NSColor(calibratedRed: 1, green: 1, blue: 0.6, alpha: 1).cgColor)
-        cell.birthRate = 10
-        cell.lifetime = 6
+        cell.contents = ParticleTextures.softCircle(radius: 14, color: glowColor)
+        cell.birthRate = 30
+        cell.lifetime = 8
         cell.lifetimeRange = 3
-        cell.velocity = 12
-        cell.velocityRange = 18
+        cell.velocity = 18
+        cell.velocityRange = 22
         cell.emissionRange = .pi * 2  // all directions
-        cell.scale = 0.8
+        cell.scale = 1.0
         cell.scaleRange = 0.4
-        cell.alphaRange = 0.5
-        cell.alphaSpeed = -0.15
-        cell.yAcceleration = 3
-        cell.color = NSColor(calibratedRed: 1, green: 1, blue: 0.6, alpha: 1).cgColor
+        cell.alphaRange = 0.6
+        cell.alphaSpeed = -0.12  // 缓慢淡出制造闪烁
+        cell.yAcceleration = 2
+        cell.color = glowColor
         return EmitterPreset(
             cells: [cell],
             shape: .rectangle,
@@ -427,30 +431,6 @@ private enum ParticleTextures {
             options: []
         )
 
-        return ctx.makeImage()
-    }
-
-    /// Solid filled circle (no gradient). Slightly cheaper than `softCircle`.
-    static func solidCircle(radius: CGFloat, color: CGColor) -> CGImage? {
-        let diameter = max(Int(ceil(radius * 2)), 2)
-        guard let ctx = makeContext(width: diameter, height: diameter) else { return nil }
-        ctx.setFillColor(color)
-        ctx.fillEllipse(in: CGRect(x: 0, y: 0, width: diameter, height: diameter))
-        return ctx.makeImage()
-    }
-
-    /// Vertical streak for rain particles. Width is the streak's thickness;
-    /// the streak is drawn as a vertical pill (rounded ends).
-    static func streak(width: CGFloat, height: CGFloat, color: CGColor) -> CGImage? {
-        let w = max(Int(ceil(width)), 2)
-        let h = max(Int(ceil(height)), 2)
-        guard let ctx = makeContext(width: w, height: h) else { return nil }
-        ctx.setFillColor(color)
-        let cornerRadius = CGFloat(w) / 2
-        let rect = CGRect(x: 0, y: 0, width: w, height: h)
-        let path = CGPath(roundedRect: rect, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)
-        ctx.addPath(path)
-        ctx.fillPath()
         return ctx.makeImage()
     }
 

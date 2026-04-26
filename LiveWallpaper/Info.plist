@@ -49,6 +49,8 @@
 	<string>Access to documents is needed to play video files stored there.</string>
 	<key>NSDownloadsFolderUsageDescription</key>
 	<string>Access to downloads is needed to play video files stored there.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Location is used to fetch local weather so LiveWallpaper can adapt effects to current conditions.</string>
 	<key>NSSecurityScopedBookmarksUsageDescription</key>
 	<string>Bookmarks are used to maintain access to your selected video files.</string>
 	<key>LSUIElement</key>

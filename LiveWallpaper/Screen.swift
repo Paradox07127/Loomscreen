@@ -1,7 +1,4 @@
 import AppKit
-import SwiftUI
-import AVKit
-import Combine
 import Observation
 
 @MainActor @Observable
@@ -11,51 +8,32 @@ class Screen: Identifiable, Hashable {
     let frame: CGRect
     let nsScreen: NSScreen
 
-    @ObservationIgnored private var previewPlayerObserver: AnyCancellable?
-    @ObservationIgnored private var syncTask: Task<Void, Never>?
-    @ObservationIgnored private var skipPreviewPlayerNotification = false
+    // MARK: - Unified Runtime Session
 
-    // MARK: - Active Wallpaper Window (any type)
-
-    /// The currently active wallpaper window (video, HTML, or shader).
-    /// Managed by ScreenManager — set to nil to close.
-    var activeWallpaperWindow: NSWindow? {
-        willSet {
-            if let old = activeWallpaperWindow, old !== newValue {
-                old.close()
-            }
+    private(set) var runtimeSession: (any WallpaperRuntimeSession)? {
+        didSet {
+            guard !isSameSession(oldValue, runtimeSession) else { return }
+            // Observer transition MUST run while `oldValue` still owns its
+            // player reference; teardown happens after.
+            handleRuntimeSessionTransition(from: oldValue, to: runtimeSession)
+            oldValue?.cleanup()
         }
     }
 
-    /// Current wallpaper type for this screen
-    var activeWallpaperType: WallpaperType = .video
+    var activeWallpaperWindow: NSWindow? {
+        runtimeSession?.wallpaperWindow
+    }
 
-    // MARK: - Video Player
+    var activeWallpaperType: WallpaperType {
+        runtimeSession?.wallpaperType ?? .video
+    }
 
     var videoPlayer: WallpaperVideoPlayer? {
-        didSet {
-            guard oldValue !== videoPlayer else { return }
+        runtimeSession?.videoPlayer
+    }
 
-            // Remove observer from old player
-            if let oldPlayer = oldValue {
-                NotificationCenter.default.removeObserver(
-                    self,
-                    name: WallpaperVideoPlayer.didChangePlaybackStateNotification,
-                    object: oldPlayer
-                )
-            }
-
-            // Add observer to new player
-            if let newPlayer = videoPlayer {
-                NotificationCenter.default.addObserver(
-                    self,
-                    selector: #selector(notifyPlaybackStateChanged),
-                    name: WallpaperVideoPlayer.didChangePlaybackStateNotification,
-                    object: newPlayer
-                )
-                syncPreviewToWallpaper()
-            }
-        }
+    var playbackController: (any WallpaperPlaybackControllable)? {
+        runtimeSession as? any WallpaperPlaybackControllable
     }
 
     /// Incremented whenever the video player's playback state changes,
@@ -66,91 +44,84 @@ class Screen: Identifiable, Hashable {
         playbackStateVersion += 1
     }
 
-    // MARK: - Preview Player
+    private func handleRuntimeSessionTransition(
+        from oldSession: (any WallpaperRuntimeSession)?,
+        to newSession: (any WallpaperRuntimeSession)?
+    ) {
+        let oldPlayer = oldSession?.videoPlayer
+        let newPlayer = newSession?.videoPlayer
 
-    var previewPlayer: AVPlayer? {
-        willSet {
-            guard !skipPreviewPlayerNotification else { return }
-            previewPlayer?.pause()
-            stopSyncTimer()
-            releasePreviewSecurityScope()
+        if !isSameVideoPlayer(oldPlayer, newPlayer), let oldPlayer {
+            NotificationCenter.default.removeObserver(
+                self,
+                name: WallpaperVideoPlayer.didChangePlaybackStateNotification,
+                object: oldPlayer
+            )
         }
-        didSet {
-            guard !skipPreviewPlayerNotification, let newPlayer = previewPlayer else { return }
-            configurePreviewPlayer(newPlayer)
+
+        if !isSameVideoPlayer(oldPlayer, newPlayer), let newPlayer {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(notifyPlaybackStateChanged),
+                name: WallpaperVideoPlayer.didChangePlaybackStateNotification,
+                object: newPlayer
+            )
+        }
+
+        playbackStateVersion += 1
+    }
+
+    private func isSameSession(
+        _ lhs: (any WallpaperRuntimeSession)?,
+        _ rhs: (any WallpaperRuntimeSession)?
+    ) -> Bool {
+        switch (lhs, rhs) {
+        case let (lhs?, rhs?):
+            return ObjectIdentifier(lhs as AnyObject) == ObjectIdentifier(rhs as AnyObject)
+        case (nil, nil):
+            return true
+        default:
+            return false
         }
     }
 
-    /// Security-scoped URL kept alive for the duration of `previewPlayer`.
-    /// AVFoundation reads file data lazily, so the scope must outlive AVAsset
-    /// construction — releasing it immediately causes "works once, then black".
-    @ObservationIgnored private var previewSecurityScopedURL: URL?
-
-    /// Begin a security scope tied to the preview player's lifetime. Any prior scope
-    /// is released first to keep the start/stop count balanced.
-    func retainPreviewSecurityScope(_ url: URL) {
-        releasePreviewSecurityScope()
-        if url.startAccessingSecurityScopedResource() {
-            previewSecurityScopedURL = url
+    private func isSameVideoPlayer(_ lhs: WallpaperVideoPlayer?, _ rhs: WallpaperVideoPlayer?) -> Bool {
+        switch (lhs, rhs) {
+        case let (lhs?, rhs?):
+            return lhs === rhs
+        case (nil, nil):
+            return true
+        default:
+            return false
         }
     }
 
-    private func releasePreviewSecurityScope() {
-        if let scoped = previewSecurityScopedURL {
-            scoped.stopAccessingSecurityScopedResource()
-            previewSecurityScopedURL = nil
-        }
+    var wallpaperSessionSummary: WallpaperSessionSummary {
+        _ = playbackStateVersion
+        return runtimeSession?.summary ?? .notConfigured
     }
 
-    private func configurePreviewPlayer(_ player: AVPlayer) {
-        player.volume = 0
-        player.isMuted = true
-
-        // Disable audio tracks to prevent AirPods from connecting
-        if let playerItem = player.currentItem {
-            playerItem.tracks
-                .filter { $0.assetTrack?.mediaType == .audio }
-                .forEach { $0.isEnabled = false }
-        }
-
-        // Observe player status
-        previewPlayerObserver = player.publisher(for: \.status)
-            .sink { [weak self, weak player] status in
-                guard status == .readyToPlay else { return }
-                player?.play()
-                self?.syncPreviewToWallpaper()
-            }
-
-        startSyncTimer()
+    func installRuntimeSession(_ session: any WallpaperRuntimeSession) {
+        // Setter's `didSet` cleans up the previous session AFTER the observer
+        // transition runs, so do not pre-clean here — that nils the old
+        // player and breaks observer removal.
+        runtimeSession = session
     }
 
-    // MARK: - Player Synchronization
-
-    func syncPreviewToWallpaper() {
-        guard let wallpaperPlayer = videoPlayer?.player,
-              let preview = previewPlayer else { return }
-
-        let wallpaperTime = wallpaperPlayer.currentTime()
-        if wallpaperTime.isValid && !wallpaperTime.seconds.isNaN {
-            preview.seek(to: wallpaperTime, toleranceBefore: .zero, toleranceAfter: .zero)
-        }
-
-        preview.rate = wallpaperPlayer.rate
+    func clearWallpaperRuntimeSession() {
+        runtimeSession = nil
     }
 
-    private func startSyncTimer() {
-        stopSyncTimer()
-        syncTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(5))
-                self?.syncPreviewToWallpaper()
-            }
-        }
+    func adoptRuntimeSession(from existingScreen: Screen) {
+        runtimeSession = existingScreen.runtimeSession
     }
 
-    private func stopSyncTimer() {
-        syncTask?.cancel()
-        syncTask = nil
+    func updateRuntimeFrame(to frame: CGRect) {
+        runtimeSession?.updateFrame(to: frame)
+    }
+
+    func resetRuntimeSession() {
+        clearWallpaperRuntimeSession()
     }
     
     // MARK: - Initialization
@@ -159,9 +130,11 @@ class Screen: Identifiable, Hashable {
         self.nsScreen = nsScreen
         self.frame = nsScreen.frame
 
-        // Get display ID safely with fallback
+        // Get display ID safely with fallback.
+        // `abs(Int.min)` would trap, so we bit-truncate into UInt32 instead —
+        // the exact value doesn't matter, only that it's deterministic per screen.
         self.id = (nsScreen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? UInt32)
-            ?? UInt32(abs(Self.generateFallbackID(for: nsScreen)))
+            ?? UInt32(truncatingIfNeeded: Self.generateFallbackID(for: nsScreen))
 
         // Get screen name with fallback
         let screenName = nsScreen.localizedName

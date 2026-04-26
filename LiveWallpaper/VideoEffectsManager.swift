@@ -32,14 +32,6 @@ final class VideoEffectsManager {
 
     private(set) var parameters: FilterParameters
 
-    // MARK: - Cached filters (allocated once, reused every frame)
-
-    private let blurFilter = CIFilter(name: "CIGaussianBlur")!
-    private let colorControlsFilter = CIFilter(name: "CIColorControls")!
-    private let tempTintFilter = CIFilter(name: "CITemperatureAndTint")!
-    private let vignetteFilter = CIFilter(name: "CIVignette")!
-    private let neutralVector = CIVector(x: 6500, y: 0)
-
     // MARK: - Initialization
 
     init(config: VideoEffectConfig = .default) {
@@ -64,11 +56,9 @@ final class VideoEffectsManager {
 
         let params = self.parameters
 
-        // CIFilter is non-Sendable, so filters must be created inside the handler.
-        // CoreImage internally caches filter lookup by name, so CIFilter(name:) is cheap.
-        let handler: @Sendable (AVAsynchronousCIImageFilteringRequest) -> Void = { request in
-            let sourceExtent = request.sourceImage.extent
-            var image = request.sourceImage.clampedToExtent()
+        let applier: @Sendable (AVCIImageFilteringParameters) async throws -> AVCIImageFilteringResult = { parameters in
+            let sourceExtent = parameters.sourceImage.extent
+            var image = parameters.sourceImage.clampedToExtent()
 
             if params.blurRadius > 0, let f = CIFilter(name: "CIGaussianBlur") {
                 f.setValue(image, forKey: kCIInputImageKey)
@@ -79,7 +69,7 @@ final class VideoEffectsManager {
             if params.glassRainEffect {
                 let rainFilter = RainGlassFilter()
                 rainFilter.inputImage = image
-                rainFilter.inputTime = NSNumber(value: request.compositionTime.seconds)
+                rainFilter.inputTime = NSNumber(value: parameters.compositionTime.seconds)
                 rainFilter.inputResolution = CIVector(x: sourceExtent.width, y: sourceExtent.height)
                 image = rainFilter.outputImage ?? image
             }
@@ -106,27 +96,35 @@ final class VideoEffectsManager {
                 image = f.outputImage ?? image
             }
 
-            request.finish(with: image.cropped(to: sourceExtent), context: nil)
+            return AVCIImageFilteringResult(resultImage: image.cropped(to: sourceExtent))
         }
 
-        // Use the async factory method for CIFilter composition.
-        // Then re-wrap via Configuration to update frameDuration safely
-        // (AVMutableVideoComposition is deprecated in macOS 26).
-        let base = try await AVVideoComposition.videoComposition(
-            with: asset,
-            applyingCIFiltersWithHandler: handler
+        let composition = try await AVVideoComposition(applyingFiltersTo: asset, applier: applier)
+        return Self.copy(composition, replacingFrameDurationWith: frameDuration)
+    }
+
+    private nonisolated static func copy(
+        _ composition: AVVideoComposition,
+        replacingFrameDurationWith frameDuration: CMTime
+    ) -> AVVideoComposition {
+        AVVideoComposition(
+            configuration: AVVideoComposition.Configuration(
+                animationTool: composition.animationTool,
+                colorPrimaries: composition.colorPrimaries,
+                colorTransferFunction: composition.colorTransferFunction,
+                colorYCbCrMatrix: composition.colorYCbCrMatrix,
+                customVideoCompositorClass: composition.customVideoCompositorClass,
+                frameDuration: frameDuration,
+                instructions: composition.instructions,
+                outputBufferDescription: composition.outputBufferDescription,
+                perFrameHDRDisplayMetadataPolicy: composition.perFrameHDRDisplayMetadataPolicy,
+                renderScale: composition.renderScale,
+                renderSize: composition.renderSize,
+                sourceSampleDataTrackIDs: composition.sourceSampleDataTrackIDs,
+                sourceTrackIDForFrameTiming: composition.sourceTrackIDForFrameTiming,
+                spatialVideoConfigurations: composition.spatialVideoConfigurations
+            )
         )
-
-        // CIFilter compositions use internal AVCoreImageFilterVideoCompositionInstruction
-        // objects that cannot be transferred to AVVideoComposition.Configuration (crashes
-        // with -[... dictionaryRepresentation]: unrecognized selector). The deprecated
-        // mutableCopy path is the ONLY working approach until Apple ships a CIFilter-aware
-        // Configuration API. FB15823456 (radar filed).
-        if let mutable = base.mutableCopy() as? AVMutableVideoComposition {
-            mutable.frameDuration = frameDuration
-            return mutable
-        }
-        return base
     }
 
     // MARK: - Time-of-Day Warmth
@@ -221,17 +219,46 @@ class RainGlassFilter: CIFilter, @unchecked Sendable {
 
         // Wrap the texture as CIImage. Metal textures have y-down by default;
         // flip so it aligns with CI's y-up coordinate space.
-        guard var displacementMap = CIImage(mtlTexture: texture, options: nil) else {
+        guard var rainTexture = CIImage(mtlTexture: texture, options: nil) else {
             return inputImage
         }
-        displacementMap = displacementMap.oriented(.downMirrored)
+        rainTexture = rainTexture.oriented(.downMirrored)
 
-        // Apply CIDisplacementDistortion — scale is resolution-relative.
-        let distortion = CIFilter(name: "CIDisplacementDistortion")!
-        distortion.setValue(inputImage, forKey: kCIInputImageKey)
-        distortion.setValue(displacementMap, forKey: "inputDisplacementImage")
-        distortion.setValue(finiteExtent.height * 0.04, forKey: kCIInputScaleKey)
+        // 1) 朦胧玻璃背景：高斯模糊整帧。clampedToExtent 防止边缘黑色。
+        let blurred = inputImage
+            .clampedToExtent()
+            .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 12])
+            .cropped(to: finiteExtent)
 
-        return distortion.outputImage?.cropped(to: finiteExtent) ?? inputImage
+        // 2) Displacement map（仅 RG 通道）：把 B 通道置 0 喂给位移滤镜，
+        //    避免 displacement 把 mask 数据误解为偏移。
+        let displacementOnly = rainTexture.applyingFilter("CIColorMatrix", parameters: [
+            "inputRVector": CIVector(x: 1, y: 0, z: 0, w: 0),
+            "inputGVector": CIVector(x: 0, y: 1, z: 0, w: 0),
+            "inputBVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+        ])
+
+        // 3) 清晰扭曲层：用 displacement map 在原始视频上做折射。
+        let displaced = inputImage.applyingFilter("CIDisplacementDistortion", parameters: [
+            "inputDisplacementImage": displacementOnly,
+            kCIInputScaleKey: finiteExtent.height * 0.05,
+        ]).cropped(to: finiteExtent)
+
+        // 4) Drop mask：把 B 通道复制到 A，形成 alpha mask。CIBlendWithAlphaMask
+        //    在 alpha=1 区域显示前景（清晰水滴），alpha=0 区域显示背景（模糊玻璃）。
+        let alphaMask = rainTexture.applyingFilter("CIColorMatrix", parameters: [
+            "inputRVector": CIVector(x: 0, y: 0, z: 1, w: 0),
+            "inputGVector": CIVector(x: 0, y: 0, z: 1, w: 0),
+            "inputBVector": CIVector(x: 0, y: 0, z: 1, w: 0),
+            "inputAVector": CIVector(x: 0, y: 0, z: 1, w: 0),
+        ])
+
+        let blended = displaced.applyingFilter("CIBlendWithAlphaMask", parameters: [
+            "inputBackgroundImage": blurred,
+            "inputMaskImage": alphaMask,
+        ])
+
+        return blended.cropped(to: finiteExtent)
     }
 }

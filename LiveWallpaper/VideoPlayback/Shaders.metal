@@ -260,6 +260,10 @@ kernel void rainDisplacementCompute(
     float t = fmod(time * 0.2, 7200.0); // prevent overflow
 
     float2 normal = float2(0.0);
+    // 累积"清晰区"强度：水滴中心 + 拖尾 + 静态小水珠都贡献 mask。Swift 层
+    // 用此通道把模糊玻璃与清晰扭曲层做 alpha 混合，呈现真正的"雨滴清楚、
+    // 玻璃朦胧"观感（参考 Wallpaper Engine / ShaderToy "Heartfelt"）。
+    float dropMask = 0.0;
 
     // Two depth layers for parallax
     for (float i = 0.0; i < 2.0; i += 1.0) {
@@ -294,13 +298,20 @@ kernel void rainDisplacementCompute(
         float staticDrops = smoothstep(-0.5, 1.0, n) * smoothstep(0.05, 0.01, length(staticPos));
 
         normal += dropPos * mainDrop + trailPos * trailDrop + staticPos * staticDrops;
+
+        // 雨滴 mask：水滴中心权重最高，拖尾次之，零散小点最弱；
+        // 后层（i=1）权重略低制造景深。
+        float layerWeight = 1.0 - i * 0.35;
+        dropMask += (mainDrop * 1.0 + trailDrop * 0.55 + staticDrops * 0.35) * layerWeight;
     }
 
     // Subtle global ripple (uneven glass)
     float ripple = sin(uv.y * 10.0 + time) * cos(uv.x * 8.0 + time) * 0.02;
     normal.x += ripple;
 
-    // Encode: 0.5 = neutral displacement
+    // Encode: 0.5 = neutral displacement，B 通道存 drop mask 供 CPU 端
+    // 提取作 alpha mask；A=1 保持兼容。
     float2 encoded = clamp((normal * 0.5) + 0.5, 0.0, 1.0);
-    output.write(float4(encoded.x, encoded.y, 0.0, 1.0), gid);
+    float maskOut = clamp(dropMask, 0.0, 1.0);
+    output.write(float4(encoded.x, encoded.y, maskOut, 1.0), gid);
 }

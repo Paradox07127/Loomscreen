@@ -41,6 +41,12 @@ final class WallpaperVideoPlayer {
     private var cleanupTasks = Set<AnyCancellable>()
     private var loadingTask: Task<Void, Never>?
     private var frameRateLimitTask: Task<Void, Never>?
+    /// 当前期望生效的视频合成。`AVPlayerLooper` 会轮转 `AVQueuePlayer.items()`，
+    /// 因此必须把 composition 同步到队列中所有 item，并在 currentItem
+    /// 切换时立即重映射，否则 looper 旋转后的新 currentItem 会因 stale
+    /// composition 触发 -12784 / -11858 等 compositor pipeline 错误。
+    private var currentVideoComposition: AVVideoComposition?
+    private var currentItemSubscription: AnyCancellable?
     private var accessToken = false
     private var lastObservedLoopCount: Int = 0
     private let initialFrame: CGRect
@@ -143,10 +149,6 @@ final class WallpaperVideoPlayer {
         
         // Set up quality of service for better performance
         playerItem.preferredForwardBufferDuration = 5.0
-        // Battery optimization: cap decode resolution when on battery
-        if PowerMonitor.shared.currentPowerSource.isOnBattery {
-            playerItem.preferredMaximumResolution = CGSize(width: 1920, height: 1080)
-        }
         playerItem.canUseNetworkResourcesForLiveStreamingWhilePaused = false
 
         // Configure player with muted audio for wallpaper playback
@@ -228,10 +230,12 @@ final class WallpaperVideoPlayer {
         // so we filter them out instead of spamming the log.
         //
         // -11847 AVErrorOperationInterrupted
+        // -11858 AVErrorOperationStopped — emitted when looper retires an item
+        //        whose composition was just swapped (rapid effect toggling).
         // -11878 AVErrorOperationCancelled
         // -12784 AVErrorCompositionFailed
         // -12504 / -12509 Custom compositor errors often triggered by CIFilter pipeline recompilation
-        let benignLooperCodes: Set<Int> = [-11847, -11878, -12784, -12504, -12509]
+        let benignLooperCodes: Set<Int> = [-11847, -11858, -11878, -12784, -12504, -12509]
         NotificationCenter.default.publisher(for: .AVPlayerItemFailedToPlayToEndTime, object: player?.currentItem)
             .sink { notification in
                 guard let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error else { return }
@@ -346,14 +350,6 @@ final class WallpaperVideoPlayer {
         }
     }
 
-    func setBatteryResolutionCap(_ enabled: Bool) {
-        if enabled {
-            player?.currentItem?.preferredMaximumResolution = CGSize(width: 1920, height: 1080)
-        } else {
-            player?.currentItem?.preferredMaximumResolution = .zero
-        }
-    }
-
     func setVideoFitMode(_ mode: VideoFitMode) {
         guard mode != fitMode else { return }
         fitMode = mode
@@ -393,6 +389,15 @@ final class WallpaperVideoPlayer {
         }
     }
 
+    func setWindowVisible(_ visible: Bool) {
+        guard let window else { return }
+        if visible {
+            window.orderBack(nil)
+        } else {
+            window.orderOut(nil)
+        }
+    }
+
     private func isValidFrame(_ frame: CGRect) -> Bool {
         !frame.isEmpty && frame.width > 0 && frame.height > 0
     }
@@ -411,23 +416,56 @@ final class WallpaperVideoPlayer {
         return windowScreenID == screenID
     }
 
+    // MARK: - Video Composition (Centralized Owner)
+
+    /// 单一入口设置 `AVVideoComposition`：
+    /// 1. 同步到 `AVQueuePlayer.items()` 中的所有 item（覆盖 looper 队列）；
+    /// 2. 订阅 `currentItem` 变更，在 looper 旋转时立即把 composition
+    ///    映射到新的 currentItem，避免 stale composition 触发 compositor 错误；
+    /// 3. 同步操作只更新已存在 item，不会与 `AVPlayerLooper` 内部的
+    ///    `replaceCurrentItem(with:)` 抢占。
+    func setVideoComposition(_ composition: AVVideoComposition?) {
+        currentVideoComposition = composition
+        applyCurrentCompositionToQueueItems()
+        installCurrentItemRebindIfNeeded()
+    }
+
+    private func applyCurrentCompositionToQueueItems() {
+        guard let queuePlayer = player else { return }
+        let composition = currentVideoComposition
+        for item in queuePlayer.items() {
+            item.videoComposition = composition
+        }
+    }
+
+    private func installCurrentItemRebindIfNeeded() {
+        guard currentItemSubscription == nil, let queuePlayer = player else { return }
+        currentItemSubscription = queuePlayer.publisher(for: \.currentItem)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.applyCurrentCompositionToQueueItems()
+            }
+    }
+
     // MARK: - Frame Rate Limiting
     func setFrameRateLimit(_ framesPerSecond: Float) {
         guard let playerItem = player?.currentItem else {
             Logger.warning("Cannot set frame rate limit: No player item available", category: .videoPlayer)
             return
         }
-        
+
+        // Cancel any previous frame rate limit task BEFORE the early-return
+        // path so a stale in-flight task can't reapply a limited composition
+        // after the caller asks for unlimited.
+        frameRateLimitTask?.cancel()
+        frameRateLimitTask = nil
+
         // If 0 is provided, use the original frame rate
         if framesPerSecond <= 0 {
-            // Remove any existing composition to use native frame rate
-            playerItem.videoComposition = nil
+            setVideoComposition(nil)
             Logger.debug("Frame rate limit disabled, using native frame rate", category: .videoPlayer)
             return
         }
-        
-        // Cancel any previous frame rate limit task
-        frameRateLimitTask?.cancel()
 
         let asset = playerItem.asset
         frameRateLimitTask = Task { [weak self] in
@@ -470,11 +508,8 @@ final class WallpaperVideoPlayer {
                 let composition = AVVideoComposition(configuration: compositionConfig)
 
                 await MainActor.run { [weak self] in
-                    guard self != nil else { return }
-
-                    // Apply to player item
-                    playerItem.videoComposition = composition
-
+                    guard let self else { return }
+                    self.setVideoComposition(composition)
                     Logger.info("Frame rate limit set to \(Int(targetFPS)) FPS", category: .videoPlayer)
                 }
             } catch is CancellationError {
@@ -507,6 +542,10 @@ final class WallpaperVideoPlayer {
 
         playerLooper?.disableLooping()
         playerLooper = nil
+
+        currentItemSubscription?.cancel()
+        currentItemSubscription = nil
+        currentVideoComposition = nil
 
         cleanupTasks.removeAll()
 

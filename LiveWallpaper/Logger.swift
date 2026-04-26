@@ -1,5 +1,5 @@
 import Foundation
-import os.log
+import os
 
 final class Logger {
     // MARK: - Log Categories
@@ -17,8 +17,13 @@ final class Logger {
         case lifecycle = "Lifecycle"
         case memory = "Memory"
 
-        var log: OSLog {
-            OSLog(subsystem: "com.livewallpaper", category: self.rawValue)
+        static let subsystem = "com.livewallpaper"
+
+        /// Backing `os.Logger` for this category, lazily created and cached.
+        /// `os.Logger` is a thin wrapper but caching avoids the per-call
+        /// subsystem string interning.
+        fileprivate var logger: os.Logger {
+            LoggerCache.shared.logger(for: self)
         }
     }
 
@@ -26,17 +31,6 @@ final class Logger {
 
     enum Level {
         case debug, info, notice, warning, error, fault
-
-        var osLogType: OSLogType {
-            switch self {
-            case .debug:    return .debug
-            case .info:     return .info
-            case .notice:   return .default
-            case .warning:  return .default
-            case .error:    return .error
-            case .fault:    return .fault
-            }
-        }
 
         var prefix: String {
             switch self {
@@ -46,6 +40,17 @@ final class Logger {
             case .warning:  return "⚠️"
             case .error:    return "❌"
             case .fault:    return "🔥"
+            }
+        }
+
+        fileprivate var osLogType: OSLogType {
+            switch self {
+            case .debug:    return .debug
+            case .info:     return .info
+            case .notice:   return .default
+            case .warning:  return .default
+            case .error:    return .error
+            case .fault:    return .fault
             }
         }
     }
@@ -64,9 +69,15 @@ final class Logger {
         if level == .debug { return }
         #endif
 
-        let fileName = URL(fileURLWithPath: file).lastPathComponent
-        let logMessage = "\(level.prefix) [\(fileName):\(line)] \(function) - \(message)"
-        os_log("%{public}@", log: category.log, type: level.osLogType, logMessage)
+        let fileName = (file as NSString).lastPathComponent
+        // Swift `os.Logger` keeps the level-aware short-circuit: when the
+        // system log level disables a category, the formatted string is never
+        // built. Privacy is `.public` so console output matches the legacy
+        // `os_log("%{public}@", ...)` behavior.
+        category.logger.log(
+            level: level.osLogType,
+            "\(level.prefix, privacy: .public) [\(fileName, privacy: .public):\(line, privacy: .public)] \(function, privacy: .public) - \(message, privacy: .public)"
+        )
     }
 
     // MARK: - Convenience Methods
@@ -165,5 +176,28 @@ class PerformanceTimer {
         let elapsed = CFAbsoluteTimeGetCurrent() - startTime
         Logger.debug("⏱ \(description) - Finished in \(String(format: "%.4f", elapsed))s",
                    category: category, file: file, function: function, line: line)
+    }
+}
+
+// MARK: - Cache
+
+/// Thread-safe registry of `os.Logger` instances per category.
+///
+/// Uses an unfair lock (cheap and short-held) rather than an actor so that
+/// `Logger.log(...)` stays synchronous and can be called from any context
+/// (including `nonisolated deinit`).
+private final class LoggerCache: @unchecked Sendable {
+    static let shared = LoggerCache()
+
+    private var loggers: [Logger.Category: os.Logger] = [:]
+    private let lock = NSLock()
+
+    func logger(for category: Logger.Category) -> os.Logger {
+        lock.lock()
+        defer { lock.unlock() }
+        if let cached = loggers[category] { return cached }
+        let new = os.Logger(subsystem: Logger.Category.subsystem, category: category.rawValue)
+        loggers[category] = new
+        return new
     }
 }

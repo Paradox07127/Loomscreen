@@ -385,33 +385,65 @@ struct ScreenConfigurationDecoderTests {
     func htmlConfigRoundTrip() throws {
         let original = ScreenConfiguration(
             screenID: 42,
-            videoBookmarkData: Data(),
-            wallpaperType: .html,
-            htmlContent: "https://example.com/wallpaper"
+            wallpaper: .html("https://example.com/wallpaper")
         )
 
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(ScreenConfiguration.self, from: data)
 
+        #expect(decoded.activeWallpaper == .html("https://example.com/wallpaper"))
         #expect(decoded.wallpaperType == .html)
         #expect(decoded.htmlContent == "https://example.com/wallpaper")
         #expect(decoded.screenID == 42)
+        #expect(decoded.preferredVideoBookmarkData == nil)
     }
 
     @Test("Shader wallpaper config round-trips with preset")
     func shaderConfigRoundTrip() throws {
         let original = ScreenConfiguration(
             screenID: 7,
-            videoBookmarkData: Data(),
-            wallpaperType: .metalShader,
-            shaderPreset: .aurora
+            wallpaper: .metalShader(.aurora)
         )
 
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(ScreenConfiguration.self, from: data)
 
+        #expect(decoded.activeWallpaper == .metalShader(.aurora))
         #expect(decoded.wallpaperType == .metalShader)
         #expect(decoded.shaderPreset == .aurora)
+    }
+
+    @Test("Legacy non-video config with fake bookmark drops the placeholder bookmark")
+    func legacyNonVideoConfigDropsPlaceholderBookmark() throws {
+        let legacyJSON = """
+        {
+            "screenID": 99,
+            "videoBookmarkData": "",
+            "wallpaperType": "HTML",
+            "htmlContent": "https://example.com"
+        }
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(ScreenConfiguration.self, from: legacyJSON)
+
+        #expect(decoded.activeWallpaper == .html("https://example.com"))
+        #expect(decoded.preferredVideoBookmarkData == nil)
+    }
+
+    @Test("Switching from HTML back to video restores the saved bookmark")
+    func switchingBackToVideoRestoresSavedBookmark() {
+        let bookmark = Data([0x10, 0x20, 0x30])
+        var configuration = ScreenConfiguration(
+            screenID: 314,
+            videoBookmarkData: bookmark
+        )
+
+        configuration.setHTMLWallpaper("https://example.com/live")
+        let restored = configuration.activateSavedVideoWallpaper()
+
+        #expect(restored == true)
+        #expect(configuration.activeWallpaper == .video(bookmarkData: bookmark))
+        #expect(configuration.preferredVideoBookmarkData == bookmark)
     }
 
     @Test("setAsLockScreen persists across encode/decode")
@@ -485,7 +517,6 @@ struct GlobalSettingsDecoderTests {
         #expect(decoded.minimumBatteryLevel == nil)
         #expect(decoded.defaultFrameRateLimit == .fps60)
         #expect(decoded.pauseOnFullScreen == true)
-        #expect(decoded.batteryResolutionCap == true)
     }
 
     @Test("Partial JSON keeps unspecified fields at default")
@@ -503,11 +534,26 @@ struct GlobalSettingsDecoderTests {
         #expect(decoded.minimumBatteryLevel == 0.2)
         // Unspecified fields keep their defaults.
         #expect(decoded.pauseOnFullScreen == true)
-        #expect(decoded.batteryResolutionCap == true)
         #expect(decoded.defaultFrameRateLimit == .fps60)
     }
 
-    @Test("Full round-trip preserves every field")
+    @Test("Legacy JSON carrying `batteryResolutionCap` still decodes")
+    func legacyBatteryResolutionCapIgnored() throws {
+        // Regression guard: older persisted configs still had the
+        // `batteryResolutionCap` key; after removal, unknown keys must not
+        // cause decode errors.
+        let legacyJSON = """
+        {
+            "globalPauseOnBattery": true,
+            "batteryResolutionCap": true
+        }
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(GlobalSettings.self, from: legacyJSON)
+        #expect(decoded.globalPauseOnBattery == true)
+    }
+
+    @Test("Full round-trip preserves every remaining field")
     func fullRoundTrip() throws {
         let original = GlobalSettings(
             globalPauseOnBattery: false,
@@ -515,8 +561,7 @@ struct GlobalSettingsDecoderTests {
             startOnLogin: true,
             minimumBatteryLevel: 0.15,
             defaultFrameRateLimit: .fps30,
-            pauseOnFullScreen: false,
-            batteryResolutionCap: false
+            pauseOnFullScreen: false
         )
 
         let data = try JSONEncoder().encode(original)
@@ -528,7 +573,6 @@ struct GlobalSettingsDecoderTests {
         #expect(decoded.minimumBatteryLevel == 0.15)
         #expect(decoded.defaultFrameRateLimit == .fps30)
         #expect(decoded.pauseOnFullScreen == false)
-        #expect(decoded.batteryResolutionCap == false)
     }
 }
 

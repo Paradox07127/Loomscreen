@@ -15,4 +15,10 @@ extension Notification.Name {
 
     /// A video player completed one full loop of its current video.
     static let videoDidCompleteLoop = Notification.Name("VideoDidCompleteLoop")
+
+    /// A screen's persisted wallpaper configuration changed (saved or removed).
+    /// `userInfo["screenID"]: CGDirectDisplayID` identifies which screen.
+    /// Inspectors / detail views should reload their @State from the manager
+    /// when the screenID matches the one they currently display.
+    static let wallpaperConfigurationDidChange = Notification.Name("WallpaperConfigurationDidChange")
 }

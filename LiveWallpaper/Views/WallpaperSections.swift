@@ -46,7 +46,7 @@ struct HTMLWallpaperSection: View {
                         guard !htmlContent.isEmpty else { return }
                         screenManager.setHTMLWallpaper(url: htmlContent, for: screen)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.glassProminent)
                     .disabled(htmlContent.isEmpty)
                 }
 
@@ -79,24 +79,35 @@ struct ShaderWallpaperSection: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                HStack(spacing: 10) {
-                    ForEach(MetalShaderPreset.allCases) { preset in
-                        Button {
-                            selectedShaderPreset = preset
-                            screenManager.setShaderWallpaper(preset: preset, for: screen)
-                        } label: {
-                            VStack(spacing: 6) {
-                                Image(systemName: preset.iconName)
-                                    .font(.title2)
-                                    .frame(width: 44, height: 44)
-                                    .background(selectedShaderPreset == preset ? Color.accentColor.opacity(0.2) : Color.gray.opacity(0.1))
-                                    .clipShape(Circle())
-                                Text(preset.rawValue)
-                                    .font(.caption2)
+                GlassEffectContainer(spacing: 10) {
+                    HStack(spacing: 10) {
+                        ForEach(MetalShaderPreset.allCases) { preset in
+                            Button {
+                                withAnimation(.snappy(duration: 0.2)) {
+                                    selectedShaderPreset = preset
+                                }
+                                screenManager.setShaderWallpaper(preset: preset, for: screen)
+                            } label: {
+                                VStack(spacing: 6) {
+                                    Image(systemName: preset.iconName)
+                                        .font(.title2)
+                                        .frame(width: 44, height: 44)
+                                        .glassEffect(
+                                            selectedShaderPreset == preset
+                                                ? .regular.tint(Color.accentColor.opacity(0.35)).interactive()
+                                                : .regular.interactive(),
+                                            in: .circle
+                                        )
+                                    Text(preset.rawValue)
+                                        .font(.caption2)
+                                        .foregroundStyle(selectedShaderPreset == preset ? .primary : .secondary)
+                                }
+                                .frame(maxWidth: .infinity)
                             }
-                            .frame(maxWidth: .infinity)
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("\(preset.rawValue) shader")
+                            .accessibilityHint(selectedShaderPreset == preset ? "Currently selected" : "Switch to \(preset.rawValue) shader")
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }

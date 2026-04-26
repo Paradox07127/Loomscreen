@@ -1,33 +1,24 @@
 import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
 
-/// Time-of-day wallpaper scheduling UI with 4 configurable time slots.
+/// Time-of-day wallpaper scheduling UI with conflict detection + per-slot
+/// add/remove. Slots can span midnight.
 struct ScheduleSection: View {
     @Binding var scheduleSlots: [ScheduleSlot]
     var screen: Screen
     var screenManager: ScreenManager
 
     @State private var currentHour: Int = Calendar.current.component(.hour, from: Date())
+    @State private var pendingSlotID: UUID?
+    /// stepper 调整若产生冲突，被影响的 slot ID 短暂高亮（红色描边）。
+    @State private var conflictHighlight: Set<UUID> = []
+    @State private var addSlotErrorMessage: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if scheduleSlots.isEmpty {
-                // Enable button
-                HStack {
-                    Spacer()
-                    Button(action: enableSchedule) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "plus.circle.fill")
-                            Text("Enable Schedule")
-                        }
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color.accentColor)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Enable schedule")
-                    .accessibilityHint("Creates time-of-day wallpaper slots")
-                    Spacer()
-                }
-                .padding(.vertical, 4)
+                emptyState
             } else {
                 ScheduleTimelineBar(slots: scheduleSlots, currentHour: currentHour)
 
@@ -35,34 +26,93 @@ struct ScheduleSection: View {
                     ScheduleSlotRow(
                         slot: $slot,
                         isActive: slot.containsHour(currentHour),
+                        isHighlightedConflict: conflictHighlight.contains(slot.id),
                         onVideoSelect: { selectVideo(for: slot.id) },
                         onClearVideo: { clearVideo(for: slot.id) },
-                        onChange: { screenManager.updateScheduleSlots(scheduleSlots, for: screen) }
+                        onRemove: { removeSlot(slot.id) },
+                        onValidateChange: { proposedStart, proposedEnd in
+                            validateAndCommit(slotID: slot.id, start: proposedStart, end: proposedEnd)
+                        }
                     )
+                }
+
+                if let message = addSlotErrorMessage {
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                        Text(message)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .transition(.opacity)
                 }
 
                 Divider()
 
-                Button(action: disableSchedule) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "xmark.circle")
-                        Text("Disable Schedule")
+                HStack(spacing: 8) {
+                    Button(action: addSlot) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "plus.circle.fill")
+                            Text("Add Slot")
+                        }
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.accentColor)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
                     }
-                    .font(.system(size: 12))
-                    .foregroundStyle(.red)
+                    .buttonStyle(.plain)
+                    .glassEffect(.regular.tint(Color.accentColor.opacity(0.15)).interactive(), in: .capsule)
+                    .accessibilityLabel("Add schedule slot")
+
+                    Spacer()
+
+                    Button(action: disableSchedule) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "xmark.circle")
+                            Text("Disable Schedule")
+                        }
+                        .font(.system(size: 12))
+                        .foregroundStyle(.red)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                    }
+                    .buttonStyle(.plain)
+                    .glassEffect(.regular.tint(Color.red.opacity(0.15)).interactive(), in: .capsule)
+                    .accessibilityLabel("Disable schedule")
+                    .accessibilityHint("Removes all schedule slots and returns to normal playback")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Disable schedule")
-                .accessibilityHint("Removes all schedule slots and returns to normal playback")
             }
         }
         .task {
-            // Update current hour periodically
             while !Task.isCancelled {
                 currentHour = Calendar.current.component(.hour, from: Date())
                 try? await Task.sleep(for: .seconds(60))
             }
         }
+    }
+
+    @ViewBuilder
+    private var emptyState: some View {
+        HStack {
+            Spacer()
+            Button(action: enableSchedule) {
+                HStack(spacing: 4) {
+                    Image(systemName: "plus.circle.fill")
+                    Text("Enable Schedule")
+                }
+                .font(.system(size: 12))
+                .foregroundStyle(Color.accentColor)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+            }
+            .buttonStyle(.plain)
+            .glassEffect(.regular.tint(Color.accentColor.opacity(0.15)).interactive(), in: .capsule)
+            .accessibilityLabel("Enable schedule")
+            .accessibilityHint("Creates time-of-day wallpaper slots")
+            Spacer()
+        }
+        .padding(.vertical, 4)
     }
 
     // MARK: - Actions
@@ -78,17 +128,108 @@ struct ScheduleSection: View {
     }
 
     private func selectVideo(for slotID: UUID) {
-        let panel = ResourceUtilities.configureVideoOpenPanel()
-        panel.begin { response in
-            guard response == .OK, let url = panel.url else { return }
-            Task { @MainActor in
-                if let bookmark = ResourceUtilities.createBookmark(for: url) {
-                    if let index = scheduleSlots.firstIndex(where: { $0.id == slotID }) {
-                        scheduleSlots[index].videoBookmarkData = bookmark
-                        screenManager.updateScheduleSlots(scheduleSlots, for: screen)
-                    }
+        pendingSlotID = slotID
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.movie, .video, .quickTimeMovie, .mpeg4Movie, .avi]
+        // 绑定到当前 key window，让 panel 在用户操作的屏幕上弹出，
+        // 避免跑到 main screen。
+        if let parent = NSApp.keyWindow ?? NSApp.mainWindow {
+            panel.beginSheetModal(for: parent) { response in
+                guard response == .OK, !panel.urls.isEmpty else {
+                    pendingSlotID = nil
+                    return
                 }
+                handleImporterResult(.success(panel.urls))
             }
+        } else {
+            guard panel.runModal() == .OK, !panel.urls.isEmpty else {
+                pendingSlotID = nil
+                return
+            }
+            handleImporterResult(.success(panel.urls))
+        }
+    }
+
+    private func handleImporterResult(_ result: Result<[URL], Error>) {
+        defer { pendingSlotID = nil }
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first, let slotID = pendingSlotID else { return }
+            SettingsManager.shared.saveLastUsedDirectory(url.deletingLastPathComponent())
+            guard let bookmark = ResourceUtilities.createBookmark(for: url),
+                  let index = scheduleSlots.firstIndex(where: { $0.id == slotID }) else { return }
+            scheduleSlots[index].videoBookmarkData = bookmark
+            screenManager.updateScheduleSlots(scheduleSlots, for: screen)
+        case .failure(let error):
+            Logger.error("Schedule slot video import failed: \(error.localizedDescription)", category: .fileAccess)
+        }
+    }
+
+    /// stepper 改动 startHour/endHour 时调用：先用建议值构造一个临时 slot，
+    /// 计算与其他 slot 的冲突。无冲突 → 提交并保存；有冲突 → 撤销改动并
+    /// 短暂红框提示。
+    private func validateAndCommit(slotID: UUID, start: Int, end: Int) {
+        guard let index = scheduleSlots.firstIndex(where: { $0.id == slotID }) else { return }
+        var probe = scheduleSlots[index]
+        probe.startHour = start
+        probe.endHour = end
+        let others = scheduleSlots.filter { $0.id != slotID }
+        let conflicts = SchedulePolicy.conflicts(slot: probe, against: others)
+        if conflicts.isEmpty {
+            scheduleSlots[index].startHour = start
+            scheduleSlots[index].endHour = end
+            screenManager.updateScheduleSlots(scheduleSlots, for: screen)
+            return
+        }
+        // 冲突：撤销 stepper 改动 + 红框警示对方 slot 1.5 秒。
+        var highlighted = conflicts
+        highlighted.insert(slotID)
+        withAnimation(.snappy(duration: 0.18)) { conflictHighlight = highlighted }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(1500))
+            withAnimation(.snappy(duration: 0.2)) { conflictHighlight.removeAll() }
+        }
+    }
+
+    private func removeSlot(_ slotID: UUID) {
+        scheduleSlots.removeAll(where: { $0.id == slotID })
+        if scheduleSlots.isEmpty {
+            screenManager.updateScheduleSlots(nil, for: screen)
+        } else {
+            screenManager.updateScheduleSlots(scheduleSlots, for: screen)
+        }
+    }
+
+    private func addSlot() {
+        guard let free = SchedulePolicy.findFreeRange(in: scheduleSlots, minHours: 2) else {
+            withAnimation { addSlotErrorMessage = "No free time range. Adjust an existing slot first." }
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(3))
+                withAnimation { addSlotErrorMessage = nil }
+            }
+            return
+        }
+        let label = defaultLabel(for: free.start)
+        let newSlot = ScheduleSlot(
+            startHour: free.start,
+            endHour: min(free.end, 24) % 24,
+            label: label
+        )
+        scheduleSlots.append(newSlot)
+        screenManager.updateScheduleSlots(scheduleSlots, for: screen)
+        addSlotErrorMessage = nil
+    }
+
+    private func defaultLabel(for hour: Int) -> String {
+        switch hour {
+        case 5..<11:  return "Morning"
+        case 11..<14: return "Midday"
+        case 14..<18: return "Afternoon"
+        case 18..<22: return "Evening"
+        default:      return "Night"
         }
     }
 
@@ -105,20 +246,27 @@ struct ScheduleSection: View {
 struct ScheduleSlotRow: View {
     @Binding var slot: ScheduleSlot
     let isActive: Bool
+    let isHighlightedConflict: Bool
     let onVideoSelect: () -> Void
     let onClearVideo: () -> Void
-    let onChange: () -> Void
+    let onRemove: () -> Void
+    /// stepper 调整时调用，传入候选的 startHour/endHour 让上层做冲突校验。
+    /// 若校验通过上层会直接写回 binding；不通过则不写回。
+    let onValidateChange: (_ start: Int, _ end: Int) -> Void
 
     @State private var videoName: String?
     @State private var isEditingTime = false
+    @State private var isHovering = false
 
     var body: some View {
         VStack(spacing: 4) {
             HStack(spacing: 8) {
-                // Active indicator
-                Circle()
-                    .fill(isActive ? Color.green : Color.gray.opacity(0.3))
-                    .frame(width: 8, height: 8)
+                // Active indicator — pulses when slot covers the current hour
+                Image(systemName: "circle.fill")
+                    .font(.system(size: 8))
+                    .foregroundStyle(isActive ? Color.green : Color.gray.opacity(0.3))
+                    .symbolEffect(.pulse, options: .repeat(.continuous), isActive: isActive)
+                    .animation(.smooth(duration: 0.3), value: isActive)
 
                 // Slot label + time (tap to edit)
                 HStack(spacing: 4) {
@@ -133,49 +281,58 @@ struct ScheduleSlotRow: View {
                         .font(.system(size: 8))
                         .foregroundStyle(.tertiary)
                         .rotationEffect(isEditingTime ? .degrees(90) : .degrees(0))
-                        .animation(.easeInOut(duration: 0.2), value: isEditingTime)
+                        .animation(.snappy(duration: 0.2), value: isEditingTime)
                 }
                 .frame(width: 90, alignment: .leading)
                 .onTapGesture { withAnimation { isEditingTime.toggle() } }
                 .accessibilityLabel("\(slot.label), \(formatHour(slot.startHour)) to \(formatHour(slot.endHour))")
                 .accessibilityHint("Tap to edit time range")
 
-            Spacer()
+                Spacer()
 
-            // Video assignment
-            if let name = videoName {
-                HStack(spacing: 4) {
-                    Image(systemName: "film.fill")
-                        .font(.system(size: 10))
-                        .foregroundStyle(Color.accentColor)
-                    Text(name)
-                        .font(.system(size: 11))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .frame(maxWidth: 80)
-                    Button(action: onClearVideo) {
-                        Image(systemName: "xmark.circle.fill")
+                // Video assignment
+                if let name = videoName {
+                    HStack(spacing: 4) {
+                        Image(systemName: "film.fill")
                             .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Color.accentColor)
+                        Text(name)
+                            .font(.system(size: 11))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: 80)
+                        Button(action: onClearVideo) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Clear video for \(slot.label)")
+                        .accessibilityHint("Removes the assigned video from this schedule slot")
+                    }
+                } else {
+                    Button(action: onVideoSelect) {
+                        HStack(spacing: 2) {
+                            Image(systemName: "plus.circle")
+                                .font(.system(size: 10))
+                            Text("Set Video")
+                                .font(.system(size: 11))
+                        }
+                        .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Clear video for \(slot.label)")
-                    .accessibilityHint("Removes the assigned video from this schedule slot")
+                    .accessibilityLabel("Set video for \(slot.label)")
+                    .accessibilityHint("Choose a video for this schedule slot")
                 }
-            } else {
-                Button(action: onVideoSelect) {
-                    HStack(spacing: 2) {
-                        Image(systemName: "plus.circle")
-                            .font(.system(size: 10))
-                        Text("Set Video")
-                            .font(.system(size: 11))
-                    }
-                    .foregroundStyle(.secondary)
+
+                Button(action: onRemove) {
+                    Image(systemName: "trash.circle.fill")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Set video for \(slot.label)")
-                .accessibilityHint("Choose a video for this schedule slot")
-            }
+                .opacity(isHovering ? 1 : 0)
+                .accessibilityLabel("Remove \(slot.label) slot")
             }
 
             // Time range editor (toggled by tapping the time label)
@@ -187,13 +344,11 @@ struct ScheduleSlotRow: View {
                             .foregroundStyle(.secondary)
                         Stepper(
                             formatHour(slot.startHour),
-                            value: $slot.startHour,
-                            in: 0...23,
-                            step: 1
+                            onIncrement: { onValidateChange((slot.startHour + 1) % 24, slot.endHour) },
+                            onDecrement: { onValidateChange((slot.startHour + 23) % 24, slot.endHour) }
                         )
                         .font(.system(size: 11))
                         .frame(width: 100)
-                        .onChange(of: slot.startHour) { onChange() }
                         .accessibilityLabel("Start hour for \(slot.label)")
                         .accessibilityValue(formatHour(slot.startHour))
                         .accessibilityHint("Adjust the start time of this schedule slot")
@@ -204,13 +359,11 @@ struct ScheduleSlotRow: View {
                             .foregroundStyle(.secondary)
                         Stepper(
                             formatHour(slot.endHour),
-                            value: $slot.endHour,
-                            in: 0...23,
-                            step: 1
+                            onIncrement: { onValidateChange(slot.startHour, (slot.endHour + 1) % 24) },
+                            onDecrement: { onValidateChange(slot.startHour, (slot.endHour + 23) % 24) }
                         )
                         .font(.system(size: 11))
                         .frame(width: 100)
-                        .onChange(of: slot.endHour) { onChange() }
                         .accessibilityLabel("End hour for \(slot.label)")
                         .accessibilityValue(formatHour(slot.endHour))
                         .accessibilityHint("Adjust the end time of this schedule slot")
@@ -220,9 +373,26 @@ struct ScheduleSlotRow: View {
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .padding(.vertical, 2)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(rowBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(isHighlightedConflict ? Color.red.opacity(0.7) : Color.clear, lineWidth: 1)
+        )
+        .animation(.snappy(duration: 0.2), value: isHighlightedConflict)
+        .onHover { isHovering = $0 }
         .onAppear { resolveVideoName() }
         .onChange(of: slot.videoBookmarkData) { resolveVideoName() }
+    }
+
+    private var rowBackground: Color {
+        if isHighlightedConflict { return Color.red.opacity(0.06) }
+        if isHovering { return Color.primary.opacity(0.04) }
+        return Color.clear
     }
 
     private func resolveVideoName() {
@@ -255,7 +425,7 @@ struct ScheduleTimelineBar: View {
     /// Exposed as `internal static` so unit tests can pin down the boundary
     /// behavior (normal, wrapping, zero-length) without standing up a SwiftUI
     /// view hierarchy.
-    static func segments(for slot: ScheduleSlot) -> [(start: Int, end: Int)] {
+    nonisolated static func segments(for slot: ScheduleSlot) -> [(start: Int, end: Int)] {
         if slot.startHour == slot.endHour {
             return []
         }

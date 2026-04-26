@@ -93,6 +93,21 @@ final class MetalWallpaperView: NSView, MTKViewDelegate {
         currentPreset = preset
     }
 
+    func applyPerformanceProfile(_ profile: WallpaperPerformanceProfile) {
+        guard let metalView else { return }
+
+        switch profile {
+        case .quality:
+            metalView.preferredFramesPerSecond = profile.shaderFramesPerSecond
+            metalView.enableSetNeedsDisplay = false
+            metalView.isPaused = false
+        case .suspended:
+            metalView.isPaused = true
+            metalView.enableSetNeedsDisplay = false
+            metalView.releaseDrawables()
+        }
+    }
+
     // MARK: - MTKViewDelegate
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
@@ -165,3 +180,5 @@ final class MetalWallpaperView: NSView, MTKViewDelegate {
         // deinit is not allowed under strict concurrency.
     }
 }
+
+extension MetalWallpaperView: WallpaperPerformanceConfigurable {}

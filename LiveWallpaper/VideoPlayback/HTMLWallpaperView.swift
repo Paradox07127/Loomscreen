@@ -69,6 +69,23 @@ final class HTMLWallpaperView: NSView {
         webView.loadFileURL(fileURL, allowingReadAccessTo: fileURL.deletingLastPathComponent())
     }
 
+    func applyPerformanceProfile(_ profile: WallpaperPerformanceProfile) {
+        switch profile {
+        case .quality:
+            setMediaPlaybackSuspended(false)
+        case .suspended:
+            setMediaPlaybackSuspended(true)
+        }
+    }
+
+    private func setMediaPlaybackSuspended(_ suspended: Bool) {
+        if #available(macOS 12.0, *) {
+            webView.setAllMediaPlaybackSuspended(suspended) {}
+        } else if suspended {
+            webView.evaluateJavaScript("document.querySelectorAll('video,audio').forEach(function(el){ el.pause(); });")
+        }
+    }
+
     // MARK: - Layout
 
     override func layout() {
@@ -86,6 +103,10 @@ final class HTMLWallpaperView: NSView {
 
     nonisolated deinit {}
 }
+
+extension HTMLWallpaperView: WallpaperPerformanceConfigurable {}
+
+extension HTMLWallpaperView: WallpaperResourceCleanable {}
 
 // MARK: - WKNavigationDelegate
 
