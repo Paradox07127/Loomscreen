@@ -41,10 +41,9 @@ final class WallpaperVideoPlayer {
     private var cleanupTasks = Set<AnyCancellable>()
     private var loadingTask: Task<Void, Never>?
     private var frameRateLimitTask: Task<Void, Never>?
-    /// 当前期望生效的视频合成。`AVPlayerLooper` 会轮转 `AVQueuePlayer.items()`，
-    /// 因此必须把 composition 同步到队列中所有 item，并在 currentItem
-    /// 切换时立即重映射，否则 looper 旋转后的新 currentItem 会因 stale
-    /// composition 触发 -12784 / -11858 等 compositor pipeline 错误。
+    /// AVPlayerLooper rotates queued items, so composition must be applied to
+    /// every item + re-applied on currentItem changes to avoid stale-composition
+    /// compositor errors.
     private var currentVideoComposition: AVVideoComposition?
     private var currentItemSubscription: AnyCancellable?
     private var accessToken = false
@@ -132,7 +131,7 @@ final class WallpaperVideoPlayer {
                     timer.checkpoint("Playback configured")
                 }
 
-                Logger.videoLoaded(url: url, screenID: UInt32(0)) // Will be updated later with correct screen ID
+                Logger.debug("Video loaded: \(url.lastPathComponent)", category: .videoPlayer)
             } catch is CancellationError {
                 Logger.debug("Video loading task was cancelled", category: .videoPlayer)
                 self.stopAccessingResource()
@@ -146,10 +145,17 @@ final class WallpaperVideoPlayer {
     private func configurePlaybackComponents(with asset: AVURLAsset) {
         // Create an optimized player item with playback settings
         let playerItem = AVPlayerItem(asset: asset)
-        
+
         // Set up quality of service for better performance
         playerItem.preferredForwardBufferDuration = 5.0
         playerItem.canUseNetworkResourcesForLiveStreamingWhilePaused = false
+
+        // Disable any audio tracks. Wallpaper playback never plays sound, and
+        // leaving audio tracks enabled lets AVF invoke audioanalyticsd / AudioHAL
+        // headset queries which spam the log under sandbox.
+        for track in playerItem.tracks where track.assetTrack?.mediaType == .audio {
+            track.isEnabled = false
+        }
 
         // Configure player with muted audio for wallpaper playback
         // Use AVQueuePlayer + AVPlayerLooper for seamless zero-cost looping
@@ -235,15 +241,31 @@ final class WallpaperVideoPlayer {
         // -11878 AVErrorOperationCancelled
         // -12784 AVErrorCompositionFailed
         // -12504 / -12509 Custom compositor errors often triggered by CIFilter pipeline recompilation
-        let benignLooperCodes: Set<Int> = [-11847, -11858, -11878, -12784, -12504, -12509]
-        NotificationCenter.default.publisher(for: .AVPlayerItemFailedToPlayToEndTime, object: player?.currentItem)
-            .sink { notification in
-                guard let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error else { return }
+        // Benign looper / compositor transitions emitted during item rotation,
+        // composition rebuild, or media-cache settling. Treat as noise — they
+        // do not actually halt playback.
+        // -11847 AVErrorOperationInterrupted
+        // -11858 AVErrorOperationStopped
+        // -11878 AVErrorOperationCancelled
+        // -12504 / -12509 / -12784 CustomVideoCompositor / FigCompositionFailed
+        // -12823 VMC (Video Media Cache) settling
+        // -12852 VRP (Video Rendering Pipeline) settling
+        // -12860 FigFilePlayer FailedToPlayToEnd (looper rotation)
+        let benignLooperCodes: Set<Int> = [-11847, -11858, -11878, -12504, -12509, -12784, -12823, -12852, -12860]
+        // 不绑定到初始 currentItem：AVPlayerLooper 会轮换 item，绑定单一对象会
+        // 漏掉后续 item 的失败事件。改用全局监听 + 队列过滤。
+        NotificationCenter.default.publisher(for: .AVPlayerItemFailedToPlayToEndTime, object: nil)
+            .sink { [weak self] notification in
+                guard let self,
+                      let item = notification.object as? AVPlayerItem,
+                      let queue = self.player,
+                      queue.items().contains(item) || queue.currentItem === item,
+                      let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
+                else { return }
                 let nsError = error as NSError
                 if nsError.domain == AVFoundationErrorDomain && benignLooperCodes.contains(nsError.code) {
-                    return  // benign looper transition or safe compositor drop
+                    return
                 }
-                // Only log actual fatal errors that stop playback
                 Logger.warning("Playback item failed (code: \(nsError.code)): \(error.localizedDescription)", category: .videoPlayer)
             }
             .store(in: &cleanupTasks)
@@ -298,27 +320,21 @@ final class WallpaperVideoPlayer {
         cleanupTasks.insert(AnyCancellable { positionTask.cancel() })
     }
     
-    /// Finds the associated screen and updates the window position to match
+    /// Updates window position when the associated NSScreen still exists.
+    /// 找不到匹配 NSScreen 时（显示器重新配置的瞬间状态）保持原 frame —— 之前
+    /// 会 fallback 到 main screen 把壁纸错位到错误的屏幕。等下一次屏幕参数稳定
+    /// 通知 + ScreenManager.hardRefresh 修复。
     private func updateWindowPositionForCurrentScreen() {
-        // Find the screen this player is associated with
         let associatedScreen = NSScreen.screens.first { screen in
             guard let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else {
                 return false
             }
             return isAssociatedWithScreen(id)
         }
-
-        let targetScreen: NSScreen
-        if let screen = associatedScreen {
-            targetScreen = screen
-        } else if let mainScreen = NSScreen.main {
-            Logger.warning("Could not find matching screen for video player, using main screen as fallback", category: .screenManager)
-            targetScreen = mainScreen
-        } else {
+        guard let targetScreen = associatedScreen else {
+            Logger.debug("Skipping window-position update: associated NSScreen not found yet (display likely mid-reconfigure)", category: .screenManager)
             return
         }
-
-        Logger.debug("Updating window frame to match screen \(targetScreen.localizedName): \(targetScreen.frame)", category: .screenManager)
         updateWindowFrame(targetScreen.frame)
     }
     
@@ -418,12 +434,8 @@ final class WallpaperVideoPlayer {
 
     // MARK: - Video Composition (Centralized Owner)
 
-    /// 单一入口设置 `AVVideoComposition`：
-    /// 1. 同步到 `AVQueuePlayer.items()` 中的所有 item（覆盖 looper 队列）；
-    /// 2. 订阅 `currentItem` 变更，在 looper 旋转时立即把 composition
-    ///    映射到新的 currentItem，避免 stale composition 触发 compositor 错误；
-    /// 3. 同步操作只更新已存在 item，不会与 `AVPlayerLooper` 内部的
-    ///    `replaceCurrentItem(with:)` 抢占。
+    /// Sole entry point for `AVVideoComposition`. Mirrors composition onto
+    /// every queued item and rebinds on looper rotation.
     func setVideoComposition(_ composition: AVVideoComposition?) {
         currentVideoComposition = composition
         applyCurrentCompositionToQueueItems()
@@ -450,7 +462,8 @@ final class WallpaperVideoPlayer {
     // MARK: - Frame Rate Limiting
     func setFrameRateLimit(_ framesPerSecond: Float) {
         guard let playerItem = player?.currentItem else {
-            Logger.warning("Cannot set frame rate limit: No player item available", category: .videoPlayer)
+            // Expected during reload/restart while AVPlayerItem is reattaching.
+            Logger.debug("Skip frame-rate limit: no player item yet (player not ready)", category: .videoPlayer)
             return
         }
 

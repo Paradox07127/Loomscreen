@@ -63,4 +63,12 @@ enum PlaylistPolicy {
         guard rotationMinutes > 0 else { return false }
         return now.timeIntervalSince(lastRotation) >= Double(rotationMinutes) * 60.0
     }
+
+    /// 拖拽 reorder 后 cursor 重映射：在新 combined 数组中查找原本 active 的
+    /// bookmark 的位置；找不到时返回 0（指向 primary）。让 reorder 不会让
+    /// 已经在播的视频"跳"到错误位置。
+    static func resolveCursor(activeBookmark: Data?, in combined: [Data]) -> Int {
+        guard let activeBookmark else { return 0 }
+        return combined.firstIndex(of: activeBookmark) ?? 0
+    }
 }

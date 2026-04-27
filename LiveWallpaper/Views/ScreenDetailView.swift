@@ -41,6 +41,7 @@ struct ScreenDetailView: View {
     @State private var hasPreviewSource = false
 
     @State private var selectedWallpaperType: WallpaperType = .video
+    @State private var selectedWallpaperMode: WallpaperMode = .single
     @State private var selectedParticleEffect: ParticleEffect = .none
     @State private var effectConfig = VideoEffectConfig.default
     @State private var selectedShaderPreset: MetalShaderPreset = .waves
@@ -231,6 +232,35 @@ struct ScreenDetailView: View {
                         // each glass surface independently.
                         GlassEffectContainer(spacing: 16) {
                             VStack(spacing: 16) {
+                            // Mode picker: single capsule container with internal segments
+                            // (matches the toolbar Wallpaper Type picker visually); the entire
+                            // segment area is hit-testable, not just the text glyphs.
+                            HStack(spacing: 0) {
+                                ForEach(WallpaperMode.allCases) { mode in
+                                    Button {
+                                        withAnimation(.snappy(duration: 0.18)) {
+                                            selectedWallpaperMode = mode
+                                        }
+                                        screenManager.updateWallpaperMode(mode, for: screen)
+                                    } label: {
+                                        Text(mode.label)
+                                            .font(.system(size: 12, weight: selectedWallpaperMode == mode ? .semibold : .regular))
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 5)
+                                            .background(
+                                                Capsule()
+                                                    .fill(selectedWallpaperMode == mode ? Color.accentColor.opacity(0.35) : Color.clear)
+                                            )
+                                            .contentShape(Capsule())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel("\(mode.label) mode")
+                                }
+                            }
+                            .padding(2)
+                            .glassEffect(.regular.interactive(), in: .capsule)
+
+                            if selectedWallpaperMode == .playlist {
                             // Playlist Group
                             GroupBox {
                                 CollapsibleSection(
@@ -248,7 +278,9 @@ struct ScreenDetailView: View {
                                 }
                             }
                             .groupBoxStyle(ContainerGroupBoxStyle())
+                            }
 
+                            if selectedWallpaperMode == .schedule {
                             // Schedule Group
                             GroupBox {
                                 CollapsibleSection(
@@ -264,6 +296,7 @@ struct ScreenDetailView: View {
                                 }
                             }
                             .groupBoxStyle(ContainerGroupBoxStyle())
+                            }
 
                             // Environment Group
                             GroupBox {
@@ -436,7 +469,7 @@ struct ScreenDetailView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 280)
+                .fixedSize(horizontal: true, vertical: false)
                 .accessibilityLabel("Wallpaper type")
                 .accessibilityHint("Choose between video, HTML, or Metal shader wallpaper")
                 .onChange(of: selectedWallpaperType) { _, newType in
@@ -492,6 +525,7 @@ struct ScreenDetailView: View {
 
     // MARK: - Drag and Drop
     private func handleDrop(urls: [URL]) -> Bool {
+        defer { isDraggingOver = false }
         guard let videoURL = urls.first else { return false }
         handleSelectedFile(url: videoURL)
         return true
@@ -523,6 +557,7 @@ struct ScreenDetailView: View {
             scheduleSlots = config.scheduleSlots ?? []
             if let preset = config.shaderPreset { selectedShaderPreset = preset }
             selectedWallpaperType = config.wallpaperType
+            selectedWallpaperMode = config.wallpaperMode
             htmlContent = config.htmlContent ?? ""
             hasPreviewSource = config.wallpaperType == .video && config.videoBookmarkData != nil
             loadPreviewPosterIfNeeded()
@@ -542,6 +577,7 @@ struct ScreenDetailView: View {
             playlistRotationMinutes = nil
             scheduleSlots = []
             selectedWallpaperType = .video
+            selectedWallpaperMode = .single
             htmlContent = ""
             hasPreviewSource = screen.videoPlayer?.videoURL != nil
             loadPreviewPosterIfNeeded()
@@ -608,12 +644,18 @@ struct ScreenDetailView: View {
            config.wallpaperType == .video,
            let bookmarkData = config.videoBookmarkData {
             var isStale = false
-            return try? URL(
+            guard let url = try? URL(
                 resolvingBookmarkData: bookmarkData,
                 options: .withSecurityScope,
                 relativeTo: nil,
                 bookmarkDataIsStale: &isStale
-            )
+            ) else { return nil }
+            // Refresh the persisted bookmark when macOS reports it as stale,
+            // so subsequent launches don't keep re-resolving against drifted data.
+            if isStale, let refreshed = ResourceUtilities.createBookmark(for: url) {
+                screenManager.replaceActiveBookmark(refreshed, for: screen)
+            }
+            return url
         }
 
         return screen.videoPlayer?.videoURL

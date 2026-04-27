@@ -31,57 +31,38 @@ struct PlaylistSection: View {
                 entryList
             }
 
-            // Previous (left) · Add Videos (center) · Next (right)
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 Button(action: { screenManager.regressPlaylist(for: screen) }) {
-                    HStack(spacing: 4) {
+                    HStack(spacing: 3) {
                         Image(systemName: "backward.fill")
-                        Text("Previous")
+                        Text("Prev").lineLimit(1)
                     }
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color.accentColor)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
                 }
-                .buttonStyle(.plain)
-                .glassEffect(.regular.tint(Color.accentColor.opacity(0.15)).interactive(), in: .capsule)
+                .buttonStyle(GlassCapsuleButtonStyle(fontSize: 11, horizontalPadding: 8))
                 .disabled(entries.count < 2)
                 .accessibilityLabel("Skip to previous video")
 
-                Spacer(minLength: 4)
-
                 Button(action: addVideos) {
-                    HStack(spacing: 4) {
+                    HStack(spacing: 3) {
                         Image(systemName: "plus.circle.fill")
-                        Text("Add Videos")
+                        Text("Add").lineLimit(1)
                     }
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color.accentColor)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
                 }
-                .buttonStyle(.plain)
-                .glassEffect(.regular.tint(Color.accentColor.opacity(0.15)).interactive(), in: .capsule)
+                .buttonStyle(GlassCapsuleButtonStyle(fontSize: 11, horizontalPadding: 8))
                 .accessibilityLabel("Add videos to playlist")
 
-                Spacer(minLength: 4)
-
                 Button(action: { screenManager.advancePlaylist(for: screen) }) {
-                    HStack(spacing: 4) {
-                        Text("Next")
+                    HStack(spacing: 3) {
+                        Text("Next").lineLimit(1)
                         Image(systemName: "forward.fill")
                             .contentTransition(.symbolEffect(.replace))
                     }
-                    .font(.system(size: 12))
-                    .foregroundStyle(Color.accentColor)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
                 }
-                .buttonStyle(.plain)
-                .glassEffect(.regular.tint(Color.accentColor.opacity(0.15)).interactive(), in: .capsule)
+                .buttonStyle(GlassCapsuleButtonStyle(fontSize: 11, horizontalPadding: 8))
                 .disabled(entries.count < 2)
                 .accessibilityLabel("Skip to next video")
             }
+            .frame(maxWidth: .infinity, alignment: .center)
 
             if entries.count >= 2 {
                 Divider()
@@ -160,7 +141,7 @@ struct PlaylistSection: View {
                     onPlayNow: { playNow(entry) },
                     onRemove: { remove(entry) }
                 )
-                .draggable(entry.id.uuidString) {
+                .draggable(entry.id) {
                     PlaylistRow(
                         entry: entry,
                         isDragging: false,
@@ -201,30 +182,18 @@ struct PlaylistSection: View {
         let cursor = config.playlistCursorIndex ?? 0
         let activeBookmark = (cursor < combined.count) ? combined[cursor] : primary
 
-        var newEntries: [PlaylistEntry] = []
-        newEntries.append(PlaylistEntry(
+        entries = [PlaylistEntry(
             bookmark: primary,
             isPrimary: true,
             isPlaying: primary == activeBookmark,
             name: ResourceUtilities.resolveBookmarkName(primary) ?? "Primary"
-        ))
-        for extra in extras {
-            newEntries.append(PlaylistEntry(
-                bookmark: extra,
+        )] + extras.map {
+            PlaylistEntry(
+                bookmark: $0,
                 isPrimary: false,
-                isPlaying: extra == activeBookmark,
-                name: ResourceUtilities.resolveBookmarkName(extra) ?? "Unknown"
-            ))
-        }
-        // Stable IDs across reloads if bookmarks unchanged.
-        if entries.count == newEntries.count,
-           zip(entries, newEntries).allSatisfy({ $0.bookmark == $1.bookmark }) {
-            for index in entries.indices {
-                entries[index].isPrimary = newEntries[index].isPrimary
-                entries[index].isPlaying = newEntries[index].isPlaying
-            }
-        } else {
-            entries = newEntries
+                isPlaying: $0 == activeBookmark,
+                name: ResourceUtilities.resolveBookmarkName($0) ?? "Unknown"
+            )
         }
     }
 
@@ -275,7 +244,7 @@ struct PlaylistSection: View {
     }
 
     private func handleDrop(itemIDs: [String], target: PlaylistEntry.ID) -> Bool {
-        guard let dragged = itemIDs.compactMap({ UUID(uuidString: $0) }).first,
+        guard let dragged = itemIDs.first,
               dragged != target,
               let sourceIndex = entries.firstIndex(where: { $0.id == dragged }),
               let targetIndex = entries.firstIndex(where: { $0.id == target }) else {
@@ -284,7 +253,8 @@ struct PlaylistSection: View {
         }
         var newEntries = entries
         let item = newEntries.remove(at: sourceIndex)
-        let insertAt = sourceIndex < targetIndex ? targetIndex : targetIndex
+        // 删除 source 后下游索引整体左移，所以 source<target 时实际插入位置是 target-1。
+        let insertAt = sourceIndex < targetIndex ? max(0, targetIndex - 1) : targetIndex
         newEntries.insert(item, at: min(insertAt, newEntries.count))
         applyEntries(newEntries, removedPrimary: false)
         draggingID = nil
@@ -316,7 +286,10 @@ struct PlaylistSection: View {
 // MARK: - PlaylistEntry View Model
 
 struct PlaylistEntry: Identifiable, Equatable {
-    let id: UUID = UUID()
+    /// Stable ID: derived from bookmark + primary flag. Survives reload as
+    /// long as bookmark bytes don't change, so SwiftUI ForEach identity and
+    /// in-flight drag previews stay coherent.
+    var id: String { "\(isPrimary ? "p" : "x"):\(bookmark.hashValue)" }
     let bookmark: Data
     var isPrimary: Bool
     var isPlaying: Bool
@@ -386,6 +359,8 @@ private struct PlaylistRow: View {
                 Image(systemName: "ellipsis.circle")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
+                    .frame(width: 18, height: 18)
+                    .contentShape(Rectangle())
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
@@ -411,6 +386,7 @@ private struct PlaylistRow: View {
             RoundedRectangle(cornerRadius: 8)
                 .strokeBorder(entry.isPlaying ? Color.green.opacity(0.45) : Color.clear, lineWidth: 1)
         )
+        .contentShape(Rectangle())
         .opacity(isDragging ? 0.4 : 1.0)
         .onHover { isHovering = $0 }
         .accessibilityElement(children: .combine)

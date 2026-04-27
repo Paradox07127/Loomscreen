@@ -15,7 +15,8 @@ final class VideoEffectsApplicationService {
         noEffectsHandler: () -> Void
     ) {
         guard let playerItem = player.player?.currentItem else {
-            Logger.warning("Cannot apply effects: no active player for screen \(screenID)", category: .videoPlayer)
+            // Expected during reload/restart while AVPlayerItem is reattaching.
+            Logger.debug("Skip apply-effects: no active player for screen \(screenID) yet", category: .videoPlayer)
             return
         }
 
@@ -67,8 +68,10 @@ final class VideoEffectsApplicationService {
             } catch is CancellationError {
                 // expected — newer apply superseded this build
             } catch {
-                await MainActor.run {
+                await MainActor.run { [weak self] in
                     Logger.error("Failed to apply video effects: \(error.localizedDescription)", category: .videoPlayer)
+                    // 错误路径同样清掉 inflightTasks，避免 Task 引用悬挂占内存。
+                    self?.inflightTasks[screenID] = nil
                 }
             }
         }

@@ -312,6 +312,68 @@ struct PlaylistPolicyTests {
             rotationMinutes: 1
         ))
     }
+
+    @Test("Sequential previousCursor decrements 2 → 1 → 0 → 2")
+    func sequentialPreviousCursorDecrements() {
+        #expect(PlaylistPolicy.previousCursor(currentCursor: 2, playlistCount: 3, shuffle: false) == 1)
+        #expect(PlaylistPolicy.previousCursor(currentCursor: 1, playlistCount: 3, shuffle: false) == 0)
+        #expect(PlaylistPolicy.previousCursor(currentCursor: 0, playlistCount: 3, shuffle: false) == 2)
+    }
+
+    @Test("Previous with fewer than two entries does not rotate")
+    func previousTooFewEntries() {
+        #expect(PlaylistPolicy.previousCursor(currentCursor: 0, playlistCount: 1, shuffle: false) == nil)
+        #expect(PlaylistPolicy.previousCursor(currentCursor: 0, playlistCount: 0, shuffle: false) == nil)
+    }
+
+    @Test("Shuffle previous excludes the current cursor")
+    func shufflePreviousExcludesCurrent() {
+        let result = PlaylistPolicy.previousCursor(
+            currentCursor: 2,
+            playlistCount: 4,
+            shuffle: true,
+            randomIndex: { _ in 2 }
+        )
+        #expect(result != nil && result != 2)
+    }
+
+    @Test("Stale previousCursor (past end) normalizes before stepping back")
+    func stalePreviousCursorNormalizes() {
+        #expect(PlaylistPolicy.previousCursor(currentCursor: 7, playlistCount: 3, shuffle: false) == 0)
+    }
+
+    // MARK: - resolveCursor (used by ScreenManager.replacePlaylist after reorder)
+
+    @Test("resolveCursor: active bookmark found at its new index")
+    func resolveCursorFound() {
+        let primary = Data([0x01])
+        let extra1 = Data([0x02])
+        let extra2 = Data([0x03])
+        // After user reorders: [extra1, primary, extra2]
+        let combined = [extra1, primary, extra2]
+        // Was playing primary → cursor should follow primary to its new index 1.
+        #expect(PlaylistPolicy.resolveCursor(activeBookmark: primary, in: combined) == 1)
+    }
+
+    @Test("resolveCursor: active bookmark removed from list → falls back to 0")
+    func resolveCursorRemovedFallsBackToPrimary() {
+        let primary = Data([0x01])
+        let extra = Data([0x02])
+        let removed = Data([0x99])
+        let combined = [primary, extra]
+        #expect(PlaylistPolicy.resolveCursor(activeBookmark: removed, in: combined) == 0)
+    }
+
+    @Test("resolveCursor: nil active → 0")
+    func resolveCursorNilActive() {
+        let combined = [Data([0x01]), Data([0x02])]
+        #expect(PlaylistPolicy.resolveCursor(activeBookmark: nil, in: combined) == 0)
+    }
+
+    @Test("resolveCursor: empty combined → 0")
+    func resolveCursorEmptyCombined() {
+        #expect(PlaylistPolicy.resolveCursor(activeBookmark: Data([0x01]), in: []) == 0)
+    }
 }
 
 // MARK: - ScreenConfiguration rotation / schedule / replace-primary integration
@@ -469,13 +531,14 @@ struct SchedulePolicyTests {
     func schedulePolicyReturnsBookmark() {
         let current = Data([0x01])
         let scheduled = Data([0x02])
-        let configuration = ScreenConfiguration(
+        var configuration = ScreenConfiguration(
             screenID: 41,
             videoBookmarkData: current,
             scheduleSlots: [
                 ScheduleSlot(startHour: 6, endHour: 12, videoBookmarkData: scheduled, label: "Morning")
             ]
         )
+        configuration.wallpaperMode = .schedule
 
         let result = SchedulePolicy.scheduledBookmark(in: configuration, hour: 8)
 
@@ -486,17 +549,119 @@ struct SchedulePolicyTests {
     @Test("Schedule policy skips already active bookmark")
     func schedulePolicySkipsAlreadyActiveBookmark() {
         let bookmark = Data([0x01])
-        let configuration = ScreenConfiguration(
+        var configuration = ScreenConfiguration(
             screenID: 42,
             videoBookmarkData: bookmark,
             scheduleSlots: [
                 ScheduleSlot(startHour: 6, endHour: 12, videoBookmarkData: bookmark, label: "Morning")
             ]
         )
+        configuration.wallpaperMode = .schedule
 
         let result = SchedulePolicy.scheduledBookmark(in: configuration, hour: 8)
 
         #expect(result == nil)
+    }
+
+    // MARK: - decision mode-gate
+
+    @Test("decision returns .none when wallpaperMode != .schedule even with active slot")
+    func decisionGatedByMode() {
+        let primary = Data([0x01])
+        let scheduled = Data([0x02])
+        var configuration = ScreenConfiguration(
+            screenID: 50,
+            videoBookmarkData: primary,
+            scheduleSlots: [
+                ScheduleSlot(startHour: 6, endHour: 12, videoBookmarkData: scheduled, label: "Morning")
+            ]
+        )
+
+        configuration.wallpaperMode = .single
+        #expect(SchedulePolicy.decision(for: configuration, hour: 8) == .none)
+
+        configuration.wallpaperMode = .playlist
+        #expect(SchedulePolicy.decision(for: configuration, hour: 8) == .none)
+    }
+
+    // MARK: - hourRanges
+
+    @Test("hourRanges: normal slot produces a single range")
+    func hourRangesNormal() {
+        let slot = ScheduleSlot(startHour: 6, endHour: 12, label: "Morning")
+        let ranges = SchedulePolicy.hourRanges(for: slot)
+        #expect(ranges == [6..<12])
+    }
+
+    @Test("hourRanges: midnight wrap produces two ranges")
+    func hourRangesMidnightWrap() {
+        let slot = ScheduleSlot(startHour: 22, endHour: 6, label: "Night")
+        let ranges = SchedulePolicy.hourRanges(for: slot)
+        #expect(ranges == [22..<24, 0..<6])
+    }
+
+    @Test("hourRanges: zero-length slot returns empty")
+    func hourRangesZeroLength() {
+        let slot = ScheduleSlot(startHour: 8, endHour: 8, label: "Empty")
+        #expect(SchedulePolicy.hourRanges(for: slot).isEmpty)
+    }
+
+    // MARK: - conflicts
+
+    @Test("conflicts: overlapping normal slots are detected")
+    func conflictsOverlap() {
+        let slotA = ScheduleSlot(startHour: 6, endHour: 12, label: "Morning")
+        let slotB = ScheduleSlot(startHour: 10, endHour: 14, label: "Late Morning")
+        #expect(SchedulePolicy.conflicts(slot: slotA, against: [slotB]) == Set([slotB.id]))
+    }
+
+    @Test("conflicts: adjacent slots do not conflict")
+    func conflictsAdjacent() {
+        let slotA = ScheduleSlot(startHour: 6, endHour: 12, label: "A")
+        let slotB = ScheduleSlot(startHour: 12, endHour: 18, label: "B")
+        #expect(SchedulePolicy.conflicts(slot: slotA, against: [slotB]).isEmpty)
+    }
+
+    @Test("conflicts: midnight-wrap slot overlaps an early-morning slot")
+    func conflictsMidnightWrap() {
+        let night = ScheduleSlot(startHour: 22, endHour: 6, label: "Night")
+        let morning = ScheduleSlot(startHour: 4, endHour: 9, label: "Morning")
+        #expect(SchedulePolicy.conflicts(slot: night, against: [morning]) == Set([morning.id]))
+    }
+
+    @Test("conflicts: empty slot conflicts with nobody")
+    func conflictsEmptySlot() {
+        let empty = ScheduleSlot(startHour: 8, endHour: 8, label: "Empty")
+        let other = ScheduleSlot(startHour: 0, endHour: 24, label: "Wrap-disguise")
+        #expect(SchedulePolicy.conflicts(slot: empty, against: [other]).isEmpty)
+    }
+
+    // MARK: - findFreeRange
+
+    @Test("findFreeRange: returns longest contiguous gap")
+    func findFreeRangeFindsGap() {
+        let slots = [
+            ScheduleSlot(startHour: 6, endHour: 9, label: "A"),
+            ScheduleSlot(startHour: 14, endHour: 18, label: "B"),
+        ]
+        let gap = SchedulePolicy.findFreeRange(in: slots, minHours: 2)
+        // Free segments: 0–6 (6h), 9–14 (5h), 18–24 (6h). Longest is 0–6 or 18–24, both 6h.
+        #expect(gap != nil)
+        #expect((gap?.end ?? 0) - (gap?.start ?? 0) >= 5)
+    }
+
+    @Test("findFreeRange: returns nil when no segment satisfies minHours")
+    func findFreeRangeReturnsNil() {
+        let slots = [ScheduleSlot(startHour: 0, endHour: 23, label: "AlmostFull")]
+        // Only 23–24 = 1h free; minHours: 2 cannot fit.
+        #expect(SchedulePolicy.findFreeRange(in: slots, minHours: 2) == nil)
+    }
+
+    @Test("findFreeRange: returns whole day when slots empty")
+    func findFreeRangeAllFree() {
+        let gap = SchedulePolicy.findFreeRange(in: [], minHours: 24)
+        #expect(gap?.start == 0)
+        #expect(gap?.end == 24)
     }
 }
 

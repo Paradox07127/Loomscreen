@@ -14,6 +14,7 @@ struct ScheduleSection: View {
     /// stepper 调整若产生冲突，被影响的 slot ID 短暂高亮（红色描边）。
     @State private var conflictHighlight: Set<UUID> = []
     @State private var addSlotErrorMessage: String?
+    @State private var conflictMessage: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -36,7 +37,7 @@ struct ScheduleSection: View {
                     )
                 }
 
-                if let message = addSlotErrorMessage {
+                if let message = addSlotErrorMessage ?? conflictMessage {
                     HStack(spacing: 4) {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .font(.caption2)
@@ -56,13 +57,8 @@ struct ScheduleSection: View {
                             Image(systemName: "plus.circle.fill")
                             Text("Add Slot")
                         }
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color.accentColor)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
                     }
-                    .buttonStyle(.plain)
-                    .glassEffect(.regular.tint(Color.accentColor.opacity(0.15)).interactive(), in: .capsule)
+                    .buttonStyle(GlassCapsuleButtonStyle())
                     .accessibilityLabel("Add schedule slot")
 
                     Spacer()
@@ -72,22 +68,25 @@ struct ScheduleSection: View {
                             Image(systemName: "xmark.circle")
                             Text("Disable Schedule")
                         }
-                        .font(.system(size: 12))
-                        .foregroundStyle(.red)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
                     }
-                    .buttonStyle(.plain)
-                    .glassEffect(.regular.tint(Color.red.opacity(0.15)).interactive(), in: .capsule)
+                    .buttonStyle(GlassCapsuleButtonStyle(tint: .red))
                     .accessibilityLabel("Disable schedule")
                     .accessibilityHint("Removes all schedule slots and returns to normal playback")
                 }
             }
         }
         .task {
+            // Sleep precisely until the next top-of-hour so currentHour flips
+            // at the boundary instead of up to 59s late.
             while !Task.isCancelled {
                 currentHour = Calendar.current.component(.hour, from: Date())
-                try? await Task.sleep(for: .seconds(60))
+                let nextHour = Calendar.current.nextDate(
+                    after: Date(),
+                    matching: DateComponents(minute: 0, second: 0),
+                    matchingPolicy: .nextTime
+                ) ?? Date().addingTimeInterval(60)
+                let delay = max(1, nextHour.timeIntervalSinceNow)
+                try? await Task.sleep(for: .seconds(delay))
             }
         }
     }
@@ -101,13 +100,8 @@ struct ScheduleSection: View {
                     Image(systemName: "plus.circle.fill")
                     Text("Enable Schedule")
                 }
-                .font(.system(size: 12))
-                .foregroundStyle(Color.accentColor)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
             }
-            .buttonStyle(.plain)
-            .glassEffect(.regular.tint(Color.accentColor.opacity(0.15)).interactive(), in: .capsule)
+            .buttonStyle(GlassCapsuleButtonStyle())
             .accessibilityLabel("Enable schedule")
             .accessibilityHint("Creates time-of-day wallpaper slots")
             Spacer()
@@ -182,9 +176,17 @@ struct ScheduleSection: View {
             scheduleSlots[index].startHour = start
             scheduleSlots[index].endHour = end
             screenManager.updateScheduleSlots(scheduleSlots, for: screen)
+            withAnimation(.snappy(duration: 0.2)) { conflictMessage = nil }
             return
         }
-        // 冲突：撤销 stepper 改动 + 红框警示对方 slot 1.5 秒。
+        // 冲突：撤销 stepper 改动 + 持久错误条 + 红框警示 1.5 秒。
+        let conflictingLabels = scheduleSlots
+            .filter { conflicts.contains($0.id) }
+            .map(\.label)
+            .joined(separator: ", ")
+        withAnimation(.snappy(duration: 0.2)) {
+            conflictMessage = "Time range overlaps with: \(conflictingLabels)"
+        }
         var highlighted = conflicts
         highlighted.insert(slotID)
         withAnimation(.snappy(duration: 0.18)) { conflictHighlight = highlighted }
@@ -344,8 +346,11 @@ struct ScheduleSlotRow: View {
                             .foregroundStyle(.secondary)
                         Stepper(
                             formatHour(slot.startHour),
-                            onIncrement: { onValidateChange((slot.startHour + 1) % 24, slot.endHour) },
-                            onDecrement: { onValidateChange((slot.startHour + 23) % 24, slot.endHour) }
+                            value: Binding(
+                                get: { slot.startHour },
+                                set: { onValidateChange(((($0 % 24) + 24) % 24), slot.endHour) }
+                            ),
+                            in: 0...23
                         )
                         .font(.system(size: 11))
                         .frame(width: 100)
@@ -359,8 +364,11 @@ struct ScheduleSlotRow: View {
                             .foregroundStyle(.secondary)
                         Stepper(
                             formatHour(slot.endHour),
-                            onIncrement: { onValidateChange(slot.startHour, (slot.endHour + 1) % 24) },
-                            onDecrement: { onValidateChange(slot.startHour, (slot.endHour + 23) % 24) }
+                            value: Binding(
+                                get: { slot.endHour },
+                                set: { onValidateChange(slot.startHour, ((($0 % 24) + 24) % 24)) }
+                            ),
+                            in: 0...23
                         )
                         .font(.system(size: 11))
                         .frame(width: 100)
