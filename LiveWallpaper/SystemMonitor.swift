@@ -10,7 +10,7 @@ final class SystemMonitor {
     // MARK: - Observed Properties
 
     private(set) var cpuUsage: Double = 0
-    /// 整机 CPU 占用 (0-100%)，用 host_statistics(HOST_CPU_LOAD_INFO) 增量计算。
+    /// Whole-machine CPU usage (0-100%), derived from host_statistics(HOST_CPU_LOAD_INFO) deltas.
     private(set) var systemCpuUsage: Double = 0
     private(set) var memoryUsage: UInt64 = 0
     private(set) var totalMemory: UInt64 = 0
@@ -29,7 +29,7 @@ final class SystemMonitor {
     @ObservationIgnored private var updateInterval: TimeInterval = 2.0
     @ObservationIgnored private var updateTask: Task<Void, Never>?
     @ObservationIgnored private var fpsCounter = FPSCounter()
-    /// 上一次采样的 host CPU ticks，用于计算两次采样之间的增量。
+    /// Previous host CPU ticks sample, used to compute deltas between samples.
     @ObservationIgnored private var prevHostCpuLoad: host_cpu_load_info?
 
     private init() {
@@ -142,9 +142,9 @@ final class SystemMonitor {
 
     // MARK: - System-wide CPU Usage
 
-    /// 整机 CPU 占用率（0-100），基于 `host_statistics(HOST_CPU_LOAD_INFO)`
-    /// 两次采样的 ticks 差值。第一次采样返回 0，之后是 user+system+nice 占
-    /// (user+system+nice+idle) 的百分比。
+    /// Whole-machine CPU usage (0-100), based on `host_statistics(HOST_CPU_LOAD_INFO)`
+    /// tick deltas between samples. First sample returns 0; subsequent samples return
+    /// (user+system+nice) / (user+system+nice+idle).
     private func getSystemCPUUsage() -> Double {
         var info = host_cpu_load_info()
         var size = mach_msg_type_number_t(MemoryLayout<host_cpu_load_info>.stride / MemoryLayout<integer_t>.size)
@@ -161,8 +161,8 @@ final class SystemMonitor {
         defer { prevHostCpuLoad = info }
         guard let prev = prevHostCpuLoad else { return 0 }
 
-        // host_cpu_load_info.cpu_ticks 是 fixed-size tuple of 4 natural_t:
-        // [USER, SYSTEM, IDLE, NICE]，按 CPU_STATE_* 索引访问。
+        // host_cpu_load_info.cpu_ticks is a fixed tuple of 4 natural_t:
+        // [USER, SYSTEM, IDLE, NICE], indexed via CPU_STATE_*.
         let userDelta   = Double(info.cpu_ticks.0 &- prev.cpu_ticks.0)
         let systemDelta = Double(info.cpu_ticks.1 &- prev.cpu_ticks.1)
         let idleDelta   = Double(info.cpu_ticks.2 &- prev.cpu_ticks.2)

@@ -160,9 +160,9 @@ final class ScreenManager {
                     playback.pause()
                     powerPolicy.markPausedByFullScreen(screen.id)
                 }
-                // 不再 orderOut 壁纸窗口：Mission Control / 多任务上划时
-                // 我们仍然希望看到当前帧，而不是被 orderOut 后露出系统默认
-                // 壁纸。pause + .suspended profile 已能停掉解码 / 动画。
+                // Don't orderOut the wallpaper window: keep the frozen frame visible
+                // during Mission Control / Spaces swipe instead of revealing the system
+                // wallpaper. pause + .suspended profile already stops decoding.
             } else {
                 if let playback = screen.playbackController,
                    powerPolicy.wasPausedByFullScreen(screen.id) {
@@ -877,10 +877,10 @@ final class ScreenManager {
             return
         }
 
-        // 用户主动 Reload 必须从配置彻底重建 runtime session：
-        // 沿用现有 player 的 reuse 分支只会更新设置，无法从卡死/失效
-        // 状态恢复（AVQueuePlayer + AVPlayerLooper 已损坏）。强制 release
-        // 让 restoreWallpaperSession 走 needsNewPlayer 分支彻底重启。
+        // User-initiated Reload must rebuild the runtime session from scratch.
+        // The reuse branch only updates settings and can't recover a stalled
+        // AVQueuePlayer + AVPlayerLooper. Force release so restoreWallpaperSession
+        // takes the needsNewPlayer branch.
         releaseRuntimeSession(screen)
         restoreWallpaperSession(for: screen, configuration: configuration, preservingState: false)
     }
@@ -932,8 +932,8 @@ final class ScreenManager {
 
         configuration.frameRateLimit = frameRateLimit
         saveConfiguration(configuration)
-        // 有 active effects 时，frame rate 必须通过 effects 路径合成，否则
-        // 普通 frame-rate composition 会覆盖 CIFilter composition 让滤镜失效。
+        // With active effects, frame rate must go through the effects compositor;
+        // otherwise the plain frame-rate composition overrides CIFilter composition.
         if configuration.effectConfig.hasActiveEffect || configuration.effectConfig.autoTimeTint {
             applyVideoEffects(for: screen, config: configuration)
         } else {
@@ -1006,15 +1006,15 @@ final class ScreenManager {
         return (validConfigCount, invalidConfigCount)
     }
     
-    /// Hard refresh: 强制重读 NSScreen + 释放所有 runtime + 按持久化配置重建。
-    /// 当 macOS 改分辨率后系统通知 timing 不可靠（sidebar 显示器变灰、视频消失）时，
-    /// 由 sidebar refresh 按钮触发，把一切恢复到最新状态。
+    /// Force re-read NSScreen + release all runtime sessions + rebuild from persisted config.
+    /// Triggered by the sidebar refresh button when system notifications miss a resolution
+    /// change (sidebar displays grey out, video disappears).
     func hardRefresh() {
         Logger.notice("Hard refresh: rebuilding display registry + runtime sessions", category: .screenManager)
         refreshRateCache.removeAll()
-        // 1) 重读 NSScreen + 释放所有 runtime（不 preserve），让 screens 数组反映最新 frame/ID
+        // 1) Re-read NSScreen + release all runtime so the screens array reflects the latest frame/ID.
         refreshScreens(preserveRuntimeSessions: false)
-        // 2) 按持久化配置重建每屏的 wallpaper session（视频/HTML/Shader）
+        // 2) Rebuild each screen's wallpaper session (video/HTML/Shader) from persisted config.
         reloadAllScreens()
     }
 
@@ -1041,9 +1041,9 @@ final class ScreenManager {
                 continue
             }
 
-            // 同 reloadWallpaperForScreen：批量 reload 也必须先释放 runtime
-            // session 再恢复，避免命中 applyConfiguration 的 reuse 分支让
-            // 卡死的 AVQueuePlayer 苟活下来。
+            // Same as reloadWallpaperForScreen: batch reload must release runtime
+            // sessions before restoring; otherwise the reuse branch keeps a stalled
+            // AVQueuePlayer alive.
             releaseRuntimeSession(screen)
             restoreWallpaperSession(for: screen, configuration: configuration, preservingState: false)
         }
@@ -1287,33 +1287,33 @@ final class ScreenManager {
         saveConfiguration(config)
     }
 
-    /// 把指定 bookmark 设为 primary：旧 primary 自动加入 playlist 末尾
-    /// （除非 bookmark 已经是 primary）。primary 改变会触发 player 重建。
+    /// Promote a bookmark to primary; the old primary is appended to the playlist.
+    /// Triggers a player rebuild.
     func setPrimaryVideo(bookmark: Data, for screen: Screen) {
         guard var config = configurationStore.get(for: screen.id),
               config.savedVideoBookmarkData != bookmark else { return }
 
         var extras = config.playlistBookmarks ?? []
-        // 旧 primary 入 playlist（避免丢失）。
+        // Move old primary into the playlist so it isn't lost.
         if let oldPrimary = config.savedVideoBookmarkData,
            !extras.contains(oldPrimary), oldPrimary != bookmark {
             extras.append(oldPrimary)
         }
-        // 移除新 primary 在 extras 中的旧位置（避免重复）。
+        // Remove the new primary from extras to avoid duplication.
         extras.removeAll(where: { $0 == bookmark })
 
         config.replacePrimaryVideo(bookmarkData: bookmark)
         config.playlistBookmarks = extras.isEmpty ? nil : extras
         saveConfiguration(config)
 
-        // 立即重启 player 让新 primary 生效。
+        // Restart the player so the new primary takes effect immediately.
         reloadWallpaperForScreen(screen)
     }
 
-    /// 拖拽 reorder 后原子更新 primary + extras。primary identity 不变时
-    /// 仅写 playlist 顺序（不重建 player），减少不必要的播放中断；并把
-    /// `playlistCursorIndex` 重映射到旧 active bookmark 的新位置，避免
-    /// reorder 后 cursor 指向错乱的视频。
+    /// Atomic update of primary + extras after a drag-reorder. When primary
+    /// identity is unchanged, only the playlist order is written (no player rebuild)
+    /// and `playlistCursorIndex` is remapped to the new position of the previously
+    /// active bookmark so the cursor doesn't jump to the wrong track.
     func replacePlaylist(primary: Data, extras: [Data], for screen: Screen) {
         guard var config = configurationStore.get(for: screen.id) else { return }
 
@@ -1343,8 +1343,8 @@ final class ScreenManager {
         }
     }
 
-    /// 跳到 `[primary] + playlistBookmarks` 中任意一项立即播放。
-    /// `index` 0 = primary，>0 = playlistBookmarks[index-1]。
+    /// Jump to any entry in `[primary] + playlistBookmarks` and play immediately.
+    /// `index` 0 = primary; >0 = playlistBookmarks[index-1].
     func playPlaylistEntry(at index: Int, for screen: Screen) {
         guard let config = configurationStore.get(for: screen.id),
               let primary = config.savedVideoBookmarkData else { return }
@@ -1423,8 +1423,8 @@ final class ScreenManager {
         saveConfiguration(config)
     }
 
-    /// 把游标推进/回退后实际激活目标 bookmark 的共享逻辑：
-    /// 验证 → 保存配置 → 释放旧 session → setup 新 player。
+    /// Shared logic for advancing/regressing the cursor and activating the target bookmark:
+    /// validate → save config → release old session → set up new player.
     private func applyPlaylistCursor(
         _ cursor: Int,
         combined: [Data],

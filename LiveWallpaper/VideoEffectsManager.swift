@@ -224,14 +224,15 @@ class RainGlassFilter: CIFilter, @unchecked Sendable {
         }
         rainTexture = rainTexture.oriented(.downMirrored)
 
-        // 1) 朦胧玻璃背景：高斯模糊整帧。clampedToExtent 防止边缘黑色。
+        // 1) Frosted-glass background: Gaussian blur the whole frame.
+        //    clampedToExtent prevents black edges.
         let blurred = inputImage
             .clampedToExtent()
             .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 12])
             .cropped(to: finiteExtent)
 
-        // 2) Displacement map（仅 RG 通道）：把 B 通道置 0 喂给位移滤镜，
-        //    避免 displacement 把 mask 数据误解为偏移。
+        // 2) Displacement map (R/G only): zero out B so displacement doesn't
+        //    misread mask data as an offset.
         let displacementOnly = rainTexture.applyingFilter("CIColorMatrix", parameters: [
             "inputRVector": CIVector(x: 1, y: 0, z: 0, w: 0),
             "inputGVector": CIVector(x: 0, y: 1, z: 0, w: 0),
@@ -239,14 +240,15 @@ class RainGlassFilter: CIFilter, @unchecked Sendable {
             "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
         ])
 
-        // 3) 清晰扭曲层：用 displacement map 在原始视频上做折射。
+        // 3) Sharp distortion layer: refract the original video through the displacement map.
         let displaced = inputImage.applyingFilter("CIDisplacementDistortion", parameters: [
             "inputDisplacementImage": displacementOnly,
             kCIInputScaleKey: finiteExtent.height * 0.05,
         ]).cropped(to: finiteExtent)
 
-        // 4) Drop mask：把 B 通道复制到 A，形成 alpha mask。CIBlendWithAlphaMask
-        //    在 alpha=1 区域显示前景（清晰水滴），alpha=0 区域显示背景（模糊玻璃）。
+        // 4) Drop mask: copy B channel to A to form an alpha mask.
+        //    CIBlendWithAlphaMask shows foreground (sharp drops) where alpha=1,
+        //    background (blurred glass) where alpha=0.
         let alphaMask = rainTexture.applyingFilter("CIColorMatrix", parameters: [
             "inputRVector": CIVector(x: 0, y: 0, z: 1, w: 0),
             "inputGVector": CIVector(x: 0, y: 0, z: 1, w: 0),

@@ -253,7 +253,7 @@ struct PlaylistSection: View {
         }
         var newEntries = entries
         let item = newEntries.remove(at: sourceIndex)
-        // 删除 source 后下游索引整体左移，所以 source<target 时实际插入位置是 target-1。
+        // Removing source shifts downstream indices left, so source<target inserts at target-1.
         let insertAt = sourceIndex < targetIndex ? max(0, targetIndex - 1) : targetIndex
         newEntries.insert(item, at: min(insertAt, newEntries.count))
         applyEntries(newEntries, removedPrimary: false)

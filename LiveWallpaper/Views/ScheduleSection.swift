@@ -11,7 +11,7 @@ struct ScheduleSection: View {
 
     @State private var currentHour: Int = Calendar.current.component(.hour, from: Date())
     @State private var pendingSlotID: UUID?
-    /// stepper 调整若产生冲突，被影响的 slot ID 短暂高亮（红色描边）。
+    /// Slot IDs to flash with red outline when a stepper change conflicts.
     @State private var conflictHighlight: Set<UUID> = []
     @State private var addSlotErrorMessage: String?
     @State private var conflictMessage: String?
@@ -128,8 +128,7 @@ struct ScheduleSection: View {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = [.movie, .video, .quickTimeMovie, .mpeg4Movie, .avi]
-        // 绑定到当前 key window，让 panel 在用户操作的屏幕上弹出，
-        // 避免跑到 main screen。
+        // Attach to current key window so the panel appears on the user's active display.
         if let parent = NSApp.keyWindow ?? NSApp.mainWindow {
             panel.beginSheetModal(for: parent) { response in
                 guard response == .OK, !panel.urls.isEmpty else {
@@ -162,9 +161,8 @@ struct ScheduleSection: View {
         }
     }
 
-    /// stepper 改动 startHour/endHour 时调用：先用建议值构造一个临时 slot，
-    /// 计算与其他 slot 的冲突。无冲突 → 提交并保存；有冲突 → 撤销改动并
-    /// 短暂红框提示。
+    /// Validate a candidate stepper change against other slots; commit if no conflict,
+    /// otherwise reject and flash a red outline + persistent message.
     private func validateAndCommit(slotID: UUID, start: Int, end: Int) {
         guard let index = scheduleSlots.firstIndex(where: { $0.id == slotID }) else { return }
         var probe = scheduleSlots[index]
@@ -179,7 +177,7 @@ struct ScheduleSection: View {
             withAnimation(.snappy(duration: 0.2)) { conflictMessage = nil }
             return
         }
-        // 冲突：撤销 stepper 改动 + 持久错误条 + 红框警示 1.5 秒。
+        // Conflict: revert stepper change, show persistent banner, flash outline 1.5s.
         let conflictingLabels = scheduleSlots
             .filter { conflicts.contains($0.id) }
             .map(\.label)
@@ -252,8 +250,8 @@ struct ScheduleSlotRow: View {
     let onVideoSelect: () -> Void
     let onClearVideo: () -> Void
     let onRemove: () -> Void
-    /// stepper 调整时调用，传入候选的 startHour/endHour 让上层做冲突校验。
-    /// 若校验通过上层会直接写回 binding；不通过则不写回。
+    /// Called on stepper change with candidate start/end. Parent validates and writes back
+    /// to the binding only on success.
     let onValidateChange: (_ start: Int, _ end: Int) -> Void
 
     @State private var videoName: String?

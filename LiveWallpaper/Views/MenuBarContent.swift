@@ -1,8 +1,7 @@
 import SwiftUI
 import AppKit
 
-/// MenuBarExtra `.window` 风格的状态栏面板：
-/// dashboard + per-screen card + quick toggles + footer。
+/// MenuBarExtra `.window` panel: dashboard + per-screen cards + quick toggles + footer.
 struct MenuBarContent: View {
     let openSettings: () -> Void
     let openSettingsForScreen: (CGDirectDisplayID) -> Void
@@ -12,14 +11,13 @@ struct MenuBarContent: View {
 
     @State private var globalPauseOnBattery: Bool = SettingsManager.shared.loadGlobalSettings().globalPauseOnBattery
     @State private var globalPauseOnFullScreen: Bool = SettingsManager.shared.loadGlobalSettings().pauseOnFullScreen
-    /// "system" = 整机 RAM 占用（默认）；"app" = 仅本进程。与 sidebar dashboard 同步。
+    /// "system" = whole-machine usage (default); "app" = this process only. Synced with sidebar dashboard.
     @AppStorage("Dashboard.RAMScope") private var ramScopeRaw: String = "system"
 
     private var monitor: SystemMonitor { .shared }
     private var ramPercent: Double {
         ramScopeRaw == "app" ? monitor.memoryPercentage() : monitor.systemMemoryUsage * 100
     }
-    /// CPU 同样跟随 scope：All = 整机 CPU，App = 仅本进程。
     private var cpuPercent: Double {
         ramScopeRaw == "app" ? monitor.cpuUsage : monitor.systemCpuUsage
     }

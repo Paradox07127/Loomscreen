@@ -156,10 +156,8 @@ struct ScreenDetailView: View {
                                     selectedFitMode: selectedFitMode,
                                     startPreview: setupPreviewPlayer
                                 )
-                                // 强制 16:9 容器 + 双向尺寸上限：避免不同屏幕
-                                // inspector content 长度差异导致 detail 区
-                                // 横向重排后视频宽高比例跳变（用户感知"切屏
-                                // 时窗口整体 size 变动"）。
+                                // Locked 16:9 + max size: prevents preview aspect ratio from
+                                // jumping when switching screens with different inspector content lengths.
                                 .aspectRatio(16/9, contentMode: .fit)
                                 .frame(maxWidth: 720, maxHeight: 405)
                                 .shadow(color: Color.black.opacity(0.18), radius: 12, x: 0, y: 4)
@@ -178,8 +176,8 @@ struct ScreenDetailView: View {
 
                                     Divider()
 
-                                    // Speed 行独占一行：避免与 Fit 行争抢横向空间，
-                                    // 之前 HStack 布局在窄宽度下会把 picker 裁掉。
+                                    // Speed gets its own row so it doesn't compete with Fit
+                                    // for horizontal space (the old HStack truncated the picker).
                                     HStack(spacing: 10) {
                                         Text("Speed")
                                             .font(.system(size: 12, weight: .medium))
@@ -199,9 +197,8 @@ struct ScreenDetailView: View {
                                         .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
                                 )
                             }
-                            // 整组（preview + controls）垂直居中，去掉以前的
-                            // `Spacer(minLength: 0)` —— 它配合 alignment:.top
-                            // 会在控件下方留下大段空白。
+                            // Center preview + controls vertically. The previous Spacer(minLength:0)
+                            // with alignment:.top left a large empty band below the controls.
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .padding(.horizontal, 24)
                             .padding(.vertical, 18)

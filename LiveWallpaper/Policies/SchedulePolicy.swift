@@ -64,9 +64,8 @@ enum SchedulePolicy {
 
     // MARK: - Conflict Detection
 
-    /// 返回与 `slot` 时间区间重叠的其他 slot 的 ID 集合（不包括自身）。
-    /// `ScheduleSlot` 可跨午夜（startHour > endHour），比较时拆为 0-24
-    /// 内的 1 ～ 2 段非环 range 后再判重叠。
+    /// IDs of slots overlapping the given slot (excluding itself).
+    /// Midnight-wrapping slots are decomposed into 1-2 non-wrapping ranges first.
     static func conflicts(slot: ScheduleSlot, against others: [ScheduleSlot]) -> Set<UUID> {
         let ours = hourRanges(for: slot)
         guard !ours.isEmpty else { return [] }
@@ -84,8 +83,8 @@ enum SchedulePolicy {
         return conflicting
     }
 
-    /// 把 slot 拆为 0-24 内的 `[start, end)` range；跨午夜返回两段。
-    /// `startHour == endHour` 视为空 slot（无任何小时）。
+    /// Decompose a slot into `[start, end)` half-open ranges within 0-24.
+    /// Returns 2 ranges when wrapping past midnight; empty when `start == end`.
     static func hourRanges(for slot: ScheduleSlot) -> [Range<Int>] {
         let s = clampHour(slot.startHour)
         let e = clampHour(slot.endHour)
@@ -94,8 +93,8 @@ enum SchedulePolicy {
         return [s..<24, 0..<e]
     }
 
-    /// 在 `slots` 占据之外找最长的连续空闲段，至少 `minHours` 小时。
-    /// 用于 Add Slot 时自动选取一段免冲突的时间。
+    /// Longest contiguous free range outside `slots`, at least `minHours` long.
+    /// Used by Add Slot to auto-pick a non-conflicting window.
     static func findFreeRange(in slots: [ScheduleSlot], minHours: Int = 2) -> (start: Int, end: Int)? {
         var occupied = Array(repeating: false, count: 24)
         for slot in slots {
