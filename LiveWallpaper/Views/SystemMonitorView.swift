@@ -3,13 +3,13 @@ import SwiftUI
 struct SystemMonitorView: View {
     private var monitor = SystemMonitor.shared
     @State private var powerSource: PowerMonitor.PowerSource = PowerMonitor.shared.currentPowerSource
-    /// "system" = 整机 RAM 占用（默认）；"app" = 仅本进程。tap RAM chip 切换。
+    /// "system" = whole-machine usage (default); "app" = this process only. Synced with menubar panel.
     @AppStorage("Dashboard.RAMScope") private var ramScopeRaw: String = "system"
 
     private var ramPercent: Double {
         ramScopeRaw == "app" ? monitor.memoryPercentage() : monitor.systemMemoryUsage * 100
     }
-    /// CPU 同样跟随 scope：All = 整机 CPU（host_statistics），App = 仅本进程 task_threads。
+    /// All = whole-machine CPU (host_statistics); App = this process (task_threads).
     private var cpuPercent: Double {
         ramScopeRaw == "app" ? monitor.cpuUsage : monitor.systemCpuUsage
     }
@@ -124,9 +124,8 @@ struct SystemMonitorView: View {
             .padding(.horizontal, 2)
         }
         .padding(.vertical, 2)
-        // 硬性 220 宽度上限 + .clipped()，防止 List(.sidebar) 拉伸时阴影/
-        // 子视图越过 sidebar 左边界。`maxWidth: .infinity` 会被 List 默认
-        // row inset 拉至负偏移，反而触发溢出。
+        // Hard 220pt cap + .clipped() to prevent shadows/subviews from spilling past
+        // sidebar's left edge when List(.sidebar) gets stretched.
         .frame(maxWidth: 220, alignment: .leading)
         .clipped()
         .onAppear {
@@ -162,9 +161,9 @@ struct SystemMonitorView: View {
 
 // MARK: - MiniGaugeCard
 
-/// 自定义 270° 圆环 gauge：背景轨道 + 前景轨道按比例填充，中央放图标，
-/// 圆环底部缺口处放 title 与百分比。该样式视觉密度优于
-/// `Gauge.accessoryCircularCapacity`（后者在 macOS 26 字号偏大、缺口对齐失真）。
+/// Custom 270° ring gauge: background + filled foreground track, icon in center,
+/// title + percentage at the bottom gap. Higher visual density than
+/// `Gauge.accessoryCircularCapacity` (which has font-size and gap-alignment issues on macOS 26).
 struct MiniGaugeCard: View {
     let title: String
     let value: Double
@@ -209,8 +208,7 @@ struct PowerStatusCard: View {
 
     var body: some View {
         ZStack {
-            // 与 MiniGaugeCard 保持一致的 lineWidth=6，确保 sidebar 仪表盘
-            // 四个圆环视觉粗细统一。
+            // lineWidth=6 matches MiniGaugeCard for consistent ring thickness across the dashboard.
             Circle()
                 .trim(from: 0.0, to: 0.75)
                 .stroke(Color.gray.opacity(0.15), style: StrokeStyle(lineWidth: 6, lineCap: .round))

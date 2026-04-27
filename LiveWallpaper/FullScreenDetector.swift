@@ -143,10 +143,10 @@ final class FullScreenDetector {
             )
 
             for (screenID, cgScreenFrame) in screenFrames {
-                // 只比较宽高会让"屏幕 A 上的全屏窗口"误判为也覆盖了屏幕 B
-                // （当两屏分辨率相同时），从而把 B 的壁纸 orderOut。
-                // 改用与目标屏幕的相交面积：当窗口覆盖该屏幕 ≥95% 时才算
-                // 真正全屏，避免跨屏误判。
+                // Comparing width/height alone would flag a fullscreen window on screen A
+                // as also covering screen B when both share the same resolution, which
+                // would orderOut B's wallpaper. Use intersection area instead: only count
+                // it as fullscreen when the window covers ≥95% of the target screen.
                 let intersection = windowFrame.intersection(cgScreenFrame)
                 guard !intersection.isNull else { continue }
                 let coverage = intersection.width * intersection.height

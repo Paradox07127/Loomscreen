@@ -2,19 +2,18 @@ import SwiftUI
 import AppKit
 import AVKit
 
-/// 自管 NSView + AVPlayerLayer 的 SwiftUI wrapper。
+/// SwiftUI wrapper around a self-hosted NSView + AVPlayerLayer.
 ///
-/// 之前用 `AVPlayerView`：
-/// - 它的 `intrinsicContentSize` = 视频原生分辨率，导致 SwiftUI 在含
-///   `aspectRatio(16/9)` 的父视图里仍按视频自身比例 layout，切换不同
-///   分辨率的视频时 preview 容器尺寸抖动。
-/// - 内部 `AVPlayerLayer` 默认黑色背景，在父视图 `.clipShape` 外侧仍
-///   渲染矩形黑边。
+/// Replaces `AVPlayerView`, which had two issues:
+/// - Its `intrinsicContentSize` reports the video's native resolution, making
+///   SwiftUI layout jitter when switching videos of different resolutions
+///   inside an `aspectRatio(16/9)` container.
+/// - Its internal `AVPlayerLayer` has a black background that bleeds past the
+///   parent's `.clipShape`.
 ///
-/// 直接管理 `AVPlayerLayer` 可同时去掉这两个副作用：
-/// - `intrinsicContentSize = .zero` 让 SwiftUI 完全按 frame 布局；
-/// - host view 与 layer 双层 `backgroundColor = clear`，圆角裁剪外
-///   不再漏出黑色矩形。
+/// Managing `AVPlayerLayer` directly removes both:
+/// - `intrinsicContentSize = .zero` so SwiftUI controls layout entirely.
+/// - Host view and layer both use a clear background — no black rectangle leaks.
 struct CustomVideoPlayer: NSViewRepresentable {
     var player: AVPlayer
     var fitMode: VideoFitMode = .aspectFill
@@ -37,8 +36,9 @@ struct CustomVideoPlayer: NSViewRepresentable {
     }
 }
 
-/// 承载 `AVPlayerLayer` 的 NSView。Layer 的尺寸跟随 view 的 bounds，
-/// 始终透明背景；intrinsic size = .zero 让父布局（SwiftUI）独享尺寸决策。
+/// NSView hosting an `AVPlayerLayer`. The layer tracks the view's bounds with
+/// a transparent background; `intrinsicContentSize = .zero` lets the SwiftUI
+/// parent own all layout decisions.
 final class PlayerLayerHostView: NSView {
     private let playerLayer = AVPlayerLayer()
 
@@ -53,10 +53,10 @@ final class PlayerLayerHostView: NSView {
         super.init(frame: frameRect)
         wantsLayer = true
         layerContentsRedrawPolicy = .duringViewResize
-        // host view 透明
+        // Host view: transparent.
         layer = CALayer()
         layer?.backgroundColor = NSColor.clear.cgColor
-        // player layer 同样透明，避免 letterbox 区域出现黑色矩形
+        // Player layer: transparent too, so letterbox areas don't show black.
         playerLayer.backgroundColor = NSColor.clear.cgColor
         playerLayer.frame = bounds
         layer?.addSublayer(playerLayer)
@@ -64,7 +64,7 @@ final class PlayerLayerHostView: NSView {
 
     required init?(coder: NSCoder) { nil }
 
-    /// 拒绝把视频原生分辨率作为 intrinsic size，让 SwiftUI 完全控制 layout。
+    /// Refuse to expose the video's native resolution as intrinsic size — SwiftUI owns layout.
     override var intrinsicContentSize: NSSize { .zero }
 
     override func layout() {

@@ -34,9 +34,9 @@ struct GeneralSettingsView: View {
             aboutTab
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
-        // 仅设 min 尺寸，避免 maxWidth 在窄 detail 下把内容裁出画面。
-        // grouped Form 的天然留白通过把 Reset 按钮内嵌 + 卡片内紧凑布局
-        // 在 Section 内消化，而不是限制整体宽度。
+        // Set min size only; capping maxWidth would clip content in narrow detail panes.
+        // Grouped Form whitespace is absorbed inside Sections (inline Reset button +
+        // compact card layout) rather than by constraining overall width.
         .frame(minWidth: 500, minHeight: 400)
         .alert("Reset Settings", isPresented: $showingResetAlert) {
             Button("Cancel", role: .cancel) { }
@@ -109,9 +109,9 @@ struct GeneralSettingsView: View {
                 .controlSize(.large)
                 .padding(.vertical, 4)
 
-                // Reset 直接嵌入 Section body，与 Validate/Reload 同卡片，
-                // 替代之前 footer 中的 Reset —— 去掉 Section.footer 隐含的
-                // 大段竖向 inset，让重置按钮紧贴排查工具下方。
+                // Reset embedded in Section body alongside Validate/Reload (replacing
+                // the old footer placement) so it sits tight under the troubleshooting
+                // tools without Section.footer's large vertical inset.
                 HStack {
                     Spacer()
                     Button("Reset All Settings to Default") {

@@ -252,8 +252,9 @@ final class WallpaperVideoPlayer {
         // -12852 VRP (Video Rendering Pipeline) settling
         // -12860 FigFilePlayer FailedToPlayToEnd (looper rotation)
         let benignLooperCodes: Set<Int> = [-11847, -11858, -11878, -12504, -12509, -12784, -12823, -12852, -12860]
-        // 不绑定到初始 currentItem：AVPlayerLooper 会轮换 item，绑定单一对象会
-        // 漏掉后续 item 的失败事件。改用全局监听 + 队列过滤。
+        // Don't bind to the initial currentItem: AVPlayerLooper rotates items, so
+        // a single-object subscription misses later items' failure events. Use a
+        // global observer + queue-membership filter instead.
         NotificationCenter.default.publisher(for: .AVPlayerItemFailedToPlayToEndTime, object: nil)
             .sink { [weak self] notification in
                 guard let self,
@@ -320,10 +321,10 @@ final class WallpaperVideoPlayer {
         cleanupTasks.insert(AnyCancellable { positionTask.cancel() })
     }
     
-    /// Updates window position when the associated NSScreen still exists.
-    /// 找不到匹配 NSScreen 时（显示器重新配置的瞬间状态）保持原 frame —— 之前
-    /// 会 fallback 到 main screen 把壁纸错位到错误的屏幕。等下一次屏幕参数稳定
-    /// 通知 + ScreenManager.hardRefresh 修复。
+    /// Update window position when the associated NSScreen still exists.
+    /// When no matching NSScreen is found (mid-reconfiguration), keep the existing
+    /// frame instead of falling back to main screen, which would misplace the wallpaper.
+    /// Recovery happens on the next screen-parameters notification + ScreenManager.hardRefresh.
     private func updateWindowPositionForCurrentScreen() {
         let associatedScreen = NSScreen.screens.first { screen in
             guard let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else {

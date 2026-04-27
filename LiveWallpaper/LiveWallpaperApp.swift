@@ -1,13 +1,13 @@
 import SwiftUI
 import AppKit
 
-/// 应用启动时的工作流：
-/// 1. `applicationDidFinishLaunching` 在 NSApp 主循环就绪后构造 ScreenManager
-///    （提早构造会触发 FullScreenDetector 中的 NSScreen/NSApp 调用断言崩溃）。
-/// 2. `screenManager` 用 `@Observable` 暴露给 `LiveWallpaperApp.body`，从 nil
-///    变为非 nil 时驱动 MenuBarExtra 内容重渲染。
-/// 3. Settings 窗口由本类托管的 `NSWindowController` 直接打开，与旧实现一致，
-///    避免 SwiftUI `Settings { ... }` scene 套用 macOS System Settings 风格。
+/// App startup workflow:
+/// 1. `applicationDidFinishLaunching` builds ScreenManager only after NSApp's main
+///    loop is ready (earlier construction trips NSScreen/NSApp asserts in FullScreenDetector).
+/// 2. `screenManager` is `@Observable` so its nil → non-nil transition re-renders
+///    `LiveWallpaperApp.body`'s MenuBarExtra contents.
+/// 3. Settings is opened via a hand-managed `NSWindowController` to avoid SwiftUI's
+///    `Settings { ... }` scene applying the macOS System Settings styling.
 @MainActor
 @Observable
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -53,8 +53,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Settings Window
 
-    /// 打开（或前置）Settings 窗口。`initialScreenID` 用于"从状态栏的某个
-    /// 显示器子菜单点击后直接跳到该屏幕"。
+    /// Open (or front) the Settings window. `initialScreenID` is used to jump
+    /// straight to a specific display from the menubar's per-screen submenu.
     func showSettings(initialScreenID: CGDirectDisplayID? = nil) {
         guard let manager = screenManager else { return }
 
@@ -67,9 +67,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     userInfo: ["screenID": id]
                 )
             }
-            // 多屏 / 后台进程场景下仅 NSApp.activate() 不足以把窗口
-            // 提到最前；显式 makeKey + orderFrontRegardless 才能保证
-            // 用户能看到窗口。
+            // On multi-display / background process: NSApp.activate() alone doesn't
+            // raise the window. Explicit makeKey + orderFrontRegardless guarantees visibility.
             NSApp.activate(ignoringOtherApps: true)
             controller.window?.makeKeyAndOrderFront(nil)
             controller.window?.orderFrontRegardless()
@@ -115,15 +114,15 @@ struct LiveWallpaperApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
-        // MenuBarExtra 是 macOS 13+ 替代 NSStatusItem 的原生 SwiftUI 入口。
-        // label 闭包负责状态栏图标，依赖 @Observable AppDelegate 自动刷新。
+        // MenuBarExtra is the SwiftUI replacement for NSStatusItem (macOS 13+).
+        // The label closure provides the status-bar icon; @Observable AppDelegate auto-refreshes.
         MenuBarExtra {
             menuBarBody
         } label: {
             Image(systemName: menuBarIconName)
         }
-        // .window 风格让我们在状态栏弹出自定义 SwiftUI panel：
-        // 顶部 mini dashboard、每屏卡片、Quick Toggles、底部 Settings/Quit。
+        // .window style lets us pop a custom SwiftUI panel from the status bar:
+        // mini dashboard + per-screen cards + quick toggles + Settings/Quit footer.
         .menuBarExtraStyle(.window)
     }
 
@@ -144,7 +143,7 @@ struct LiveWallpaperApp: App {
         }
     }
 
-    /// 镜像旧版 `StatusBarController.determineStatusBarIcon` 的逻辑。
+    /// Mirrors the legacy `StatusBarController.determineStatusBarIcon` logic.
     private var menuBarIconName: String {
         guard let manager = appDelegate.screenManager else {
             return "photo.on.rectangle"

@@ -263,9 +263,8 @@ final class ParticleOverlayView: NSView {
     // MARK: - Fireflies
 
     private static let firefliesPreset: EmitterPreset = {
-        // 之前 radius=3 + scale=0.8 渲染 ~5px 的小亮点，被视频内容完全淹没。
-        // 把贴图放大到 radius=14 + scale=1.0–1.4，并提高 birthRate 让萤火虫
-        // 在画面里有真正的辉光感；color 用浅黄绿模拟夜光昆虫色温。
+        // Larger texture (radius=14, scale=1.0–1.4) and higher birthRate so fireflies
+        // produce a real glow over video; pale yellow-green mimics nocturnal insect color.
         let glowColor = NSColor(calibratedRed: 1.0, green: 0.95, blue: 0.55, alpha: 1).cgColor
         let cell = CAEmitterCell()
         cell.contents = ParticleTextures.softCircle(radius: 14, color: glowColor)
@@ -278,7 +277,7 @@ final class ParticleOverlayView: NSView {
         cell.scale = 1.0
         cell.scaleRange = 0.4
         cell.alphaRange = 0.6
-        cell.alphaSpeed = -0.12  // 缓慢淡出制造闪烁
+        cell.alphaSpeed = -0.12  // slow fade-out for shimmer
         cell.yAcceleration = 2
         cell.color = glowColor
         return EmitterPreset(

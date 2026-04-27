@@ -58,10 +58,10 @@ final class VideoEffectsApplicationService {
                     guard let self,
                           let player,
                           self.generations[screenID] == generation else { return }
-                    // 路由到 WallpaperVideoPlayer 集中合成入口：composition
-                    // 会同步到 AVQueuePlayer 中所有 looper item，并在
-                    // currentItem 轮转时自动重映射，避免 stale composition
-                    // 触发 -12784 / -11858 等 compositor pipeline 错误。
+                    // Route through WallpaperVideoPlayer's centralized writer: composition
+                    // is propagated to every AVQueuePlayer looper item and re-bound on
+                    // currentItem rotation, avoiding stale-composition errors like
+                    // -12784 / -11858 from the compositor pipeline.
                     player.setVideoComposition(composition)
                     self.inflightTasks[screenID] = nil
                 }
@@ -70,7 +70,7 @@ final class VideoEffectsApplicationService {
             } catch {
                 await MainActor.run { [weak self] in
                     Logger.error("Failed to apply video effects: \(error.localizedDescription)", category: .videoPlayer)
-                    // 错误路径同样清掉 inflightTasks，避免 Task 引用悬挂占内存。
+                    // Clear inflightTasks on the error path too, so Task references don't leak.
                     self?.inflightTasks[screenID] = nil
                 }
             }

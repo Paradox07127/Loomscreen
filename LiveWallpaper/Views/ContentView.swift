@@ -88,26 +88,24 @@ struct Sidebar: View {
             }) {
                 SystemMonitorView()
                     .padding(.vertical, 2)
-                    // 显式 listRowInsets 让仪表盘 row 的左右内边距与 sidebar
-                    // 视觉边界对齐；不依赖 List 默认 inset（macOS 26 下会随
-                    // sidebar 宽度动态变化，导致拉伸时内容相对漂移）。
-                    // 收紧到 4pt 横向，让 dashboard 卡片更贴近 sidebar 边缘。
+                    // Tight 4pt horizontal inset. Default List inset on macOS 26 drifts
+                    // with sidebar width, causing dashboard cards to misalign on resize.
                     .listRowInsets(EdgeInsets(top: 2, leading: 4, bottom: 2, trailing: 4))
                     .listRowBackground(Color.clear)
             }
         }
         .listStyle(.sidebar)
-        // 默认与最小宽度同步为 200pt，sidebar 打开就是最紧凑形态；用户仍可拖宽到 280。
+        // Ideal == min so sidebar opens compact; user can drag to 280.
         .navigationSplitViewColumnWidth(min: 200, ideal: 200, max: 280)
     }
-    
+
     private func refreshDisplays() {
         withAnimation(.snappy(duration: 0.2)) {
             isRefreshing = true
         }
 
-        // 用 hardRefresh：重读 NSScreen + 释放并按配置重建所有 runtime session。
-        // 解决"改分辨率后 sidebar 显示器变灰、视频消失"的恢复路径。
+        // hardRefresh: re-read NSScreen + tear down and rebuild all runtime sessions.
+        // Recovery path for "displays grey out, video disappears after resolution change".
         screenManager.hardRefresh()
 
         Task {
@@ -133,9 +131,9 @@ struct ScreenRow: View {
     var screen: Screen
     @Environment(ScreenManager.self) private var screenManager
 
-    /// 缓存 effect badge 状态。直接在 body 里读 config 不会响应
-    /// `.wallpaperConfigurationDidChange` 通知（@Observable screens
-    /// 数组本身没变），需要自管 state 订阅通知。
+    /// Cached effect badge state. Body-level config reads don't trigger on
+    /// `.wallpaperConfigurationDidChange` (the @Observable screens array stays
+    /// the same), so we subscribe ourselves.
     @State private var hasEffectBadge: Bool = false
 
     private var sessionSummary: WallpaperSessionSummary {
