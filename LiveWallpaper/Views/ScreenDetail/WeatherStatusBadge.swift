@@ -1,8 +1,20 @@
 import SwiftUI
+import AppKit
 
 struct WeatherStatusBadge: View {
     var weatherService: WeatherReactiveService
     var refresh: () -> Void
+
+    /// Accessory apps (LSUIElement) cannot show the system Location permission
+    /// dialog directly; we surface a one-tap shortcut to System Settings instead.
+    /// Also covers `.error` since `didFailWithError` collapses kCLErrorDenied into
+    /// generic `.error` — and Settings is still the right action for those.
+    private var needsLocationSettingsLink: Bool {
+        switch weatherService.locationStatus {
+        case .notDetermined, .denied, .error: return true
+        default: return false
+        }
+    }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -36,6 +48,16 @@ struct WeatherStatusBadge: View {
                     .foregroundStyle(.secondary)
             }
 
+            if needsLocationSettingsLink {
+                Button(action: openLocationSettings) {
+                    Text("Open Settings")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .buttonStyle(GlassCapsuleButtonStyle(fontSize: 10, horizontalPadding: 7, verticalPadding: 3))
+                .help("Open System Settings → Privacy & Security → Location Services")
+                .accessibilityLabel("Open Location Services settings")
+            }
+
             Button(action: refresh) {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 10, weight: .semibold))
@@ -47,6 +69,12 @@ struct WeatherStatusBadge: View {
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Weather status: \(weatherService.currentCondition?.rawValue ?? "loading")")
+    }
+
+    private func openLocationSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     private var weatherIcon: String {

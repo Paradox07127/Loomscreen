@@ -3,22 +3,71 @@ import SwiftUI
 struct SystemMonitorView: View {
     private var monitor = SystemMonitor.shared
     @State private var powerSource: PowerMonitor.PowerSource = PowerMonitor.shared.currentPowerSource
+    /// "system" = 整机 RAM 占用（默认）；"app" = 仅本进程。tap RAM chip 切换。
+    @AppStorage("Dashboard.RAMScope") private var ramScopeRaw: String = "system"
+
+    private var ramPercent: Double {
+        ramScopeRaw == "app" ? monitor.memoryPercentage() : monitor.systemMemoryUsage * 100
+    }
+    /// CPU 同样跟随 scope：All = 整机 CPU（host_statistics），App = 仅本进程 task_threads。
+    private var cpuPercent: Double {
+        ramScopeRaw == "app" ? monitor.cpuUsage : monitor.systemCpuUsage
+    }
+    private var ramTitle: String { "RAM" }
+
+    @ViewBuilder
+    private func ramScopeButton(label: String, value: String) -> some View {
+        Button {
+            withAnimation(.snappy(duration: 0.18)) { ramScopeRaw = value }
+        } label: {
+            Text(label)
+                .font(.system(size: 10, weight: ramScopeRaw == value ? .semibold : .regular))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 3)
+                .background(
+                    Capsule()
+                        .fill(ramScopeRaw == value ? Color.accentColor.opacity(0.35) : Color.clear)
+                )
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(value == "system" ? "Show whole-system memory usage" : "Show this app's memory usage")
+    }
+
+    private var ramDetailText: String {
+        if ramScopeRaw == "app" {
+            return "App: \(monitor.formattedMemoryUsage()) / \(monitor.formattedTotalMemory())"
+        }
+        let totalBytes = ProcessInfo.processInfo.physicalMemory
+        let usedBytes = UInt64(Double(totalBytes) * monitor.systemMemoryUsage)
+        return "Sys: \(FormatUtils.formatBytes(usedBytes)) / \(monitor.formattedTotalMemory())"
+    }
 
     var body: some View {
         VStack(spacing: 8) {
+            // RAM scope picker: explicit segmented capsule for "All" (system) vs "App".
+            HStack(spacing: 0) {
+                ramScopeButton(label: "All", value: "system")
+                ramScopeButton(label: "App", value: "app")
+            }
+            .padding(2)
+            .background(Capsule().fill(Color.gray.opacity(0.18)))
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("RAM scope")
+
             // 4-widget grid (2x2): CPU / GPU / RAM / Power
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
-                MiniGaugeCard(title: "CPU", value: monitor.cpuUsage, color: colorForPercent(monitor.cpuUsage), icon: "cpu")
+                MiniGaugeCard(title: "CPU", value: cpuPercent, color: colorForPercent(cpuPercent), icon: "cpu")
                     .accessibilityLabel("CPU usage")
-                    .accessibilityValue("\(Int(monitor.cpuUsage)) percent")
+                    .accessibilityValue("\(Int(cpuPercent)) percent")
 
                 MiniGaugeCard(title: "GPU", value: monitor.gpuUsage, color: colorForPercent(monitor.gpuUsage), icon: "square.stack.3d.up.fill")
                     .accessibilityLabel("GPU usage")
                     .accessibilityValue("\(Int(monitor.gpuUsage)) percent")
 
-                MiniGaugeCard(title: "RAM", value: monitor.memoryPercentage(), color: colorForPercent(monitor.memoryPercentage()), icon: "memorychip")
-                    .accessibilityLabel("RAM usage")
-                    .accessibilityValue("\(Int(monitor.memoryPercentage())) percent")
+                MiniGaugeCard(title: ramTitle, value: ramPercent, color: colorForPercent(ramPercent), icon: "memorychip")
+                    .accessibilityLabel("\(ramTitle) usage")
+                    .accessibilityValue("\(Int(ramPercent)) percent")
 
                 PowerStatusCard(powerSource: powerSource)
                     .accessibilityLabel("Power source")
@@ -64,7 +113,7 @@ struct SystemMonitorView: View {
                     Image(systemName: "memorychip")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                    Text("RAM: \(monitor.formattedMemoryUsage()) / \(monitor.formattedTotalMemory())")
+                    Text(ramDetailText)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)

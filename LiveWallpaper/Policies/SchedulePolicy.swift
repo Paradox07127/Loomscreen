@@ -20,7 +20,12 @@ enum SchedulePolicy {
     ///   slot no longer covers the current hour; restore the user's primary.
     /// - `.none` — already playing the right thing, or no schedule configured.
     static func decision(for configuration: ScreenConfiguration, hour: Int) -> Decision {
-        guard let slots = configuration.scheduleSlots, !slots.isEmpty else {
+        // Mode gate: schedule automation is silent unless the user picked
+        // .schedule explicitly. Avoids restoring primary when the active
+        // bookmark happens to coincide with a schedule slot bookmark while
+        // the user is actually in playlist mode.
+        guard configuration.wallpaperMode == .schedule,
+              let slots = configuration.scheduleSlots, !slots.isEmpty else {
             return .none
         }
 

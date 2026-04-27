@@ -21,6 +21,10 @@ struct ScreenConfiguration: Codable, Equatable {
     /// position survives app restarts.
     var playlistCursorIndex: Int?
     var setAsLockScreen: Bool
+    /// Top-level automation mode. Controls inspector section visibility and
+    /// playlist/schedule guards. Default `.single`; legacy configs are inferred
+    /// at decode time.
+    var wallpaperMode: WallpaperMode = .single
 
     private enum CodingKeys: String, CodingKey {
         case screenID
@@ -38,6 +42,7 @@ struct ScreenConfiguration: Codable, Equatable {
         case playlistRotationMinutes
         case playlistCursorIndex
         case setAsLockScreen
+        case wallpaperMode
 
         case videoBookmarkData
         case wallpaperType
@@ -219,6 +224,16 @@ struct ScreenConfiguration: Codable, Equatable {
         playlistCursorIndex = try c.decodeIfPresent(Int.self, forKey: .playlistCursorIndex)
         setAsLockScreen = try c.decodeIfPresent(Bool.self, forKey: .setAsLockScreen) ?? false
 
+        if let storedMode = try c.decodeIfPresent(WallpaperMode.self, forKey: .wallpaperMode) {
+            wallpaperMode = storedMode
+        } else if (scheduleSlots?.isEmpty == false) {
+            wallpaperMode = .schedule
+        } else if (playlistBookmarks?.isEmpty == false) {
+            wallpaperMode = .playlist
+        } else {
+            wallpaperMode = .single
+        }
+
         if let decodedWallpaper = try c.decodeIfPresent(WallpaperContent.self, forKey: .activeWallpaper) {
             activeWallpaper = decodedWallpaper
             savedVideoBookmarkData = try c.decodeIfPresent(Data.self, forKey: .savedVideoBookmarkData)
@@ -263,6 +278,7 @@ struct ScreenConfiguration: Codable, Equatable {
         try c.encodeIfPresent(playlistRotationMinutes, forKey: .playlistRotationMinutes)
         try c.encodeIfPresent(playlistCursorIndex, forKey: .playlistCursorIndex)
         try c.encode(setAsLockScreen, forKey: .setAsLockScreen)
+        try c.encode(wallpaperMode, forKey: .wallpaperMode)
     }
 
     mutating func setHTMLWallpaper(_ content: String) {

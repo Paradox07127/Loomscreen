@@ -97,8 +97,8 @@ struct Sidebar: View {
             }
         }
         .listStyle(.sidebar)
-        // 初始宽度 220，最大 280 — 比之前更紧凑。
-        .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
+        // 默认与最小宽度同步为 200pt，sidebar 打开就是最紧凑形态；用户仍可拖宽到 280。
+        .navigationSplitViewColumnWidth(min: 200, ideal: 200, max: 280)
     }
     
     private func refreshDisplays() {
@@ -106,7 +106,9 @@ struct Sidebar: View {
             isRefreshing = true
         }
 
-        screenManager.refreshScreens()
+        // 用 hardRefresh：重读 NSScreen + 释放并按配置重建所有 runtime session。
+        // 解决"改分辨率后 sidebar 显示器变灰、视频消失"的恢复路径。
+        screenManager.hardRefresh()
 
         Task {
             try? await Task.sleep(for: .milliseconds(500))
@@ -143,10 +145,10 @@ struct ScreenRow: View {
     var body: some View {
         let summary = sessionSummary
 
-        HStack(spacing: 12) {
+        HStack(spacing: 4) {
             Image(systemName: iconName(for: summary))
                 .foregroundStyle(iconColor(for: summary))
-                .frame(width: 32, height: 24)
+                .frame(width: 22, height: 22)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(screen.name)

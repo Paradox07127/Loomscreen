@@ -10,6 +10,8 @@ final class SystemMonitor {
     // MARK: - Observed Properties
 
     private(set) var cpuUsage: Double = 0
+    /// 整机 CPU 占用 (0-100%)，用 host_statistics(HOST_CPU_LOAD_INFO) 增量计算。
+    private(set) var systemCpuUsage: Double = 0
     private(set) var memoryUsage: UInt64 = 0
     private(set) var totalMemory: UInt64 = 0
     private(set) var isMemoryLow: Bool = false
@@ -27,6 +29,8 @@ final class SystemMonitor {
     @ObservationIgnored private var updateInterval: TimeInterval = 2.0
     @ObservationIgnored private var updateTask: Task<Void, Never>?
     @ObservationIgnored private var fpsCounter = FPSCounter()
+    /// 上一次采样的 host CPU ticks，用于计算两次采样之间的增量。
+    @ObservationIgnored private var prevHostCpuLoad: host_cpu_load_info?
 
     private init() {
         totalMemory = ProcessInfo.processInfo.physicalMemory
@@ -37,10 +41,10 @@ final class SystemMonitor {
     func startMonitoring() {
         stopMonitoring()
         let interval = updateInterval
-        updateTask = Task { [weak self] in
+        updateTask = Task {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(interval))
-                self?.updateResourceUsage()
+                self.updateResourceUsage()
             }
         }
         updateResourceUsage()
@@ -73,20 +77,11 @@ final class SystemMonitor {
         }
     }
 
-    var thermalStateColor: String {
-        switch thermalState {
-        case .nominal:  return "green"
-        case .fair:     return "yellow"
-        case .serious:  return "orange"
-        case .critical: return "red"
-        @unknown default: return "gray"
-        }
-    }
-
     // MARK: - Update Loop
 
     private func updateResourceUsage() {
         cpuUsage = getAppCPUUsage()
+        systemCpuUsage = getSystemCPUUsage()
         memoryUsage = getAppMemoryUsage()
         systemMemoryUsage = getSystemMemoryUsage()
         gpuUsage = getGPUUsage()
@@ -143,6 +138,39 @@ final class SystemMonitor {
 
         let coreCount = Double(ProcessInfo.processInfo.activeProcessorCount)
         return min(totalUsageOfCPU / coreCount * 100, 100.0)
+    }
+
+    // MARK: - System-wide CPU Usage
+
+    /// 整机 CPU 占用率（0-100），基于 `host_statistics(HOST_CPU_LOAD_INFO)`
+    /// 两次采样的 ticks 差值。第一次采样返回 0，之后是 user+system+nice 占
+    /// (user+system+nice+idle) 的百分比。
+    private func getSystemCPUUsage() -> Double {
+        var info = host_cpu_load_info()
+        var size = mach_msg_type_number_t(MemoryLayout<host_cpu_load_info>.stride / MemoryLayout<integer_t>.size)
+        let hostPort = mach_host_self()
+        defer { mach_port_deallocate(mach_task_self_, hostPort) }
+
+        let result = withUnsafeMutablePointer(to: &info) { ptr in
+            ptr.withMemoryRebound(to: integer_t.self, capacity: Int(size)) { intPtr in
+                host_statistics(hostPort, HOST_CPU_LOAD_INFO, intPtr, &size)
+            }
+        }
+        guard result == KERN_SUCCESS else { return systemCpuUsage }
+
+        defer { prevHostCpuLoad = info }
+        guard let prev = prevHostCpuLoad else { return 0 }
+
+        // host_cpu_load_info.cpu_ticks 是 fixed-size tuple of 4 natural_t:
+        // [USER, SYSTEM, IDLE, NICE]，按 CPU_STATE_* 索引访问。
+        let userDelta   = Double(info.cpu_ticks.0 &- prev.cpu_ticks.0)
+        let systemDelta = Double(info.cpu_ticks.1 &- prev.cpu_ticks.1)
+        let idleDelta   = Double(info.cpu_ticks.2 &- prev.cpu_ticks.2)
+        let niceDelta   = Double(info.cpu_ticks.3 &- prev.cpu_ticks.3)
+        let busy = userDelta + systemDelta + niceDelta
+        let total = busy + idleDelta
+        guard total > 0 else { return systemCpuUsage }
+        return min(100, max(0, busy / total * 100))
     }
 
     // MARK: - Memory Usage

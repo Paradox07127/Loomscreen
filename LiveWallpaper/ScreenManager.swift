@@ -21,6 +21,11 @@ final class ScreenManager {
     @ObservationIgnored private let playbackStateSubject = CurrentValueSubject<Bool, Never>(false)
     @ObservationIgnored private let fullScreenDetector = FullScreenDetector()
     @ObservationIgnored private let videoEffectsApplier = VideoEffectsApplicationService()
+    /// Per-screen monotonic counter — bumped each time we kick off a video
+    /// transition (setVideo / playlist jump). Tasks capture the bumped value
+    /// and only apply if it matches at completion, preventing a stale validate
+    /// from overwriting a newer one.
+    @ObservationIgnored private var transitionGeneration: [CGDirectDisplayID: Int] = [:]
     @ObservationIgnored let weatherService = WeatherReactiveService()
     @ObservationIgnored private lazy var lockScreenSnapshotCoordinator = LockScreenSnapshotCoordinator { [weak self] in
         self?.captureDesktopSnapshotsForLockIfNeeded()
@@ -346,11 +351,13 @@ final class ScreenManager {
             return
         }
 
+        let generation = bumpTransition(for: screen.id)
         Task {
             do {
                 try await PlayableVideoLoader.validatePlayableVideo(at: url)
                 await MainActor.run { [weak self] in
-                    self?.setupVideoPlayback(url: url, screen: screen)
+                    guard let self, self.isCurrentTransition(generation, for: screen.id) else { return }
+                    self.setupVideoPlayback(url: url, screen: screen)
                 }
             } catch {
                 await MainActor.run {
@@ -359,7 +366,17 @@ final class ScreenManager {
             }
         }
     }
-    
+
+    private func bumpTransition(for screenID: CGDirectDisplayID) -> Int {
+        let next = (transitionGeneration[screenID] ?? 0) &+ 1
+        transitionGeneration[screenID] = next
+        return next
+    }
+
+    private func isCurrentTransition(_ generation: Int, for screenID: CGDirectDisplayID) -> Bool {
+        transitionGeneration[screenID] == generation
+    }
+
     private func applyConfiguration(_ configuration: ScreenConfiguration, to screen: Screen, preservingState: Bool = false) {
         do {
             guard let bookmarkData = configuration.videoBookmarkData else {
@@ -915,7 +932,13 @@ final class ScreenManager {
 
         configuration.frameRateLimit = frameRateLimit
         saveConfiguration(configuration)
-        applyFrameRateLimit(frameRateLimit, to: screen)
+        // 有 active effects 时，frame rate 必须通过 effects 路径合成，否则
+        // 普通 frame-rate composition 会覆盖 CIFilter composition 让滤镜失效。
+        if configuration.effectConfig.hasActiveEffect || configuration.effectConfig.autoTimeTint {
+            applyVideoEffects(for: screen, config: configuration)
+        } else {
+            applyFrameRateLimit(frameRateLimit, to: screen)
+        }
     }
     
     // Apply frame rate limit to a screen's video player
@@ -983,6 +1006,18 @@ final class ScreenManager {
         return (validConfigCount, invalidConfigCount)
     }
     
+    /// Hard refresh: 强制重读 NSScreen + 释放所有 runtime + 按持久化配置重建。
+    /// 当 macOS 改分辨率后系统通知 timing 不可靠（sidebar 显示器变灰、视频消失）时，
+    /// 由 sidebar refresh 按钮触发，把一切恢复到最新状态。
+    func hardRefresh() {
+        Logger.notice("Hard refresh: rebuilding display registry + runtime sessions", category: .screenManager)
+        refreshRateCache.removeAll()
+        // 1) 重读 NSScreen + 释放所有 runtime（不 preserve），让 screens 数组反映最新 frame/ID
+        refreshScreens(preserveRuntimeSessions: false)
+        // 2) 按持久化配置重建每屏的 wallpaper session（视频/HTML/Shader）
+        reloadAllScreens()
+    }
+
     // Reload all screens
     func reloadAllScreens() {
         Logger.notice("Reloading all screens", category: .screenManager)
@@ -1276,17 +1311,31 @@ final class ScreenManager {
     }
 
     /// 拖拽 reorder 后原子更新 primary + extras。primary identity 不变时
-    /// 仅写 playlist 顺序（不重建 player），减少不必要的播放中断。
+    /// 仅写 playlist 顺序（不重建 player），减少不必要的播放中断；并把
+    /// `playlistCursorIndex` 重映射到旧 active bookmark 的新位置，避免
+    /// reorder 后 cursor 指向错乱的视频。
     func replacePlaylist(primary: Data, extras: [Data], for screen: Screen) {
         guard var config = configurationStore.get(for: screen.id) else { return }
 
+        let oldCombined = [config.savedVideoBookmarkData].compactMap { $0 } + (config.playlistBookmarks ?? [])
+        let oldCursor = config.playlistCursorIndex ?? 0
+        let oldActive: Data? = oldCursor < oldCombined.count ? oldCombined[oldCursor] : config.videoBookmarkData
+
         let primaryChanged = config.savedVideoBookmarkData != primary
         config.savedVideoBookmarkData = primary
-        if primaryChanged {
-            config.activeWallpaper = .video(bookmarkData: primary)
-            config.playlistCursorIndex = 0
-        }
         config.playlistBookmarks = extras.isEmpty ? nil : extras
+
+        let newCombined = [primary] + extras
+        if primaryChanged {
+            config.playlistCursorIndex = 0
+            config.activeWallpaper = .video(bookmarkData: primary)
+        } else {
+            let resolved = PlaylistPolicy.resolveCursor(activeBookmark: oldActive, in: newCombined)
+            config.playlistCursorIndex = resolved
+            if resolved < newCombined.count {
+                config.activeWallpaper = .video(bookmarkData: newCombined[resolved])
+            }
+        }
         saveConfiguration(config)
 
         if primaryChanged {
@@ -1322,6 +1371,7 @@ final class ScreenManager {
     /// playing instead of clearing the screen.
     func advancePlaylist(for screen: Screen) {
         guard let config = configurationStore.get(for: screen.id),
+              config.wallpaperMode == .playlist,
               let primary = config.savedVideoBookmarkData else { return }
 
         let combined = [primary] + (config.playlistBookmarks ?? [])
@@ -1337,9 +1387,9 @@ final class ScreenManager {
         applyPlaylistCursor(nextCursor, combined: combined, screen: screen, label: "advancing")
     }
 
-    /// `advancePlaylist` 的对称版本：用户点 Previous 时回到上一首。
     func regressPlaylist(for screen: Screen) {
         guard let config = configurationStore.get(for: screen.id),
+              config.wallpaperMode == .playlist,
               let primary = config.savedVideoBookmarkData else { return }
 
         let combined = [primary] + (config.playlistBookmarks ?? [])
@@ -1353,6 +1403,24 @@ final class ScreenManager {
         ) else { return }
 
         applyPlaylistCursor(prevCursor, combined: combined, screen: screen, label: "regressing")
+    }
+
+    /// Refresh the persisted bookmark associated with the screen's currently
+    /// active video. Call when the OS reports a bookmark as stale so the JSON
+    /// store stops drifting from the real file location.
+    func replaceActiveBookmark(_ bookmarkData: Data, for screen: Screen) {
+        guard let config = configurationStore.get(for: screen.id) else { return }
+        let updated = config.withUpdatedActiveBookmark(bookmarkData)
+        saveConfiguration(updated)
+    }
+
+    /// Persist the user's chosen automation mode. No player restart — mode
+    /// only gates which automation is consulted.
+    func updateWallpaperMode(_ mode: WallpaperMode, for screen: Screen) {
+        guard var config = configurationStore.get(for: screen.id),
+              config.wallpaperMode != mode else { return }
+        config.wallpaperMode = mode
+        saveConfiguration(config)
     }
 
     /// 把游标推进/回退后实际激活目标 bookmark 的共享逻辑：
@@ -1375,12 +1443,14 @@ final class ScreenManager {
         ) else { return }
 
         let screenID = screen.id
+        let generation = bumpTransition(for: screenID)
 
         Task { [weak self] in
             do {
                 try await PlayableVideoLoader.validatePlayableVideo(at: url)
                 await MainActor.run { [weak self] in
                     guard let self,
+                          self.isCurrentTransition(generation, for: screenID),
                           let liveScreen = self.screens.first(where: { $0.id == screenID }),
                           var liveConfig = self.configurationStore.get(for: screenID) else { return }
                     liveConfig.playlistCursorIndex = cursor

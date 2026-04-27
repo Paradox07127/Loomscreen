@@ -1,15 +1,8 @@
 import SwiftUI
 import AppKit
 
-/// MenuBarExtra `.window` 风格下的状态栏弹出面板。
-///
-/// 与 `.menu` 风格的原生 NSMenu 不同，`.window` 风格让我们在状态栏弹出
-/// 一个自定义 SwiftUI panel，可以塞入 mini dashboard、每屏卡片、Quick
-/// Toggles 等高密度信息。
-///
-/// Settings 窗口仍由 `AppDelegate` 用 `NSWindowController` 创建，所以
-/// "Open Settings" 按钮通过外部传入的闭包触发，闭包内 dismiss 当前 panel
-/// 再 showSettings 以保证窗口浮到最前。
+/// MenuBarExtra `.window` 风格的状态栏面板：
+/// dashboard + per-screen card + quick toggles + footer。
 struct MenuBarContent: View {
     let openSettings: () -> Void
     let openSettingsForScreen: (CGDirectDisplayID) -> Void
@@ -19,8 +12,36 @@ struct MenuBarContent: View {
 
     @State private var globalPauseOnBattery: Bool = SettingsManager.shared.loadGlobalSettings().globalPauseOnBattery
     @State private var globalPauseOnFullScreen: Bool = SettingsManager.shared.loadGlobalSettings().pauseOnFullScreen
+    /// "system" = 整机 RAM 占用（默认）；"app" = 仅本进程。与 sidebar dashboard 同步。
+    @AppStorage("Dashboard.RAMScope") private var ramScopeRaw: String = "system"
 
     private var monitor: SystemMonitor { .shared }
+    private var ramPercent: Double {
+        ramScopeRaw == "app" ? monitor.memoryPercentage() : monitor.systemMemoryUsage * 100
+    }
+    /// CPU 同样跟随 scope：All = 整机 CPU，App = 仅本进程。
+    private var cpuPercent: Double {
+        ramScopeRaw == "app" ? monitor.cpuUsage : monitor.systemCpuUsage
+    }
+
+    @ViewBuilder
+    private func ramScopeButton(label: String, value: String) -> some View {
+        Button {
+            withAnimation(.snappy(duration: 0.18)) { ramScopeRaw = value }
+        } label: {
+            Text(label)
+                .font(.system(size: 10, weight: ramScopeRaw == value ? .semibold : .regular))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 3)
+                .background(
+                    Capsule()
+                        .fill(ramScopeRaw == value ? Color.accentColor.opacity(0.35) : Color.clear)
+                )
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(value == "system" ? "Show whole-system memory usage" : "Show this app's memory usage")
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -61,10 +82,27 @@ struct MenuBarContent: View {
     // MARK: - Mini Dashboard
 
     private var miniDashboard: some View {
+        VStack(spacing: 6) {
+            // RAM scope picker — explicit segmented capsule shared with sidebar.
+            HStack(spacing: 0) {
+                ramScopeButton(label: "All", value: "system")
+                ramScopeButton(label: "App", value: "app")
+            }
+            .padding(2)
+            .background(Capsule().fill(Color.gray.opacity(0.18)))
+            .frame(maxWidth: 180)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("RAM scope")
+
+            chipRow
+        }
+    }
+
+    private var chipRow: some View {
         HStack(spacing: 8) {
-            DashboardChip(label: "CPU", value: monitor.cpuUsage, color: dashboardColor(for: monitor.cpuUsage), icon: "cpu")
+            DashboardChip(label: "CPU", value: cpuPercent, color: dashboardColor(for: cpuPercent), icon: "cpu")
             DashboardChip(label: "GPU", value: monitor.gpuUsage, color: dashboardColor(for: monitor.gpuUsage), icon: "square.stack.3d.up.fill")
-            DashboardChip(label: "RAM", value: monitor.memoryPercentage(), color: dashboardColor(for: monitor.memoryPercentage()), icon: "memorychip")
+            DashboardChip(label: "RAM", value: ramPercent, color: dashboardColor(for: ramPercent), icon: "memorychip")
             DashboardChip(
                 label: monitor.videoFPS > 0 ? "FPS" : "—",
                 value: min(monitor.videoFPS, 120) / 120 * 100,
@@ -158,11 +196,8 @@ struct MenuBarContent: View {
     // MARK: - Helpers
 
     private func invokeOpenSettings() {
-        // 先关闭面板再打开 Settings —— 避免被面板遮挡。
         dismiss()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            openSettings()
-        }
+        openSettings()
     }
 
     private func togglePlayback(for screen: Screen) {
@@ -250,6 +285,8 @@ private struct DashboardChip: View {
         .padding(.horizontal, 6)
         .padding(.vertical, 5)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 7))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(label): \(displayValue ?? "\(Int(value))%")")
     }
 }
 
