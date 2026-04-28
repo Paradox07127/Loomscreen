@@ -17,6 +17,9 @@ struct ContentView: View {
                     guard let screenID = notification.userInfo?["screenID"] as? CGDirectDisplayID else { return }
                     selectedNavigation = .screen(screenID)
                 }
+                .onReceive(NotificationCenter.default.publisher(for: .openAppleAerials)) { _ in
+                    selectedNavigation = .appleAerials
+                }
         } detail: {
             DetailContent(selection: $selectedNavigation)
                 .toolbar {
@@ -40,6 +43,7 @@ struct ContentView: View {
 enum Navigation: Hashable {
     case general
     case screen(CGDirectDisplayID)
+    case appleAerials
 }
 
 // MARK: - Sidebar View
@@ -82,6 +86,15 @@ struct Sidebar: View {
                 }
             }
             
+            Section(header: VStack(alignment: .leading, spacing: 6) {
+                Divider()
+                Text("Library").font(.caption).bold().foregroundStyle(.secondary)
+            }) {
+                NavigationLink(value: Navigation.appleAerials) {
+                    Label("Apple Aerials", systemImage: "sparkles.tv")
+                }
+            }
+
             Section(header: VStack(alignment: .leading, spacing: 6) {
                 Divider()
                 Text("Dashboard").font(.caption).bold().foregroundStyle(.secondary)
@@ -281,7 +294,11 @@ struct DetailContent: View {
                         message: "The selected display is no longer available."
                     )
                 }
-                
+
+            case .appleAerials:
+                AppleAerialsLibraryView()
+                    .transition(.opacity)
+
             case .none:
                 EmptyStateView(
                     icon: "arrow.left.circle",

@@ -29,6 +29,13 @@ final class WallpaperVideoPlayer {
 
     private(set) var player: AVQueuePlayer?
     var videoURL: URL?
+    /// Whether audio is suppressed entirely. When true, audio tracks are
+    /// disabled at the AVPlayerItem level — this prevents AVF from engaging
+    /// the audio engine, which would otherwise route through whatever output
+    /// device is active (potentially stealing focus from AirPods or other
+    /// in-use audio output). Defaults to true; user opts-in via per-screen
+    /// toggle in ScreenDetailView.
+    private(set) var isMuted: Bool = true
 
     // MARK: - Private Properties
 
@@ -150,20 +157,16 @@ final class WallpaperVideoPlayer {
         playerItem.preferredForwardBufferDuration = 5.0
         playerItem.canUseNetworkResourcesForLiveStreamingWhilePaused = false
 
-        // Disable any audio tracks. Wallpaper playback never plays sound, and
-        // leaving audio tracks enabled lets AVF invoke audioanalyticsd / AudioHAL
-        // headset queries which spam the log under sandbox.
-        for track in playerItem.tracks where track.assetTrack?.mediaType == .audio {
-            track.isEnabled = false
-        }
+        // Apply current audio policy (default: tracks disabled — keeps AVF
+        // from spinning up the audio engine and grabbing AirPods/output).
+        applyAudioPolicy(to: playerItem)
 
-        // Configure player with muted audio for wallpaper playback
         // Use AVQueuePlayer + AVPlayerLooper for seamless zero-cost looping
         // (avoids seek-to-zero which flushes the decode pipeline)
         let queuePlayer = AVQueuePlayer()
         queuePlayer.automaticallyWaitsToMinimizeStalling = true
-        queuePlayer.volume = 0
-        queuePlayer.isMuted = true
+        queuePlayer.volume = isMuted ? 0 : 1
+        queuePlayer.isMuted = isMuted
         self.player = queuePlayer
         self.playerLooper = AVPlayerLooper(player: queuePlayer, templateItem: playerItem)
         
@@ -364,6 +367,35 @@ final class WallpaperVideoPlayer {
         // Only apply rate immediately if currently playing; avoid implicit resume
         if player?.timeControlStatus == .playing {
             player?.rate = Float(speed)
+        }
+    }
+
+    /// Toggle audio between fully suppressed (default, AirPods-safe) and active.
+    /// When suppressed, audio tracks are disabled at the item level so AVF never
+    /// engages the audio engine. When active, tracks are re-enabled and the
+    /// player is unmuted; macOS will then route audio through the system default
+    /// output as usual.
+    func setMuted(_ muted: Bool) {
+        guard isMuted != muted else { return }
+        isMuted = muted
+
+        guard let player else { return }
+        // Re-apply policy on every queued + current item so looper rotations
+        // inherit the new state.
+        if let current = player.currentItem {
+            applyAudioPolicy(to: current)
+        }
+        for item in player.items() where item !== player.currentItem {
+            applyAudioPolicy(to: item)
+        }
+        player.isMuted = muted
+        player.volume = muted ? 0 : 1
+    }
+
+    private func applyAudioPolicy(to playerItem: AVPlayerItem) {
+        let enable = !isMuted
+        for track in playerItem.tracks where track.assetTrack?.mediaType == .audio {
+            track.isEnabled = enable
         }
     }
 

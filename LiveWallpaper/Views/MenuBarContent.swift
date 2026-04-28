@@ -53,7 +53,7 @@ struct MenuBarContent: View {
             footer
         }
         .padding(12)
-        .frame(width: 340)
+        .frame(width: 280)
         .onAppear {
             monitor.startMonitoring()
             refreshGlobalToggles()

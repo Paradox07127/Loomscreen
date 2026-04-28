@@ -19,6 +19,7 @@ final class SettingsManager {
         static let screenConfigurations = "screenConfigurations"
         static let globalSettings = "globalSettings"
         static let lastUsedDirectory = "lastUsedDirectory"
+        static let aerialsDirectoryBookmark = "AerialsLibrary.DirectoryBookmark"
     }
 
     // MARK: - Screen Configurations
@@ -132,6 +133,7 @@ final class SettingsManager {
         cachedConfigurations = nil
         UserDefaults.standard.removeObject(forKey: Keys.screenConfigurations)
         UserDefaults.standard.removeObject(forKey: Keys.globalSettings)
+        UserDefaults.standard.removeObject(forKey: Keys.aerialsDirectoryBookmark)
         applyStartOnLoginSetting(false)
     }
     
@@ -203,6 +205,20 @@ final class SettingsManager {
         }
         Logger.warning("Last used directory no longer exists: \(path)", category: .fileAccess)
         return nil
+    }
+
+    // MARK: - Apple Aerials Library
+
+    func saveAerialsDirectoryBookmark(_ bookmarkData: Data) {
+        UserDefaults.standard.set(bookmarkData, forKey: Keys.aerialsDirectoryBookmark)
+    }
+
+    func loadAerialsDirectoryBookmark() -> Data? {
+        UserDefaults.standard.data(forKey: Keys.aerialsDirectoryBookmark)
+    }
+
+    func clearAerialsDirectoryBookmark() {
+        UserDefaults.standard.removeObject(forKey: Keys.aerialsDirectoryBookmark)
     }
 }
 

@@ -25,6 +25,11 @@ struct ScreenConfiguration: Codable, Equatable {
     /// playlist/schedule guards. Default `.single`; legacy configs are inferred
     /// at decode time.
     var wallpaperMode: WallpaperMode = .single
+    /// Whether the video wallpaper plays muted. Defaults to `true` because
+    /// wallpapers are conventionally silent AND because the muted path
+    /// disables audio tracks entirely — preventing macOS from engaging the
+    /// audio engine and potentially routing through AirPods / external outputs.
+    var muted: Bool = true
 
     private enum CodingKeys: String, CodingKey {
         case screenID
@@ -43,6 +48,7 @@ struct ScreenConfiguration: Codable, Equatable {
         case playlistCursorIndex
         case setAsLockScreen
         case wallpaperMode
+        case muted
 
         case videoBookmarkData
         case wallpaperType
@@ -223,6 +229,7 @@ struct ScreenConfiguration: Codable, Equatable {
         playlistRotationMinutes = try c.decodeIfPresent(Int.self, forKey: .playlistRotationMinutes)
         playlistCursorIndex = try c.decodeIfPresent(Int.self, forKey: .playlistCursorIndex)
         setAsLockScreen = try c.decodeIfPresent(Bool.self, forKey: .setAsLockScreen) ?? false
+        muted = try c.decodeIfPresent(Bool.self, forKey: .muted) ?? true
 
         if let storedMode = try c.decodeIfPresent(WallpaperMode.self, forKey: .wallpaperMode) {
             wallpaperMode = storedMode
@@ -279,6 +286,7 @@ struct ScreenConfiguration: Codable, Equatable {
         try c.encodeIfPresent(playlistCursorIndex, forKey: .playlistCursorIndex)
         try c.encode(setAsLockScreen, forKey: .setAsLockScreen)
         try c.encode(wallpaperMode, forKey: .wallpaperMode)
+        try c.encode(muted, forKey: .muted)
     }
 
     mutating func setHTMLWallpaper(_ content: String) {
