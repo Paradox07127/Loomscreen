@@ -1,18 +1,12 @@
 import Foundation
 
-/// Per-screen behaviour toggles for an HTML wallpaper.
-///
-/// Defaults are conservative: JavaScript on (most modern wallpapers need it),
-/// mouse interaction off (so the wallpaper does not steal Finder clicks),
-/// trackers blocked (privacy by default for URL wallpapers), no custom CSS.
+/// Per-screen behavior toggles for an HTML wallpaper.
 struct HTMLConfig: Codable, Equatable {
     /// When `false`, `WKWebView` runs with JS disabled. Useful for static
     /// HTML/SVG art and as a safety hatch for untrusted URLs.
     var allowJavaScript: Bool = true
 
-    /// When `false`, `HTMLWallpaperView.hitTest` returns `nil` so events fall
-    /// through to the desktop. When `true`, clicks and scroll events reach
-    /// the embedded `WKWebView` so users can interact with the wallpaper.
+    /// Allows the embedded web view to receive mouse and scroll events.
     var allowMouseInteraction: Bool = false
 
     /// When `true`, a `WKContentRuleList` blocks common analytics and ad

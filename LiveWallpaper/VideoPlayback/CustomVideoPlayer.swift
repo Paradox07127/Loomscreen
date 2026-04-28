@@ -2,18 +2,7 @@ import SwiftUI
 import AppKit
 import AVKit
 
-/// SwiftUI wrapper around a self-hosted NSView + AVPlayerLayer.
-///
-/// Replaces `AVPlayerView`, which had two issues:
-/// - Its `intrinsicContentSize` reports the video's native resolution, making
-///   SwiftUI layout jitter when switching videos of different resolutions
-///   inside an `aspectRatio(16/9)` container.
-/// - Its internal `AVPlayerLayer` has a black background that bleeds past the
-///   parent's `.clipShape`.
-///
-/// Managing `AVPlayerLayer` directly removes both:
-/// - `intrinsicContentSize = .zero` so SwiftUI controls layout entirely.
-/// - Host view and layer both use a clear background — no black rectangle leaks.
+/// SwiftUI wrapper around an `AVPlayerLayer` with stable sizing and clear chrome.
 struct CustomVideoPlayer: NSViewRepresentable {
     var player: AVPlayer
     var fitMode: VideoFitMode = .aspectFill

@@ -1,14 +1,6 @@
 import SwiftUI
 
-/// macOS-native collapsible section with a whole-row tappable header.
-///
-/// Replaces SwiftUI's stock `DisclosureGroup`, whose hit area is restricted to
-/// the disclosure chevron — Apple's own apps (System Settings, Mail, Notes)
-/// make the entire header row tappable.
-///
-/// The chevron is right-aligned (matching System Settings disclosure rows
-/// rather than DisclosureGroup's leading chevron), animates with `.snappy`,
-/// and the divider+content fade in only when expanded.
+/// macOS-style collapsible section with a whole-row tappable header.
 struct CollapsibleSection<Content: View>: View {
     let title: String
     let systemImage: String

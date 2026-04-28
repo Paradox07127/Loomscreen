@@ -87,7 +87,7 @@ struct SystemMonitorView: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                         if monitor.videoFPS > 0 {
-                            Text("\(Int(monitor.videoFPS)) FPS")
+                            Text("Est \(Int(monitor.videoFPS)) FPS")
                                 .font(.caption)
                                 .fontWeight(.medium)
                         } else {

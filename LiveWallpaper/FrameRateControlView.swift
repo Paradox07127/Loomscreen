@@ -91,12 +91,12 @@ struct FrameRateControlView: View {
         guard let videoPlayer = screen.videoPlayer, videoPlayer.videoFrameRate > 0 else {
             return nil
         }
-        
+
         let limit = selectedLimit.getEffectiveLimit(
             videoFrameRate: videoPlayer.videoFrameRate,
             screenRefreshRate: Double(screenRefreshRate)
         )
-        
+
         if limit <= 0 {
             // For unlimited or when no limiting is needed
             let effectiveRate = min(videoPlayer.videoFrameRate, Double(screenRefreshRate))
@@ -109,12 +109,16 @@ struct FrameRateControlView: View {
 // Preview provider
 struct FrameRateControlView_Previews: PreviewProvider {
     static var previews: some View {
-        let mockScreen = Screen(nsScreen: NSScreen.main!)
-        let mockManager = ScreenManager()
-        
-        return FrameRateControlView(screen: mockScreen)
-            .environment(mockManager)
-            .frame(width: 400)
-            .padding()
+        if let nsScreen = NSScreen.main ?? NSScreen.screens.first {
+            let mockScreen = Screen(nsScreen: nsScreen)
+            let mockManager = ScreenManager()
+
+            FrameRateControlView(screen: mockScreen)
+                .environment(mockManager)
+                .frame(width: 400)
+                .padding()
+        } else {
+            Text("No display available")
+        }
     }
 }

@@ -2,12 +2,7 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
-/// Inspector section for picking and configuring an HTML wallpaper.
-///
-/// Splits the picker by source kind (`URL`, `File`, `Folder`) so each path
-/// gets a dedicated affordance: URLs prompt for typed input with a submit
-/// button, files and folders go through `NSOpenPanel` so we can capture a
-/// security-scoped bookmark.
+/// Picker and options for URL, file, or folder-backed HTML wallpapers.
 struct HTMLSourceSection: View {
     var screen: Screen
     @Binding var source: HTMLSource?

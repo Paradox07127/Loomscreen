@@ -123,10 +123,7 @@ class VideoContainerView: NSView {
     }
 
     // MARK: - Layout
-    //
-    // No manual frame propagation: both subviews use `autoresizingMask`, so
-    // AppKit resizes them automatically. Manually setting frames from inside
-    // `layout()` triggers a layout-recursion warning.
+    // Subviews resize via autoresizing masks; no manual frame propagation.
 
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()

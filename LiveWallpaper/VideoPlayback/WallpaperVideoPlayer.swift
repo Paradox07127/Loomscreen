@@ -29,12 +29,7 @@ final class WallpaperVideoPlayer {
 
     private(set) var player: AVQueuePlayer?
     var videoURL: URL?
-    /// Whether audio is suppressed entirely. When true, audio tracks are
-    /// disabled at the AVPlayerItem level — this prevents AVF from engaging
-    /// the audio engine, which would otherwise route through whatever output
-    /// device is active (potentially stealing focus from AirPods or other
-    /// in-use audio output). Defaults to true; user opts-in via per-screen
-    /// toggle in ScreenDetailView.
+    /// Whether audio tracks are disabled at the AVPlayerItem level.
     private(set) var isMuted: Bool = true
 
     // MARK: - Private Properties
@@ -251,21 +246,19 @@ final class WallpaperVideoPlayer {
             }
             .store(in: &cleanupTasks)
 
-        // Looping is handled by AVPlayerLooper — no manual seek needed
-    }    
+        // Looping is handled by AVPlayerLooper.
+    }
     private func setupFPSTracking() {
-        // Use a structured Task instead of Timer to avoid @Sendable isolation issues
+        let interval: TimeInterval = 0.5
         let task = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(500))
                 guard let self, self.isPlaying else { continue }
-                // AVPlayer renders at the video's native FPS (or limited by composition)
-                // Report effective FPS based on videoFrameRate and frame rate limit
-                let effectiveFPS = self.videoFrameRate > 0 ? self.videoFrameRate : 30.0
-                // Tick once per half-second, scaled to represent the actual frame count
-                for _ in 0..<Int(effectiveFPS / 2) {
-                    SystemMonitor.shared.tickFrame()
-                }
+                let estimatedFrames = EstimatedFrameTickPolicy.tickCount(
+                    forFrameRate: self.videoFrameRate,
+                    interval: interval
+                )
+                SystemMonitor.shared.tickEstimatedFrames(estimatedFrames)
 
                 // Detect loop completion via AVPlayerLooper.loopCount
                 if let loopCount = self.playerLooper?.loopCount,
@@ -347,11 +340,7 @@ final class WallpaperVideoPlayer {
         }
     }
 
-    /// Toggle audio between fully suppressed (default, AirPods-safe) and active.
-    /// When suppressed, audio tracks are disabled at the item level so AVF never
-    /// engages the audio engine. When active, tracks are re-enabled and the
-    /// player is unmuted; macOS will then route audio through the system default
-    /// output as usual.
+    /// Toggle audio between disabled tracks and normal system output.
     func setMuted(_ muted: Bool) {
         guard isMuted != muted else { return }
         isMuted = muted

@@ -1,14 +1,6 @@
 import SwiftUI
 
-/// Reusable glass-capsule button style. Matches the design language used across
-/// PlaylistSection / ScheduleSection / ScreenDetail controls.
-///
-/// Usage:
-/// ```
-/// Button(action: …) { Label("Add", systemImage: "plus.circle.fill") }
-///     .buttonStyle(GlassCapsuleButtonStyle())              // accent tint
-///     .buttonStyle(GlassCapsuleButtonStyle(tint: .red))     // destructive
-/// ```
+/// Reusable glass-capsule button style for detail controls.
 struct GlassCapsuleButtonStyle: ButtonStyle {
     var tint: Color = .accentColor
     var fontSize: CGFloat = 12

@@ -107,12 +107,7 @@ final class FullScreenDetector {
 
         let ownPID = ProcessInfo.processInfo.processIdentifier
 
-        // Use CGDisplayBounds for each screen — it already returns the
-        // top-left-origin CG coordinate space, identical to CGWindowList.
-        // The previous code derived a "primary height" from
-        // `NSScreen.screens.first` and flipped manually; that broke on
-        // multi-monitor layouts where the first screen is not the global
-        // origin (e.g. external display above the laptop).
+        // CGDisplayBounds already matches CGWindowList's coordinate space.
         let screenFrames: [(id: CGDirectDisplayID, frame: CGRect)] = screens.compactMap { screen in
             guard let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else {
                 return nil

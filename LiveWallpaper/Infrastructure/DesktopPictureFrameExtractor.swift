@@ -17,12 +17,7 @@ enum DesktopPictureFrameExtractor {
         imageGenerator.requestedTimeToleranceAfter = CMTime(seconds: 1, preferredTimescale: 600)
 
         let currentTime = player.currentTime()
-        // `AVAssetImageGenerator` is not `Sendable`, so we manually escape the
-        // main actor with `nonisolated(unsafe)`. This is safe because:
-        //   1. The generator is created locally and handed to exactly one Task.
-        //   2. AVFoundation's async `image(at:)` is `@Sendable` and designed
-        //      to be called off the main actor.
-        //   3. We never touch the generator from the main actor after hand-off.
+        // Local generator is handed to one task and never touched again here.
         nonisolated(unsafe) let generator = imageGenerator
 
         Task {

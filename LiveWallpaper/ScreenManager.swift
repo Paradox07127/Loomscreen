@@ -519,12 +519,7 @@ final class ScreenManager {
 
         } catch let error as NSError {
             Logger.error("Failed to apply configuration: \(error.localizedDescription) [domain=\(error.domain) code=\(error.code)]", category: .screenManager)
-            // NSCocoaError 261 (NSFileReadCorruptFileError) on bookmark
-            // resolution means the persisted bookmark format is unrecognised
-            // — typically a malformed bookmark from an earlier broken code
-            // path. Clear the saved bookmark so the screen returns to the
-            // empty state instead of looping the same failure on every
-            // refresh / reload.
+            // Malformed persisted bookmark; clear it to avoid retry loops.
             if error.domain == NSCocoaErrorDomain, error.code == NSFileReadCorruptFileError {
                 Logger.warning("Clearing unresolvable bookmark for screen \(screen.id); user must re-pick the source.", category: .screenManager)
                 configurationStore.remove(for: screen.id)
@@ -932,11 +927,7 @@ final class ScreenManager {
         screen.videoPlayer?.setPlaybackSpeed(speed)
     }
 
-    /// Toggle video wallpaper audio for a screen. Default is muted: audio
-    /// tracks are disabled at the AVPlayerItem level so AVF never engages
-    /// the audio engine, which keeps AirPods/external outputs free. User
-    /// opts in per-screen — turning audio on routes through system default
-    /// output as usual.
+    /// Toggle video wallpaper audio for a screen.
     func updateMuted(_ muted: Bool, for screen: Screen) {
         guard var configuration = configurationStore.get(for: screen.id),
               muted != configuration.muted else { return }
@@ -1412,16 +1403,7 @@ final class ScreenManager {
         saveConfiguration(config)
     }
 
-    /// Advance to the next video in the playlist for the given screen.
-    /// Preserves all existing settings (effects, particles, playlist, etc.).
-    /// Cursor-based: the primary (`savedVideoBookmarkData`) stays put, only the
-    /// active-playlist cursor moves, so rotation never stalls even when the
-    /// current playing bookmark happens to coincide with one of the additional
-    /// entries.
-    ///
-    /// Validates the next bookmark BEFORE saving / releasing the live session
-    /// so a missing or unreadable file leaves the user's current wallpaper
-    /// playing instead of clearing the screen.
+    /// Advance playlist after validating the next bookmark.
     func advancePlaylist(for screen: Screen) {
         guard let config = configurationStore.get(for: screen.id),
               config.wallpaperMode == .playlist,
@@ -1531,12 +1513,7 @@ final class ScreenManager {
         }
     }
 
-    /// Check the current hour and apply the schedule decision (apply slot,
-    /// restore primary when the slot window ends, or no-op).
-    ///
-    /// Preserves the screen's configuration (effects, particles, playlist,
-    /// schedule slots themselves, etc.); only `activeWallpaper` is swapped.
-    /// `savedVideoBookmarkData` (the user's primary) is never touched here.
+    /// Apply the current schedule decision without mutating the primary.
     func checkAndApplySchedule(for screen: Screen) {
         guard let config = configurationStore.get(for: screen.id) else { return }
 

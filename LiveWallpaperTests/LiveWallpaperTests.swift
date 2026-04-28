@@ -739,10 +739,6 @@ struct ScheduleTimelineBarSegmentsTests {
 }
 
 // MARK: - FrameRateLimit.resolveCompositionFPS Tests
-//
-// Locks down the audit-fix that "Unlimited" frame rate must respect screen
-// refresh rate instead of being silently capped at 60 in the CI composition
-// path.
 
 @Suite("FrameRateLimit.resolveCompositionFPS")
 struct ResolveCompositionFPSTests {
