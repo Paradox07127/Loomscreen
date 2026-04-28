@@ -9,7 +9,6 @@ struct OnboardingStepFirstWallpaper: View {
     @Environment(ScreenManager.self) private var screenManager
     @State private var isRequestingAerials = false
     @State private var showHTMLSheet = false
-    @State private var htmlURLInput = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -77,10 +76,9 @@ struct OnboardingStepFirstWallpaper: View {
             Spacer()
         }
         .sheet(isPresented: $showHTMLSheet) {
-            HTMLURLSheet(
-                urlInput: $htmlURLInput,
+            HTMLPickerSheet(
                 onCancel: { showHTMLSheet = false },
-                onConfirm: { applyHTML($0) }
+                onConfirm: { source in applyHTML(source) }
             )
         }
     }
@@ -117,60 +115,199 @@ struct OnboardingStepFirstWallpaper: View {
         nextStep()
     }
 
-    private func applyHTML(_ rawInput: String) {
-        let trimmed = rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-
-        let normalized: String = {
-            let lower = trimmed.lowercased()
-            if lower.hasPrefix("http://") || lower.hasPrefix("https://") || lower.hasPrefix("file://") {
-                return trimmed
-            }
-            return "https://" + trimmed
-        }()
-
+    private func applyHTML(_ source: HTMLSource) {
         if let screen = screenManager.screens.first {
-            screenManager.setHTMLWallpaper(url: normalized, for: screen)
+            screenManager.setHTMLWallpaper(source: source, for: screen)
         }
         showHTMLSheet = false
         nextStep()
     }
 }
 
-private struct HTMLURLSheet: View {
-    @Binding var urlInput: String
-    let onCancel: () -> Void
-    let onConfirm: (String) -> Void
+// MARK: - HTML Picker Sheet
 
-    @FocusState private var isFieldFocused: Bool
+/// Three-tab sheet that lets first-run users start with any HTML source kind.
+/// File/Folder go through `NSOpenPanel` so the resulting bookmark is
+/// security-scoped — the same machinery the inspector uses.
+private struct HTMLPickerSheet: View {
+    let onCancel: () -> Void
+    let onConfirm: (HTMLSource) -> Void
+
+    @State private var selectedKind: PickerKind = .url
+    @State private var urlInput: String = ""
+    /// The source produced by `pickFile` — usually a `.folder` upgrade so
+    /// sibling assets (CSS/JS/images) keep resolving across launches; a
+    /// `.file` fallback when the parent grant is denied.
+    @State private var pickedFileSource: HTMLSource? = nil
+    @State private var pickedFileName: String = ""
+    @State private var pickedFolderBookmark: Data? = nil
+    @State private var pickedFolderIndexFile: String = "index.html"
+    @State private var pickedFolderName: String = ""
+
+    @FocusState private var isURLFieldFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Web Page Wallpaper")
+                Text("Web / HTML Wallpaper")
                     .font(.system(size: 16, weight: .semibold))
-                Text("Enter a URL — defaults to https:// when no scheme is given.")
+                Text("Use a website, a single .html file, or a full folder of assets.")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
 
-            TextField("example.com", text: $urlInput)
-                .textFieldStyle(.roundedBorder)
-                .focused($isFieldFocused)
-                .onSubmit { onConfirm(urlInput) }
+            Picker("Source", selection: $selectedKind) {
+                ForEach(PickerKind.allCases) { kind in
+                    Label(kind.label, systemImage: kind.icon).tag(kind)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            sourcePane
+                .animation(.snappy(duration: 0.18), value: selectedKind)
 
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel, action: onCancel)
                     .keyboardShortcut(.cancelAction)
-                Button("Use as Wallpaper") { onConfirm(urlInput) }
+                Button("Use as Wallpaper", action: commit)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(urlInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(!canCommit)
             }
         }
         .padding(20)
-        .frame(width: 380)
-        .onAppear { isFieldFocused = true }
+        .frame(width: 420)
+        .onAppear { isURLFieldFocused = true }
+    }
+
+    @ViewBuilder
+    private var sourcePane: some View {
+        switch selectedKind {
+        case .url:
+            VStack(alignment: .leading, spacing: 6) {
+                TextField("example.com or https://…", text: $urlInput)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($isURLFieldFocused)
+                    .onSubmit { commit() }
+                Text("HTTPS is added automatically when no scheme is given.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        case .file:
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Image(systemName: "doc.richtext")
+                        .foregroundStyle(.secondary)
+                    Text(pickedFileName.isEmpty ? "No file chosen" : pickedFileName)
+                        .font(.system(size: 12, design: .monospaced))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer()
+                    Button("Choose…", action: pickFile)
+                        .buttonStyle(.bordered)
+                }
+                Text("Pick a single .html file. Sibling assets next to the file are accessible.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        case .folder:
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Image(systemName: "folder")
+                        .foregroundStyle(.secondary)
+                    Text(pickedFolderName.isEmpty ? "No folder chosen" : pickedFolderName)
+                        .font(.system(size: 12, design: .monospaced))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer()
+                    Button("Choose…", action: pickFolder)
+                        .buttonStyle(.bordered)
+                }
+                Text("Pick a folder containing index.html plus any JS, CSS, or images it loads.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    // MARK: - Commit
+
+    private var canCommit: Bool {
+        switch selectedKind {
+        case .url:    return !urlInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .file:   return pickedFileSource != nil
+        case .folder: return pickedFolderBookmark != nil
+        }
+    }
+
+    private func commit() {
+        switch selectedKind {
+        case .url:
+            guard let source = HTMLSource(userInput: urlInput) else { return }
+            onConfirm(source)
+        case .file:
+            guard let source = pickedFileSource else { return }
+            onConfirm(source)
+        case .folder:
+            guard let bookmark = pickedFolderBookmark else { return }
+            onConfirm(.folder(bookmarkData: bookmark, indexFileName: pickedFolderIndexFile))
+        }
+    }
+
+    // MARK: - File / Folder Pickers
+
+    private func pickFile() {
+        NSApp.activate(ignoringOtherApps: true)
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [UTType.html]
+        panel.prompt = "Use Wallpaper"
+        guard panel.runModal() == .OK, let url = panel.url,
+              let source = ResourceUtilities.htmlSourceFromPickedFile(url) else { return }
+        pickedFileSource = source
+        pickedFileName = url.lastPathComponent
+    }
+
+    private func pickFolder() {
+        NSApp.activate(ignoringOtherApps: true)
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Use Wallpaper"
+        guard panel.runModal() == .OK, let folderURL = panel.url,
+              let bookmark = ResourceUtilities.createBookmark(for: folderURL) else { return }
+        let didStart = folderURL.startAccessingSecurityScopedResource()
+        defer { if didStart { folderURL.stopAccessingSecurityScopedResource() } }
+        let entries = (try? FileManager.default.contentsOfDirectory(atPath: folderURL.path)) ?? []
+        let inferred = ["index.html", "index.htm"].first(where: { entries.contains($0) })
+            ?? entries.first(where: { $0.lowercased().hasSuffix(".html") })
+            ?? "index.html"
+        pickedFolderBookmark = bookmark
+        pickedFolderName = folderURL.lastPathComponent
+        pickedFolderIndexFile = inferred
+    }
+}
+
+private enum PickerKind: String, CaseIterable, Identifiable {
+    case url, file, folder
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .url: return "URL"
+        case .file: return "File"
+        case .folder: return "Folder"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .url: return "globe"
+        case .file: return "doc.richtext"
+        case .folder: return "folder"
+        }
     }
 }
 

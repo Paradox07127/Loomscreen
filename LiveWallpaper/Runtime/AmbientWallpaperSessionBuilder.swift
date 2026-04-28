@@ -3,19 +3,13 @@ import AppKit
 /// Builds non-video wallpaper sessions backed by a window.
 @MainActor
 final class AmbientWallpaperSessionBuilder {
-    func makeHTMLSession(for source: HTMLWallpaperSource, frame: CGRect) -> AmbientWallpaperSession {
+    func makeHTMLSession(source: HTMLSource, config: HTMLConfig, frame: CGRect) -> AmbientWallpaperSession {
         let window = VideoWallpaperWindow(frame: frame)
         let htmlView = HTMLWallpaperView(frame: frame)
         window.contentView = htmlView
 
-        switch source {
-        case .remoteURL(let url):
-            htmlView.loadURL(url)
-        case .localFile(let fileURL):
-            htmlView.loadFile(fileURL)
-        case .inlineHTML(let html):
-            htmlView.loadHTML(html)
-        }
+        htmlView.apply(config)
+        htmlView.loadSource(source)
 
         window.orderBack(nil)
         return AmbientWallpaperSession(window: window, wallpaperType: .html, performanceTarget: htmlView)

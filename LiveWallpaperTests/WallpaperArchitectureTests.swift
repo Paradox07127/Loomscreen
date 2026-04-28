@@ -8,55 +8,45 @@ struct WallpaperSessionDefinitionTests {
 
     @Test("Remote HTML configuration resolves into a typed session definition")
     func remoteHTMLConfigurationResolves() {
+        let url = URL(string: "https://example.com/wallpaper")!
         let configuration = ScreenConfiguration(
             screenID: 11,
-            videoBookmarkData: Data(),
-            wallpaperType: .html,
-            htmlContent: "https://example.com/wallpaper"
+            wallpaper: .html(source: .url(url), config: .default)
         )
 
         let definition = WallpaperSessionDefinition(configuration: configuration)
 
-        #expect(definition == .html(.remoteURL(URL(string: "https://example.com/wallpaper")!)))
-    }
-
-    @Test("Local HTML configuration resolves into a typed session definition")
-    func localHTMLConfigurationResolves() throws {
-        let localFile = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("html")
-        try Data("<html></html>".utf8).write(to: localFile)
-
-        let configuration = ScreenConfiguration(
-            screenID: 12,
-            videoBookmarkData: Data(),
-            wallpaperType: .html,
-            htmlContent: localFile.path
-        )
-
-        let definition = WallpaperSessionDefinition(configuration: configuration)
-
-        #expect(definition == .html(.localFile(localFile)))
+        #expect(definition == .html(.url(url), .default))
     }
 
     @Test("Inline HTML configuration resolves into a typed session definition")
     func inlineHTMLConfigurationResolves() {
+        let html = "<html><body>Inline</body></html>"
         let configuration = ScreenConfiguration(
             screenID: 13,
-            videoBookmarkData: Data(),
-            wallpaperType: .html,
-            htmlContent: "<html><body>Inline</body></html>"
+            wallpaper: .html(source: .inline(html), config: .default)
         )
 
         let definition = WallpaperSessionDefinition(configuration: configuration)
 
-        #expect(definition == .html(.inlineHTML("<html><body>Inline</body></html>")))
+        #expect(definition == .html(.inline(html), .default))
+    }
+
+    @Test("Empty inline HTML configuration produces no session")
+    func emptyInlineHTMLProducesNoSession() {
+        let configuration = ScreenConfiguration(
+            screenID: 14,
+            wallpaper: .html(source: .inline(""), config: .default)
+        )
+
+        #expect(WallpaperSessionDefinition(configuration: configuration) == nil)
     }
 
     @Test("Session definition display names come from typed content")
     func sessionDefinitionDisplayNameUsesTypedContent() {
         let definitions: [WallpaperSessionDefinition] = [
-            .html(.remoteURL(URL(string: "https://example.com/live")!)),
-            .html(.localFile(URL(fileURLWithPath: "/tmp/demo.html"))),
-            .html(.inlineHTML("<html></html>")),
+            .html(.url(URL(string: "https://example.com/live")!), .default),
+            .html(.inline("<html></html>"), .default),
             .metalShader(.aurora),
             .video(bookmarkData: Data([0x01, 0x02])),
         ]
@@ -66,10 +56,9 @@ struct WallpaperSessionDefinitionTests {
         }
 
         #expect(displayNames[0] == "example.com")
-        #expect(displayNames[1] == "demo.html")
-        #expect(displayNames[2] == "Inline HTML")
-        #expect(displayNames[3] == "Aurora")
-        #expect(displayNames[4] == "Demo.mov")
+        #expect(displayNames[1] == "Inline HTML")
+        #expect(displayNames[2] == "Aurora")
+        #expect(displayNames[3] == "Demo.mov")
     }
 }
 
@@ -118,6 +107,75 @@ struct WallpaperStatusAggregatorTests {
     }
 }
 
+@Suite("Menu bar playback controls")
+@MainActor
+struct MenuBarPlaybackControlTests {
+    @Test("Toggle helper pauses a playing wallpaper exactly once")
+    func togglePausesPlayingWallpaperOnce() {
+        let playback = FakePlaybackController(isPlaying: true)
+
+        PlaybackToggle.toggle(playback)
+
+        #expect(!playback.isPlaying)
+        #expect(playback.pauseCount == 1)
+        #expect(playback.playCount == 0)
+    }
+
+    @Test("Toggle helper plays a paused wallpaper exactly once")
+    func togglePlaysPausedWallpaperOnce() {
+        let playback = FakePlaybackController(isPlaying: false)
+
+        PlaybackToggle.toggle(playback)
+
+        #expect(playback.isPlaying)
+        #expect(playback.playCount == 1)
+        #expect(playback.pauseCount == 0)
+    }
+}
+
+@Suite("PlaylistEntry identity")
+struct PlaylistEntryIdentityTests {
+    @Test("Entry ID is deterministic and does not use process-randomized hashValue")
+    func entryIDUsesStableBookmarkEncoding() {
+        let bookmark = Data([0x01, 0x02, 0x03, 0x04])
+
+        #expect(PlaylistEntry(bookmark: bookmark, isPrimary: true, isPlaying: false, name: "Primary").id == "p:AQIDBA==")
+        #expect(PlaylistEntry(bookmark: bookmark, isPrimary: false, isPlaying: false, name: "Extra").id == "x:AQIDBA==")
+    }
+}
+
+@MainActor
+private final class FakePlaybackController: WallpaperPlaybackControllable {
+    var isPlaying: Bool
+    var playCount = 0
+    var pauseCount = 0
+
+    init(isPlaying: Bool) {
+        self.isPlaying = isPlaying
+    }
+
+    var wallpaperType: WallpaperType { .video }
+    var summary: WallpaperSessionSummary { .notConfigured }
+    var videoPlayer: WallpaperVideoPlayer? { nil }
+    var wallpaperWindow: NSWindow? { nil }
+
+    func show() {}
+    func hide() {}
+    func applyPerformanceProfile(_ profile: WallpaperPerformanceProfile) {}
+    func updateFrame(to frame: CGRect) {}
+    func cleanup() {}
+
+    func play() {
+        playCount += 1
+        isPlaying = true
+    }
+
+    func pause() {
+        pauseCount += 1
+        isPlaying = false
+    }
+}
+
 @Suite("WallpaperConfigurationStore removing invalid video configurations")
 struct WallpaperConfigurationStoreInvalidConfigTests {
 
@@ -159,7 +217,6 @@ struct WallpaperPolicyEngineTests {
         #expect(profile == .quality)
         #expect(!WallpaperPolicyEngine.shouldPauseForPower(
             globalSettings: settings,
-            configuration: nil,
             powerSource: .battery(level: 80)
         ))
     }
@@ -187,7 +244,6 @@ struct WallpaperPolicyEngineTests {
 
         #expect(WallpaperPolicyEngine.shouldPauseForPower(
             globalSettings: settings,
-            configuration: nil,
             powerSource: .battery(level: 90)
         ))
         #expect(WallpaperPolicyEngine.shouldResumeFromPower(

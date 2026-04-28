@@ -1,7 +1,8 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
-/// MenuBarExtra `.window` panel: dashboard + per-screen cards + quick toggles + footer.
+/// MenuBarExtra window content.
 struct MenuBarContent: View {
     let openSettings: () -> Void
     let openSettingsForScreen: (CGDirectDisplayID) -> Void
@@ -11,8 +12,10 @@ struct MenuBarContent: View {
 
     @State private var globalPauseOnBattery: Bool = SettingsManager.shared.loadGlobalSettings().globalPauseOnBattery
     @State private var globalPauseOnFullScreen: Bool = SettingsManager.shared.loadGlobalSettings().pauseOnFullScreen
-    /// "system" = whole-machine usage (default); "app" = this process only. Synced with sidebar dashboard.
     @AppStorage("Dashboard.RAMScope") private var ramScopeRaw: String = "system"
+
+    @State private var isWebURLEntryExpanded: Bool = false
+    @State private var webURLDraft: String = ""
 
     private var monitor: SystemMonitor { .shared }
     private var ramPercent: Double {
@@ -48,17 +51,15 @@ struct MenuBarContent: View {
             Divider()
             screenSection
             Divider()
+            quickActions
+            Divider()
             quickToggles
             Divider()
             footer
         }
         .padding(12)
         .frame(width: 280)
-        .onAppear {
-            monitor.startMonitoring()
-            refreshGlobalToggles()
-        }
-        .onDisappear { monitor.stopMonitoring() }
+        .onAppear { refreshGlobalToggles() }
     }
 
     // MARK: - Header
@@ -129,6 +130,7 @@ struct MenuBarContent: View {
                     MenuBarScreenCard(
                         screen: screen,
                         videoName: resolveCurrentVideoName(for: screen),
+                        htmlName: resolveCurrentHTMLName(for: screen),
                         onOpen: { openSettingsForScreen(screen.id) },
                         onPlayPause: { togglePlayback(for: screen) },
                         onPrev: { screenManager.regressPlaylist(for: screen) },
@@ -136,6 +138,53 @@ struct MenuBarContent: View {
                     )
                 }
             }
+        }
+    }
+
+    // MARK: - Quick Actions
+
+    private var quickActions: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("ADD WALLPAPER")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .tracking(0.6)
+
+            HStack(spacing: 6) {
+                QuickActionButton(label: "Web Page", systemImage: "globe") {
+                    withAnimation(.snappy(duration: 0.18)) { isWebURLEntryExpanded.toggle() }
+                }
+                QuickActionButton(label: "HTML File", systemImage: "doc.richtext") {
+                    pickHTMLFileFromMenuBar()
+                }
+                QuickActionButton(label: "Folder", systemImage: "folder") {
+                    pickHTMLFolderFromMenuBar()
+                }
+            }
+
+            if isWebURLEntryExpanded {
+                webURLEntryRow
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    private var webURLEntryRow: some View {
+        HStack(spacing: 6) {
+            TextField("example.com or https://…", text: $webURLDraft)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 12))
+                .onSubmit { commitWebURLEntry() }
+
+            Button {
+                commitWebURLEntry()
+            } label: {
+                Image(systemName: "arrow.right.circle.fill")
+                    .font(.system(size: 16))
+            }
+            .buttonStyle(.plain)
+            .disabled(webURLDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .help("Use as wallpaper for the first display")
         }
     }
 
@@ -200,7 +249,7 @@ struct MenuBarContent: View {
 
     private func togglePlayback(for screen: Screen) {
         guard let playback = screen.playbackController else { return }
-        if playback.isPlaying { playback.pause() } else { playback.play() }
+        PlaybackToggle.toggle(playback)
     }
 
     private func resolveCurrentVideoName(for screen: Screen) -> String? {
@@ -211,6 +260,60 @@ struct MenuBarContent: View {
             return config.savedVideoBookmarkData.flatMap { ResourceUtilities.resolveBookmarkName($0) }
         }
         return ResourceUtilities.resolveBookmarkName(combined[cursor])
+    }
+
+    private func resolveCurrentHTMLName(for screen: Screen) -> String? {
+        screenManager.getConfiguration(for: screen)?.htmlSource?.displayName
+    }
+
+    // MARK: - Quick Action Handlers
+
+    private func commitWebURLEntry() {
+        let trimmed = webURLDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard let source = HTMLSource(userInput: trimmed),
+              let target = screenManager.screens.first else { return }
+        screenManager.setHTMLWallpaperPreservingConfig(source: source, for: target)
+        webURLDraft = ""
+        withAnimation(.snappy(duration: 0.18)) { isWebURLEntryExpanded = false }
+    }
+
+    private func pickHTMLFileFromMenuBar() {
+        guard let target = screenManager.screens.first else { return }
+        // Activate the app so the modal panel comes to the front instead of
+        // hiding behind the menu bar / other windows.
+        NSApp.activate(ignoringOtherApps: true)
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [UTType.html]
+        panel.prompt = "Use as Wallpaper"
+        guard panel.runModal() == .OK, let url = panel.url,
+              let source = ResourceUtilities.htmlSourceFromPickedFile(url) else { return }
+        screenManager.setHTMLWallpaperPreservingConfig(source: source, for: target)
+    }
+
+    private func pickHTMLFolderFromMenuBar() {
+        guard let target = screenManager.screens.first else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Use as Wallpaper"
+        guard panel.runModal() == .OK, let folderURL = panel.url,
+              let bookmark = ResourceUtilities.createBookmark(for: folderURL) else { return }
+        let didStart = folderURL.startAccessingSecurityScopedResource()
+        defer { if didStart { folderURL.stopAccessingSecurityScopedResource() } }
+        let entries = (try? FileManager.default.contentsOfDirectory(atPath: folderURL.path)) ?? []
+        let indexFileName = ["index.html", "index.htm"].first(where: { entries.contains($0) })
+            ?? entries.first(where: { $0.lowercased().hasSuffix(".html") })
+            ?? "index.html"
+        screenManager.setHTMLWallpaperPreservingConfig(
+            source: .folder(bookmarkData: bookmark, indexFileName: indexFileName),
+            for: target
+        )
     }
 
     private func refreshGlobalToggles() {
@@ -242,6 +345,17 @@ struct MenuBarContent: View {
         let info = Bundle.main.infoDictionary
         let version = info?["CFBundleShortVersionString"] as? String ?? "—"
         return "v\(version)"
+    }
+}
+
+@MainActor
+enum PlaybackToggle {
+    static func toggle(_ playback: any WallpaperPlaybackControllable) {
+        if playback.isPlaying {
+            playback.pause()
+        } else {
+            playback.play()
+        }
     }
 }
 
@@ -293,6 +407,7 @@ private struct DashboardChip: View {
 private struct MenuBarScreenCard: View {
     let screen: Screen
     let videoName: String?
+    let htmlName: String?
     let onOpen: () -> Void
     let onPlayPause: () -> Void
     let onPrev: () -> Void
@@ -397,11 +512,45 @@ private struct MenuBarScreenCard: View {
 
     private var subtitle: String {
         if let videoName, summary.wallpaperType == .video { return videoName }
+        if let htmlName, summary.wallpaperType == .html { return htmlName }
         switch summary.wallpaperType {
         case .html: return "HTML wallpaper"
         case .metalShader: return "Shader wallpaper"
         case .video: return "Not configured"
         case nil: return "Not configured"
         }
+    }
+}
+
+// MARK: - Quick Action Button
+
+private struct QuickActionButton: View {
+    let label: String
+    let systemImage: String
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 14, weight: .medium))
+                Text(label)
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, minHeight: 38)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isHovering ? Color.accentColor.opacity(0.20) : Color.gray.opacity(0.12))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focusable()
+        .onHover { isHovering = $0 }
+        .accessibilityLabel(label)
     }
 }

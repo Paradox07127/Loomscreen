@@ -3,14 +3,7 @@ import AVKit
 
 // MARK: - PlayerHostView
 
-/// Layer-hosting NSView whose backing layer **is** an `AVPlayerLayer`.
-///
-/// This is the Apple-recommended way to embed an `AVPlayerLayer` into an NSView
-/// hierarchy: by overriding `makeBackingLayer()` we make the player layer the
-/// view's *own* layer instead of injecting it as a manual sublayer. The view
-/// then participates correctly in `subviews` ordering, so sibling subviews
-/// (e.g. the particle overlay) reliably render above the video without any
-/// `zPosition` or `insertSublayer(at:)` tricks.
+/// NSView whose backing layer is an AVPlayerLayer.
 final class PlayerHostView: NSView {
 
     override func makeBackingLayer() -> CALayer {
@@ -57,14 +50,7 @@ final class PlayerHostView: NSView {
 
 // MARK: - VideoContainerView
 
-/// Hosts the video player **and** the particle overlay as a single unit so the
-/// caller can never accidentally hand subview frames in the wrong coordinate
-/// space (the previous bug — see `setParticleEffect`'s docstring).
-///
-/// Layout contract: both subviews are created with `origin: .zero` and the
-/// container's local size, then sized via `autoresizingMask`. The video host
-/// is the first subview and the particle overlay is the second, so NSView's
-/// deterministic subview ordering renders particles above the video.
+/// Keeps the video layer and particle overlay in one local coordinate space.
 class VideoContainerView: NSView {
 
     // MARK: - Subviews
@@ -83,11 +69,6 @@ class VideoContainerView: NSView {
     // MARK: - Initialization
 
     override init(frame frameRect: NSRect) {
-        // Both subviews are created in the container's local coordinate space
-        // (origin = .zero) — passing the container's frame directly would put
-        // them at the parent's screen offset and clip them out of view on any
-        // monitor with a non-zero origin. This was the long-standing
-        // "particles never visible on the secondary monitor" bug.
         let localBounds = NSRect(origin: .zero, size: frameRect.size)
         playerHostView = PlayerHostView(frame: localBounds)
         playerHostView.autoresizingMask = [.width, .height]
@@ -109,9 +90,7 @@ class VideoContainerView: NSView {
         layer?.drawsAsynchronously = true
         layer?.masksToBounds = true
 
-        // Order matters: playerHostView is the bottom subview (index 0),
-        // particleOverlayView is the top subview (index 1). NSView subview
-        // order determines composition order, so particles render above video.
+        // Subview order keeps particles above the video.
         addSubview(playerHostView)
         addSubview(particleOverlayView)
 
@@ -135,14 +114,10 @@ class VideoContainerView: NSView {
 
     // MARK: - Public API — Particles
 
-    /// Updates the active particle effect overlay. Density is a 0.05–3.0
-    /// multiplier on the emitter's master birth rate. Pass `.none` to disable.
     func setParticleEffect(_ effect: ParticleEffect, density: Double) {
         particleOverlayView.setEffect(effect, density: CGFloat(density))
     }
 
-    /// Adjusts particle density without rebuilding the emitter. Existing
-    /// particles continue their lifecycle smoothly.
     func setParticleDensity(_ density: Double) {
         particleOverlayView.updateDensity(CGFloat(density))
     }

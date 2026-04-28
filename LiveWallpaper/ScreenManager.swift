@@ -289,8 +289,8 @@ final class ScreenManager {
         switch definition {
         case .video:
             applyConfiguration(configuration, to: screen, preservingState: preservingState)
-        case .html(let source):
-            activateAmbientWallpaper(.html(source), for: screen)
+        case .html(let source, let htmlConfig):
+            activateAmbientWallpaper(.html(source, htmlConfig), for: screen)
         case .metalShader(let preset):
             activateAmbientWallpaper(.metalShader(preset), for: screen)
         }
@@ -333,8 +333,7 @@ final class ScreenManager {
         } else {
             configuration = ScreenConfiguration(
                 screenID: screen.id,
-                videoBookmarkData: bookmarkData,
-                pauseOnBattery: globalSettings.globalPauseOnBattery
+                videoBookmarkData: bookmarkData
             )
         }
         configurationStore.save(configuration)
@@ -461,8 +460,8 @@ final class ScreenManager {
                     
                     // Check if we should pause based on power state
                     let shouldPause = powerMonitor.currentPowerSource.isOnBattery &&
-                    (SettingsManager.shared.loadGlobalSettings().globalPauseOnBattery || configuration.pauseOnBattery)
-                    
+                    SettingsManager.shared.loadGlobalSettings().globalPauseOnBattery
+
                     if shouldPause && wasPlaying {
                         player.pause()
                     } else if !shouldPause && !wasPlaying {
@@ -494,7 +493,7 @@ final class ScreenManager {
 
                 // Check if we should play based on power state
                 let shouldPause = powerMonitor.currentPowerSource.isOnBattery &&
-                (SettingsManager.shared.loadGlobalSettings().globalPauseOnBattery || configuration.pauseOnBattery)
+                SettingsManager.shared.loadGlobalSettings().globalPauseOnBattery
 
                 if shouldPause {
                     player.pause()
@@ -516,6 +515,20 @@ final class ScreenManager {
                     fullScreenDetector.isDesktopHidden(for: screen.id)
             )
 
+        } catch let error as NSError {
+            Logger.error("Failed to apply configuration: \(error.localizedDescription) [domain=\(error.domain) code=\(error.code)]", category: .screenManager)
+            // NSCocoaError 261 (NSFileReadCorruptFileError) on bookmark
+            // resolution means the persisted bookmark format is unrecognised
+            // — typically a malformed bookmark from an earlier broken code
+            // path. Clear the saved bookmark so the screen returns to the
+            // empty state instead of looping the same failure on every
+            // refresh / reload.
+            if error.domain == NSCocoaErrorDomain, error.code == NSFileReadCorruptFileError {
+                Logger.warning("Clearing unresolvable bookmark for screen \(screen.id); user must re-pick the source.", category: .screenManager)
+                configurationStore.remove(for: screen.id)
+                screen.resetRuntimeSession()
+                notifyWallpaperSessionChanged()
+            }
         } catch {
             Logger.error("Failed to apply configuration: \(error.localizedDescription)", category: .screenManager)
         }
@@ -755,7 +768,6 @@ final class ScreenManager {
 
             let shouldPauseForPower = WallpaperPolicyEngine.shouldPauseForPower(
                 globalSettings: globalSettings,
-                configuration: configuration,
                 powerSource: powerSource
             )
             let shouldResumeForPower = WallpaperPolicyEngine.shouldResumeFromPower(
@@ -991,23 +1003,6 @@ final class ScreenManager {
         return configurationStore.get(for: screen.id)
     }
     
-    // Update power settings for a screen
-    func updatePowerSettings(pauseOnBattery: Bool, for screen: Screen) {
-        guard var configuration = getConfiguration(for: screen),
-              pauseOnBattery != configuration.pauseOnBattery else { return }
-
-        configuration.pauseOnBattery = pauseOnBattery
-        saveConfiguration(configuration)
-
-        // Apply the new setting immediately based on power state
-        let isOnBattery = powerMonitor.currentPowerSource.isOnBattery
-        if isOnBattery && pauseOnBattery {
-            screen.playbackController?.pause()
-            powerPolicy.markPausedByPower(screen.id)
-        }
-        // Don't unconditionally resume when on AC — respect manual pause state
-    }
-    
     // Validate all saved configurations
     func validateAllConfigurations() -> (valid: Int, invalid: Int) {
         let screenIDs = configurationStore.allScreenIDs()
@@ -1239,9 +1234,9 @@ final class ScreenManager {
         let session: AmbientWallpaperSession
 
         switch definition {
-        case .html(let source):
-            session = ambientSessionBuilder.makeHTMLSession(for: source, frame: screen.frame)
-            Logger.info("Set HTML wallpaper for screen \(screen.id)", category: .screenManager)
+        case .html(let source, let htmlConfig):
+            session = ambientSessionBuilder.makeHTMLSession(source: source, config: htmlConfig, frame: screen.frame)
+            Logger.info("Set HTML wallpaper for screen \(screen.id) — \(source.displayName)", category: .screenManager)
         case .metalShader(let preset):
             session = ambientSessionBuilder.makeShaderSession(preset: preset, frame: screen.frame)
             Logger.info("Set shader wallpaper (\(preset.rawValue)) for screen \(screen.id)", category: .screenManager)
@@ -1263,15 +1258,46 @@ final class ScreenManager {
 
     // MARK: - HTML Wallpaper
 
-    func setHTMLWallpaper(url: String, for screen: Screen) {
-        // Save config (create one if it doesn't exist yet)
-        var config = configurationStore.get(for: screen.id) ?? ScreenConfiguration(
-            screenID: screen.id, wallpaper: .html(url)
+    /// Apply an arbitrary `HTMLSource` (file/folder/url/inline) using the
+    /// supplied `config`. Always overwrites the persisted toggles — call
+    /// `setHTMLWallpaperPreservingConfig(source:for:)` from quick actions
+    /// when the existing per-screen settings should be kept untouched.
+    func setHTMLWallpaper(source: HTMLSource, config: HTMLConfig = .default, for screen: Screen) {
+        var configuration = configurationStore.get(for: screen.id) ?? ScreenConfiguration(
+            screenID: screen.id,
+            wallpaper: .html(source: source, config: config)
         )
-        config.setHTMLWallpaper(url)
-        saveConfiguration(config)
+        configuration.setHTMLWallpaper(source: source, config: config)
+        saveConfiguration(configuration)
 
-        restoreWallpaperSession(for: screen, configuration: config, preservingState: false)
+        restoreWallpaperSession(for: screen, configuration: configuration, preservingState: false)
+    }
+
+    /// Quick-action / menu-bar entry that swaps just the source while
+    /// keeping the previously persisted `HTMLConfig` intact (or `.default`
+    /// when no prior HTML configuration exists). Mirrors the "swap video,
+    /// keep settings" pattern used by `setVideo(...)`.
+    func setHTMLWallpaperPreservingConfig(source: HTMLSource, for screen: Screen) {
+        let preserved = configurationStore.get(for: screen.id)?.htmlConfig ?? .default
+        setHTMLWallpaper(source: source, config: preserved, for: screen)
+    }
+
+    /// Legacy URL-string entry point kept for onboarding / quick-input flows.
+    /// Internally maps the string to an `HTMLSource` via the shared user-input
+    /// heuristic.
+    func setHTMLWallpaper(url: String, for screen: Screen) {
+        guard let source = HTMLSource(userInput: url) else { return }
+        setHTMLWallpaper(source: source, for: screen)
+    }
+
+    /// Replace only the `HTMLConfig` for the current HTML wallpaper. No-op
+    /// when the active wallpaper is not HTML.
+    func updateHTMLConfig(_ config: HTMLConfig, for screen: Screen) {
+        guard var existing = configurationStore.get(for: screen.id),
+              case .html(let source, _) = existing.activeWallpaper else { return }
+        existing.activeWallpaper = .html(source: source, config: config)
+        saveConfiguration(existing)
+        restoreWallpaperSession(for: screen, configuration: existing, preservingState: false)
     }
 
     // MARK: - Metal Shader Wallpaper

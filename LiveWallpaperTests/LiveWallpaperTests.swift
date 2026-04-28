@@ -4,6 +4,20 @@ import CoreGraphics
 import SwiftUI
 @testable import LiveWallpaper
 
+// MARK: - ResourceUtilities Tests
+
+@Suite("ResourceUtilities") @MainActor
+struct ResourceUtilitiesTests {
+
+    @Test("Bookmark creation options match read-only sandbox entitlement")
+    func bookmarkCreationOptionsAreReadOnlyScoped() {
+        let options = ResourceUtilities.bookmarkCreationOptions
+
+        #expect(options.contains(.withSecurityScope))
+        #expect(options.contains(.securityScopeAllowOnlyReadAccess))
+    }
+}
+
 // MARK: - PowerPolicyController Tests
 
 @Suite("PowerPolicyController") @MainActor
@@ -367,7 +381,6 @@ struct ScreenConfigurationDecoderTests {
         #expect(decoded.screenID == 12345)
         #expect(decoded.playbackSpeed == 1.0)
         #expect(decoded.fitMode == .aspectFill)
-        #expect(decoded.pauseOnBattery == false)
         #expect(decoded.frameRateLimit == .fps60)
         #expect(decoded.wallpaperType == .video)
         #expect(decoded.particleEffect == .none)
@@ -383,19 +396,44 @@ struct ScreenConfigurationDecoderTests {
 
     @Test("HTML wallpaper config round-trips correctly")
     func htmlConfigRoundTrip() throws {
+        let url = URL(string: "https://example.com/wallpaper")!
         let original = ScreenConfiguration(
             screenID: 42,
-            wallpaper: .html("https://example.com/wallpaper")
+            wallpaper: .html(source: .url(url), config: .default)
         )
 
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(ScreenConfiguration.self, from: data)
 
-        #expect(decoded.activeWallpaper == .html("https://example.com/wallpaper"))
+        #expect(decoded.activeWallpaper == .html(source: .url(url), config: .default))
         #expect(decoded.wallpaperType == .html)
         #expect(decoded.htmlContent == "https://example.com/wallpaper")
+        #expect(decoded.htmlSource == .url(url))
+        #expect(decoded.htmlConfig?.allowJavaScript == true)
+        #expect(decoded.htmlConfig?.allowMouseInteraction == false)
+        #expect(decoded.htmlConfig?.blockTrackers == true)
         #expect(decoded.screenID == 42)
         #expect(decoded.preferredVideoBookmarkData == nil)
+    }
+
+    @Test("HTML wallpaper config persists customised toggles")
+    func htmlConfigPersistsCustomToggles() throws {
+        let url = URL(string: "https://example.com/wallpaper")!
+        let custom = HTMLConfig(
+            allowJavaScript: false,
+            allowMouseInteraction: true,
+            blockTrackers: false,
+            customCSS: "body { background: black; }"
+        )
+        let original = ScreenConfiguration(
+            screenID: 11,
+            wallpaper: .html(source: .url(url), config: custom)
+        )
+
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(ScreenConfiguration.self, from: data)
+
+        #expect(decoded.htmlConfig == custom)
     }
 
     @Test("Shader wallpaper config round-trips with preset")
@@ -426,7 +464,8 @@ struct ScreenConfigurationDecoderTests {
 
         let decoded = try JSONDecoder().decode(ScreenConfiguration.self, from: legacyJSON)
 
-        #expect(decoded.activeWallpaper == .html("https://example.com"))
+        #expect(decoded.htmlSource == .url(URL(string: "https://example.com")!))
+        #expect(decoded.htmlConfig == .default)
         #expect(decoded.preferredVideoBookmarkData == nil)
     }
 
@@ -573,7 +612,7 @@ struct GlobalSettingsDecoderTests {
         let emptyJSON = "{}".data(using: .utf8)!
         let decoded = try JSONDecoder().decode(GlobalSettings.self, from: emptyJSON)
 
-        #expect(decoded.globalPauseOnBattery == true)
+        #expect(decoded.globalPauseOnBattery == false)
         #expect(decoded.preservePlaybackOnLock == false)
         #expect(decoded.startOnLogin == false)
         #expect(decoded.minimumBatteryLevel == nil)
