@@ -684,16 +684,7 @@ struct ScreenDetailView: View {
         previewController.cleanup()
     }
 
-    /// Opens an `NSOpenPanel` for video selection.
-    ///
-    /// SwiftUI's `.fileImporter` was previously used here. On macOS its
-    /// callback receives URLs whose Powerbox sandbox-extension token can be
-    /// revoked before the closure runs, which makes
-    /// `URL.bookmarkData(.withSecurityScope)` fail with EPERM for files in
-    /// TCC-protected directories like `~/Documents`. AppKit's `NSOpenPanel`
-    /// vends a longer-lived extension that survives the bookmark call,
-    /// matching the pattern already used for HTML / playlist / schedule /
-    /// menu-bar / onboarding pickers.
+    /// Uses `NSOpenPanel` so the security-scoped bookmark survives creation.
     private func showFilePicker() {
         NSApp.activate(ignoringOtherApps: true)
         let panel = NSOpenPanel()

@@ -45,11 +45,7 @@ final class ParticleOverlayView: NSView {
         currentEffect = effect
         currentDensity = density
 
-        // Remove old emitter immediately. CAEmitterLayer already lets in-flight
-        // particles live out their `lifetime` even after the layer is removed
-        // from the tree, so the visual transition is smooth without any
-        // asyncAfter delay. Removing immediately also prevents sublayer
-        // accumulation if the user switches effects rapidly.
+        // Remove immediately; existing particles finish their lifetime.
         if let oldEmitter = activeEmitter {
             oldEmitter.birthRate = 0
             oldEmitter.removeFromSuperlayer()

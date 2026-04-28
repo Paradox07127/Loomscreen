@@ -1,11 +1,6 @@
 import Foundation
 
-/// Resolved, runtime-ready description of what a screen should display.
-///
-/// Translates the persisted `WallpaperContent` into a value the runtime layer
-/// can act on directly — the configuration store keeps its own representation
-/// while the runtime always sees a fully-formed definition (including
-/// `HTMLConfig` defaults for legacy decodes).
+/// Runtime-ready wallpaper definition derived from persisted configuration.
 enum WallpaperSessionDefinition: Equatable {
     case video(bookmarkData: Data)
     case html(HTMLSource, HTMLConfig)

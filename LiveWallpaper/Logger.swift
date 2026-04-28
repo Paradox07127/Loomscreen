@@ -181,11 +181,7 @@ class PerformanceTimer {
 
 // MARK: - Cache
 
-/// Thread-safe registry of `os.Logger` instances per category.
-///
-/// Uses an unfair lock (cheap and short-held) rather than an actor so that
-/// `Logger.log(...)` stays synchronous and can be called from any context
-/// (including `nonisolated deinit`).
+/// Synchronous, thread-safe cache of `os.Logger` instances.
 private final class LoggerCache: @unchecked Sendable {
     static let shared = LoggerCache()
 

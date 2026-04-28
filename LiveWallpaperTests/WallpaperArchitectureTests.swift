@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Metal
 import Testing
 @testable import LiveWallpaper
 
@@ -163,6 +164,59 @@ struct WeatherReactivePolicyTests {
         #expect(WeatherReactivePolicy.shouldMonitor(configurations: [activeConfig], activeScreenIDs: [activeID]))
         #expect(!WeatherReactivePolicy.shouldMonitor(configurations: [inactiveConfig], activeScreenIDs: [activeID]))
         #expect(!WeatherReactivePolicy.shouldMonitor(configurations: [disabledConfig], activeScreenIDs: [activeID]))
+    }
+}
+
+@Suite("Monitoring reference counter")
+struct MonitoringReferenceCounterTests {
+    @Test("Monitoring stops only after every starter has stopped")
+    func stopsAfterAllConsumersRelease() {
+        var counter = MonitoringReferenceCounter()
+
+        #expect(counter.start() == true)
+        #expect(counter.start() == false)
+        #expect(counter.stop() == false)
+        #expect(counter.stop() == true)
+        #expect(counter.stop() == false)
+    }
+}
+
+@Suite("Estimated frame tick policy")
+struct EstimatedFrameTickPolicyTests {
+    @Test("Half-second tick count is derived from nominal FPS")
+    func tickCountUsesNominalFPSWithFallback() {
+        #expect(EstimatedFrameTickPolicy.tickCount(forFrameRate: 60, interval: 0.5) == 30)
+        #expect(EstimatedFrameTickPolicy.tickCount(forFrameRate: 24, interval: 0.5) == 12)
+        #expect(EstimatedFrameTickPolicy.tickCount(forFrameRate: 0, interval: 0.5) == 15)
+    }
+}
+
+@Suite("Rain glass texture pool")
+struct RainGlassTexturePoolTests {
+    @Test("Pool reuses a bounded ring for matching dimensions")
+    func poolReusesMatchingTextures() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else { return }
+        let pool = RainGlassTexturePool(device: device, inFlightTextureCount: 2)
+
+        let first = try #require(pool.nextTexture(width: 64, height: 64))
+        let second = try #require(pool.nextTexture(width: 64, height: 64))
+        let third = try #require(pool.nextTexture(width: 64, height: 64))
+
+        #expect(ObjectIdentifier(first as AnyObject) != ObjectIdentifier(second as AnyObject))
+        #expect(ObjectIdentifier(first as AnyObject) == ObjectIdentifier(third as AnyObject))
+    }
+
+    @Test("Pool rebuilds when render dimensions change")
+    func poolRebuildsForNewDimensions() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else { return }
+        let pool = RainGlassTexturePool(device: device, inFlightTextureCount: 2)
+
+        let first = try #require(pool.nextTexture(width: 64, height: 64))
+        let resized = try #require(pool.nextTexture(width: 128, height: 64))
+
+        #expect(first.width == 64)
+        #expect(resized.width == 128)
+        #expect(resized.height == 64)
     }
 }
 

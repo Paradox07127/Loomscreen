@@ -103,7 +103,7 @@ struct MenuBarContent: View {
             DashboardChip(label: "GPU", value: monitor.gpuUsage, color: dashboardColor(for: monitor.gpuUsage), icon: "square.stack.3d.up.fill")
             DashboardChip(label: "RAM", value: ramPercent, color: dashboardColor(for: ramPercent), icon: "memorychip")
             DashboardChip(
-                label: monitor.videoFPS > 0 ? "FPS" : "—",
+                label: monitor.videoFPS > 0 ? "EST" : "—",
                 value: min(monitor.videoFPS, 120) / 120 * 100,
                 color: monitor.videoFPS >= 30 ? .green : (monitor.videoFPS > 0 ? .orange : .secondary),
                 icon: "speedometer",

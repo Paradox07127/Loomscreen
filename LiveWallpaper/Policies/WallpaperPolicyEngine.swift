@@ -1,8 +1,7 @@
 import CoreGraphics
 import Foundation
 
-/// Converts global settings, per-screen configuration, and system state into
-/// runtime actions. ScreenManager owns wiring; this type owns the decisions.
+/// Converts settings and system state into runtime decisions.
 enum WallpaperPolicyEngine {
     static func performanceProfile(
         globalSettings: GlobalSettings,
@@ -13,11 +12,7 @@ enum WallpaperPolicyEngine {
             return .suspended
         }
 
-        // Battery-induced pause is applied explicitly by ScreenManager —
-        // see `shouldPauseForPower` (video) and the ambient-session branch
-        // in `handlePowerStateChange`. The profile itself encodes no
-        // intermediate "battery saver" state; the UX is static-on-battery,
-        // not degraded animation.
+        // Battery pause is applied by ScreenManager, not encoded as quality.
         return .quality
     }
 

@@ -1,12 +1,6 @@
 import Foundation
 
-/// Where an HTML wallpaper's content lives.
-///
-/// `file` and `folder` carry security-scoped bookmarks so the sandboxed
-/// `WKWebView` can read the resolved URL on later launches. `folder` carries
-/// an `indexFileName` so we can call `loadFileURL(_:allowingReadAccessTo:)`
-/// with the directory granted, letting relative `<script src>` and
-/// `<img src>` references resolve correctly.
+/// Persisted source for an HTML wallpaper.
 enum HTMLSource: Codable, Equatable {
     case file(bookmarkData: Data)
     case folder(bookmarkData: Data, indexFileName: String)

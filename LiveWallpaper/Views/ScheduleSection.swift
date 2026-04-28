@@ -425,12 +425,7 @@ struct ScheduleTimelineBar: View {
 
     private let slotColors: [Color] = [.blue, .orange, .green, .purple]
 
-    /// Splits a slot into one or two `(startHour, endHour)` segments so slots that
-    /// wrap midnight (e.g. 22 → 6) still render correctly.
-    ///
-    /// Exposed as `internal static` so unit tests can pin down the boundary
-    /// behavior (normal, wrapping, zero-length) without standing up a SwiftUI
-    /// view hierarchy.
+    /// Splits midnight-wrapping slots into timeline segments.
     nonisolated static func segments(for slot: ScheduleSlot) -> [(start: Int, end: Int)] {
         if slot.startHour == slot.endHour {
             return []

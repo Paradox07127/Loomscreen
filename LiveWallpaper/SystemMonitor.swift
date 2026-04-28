@@ -3,6 +3,30 @@ import Observation
 import Darwin
 import IOKit
 
+struct MonitoringReferenceCounter {
+    private var count = 0
+
+    mutating func start() -> Bool {
+        count += 1
+        return count == 1
+    }
+
+    mutating func stop() -> Bool {
+        guard count > 0 else { return false }
+        count -= 1
+        return count == 0
+    }
+}
+
+enum EstimatedFrameTickPolicy {
+    private static let fallbackFPS = 30.0
+
+    static func tickCount(forFrameRate frameRate: Double, interval: TimeInterval) -> Int {
+        let effectiveFPS = frameRate > 0 ? frameRate : fallbackFPS
+        return max(1, Int((effectiveFPS * interval).rounded()))
+    }
+}
+
 @MainActor @Observable
 final class SystemMonitor {
     static let shared = SystemMonitor()
@@ -21,7 +45,7 @@ final class SystemMonitor {
     private(set) var gpuUsage: Double = 0           // 0-100%
     private(set) var energyImpact: Double = 0       // watts (approximate)
     private(set) var thermalState: ProcessInfo.ThermalState = .nominal
-    private(set) var videoFPS: Double = 0            // actual rendered FPS
+    private(set) var videoFPS: Double = 0            // estimated for AVPlayer, actual for shader render loops
 
     // MARK: - Configuration
 
@@ -29,6 +53,7 @@ final class SystemMonitor {
     @ObservationIgnored private var updateInterval: TimeInterval = 2.0
     @ObservationIgnored private var updateTask: Task<Void, Never>?
     @ObservationIgnored private var fpsCounter = FPSCounter()
+    @ObservationIgnored private var references = MonitoringReferenceCounter()
     /// Previous host CPU ticks sample, used to compute deltas between samples.
     @ObservationIgnored private var prevHostCpuLoad: host_cpu_load_info?
 
@@ -39,7 +64,7 @@ final class SystemMonitor {
     // MARK: - Public Methods
 
     func startMonitoring() {
-        stopMonitoring()
+        guard references.start() else { return }
         let interval = updateInterval
         updateTask = Task {
             while !Task.isCancelled {
@@ -51,13 +76,19 @@ final class SystemMonitor {
     }
 
     func stopMonitoring() {
+        guard references.stop() else { return }
         updateTask?.cancel()
         updateTask = nil
     }
 
-    /// Call this from the video player's render loop to track actual FPS
+    /// Call this from real render loops to track actual FPS.
     func tickFrame() {
         fpsCounter.tick()
+    }
+
+    /// AVPlayer does not expose rendered-frame callbacks here; record an estimate.
+    func tickEstimatedFrames(_ count: Int) {
+        fpsCounter.tick(count: count)
     }
 
     func formattedMemoryUsage() -> String { FormatUtils.formatBytes(memoryUsage) }
@@ -272,7 +303,7 @@ final class SystemMonitor {
 
 // MARK: - FPS Counter
 
-/// Lightweight frame counter — call `tick()` on each rendered frame, read `fps` periodically.
+/// Lightweight frame counter; callers may record actual or estimated frames.
 private class FPSCounter {
     private var timestamps: [CFAbsoluteTime] = []
     private let window: TimeInterval = 2.0  // rolling 2-second window
@@ -285,7 +316,13 @@ private class FPSCounter {
     }
 
     func tick() {
-        timestamps.append(CFAbsoluteTimeGetCurrent())
+        tick(count: 1)
+    }
+
+    func tick(count: Int) {
+        guard count > 0 else { return }
+        let now = CFAbsoluteTimeGetCurrent()
+        timestamps.append(contentsOf: repeatElement(now, count: count))
         // Keep array bounded
         if timestamps.count > 300 {
             timestamps.removeFirst(timestamps.count - 200)

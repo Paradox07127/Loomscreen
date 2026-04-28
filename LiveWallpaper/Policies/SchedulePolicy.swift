@@ -12,18 +12,9 @@ enum SchedulePolicy {
         return slots.first { $0.containsHour(normalizedHour) }
     }
 
-    /// Decide what to do for the given configuration at the given hour.
-    ///
-    /// - `.applySlot` — switch to the slot's bookmark (only when it differs
-    ///   from what's currently playing).
-    /// - `.restorePrimary` — currently playing is a scheduled bookmark whose
-    ///   slot no longer covers the current hour; restore the user's primary.
-    /// - `.none` — already playing the right thing, or no schedule configured.
+    /// Decide whether to apply a slot, restore primary, or do nothing.
     static func decision(for configuration: ScreenConfiguration, hour: Int) -> Decision {
-        // Mode gate: schedule automation is silent unless the user picked
-        // .schedule explicitly. Avoids restoring primary when the active
-        // bookmark happens to coincide with a schedule slot bookmark while
-        // the user is actually in playlist mode.
+        // Only schedule mode may restore or replace the active bookmark.
         guard configuration.wallpaperMode == .schedule,
               let slots = configuration.scheduleSlots, !slots.isEmpty else {
             return .none
