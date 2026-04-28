@@ -591,7 +591,14 @@ final class ScreenManager {
             frame: screen.frame,
             fitMode: configuration?.fitMode ?? .aspectFill
         )
-        
+
+        // Apply persisted mute state. Default is true so audio tracks stay
+        // disabled and AVF never engages the audio engine — protects AirPods
+        // and external outputs from being grabbed by a silent wallpaper.
+        if let stored = configuration?.muted {
+            player.setMuted(stored)
+        }
+
         // Update screen properties
         if let index = screens.firstIndex(where: { $0.id == screen.id }) {
             screens[index].installRuntimeSession(VideoWallpaperSession(player: player))
@@ -910,6 +917,20 @@ final class ScreenManager {
         configuration.playbackSpeed = speed
         saveConfiguration(configuration)
         screen.videoPlayer?.setPlaybackSpeed(speed)
+    }
+
+    /// Toggle video wallpaper audio for a screen. Default is muted: audio
+    /// tracks are disabled at the AVPlayerItem level so AVF never engages
+    /// the audio engine, which keeps AirPods/external outputs free. User
+    /// opts in per-screen — turning audio on routes through system default
+    /// output as usual.
+    func updateMuted(_ muted: Bool, for screen: Screen) {
+        guard var configuration = configurationStore.get(for: screen.id),
+              muted != configuration.muted else { return }
+
+        configuration.muted = muted
+        saveConfiguration(configuration)
+        screen.videoPlayer?.setMuted(muted)
     }
 
     // Update the fit mode for a screen

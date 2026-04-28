@@ -109,6 +109,21 @@ struct GeneralSettingsView: View {
                 .controlSize(.large)
                 .padding(.vertical, 4)
 
+                HStack {
+                    Spacer()
+                    Button("Show Welcome Tour") {
+                        if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
+                            appDelegate.showOnboarding()
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Color.accentColor)
+                    .accessibilityLabel("Show welcome tour")
+                    .accessibilityHint("Replays the initial onboarding flow")
+                    Spacer()
+                }
+                .padding(.vertical, 4)
+
                 // Reset embedded in Section body alongside Validate/Reload (replacing
                 // the old footer placement) so it sits tight under the troubleshooting
                 // tools without Section.footer's large vertical inset.

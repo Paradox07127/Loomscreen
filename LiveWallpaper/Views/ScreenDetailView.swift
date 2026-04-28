@@ -55,6 +55,7 @@ struct ScreenDetailView: View {
 
     @State private var isDraggingOver = false
     @State private var screenPauseOnBattery: Bool = false
+    @State private var videoMuted: Bool = true
     @State private var lockScreenExtracted: Bool = false
     @State private var particleDensity: Double = 1.0
     @State private var selectedFrameRateLimit: FrameRateLimit = .fps60
@@ -415,6 +416,26 @@ struct ScreenDetailView: View {
 
                                         Divider()
 
+                                        SettingRow(
+                                            icon: videoMuted ? "speaker.slash" : "speaker.wave.2",
+                                            iconColor: videoMuted ? .secondary : .blue,
+                                            title: "Audio",
+                                            subtitle: videoMuted
+                                                ? "Muted (default)"
+                                                : "Routed through system output"
+                                        ) {
+                                            Toggle("", isOn: Binding(get: { !videoMuted }, set: { videoMuted = !$0 }))
+                                                .labelsHidden()
+                                                .toggleStyle(.switch)
+                                                .onChange(of: videoMuted) { _, newValue in
+                                                    screenManager.updateMuted(newValue, for: screen)
+                                                }
+                                                .accessibilityLabel("Video audio")
+                                                .accessibilityHint("When off, audio tracks are disabled entirely so macOS does not engage the audio engine")
+                                        }
+
+                                        Divider()
+
                                         SettingRow(icon: "photo.on.rectangle", iconColor: .blue, title: "Desktop Picture") {
                                             HStack(spacing: 6) {
                                                 if lockScreenExtracted {
@@ -547,6 +568,7 @@ struct ScreenDetailView: View {
             particleDensity = config.effectConfig.particleDensity
             setAsLockScreen = config.setAsLockScreen
             screenPauseOnBattery = config.pauseOnBattery
+            videoMuted = config.muted
             selectedFrameRateLimit = config.frameRateLimit
             playlistBookmarks = config.playlistBookmarks ?? []
             shufflePlaylist = config.shufflePlaylist

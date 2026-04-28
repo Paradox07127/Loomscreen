@@ -7,9 +7,21 @@ struct VideoInformationOverlay: View {
     @State private var videoResolution: (width: Int, height: Int)? = nil
     @State private var videoFrameRate: Double = 0
     @State private var fileSize: String = ""
+    @State private var formatBadges: [String] = []
 
     var body: some View {
         HStack(spacing: 12) {
+            if !formatBadges.isEmpty {
+                HStack(spacing: 4) {
+                    ForEach(formatBadges, id: \.self) { badge in
+                        Text(badge)
+                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(Color.white.opacity(0.18), in: Capsule())
+                    }
+                }
+            }
             if let res = videoResolution {
                 HStack(spacing: 4) {
                     Image(systemName: "rectangle.3.group")
@@ -52,6 +64,13 @@ struct VideoInformationOverlay: View {
                     fileSize = FormatUtils.formatBytes(size.int64Value)
                 }
             } catch {}
+
+            let assetURL = urlAsset.url
+            Task {
+                if let info = try? await PlayableVideoLoader.detectFormat(at: assetURL) {
+                    await MainActor.run { self.formatBadges = info.badges }
+                }
+            }
         }
 
         Task {

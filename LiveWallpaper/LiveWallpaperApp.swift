@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var screenManager: ScreenManager?
 
     @ObservationIgnored private var settingsWindowController: NSWindowController?
+    @ObservationIgnored private var onboardingWindowController: NSWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Logger.notice("Application starting", category: .startup)
@@ -36,6 +37,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         NSApp.setActivationPolicy(.accessory)
         Logger.notice("Application startup complete", category: .startup)
+
+        if !UserDefaults.standard.bool(forKey: "Onboarding.Completed") {
+            DispatchQueue.main.async { [weak self] in
+                self?.showOnboarding()
+            }
+        }
     }
 
     @objc private func handleWakeNotification() {
@@ -101,11 +108,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
     }
+
+    // MARK: - Onboarding Window
+
+    /// Show (or front) the first-run onboarding flow. Triggered automatically
+    /// on first launch and re-triggerable from GeneralSettingsView.
+    func showOnboarding() {
+        if let controller = onboardingWindowController {
+            NSApp.activate(ignoringOtherApps: true)
+            controller.window?.makeKeyAndOrderFront(nil)
+            controller.window?.orderFrontRegardless()
+            return
+        }
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 580),
+            styleMask: [.titled, .fullSizeContentView, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.isMovableByWindowBackground = true
+        window.isReleasedWhenClosed = false
+        window.center()
+
+        let controller = NSWindowController(window: window)
+        onboardingWindowController = controller
+
+        let flow = OnboardingFlow(onClose: { [weak self] in
+            self?.onboardingWindowController?.close()
+        })
+
+        if let manager = screenManager {
+            window.contentView = NSHostingView(rootView: flow.environment(manager))
+        } else {
+            window.contentView = NSHostingView(rootView: flow)
+        }
+
+        window.delegate = self
+
+        NSApp.activate(ignoringOtherApps: true)
+        controller.showWindow(nil)
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+    }
 }
 
 extension AppDelegate: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
-        settingsWindowController = nil
+        guard let closingWindow = notification.object as? NSWindow else { return }
+
+        if closingWindow == settingsWindowController?.window {
+            settingsWindowController = nil
+            return
+        }
+        if closingWindow == onboardingWindowController?.window {
+            onboardingWindowController = nil
+            return
+        }
     }
 }
 
