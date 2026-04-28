@@ -19,9 +19,12 @@ protocol WallpaperRuntimeSession: AnyObject {
 
 extension WallpaperRuntimeSession {
     func prepareForDisplay(timeout: Duration) async -> Bool {
-        // Default fallback; concrete sessions can wait on stronger signals.
-        try? await Task.sleep(for: .milliseconds(50))
-        return true
+        do {
+            try await Task.sleep(for: .milliseconds(50))
+            return !Task.isCancelled
+        } catch {
+            return false
+        }
     }
 }
 

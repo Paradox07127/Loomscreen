@@ -307,9 +307,7 @@ struct MenuBarContent: View {
         let didStart = folderURL.startAccessingSecurityScopedResource()
         defer { if didStart { folderURL.stopAccessingSecurityScopedResource() } }
         let entries = (try? FileManager.default.contentsOfDirectory(atPath: folderURL.path)) ?? []
-        let indexFileName = ["index.html", "index.htm"].first(where: { entries.contains($0) })
-            ?? entries.first(where: { $0.lowercased().hasSuffix(".html") })
-            ?? "index.html"
+        let indexFileName = ResourceUtilities.inferHTMLIndexFileName(from: entries)
         screenManager.setHTMLWallpaperPreservingConfig(
             source: .folder(bookmarkData: bookmark, indexFileName: indexFileName),
             for: target
@@ -413,17 +411,21 @@ private struct MenuBarScreenCard: View {
     let onPrev: () -> Void
     let onNext: () -> Void
 
+    @Environment(ScreenManager.self) private var screenManager
     @State private var isHovering = false
 
     private var isPlaying: Bool {
-        screen.playbackController?.isPlaying ?? false
+        summary.activity == .active
     }
 
     private var summary: WallpaperSessionSummary {
-        screen.wallpaperSessionSummary
+        screenManager.wallpaperSummary(for: screen)
     }
 
     var body: some View {
+        let summary = screenManager.wallpaperSummary(for: screen)
+        let isPlaying = summary.activity == .active
+
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Image(systemName: iconName)

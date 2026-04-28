@@ -12,10 +12,7 @@ struct AerialAsset: Identifiable, Hashable {
     let bookmarkData: Data
 }
 
-/// Scans the Apple Aerials directory (idleassetsd) for downloaded wallpaper
-/// videos and exposes them as playable assets. Sandboxed apps cannot read
-/// `/Library/Application Support/com.apple.idleassetsd/` directly, so the
-/// user grants a one-time directory bookmark via `requestAccess()`.
+/// Scans Apple Aerial wallpapers after the user grants a directory bookmark.
 @MainActor
 @Observable
 final class AppleAerialsLibrary {
@@ -26,10 +23,7 @@ final class AppleAerialsLibrary {
     private(set) var lastScanError: String?
     private(set) var isScanning: Bool
 
-    /// Monotonic generation token. refresh() captures the current value before
-    /// dispatching to a background task, then only commits its result if the
-    /// generation still matches — protects against clearAccess() races and
-    /// concurrent refreshes.
+    /// Drops stale async scan results.
     @ObservationIgnored private var scanGeneration: UInt64 = 0
 
     init() {
@@ -73,9 +67,7 @@ final class AppleAerialsLibrary {
     func refresh() async {
         guard let directoryURL = resolveAuthorizedDirectory() else { return }
 
-        // Start the security scope FIRST. scanPlan / fileExists checks that follow
-        // need the scope active; without it, sandbox returns false even for paths
-        // the user just authorized.
+        // scanPlan / fileExists need this scope active.
         let didStartAccess = directoryURL.startAccessingSecurityScopedResource()
         guard didStartAccess else {
             let message = "Cannot access Apple Aerials directory. Grant access again."
@@ -86,7 +78,6 @@ final class AppleAerialsLibrary {
             return
         }
 
-        // Capture generation now; only commit results if it survives the async hop.
         scanGeneration &+= 1
         let myGeneration = scanGeneration
         isScanning = true
@@ -98,7 +89,6 @@ final class AppleAerialsLibrary {
             }
         }
 
-        // Validate folder layout while scope is active.
         guard let plan = Self.scanPlan(for: directoryURL) else {
             guard scanGeneration == myGeneration else { return }
             let message = "The selected folder doesn't contain Apple wallpapers. Try ~/Library/Application Support/com.apple.wallpaper/aerials/."
@@ -125,7 +115,6 @@ final class AppleAerialsLibrary {
             }
         }.value
 
-        // Drop result if state moved on (clearAccess or another refresh started).
         guard scanGeneration == myGeneration else {
             Logger.debug("Discarding stale Aerials scan result", category: .fileAccess)
             return
@@ -449,8 +438,7 @@ extension AppleAerialsLibrary {
     }
 
     nonisolated private static func entriesURL(for selectedDirectory: URL, fileManager: FileManager) -> URL? {
-        // macOS 26 Tahoe layout: ~/Library/Application Support/com.apple.wallpaper/aerials/manifest/entries.json
-        // The selected directory might be `videos/`, `aerials/`, or `com.apple.wallpaper/`.
+        // Tahoe layout: aerials/manifest/entries.json.
         let last = selectedDirectory.lastPathComponent
 
         if last == "videos" {

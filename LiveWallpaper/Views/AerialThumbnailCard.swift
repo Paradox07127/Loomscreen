@@ -1,6 +1,53 @@
 import SwiftUI
 import AVFoundation
 
+struct AerialThumbnailCacheKey: Hashable {
+    private let path: String
+    private let fileSize: Int64
+
+    init(asset: AerialAsset) {
+        path = asset.url.standardizedFileURL.path
+        fileSize = asset.fileSize ?? -1
+    }
+}
+
+private struct AerialThumbnailCacheEntry {
+    let thumbnail: NSImage?
+    let formatInfo: VideoFormatInfo?
+}
+
+@MainActor
+private final class AerialThumbnailCache {
+    static let shared = AerialThumbnailCache()
+
+    private let capacity = 64
+    private var entries: [AerialThumbnailCacheKey: AerialThumbnailCacheEntry] = [:]
+    private var recency: [AerialThumbnailCacheKey] = []
+
+    func entry(for key: AerialThumbnailCacheKey) -> AerialThumbnailCacheEntry? {
+        guard let entry = entries[key] else { return nil }
+        touch(key)
+        return entry
+    }
+
+    func insert(_ entry: AerialThumbnailCacheEntry, for key: AerialThumbnailCacheKey) {
+        entries[key] = entry
+        touch(key)
+        trim()
+    }
+
+    private func touch(_ key: AerialThumbnailCacheKey) {
+        recency.removeAll { $0 == key }
+        recency.append(key)
+    }
+
+    private func trim() {
+        while recency.count > capacity {
+            entries.removeValue(forKey: recency.removeFirst())
+        }
+    }
+}
+
 struct AerialThumbnailCard: View {
     let asset: AerialAsset
     let action: () -> Void
@@ -116,8 +163,16 @@ struct AerialThumbnailCard: View {
         }
     }
 
+    @MainActor
     private func loadThumbnailIfNeeded() async {
         guard thumbnail == nil else { return }
+
+        let cacheKey = AerialThumbnailCacheKey(asset: asset)
+        if let cached = AerialThumbnailCache.shared.entry(for: cacheKey) {
+            thumbnail = cached.thumbnail
+            formatInfo = cached.formatInfo
+            if cached.thumbnail != nil { return }
+        }
 
         let bookmarkData = asset.bookmarkData
         let resolved: URL? = await Task.detached { () -> URL? in
@@ -135,10 +190,11 @@ struct AerialThumbnailCard: View {
         let didStart = url.startAccessingSecurityScopedResource()
         defer { if didStart { url.stopAccessingSecurityScopedResource() } }
 
-        // Format detection is cheap (just metadata reads) and runs alongside
-        // thumbnail extraction while the security scope is active.
+        var loadedFormatInfo = formatInfo
         if let info = try? await PlayableVideoLoader.detectFormat(at: url) {
-            await MainActor.run { self.formatInfo = info }
+            guard !Task.isCancelled else { return }
+            loadedFormatInfo = info
+            formatInfo = info
         }
 
         let avAsset = AVURLAsset(url: url)
@@ -148,11 +204,20 @@ struct AerialThumbnailCard: View {
 
         do {
             let image = try await generator.image(at: .zero).image
-            await MainActor.run {
-                self.thumbnail = NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
-            }
+            guard !Task.isCancelled else { return }
+            let nsImage = NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
+            thumbnail = nsImage
+            AerialThumbnailCache.shared.insert(
+                AerialThumbnailCacheEntry(thumbnail: nsImage, formatInfo: loadedFormatInfo),
+                for: cacheKey
+            )
         } catch {
-            // Placeholder remains; surfacing this error in UI would be noise for a thumbnail.
+            if loadedFormatInfo != nil {
+                AerialThumbnailCache.shared.insert(
+                    AerialThumbnailCacheEntry(thumbnail: nil, formatInfo: loadedFormatInfo),
+                    for: cacheKey
+                )
+            }
         }
     }
 }

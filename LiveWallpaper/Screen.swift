@@ -179,7 +179,4 @@ class Screen: Identifiable, Hashable {
         lhs.id == rhs.id
     }
 
-    // MARK: - Cleanup
-
-    nonisolated deinit {}
 }

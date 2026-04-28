@@ -41,6 +41,27 @@ enum WallpaperPolicyEngine {
         !powerSource.isOnBattery && wasPausedByPower
     }
 
+    static func shouldStartVideoPaused(
+        globalSettings: GlobalSettings,
+        powerSource: PowerMonitor.PowerSource,
+        isHiddenByFullScreen: Bool
+    ) -> Bool {
+        shouldPauseForPower(globalSettings: globalSettings, powerSource: powerSource) ||
+            shouldApplyFullScreenPolicy(
+                globalSettings: globalSettings,
+                isHiddenByFullScreen: isHiddenByFullScreen
+            )
+    }
+
+    static func shouldResumeFromFullScreen(
+        globalSettings: GlobalSettings,
+        powerSource: PowerMonitor.PowerSource,
+        wasPausedByFullScreen: Bool
+    ) -> Bool {
+        wasPausedByFullScreen &&
+            !shouldPauseForPower(globalSettings: globalSettings, powerSource: powerSource)
+    }
+
     static func shouldApplyFullScreenPolicy(
         globalSettings: GlobalSettings,
         isHiddenByFullScreen: Bool

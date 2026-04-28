@@ -1,31 +1,84 @@
 import SwiftUI
 import AppKit
 
+struct AppRuntimeOptions: Equatable {
+    let isTesting: Bool
+
+    var shouldRestoreSavedWallpapers: Bool { !isTesting }
+    var shouldStartAutomation: Bool { !isTesting }
+    var shouldShowOnboarding: Bool { !isTesting }
+
+    init(
+        arguments: [String] = ProcessInfo.processInfo.arguments,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        isXCTestLoaded: Bool = AppRuntimeOptions.isXCTestLoaded()
+    ) {
+        isTesting = arguments.contains("--ui-testing")
+            || environment["LIVEWALLPAPER_TESTING"] == "1"
+            || environment["LIVEWALLPAPER_UI_TESTING"] == "1"
+            || environment["XCTestConfigurationFilePath"] != nil
+            || environment.keys.contains { $0.localizedCaseInsensitiveContains("XCTest") }
+            || isXCTestLoaded
+    }
+
+    private static func isXCTestLoaded() -> Bool {
+        NSClassFromString("XCTestCase") != nil
+            || NSClassFromString("XCTest.XCTestCase") != nil
+    }
+}
+
+struct AppStartupPlan: Equatable {
+    let screenManagerOptions: ScreenManagerStartupOptions
+    let refreshScreensAfterManagerCreation: Bool
+    let reloadWallpapersAfterLaunch: Bool
+    let showOnboarding: Bool
+
+    init(runtimeOptions: AppRuntimeOptions, onboardingCompleted: Bool) {
+        screenManagerOptions = ScreenManagerStartupOptions(
+            restoreSavedWallpapers: runtimeOptions.shouldRestoreSavedWallpapers,
+            startAutomation: runtimeOptions.shouldStartAutomation
+        )
+        refreshScreensAfterManagerCreation = false
+        reloadWallpapersAfterLaunch = false
+        showOnboarding = runtimeOptions.shouldShowOnboarding && !onboardingCompleted
+    }
+}
+
 /// App delegate owns startup and the hand-managed settings/onboarding windows.
 @MainActor
 @Observable
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var screenManager: ScreenManager?
 
+    @ObservationIgnored private let runtimeOptions = AppRuntimeOptions()
     @ObservationIgnored private var settingsWindowController: NSWindowController?
     @ObservationIgnored private var onboardingWindowController: NSWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Logger.notice("Application starting", category: .startup)
 
-        let manager = ScreenManager()
+        let startupPlan = AppStartupPlan(
+            runtimeOptions: runtimeOptions,
+            onboardingCompleted: UserDefaults.standard.bool(forKey: "Onboarding.Completed")
+        )
+        let manager = ScreenManager(startupOptions: startupPlan.screenManagerOptions)
         screenManager = manager
-        manager.refreshScreens()
 
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(1))
-            manager.reloadAllScreens()
+        if startupPlan.refreshScreensAfterManagerCreation {
+            manager.refreshScreens()
+        }
+
+        if startupPlan.reloadWallpapersAfterLaunch {
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(1))
+                manager.reloadAllScreens()
+            }
         }
 
         NSApp.setActivationPolicy(.accessory)
         Logger.notice("Application startup complete", category: .startup)
 
-        if !UserDefaults.standard.bool(forKey: "Onboarding.Completed") {
+        if startupPlan.showOnboarding {
             DispatchQueue.main.async { [weak self] in
                 self?.showOnboarding()
             }

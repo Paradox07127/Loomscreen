@@ -1,16 +1,12 @@
 import AppKit
 import MetalKit
 
-/// Uniforms passed to the Metal shader on every frame.
 struct ShaderUniforms {
     var time: Float
     var resolution: SIMD2<Float>
     var shaderType: Int32
 }
 
-/// Metal-based procedural shader wallpaper renderer.
-/// Embeds an `MTKView` and drives it at 30 FPS with a full-screen quad
-/// rendered by a fragment shader that switches between visual presets.
 final class MetalWallpaperView: NSView, MTKViewDelegate {
 
     // MARK: - Properties
@@ -44,7 +40,6 @@ final class MetalWallpaperView: NSView, MTKViewDelegate {
         self.device = device
         self.commandQueue = device.makeCommandQueue()
 
-        // Create and configure the MTKView.
         let mtkView = MTKView(frame: bounds, device: device)
         mtkView.delegate = self
         mtkView.preferredFramesPerSecond = 30
@@ -52,7 +47,6 @@ final class MetalWallpaperView: NSView, MTKViewDelegate {
         mtkView.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
         mtkView.autoresizingMask = [.width, .height]
 
-        // Transparent layer so the window behind shows through if needed.
         mtkView.wantsLayer = true
         mtkView.layer?.isOpaque = true
 
@@ -88,7 +82,6 @@ final class MetalWallpaperView: NSView, MTKViewDelegate {
 
     // MARK: - Public API
 
-    /// Switch the shader preset displayed by this view.
     func setPreset(_ preset: MetalShaderPreset) {
         currentPreset = preset
     }
@@ -110,9 +103,7 @@ final class MetalWallpaperView: NSView, MTKViewDelegate {
 
     // MARK: - MTKViewDelegate
 
-    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
-        // No additional work needed; resolution is sent as a uniform.
-    }
+    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
     func draw(in view: MTKView) {
         guard let pipelineState = pipelineState,
@@ -138,12 +129,8 @@ final class MetalWallpaperView: NSView, MTKViewDelegate {
 
         encoder.setRenderPipelineState(pipelineState)
 
-        // Pass uniforms to the fragment shader at buffer index 0.
-        // Use .stride (not .size) for proper Metal alignment
         encoder.setFragmentBytes(&uniforms, length: MemoryLayout<ShaderUniforms>.stride, index: 0)
 
-        // Draw a full-screen quad (4 vertices as triangle strip -- vertex positions
-        // are generated in the vertex shader from vertex_id).
         encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
 
         encoder.endEncoding()
@@ -172,13 +159,6 @@ final class MetalWallpaperView: NSView, MTKViewDelegate {
         metalView?.frame = bounds
     }
 
-    // MARK: - Cleanup
-
-    deinit {
-        // AppKit handles subview cleanup when the view is deallocated.
-        // Mutating delegate and calling removeFromSuperview() from nonisolated
-        // deinit is not allowed under strict concurrency.
-    }
 }
 
 extension MetalWallpaperView: WallpaperPerformanceConfigurable {}

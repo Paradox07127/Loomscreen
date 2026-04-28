@@ -150,10 +150,7 @@ struct AppleAerialsLibraryView: View {
         let displays = screenManager.screens
         guard !displays.isEmpty else { return }
 
-        // Resolve the per-file bookmark to obtain a security-scoped URL.
-        // The aerials *directory* scope from refresh() has already been released,
-        // so passing asset.url (a raw URL) would fail validatePlayableVideo /
-        // playback inside the sandbox.
+        // Refresh releases the directory scope; use the file bookmark here.
         guard let scopedURL = resolveScopedURL(asset.bookmarkData) else {
             Logger.error("Failed to resolve aerial bookmark; user may need to reconnect", category: .fileAccess)
             return
@@ -208,7 +205,7 @@ struct AppleAerialsLibraryView: View {
     }
 }
 
-// MARK: - Unauthorized State (concise icon-driven layout)
+// MARK: - Unauthorized State
 
 private struct UnauthorizedAerialsCard: View {
     let isRequesting: Bool

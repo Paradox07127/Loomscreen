@@ -2,8 +2,7 @@ import AppKit
 import Combine
 import Observation
 
-/// Detects when a full-screen app covers the desktop on each display.
-/// Uses CGWindowListCopyWindowInfo (no permission required) + workspace notifications.
+/// Detects when a full-screen app covers a display.
 @MainActor @Observable
 final class FullScreenDetector {
 
@@ -74,20 +73,18 @@ final class FullScreenDetector {
         cancellables.removeAll()
     }
 
-    // MARK: - Detection via CGWindowListCopyWindowInfo (NO permission required)
+    // MARK: - Detection
 
     private func checkFullScreenState() {
         var result: [CGDirectDisplayID: Bool] = [:]
         let screens = NSScreen.screens
 
-        // Initialize all screens as not hidden
         for screen in screens {
             if let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID {
                 result[id] = false
             }
         }
 
-        // If displays don't have separate spaces, use the simpler presentation options check
         if !NSScreen.screensHaveSeparateSpaces {
             let isFullScreen = NSApp.currentSystemPresentationOptions.contains(.fullScreen)
             for key in result.keys { result[key] = isFullScreen }
@@ -95,10 +92,8 @@ final class FullScreenDetector {
             return
         }
 
-        // Per-screen detection via CGWindowList
         let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
         guard let windowList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
-            // Fallback to presentation options
             let isFullScreen = NSApp.currentSystemPresentationOptions.contains(.fullScreen)
             for key in result.keys { result[key] = isFullScreen }
             updateIfChanged(result)
@@ -120,10 +115,9 @@ final class FullScreenDetector {
                   pid != ownPID,
                   let boundsDict = info[kCGWindowBounds as String] as? [String: CGFloat],
                   let layer = info[kCGWindowLayer as String] as? Int,
-                  layer == 0  // Normal window layer (fullscreen apps use layer 0)
+                  layer == 0
             else { continue }
 
-            // Skip system processes
             let ownerName = info[kCGWindowOwnerName as String] as? String ?? ""
             if ownerName == "Dock" || ownerName == "Window Server"
                 || ownerName == "SystemUIServer" || ownerName == "Finder" {
@@ -138,10 +132,7 @@ final class FullScreenDetector {
             )
 
             for (screenID, cgScreenFrame) in screenFrames {
-                // Comparing width/height alone would flag a fullscreen window on screen A
-                // as also covering screen B when both share the same resolution, which
-                // would orderOut B's wallpaper. Use intersection area instead: only count
-                // it as fullscreen when the window covers ≥95% of the target screen.
+                // Intersection avoids cross-triggering same-size displays.
                 let intersection = windowFrame.intersection(cgScreenFrame)
                 guard !intersection.isNull else { continue }
                 let coverage = intersection.width * intersection.height

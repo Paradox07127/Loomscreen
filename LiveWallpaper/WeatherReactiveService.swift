@@ -2,12 +2,8 @@ import Foundation
 import CoreLocation
 import Observation
 
-/// Maps real-time weather conditions to particle effects and CIFilter adjustments.
-/// Uses Open-Meteo API (free, no API key) and CLLocationManager for location.
 @MainActor @Observable
 final class WeatherReactiveService: NSObject, CLLocationManagerDelegate {
-
-    // MARK: - Observed State
 
     private(set) var currentCondition: WeatherDescription?
     private(set) var currentParticleEffect: ParticleEffect = .none
@@ -26,7 +22,6 @@ final class WeatherReactiveService: NSObject, CLLocationManagerDelegate {
         case error = "Error"
     }
 
-    /// Human-readable weather description derived from WMO code.
     enum WeatherDescription: String {
         case clear = "Clear"
         case partlyCloudy = "Partly Cloudy"
@@ -41,7 +36,6 @@ final class WeatherReactiveService: NSObject, CLLocationManagerDelegate {
         case unknown = "Unknown"
     }
 
-    /// CIFilter adjustments derived from weather conditions.
     struct WeatherEffectAdjustments: Equatable {
         var saturation: Double
         var brightness: Double
@@ -53,8 +47,6 @@ final class WeatherReactiveService: NSObject, CLLocationManagerDelegate {
             saturation: 1.0, brightness: 0, warmth: 6500, blurRadius: 0, vignetteIntensity: 0
         )
     }
-
-    // MARK: - Private
 
     @ObservationIgnored private let locationManager = CLLocationManager()
     @ObservationIgnored private var currentLocation: CLLocation?
@@ -94,11 +86,13 @@ final class WeatherReactiveService: NSObject, CLLocationManagerDelegate {
 
         updateTask?.cancel()
         updateTask = Task { [weak self] in
-            // Initial fetch
             await self?.fetchWeatherIfPossible()
-            // Then every 15 minutes
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(900))
+                do {
+                    try await Task.sleep(for: .seconds(900))
+                } catch {
+                    return
+                }
                 await self?.fetchWeatherIfPossible()
             }
         }
@@ -136,10 +130,12 @@ final class WeatherReactiveService: NSObject, CLLocationManagerDelegate {
 
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
+            try Task.checkCancellation()
             let response = try JSONDecoder().decode(OpenMeteoResponse.self, from: data)
+            try Task.checkCancellation()
 
             let weatherCode = response.current.weather_code
-            let cloudCover = response.current.cloud_cover / 100.0 // normalize to 0-1
+            let cloudCover = response.current.cloud_cover / 100.0
             let description = mapWMOCode(weatherCode)
 
             currentCondition = description
@@ -149,6 +145,8 @@ final class WeatherReactiveService: NSObject, CLLocationManagerDelegate {
             lastError = nil
 
             Logger.info("Weather updated: \(description.rawValue), code=\(weatherCode), particle=\(currentParticleEffect.rawValue)", category: .screenManager)
+        } catch is CancellationError {
+            return
         } catch {
             lastError = error.localizedDescription
             locationStatus = .error
@@ -165,14 +163,14 @@ final class WeatherReactiveService: NSObject, CLLocationManagerDelegate {
         case 3:           return .cloudy
         case 45, 48:      return .foggy
         case 51, 53, 55:  return .drizzle
-        case 56, 57:      return .drizzle        // freezing drizzle
+        case 56, 57:      return .drizzle
         case 61, 63, 80:  return .rain
         case 65, 81, 82:  return .heavyRain
-        case 66, 67:      return .rain            // freezing rain
+        case 66, 67:      return .rain
         case 71, 73, 85:  return .snow
         case 75, 77, 86:  return .heavySnow
         case 95:          return .thunderstorm
-        case 96, 99:      return .thunderstorm    // thunderstorm with hail
+        case 96, 99:      return .thunderstorm
         default:          return .unknown
         }
     }

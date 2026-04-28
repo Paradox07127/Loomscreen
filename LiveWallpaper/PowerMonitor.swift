@@ -143,8 +143,14 @@ final class PowerMonitor: @unchecked Sendable {
     private func updateBatteryLevel() {
         guard currentPowerSource.isOnBattery else { return }
         let batteryLevel = Self.getCurrentBatteryLevel()
+        let oldSource = powerSourceSubject.value
+        let newSource = PowerSource.battery(level: batteryLevel)
+
+        guard newSource != oldSource else { return }
+
         Logger.debug("Battery level updated: \(Int(batteryLevel * 100))%", category: .powerMonitor)
-        powerSourceSubject.send(.battery(level: batteryLevel))
+        powerSourceSubject.send(newSource)
+        postPowerChangeNotification(oldSource: oldSource, newSource: newSource)
     }
 
     func refreshPowerStatus() {

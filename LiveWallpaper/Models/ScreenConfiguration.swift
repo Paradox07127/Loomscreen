@@ -308,7 +308,9 @@ struct ScreenConfiguration: Codable, Equatable {
 
     @discardableResult
     mutating func activateSavedVideoWallpaper() -> Bool {
-        guard let bookmarkData = videoBookmarkData else { return false }
+        guard let bookmarkData = savedVideoBookmarkData ?? activeWallpaper.activeVideoBookmarkData else {
+            return false
+        }
         activeWallpaper = .video(bookmarkData: bookmarkData)
         savedVideoBookmarkData = bookmarkData
         // User explicitly switched back to video — restart playlist at primary.
@@ -330,8 +332,8 @@ struct ScreenConfiguration: Codable, Equatable {
     }
 
     private mutating func preserveCurrentVideoBookmarkIfNeeded() {
-        if let activeVideoBookmarkData = activeWallpaper.activeVideoBookmarkData {
-            savedVideoBookmarkData = activeVideoBookmarkData
+        if savedVideoBookmarkData == nil {
+            savedVideoBookmarkData = activeWallpaper.activeVideoBookmarkData
         }
     }
 

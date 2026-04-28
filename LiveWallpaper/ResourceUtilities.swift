@@ -87,4 +87,13 @@ class ResourceUtilities {
         }
         return nil
     }
+
+    static func inferHTMLIndexFileName(from entries: [String]) -> String {
+        for standardName in ["index.html", "index.htm"] {
+            if let entry = entries.first(where: { $0.lowercased() == standardName }) {
+                return entry
+            }
+        }
+        return entries.first { $0.lowercased().hasSuffix(".html") } ?? "index.html"
+    }
 }

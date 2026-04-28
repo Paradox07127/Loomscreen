@@ -108,6 +108,112 @@ struct WallpaperStatusAggregatorTests {
     }
 }
 
+@Suite("WallpaperSessionSummaryCache")
+struct WallpaperSessionSummaryCacheTests {
+    @Test("Cached summary wins over fallback")
+    func cachedSummaryWinsOverFallback() {
+        let active = WallpaperSessionSummary(
+            wallpaperType: .video,
+            activity: .active,
+            supportsPlaybackControl: true,
+            subtitle: nil
+        )
+        var cache = WallpaperSessionSummaryCache()
+
+        cache.replace(with: [(42, active)])
+
+        #expect(cache.summary(for: 42, fallback: .notConfigured) == active)
+    }
+
+    @Test("Replacing cache removes stale screen IDs")
+    func replacingCacheRemovesStaleScreenIDs() {
+        let paused = WallpaperSessionSummary(
+            wallpaperType: .video,
+            activity: .paused,
+            supportsPlaybackControl: true,
+            subtitle: nil
+        )
+        var cache = WallpaperSessionSummaryCache()
+
+        cache.replace(with: [(1, paused)])
+        cache.replace(with: [])
+
+        #expect(cache.summary(for: 1, fallback: .notConfigured) == .notConfigured)
+    }
+}
+
+@Suite("AppRuntimeOptions")
+struct AppRuntimeOptionsTests {
+    @Test("UI testing argument disables live wallpaper startup")
+    func uiTestingArgumentDisablesLiveWallpaperStartup() {
+        let options = AppRuntimeOptions(
+            arguments: ["LiveWallpaper", "--ui-testing"],
+            environment: [:],
+            isXCTestLoaded: false
+        )
+
+        #expect(options.shouldRestoreSavedWallpapers == false)
+        #expect(options.shouldStartAutomation == false)
+        #expect(options.shouldShowOnboarding == false)
+    }
+
+    @Test("XCTest host environment disables live wallpaper startup")
+    func xctestEnvironmentDisablesLiveWallpaperStartup() {
+        let options = AppRuntimeOptions(
+            arguments: ["LiveWallpaper"],
+            environment: ["XCTestConfigurationFilePath": "/tmp/test.xctestconfiguration"],
+            isXCTestLoaded: false
+        )
+
+        #expect(options.shouldRestoreSavedWallpapers == false)
+        #expect(options.shouldStartAutomation == false)
+        #expect(options.shouldShowOnboarding == false)
+    }
+
+    @Test("Test scheme environment disables live wallpaper startup")
+    func testSchemeEnvironmentDisablesLiveWallpaperStartup() {
+        let options = AppRuntimeOptions(
+            arguments: ["LiveWallpaper"],
+            environment: ["LIVEWALLPAPER_TESTING": "1"],
+            isXCTestLoaded: false
+        )
+
+        #expect(options.shouldRestoreSavedWallpapers == false)
+        #expect(options.shouldStartAutomation == false)
+        #expect(options.shouldShowOnboarding == false)
+    }
+
+    @Test("Loaded XCTest framework disables live wallpaper startup")
+    func loadedXCTestFrameworkDisablesLiveWallpaperStartup() {
+        let options = AppRuntimeOptions(
+            arguments: ["LiveWallpaper"],
+            environment: [:],
+            isXCTestLoaded: true
+        )
+
+        #expect(options.shouldRestoreSavedWallpapers == false)
+        #expect(options.shouldStartAutomation == false)
+        #expect(options.shouldShowOnboarding == false)
+    }
+
+    @Test("Launch startup plan relies on ScreenManager initial refresh")
+    func launchStartupPlanAvoidsDuplicateScreenReloads() {
+        let runtime = AppRuntimeOptions(
+            arguments: ["LiveWallpaper"],
+            environment: [:],
+            isXCTestLoaded: false
+        )
+
+        let plan = AppStartupPlan(runtimeOptions: runtime, onboardingCompleted: true)
+
+        #expect(plan.screenManagerOptions.restoreSavedWallpapers)
+        #expect(plan.screenManagerOptions.startAutomation)
+        #expect(plan.refreshScreensAfterManagerCreation == false)
+        #expect(plan.reloadWallpapersAfterLaunch == false)
+        #expect(plan.showOnboarding == false)
+    }
+}
+
 @Suite("Menu bar playback controls")
 @MainActor
 struct MenuBarPlaybackControlTests {
@@ -220,6 +326,177 @@ struct RainGlassTexturePoolTests {
     }
 }
 
+@Suite("Aerial thumbnail cache key")
+struct AerialThumbnailCacheKeyTests {
+    @Test("Key includes path so same file names in different folders stay separate")
+    func keyIncludesPath() {
+        let first = aerialAsset(url: URL(fileURLWithPath: "/tmp/a/scene.mov"), fileSize: 100)
+        let second = aerialAsset(url: URL(fileURLWithPath: "/tmp/b/scene.mov"), fileSize: 100)
+
+        #expect(AerialThumbnailCacheKey(asset: first) != AerialThumbnailCacheKey(asset: second))
+    }
+
+    @Test("Key includes file size so changed files invalidate cached thumbnails")
+    func keyIncludesFileSize() {
+        let original = aerialAsset(url: URL(fileURLWithPath: "/tmp/a/scene.mov"), fileSize: 100)
+        let changed = aerialAsset(url: URL(fileURLWithPath: "/tmp/a/scene.mov"), fileSize: 200)
+
+        #expect(AerialThumbnailCacheKey(asset: original) != AerialThumbnailCacheKey(asset: changed))
+    }
+
+    private func aerialAsset(url: URL, fileSize: Int64) -> AerialAsset {
+        AerialAsset(
+            id: url.deletingPathExtension().lastPathComponent,
+            url: url,
+            displayName: url.lastPathComponent,
+            category: nil,
+            fileSize: fileSize,
+            bookmarkData: Data([0x01])
+        )
+    }
+}
+
+@Suite("HTML wallpaper local file access")
+@MainActor
+struct HTMLWallpaperLocalFileAccessTests {
+    @Test("Single HTML files allow WebKit to read sibling assets")
+    func singleFileReadAccessUsesParentDirectory() {
+        let fileURL = URL(fileURLWithPath: "/tmp/site/index.html")
+
+        #expect(HTMLWallpaperView.readAccessRoot(forFileURL: fileURL) == fileURL.deletingLastPathComponent())
+    }
+}
+
+@Suite("HTML wallpaper mouse interaction")
+@MainActor
+struct HTMLWallpaperMouseInteractionTests {
+    @Test("Interactive HTML wallpapers let the host window receive mouse events")
+    func interactiveHTMLWallpapersLetHostWindowReceiveMouseEvents() {
+        let session = AmbientWallpaperSessionBuilder().makeHTMLSession(
+            source: .inline("<html><body></body></html>"),
+            config: HTMLConfig(allowMouseInteraction: true),
+            frame: CGRect(x: 0, y: 0, width: 16, height: 16)
+        )
+        defer { session.cleanup() }
+
+        #expect(session.wallpaperWindow?.ignoresMouseEvents == false)
+        #expect((session.wallpaperWindow?.level.rawValue ?? 0) == CGWindowLevelForKey(.desktopIconWindow) - 1)
+    }
+
+    @Test("Passive HTML wallpapers keep mouse events passing through")
+    func passiveHTMLWallpapersKeepMouseEventsPassingThrough() {
+        let session = AmbientWallpaperSessionBuilder().makeHTMLSession(
+            source: .inline("<html><body></body></html>"),
+            config: HTMLConfig(allowMouseInteraction: false),
+            frame: CGRect(x: 0, y: 0, width: 16, height: 16)
+        )
+        defer { session.cleanup() }
+
+        #expect(session.wallpaperWindow?.ignoresMouseEvents == true)
+        #expect((session.wallpaperWindow?.level.rawValue ?? 0) == CGWindowLevelForKey(.desktopWindow) - 1)
+    }
+}
+
+@Suite("WallpaperAutomationCoordinator")
+@MainActor
+struct WallpaperAutomationCoordinatorTests {
+    @Test("Schedule handler runs once when monitoring starts")
+    func scheduleHandlerRunsImmediately() async throws {
+        guard let nsScreen = NSScreen.screens.first else {
+            Issue.record("No NSScreen available for test")
+            return
+        }
+
+        let screen = Screen(nsScreen: nsScreen)
+        let coordinator = WallpaperAutomationCoordinator()
+        var calls = 0
+
+        coordinator.start(
+            screenProvider: { [screen] },
+            configurationProvider: { _ in nil },
+            scheduleHandler: { _ in calls += 1 },
+            playlistHandler: { _ in }
+        )
+
+        for _ in 0..<10 where calls == 0 {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        coordinator.stop()
+
+        #expect(calls == 1)
+    }
+}
+
+@Suite("WallpaperVideoPlayer startup policy")
+@MainActor
+struct WallpaperVideoPlayerStartupPolicyTests {
+    @Test("Pause before AVPlayer readiness suppresses ready-time autoplay")
+    func pauseBeforeReadinessSuppressesAutoplay() {
+        let player = WallpaperVideoPlayer(
+            url: URL(fileURLWithPath: "/tmp/missing.mov"),
+            frame: CGRect(x: 0, y: 0, width: 16, height: 16),
+            loadImmediately: false
+        )
+
+        #expect(player.shouldAutoplayWhenReady)
+
+        player.pause()
+        #expect(!player.shouldAutoplayWhenReady)
+
+        player.play()
+        #expect(player.shouldAutoplayWhenReady)
+    }
+
+    @Test("Frame-rate limit requested before AVPlayer item exists is retained")
+    func frameRateLimitBeforeItemReadinessIsRetained() {
+        let player = WallpaperVideoPlayer(
+            url: URL(fileURLWithPath: "/tmp/missing.mov"),
+            frame: CGRect(x: 0, y: 0, width: 16, height: 16),
+            loadImmediately: false
+        )
+
+        player.setFrameRateLimit(30)
+
+        #expect(player.requestedFrameRateLimit == 30)
+    }
+}
+
+@Suite("Monitoring cadence policy")
+struct MonitoringCadencePolicyTests {
+    @Test("GPU sampling runs immediately then at configured cadence")
+    func gpuSamplingCadence() {
+        #expect(MonitoringCadencePolicy.shouldSampleGPU(updateCount: 1, cadence: 3))
+        #expect(!MonitoringCadencePolicy.shouldSampleGPU(updateCount: 2, cadence: 3))
+        #expect(MonitoringCadencePolicy.shouldSampleGPU(updateCount: 3, cadence: 3))
+        #expect(!MonitoringCadencePolicy.shouldSampleGPU(updateCount: 4, cadence: 3))
+        #expect(MonitoringCadencePolicy.shouldSampleGPU(updateCount: 6, cadence: 3))
+    }
+
+    @Test("Cadence below two samples every update")
+    func lowCadenceSamplesEveryUpdate() {
+        #expect(MonitoringCadencePolicy.shouldSampleGPU(updateCount: 4, cadence: 1))
+        #expect(MonitoringCadencePolicy.shouldSampleGPU(updateCount: 4, cadence: 0))
+    }
+}
+
+@Suite("Wallpaper runtime readiness")
+@MainActor
+struct WallpaperRuntimeReadinessTests {
+    @Test("Default preparation reports false when cancelled")
+    func defaultPreparationCancellation() async {
+        let session = FakePlaybackController(isPlaying: false)
+        let task = Task { @MainActor in
+            await session.prepareForDisplay(timeout: .milliseconds(200))
+        }
+
+        task.cancel()
+        let prepared = await task.value
+
+        #expect(!prepared)
+    }
+}
+
 @MainActor
 private final class FakePlaybackController: WallpaperPlaybackControllable {
     var isPlaying: Bool
@@ -325,6 +602,41 @@ struct WallpaperPolicyEngineTests {
         #expect(WallpaperPolicyEngine.shouldResumeFromPower(
             powerSource: .external,
             wasPausedByPower: true
+        ))
+    }
+
+    @Test("Startup video pause combines power and fullscreen policy")
+    func startupVideoPauseDecision() {
+        #expect(WallpaperPolicyEngine.shouldStartVideoPaused(
+            globalSettings: GlobalSettings(globalPauseOnBattery: true, pauseOnFullScreen: false),
+            powerSource: .battery(level: 90),
+            isHiddenByFullScreen: false
+        ))
+        #expect(WallpaperPolicyEngine.shouldStartVideoPaused(
+            globalSettings: GlobalSettings(globalPauseOnBattery: false, pauseOnFullScreen: true),
+            powerSource: .external,
+            isHiddenByFullScreen: true
+        ))
+        #expect(!WallpaperPolicyEngine.shouldStartVideoPaused(
+            globalSettings: GlobalSettings(globalPauseOnBattery: false, pauseOnFullScreen: true),
+            powerSource: .external,
+            isHiddenByFullScreen: false
+        ))
+    }
+
+    @Test("Fullscreen resume waits when power policy still wants pause")
+    func fullScreenResumeHonorsPowerPause() {
+        let settings = GlobalSettings(globalPauseOnBattery: true, pauseOnFullScreen: true)
+
+        #expect(!WallpaperPolicyEngine.shouldResumeFromFullScreen(
+            globalSettings: settings,
+            powerSource: .battery(level: 90),
+            wasPausedByFullScreen: true
+        ))
+        #expect(WallpaperPolicyEngine.shouldResumeFromFullScreen(
+            globalSettings: settings,
+            powerSource: .external,
+            wasPausedByFullScreen: true
         ))
     }
 
@@ -654,6 +966,33 @@ struct ScreenConfigurationHelpersTests {
         #expect(config.playlistCursorIndex == 0)
         #expect(config.activeWallpaper == .video(bookmarkData: primary))
     }
+
+    @Test("switching to ambient wallpaper while scheduled keeps primary bookmark")
+    func ambientSwitchPreservesPrimaryDuringSchedule() {
+        let primary = Data([0x01])
+        let scheduled = Data([0xAA])
+        var config = ScreenConfiguration(screenID: 7, videoBookmarkData: primary)
+
+        config.applyScheduledBookmark(scheduled)
+        config.setShaderWallpaper(.aurora)
+
+        #expect(config.savedVideoBookmarkData == primary)
+        #expect(config.videoBookmarkData == primary)
+    }
+
+    @Test("activateSavedVideoWallpaper prefers saved primary over active scheduled video")
+    func activateSavedVideoUsesPrimary() {
+        let primary = Data([0x01])
+        let scheduled = Data([0xAA])
+        var config = ScreenConfiguration(screenID: 8, videoBookmarkData: primary)
+
+        config.applyScheduledBookmark(scheduled)
+        let restored = config.activateSavedVideoWallpaper()
+
+        #expect(restored)
+        #expect(config.activeWallpaper == .video(bookmarkData: primary))
+        #expect(config.savedVideoBookmarkData == primary)
+    }
 }
 
 @Suite("SchedulePolicy")
@@ -693,6 +1032,23 @@ struct SchedulePolicyTests {
         let result = SchedulePolicy.scheduledBookmark(in: configuration, hour: 8)
 
         #expect(result == nil)
+    }
+
+    @Test("Schedule policy applies a primary slot when current wallpaper is not video")
+    func schedulePolicyAppliesPrimarySlotOverHTML() {
+        let primary = Data([0x01])
+        let slot = ScheduleSlot(startHour: 6, endHour: 12, videoBookmarkData: primary, label: "Morning")
+        var configuration = ScreenConfiguration(
+            screenID: 43,
+            wallpaper: .html(source: .url(URL(string: "https://example.com")!), config: .default),
+            scheduleSlots: [slot],
+            savedVideoBookmarkData: primary
+        )
+        configuration.wallpaperMode = .schedule
+
+        let result = SchedulePolicy.decision(for: configuration, hour: 8)
+
+        #expect(result == .applySlot(slot: slot, bookmarkData: primary))
     }
 
     // MARK: - decision mode-gate

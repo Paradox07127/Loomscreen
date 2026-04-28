@@ -3,13 +3,11 @@ import SwiftUI
 struct SystemMonitorView: View {
     private var monitor = SystemMonitor.shared
     @State private var powerSource: PowerMonitor.PowerSource = PowerMonitor.shared.currentPowerSource
-    /// "system" = whole-machine usage (default); "app" = this process only. Synced with menubar panel.
     @AppStorage("Dashboard.RAMScope") private var ramScopeRaw: String = "system"
 
     private var ramPercent: Double {
         ramScopeRaw == "app" ? monitor.memoryPercentage() : monitor.systemMemoryUsage * 100
     }
-    /// All = whole-machine CPU (host_statistics); App = this process (task_threads).
     private var cpuPercent: Double {
         ramScopeRaw == "app" ? monitor.cpuUsage : monitor.systemCpuUsage
     }
@@ -45,7 +43,6 @@ struct SystemMonitorView: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            // RAM scope picker: explicit segmented capsule for "All" (system) vs "App".
             HStack(spacing: 0) {
                 ramScopeButton(label: "All", value: "system")
                 ramScopeButton(label: "App", value: "app")
@@ -55,7 +52,6 @@ struct SystemMonitorView: View {
             .accessibilityElement(children: .contain)
             .accessibilityLabel("RAM scope")
 
-            // 4-widget grid (2x2): CPU / GPU / RAM / Power
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
                 MiniGaugeCard(title: "CPU", value: cpuPercent, color: colorForPercent(cpuPercent), icon: "cpu")
                     .accessibilityLabel("CPU usage")
@@ -79,7 +75,6 @@ struct SystemMonitorView: View {
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .shadow(color: Color.black.opacity(0.06), radius: 3, x: 0, y: 1)
 
-            // FPS, Thermal, RAM detail row
             VStack(spacing: 6) {
                 HStack(spacing: 12) {
                     HStack(spacing: 4) {
@@ -124,8 +119,6 @@ struct SystemMonitorView: View {
             .padding(.horizontal, 2)
         }
         .padding(.vertical, 2)
-        // Hard 220pt cap + .clipped() to prevent shadows/subviews from spilling past
-        // sidebar's left edge when List(.sidebar) gets stretched.
         .frame(maxWidth: 220, alignment: .leading)
         .clipped()
         .onAppear {
@@ -161,9 +154,7 @@ struct SystemMonitorView: View {
 
 // MARK: - MiniGaugeCard
 
-/// Custom 270° ring gauge: background + filled foreground track, icon in center,
-/// title + percentage at the bottom gap. Higher visual density than
-/// `Gauge.accessoryCircularCapacity` (which has font-size and gap-alignment issues on macOS 26).
+/// Compact 270° ring gauge for the dashboard grid.
 struct MiniGaugeCard: View {
     let title: String
     let value: Double
@@ -208,7 +199,6 @@ struct PowerStatusCard: View {
 
     var body: some View {
         ZStack {
-            // lineWidth=6 matches MiniGaugeCard for consistent ring thickness across the dashboard.
             Circle()
                 .trim(from: 0.0, to: 0.75)
                 .stroke(Color.gray.opacity(0.15), style: StrokeStyle(lineWidth: 6, lineCap: .round))
