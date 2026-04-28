@@ -6,6 +6,16 @@ final class VideoEffectsApplicationService {
     private let effectsManager = VideoEffectsManager()
     private var inflightTasks: [CGDirectDisplayID: Task<Void, Never>] = [:]
     private var generations: [CGDirectDisplayID: Int] = [:]
+    /// Hash of (effectConfig, frameRateLimit) most recently APPLIED for each
+    /// screen. When a duplicate apply request arrives with the same hash we
+    /// skip the rebuild — `setVideoComposition` would otherwise recompile
+    /// the CIFilter chain and force the AVPlayerLooper to rebind every queue
+    /// item, which produced visible GPU spikes on rapid slider drags.
+    private struct AppliedFingerprint: Equatable {
+        let effects: VideoEffectConfig
+        let limit: FrameRateLimit
+    }
+    private var appliedFingerprints: [CGDirectDisplayID: AppliedFingerprint] = [:]
 
     func applyEffects(
         to player: WallpaperVideoPlayer,
@@ -20,12 +30,21 @@ final class VideoEffectsApplicationService {
             return
         }
 
+        let hasEffects = config.effectConfig.hasActiveEffect
+        let fingerprint = AppliedFingerprint(effects: config.effectConfig, limit: config.frameRateLimit)
+
+        // Skip rebuild when nothing changed (avoids slider-drag GPU spikes).
+        if hasEffects, appliedFingerprints[screenID] == fingerprint, inflightTasks[screenID] == nil {
+            Logger.debug("Skip apply-effects: fingerprint unchanged for screen \(screenID)", category: .videoPlayer)
+            return
+        }
+
         cancelInflight(for: screenID)
 
-        let hasEffects = config.effectConfig.hasActiveEffect
         Logger.info("Applying effects for screen \(screenID): hasEffects=\(hasEffects)", category: .videoPlayer)
 
         if !hasEffects {
+            appliedFingerprints[screenID] = nil
             noEffectsHandler()
             return
         }
@@ -58,6 +77,10 @@ final class VideoEffectsApplicationService {
                           self.generations[screenID] == generation else { return }
                     player.setVideoComposition(composition)
                     self.inflightTasks[screenID] = nil
+                    self.appliedFingerprints[screenID] = AppliedFingerprint(
+                        effects: config.effectConfig,
+                        limit: config.frameRateLimit
+                    )
                 }
             } catch is CancellationError {
                 return
@@ -74,10 +97,14 @@ final class VideoEffectsApplicationService {
     func cancelInflight(for screenID: CGDirectDisplayID) {
         inflightTasks[screenID]?.cancel()
         inflightTasks[screenID] = nil
+        // Drop the cached fingerprint so the next legitimate apply rebuilds
+        // composition even if the same config arrives again.
+        appliedFingerprints[screenID] = nil
     }
 
     func cancelAll() {
         for task in inflightTasks.values { task.cancel() }
         inflightTasks.removeAll()
+        appliedFingerprints.removeAll()
     }
 }

@@ -68,10 +68,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             manager.refreshScreens()
         }
 
-        if startupPlan.reloadWallpapersAfterLaunch {
+        // Light async pass: drops configurations whose video bookmark cannot
+        // be resolved any more. Replaces the legacy heavy reloadAllScreens.
+        if startupPlan.screenManagerOptions.restoreSavedWallpapers {
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(1))
-                manager.reloadAllScreens()
+                manager.pruneInvalidConfigurationsIfNeeded()
             }
         }
 

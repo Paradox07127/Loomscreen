@@ -231,16 +231,25 @@ extension AppleAerialsLibrary {
             fileManager: fileManager
         )
 
-        let assets = try videoURLs.map { url -> AerialAsset in
+        // Per-file bookmark failures must NOT collapse the entire scan —
+        // otherwise a single quarantined .mov would hide the whole library.
+        let assets: [AerialAsset] = videoURLs.compactMap { url in
             let id = url.deletingPathExtension().lastPathComponent
             let entry = metadata[id]
+            guard let bookmark = try? bookmarkCreator(url) else {
+                Logger.warning(
+                    "Skipping aerial '\(url.lastPathComponent)': bookmark creation failed",
+                    category: .fileAccess
+                )
+                return nil
+            }
             return AerialAsset(
                 id: id,
                 url: url,
                 displayName: entry?.displayName ?? url.lastPathComponent,
                 category: entry?.category,
                 fileSize: fileSize(for: url),
-                bookmarkData: try bookmarkCreator(url)
+                bookmarkData: bookmark
             )
         }
 

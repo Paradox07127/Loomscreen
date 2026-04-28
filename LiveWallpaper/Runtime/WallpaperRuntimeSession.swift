@@ -35,7 +35,7 @@ protocol WallpaperPerformanceConfigurable: AnyObject {
 
 @MainActor
 protocol WallpaperResourceCleanable: AnyObject {
-    func cleanUp()
+    func cleanup()
 }
 
 @MainActor
@@ -171,7 +171,7 @@ final class AmbientWallpaperSession: WallpaperRuntimeSession {
 
     func cleanup() {
         performanceTarget?.applyPerformanceProfile(.suspended)
-        (performanceTarget as? any WallpaperResourceCleanable)?.cleanUp()
+        (performanceTarget as? any WallpaperResourceCleanable)?.cleanup()
         window?.close()
         window = nil
         performanceTarget = nil

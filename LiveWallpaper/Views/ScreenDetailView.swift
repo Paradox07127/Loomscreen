@@ -59,6 +59,7 @@ struct ScreenDetailView: View {
     @State private var lockScreenExtracted: Bool = false
     @State private var particleDensity: Double = 1.0
     @State private var selectedFrameRateLimit: FrameRateLimit = .fps60
+    @State private var showBookmarks = false
 
     @AppStorage("Inspector.PlaylistExpanded") private var isPlaylistExpanded = false
     @AppStorage("Inspector.ScheduleExpanded") private var isScheduleExpanded = false
@@ -104,6 +105,20 @@ struct ScreenDetailView: View {
                     }
                 }
                 Spacer()
+
+                Button {
+                    showBookmarks = true
+                } label: {
+                    Label("Bookmarks", systemImage: "bookmark.fill")
+                }
+                .buttonStyle(.glass)
+                .controlSize(.regular)
+                .help("Saved video / HTML / shader shortcuts")
+                .accessibilityLabel("Bookmarks")
+                .popover(isPresented: $showBookmarks, arrowEdge: .bottom) {
+                    BookmarksPopover(screen: screen)
+                        .environment(screenManager)
+                }
 
                 if selectedWallpaperType == .video {
                     HStack(spacing: 8) {
@@ -461,8 +476,13 @@ struct ScreenDetailView: View {
                 .accessibilityLabel("Wallpaper type")
                 .accessibilityHint("Choose between video, HTML, or Metal shader wallpaper")
                 .onChange(of: selectedWallpaperType) { _, newType in
-                    if newType == .video {
+                    switch newType {
+                    case .video:
                         screenManager.switchToVideoWallpaper(for: screen)
+                    case .html:
+                        screenManager.switchToHTMLWallpaper(for: screen)
+                    case .metalShader:
+                        break // shader picker drives its own activation
                     }
                 }
             }

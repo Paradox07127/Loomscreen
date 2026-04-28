@@ -18,6 +18,7 @@ final class SettingsManager {
         static let globalSettings = "globalSettings"
         static let lastUsedDirectory = "lastUsedDirectory"
         static let aerialsDirectoryBookmark = "AerialsLibrary.DirectoryBookmark"
+        static let bookmarks = "WallpaperBookmarks.v1"
     }
 
     // MARK: - Screen Configurations
@@ -216,6 +217,27 @@ final class SettingsManager {
 
     func clearAerialsDirectoryBookmark() {
         UserDefaults.standard.removeObject(forKey: Keys.aerialsDirectoryBookmark)
+    }
+
+    // MARK: - Wallpaper Bookmarks
+
+    func loadWallpaperBookmarks() -> [WallpaperBookmark] {
+        guard let data = UserDefaults.standard.data(forKey: Keys.bookmarks) else { return [] }
+        do {
+            return try decoder.decode([WallpaperBookmark].self, from: data)
+        } catch {
+            Logger.error("Failed to decode wallpaper bookmarks: \(error.localizedDescription)", category: .settings)
+            return []
+        }
+    }
+
+    func saveWallpaperBookmarks(_ bookmarks: [WallpaperBookmark]) {
+        do {
+            let data = try encoder.encode(bookmarks)
+            UserDefaults.standard.set(data, forKey: Keys.bookmarks)
+        } catch {
+            Logger.error("Failed to encode wallpaper bookmarks: \(error.localizedDescription)", category: .settings)
+        }
     }
 }
 

@@ -5,6 +5,9 @@ struct ScreenConfiguration: Codable, Equatable {
     let screenID: UInt32
     var activeWallpaper: WallpaperContent
     var savedVideoBookmarkData: Data?
+    /// Last applied HTML source — restored on type switch back to HTML.
+    var savedHTMLSource: HTMLSource?
+    var savedHTMLConfig: HTMLConfig?
     var playbackSpeed: Double
     var fitMode: VideoFitMode
     var frameRateLimit: FrameRateLimit
@@ -26,6 +29,8 @@ struct ScreenConfiguration: Codable, Equatable {
         case screenID
         case activeWallpaper
         case savedVideoBookmarkData
+        case savedHTMLSource
+        case savedHTMLConfig
         case playbackSpeed
         case fitMode
         case frameRateLimit
@@ -65,6 +70,10 @@ struct ScreenConfiguration: Codable, Equatable {
         self.screenID = screenID
         self.activeWallpaper = wallpaper
         self.savedVideoBookmarkData = savedVideoBookmarkData ?? wallpaper.activeVideoBookmarkData
+        if case .html(let source, let config) = wallpaper {
+            self.savedHTMLSource = source
+            self.savedHTMLConfig = config
+        }
         self.playbackSpeed = playbackSpeed
         self.fitMode = fitMode
         self.frameRateLimit = frameRateLimit
@@ -238,10 +247,18 @@ struct ScreenConfiguration: Codable, Equatable {
             wallpaperMode = .single
         }
 
+        savedHTMLSource = try c.decodeIfPresent(HTMLSource.self, forKey: .savedHTMLSource)
+        savedHTMLConfig = try c.decodeIfPresent(HTMLConfig.self, forKey: .savedHTMLConfig)
+
         if let decodedWallpaper = try c.decodeIfPresent(WallpaperContent.self, forKey: .activeWallpaper) {
             activeWallpaper = decodedWallpaper
             savedVideoBookmarkData = try c.decodeIfPresent(Data.self, forKey: .savedVideoBookmarkData)
                 ?? decodedWallpaper.activeVideoBookmarkData
+            // Backfill saved HTML if absent but currently HTML.
+            if savedHTMLSource == nil, case .html(let source, let config) = decodedWallpaper {
+                savedHTMLSource = source
+                savedHTMLConfig = config
+            }
             return
         }
 
@@ -256,8 +273,11 @@ struct ScreenConfiguration: Codable, Equatable {
             savedVideoBookmarkData = bookmark
         case .html:
             let legacyHTML = try c.decodeIfPresent(String.self, forKey: .htmlContent) ?? ""
-            activeWallpaper = .html(source: HTMLSource(legacyString: legacyHTML), config: .default)
+            let legacySource = HTMLSource(legacyString: legacyHTML)
+            activeWallpaper = .html(source: legacySource, config: .default)
             savedVideoBookmarkData = legacySavedBookmark
+            if savedHTMLSource == nil { savedHTMLSource = legacySource }
+            if savedHTMLConfig == nil { savedHTMLConfig = .default }
         case .metalShader:
             activeWallpaper = .metalShader(
                 try c.decodeIfPresent(MetalShaderPreset.self, forKey: .shaderPreset) ?? .waves
@@ -271,6 +291,8 @@ struct ScreenConfiguration: Codable, Equatable {
         try c.encode(screenID, forKey: .screenID)
         try c.encode(activeWallpaper, forKey: .activeWallpaper)
         try c.encodeIfPresent(savedVideoBookmarkData, forKey: .savedVideoBookmarkData)
+        try c.encodeIfPresent(savedHTMLSource, forKey: .savedHTMLSource)
+        try c.encodeIfPresent(savedHTMLConfig, forKey: .savedHTMLConfig)
         try c.encode(playbackSpeed, forKey: .playbackSpeed)
         try c.encode(fitMode, forKey: .fitMode)
         try c.encode(frameRateLimit, forKey: .frameRateLimit)
@@ -288,6 +310,8 @@ struct ScreenConfiguration: Codable, Equatable {
 
     mutating func setHTMLWallpaper(source: HTMLSource, config: HTMLConfig = .default) {
         preserveCurrentVideoBookmarkIfNeeded()
+        savedHTMLSource = source
+        savedHTMLConfig = config
         activeWallpaper = .html(source: source, config: config)
     }
 
@@ -298,11 +322,13 @@ struct ScreenConfiguration: Codable, Equatable {
 
     mutating func updateHTMLConfig(_ config: HTMLConfig) {
         guard case .html(let source, _) = activeWallpaper else { return }
+        savedHTMLConfig = config
         activeWallpaper = .html(source: source, config: config)
     }
 
     mutating func setShaderWallpaper(_ preset: MetalShaderPreset) {
         preserveCurrentVideoBookmarkIfNeeded()
+        preserveCurrentHTMLIfNeeded()
         activeWallpaper = .metalShader(preset)
     }
 
@@ -311,18 +337,30 @@ struct ScreenConfiguration: Codable, Equatable {
         guard let bookmarkData = savedVideoBookmarkData ?? activeWallpaper.activeVideoBookmarkData else {
             return false
         }
+        preserveCurrentHTMLIfNeeded()
         activeWallpaper = .video(bookmarkData: bookmarkData)
         savedVideoBookmarkData = bookmarkData
-        // User explicitly switched back to video — restart playlist at primary.
+        // Restart playlist cursor when explicitly returning to video.
         playlistCursorIndex = 0
         return true
     }
 
-    /// Swaps the primary video while preserving per-screen settings.
+    /// Restore the previously applied HTML source after a type swap.
+    @discardableResult
+    mutating func activateSavedHTMLWallpaper() -> Bool {
+        guard let source = savedHTMLSource else { return false }
+        let config = savedHTMLConfig ?? .default
+        preserveCurrentVideoBookmarkIfNeeded()
+        activeWallpaper = .html(source: source, config: config)
+        return true
+    }
+
+    /// Swap primary video while preserving per-screen settings + saved HTML.
     mutating func replacePrimaryVideo(bookmarkData: Data) {
+        preserveCurrentHTMLIfNeeded()
         savedVideoBookmarkData = bookmarkData
         activeWallpaper = .video(bookmarkData: bookmarkData)
-        // Reset cursor so rotation doesn't point past the end of a reshuffled list.
+        // Reset cursor so rotation never points past a reshuffled list.
         playlistCursorIndex = 0
     }
 
@@ -334,6 +372,13 @@ struct ScreenConfiguration: Codable, Equatable {
     private mutating func preserveCurrentVideoBookmarkIfNeeded() {
         if savedVideoBookmarkData == nil {
             savedVideoBookmarkData = activeWallpaper.activeVideoBookmarkData
+        }
+    }
+
+    private mutating func preserveCurrentHTMLIfNeeded() {
+        if case .html(let source, let config) = activeWallpaper {
+            savedHTMLSource = source
+            savedHTMLConfig = config
         }
     }
 

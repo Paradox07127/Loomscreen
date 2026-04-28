@@ -117,14 +117,6 @@ class Screen: Identifiable, Hashable {
         return old
     }
 
-    func clearWallpaperRuntimeSession() {
-        let old = runtimeSession
-        guard old != nil else { return }
-        handleRuntimeSessionTransition(from: old, to: nil)
-        runtimeSession = nil
-        old?.cleanup()
-    }
-
     func adoptRuntimeSession(from existingScreen: Screen) {
         // Adoption shares the SAME session reference between screens, so we
         // never want to cleanup the previously-held session here.
@@ -138,8 +130,13 @@ class Screen: Identifiable, Hashable {
         runtimeSession?.updateFrame(to: frame)
     }
 
+    /// Tear down and release the active wallpaper session for this screen.
     func resetRuntimeSession() {
-        clearWallpaperRuntimeSession()
+        let old = runtimeSession
+        guard old != nil else { return }
+        handleRuntimeSessionTransition(from: old, to: nil)
+        runtimeSession = nil
+        old?.cleanup()
     }
     
     // MARK: - Initialization

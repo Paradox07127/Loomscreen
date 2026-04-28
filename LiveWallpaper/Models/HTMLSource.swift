@@ -41,7 +41,13 @@ enum HTMLSource: Codable, Equatable {
             self = .url(url)
             return
         }
-        if let url = URL(string: "https://" + trimmed), url.host != nil {
+        // Auto-prefix `https://` only when the input plausibly looks like a
+        // domain — i.e. contains at least one `.` separating host segments.
+        // Without this, typing "abc" would build `https://abc` whose host is
+        // technically non-nil but never resolvable.
+        if trimmed.contains("."),
+           let url = URL(string: "https://" + trimmed),
+           let host = url.host, host.contains(".") {
             self = .url(url)
             return
         }

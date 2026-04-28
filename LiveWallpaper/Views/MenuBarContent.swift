@@ -16,6 +16,7 @@ struct MenuBarContent: View {
 
     @State private var isWebURLEntryExpanded: Bool = false
     @State private var webURLDraft: String = ""
+    @State private var showBookmarksPopover = false
 
     private var monitor: SystemMonitor { .shared }
     private var ramPercent: Double {
@@ -159,6 +160,17 @@ struct MenuBarContent: View {
                 }
                 QuickActionButton(label: "Folder", systemImage: "folder") {
                     pickHTMLFolderFromMenuBar()
+                }
+                QuickActionButton(label: "Bookmarks", systemImage: "bookmark.fill") {
+                    showBookmarksPopover = true
+                }
+                .popover(isPresented: $showBookmarksPopover, arrowEdge: .bottom) {
+                    if let target = screenManager.screens.first {
+                        BookmarksPopover(screen: target)
+                            .environment(screenManager)
+                    } else {
+                        Text("No display detected").padding(20)
+                    }
                 }
             }
 
