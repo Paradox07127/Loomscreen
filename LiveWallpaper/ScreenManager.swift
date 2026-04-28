@@ -87,6 +87,10 @@ final class ScreenManager {
             }
             .store(in: &cleanupTasks)
 
+        // refreshScreens() already calls loadConfigurationForScreen on every
+        // newly registered screen (during init, every screen is "new"), so a
+        // separate loadSavedConfigurations() pass is pure duplicate work and
+        // was a contributor to the launch-time GPU spike.
         refreshScreens()
         if startupOptions.startAutomation {
             startScheduleMonitoring()
@@ -289,6 +293,25 @@ final class ScreenManager {
     }
     
     // MARK: - Configuration Management
+
+    /// Light launch-time pass: prunes configurations whose video bookmark
+    /// is no longer resolvable. Does not tear down healthy sessions.
+    func pruneInvalidConfigurationsIfNeeded() {
+        let removedScreenIDs = configurationStore.pruneInvalidVideoConfigurations(
+            using: SettingsManager.shared.validateConfiguration
+        )
+
+        guard !removedScreenIDs.isEmpty else { return }
+
+        for removedScreenID in removedScreenIDs {
+            if let screen = screens.first(where: { $0.id == removedScreenID }) {
+                Logger.warning("Removing invalid video configuration for screen \(removedScreenID)", category: .settings)
+                releaseRuntimeSession(screen)
+            }
+        }
+        notifyWallpaperSessionChanged()
+    }
+
     private func loadConfigurationForScreen(_ screen: Screen) {
         // If screen already has a video player, just update settings
         if screen.videoPlayer != nil {
@@ -1182,6 +1205,15 @@ final class ScreenManager {
         saveConfiguration(config)
 
         loadConfigurationForScreen(screen)
+    }
+
+    /// Restore previously-applied HTML source after the user toggles the type
+    /// picker back to HTML. No-op if no HTML was ever set on this screen.
+    func switchToHTMLWallpaper(for screen: Screen) {
+        guard var config = configurationStore.get(for: screen.id),
+              config.activateSavedHTMLWallpaper() else { return }
+        saveConfiguration(config)
+        restoreWallpaperSession(for: screen, configuration: config, preservingState: false)
     }
 
     private func activateAmbientWallpaper(_ definition: WallpaperSessionDefinition, for screen: Screen) {

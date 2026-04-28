@@ -44,6 +44,7 @@ enum Navigation: Hashable {
     case general
     case screen(CGDirectDisplayID)
     case appleAerials
+    case bookmarks
 }
 
 // MARK: - Sidebar View
@@ -92,6 +93,9 @@ struct Sidebar: View {
             }) {
                 NavigationLink(value: Navigation.appleAerials) {
                     Label("Apple Aerials", systemImage: "sparkles.tv")
+                }
+                NavigationLink(value: Navigation.bookmarks) {
+                    Label("Bookmarks", systemImage: "bookmark.fill")
                 }
             }
 
@@ -288,6 +292,10 @@ struct DetailContent: View {
 
             case .appleAerials:
                 AppleAerialsLibraryView()
+                    .transition(.opacity)
+
+            case .bookmarks:
+                BookmarksLibraryView()
                     .transition(.opacity)
 
             case .none:

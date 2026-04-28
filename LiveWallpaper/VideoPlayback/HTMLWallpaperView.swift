@@ -13,6 +13,11 @@ final class HTMLWallpaperView: NSView {
     private var hasTrackerRulesAttached = false
     private var trackerBlockingRequested = false
     private var activeSecurityScopedURL: URL?
+    /// Tracks the last applied `HTMLConfig` so re-`apply()` calls with the
+    /// same toggles skip the user-script teardown / re-install (which forces
+    /// WKWebView to re-evaluate scripts and was a source of GPU churn when
+    /// upstream emitters re-published frequently).
+    private var lastAppliedConfig: HTMLConfig?
 
     // MARK: - Initialization
 
@@ -75,10 +80,24 @@ final class HTMLWallpaperView: NSView {
     // MARK: - Public API
 
     func apply(_ config: HTMLConfig) {
+        if let previous = lastAppliedConfig, previous == config {
+            // No-op fast path: avoids `removeAllUserScripts` + `addUserScript`
+            // churn that forces WebKit to re-evaluate the injection bundle.
+            return
+        }
+
+        let previous = lastAppliedConfig
         webView.configuration.defaultWebpagePreferences.allowsContentJavaScript = config.allowJavaScript
         allowMouseInteraction = config.allowMouseInteraction
-        applyCustomCSS(config.customCSS)
-        applyTrackerBlocking(enabled: config.blockTrackers)
+
+        // Only rebuild user-script bundle when CSS or JS toggle actually changed.
+        if previous?.customCSS != config.customCSS || previous?.allowJavaScript != config.allowJavaScript {
+            applyCustomCSS(config.customCSS)
+        }
+        if previous?.blockTrackers != config.blockTrackers {
+            applyTrackerBlocking(enabled: config.blockTrackers)
+        }
+        lastAppliedConfig = config
     }
 
     func loadSource(_ source: HTMLSource) {
@@ -214,7 +233,7 @@ final class HTMLWallpaperView: NSView {
 
     // MARK: - Cleanup
 
-    func cleanUp() {
+    func cleanup() {
         trackerBlockingRequested = false
         webView.stopLoading()
         webView.navigationDelegate = nil
