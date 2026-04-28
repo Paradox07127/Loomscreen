@@ -15,19 +15,11 @@ struct ScreenConfiguration: Codable, Equatable {
     var playlistBookmarks: [Data]?
     var shufflePlaylist: Bool
     var playlistRotationMinutes: Int?
-    /// Index in the combined playlist `[savedVideoBookmarkData] + playlistBookmarks`.
-    /// `nil` or 0 means the primary is currently playing. Persisted so rotation
-    /// position survives app restarts.
+    /// Cursor in `[savedVideoBookmarkData] + playlistBookmarks`.
     var playlistCursorIndex: Int?
     var setAsLockScreen: Bool
-    /// Top-level automation mode. Controls inspector section visibility and
-    /// playlist/schedule guards. Default `.single`; legacy configs are inferred
-    /// at decode time.
     var wallpaperMode: WallpaperMode = .single
-    /// Whether the video wallpaper plays muted. Defaults to `true` because
-    /// wallpapers are conventionally silent AND because the muted path
-    /// disables audio tracks entirely — preventing macOS from engaging the
-    /// audio engine and potentially routing through AirPods / external outputs.
+    /// Muted by default so wallpaper videos do not take over audio output.
     var muted: Bool = true
 
     private enum CodingKeys: String, CodingKey {
@@ -205,10 +197,7 @@ struct ScreenConfiguration: Codable, Equatable {
         activeWallpaper.htmlConfig
     }
 
-    /// String representation of the HTML payload, when one exists in textual
-    /// form. Returns the URL string for `.url` and the raw HTML for
-    /// `.inline`; `nil` for `.file` / `.folder` because those require
-    /// security-scoped bookmarks rather than literal strings.
+    /// Textual HTML payload, if the source is URL or inline HTML.
     var htmlContent: String? {
         guard let source = activeWallpaper.htmlSource else { return nil }
         switch source {
@@ -227,8 +216,7 @@ struct ScreenConfiguration: Codable, Equatable {
         screenID = try c.decode(UInt32.self, forKey: .screenID)
         playbackSpeed = try c.decodeIfPresent(Double.self, forKey: .playbackSpeed) ?? 1.0
         fitMode = try c.decodeIfPresent(VideoFitMode.self, forKey: .fitMode) ?? .aspectFill
-        // Legacy `pauseOnBattery` per-screen field is silently dropped on
-        // decode — power policy now lives entirely in `GlobalSettings`.
+        // Legacy per-screen power settings now live in GlobalSettings.
         frameRateLimit = try c.decodeIfPresent(FrameRateLimit.self, forKey: .frameRateLimit) ?? .fps60
         particleEffect = try c.decodeIfPresent(ParticleEffect.self, forKey: .particleEffect) ?? .none
         effectConfig = try c.decodeIfPresent(VideoEffectConfig.self, forKey: .effectConfig) ?? .default
@@ -303,15 +291,11 @@ struct ScreenConfiguration: Codable, Equatable {
         activeWallpaper = .html(source: source, config: config)
     }
 
-    /// Legacy convenience used by callers that only have a raw URL string.
-    /// Internally bridges to the new `HTMLSource`-based API by reusing the
-    /// migration heuristic.
+    /// Legacy URL/raw-HTML bridge.
     mutating func setHTMLWallpaper(_ content: String) {
         setHTMLWallpaper(source: HTMLSource(legacyString: content), config: .default)
     }
 
-    /// Replace only the per-screen `HTMLConfig` while preserving the current
-    /// `HTMLSource`. No-op when the active wallpaper is not HTML.
     mutating func updateHTMLConfig(_ config: HTMLConfig) {
         guard case .html(let source, _) = activeWallpaper else { return }
         activeWallpaper = .html(source: source, config: config)
@@ -332,8 +316,7 @@ struct ScreenConfiguration: Codable, Equatable {
         return true
     }
 
-    /// Swap the primary video bookmark. Used when the user picks a new file.
-    /// Preserves effects, playlist, schedule, etc.; only the current file identity changes.
+    /// Swaps the primary video while preserving per-screen settings.
     mutating func replacePrimaryVideo(bookmarkData: Data) {
         savedVideoBookmarkData = bookmarkData
         activeWallpaper = .video(bookmarkData: bookmarkData)
@@ -341,9 +324,7 @@ struct ScreenConfiguration: Codable, Equatable {
         playlistCursorIndex = 0
     }
 
-    /// Replace `activeWallpaper` with a scheduled-slot bookmark.
-    /// Preserves `savedVideoBookmarkData` (primary) and the playlist cursor so that
-    /// rotating/returning after the slot ends still works.
+    /// Activates a schedule slot without replacing the saved primary video.
     mutating func applyScheduledBookmark(_ bookmarkData: Data) {
         activeWallpaper = .video(bookmarkData: bookmarkData)
     }
@@ -354,20 +335,7 @@ struct ScreenConfiguration: Codable, Equatable {
         }
     }
 
-    /// Refresh the bookmark of whatever slot is currently driving playback.
-    ///
-    /// Source detection is content-based, not cursor-based. The cursor only
-    /// tracks playlist position and would mis-attribute schedule-slot playback
-    /// (which never moves the cursor) to the primary video.
-    ///
-    /// Resolution order — match the CURRENT active bookmark against:
-    ///   1. `savedVideoBookmarkData` (primary)              → refresh primary
-    ///   2. an entry in `playlistBookmarks`                 → refresh that entry
-    ///   3. an entry in `scheduleSlots[*].videoBookmarkData` → refresh that slot
-    ///
-    /// If no source matches (or `activeWallpaper` isn't a video), only
-    /// `activeWallpaper` is updated — the player keeps using the fresh
-    /// bookmark without touching any persisted slot.
+    /// Refreshes the bookmark currently driving playback.
     func withUpdatedActiveBookmark(_ bookmarkData: Data) -> ScreenConfiguration {
         var copy = self
         let oldActive = copy.activeWallpaper.activeVideoBookmarkData

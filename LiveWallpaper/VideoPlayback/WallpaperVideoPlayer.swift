@@ -230,30 +230,7 @@ final class WallpaperVideoPlayer {
                 .store(in: &cleanupTasks)
         }
 
-        // Monitor for genuine errors only.
-        //
-        // AVPlayerLooper rotates AVPlayerItems for seamless looping; on every
-        // rotation the *previous* item is interrupted before playing "to end"
-        // naturally, and AVF posts .AVPlayerItemFailedToPlayToEndTime with
-        // benign codes. Those are normal looper transitions, not real failures,
-        // so we filter them out instead of spamming the log.
-        //
-        // -11847 AVErrorOperationInterrupted
-        // -11858 AVErrorOperationStopped — emitted when looper retires an item
-        //        whose composition was just swapped (rapid effect toggling).
-        // -11878 AVErrorOperationCancelled
-        // -12784 AVErrorCompositionFailed
-        // -12504 / -12509 Custom compositor errors often triggered by CIFilter pipeline recompilation
-        // Benign looper / compositor transitions emitted during item rotation,
-        // composition rebuild, or media-cache settling. Treat as noise — they
-        // do not actually halt playback.
-        // -11847 AVErrorOperationInterrupted
-        // -11858 AVErrorOperationStopped
-        // -11878 AVErrorOperationCancelled
-        // -12504 / -12509 / -12784 CustomVideoCompositor / FigCompositionFailed
-        // -12823 VMC (Video Media Cache) settling
-        // -12852 VRP (Video Rendering Pipeline) settling
-        // -12860 FigFilePlayer FailedToPlayToEnd (looper rotation)
+        // Filter benign AVPlayerLooper/compositor transition errors.
         let benignLooperCodes: Set<Int> = [-11847, -11858, -11878, -12504, -12509, -12784, -12823, -12852, -12860]
         // Don't bind to the initial currentItem: AVPlayerLooper rotates items, so
         // a single-object subscription misses later items' failure events. Use a

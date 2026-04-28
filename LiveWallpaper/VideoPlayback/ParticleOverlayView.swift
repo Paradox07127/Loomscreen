@@ -1,28 +1,7 @@
 import AppKit
 import QuartzCore
 
-/// A layer-hosting NSView whose backing layer is a `CAEmitterLayer`.
-///
-/// ## Why CAEmitterLayer (not SpriteKit)
-///
-/// The previous implementation wrapped an `SKView` (SpriteKit) inside an NSView
-/// and tried to compose it above an `AVPlayerLayer` sibling. That fails in
-/// practice on macOS because `SKView`'s backing layer is a `CAMetalLayer` with
-/// its own off-tree render pass — when both `CAMetalLayer` and `AVPlayerLayer`
-/// live as siblings under a layer-backed parent, AppKit's composition order
-/// becomes implementation-defined and the particle layer ends up rendered
-/// behind the video.
-///
-/// `CAEmitterLayer` is a plain `CALayer` subclass that participates in normal
-/// Core Animation compositing, so it composites cleanly above an
-/// `AVPlayerLayer` sibling using deterministic NSView subview ordering.
-///
-/// ## Coordinate System
-///
-/// The default macOS `CALayer` uses **bottom-left origin** (y increases up),
-/// matching NSView's default. So `(0, 0)` is bottom-left, `(width, height)`
-/// is top-right. "Falling from the sky" particles emit at `y = bounds.height`
-/// with negative y-velocity / negative `yAcceleration`.
+/// Layer-hosting particle overlay backed by `CAEmitterLayer`.
 final class ParticleOverlayView: NSView {
 
     // MARK: - State
@@ -180,17 +159,7 @@ final class ParticleOverlayView: NSView {
     // MARK: - Rain
 
     private static let rainPreset: EmitterPreset = {
-        // Soft continuous drizzle — small round droplets falling straight down.
-        //
-        // Why round (not streak): a 2×16 streak texture made the rain look
-        // wind-blown because fast-moving elongated shapes read visually as
-        // "motion lines" even when travelling straight. A round droplet has
-        // no orientation so velocity direction is unambiguous.
-        //
-        // Why velocity = 0: the initial velocity vector used `emissionLongitude`
-        // which appeared to introduce a small horizontal drift. With velocity
-        // zero, direction is governed purely by gravity (`yAcceleration`),
-        // guaranteeing a straight-down path.
+        // Round droplets with gravity-only motion avoid fake wind drift.
         let cell = CAEmitterCell()
         cell.contents = ParticleTextures.softCircle(
             radius: 2.5,
@@ -380,11 +349,7 @@ final class ParticleOverlayView: NSView {
 
 // MARK: - Particle Texture Factory
 //
-// CAEmitterCell.contents expects a `CGImage`. We build them with
-// CGBitmapContext directly — the older NSImage.lockFocus +
-// cgImage(forProposedRect:context:hints:) path silently returned nil in many
-// cases on macOS, which is why particle cells used to render nothing even
-// though the emitter was correctly configured.
+// CAEmitterCell needs CGImage textures; CGBitmapContext is reliable here.
 
 private enum ParticleTextures {
 

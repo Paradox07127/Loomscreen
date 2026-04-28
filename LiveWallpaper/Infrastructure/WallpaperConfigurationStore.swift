@@ -45,11 +45,7 @@ final class WallpaperConfigurationStore {
     }
 
     func pruneInvalidVideoConfigurations(using validator: (CGDirectDisplayID) -> Bool) -> [CGDirectDisplayID] {
-        // 1. Snapshot the set of video screens that need validation. We do NOT
-        //    reuse the configs fetched here to build the pruned list — the
-        //    validator may call SettingsManager.saveConfiguration to refresh
-        //    stale bookmarks, and we have to write the POST-validator state
-        //    back to persistence, not the pre-validator snapshot.
+        // Snapshot IDs first; validation may refresh stale bookmarks.
         let candidateVideoIDs = SettingsManager.shared
             .loadConfigurations()
             .filter { $0.wallpaperType == .video }
@@ -65,8 +61,7 @@ final class WallpaperConfigurationStore {
             return []
         }
 
-        // 3. Re-read AFTER the validator so refreshed bookmarks survive the
-        //    rewrite on the next `replaceAllConfigurations` call.
+        // Re-read so bookmark refreshes survive the rewrite.
         let postValidationConfigs = SettingsManager.shared.loadConfigurations()
 
         let pruned = Self.removingInvalidVideoConfigurations(
