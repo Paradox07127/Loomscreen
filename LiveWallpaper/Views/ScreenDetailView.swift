@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import UniformTypeIdentifiers
 
 struct ScreenDetailView: View {
@@ -36,7 +37,6 @@ struct ScreenDetailView: View {
     @State private var showErrorAlert = false
     @State private var errorMessage = ""
     @State private var showClearConfirm = false
-    @State private var showVideoImporter = false
     @State private var previewController = InspectorPreviewController()
     @State private var hasPreviewSource = false
 
@@ -45,7 +45,8 @@ struct ScreenDetailView: View {
     @State private var selectedParticleEffect: ParticleEffect = .none
     @State private var effectConfig = VideoEffectConfig.default
     @State private var selectedShaderPreset: MetalShaderPreset = .waves
-    @State private var htmlContent: String = ""
+    @State private var htmlSource: HTMLSource? = nil
+    @State private var htmlConfig: HTMLConfig = .default
     @State private var setAsLockScreen: Bool = false
 
     @State private var playlistBookmarks: [Data] = []
@@ -54,7 +55,6 @@ struct ScreenDetailView: View {
     @State private var scheduleSlots: [ScheduleSlot] = []
 
     @State private var isDraggingOver = false
-    @State private var screenPauseOnBattery: Bool = false
     @State private var videoMuted: Bool = true
     @State private var lockScreenExtracted: Bool = false
     @State private var particleDensity: Double = 1.0
@@ -211,14 +211,22 @@ struct ScreenDetailView: View {
                                 .padding(24)
                         }
                     } else if selectedWallpaperType == .html {
-                        HTMLWallpaperSection(screen: screen, htmlContent: $htmlContent)
-                            .padding(24)
+                        HTMLSourceSection(
+                            screen: screen,
+                            source: $htmlSource,
+                            config: $htmlConfig
+                        )
+                        .padding(24)
                     } else if selectedWallpaperType == .metalShader {
                         ShaderWallpaperSection(screen: screen, selectedShaderPreset: $selectedShaderPreset)
                             .padding(24)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay {
+                    dragHintOverlay
+                        .animation(.smooth(duration: 0.2), value: isDraggingOver)
+                }
 
                 Divider()
 
@@ -378,10 +386,10 @@ struct ScreenDetailView: View {
                             }
                             .groupBoxStyle(ContainerGroupBoxStyle())
 
-                            // Display & Power Group
+                            // Display Group
                             GroupBox {
                                 CollapsibleSection(
-                                    title: "Display & Power",
+                                    title: "Display",
                                     systemImage: "display.and.arrow.down",
                                     isExpanded: $isDisplayExpanded
                                 ) {
@@ -399,19 +407,6 @@ struct ScreenDetailView: View {
                                             }
                                             .accessibilityLabel("Frame rate limit")
                                             .accessibilityValue(selectedFrameRateLimit.description)
-                                        }
-
-                                        Divider()
-
-                                        SettingRow(icon: "bolt.slash", iconColor: .yellow, title: "Pause on Battery") {
-                                            Toggle("", isOn: $screenPauseOnBattery)
-                                                .labelsHidden()
-                                                .toggleStyle(.switch)
-                                                .onChange(of: screenPauseOnBattery) { _, newValue in
-                                                    screenManager.updatePowerSettings(pauseOnBattery: newValue, for: screen)
-                                                }
-                                                .accessibilityLabel("Pause on battery")
-                                                .accessibilityHint("Pauses wallpaper playback when running on battery power")
                                         }
 
                                         Divider()
@@ -527,13 +522,6 @@ struct ScreenDetailView: View {
         } message: {
             Text("Are you sure you want to remove this video? This will delete all configuration for this screen.")
         }
-        .fileImporter(
-            isPresented: $showVideoImporter,
-            allowedContentTypes: [.movie, .video, .quickTimeMovie, .mpeg4Movie, .avi],
-            allowsMultipleSelection: false
-        ) { result in
-            handleImporterResult(result)
-        }
         .dropDestination(for: URL.self) { urls, _ in
             handleDrop(urls: urls)
         } isTargeted: { targeted in
@@ -541,12 +529,101 @@ struct ScreenDetailView: View {
         }
     }
 
+    // MARK: - Drag Hint Overlay
+
+    @ViewBuilder
+    private var dragHintOverlay: some View {
+        if isDraggingOver {
+            ZStack {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.10))
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
+                VStack(spacing: 10) {
+                    Image(systemName: "arrow.down.doc.fill")
+                        .font(.system(size: 32, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                        .symbolEffect(.bounce, options: .repeat(.continuous))
+                    Text("Drop to use as wallpaper")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.primary)
+                    Text(dragHintSubtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(20)
+            .transition(.opacity)
+            // Overlay must not intercept the drop — `dropDestination` is on the
+            // outer view body, so passthrough hit-testing keeps the gesture intact.
+            .allowsHitTesting(false)
+        }
+    }
+
+    private var dragHintSubtitle: String {
+        switch selectedWallpaperType {
+        case .video:        return "Video file (.mp4, .mov, …)"
+        case .html:         return "HTML file or folder"
+        case .metalShader:  return "Switch to Video or HTML to drop"
+        }
+    }
+
     // MARK: - Drag and Drop
     private func handleDrop(urls: [URL]) -> Bool {
         defer { isDraggingOver = false }
-        guard let videoURL = urls.first else { return false }
-        handleSelectedFile(url: videoURL)
+        guard let droppedURL = urls.first else { return false }
+        // Route HTML drops through the HTML pipeline; everything else continues
+        // to the video importer, matching the existing UX expectation.
+        if isHTMLDrop(droppedURL) {
+            applyHTMLDrop(droppedURL)
+            return true
+        }
+        handleSelectedFile(url: droppedURL)
         return true
+    }
+
+    private func isHTMLDrop(_ url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+        guard exists else { return false }
+        if isDirectory.boolValue {
+            return true
+        }
+        return url.pathExtension.lowercased() == "html" || url.pathExtension.lowercased() == "htm"
+    }
+
+    private func applyHTMLDrop(_ url: URL) {
+        var isDirectory: ObjCBool = false
+        FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+
+        let source: HTMLSource?
+        if isDirectory.boolValue {
+            // Folder drop — bookmark the directory directly so siblings are reachable.
+            guard let bookmark = ResourceUtilities.createBookmark(for: url) else {
+                errorMessage = "Failed to bookmark dropped HTML resource."
+                showErrorAlert = true
+                return
+            }
+            let didStart = url.startAccessingSecurityScopedResource()
+            defer { if didStart { url.stopAccessingSecurityScopedResource() } }
+            let entries = (try? FileManager.default.contentsOfDirectory(atPath: url.path)) ?? []
+            let indexFileName = ["index.html", "index.htm"].first(where: { entries.contains($0) })
+                ?? entries.first(where: { $0.lowercased().hasSuffix(".html") })
+                ?? "index.html"
+            source = .folder(bookmarkData: bookmark, indexFileName: indexFileName)
+        } else {
+            // Single file drop — prefer the parent-folder upgrade so sibling
+            // assets keep resolving across launches; falls back to file-only.
+            source = ResourceUtilities.htmlSourceFromPickedFile(url)
+        }
+
+        guard let resolved = source else {
+            errorMessage = "Failed to bookmark dropped HTML resource."
+            showErrorAlert = true
+            return
+        }
+        selectedWallpaperType = .html
+        screenManager.setHTMLWallpaper(source: resolved, config: htmlConfig, for: screen)
     }
 
     // MARK: - Helper Methods
@@ -567,7 +644,6 @@ struct ScreenDetailView: View {
             effectConfig = config.effectConfig
             particleDensity = config.effectConfig.particleDensity
             setAsLockScreen = config.setAsLockScreen
-            screenPauseOnBattery = config.pauseOnBattery
             videoMuted = config.muted
             selectedFrameRateLimit = config.frameRateLimit
             playlistBookmarks = config.playlistBookmarks ?? []
@@ -577,7 +653,8 @@ struct ScreenDetailView: View {
             if let preset = config.shaderPreset { selectedShaderPreset = preset }
             selectedWallpaperType = config.wallpaperType
             selectedWallpaperMode = config.wallpaperMode
-            htmlContent = config.htmlContent ?? ""
+            htmlSource = config.htmlSource
+            htmlConfig = config.htmlConfig ?? .default
             hasPreviewSource = config.wallpaperType == .video && config.videoBookmarkData != nil
             loadPreviewPosterIfNeeded()
         } else {
@@ -589,7 +666,6 @@ struct ScreenDetailView: View {
             effectConfig = .default
             particleDensity = 1.0
             setAsLockScreen = false
-            screenPauseOnBattery = false
             selectedFrameRateLimit = .fps60
             playlistBookmarks = []
             shufflePlaylist = false
@@ -597,7 +673,8 @@ struct ScreenDetailView: View {
             scheduleSlots = []
             selectedWallpaperType = .video
             selectedWallpaperMode = .single
-            htmlContent = ""
+            htmlSource = nil
+            htmlConfig = .default
             hasPreviewSource = screen.videoPlayer?.videoURL != nil
             loadPreviewPosterIfNeeded()
         }
@@ -607,21 +684,28 @@ struct ScreenDetailView: View {
         previewController.cleanup()
     }
 
+    /// Opens an `NSOpenPanel` for video selection.
+    ///
+    /// SwiftUI's `.fileImporter` was previously used here. On macOS its
+    /// callback receives URLs whose Powerbox sandbox-extension token can be
+    /// revoked before the closure runs, which makes
+    /// `URL.bookmarkData(.withSecurityScope)` fail with EPERM for files in
+    /// TCC-protected directories like `~/Documents`. AppKit's `NSOpenPanel`
+    /// vends a longer-lived extension that survives the bookmark call,
+    /// matching the pattern already used for HTML / playlist / schedule /
+    /// menu-bar / onboarding pickers.
     private func showFilePicker() {
-        showVideoImporter = true
-    }
-
-    private func handleImporterResult(_ result: Result<[URL], Error>) {
-        switch result {
-        case .success(let urls):
-            guard let url = urls.first else { return }
-            SettingsManager.shared.saveLastUsedDirectory(url.deletingLastPathComponent())
-            handleSelectedFile(url: url)
-        case .failure(let error):
-            Logger.error("Video import failed: \(error.localizedDescription)", category: .fileAccess)
-            errorMessage = "Failed to import video: \(error.localizedDescription)"
-            showErrorAlert = true
-        }
+        NSApp.activate(ignoringOtherApps: true)
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.movie, .video, .quickTimeMovie, .mpeg4Movie, .avi]
+        panel.directoryURL = SettingsManager.shared.getLastUsedDirectory()
+        panel.prompt = "Use as Wallpaper"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        SettingsManager.shared.saveLastUsedDirectory(url.deletingLastPathComponent())
+        handleSelectedFile(url: url)
     }
 
     private func handleSelectedFile(url: URL) {

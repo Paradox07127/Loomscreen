@@ -23,13 +23,11 @@ enum WallpaperPolicyEngine {
 
     static func shouldPauseForPower(
         globalSettings: GlobalSettings,
-        configuration: ScreenConfiguration?,
         powerSource: PowerMonitor.PowerSource
     ) -> Bool {
         guard powerSource.isOnBattery else { return false }
 
-        let shouldPauseOnBattery = globalSettings.globalPauseOnBattery || configuration?.pauseOnBattery == true
-        if shouldPauseOnBattery {
+        if globalSettings.globalPauseOnBattery {
             return true
         }
 

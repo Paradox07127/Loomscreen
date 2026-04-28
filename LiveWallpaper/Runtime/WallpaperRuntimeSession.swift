@@ -12,6 +12,24 @@ protocol WallpaperRuntimeSession: AnyObject {
     func applyPerformanceProfile(_ profile: WallpaperPerformanceProfile)
     func updateFrame(to frame: CGRect)
     func cleanup()
+
+    /// Wait until the session's first frame is ready to be shown. Returns
+    /// `true` when ready, `false` if `timeout` elapses first. Used by
+    /// `ScreenManager.transitionSession(...)` to keep the previous wallpaper
+    /// visible until the new one has rendered, eliminating the brief
+    /// black/empty desktop flash during session swaps.
+    func prepareForDisplay(timeout: Duration) async -> Bool
+}
+
+extension WallpaperRuntimeSession {
+    func prepareForDisplay(timeout: Duration) async -> Bool {
+        // Default — yield one main-loop tick so the window has a chance to
+        // realise its first frame. Sessions with stronger readiness signals
+        // (e.g. AVPlayerLayer.isReadyForDisplay, WKNavigation.didFinish)
+        // override this.
+        try? await Task.sleep(for: .milliseconds(50))
+        return true
+    }
 }
 
 @MainActor

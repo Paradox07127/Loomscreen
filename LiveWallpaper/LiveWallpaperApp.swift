@@ -1,13 +1,7 @@
 import SwiftUI
 import AppKit
 
-/// App startup workflow:
-/// 1. `applicationDidFinishLaunching` builds ScreenManager only after NSApp's main
-///    loop is ready (earlier construction trips NSScreen/NSApp asserts in FullScreenDetector).
-/// 2. `screenManager` is `@Observable` so its nil → non-nil transition re-renders
-///    `LiveWallpaperApp.body`'s MenuBarExtra contents.
-/// 3. Settings is opened via a hand-managed `NSWindowController` to avoid SwiftUI's
-///    `Settings { ... }` scene applying the macOS System Settings styling.
+/// App delegate owns startup and the hand-managed settings/onboarding windows.
 @MainActor
 @Observable
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -18,13 +12,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Logger.notice("Application starting", category: .startup)
-
-        NSWorkspace.shared.notificationCenter.addObserver(
-            self,
-            selector: #selector(handleWakeNotification),
-            name: NSWorkspace.didWakeNotification,
-            object: nil
-        )
 
         let manager = ScreenManager()
         screenManager = manager
@@ -45,23 +32,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func handleWakeNotification() {
-        Logger.info("System wake detected", category: .lifecycle)
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(500))
-            self?.screenManager?.refreshScreens()
-            PowerMonitor.shared.refreshPowerStatus()
-        }
-    }
-
     nonisolated func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
         true
     }
 
     // MARK: - Settings Window
 
-    /// Open (or front) the Settings window. `initialScreenID` is used to jump
-    /// straight to a specific display from the menubar's per-screen submenu.
+    /// Opens settings, optionally selecting a display from the menu bar.
     func showSettings(initialScreenID: CGDirectDisplayID? = nil) {
         guard let manager = screenManager else { return }
 
@@ -74,8 +51,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     userInfo: ["screenID": id]
                 )
             }
-            // On multi-display / background process: NSApp.activate() alone doesn't
-            // raise the window. Explicit makeKey + orderFrontRegardless guarantees visibility.
             NSApp.activate(ignoringOtherApps: true)
             controller.window?.makeKeyAndOrderFront(nil)
             controller.window?.orderFrontRegardless()
@@ -111,8 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Onboarding Window
 
-    /// Show (or front) the first-run onboarding flow. Triggered automatically
-    /// on first launch and re-triggerable from GeneralSettingsView.
+    /// Shows the first-run onboarding flow.
     func showOnboarding() {
         if let controller = onboardingWindowController {
             NSApp.activate(ignoringOtherApps: true)
@@ -175,15 +149,11 @@ struct LiveWallpaperApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
-        // MenuBarExtra is the SwiftUI replacement for NSStatusItem (macOS 13+).
-        // The label closure provides the status-bar icon; @Observable AppDelegate auto-refreshes.
         MenuBarExtra {
             menuBarBody
         } label: {
             Image(systemName: menuBarIconName)
         }
-        // .window style lets us pop a custom SwiftUI panel from the status bar:
-        // mini dashboard + per-screen cards + quick toggles + Settings/Quit footer.
         .menuBarExtraStyle(.window)
     }
 
@@ -204,7 +174,6 @@ struct LiveWallpaperApp: App {
         }
     }
 
-    /// Mirrors the legacy `StatusBarController.determineStatusBarIcon` logic.
     private var menuBarIconName: String {
         guard let manager = appDelegate.screenManager else {
             return "photo.on.rectangle"

@@ -7,7 +7,6 @@ struct ScreenConfiguration: Codable, Equatable {
     var savedVideoBookmarkData: Data?
     var playbackSpeed: Double
     var fitMode: VideoFitMode
-    var pauseOnBattery: Bool
     var frameRateLimit: FrameRateLimit
 
     var particleEffect: ParticleEffect
@@ -37,7 +36,6 @@ struct ScreenConfiguration: Codable, Equatable {
         case savedVideoBookmarkData
         case playbackSpeed
         case fitMode
-        case pauseOnBattery
         case frameRateLimit
         case particleEffect
         case effectConfig
@@ -61,7 +59,6 @@ struct ScreenConfiguration: Codable, Equatable {
         wallpaper: WallpaperContent,
         playbackSpeed: Double = 1.0,
         fitMode: VideoFitMode = .aspectFill,
-        pauseOnBattery: Bool = false,
         frameRateLimit: FrameRateLimit = .fps60,
         particleEffect: ParticleEffect = .none,
         effectConfig: VideoEffectConfig = .default,
@@ -78,7 +75,6 @@ struct ScreenConfiguration: Codable, Equatable {
         self.savedVideoBookmarkData = savedVideoBookmarkData ?? wallpaper.activeVideoBookmarkData
         self.playbackSpeed = playbackSpeed
         self.fitMode = fitMode
-        self.pauseOnBattery = pauseOnBattery
         self.frameRateLimit = frameRateLimit
         self.particleEffect = particleEffect
         self.effectConfig = effectConfig
@@ -95,7 +91,6 @@ struct ScreenConfiguration: Codable, Equatable {
         videoBookmarkData: Data,
         playbackSpeed: Double = 1.0,
         fitMode: VideoFitMode = .aspectFill,
-        pauseOnBattery: Bool = false,
         frameRateLimit: FrameRateLimit = .fps60,
         particleEffect: ParticleEffect = .none,
         effectConfig: VideoEffectConfig = .default,
@@ -111,7 +106,6 @@ struct ScreenConfiguration: Codable, Equatable {
             wallpaper: .video(bookmarkData: videoBookmarkData),
             playbackSpeed: playbackSpeed,
             fitMode: fitMode,
-            pauseOnBattery: pauseOnBattery,
             frameRateLimit: frameRateLimit,
             particleEffect: particleEffect,
             effectConfig: effectConfig,
@@ -130,7 +124,6 @@ struct ScreenConfiguration: Codable, Equatable {
         videoBookmarkData: Data,
         playbackSpeed: Double = 1.0,
         fitMode: VideoFitMode = .aspectFill,
-        pauseOnBattery: Bool = false,
         frameRateLimit: FrameRateLimit = .fps60,
         wallpaperType: WallpaperType,
         particleEffect: ParticleEffect = .none,
@@ -153,7 +146,6 @@ struct ScreenConfiguration: Codable, Equatable {
                 videoBookmarkData: videoBookmarkData,
                 playbackSpeed: playbackSpeed,
                 fitMode: fitMode,
-                pauseOnBattery: pauseOnBattery,
                 frameRateLimit: frameRateLimit,
                 particleEffect: particleEffect,
                 effectConfig: effectConfig,
@@ -167,7 +159,7 @@ struct ScreenConfiguration: Codable, Equatable {
         case .html, .metalShader:
             let wallpaper: WallpaperContent = switch wallpaperType {
             case .html:
-                .html(htmlContent ?? "")
+                .html(source: HTMLSource(legacyString: htmlContent ?? ""), config: .default)
             case .metalShader:
                 .metalShader(shaderPreset ?? .waves)
             case .video:
@@ -179,7 +171,6 @@ struct ScreenConfiguration: Codable, Equatable {
                 wallpaper: wallpaper,
                 playbackSpeed: playbackSpeed,
                 fitMode: fitMode,
-                pauseOnBattery: pauseOnBattery,
                 frameRateLimit: frameRateLimit,
                 particleEffect: particleEffect,
                 effectConfig: effectConfig,
@@ -206,8 +197,25 @@ struct ScreenConfiguration: Codable, Equatable {
         videoBookmarkData
     }
 
+    var htmlSource: HTMLSource? {
+        activeWallpaper.htmlSource
+    }
+
+    var htmlConfig: HTMLConfig? {
+        activeWallpaper.htmlConfig
+    }
+
+    /// String representation of the HTML payload, when one exists in textual
+    /// form. Returns the URL string for `.url` and the raw HTML for
+    /// `.inline`; `nil` for `.file` / `.folder` because those require
+    /// security-scoped bookmarks rather than literal strings.
     var htmlContent: String? {
-        activeWallpaper.htmlContent
+        guard let source = activeWallpaper.htmlSource else { return nil }
+        switch source {
+        case .url(let url): return url.absoluteString
+        case .inline(let raw): return raw
+        case .file, .folder: return nil
+        }
     }
 
     var shaderPreset: MetalShaderPreset? {
@@ -219,7 +227,8 @@ struct ScreenConfiguration: Codable, Equatable {
         screenID = try c.decode(UInt32.self, forKey: .screenID)
         playbackSpeed = try c.decodeIfPresent(Double.self, forKey: .playbackSpeed) ?? 1.0
         fitMode = try c.decodeIfPresent(VideoFitMode.self, forKey: .fitMode) ?? .aspectFill
-        pauseOnBattery = try c.decodeIfPresent(Bool.self, forKey: .pauseOnBattery) ?? false
+        // Legacy `pauseOnBattery` per-screen field is silently dropped on
+        // decode — power policy now lives entirely in `GlobalSettings`.
         frameRateLimit = try c.decodeIfPresent(FrameRateLimit.self, forKey: .frameRateLimit) ?? .fps60
         particleEffect = try c.decodeIfPresent(ParticleEffect.self, forKey: .particleEffect) ?? .none
         effectConfig = try c.decodeIfPresent(VideoEffectConfig.self, forKey: .effectConfig) ?? .default
@@ -258,7 +267,8 @@ struct ScreenConfiguration: Codable, Equatable {
             activeWallpaper = .video(bookmarkData: bookmark)
             savedVideoBookmarkData = bookmark
         case .html:
-            activeWallpaper = .html(try c.decodeIfPresent(String.self, forKey: .htmlContent) ?? "")
+            let legacyHTML = try c.decodeIfPresent(String.self, forKey: .htmlContent) ?? ""
+            activeWallpaper = .html(source: HTMLSource(legacyString: legacyHTML), config: .default)
             savedVideoBookmarkData = legacySavedBookmark
         case .metalShader:
             activeWallpaper = .metalShader(
@@ -275,7 +285,6 @@ struct ScreenConfiguration: Codable, Equatable {
         try c.encodeIfPresent(savedVideoBookmarkData, forKey: .savedVideoBookmarkData)
         try c.encode(playbackSpeed, forKey: .playbackSpeed)
         try c.encode(fitMode, forKey: .fitMode)
-        try c.encode(pauseOnBattery, forKey: .pauseOnBattery)
         try c.encode(frameRateLimit, forKey: .frameRateLimit)
         try c.encode(particleEffect, forKey: .particleEffect)
         try c.encode(effectConfig, forKey: .effectConfig)
@@ -289,9 +298,23 @@ struct ScreenConfiguration: Codable, Equatable {
         try c.encode(muted, forKey: .muted)
     }
 
-    mutating func setHTMLWallpaper(_ content: String) {
+    mutating func setHTMLWallpaper(source: HTMLSource, config: HTMLConfig = .default) {
         preserveCurrentVideoBookmarkIfNeeded()
-        activeWallpaper = .html(content)
+        activeWallpaper = .html(source: source, config: config)
+    }
+
+    /// Legacy convenience used by callers that only have a raw URL string.
+    /// Internally bridges to the new `HTMLSource`-based API by reusing the
+    /// migration heuristic.
+    mutating func setHTMLWallpaper(_ content: String) {
+        setHTMLWallpaper(source: HTMLSource(legacyString: content), config: .default)
+    }
+
+    /// Replace only the per-screen `HTMLConfig` while preserving the current
+    /// `HTMLSource`. No-op when the active wallpaper is not HTML.
+    mutating func updateHTMLConfig(_ config: HTMLConfig) {
+        guard case .html(let source, _) = activeWallpaper else { return }
+        activeWallpaper = .html(source: source, config: config)
     }
 
     mutating func setShaderWallpaper(_ preset: MetalShaderPreset) {

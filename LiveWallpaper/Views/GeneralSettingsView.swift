@@ -286,7 +286,7 @@ struct GeneralSettingsView: View {
     private func resetAllSettings() {
         SettingsManager.shared.cleanAllSettings()
 
-        globalPauseOnBattery = true
+        globalPauseOnBattery = false
         startOnLogin = false
         preservePlaybackOnLock = false
         minimumBatteryLevel = nil

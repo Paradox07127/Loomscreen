@@ -1,46 +1,26 @@
 import Foundation
 
-enum HTMLWallpaperSource: Equatable {
-    case remoteURL(URL)
-    case localFile(URL)
-    case inlineHTML(String)
-
-    init(rawValue: String) {
-        if let url = URL(string: rawValue), let scheme = url.scheme, scheme.hasPrefix("http") {
-            self = .remoteURL(url)
-        } else if FileManager.default.fileExists(atPath: rawValue) {
-            self = .localFile(URL(fileURLWithPath: rawValue))
-        } else {
-            self = .inlineHTML(rawValue)
-        }
-    }
-
-    var displayName: String {
-        switch self {
-        case .remoteURL(let url):
-            return url.host ?? url.absoluteString
-        case .localFile(let url):
-            return url.lastPathComponent
-        case .inlineHTML:
-            return "Inline HTML"
-        }
-    }
-}
-
+/// Resolved, runtime-ready description of what a screen should display.
+///
+/// Translates the persisted `WallpaperContent` into a value the runtime layer
+/// can act on directly — the configuration store keeps its own representation
+/// while the runtime always sees a fully-formed definition (including
+/// `HTMLConfig` defaults for legacy decodes).
 enum WallpaperSessionDefinition: Equatable {
     case video(bookmarkData: Data)
-    case html(HTMLWallpaperSource)
+    case html(HTMLSource, HTMLConfig)
     case metalShader(MetalShaderPreset)
 
     init?(configuration: ScreenConfiguration) {
         switch configuration.activeWallpaper {
         case .video(let bookmarkData):
+            guard !bookmarkData.isEmpty else { return nil }
             self = .video(bookmarkData: bookmarkData)
-        case .html(let htmlContent):
-            guard !htmlContent.isEmpty else {
-                return nil
-            }
-            self = .html(HTMLWallpaperSource(rawValue: htmlContent))
+        case .html(let source, let config):
+            // Empty inline HTML means "user has not picked anything yet" —
+            // surface as no-session so the runtime tears down gracefully.
+            if case .inline(let raw) = source, raw.isEmpty { return nil }
+            self = .html(source, config)
         case .metalShader(let preset):
             self = .metalShader(preset)
         }
@@ -50,7 +30,7 @@ enum WallpaperSessionDefinition: Equatable {
         switch self {
         case .video(let bookmarkData):
             return bookmarkNameResolver(bookmarkData)
-        case .html(let source):
+        case .html(let source, _):
             return source.displayName
         case .metalShader(let preset):
             return preset.rawValue

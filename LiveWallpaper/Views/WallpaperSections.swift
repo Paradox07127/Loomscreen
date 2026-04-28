@@ -23,43 +23,6 @@ struct WallpaperTypePicker: View {
     }
 }
 
-// MARK: - HTML Wallpaper Section
-
-struct HTMLWallpaperSection: View {
-    var screen: Screen
-    @Binding var htmlContent: String
-    @Environment(ScreenManager.self) private var screenManager
-
-    var body: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 12) {
-                Label("Web / HTML Wallpaper", systemImage: "globe")
-                    .font(.headline)
-
-                Divider()
-
-                HStack {
-                    TextField("Enter URL (https://...) or local HTML path", text: $htmlContent)
-                        .textFieldStyle(.roundedBorder)
-
-                    Button("Load") {
-                        guard !htmlContent.isEmpty else { return }
-                        screenManager.setHTMLWallpaper(url: htmlContent, for: screen)
-                    }
-                    .buttonStyle(.glassProminent)
-                    .disabled(htmlContent.isEmpty)
-                }
-
-                Text("Supports web URLs, local .html files, or inline HTML code")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(14)
-        }
-        .groupBoxStyle(ContainerGroupBoxStyle())
-    }
-}
-
 // MARK: - Shader Wallpaper Section
 
 struct ShaderWallpaperSection: View {

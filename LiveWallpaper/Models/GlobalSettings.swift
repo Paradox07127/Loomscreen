@@ -9,7 +9,10 @@ struct GlobalSettings: Codable {
     var pauseOnFullScreen: Bool
 
     init(
-        globalPauseOnBattery: Bool = true,
+        // Default `false` so a freshly-installed or reset app plays its
+        // wallpaper out of the box even when running on battery — power
+        // savers can opt in via General Settings.
+        globalPauseOnBattery: Bool = false,
         preservePlaybackOnLock: Bool = false,
         startOnLogin: Bool = false,
         minimumBatteryLevel: Double? = nil,
@@ -26,7 +29,7 @@ struct GlobalSettings: Codable {
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        globalPauseOnBattery = try c.decodeIfPresent(Bool.self, forKey: .globalPauseOnBattery) ?? true
+        globalPauseOnBattery = try c.decodeIfPresent(Bool.self, forKey: .globalPauseOnBattery) ?? false
         preservePlaybackOnLock = try c.decodeIfPresent(Bool.self, forKey: .preservePlaybackOnLock) ?? false
         startOnLogin = try c.decodeIfPresent(Bool.self, forKey: .startOnLogin) ?? false
         minimumBatteryLevel = try c.decodeIfPresent(Double.self, forKey: .minimumBatteryLevel)

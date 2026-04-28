@@ -10,15 +10,7 @@ class Screen: Identifiable, Hashable {
 
     // MARK: - Unified Runtime Session
 
-    private(set) var runtimeSession: (any WallpaperRuntimeSession)? {
-        didSet {
-            guard !isSameSession(oldValue, runtimeSession) else { return }
-            // Observer transition MUST run while `oldValue` still owns its
-            // player reference; teardown happens after.
-            handleRuntimeSessionTransition(from: oldValue, to: runtimeSession)
-            oldValue?.cleanup()
-        }
-    }
+    private(set) var runtimeSession: (any WallpaperRuntimeSession)?
 
     var activeWallpaperWindow: NSWindow? {
         runtimeSession?.wallpaperWindow
@@ -101,19 +93,45 @@ class Screen: Identifiable, Hashable {
         return runtimeSession?.summary ?? .notConfigured
     }
 
+    /// Install a new session, cleaning up the previous one immediately.
+    /// Used for direct replacements (initial install, clear, or any path
+    /// that does not need a visual fade-through window of overlap).
     func installRuntimeSession(_ session: any WallpaperRuntimeSession) {
-        // Setter's `didSet` cleans up the previous session AFTER the observer
-        // transition runs, so do not pre-clean here — that nils the old
-        // player and breaks observer removal.
+        guard !isSameSession(runtimeSession, session) else { return }
+        let old = runtimeSession
+        handleRuntimeSessionTransition(from: old, to: session)
         runtimeSession = session
+        old?.cleanup()
+    }
+
+    /// Swap to `newSession` WITHOUT cleaning up the previous session.
+    /// Returns the previous session so the caller — typically
+    /// `ScreenManager.transitionSession(...)` — can clean it up after the
+    /// visual crossfade animation finishes.
+    @discardableResult
+    func stageRuntimeSessionForTransition(_ session: any WallpaperRuntimeSession) -> (any WallpaperRuntimeSession)? {
+        guard !isSameSession(runtimeSession, session) else { return nil }
+        let old = runtimeSession
+        handleRuntimeSessionTransition(from: old, to: session)
+        runtimeSession = session
+        return old
     }
 
     func clearWallpaperRuntimeSession() {
+        let old = runtimeSession
+        guard old != nil else { return }
+        handleRuntimeSessionTransition(from: old, to: nil)
         runtimeSession = nil
+        old?.cleanup()
     }
 
     func adoptRuntimeSession(from existingScreen: Screen) {
-        runtimeSession = existingScreen.runtimeSession
+        // Adoption shares the SAME session reference between screens, so we
+        // never want to cleanup the previously-held session here.
+        let new = existingScreen.runtimeSession
+        guard !isSameSession(runtimeSession, new) else { return }
+        handleRuntimeSessionTransition(from: runtimeSession, to: new)
+        runtimeSession = new
     }
 
     func updateRuntimeFrame(to frame: CGRect) {

@@ -286,10 +286,7 @@ struct PlaylistSection: View {
 // MARK: - PlaylistEntry View Model
 
 struct PlaylistEntry: Identifiable, Equatable {
-    /// Stable ID: derived from bookmark + primary flag. Survives reload as
-    /// long as bookmark bytes don't change, so SwiftUI ForEach identity and
-    /// in-flight drag previews stay coherent.
-    var id: String { "\(isPrimary ? "p" : "x"):\(bookmark.hashValue)" }
+    var id: String { "\(isPrimary ? "p" : "x"):\(bookmark.base64EncodedString())" }
     let bookmark: Data
     var isPrimary: Bool
     var isPlaying: Bool
