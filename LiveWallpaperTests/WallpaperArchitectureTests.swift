@@ -144,6 +144,28 @@ struct PlaylistEntryIdentityTests {
     }
 }
 
+@Suite("WeatherReactivePolicy")
+struct WeatherReactivePolicyTests {
+    @Test("Monitor runs only when an active screen has weather-reactive effects")
+    func monitorRequiresActiveWeatherReactiveConfiguration() {
+        let activeID: CGDirectDisplayID = 10
+        let inactiveID: CGDirectDisplayID = 20
+
+        var activeConfig = ScreenConfiguration(screenID: activeID, videoBookmarkData: Data([0x01]))
+        activeConfig.effectConfig.weatherReactive = true
+
+        var inactiveConfig = ScreenConfiguration(screenID: inactiveID, videoBookmarkData: Data([0x02]))
+        inactiveConfig.effectConfig.weatherReactive = true
+
+        var disabledConfig = ScreenConfiguration(screenID: activeID, videoBookmarkData: Data([0x03]))
+        disabledConfig.effectConfig.weatherReactive = false
+
+        #expect(WeatherReactivePolicy.shouldMonitor(configurations: [activeConfig], activeScreenIDs: [activeID]))
+        #expect(!WeatherReactivePolicy.shouldMonitor(configurations: [inactiveConfig], activeScreenIDs: [activeID]))
+        #expect(!WeatherReactivePolicy.shouldMonitor(configurations: [disabledConfig], activeScreenIDs: [activeID]))
+    }
+}
+
 @MainActor
 private final class FakePlaybackController: WallpaperPlaybackControllable {
     var isPlaying: Bool

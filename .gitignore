@@ -117,5 +117,6 @@ Temporary Items
 # Application specific
 *.swp
 *.log
+.audit/
 
 docs/

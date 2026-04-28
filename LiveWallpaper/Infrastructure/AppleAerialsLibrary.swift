@@ -264,14 +264,7 @@ extension AppleAerialsLibrary {
         }
     }
 
-    /// Returns nil when the selected directory does not look like an Apple
-    /// wallpaper structure. This protects against runaway scans when the user
-    /// accidentally grants a parent path like `~/Library/Application Support/`.
-    ///
-    /// Recognized layouts:
-    /// - **macOS 26 Tahoe**: `~/Library/Application Support/com.apple.wallpaper/aerials/videos/<UUID>.mov`
-    /// - macOS 14/15 Sonoma/Sequoia: `/Library/Application Support/com.apple.idleassetsd/Customer/4KSDR240FPS/<UUID>.mov`
-    /// - Tahoe bundled motion: `/System/Library/Desktop Pictures/.wallpapers/`
+    /// Builds a bounded scan plan for recognized Apple wallpaper layouts.
     nonisolated static func scanPlan(for selectedDirectory: URL, fileManager: FileManager = .default) -> ScanPlan? {
         let last = selectedDirectory.lastPathComponent
 
@@ -505,23 +498,7 @@ extension AppleAerialsLibrary {
 // MARK: - Default Locations
 
 extension AppleAerialsLibrary {
-    /// Default directory for the NSOpenPanel.
-    ///
-    /// **Sandbox quirk**: A sandboxed app's `FileManager.fileExists` returns
-    /// `false` for paths inside the user's Library before authorization,
-    /// because the sandbox blocks even existence checks. NSOpenPanel itself
-    /// runs in a separate powerbox process that can see the path. So we set
-    /// `directoryURL` unconditionally to the Tahoe canonical path — the
-    /// panel will resolve it correctly.
-    ///
-    /// Pointing at `aerials/` (parent of `videos/`) instead of `videos/`
-    /// directly: granting the parent gives us read access to both the
-    /// `videos/<UUID>.mov` files AND the sibling `manifest/entries.json`
-    /// metadata used to translate UUIDs into human-readable names.
-    ///
-    /// Verified empirically on macOS 26 Tahoe:
-    /// - Videos:   `~/Library/Application Support/com.apple.wallpaper/aerials/videos/<UUID>.mov`
-    /// - Metadata: `~/Library/Application Support/com.apple.wallpaper/aerials/manifest/entries.json`
+    /// Default Powerbox location; grants both aerial videos and metadata.
     nonisolated static func suggestedDirectoryToGrant(fileManager: FileManager = .default) -> URL {
         fileManager
             .homeDirectoryForCurrentUser

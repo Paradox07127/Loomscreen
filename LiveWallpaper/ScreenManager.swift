@@ -305,7 +305,6 @@ final class ScreenManager {
     func setVideo(url: URL, bookmarkData: Data, for screen: Screen) {
         Logger.info("Setting video for screen \(screen.id): \(url.lastPathComponent)", category: .screenManager)
 
-        let globalSettings = SettingsManager.shared.loadGlobalSettings()
         let existing = configurationStore.get(for: screen.id)
 
         // Is the user re-picking the SAME file? If so we only need to refresh
@@ -336,17 +335,10 @@ final class ScreenManager {
                 videoBookmarkData: bookmarkData
             )
         }
-        configurationStore.save(configuration)
-
         if isSameURL, screen.videoPlayer != nil {
             // Keep the existing player; reapply settings on it.
+            configurationStore.save(configuration)
             applyConfiguration(configuration, to: screen, preservingState: true)
-            return
-        }
-
-        // New URL (or no live player) — validate and set up playback.
-        guard SettingsManager.shared.validateConfiguration(for: screen.id) else {
-            Logger.error("Failed to save video configuration for screen \(screen.id)", category: .screenManager)
             return
         }
 
@@ -356,6 +348,16 @@ final class ScreenManager {
                 try await PlayableVideoLoader.validatePlayableVideo(at: url)
                 await MainActor.run { [weak self] in
                     guard let self, self.isCurrentTransition(generation, for: screen.id) else { return }
+                    self.configurationStore.save(configuration)
+                    guard SettingsManager.shared.validateConfiguration(for: screen.id) else {
+                        Logger.error("Failed to save video configuration for screen \(screen.id)", category: .screenManager)
+                        if let existing {
+                            self.configurationStore.save(existing)
+                        } else {
+                            self.configurationStore.remove(for: screen.id)
+                        }
+                        return
+                    }
                     self.setupVideoPlayback(url: url, screen: screen)
                 }
             } catch {
@@ -755,7 +757,6 @@ final class ScreenManager {
         var updatedScreens = false
 
         for screen in screens {
-            let configuration = configurationStore.get(for: screen.id)
             let isHiddenByFullScreen = globalSettings.pauseOnFullScreen &&
                 fullScreenDetector.isDesktopHidden(for: screen.id)
 
@@ -1127,9 +1128,9 @@ final class ScreenManager {
         guard var config = configurationStore.get(for: screen.id) else { return }
         config.effectConfig.weatherReactive = enabled
         saveConfiguration(config)
+        refreshWeatherMonitoringState()
 
         if enabled {
-            weatherService.startMonitoring()
             applyWeatherEffects(for: screen)
         } else {
             // Revert to manual settings — preserve persisted particle density.
@@ -1165,19 +1166,24 @@ final class ScreenManager {
         applyVideoEffects(for: screen, config: updatedConfig)
     }
 
-    /// Subscribe to WeatherReactiveService updates and apply them to weather-reactive
-    /// screens. WeatherReactiveService owns the polling schedule (15-min loop), so
-    /// ScreenManager only reacts when fresh data arrives instead of double-scheduling.
+    /// Reacts to WeatherReactiveService updates; the service owns polling.
     func startWeatherMonitoring() {
         observeWeatherChanges()
+        refreshWeatherMonitoringState()
+    }
+
+    private func refreshWeatherMonitoringState() {
+        let activeScreenIDs = Set(screens.map(\.id))
+        let configurations = activeScreenIDs.compactMap { configurationStore.get(for: $0) }
+        if WeatherReactivePolicy.shouldMonitor(configurations: configurations, activeScreenIDs: activeScreenIDs) {
+            weatherService.startMonitoring()
+        } else {
+            weatherService.stopMonitoring()
+        }
     }
 
     private func observeWeatherChanges() {
-        // `withObservationTracking` is one-shot — it fires `onChange` at most
-        // once per registration. To keep reacting to weather updates we must
-        // re-register inside the handler. This is the intended pattern for
-        // `@Observable` + Combine-style reaction; do not "simplify" it to a
-        // single call or we'll only react to the first weather update.
+        // Observation tracking is one-shot; re-register after each update.
         withObservationTracking {
             // Track the observable state we react to.
             _ = weatherService.currentParticleEffect
