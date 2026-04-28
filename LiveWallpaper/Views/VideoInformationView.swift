@@ -48,45 +48,57 @@ struct VideoInformationOverlay: View {
         .background(Color.black.opacity(0.6))
         .clipShape(Capsule())
         .shadow(color: .black.opacity(0.3), radius: 5, x: 0, y: 2)
-        .onAppear {
-            loadVideoInformation()
+        .task(id: currentItemID) {
+            await loadVideoInformation()
         }
     }
-    
-    private func loadVideoInformation() {
+
+    private var currentItemID: ObjectIdentifier? {
+        guard let item = player.currentItem else { return nil }
+        return ObjectIdentifier(item)
+    }
+
+    @MainActor
+    private func loadVideoInformation() async {
+        resetVideoInformation()
         guard let playerItem = player.currentItem else { return }
 
         if let urlAsset = playerItem.asset as? AVURLAsset {
-            let path = urlAsset.url.path
-            do {
-                let attributes = try FileManager.default.attributesOfItem(atPath: path)
-                if let size = attributes[.size] as? NSNumber {
-                    fileSize = FormatUtils.formatBytes(size.int64Value)
-                }
-            } catch {}
+            fileSize = Self.fileSizeDescription(for: urlAsset.url) ?? ""
 
-            let assetURL = urlAsset.url
-            Task {
-                if let info = try? await PlayableVideoLoader.detectFormat(at: assetURL) {
-                    await MainActor.run { self.formatBadges = info.badges }
-                }
+            if let info = try? await PlayableVideoLoader.detectFormat(at: urlAsset.url) {
+                guard !Task.isCancelled else { return }
+                formatBadges = info.badges
             }
         }
 
-        Task {
-            do {
-                let videoTracks = try await playerItem.asset.loadTracks(withMediaType: .video)
-                guard let track = videoTracks.first else { return }
+        do {
+            let videoTracks = try await playerItem.asset.loadTracks(withMediaType: .video)
+            guard let track = videoTracks.first else { return }
 
-                let naturalSize = try await track.load(.naturalSize)
-                let preferredTransform = try await track.load(.preferredTransform)
-                let nominalFrameRate = try await track.load(.nominalFrameRate)
+            let naturalSize = try await track.load(.naturalSize)
+            let preferredTransform = try await track.load(.preferredTransform)
+            let nominalFrameRate = try await track.load(.nominalFrameRate)
 
-                let transformedSize = naturalSize.applying(preferredTransform)
-                videoResolution = (width: abs(Int(transformedSize.width)),
-                                   height: abs(Int(transformedSize.height)))
-                videoFrameRate = Double(nominalFrameRate)
-            } catch {}
+            guard !Task.isCancelled else { return }
+            let transformedSize = naturalSize.applying(preferredTransform)
+            videoResolution = (width: abs(Int(transformedSize.width)),
+                               height: abs(Int(transformedSize.height)))
+            videoFrameRate = Double(nominalFrameRate)
+        } catch {}
+    }
+
+    private func resetVideoInformation() {
+        videoResolution = nil
+        videoFrameRate = 0
+        fileSize = ""
+        formatBadges = []
+    }
+
+    private static func fileSizeDescription(for url: URL) -> String? {
+        guard let size = try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? NSNumber else {
+            return nil
         }
+        return FormatUtils.formatBytes(size.int64Value)
     }
 }

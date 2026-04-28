@@ -10,7 +10,7 @@ struct ScreenDetailView: View {
     @State private var selectedFitMode: VideoFitMode = .aspectFill
     @State private var isLoading: Bool = false
     private var wallpaperSessionSummary: WallpaperSessionSummary {
-        screen.wallpaperSessionSummary
+        screenManager.wallpaperSummary(for: screen)
     }
     private var sessionStatusText: String {
         switch wallpaperSessionSummary.wallpaperType {
@@ -70,7 +70,6 @@ struct ScreenDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
             HStack(alignment: .center, spacing: 14) {
                 ZStack {
                     Circle().fill(Color.accentColor.opacity(0.15)).frame(width: 44, height: 44)
@@ -137,12 +136,7 @@ struct ScreenDetailView: View {
 
             Divider()
 
-            // MAIN CONTENT (Two Columns)
-            // Disable implicit layout animation when switching wallpaper type —
-            // the inspector's appear/disappear and the preview-area resize
-            // would otherwise produce an unwanted stretch.
             HStack(spacing: 0) {
-                // LEFT: Video Preview
                 ZStack {
                     Color(NSColor.underPageBackgroundColor)
 
@@ -157,8 +151,6 @@ struct ScreenDetailView: View {
                                     selectedFitMode: selectedFitMode,
                                     startPreview: setupPreviewPlayer
                                 )
-                                // Locked 16:9 + max size: prevents preview aspect ratio from
-                                // jumping when switching screens with different inspector content lengths.
                                 .aspectRatio(16/9, contentMode: .fit)
                                 .frame(maxWidth: 720, maxHeight: 405)
                                 .shadow(color: Color.black.opacity(0.18), radius: 12, x: 0, y: 4)
@@ -177,8 +169,6 @@ struct ScreenDetailView: View {
 
                                     Divider()
 
-                                    // Speed gets its own row so it doesn't compete with Fit
-                                    // for horizontal space (the old HStack truncated the picker).
                                     HStack(spacing: 10) {
                                         Text("Speed")
                                             .font(.system(size: 12, weight: .medium))
@@ -198,8 +188,6 @@ struct ScreenDetailView: View {
                                         .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
                                 )
                             }
-                            // Center preview + controls vertically. The previous Spacer(minLength:0)
-                            // with alignment:.top left a large empty band below the controls.
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .padding(.horizontal, 24)
                             .padding(.vertical, 18)
@@ -230,17 +218,10 @@ struct ScreenDetailView: View {
 
                 Divider()
 
-                // RIGHT: Inspector ScrollView
                 if selectedWallpaperType == .video {
                     ScrollView {
-                        // GlassEffectContainer enables glass morphing between
-                        // sibling cards and is more performant than rendering
-                        // each glass surface independently.
                         GlassEffectContainer(spacing: 16) {
                             VStack(spacing: 16) {
-                            // Mode picker: single capsule container with internal segments
-                            // (matches the toolbar Wallpaper Type picker visually); the entire
-                            // segment area is hit-testable, not just the text glyphs.
                             HStack(spacing: 0) {
                                 ForEach(WallpaperMode.allCases) { mode in
                                     Button {
@@ -267,7 +248,6 @@ struct ScreenDetailView: View {
                             .glassEffect(.regular.interactive(), in: .capsule)
 
                             if selectedWallpaperMode == .playlist {
-                            // Playlist Group
                             GroupBox {
                                 CollapsibleSection(
                                     title: "Playlist",
@@ -287,7 +267,6 @@ struct ScreenDetailView: View {
                             }
 
                             if selectedWallpaperMode == .schedule {
-                            // Schedule Group
                             GroupBox {
                                 CollapsibleSection(
                                     title: "Schedule",
@@ -304,7 +283,6 @@ struct ScreenDetailView: View {
                             .groupBoxStyle(ContainerGroupBoxStyle())
                             }
 
-                            // Environment Group
                             GroupBox {
                                 CollapsibleSection(
                                     title: "Environment",
@@ -350,7 +328,6 @@ struct ScreenDetailView: View {
 
                                         Divider()
 
-                                        // Weather-Reactive toggle
                                         SettingRow(icon: "cloud.sun", iconColor: .cyan, title: "Weather") {
                                             Toggle("", isOn: $effectConfig.weatherReactive)
                                                 .labelsHidden()
@@ -374,7 +351,6 @@ struct ScreenDetailView: View {
                             }
                             .groupBoxStyle(ContainerGroupBoxStyle())
 
-                            // Color & Filters Group
                             GroupBox {
                                 CollapsibleSection(
                                     title: "Color & Filters",
@@ -386,7 +362,6 @@ struct ScreenDetailView: View {
                             }
                             .groupBoxStyle(ContainerGroupBoxStyle())
 
-                            // Display Group
                             GroupBox {
                                 CollapsibleSection(
                                     title: "Display",
@@ -498,10 +473,7 @@ struct ScreenDetailView: View {
             cleanupPreviewPlayer()
             loadScreenConfiguration()
         }
-        // React to background mutations (playlist rotation, schedule switch,
-        // weather effects, power policy edits) so the inspector never shows
-        // stale @State that would clobber the new config when the user
-        // touches a control.
+        // Keep inspector state aligned with background automation.
         .onReceive(NotificationCenter.default.publisher(for: .wallpaperConfigurationDidChange)) { notification in
             guard let changedID = notification.userInfo?["screenID"] as? CGDirectDisplayID,
                   changedID == screen.id else { return }
@@ -554,8 +526,7 @@ struct ScreenDetailView: View {
             }
             .padding(20)
             .transition(.opacity)
-            // Overlay must not intercept the drop — `dropDestination` is on the
-            // outer view body, so passthrough hit-testing keeps the gesture intact.
+            // Drop handling stays on the outer view.
             .allowsHitTesting(false)
         }
     }
@@ -572,8 +543,6 @@ struct ScreenDetailView: View {
     private func handleDrop(urls: [URL]) -> Bool {
         defer { isDraggingOver = false }
         guard let droppedURL = urls.first else { return false }
-        // Route HTML drops through the HTML pipeline; everything else continues
-        // to the video importer, matching the existing UX expectation.
         if isHTMLDrop(droppedURL) {
             applyHTMLDrop(droppedURL)
             return true
@@ -598,7 +567,6 @@ struct ScreenDetailView: View {
 
         let source: HTMLSource?
         if isDirectory.boolValue {
-            // Folder drop — bookmark the directory directly so siblings are reachable.
             guard let bookmark = ResourceUtilities.createBookmark(for: url) else {
                 errorMessage = "Failed to bookmark dropped HTML resource."
                 showErrorAlert = true
@@ -607,13 +575,9 @@ struct ScreenDetailView: View {
             let didStart = url.startAccessingSecurityScopedResource()
             defer { if didStart { url.stopAccessingSecurityScopedResource() } }
             let entries = (try? FileManager.default.contentsOfDirectory(atPath: url.path)) ?? []
-            let indexFileName = ["index.html", "index.htm"].first(where: { entries.contains($0) })
-                ?? entries.first(where: { $0.lowercased().hasSuffix(".html") })
-                ?? "index.html"
+            let indexFileName = ResourceUtilities.inferHTMLIndexFileName(from: entries)
             source = .folder(bookmarkData: bookmark, indexFileName: indexFileName)
         } else {
-            // Single file drop — prefer the parent-folder upgrade so sibling
-            // assets keep resolving across launches; falls back to file-only.
             source = ResourceUtilities.htmlSourceFromPickedFile(url)
         }
 
@@ -633,7 +597,6 @@ struct ScreenDetailView: View {
     }
 
     private func loadScreenConfiguration() {
-        // Always reset transient feedback state when switching screens.
         lockScreenExtracted = false
 
         if let config = screenManager.getConfiguration(for: screen) {
@@ -658,8 +621,6 @@ struct ScreenDetailView: View {
             hasPreviewSource = config.wallpaperType == .video && config.videoBookmarkData != nil
             loadPreviewPosterIfNeeded()
         } else {
-            // No configuration — fall back to defaults so previously selected
-            // values from another screen don't leak in.
             playbackSpeed = 1.0
             selectedFitMode = .aspectFill
             selectedParticleEffect = .none
@@ -684,7 +645,6 @@ struct ScreenDetailView: View {
         previewController.cleanup()
     }
 
-    /// Uses `NSOpenPanel` so the security-scoped bookmark survives creation.
     private func showFilePicker() {
         NSApp.activate(ignoringOtherApps: true)
         let panel = NSOpenPanel()
@@ -744,8 +704,6 @@ struct ScreenDetailView: View {
                 relativeTo: nil,
                 bookmarkDataIsStale: &isStale
             ) else { return nil }
-            // Refresh the persisted bookmark when macOS reports it as stale,
-            // so subsequent launches don't keep re-resolving against drifted data.
             if isStale, let refreshed = ResourceUtilities.createBookmark(for: url) {
                 screenManager.replaceActiveBookmark(refreshed, for: screen)
             }

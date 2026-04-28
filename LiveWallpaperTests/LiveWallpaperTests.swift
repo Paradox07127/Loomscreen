@@ -16,6 +16,33 @@ struct ResourceUtilitiesTests {
         #expect(options.contains(.withSecurityScope))
         #expect(options.contains(.securityScopeAllowOnlyReadAccess))
     }
+
+    @Test("HTML folder index inference prefers standard names")
+    func htmlFolderIndexInferencePrefersStandardNames() {
+        let entries = ["about.html", "index.htm", "index.html"]
+
+        let index = ResourceUtilities.inferHTMLIndexFileName(from: entries)
+
+        #expect(index == "index.html")
+    }
+
+    @Test("HTML folder index inference falls back to first HTML file")
+    func htmlFolderIndexInferenceFallsBackToFirstHTMLFile() {
+        let entries = ["style.css", "landing.HTML", "script.js"]
+
+        let index = ResourceUtilities.inferHTMLIndexFileName(from: entries)
+
+        #expect(index == "landing.HTML")
+    }
+
+    @Test("HTML folder index inference preserves actual file name casing")
+    func htmlFolderIndexInferencePreservesActualFileNameCasing() {
+        let entries = ["Index.HTML", "about.html"]
+
+        let index = ResourceUtilities.inferHTMLIndexFileName(from: entries)
+
+        #expect(index == "Index.HTML")
+    }
 }
 
 // MARK: - PowerPolicyController Tests
@@ -194,6 +221,53 @@ struct FrameRateLimitTests {
         let data = try JSONEncoder().encode(999)
         let decoded = try JSONDecoder().decode(FrameRateLimit.self, from: data)
         #expect(decoded == .fps60)
+    }
+}
+
+@Suite("PlainVideoFrameRateCompositionPolicy")
+struct PlainVideoFrameRateCompositionPolicyTests {
+    @Test("Default 60 FPS keeps plain video on the native playback path")
+    func fps60DoesNotUsePlainComposition() {
+        let limit = PlainVideoFrameRateCompositionPolicy.compositionLimit(
+            frameRateLimit: .fps60,
+            videoFrameRate: 120,
+            screenRefreshRate: 60
+        )
+
+        #expect(limit == nil)
+    }
+
+    @Test("Unlimited keeps plain video on the native playback path")
+    func unlimitedDoesNotUsePlainComposition() {
+        let limit = PlainVideoFrameRateCompositionPolicy.compositionLimit(
+            frameRateLimit: .unlimited,
+            videoFrameRate: 120,
+            screenRefreshRate: 60
+        )
+
+        #expect(limit == nil)
+    }
+
+    @Test("Explicit 30 FPS uses composition when source FPS is higher")
+    func fps30UsesCompositionForHighSourceFPS() {
+        let limit = PlainVideoFrameRateCompositionPolicy.compositionLimit(
+            frameRateLimit: .fps30,
+            videoFrameRate: 60,
+            screenRefreshRate: 60
+        )
+
+        #expect(limit == 30)
+    }
+
+    @Test("Explicit 30 FPS skips composition when source FPS is already lower")
+    func fps30SkipsCompositionForLowSourceFPS() {
+        let limit = PlainVideoFrameRateCompositionPolicy.compositionLimit(
+            frameRateLimit: .fps30,
+            videoFrameRate: 24,
+            screenRefreshRate: 60
+        )
+
+        #expect(limit == nil)
     }
 }
 

@@ -82,15 +82,12 @@ final class HTMLWallpaperView: NSView {
     }
 
     func loadSource(_ source: HTMLSource) {
-        // Always release any previously held security-scoped URL before
-        // starting a new one, so we never leak sandbox extensions when the
-        // user swaps wallpapers.
         stopActiveSecurityScope()
         switch source {
         case .file(let bookmarkData):
             guard let url = HTMLWallpaperView.resolveBookmark(bookmarkData) else { return }
             activeSecurityScopedURL = url
-            webView.loadFileURL(url, allowingReadAccessTo: url)
+            webView.loadFileURL(url, allowingReadAccessTo: Self.readAccessRoot(forFileURL: url))
         case .folder(let bookmarkData, let indexFileName):
             guard let folderURL = HTMLWallpaperView.resolveBookmark(bookmarkData) else { return }
             activeSecurityScopedURL = folderURL
@@ -123,7 +120,11 @@ final class HTMLWallpaperView: NSView {
     }
 
     func loadFile(_ fileURL: URL) {
-        webView.loadFileURL(fileURL, allowingReadAccessTo: fileURL.deletingLastPathComponent())
+        webView.loadFileURL(fileURL, allowingReadAccessTo: Self.readAccessRoot(forFileURL: fileURL))
+    }
+
+    static func readAccessRoot(forFileURL url: URL) -> URL {
+        url.deletingLastPathComponent()
     }
 
     func applyPerformanceProfile(_ profile: WallpaperPerformanceProfile) {
@@ -196,8 +197,10 @@ final class HTMLWallpaperView: NSView {
                     return
                 }
                 self.compiledTrackerRuleList = list
-                self.webView.configuration.userContentController.add(list)
-                self.hasTrackerRulesAttached = true
+                if !self.hasTrackerRulesAttached {
+                    self.webView.configuration.userContentController.add(list)
+                    self.hasTrackerRulesAttached = true
+                }
             }
         }
     }
@@ -212,6 +215,7 @@ final class HTMLWallpaperView: NSView {
     // MARK: - Cleanup
 
     func cleanUp() {
+        trackerBlockingRequested = false
         webView.stopLoading()
         webView.navigationDelegate = nil
         webView.configuration.userContentController.removeAllUserScripts()
@@ -221,8 +225,6 @@ final class HTMLWallpaperView: NSView {
         }
         stopActiveSecurityScope()
     }
-
-    nonisolated deinit {}
 
     // MARK: - Bookmark Resolution
 

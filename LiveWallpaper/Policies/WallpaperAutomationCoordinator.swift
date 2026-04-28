@@ -15,8 +15,17 @@ final class WallpaperAutomationCoordinator {
         stop()
 
         scheduleMonitorTask = Task { @MainActor in
+            for screen in screenProvider() {
+                scheduleHandler(screen)
+            }
+
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(60))
+                do {
+                    try await Task.sleep(for: .seconds(60))
+                } catch {
+                    return
+                }
+
                 for screen in screenProvider() {
                     scheduleHandler(screen)
                 }
@@ -27,7 +36,11 @@ final class WallpaperAutomationCoordinator {
             var lastRotation: [CGDirectDisplayID: Date] = [:]
 
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(60))
+                do {
+                    try await Task.sleep(for: .seconds(60))
+                } catch {
+                    return
+                }
 
                 let now = Date()
                 for screen in screenProvider() {

@@ -20,11 +20,9 @@ final class VideoEffectsApplicationService {
             return
         }
 
-        // Cancel any in-flight build for this screen — its result would be
-        // stale after a slider drag or wallpaper change.
         cancelInflight(for: screenID)
 
-        let hasEffects = config.effectConfig.hasActiveEffect || config.effectConfig.autoTimeTint
+        let hasEffects = config.effectConfig.hasActiveEffect
         Logger.info("Applying effects for screen \(screenID): hasEffects=\(hasEffects)", category: .videoPlayer)
 
         if !hasEffects {
@@ -58,19 +56,14 @@ final class VideoEffectsApplicationService {
                     guard let self,
                           let player,
                           self.generations[screenID] == generation else { return }
-                    // Route through WallpaperVideoPlayer's centralized writer: composition
-                    // is propagated to every AVQueuePlayer looper item and re-bound on
-                    // currentItem rotation, avoiding stale-composition errors like
-                    // -12784 / -11858 from the compositor pipeline.
                     player.setVideoComposition(composition)
                     self.inflightTasks[screenID] = nil
                 }
             } catch is CancellationError {
-                // expected — newer apply superseded this build
+                return
             } catch {
                 await MainActor.run { [weak self] in
                     Logger.error("Failed to apply video effects: \(error.localizedDescription)", category: .videoPlayer)
-                    // Clear inflightTasks on the error path too, so Task references don't leak.
                     self?.inflightTasks[screenID] = nil
                 }
             }

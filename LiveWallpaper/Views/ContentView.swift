@@ -50,20 +50,20 @@ enum Navigation: Hashable {
 struct Sidebar: View {
     @Binding var selection: Navigation?
     @Environment(ScreenManager.self) private var screenManager
-    @State private var isRefreshing = false
+    @State private var isReloading = false
     
     var body: some View {
         List(selection: $selection) {
             Section(header: HStack(spacing: 4) {
                 Text("Displays").font(.caption).bold().foregroundStyle(.secondary)
-                Button(action: refreshDisplays) {
+                Button(action: reloadWallpapers) {
                     Image(systemName: "arrow.triangle.2.circlepath")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.secondary)
-                        .symbolEffect(.rotate, options: .repeat(.continuous), isActive: isRefreshing)
+                        .symbolEffect(.rotate, options: .repeat(.continuous), isActive: isReloading)
                 }
                 .buttonStyle(.plain)
-                .help("Refresh display list")
+                .help("Reload all wallpapers")
             }) {
                 if screenManager.screens.isEmpty {
                     HStack {
@@ -112,19 +112,17 @@ struct Sidebar: View {
         .navigationSplitViewColumnWidth(min: 200, ideal: 200, max: 280)
     }
 
-    private func refreshDisplays() {
+    private func reloadWallpapers() {
         withAnimation(.snappy(duration: 0.2)) {
-            isRefreshing = true
+            isReloading = true
         }
 
-        // hardRefresh: re-read NSScreen + tear down and rebuild all runtime sessions.
-        // Recovery path for "displays grey out, video disappears after resolution change".
-        screenManager.hardRefresh()
+        screenManager.reloadAllScreens()
 
         Task {
             try? await Task.sleep(for: .milliseconds(500))
             withAnimation(.snappy(duration: 0.2)) {
-                isRefreshing = false
+                isReloading = false
             }
         }
     }
@@ -144,17 +142,10 @@ struct ScreenRow: View {
     var screen: Screen
     @Environment(ScreenManager.self) private var screenManager
 
-    /// Cached effect badge state. Body-level config reads don't trigger on
-    /// `.wallpaperConfigurationDidChange` (the @Observable screens array stays
-    /// the same), so we subscribe ourselves.
     @State private var hasEffectBadge: Bool = false
 
-    private var sessionSummary: WallpaperSessionSummary {
-        screen.wallpaperSessionSummary
-    }
-
     var body: some View {
-        let summary = sessionSummary
+        let summary = screenManager.wallpaperSummary(for: screen)
 
         HStack(spacing: 4) {
             Image(systemName: iconName(for: summary))

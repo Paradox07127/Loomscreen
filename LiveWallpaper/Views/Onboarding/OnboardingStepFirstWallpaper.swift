@@ -283,9 +283,7 @@ private struct HTMLPickerSheet: View {
         let didStart = folderURL.startAccessingSecurityScopedResource()
         defer { if didStart { folderURL.stopAccessingSecurityScopedResource() } }
         let entries = (try? FileManager.default.contentsOfDirectory(atPath: folderURL.path)) ?? []
-        let inferred = ["index.html", "index.htm"].first(where: { entries.contains($0) })
-            ?? entries.first(where: { $0.lowercased().hasSuffix(".html") })
-            ?? "index.html"
+        let inferred = ResourceUtilities.inferHTMLIndexFileName(from: entries)
         pickedFolderBookmark = bookmark
         pickedFolderName = folderURL.lastPathComponent
         pickedFolderIndexFile = inferred

@@ -104,12 +104,9 @@ class VideoContainerView: NSView {
     func setPlayer(_ player: AVPlayer?) {
         if player === currentPlayer { return }
 
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            self.currentPlayer = player
-            self.playerHostView.setVideoGravity(self.fitMode.avLayerVideoGravity)
-            self.playerHostView.setPlayer(player)
-        }
+        currentPlayer = player
+        playerHostView.setVideoGravity(fitMode.avLayerVideoGravity)
+        playerHostView.setPlayer(player)
     }
 
     // MARK: - Public API — Particles

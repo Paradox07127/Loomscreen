@@ -27,34 +27,37 @@ enum EstimatedFrameTickPolicy {
     }
 }
 
+enum MonitoringCadencePolicy {
+    static func shouldSampleGPU(updateCount: Int, cadence: Int) -> Bool {
+        guard cadence > 1, updateCount > 1 else { return true }
+        return updateCount % cadence == 0
+    }
+}
+
 @MainActor @Observable
 final class SystemMonitor {
     static let shared = SystemMonitor()
 
-    // MARK: - Observed Properties
-
     private(set) var cpuUsage: Double = 0
-    /// Whole-machine CPU usage (0-100%), derived from host_statistics(HOST_CPU_LOAD_INFO) deltas.
     private(set) var systemCpuUsage: Double = 0
     private(set) var memoryUsage: UInt64 = 0
     private(set) var totalMemory: UInt64 = 0
     private(set) var isMemoryLow: Bool = false
     private(set) var systemMemoryUsage: Double = 0
-
-    // New metrics
-    private(set) var gpuUsage: Double = 0           // 0-100%
-    private(set) var energyImpact: Double = 0       // watts (approximate)
+    private(set) var gpuUsage: Double = 0
+    private(set) var energyImpact: Double = 0
     private(set) var thermalState: ProcessInfo.ThermalState = .nominal
-    private(set) var videoFPS: Double = 0            // estimated for AVPlayer, actual for shader render loops
+    private(set) var videoFPS: Double = 0
 
     // MARK: - Configuration
 
     @ObservationIgnored private let memoryWarningThreshold: Double = 0.85
     @ObservationIgnored private var updateInterval: TimeInterval = 2.0
+    @ObservationIgnored private let gpuSampleCadence = 3
+    @ObservationIgnored private var resourceUpdateCount = 0
     @ObservationIgnored private var updateTask: Task<Void, Never>?
     @ObservationIgnored private var fpsCounter = FPSCounter()
     @ObservationIgnored private var references = MonitoringReferenceCounter()
-    /// Previous host CPU ticks sample, used to compute deltas between samples.
     @ObservationIgnored private var prevHostCpuLoad: host_cpu_load_info?
 
     private init() {
@@ -66,9 +69,14 @@ final class SystemMonitor {
     func startMonitoring() {
         guard references.start() else { return }
         let interval = updateInterval
+        resourceUpdateCount = 0
         updateTask = Task {
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(interval))
+                do {
+                    try await Task.sleep(for: .seconds(interval))
+                } catch {
+                    return
+                }
                 self.updateResourceUsage()
             }
         }
@@ -111,11 +119,14 @@ final class SystemMonitor {
     // MARK: - Update Loop
 
     private func updateResourceUsage() {
+        resourceUpdateCount += 1
         cpuUsage = getAppCPUUsage()
         systemCpuUsage = getSystemCPUUsage()
         memoryUsage = getAppMemoryUsage()
         systemMemoryUsage = getSystemMemoryUsage()
-        gpuUsage = getGPUUsage()
+        if MonitoringCadencePolicy.shouldSampleGPU(updateCount: resourceUpdateCount, cadence: gpuSampleCadence) {
+            gpuUsage = getGPUUsage()
+        }
         energyImpact = getEnergyImpact()
         thermalState = ProcessInfo.processInfo.thermalState
         videoFPS = fpsCounter.fps
@@ -173,9 +184,6 @@ final class SystemMonitor {
 
     // MARK: - System-wide CPU Usage
 
-    /// Whole-machine CPU usage (0-100), based on `host_statistics(HOST_CPU_LOAD_INFO)`
-    /// tick deltas between samples. First sample returns 0; subsequent samples return
-    /// (user+system+nice) / (user+system+nice+idle).
     private func getSystemCPUUsage() -> Double {
         var info = host_cpu_load_info()
         var size = mach_msg_type_number_t(MemoryLayout<host_cpu_load_info>.stride / MemoryLayout<integer_t>.size)
@@ -192,8 +200,6 @@ final class SystemMonitor {
         defer { prevHostCpuLoad = info }
         guard let prev = prevHostCpuLoad else { return 0 }
 
-        // host_cpu_load_info.cpu_ticks is a fixed tuple of 4 natural_t:
-        // [USER, SYSTEM, IDLE, NICE], indexed via CPU_STATE_*.
         let userDelta   = Double(info.cpu_ticks.0 &- prev.cpu_ticks.0)
         let systemDelta = Double(info.cpu_ticks.1 &- prev.cpu_ticks.1)
         let idleDelta   = Double(info.cpu_ticks.2 &- prev.cpu_ticks.2)
@@ -260,15 +266,12 @@ final class SystemMonitor {
             if IORegistryEntryCreateCFProperties(entry, &properties, kCFAllocatorDefault, 0) == KERN_SUCCESS,
                let dict = properties?.takeRetainedValue() as? [String: Any] {
 
-                // Look for "PerformanceStatistics" or "GPU Core Utilization"
                 if let perfStats = dict["PerformanceStatistics"] as? [String: Any] {
-                    // Different GPU drivers expose utilization under different keys
                     if let util = perfStats["GPU Activity(%)"] as? Double {
                         gpuUtil = util
                     } else if let util = perfStats["Device Utilization %"] as? Int {
                         gpuUtil = Double(util)
                     } else if let util = perfStats["gpuCoreUtilizationComponent"] as? Int {
-                        // Apple Silicon reports 0-100 scale per-component
                         gpuUtil = Double(util)
                     }
                 }
@@ -294,7 +297,6 @@ final class SystemMonitor {
 
         guard result == KERN_SUCCESS else { return 0 }
 
-        // total_energy is in nanojoules. Convert to approximate watts over our update interval.
         let nanojoules = Double(power.gpu_energy.task_gpu_utilisation)
         let watts = nanojoules / (updateInterval * 1_000_000_000)
         return watts
@@ -303,10 +305,9 @@ final class SystemMonitor {
 
 // MARK: - FPS Counter
 
-/// Lightweight frame counter; callers may record actual or estimated frames.
 private class FPSCounter {
     private var timestamps: [CFAbsoluteTime] = []
-    private let window: TimeInterval = 2.0  // rolling 2-second window
+    private let window: TimeInterval = 2.0
 
     var fps: Double {
         let now = CFAbsoluteTimeGetCurrent()
@@ -323,7 +324,6 @@ private class FPSCounter {
         guard count > 0 else { return }
         let now = CFAbsoluteTimeGetCurrent()
         timestamps.append(contentsOf: repeatElement(now, count: count))
-        // Keep array bounded
         if timestamps.count > 300 {
             timestamps.removeFirst(timestamps.count - 200)
         }

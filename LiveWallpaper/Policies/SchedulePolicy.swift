@@ -20,7 +20,7 @@ enum SchedulePolicy {
             return .none
         }
 
-        let activeBookmark = configuration.videoBookmarkData
+        let activeBookmark = configuration.activeWallpaper.activeVideoBookmarkData
 
         if let slot = activeSlot(in: slots, hour: hour),
            let bookmark = slot.videoBookmarkData {

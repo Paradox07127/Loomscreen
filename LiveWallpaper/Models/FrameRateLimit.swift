@@ -65,3 +65,20 @@ enum FrameRateLimit: Int, CaseIterable, Identifiable, Codable {
         return Double(limit == .unlimited ? 60 : limit.rawValue)
     }
 }
+
+enum PlainVideoFrameRateCompositionPolicy {
+    static func compositionLimit(
+        frameRateLimit: FrameRateLimit,
+        videoFrameRate: Double,
+        screenRefreshRate: Double
+    ) -> Float? {
+        guard frameRateLimit == .fps30 else { return nil }
+
+        let limit = frameRateLimit.getEffectiveLimit(
+            videoFrameRate: videoFrameRate,
+            screenRefreshRate: screenRefreshRate
+        )
+        guard limit > 0, videoFrameRate > Double(limit) else { return nil }
+        return limit
+    }
+}

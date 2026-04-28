@@ -2,7 +2,6 @@ import AppKit
 @preconcurrency import AVKit
 import Combine
 
-/// Video player class responsible for playing videos as desktop wallpaper
 @MainActor
 final class WallpaperVideoPlayer {
     // MARK: - Notifications
@@ -31,21 +30,21 @@ final class WallpaperVideoPlayer {
     var videoURL: URL?
     /// Whether audio tracks are disabled at the AVPlayerItem level.
     private(set) var isMuted: Bool = true
+    private(set) var shouldAutoplayWhenReady = true
+    private(set) var requestedFrameRateLimit: Float = 0
 
     // MARK: - Private Properties
 
-    private var window: VideoWallpaperWindow?       // strong: NSApp window list isn't always reliable for borderless wallpaper windows
-    private var videoView: VideoContainerView?      // strong: tied to window's lifetime
+    private var window: VideoWallpaperWindow?
+    private var videoView: VideoContainerView?
     private var playerLooper: AVPlayerLooper?
-    /// Buffered particle effect requested before `videoView` was created
-    /// (e.g. user picked a video and the asset is still loading).
+    private var templatePlayerItem: AVPlayerItem?
+    /// Buffered until asset loading creates the container view.
     private var pendingParticleEffect: (ParticleEffect, Double)?
     private var cleanupTasks = Set<AnyCancellable>()
     private var loadingTask: Task<Void, Never>?
     private var frameRateLimitTask: Task<Void, Never>?
-    /// AVPlayerLooper rotates queued items, so composition must be applied to
-    /// every item + re-applied on currentItem changes to avoid stale-composition
-    /// compositor errors.
+    /// Mirrored onto looper items and future template clones.
     private var currentVideoComposition: AVVideoComposition?
     private var currentItemSubscription: AnyCancellable?
     private var accessToken = false
@@ -54,13 +53,12 @@ final class WallpaperVideoPlayer {
     private var fitMode: VideoFitMode = .aspectFill
     
     // MARK: - Initialization
-    init(url: URL, frame: CGRect, fitMode: VideoFitMode = .aspectFill) {
+    init(url: URL, frame: CGRect, fitMode: VideoFitMode = .aspectFill, loadImmediately: Bool = true) {
         Logger.functionStart(category: .videoPlayer)
         self.initialFrame = frame
         self.fitMode = fitMode
         self.videoURL = url
         
-        // Validate frame
         guard !frame.isEmpty else {
             let error = NSError(
                 domain: "WallpaperVideoPlayer",
@@ -71,6 +69,11 @@ final class WallpaperVideoPlayer {
             Logger.error("WallpaperVideoPlayer init error: \(error.localizedDescription)", category: .videoPlayer)
             return
         }
+
+        guard loadImmediately else {
+            Logger.functionEnd(category: .videoPlayer)
+            return
+        }
         
         setupPlayer(with: url)
         Logger.functionEnd(category: .videoPlayer)
@@ -79,7 +82,6 @@ final class WallpaperVideoPlayer {
     // MARK: - Video Player Setup
     private func setupPlayer(with url: URL) {
         Logger.debug("Setting up player with URL: \(url.lastPathComponent)", category: .videoPlayer)
-        // Ensure we have a valid security-scoped resource
         accessToken = url.startAccessingSecurityScopedResource()
         guard accessToken else {
             let error = NSError(
@@ -99,10 +101,8 @@ final class WallpaperVideoPlayer {
                 let timer = PerformanceTimer(description: "Loading video asset", category: .videoPlayer)
                 let asset = AVURLAsset(url: url)
 
-                // Check for cancellation early
                 try Task.checkCancellation()
 
-                // Load essential properties asynchronously
                 let isPlayable = try await asset.load(.isPlayable)
 
                 guard isPlayable else {
@@ -113,7 +113,6 @@ final class WallpaperVideoPlayer {
 
                 try Task.checkCancellation()
 
-                // Get video frame rate
                 if let videoTrack = try await asset.loadTracks(withMediaType: .video).first {
                     let frameRate = try await videoTrack.load(.nominalFrameRate)
                     await MainActor.run {
@@ -122,7 +121,6 @@ final class WallpaperVideoPlayer {
                     }
                 }
 
-                // Check for cancellation before UI work
                 try Task.checkCancellation()
 
                 timer.checkpoint("Properties loaded")
@@ -145,43 +143,34 @@ final class WallpaperVideoPlayer {
     }
     
     private func configurePlaybackComponents(with asset: AVURLAsset) {
-        // Create an optimized player item with playback settings
         let playerItem = AVPlayerItem(asset: asset)
 
-        // Set up quality of service for better performance
         playerItem.preferredForwardBufferDuration = 5.0
         playerItem.canUseNetworkResourcesForLiveStreamingWhilePaused = false
 
-        // Apply current audio policy (default: tracks disabled — keeps AVF
-        // from spinning up the audio engine and grabbing AirPods/output).
         applyAudioPolicy(to: playerItem)
 
-        // Use AVQueuePlayer + AVPlayerLooper for seamless zero-cost looping
-        // (avoids seek-to-zero which flushes the decode pipeline)
         let queuePlayer = AVQueuePlayer()
+        queuePlayer.actionAtItemEnd = .none
         queuePlayer.automaticallyWaitsToMinimizeStalling = true
         queuePlayer.volume = isMuted ? 0 : 1
         queuePlayer.isMuted = isMuted
         self.player = queuePlayer
+        self.templatePlayerItem = playerItem
         self.playerLooper = AVPlayerLooper(player: queuePlayer, templateItem: playerItem)
         
-        // Create and configure window. VideoContainerView owns both the video
-        // host and the particle overlay internally so frame coordinates are
-        // never crossed between window-screen-space and view-local-space.
         let videoWindow = VideoWallpaperWindow(frame: initialFrame)
         let containerView = VideoContainerView(frame: initialFrame)
         containerView.fitMode = fitMode
         videoWindow.contentView = containerView
         containerView.setPlayer(player)
 
-        // Ensure proper window level and ordering
         videoWindow.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)) - 1)
         videoWindow.orderBack(nil)
 
         self.window = videoWindow
         self.videoView = containerView
 
-        // Drain any particle request that arrived before the view was ready.
         if let pending = pendingParticleEffect {
             pendingParticleEffect = nil
             containerView.setParticleEffect(pending.0, density: pending.1)
@@ -191,20 +180,24 @@ final class WallpaperVideoPlayer {
         setupFrameObserver()
         setupFPSTracking()
 
-        // Wait for player to be ready, then start playback
+        if queuePlayer.currentItem == nil {
+            observeInitialCurrentItemForDeferredFrameRateLimit()
+        } else {
+            applyRequestedFrameRateLimitIfReady()
+        }
         setupPlayerReadyObserver()
     }
 
     private func setupPlayerReadyObserver() {
         guard let player = player else { return }
 
-        // Use Combine instead of KVO to avoid captured-var concurrency issues
         player.publisher(for: \.status)
             .first(where: { $0 == .readyToPlay })
             .delay(for: .milliseconds(200), scheduler: DispatchQueue.main)
             .sink { [weak self] _ in
+                guard let self, self.shouldAutoplayWhenReady else { return }
                 Logger.debug("Player is ready to play", category: .videoPlayer)
-                self?.play()
+                self.play()
                 Logger.debug("Auto-starting video playback", category: .videoPlayer)
             }
             .store(in: &cleanupTasks)
@@ -212,7 +205,6 @@ final class WallpaperVideoPlayer {
     
     // MARK: - Observers
     private func setupPlaybackObservers() {
-        // Monitor playback status via Combine (avoids KVO + DispatchQueue isolation issues)
         if let player = player {
             player.publisher(for: \.timeControlStatus)
                 .map { $0 == .playing }
@@ -227,9 +219,6 @@ final class WallpaperVideoPlayer {
 
         // Filter benign AVPlayerLooper/compositor transition errors.
         let benignLooperCodes: Set<Int> = [-11847, -11858, -11878, -12504, -12509, -12784, -12823, -12852, -12860]
-        // Don't bind to the initial currentItem: AVPlayerLooper rotates items, so
-        // a single-object subscription misses later items' failure events. Use a
-        // global observer + queue-membership filter instead.
         NotificationCenter.default.publisher(for: .AVPlayerItemFailedToPlayToEndTime, object: nil)
             .sink { [weak self] notification in
                 guard let self,
@@ -245,14 +234,16 @@ final class WallpaperVideoPlayer {
                 Logger.warning("Playback item failed (code: \(nsError.code)): \(error.localizedDescription)", category: .videoPlayer)
             }
             .store(in: &cleanupTasks)
-
-        // Looping is handled by AVPlayerLooper.
     }
     private func setupFPSTracking() {
         let interval: TimeInterval = 0.5
         let task = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(500))
+                do {
+                    try await Task.sleep(for: .milliseconds(500))
+                } catch {
+                    return
+                }
                 guard let self, self.isPlaying else { continue }
                 let estimatedFrames = EstimatedFrameTickPolicy.tickCount(
                     forFrameRate: self.videoFrameRate,
@@ -260,7 +251,6 @@ final class WallpaperVideoPlayer {
                 )
                 SystemMonitor.shared.tickEstimatedFrames(estimatedFrames)
 
-                // Detect loop completion via AVPlayerLooper.loopCount
                 if let loopCount = self.playerLooper?.loopCount,
                    loopCount > self.lastObservedLoopCount {
                     self.lastObservedLoopCount = loopCount
@@ -283,21 +273,19 @@ final class WallpaperVideoPlayer {
             }
             .store(in: &cleanupTasks)
         
-        // Periodic check to ensure window stays in position
-        // Uses structured Task instead of Timer to avoid @Sendable isolation issues
         let positionTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(30))
+                do {
+                    try await Task.sleep(for: .seconds(30))
+                } catch {
+                    return
+                }
                 self?.updateWindowPositionForCurrentScreen()
             }
         }
         cleanupTasks.insert(AnyCancellable { positionTask.cancel() })
     }
     
-    /// Update window position when the associated NSScreen still exists.
-    /// When no matching NSScreen is found (mid-reconfiguration), keep the existing
-    /// frame instead of falling back to main screen, which would misplace the wallpaper.
-    /// Recovery happens on the next screen-parameters notification + ScreenManager.hardRefresh.
     private func updateWindowPositionForCurrentScreen() {
         let associatedScreen = NSScreen.screens.first { screen in
             guard let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else {
@@ -315,6 +303,7 @@ final class WallpaperVideoPlayer {
     // MARK: - Playback Controls
 
     func play() {
+        shouldAutoplayWhenReady = true
         guard let player = player, player.timeControlStatus != .playing else { return }
         player.play()
         isPlaying = true
@@ -322,6 +311,7 @@ final class WallpaperVideoPlayer {
     }
 
     func pause() {
+        shouldAutoplayWhenReady = false
         guard let player = player, player.timeControlStatus == .playing else { return }
         player.pause()
         isPlaying = false
@@ -346,8 +336,9 @@ final class WallpaperVideoPlayer {
         isMuted = muted
 
         guard let player else { return }
-        // Re-apply policy on every queued + current item so looper rotations
-        // inherit the new state.
+        if let templatePlayerItem {
+            applyAudioPolicy(to: templatePlayerItem)
+        }
         if let current = player.currentItem {
             applyAudioPolicy(to: current)
         }
@@ -373,8 +364,6 @@ final class WallpaperVideoPlayer {
 
     func setParticleEffect(_ effect: ParticleEffect, density: Double = 1.0) {
         guard let videoView = videoView else {
-            // Race: configurePlaybackComponents hasn't run yet (asset still
-            // loading). Buffer the request and apply when videoView is set.
             pendingParticleEffect = (effect, density)
             return
         }
@@ -431,10 +420,8 @@ final class WallpaperVideoPlayer {
         return windowScreenID == screenID
     }
 
-    // MARK: - Video Composition (Centralized Owner)
+    // MARK: - Video Composition
 
-    /// Sole entry point for `AVVideoComposition`. Mirrors composition onto
-    /// every queued item and rebinds on looper rotation.
     func setVideoComposition(_ composition: AVVideoComposition?) {
         currentVideoComposition = composition
         applyCurrentCompositionToQueueItems()
@@ -444,6 +431,8 @@ final class WallpaperVideoPlayer {
     private func applyCurrentCompositionToQueueItems() {
         guard let queuePlayer = player else { return }
         let composition = currentVideoComposition
+        templatePlayerItem?.videoComposition = composition
+        queuePlayer.currentItem?.videoComposition = composition
         for item in queuePlayer.items() {
             item.videoComposition = composition
         }
@@ -460,19 +449,15 @@ final class WallpaperVideoPlayer {
 
     // MARK: - Frame Rate Limiting
     func setFrameRateLimit(_ framesPerSecond: Float) {
-        guard let playerItem = player?.currentItem else {
-            // Expected during reload/restart while AVPlayerItem is reattaching.
-            Logger.debug("Skip frame-rate limit: no player item yet (player not ready)", category: .videoPlayer)
-            return
-        }
-
-        // Cancel any previous frame rate limit task BEFORE the early-return
-        // path so a stale in-flight task can't reapply a limited composition
-        // after the caller asks for unlimited.
+        requestedFrameRateLimit = framesPerSecond
         frameRateLimitTask?.cancel()
         frameRateLimitTask = nil
 
-        // If 0 is provided, use the original frame rate
+        guard let playerItem = player?.currentItem else {
+            Logger.debug("Deferring frame-rate limit until player item is ready", category: .videoPlayer)
+            return
+        }
+
         if framesPerSecond <= 0 {
             setVideoComposition(nil)
             Logger.debug("Frame rate limit disabled, using native frame rate", category: .videoPlayer)
@@ -482,7 +467,6 @@ final class WallpaperVideoPlayer {
         let asset = playerItem.asset
         frameRateLimitTask = Task { [weak self] in
             do {
-                // Check for cancellation early
                 try Task.checkCancellation()
 
                 let videoTracks = try await asset.loadTracks(withMediaType: .video)
@@ -491,20 +475,15 @@ final class WallpaperVideoPlayer {
                     return
                 }
 
-                // Check for cancellation before loading more data
                 try Task.checkCancellation()
 
-                // Load natural video size for composition
                 let naturalSize = try await videoTrack.load(.naturalSize)
 
-                // Check for cancellation before UI work
                 try Task.checkCancellation()
 
                 let targetFPS = framesPerSecond
                 let duration = try await asset.load(.duration)
 
-                // Build composition entirely from Configuration API
-                // (AVMutableVideoComposition* types are deprecated in macOS 26)
                 let layerInstrConfig = AVVideoCompositionLayerInstruction.Configuration(assetTrack: videoTrack)
 
                 var instrConfig = AVVideoCompositionInstruction.Configuration()
@@ -531,8 +510,24 @@ final class WallpaperVideoPlayer {
             }
         }
     }
+
+    private func observeInitialCurrentItemForDeferredFrameRateLimit() {
+        guard let player else { return }
+        player.publisher(for: \.currentItem)
+            .compactMap { $0 }
+            .first()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.applyRequestedFrameRateLimitIfReady()
+            }
+            .store(in: &cleanupTasks)
+    }
+
+    private func applyRequestedFrameRateLimitIfReady() {
+        guard requestedFrameRateLimit > 0, currentVideoComposition == nil else { return }
+        setFrameRateLimit(requestedFrameRateLimit)
+    }
     
-    // Properly release security-scoped resource access
     private func stopAccessingResource() {
         if accessToken, let url = videoURL {
             url.stopAccessingSecurityScopedResource()
@@ -544,7 +539,6 @@ final class WallpaperVideoPlayer {
     func cleanup() {
         Logger.debug("Cleaning up video player resources", category: .videoPlayer)
 
-        // Cancel any pending async Tasks first
         loadingTask?.cancel()
         loadingTask = nil
         frameRateLimitTask?.cancel()
@@ -554,6 +548,8 @@ final class WallpaperVideoPlayer {
 
         playerLooper?.disableLooping()
         playerLooper = nil
+        templatePlayerItem?.videoComposition = nil
+        templatePlayerItem = nil
 
         currentItemSubscription?.cancel()
         currentItemSubscription = nil
@@ -561,8 +557,6 @@ final class WallpaperVideoPlayer {
 
         cleanupTasks.removeAll()
 
-        // Particle overlay is owned by VideoContainerView and torn down when
-        // the window's contentView is released below.
         videoView?.setParticleEffect(.none, density: 0)
 
         window?.close()
@@ -571,10 +565,7 @@ final class WallpaperVideoPlayer {
         videoView = nil
         player = nil
         
-        // Stop accessing security-scoped resource
         stopAccessingResource()
         Logger.debug("Video player resources cleaned up", category: .videoPlayer)
     }
-    
-    nonisolated deinit {}
 }

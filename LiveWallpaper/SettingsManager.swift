@@ -4,12 +4,10 @@ import AppKit
 import AVFoundation
 import ServiceManagement
 
-// Manager for persisting and retrieving settings
 @MainActor
 final class SettingsManager {
     static let shared = SettingsManager()
 
-    // Cached instances — avoid re-allocating on every encode/decode
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     private var cachedGlobalSettings: GlobalSettings?
@@ -163,7 +161,6 @@ final class SettingsManager {
             let canAccess = url.startAccessingSecurityScopedResource()
             if isStale && canAccess {
                 Logger.warning("Stale bookmark detected for screen \(screenID), refreshing", category: .fileAccess)
-                // Regenerate the stale bookmark to prevent future access failures
                 let bookmarkOptions: URL.BookmarkCreationOptions = [.withSecurityScope, .securityScopeAllowOnlyReadAccess]
                 let noKeys: Set<URLResourceKey>? = nil
                 let noRelative: URL? = nil

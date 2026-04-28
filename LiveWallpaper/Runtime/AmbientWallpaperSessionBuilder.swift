@@ -6,6 +6,7 @@ final class AmbientWallpaperSessionBuilder {
     func makeHTMLSession(source: HTMLSource, config: HTMLConfig, frame: CGRect) -> AmbientWallpaperSession {
         let window = VideoWallpaperWindow(frame: frame)
         let htmlView = HTMLWallpaperView(frame: frame)
+        window.setWallpaperMouseInteractionEnabled(config.allowMouseInteraction)
         window.contentView = htmlView
 
         htmlView.apply(config)
