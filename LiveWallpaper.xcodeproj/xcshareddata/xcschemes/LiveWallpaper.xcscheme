@@ -29,30 +29,6 @@
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES"
       shouldAutocreateTestPlan = "YES">
-      <Testables>
-         <TestableReference
-            skipped = "NO"
-            parallelizable = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "0C322BFF2D6950490033C48B"
-               BuildableName = "LiveWallpaperTests.xctest"
-               BlueprintName = "LiveWallpaperTests"
-               ReferencedContainer = "container:LiveWallpaper.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
-         <TestableReference
-            skipped = "NO"
-            parallelizable = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "0C322C092D6950490033C48B"
-               BuildableName = "LiveWallpaperUITests.xctest"
-               BlueprintName = "LiveWallpaperUITests"
-               ReferencedContainer = "container:LiveWallpaper.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
-      </Testables>
       <CommandLineArguments>
          <CommandLineArgument
             argument = "--ui-testing"
@@ -66,6 +42,29 @@
             isEnabled = "YES">
          </EnvironmentVariable>
       </EnvironmentVariables>
+      <Testables>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "0C322BFF2D6950490033C48B"
+               BuildableName = "LiveWallpaperTests.xctest"
+               BlueprintName = "LiveWallpaperTests"
+               ReferencedContainer = "container:LiveWallpaper.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "0C322C092D6950490033C48B"
+               BuildableName = "LiveWallpaperUITests.xctest"
+               BlueprintName = "LiveWallpaperUITests"
+               ReferencedContainer = "container:LiveWallpaper.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+      </Testables>
    </TestAction>
    <LaunchAction
       buildConfiguration = "Debug"
