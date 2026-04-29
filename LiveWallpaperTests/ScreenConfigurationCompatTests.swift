@@ -1,0 +1,122 @@
+import Foundation
+import Testing
+@testable import LiveWallpaper
+
+/// Phase 1.x §A16 lock: Day 1 added `wpeOrigin` and `recentWPEImports` to
+/// existing persisted blobs. Both must round-trip cleanly AND survive when
+/// the blob is missing or malformed (lossy decode).
+@Suite("ScreenConfiguration / GlobalSettings persistence compatibility")
+struct ScreenConfigurationCompatTests {
+
+    // MARK: - ScreenConfiguration: legacy plist (no wpeOrigin field)
+
+    @Test("Decoding a legacy ScreenConfiguration without wpeOrigin yields nil and preserves other fields")
+    func decodeLegacyConfigurationWithoutWPEOrigin() throws {
+        // Build a baseline by encoding a current-shape config WITHOUT wpeOrigin
+        // set, then strip the field from the encoded JSON. That mimics a Day 0
+        // payload that predates the field being added.
+        let baselineConfig = ScreenConfiguration(
+            screenID: 12_345,
+            wallpaper: .video(bookmarkData: Data([0xAA, 0xBB])),
+            playbackSpeed: 1.5,
+            fitMode: .aspectFit,
+            frameRateLimit: .fps30,
+            savedVideoBookmarkData: Data([0xAA, 0xBB])
+        )
+        let baseline = try JSONEncoder().encode(baselineConfig)
+        var dict = try #require(JSONSerialization.jsonObject(with: baseline) as? [String: Any])
+        dict.removeValue(forKey: "wpeOrigin")
+        let stripped = try JSONSerialization.data(withJSONObject: dict, options: .sortedKeys)
+
+        let config = try JSONDecoder().decode(ScreenConfiguration.self, from: stripped)
+
+        #expect(config.screenID == 12_345)
+        #expect(config.wpeOrigin == nil)
+        #expect(config.playbackSpeed == 1.5)
+        #expect(config.fitMode == .aspectFit)
+    }
+
+    @Test("Round-tripping a configuration with wpeOrigin preserves every field")
+    func roundTripsWPEOriginThroughCodable() throws {
+        let origin = WPEOrigin(
+            workshopID: "round-trip",
+            title: "Round Trip Wallpaper",
+            originalType: .video,
+            sourceFolderBookmark: Data([0x01, 0x02, 0x03]),
+            cacheRelativePath: "wpe-cache/round-trip",
+            previewFileName: "preview.gif"
+        )
+
+        var config = ScreenConfiguration(
+            screenID: 999,
+            wallpaper: .video(bookmarkData: Data([0xFF])),
+            savedVideoBookmarkData: Data([0xFF])
+        )
+        config.wpeOrigin = origin
+
+        let data = try JSONEncoder().encode(config)
+        let decoded = try JSONDecoder().decode(ScreenConfiguration.self, from: data)
+
+        #expect(decoded.wpeOrigin == origin)
+        #expect(decoded.screenID == 999)
+    }
+
+    @Test("Malformed wpeOrigin blob falls back to nil without invalidating the rest")
+    func lossilyDecodesMalformedWPEOrigin() throws {
+        // Encode a valid configuration first so we have a known-good baseline,
+        // then surgically replace `wpeOrigin` with a JSON object that fails decoding.
+        let origin = WPEOrigin(
+            workshopID: "x",
+            title: "Lossy",
+            originalType: .scene,
+            sourceFolderBookmark: Data([0x00]),
+            cacheRelativePath: nil,
+            previewFileName: nil
+        )
+        var config = ScreenConfiguration(
+            screenID: 1,
+            wallpaper: .video(bookmarkData: Data([0x01]))
+        )
+        config.wpeOrigin = origin
+
+        let baseline = try JSONEncoder().encode(config)
+        var dict = try #require(JSONSerialization.jsonObject(with: baseline) as? [String: Any])
+        // Replace wpeOrigin with a structurally wrong shape.
+        dict["wpeOrigin"] = ["totally": "wrong"]
+        let mutated = try JSONSerialization.data(withJSONObject: dict, options: .sortedKeys)
+
+        let decoded = try JSONDecoder().decode(ScreenConfiguration.self, from: mutated)
+
+        #expect(decoded.wpeOrigin == nil, "Malformed WPE blob must not invalidate the whole configuration")
+        #expect(decoded.screenID == 1)
+    }
+
+    // MARK: - GlobalSettings: legacy plist (no recentWPEImports field)
+
+    @Test("Decoding legacy GlobalSettings without recentWPEImports yields empty array")
+    func decodeLegacyGlobalSettingsWithoutRecentImports() throws {
+        // Encode a fresh current-shape GlobalSettings, strip recentWPEImports.
+        let baseline = try JSONEncoder().encode(GlobalSettings(globalPauseOnBattery: true, pauseOnFullScreen: true))
+        var dict = try #require(JSONSerialization.jsonObject(with: baseline) as? [String: Any])
+        dict.removeValue(forKey: "recentWPEImports")
+        let stripped = try JSONSerialization.data(withJSONObject: dict, options: .sortedKeys)
+
+        let settings = try JSONDecoder().decode(GlobalSettings.self, from: stripped)
+
+        #expect(settings.recentWPEImports.isEmpty)
+        #expect(settings.globalPauseOnBattery == true)
+    }
+
+    @Test("Malformed recentWPEImports falls back to empty array without losing other settings")
+    func lossilyDecodesMalformedRecentImports() throws {
+        let baseline = try JSONEncoder().encode(GlobalSettings(pauseOnFullScreen: true))
+        var dict = try #require(JSONSerialization.jsonObject(with: baseline) as? [String: Any])
+        dict["recentWPEImports"] = ["malformed-not-an-array-of-entries"]
+        let mutated = try JSONSerialization.data(withJSONObject: dict, options: .sortedKeys)
+
+        let settings = try JSONDecoder().decode(GlobalSettings.self, from: mutated)
+
+        #expect(settings.recentWPEImports.isEmpty)
+        #expect(settings.pauseOnFullScreen == true)
+    }
+}

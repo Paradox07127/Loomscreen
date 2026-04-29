@@ -72,6 +72,109 @@ actor WallpaperEngineCache {
         Logger.info("WPE cache purged workshop \(workshopID)", category: .screenManager)
     }
 
+    /// Aggregate stats over every per-workshop subdirectory under the root.
+    /// Subdirectories whose name fails `isSafeWorkshopID` are skipped — they
+    /// can't have been written by us, so we don't account for them.
+    func stats() -> WPECacheStats {
+        guard fileManager.fileExists(atPath: rootURL.path),
+              let children = try? fileManager.contentsOfDirectory(
+                at: rootURL,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+              ) else {
+            return WPECacheStats(rootURL: rootURL, totalBytes: 0, entries: [])
+        }
+
+        var entries: [WPECacheStats.Entry] = []
+        var totalBytes: UInt64 = 0
+
+        for child in children {
+            let workshopID = child.lastPathComponent
+            guard Self.isSafeWorkshopID(workshopID) else { continue }
+            guard (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
+
+            let bytes = directoryByteCount(at: child)
+            let lastUsed = lastUsedDate(in: child)
+            entries.append(WPECacheStats.Entry(workshopID: workshopID, sizeBytes: bytes, lastUsed: lastUsed))
+            totalBytes += bytes
+        }
+
+        entries.sort { ($0.lastUsed ?? .distantPast) > ($1.lastUsed ?? .distantPast) }
+        return WPECacheStats(rootURL: rootURL, totalBytes: totalBytes, entries: entries)
+    }
+
+    /// Wipes every per-workshop subdirectory under the root (manifest + payloads).
+    /// Returns the byte count freed for caller reporting; never throws on a
+    /// missing root (idempotent).
+    @discardableResult
+    func purgeAll() -> UInt64 {
+        guard fileManager.fileExists(atPath: rootURL.path),
+              let children = try? fileManager.contentsOfDirectory(
+                at: rootURL,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+              ) else {
+            return 0
+        }
+
+        var freed: UInt64 = 0
+        for child in children {
+            let workshopID = child.lastPathComponent
+            guard Self.isSafeWorkshopID(workshopID) else { continue }
+            let bytes = directoryByteCount(at: child)
+            do {
+                try fileManager.removeItem(at: child)
+                freed += bytes
+            } catch {
+                Logger.warning("WPE cache purgeAll: failed to remove \(workshopID): \(error.localizedDescription)", category: .screenManager)
+            }
+        }
+        Logger.info("WPE cache purged all (\(freed) bytes freed)", category: .screenManager)
+        return freed
+    }
+
+    /// Removes per-workshop directories whose `lastUsed` (manifest extractedAt
+    /// or directory mtime) is older than `cutoff`. Returns the byte count freed.
+    @discardableResult
+    func purgeOlderThan(_ cutoff: Date) -> UInt64 {
+        let snapshot = stats()
+        var freed: UInt64 = 0
+        for entry in snapshot.entries {
+            guard let lastUsed = entry.lastUsed, lastUsed < cutoff else { continue }
+            do {
+                try purge(workshopID: entry.workshopID)
+                freed += entry.sizeBytes
+            } catch {
+                Logger.warning("WPE cache purgeOlderThan: failed to purge \(entry.workshopID): \(error.localizedDescription)", category: .screenManager)
+            }
+        }
+        Logger.info("WPE cache purgeOlderThan(\(cutoff)) freed \(freed) bytes", category: .screenManager)
+        return freed
+    }
+
+    private func directoryByteCount(at url: URL) -> UInt64 {
+        guard let enumerator = fileManager.enumerator(
+            at: url,
+            includingPropertiesForKeys: [.totalFileAllocatedSizeKey, .fileAllocatedSizeKey],
+            options: [.skipsHiddenFiles]
+        ) else { return 0 }
+
+        var total: UInt64 = 0
+        for case let item as URL in enumerator {
+            let values = try? item.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .fileAllocatedSizeKey])
+            let size = values?.totalFileAllocatedSize ?? values?.fileAllocatedSize ?? 0
+            total += UInt64(size)
+        }
+        return total
+    }
+
+    private func lastUsedDate(in cacheURL: URL) -> Date? {
+        if let manifest = readManifest(in: cacheURL) {
+            return Date(timeIntervalSince1970: manifest.extractedAt)
+        }
+        return (try? cacheURL.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+    }
+
     private func cacheDirectory(for workshopID: String) throws -> URL {
         guard Self.isSafeWorkshopID(workshopID) else {
             throw WPECacheError.invalidWorkshopID(workshopID)
@@ -157,4 +260,20 @@ enum WPECacheError: Error, Equatable, Sendable {
     case invalidWorkshopID(String)
     case pkgUnreadable(String)
     case extractionFailed(String)
+}
+
+/// Disk-usage snapshot of the WPE cache, sorted most-recently-used first.
+/// Surfaced to the cache management UI in Settings.
+struct WPECacheStats: Sendable, Equatable {
+    struct Entry: Sendable, Equatable, Identifiable {
+        let workshopID: String
+        let sizeBytes: UInt64
+        let lastUsed: Date?
+
+        var id: String { workshopID }
+    }
+
+    let rootURL: URL
+    let totalBytes: UInt64
+    let entries: [Entry]
 }

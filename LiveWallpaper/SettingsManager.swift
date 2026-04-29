@@ -20,6 +20,7 @@ final class SettingsManager {
         static let aerialsDirectoryBookmark = "AerialsLibrary.DirectoryBookmark"
         static let bookmarks = "WallpaperBookmarks.v1"
         static let trustedHosts = "TrustedHTMLHosts.v1"
+        static let workshopLibraryRootBookmark = "WPELibrary.RootBookmark.v1"
     }
 
     // MARK: - Screen Configurations
@@ -124,6 +125,23 @@ final class SettingsManager {
         NotificationCenter.default.post(name: .wpeHistoryDidChange, object: nil)
     }
 
+    // MARK: - Workshop Library Root Bookmark (Phase 1.5 gallery)
+
+    /// Persists the security-scoped bookmark to the user-chosen Workshop
+    /// library root (e.g. `~/Documents/Live Wallpapers/431960/`). The bookmark
+    /// is created via `NSOpenPanel` once and reused on subsequent scans.
+    func saveWorkshopLibraryRootBookmark(_ bookmark: Data) {
+        UserDefaults.standard.set(bookmark, forKey: Keys.workshopLibraryRootBookmark)
+    }
+
+    func loadWorkshopLibraryRootBookmark() -> Data? {
+        UserDefaults.standard.data(forKey: Keys.workshopLibraryRootBookmark)
+    }
+
+    func clearWorkshopLibraryRootBookmark() {
+        UserDefaults.standard.removeObject(forKey: Keys.workshopLibraryRootBookmark)
+    }
+
     private func applyStartOnLoginSetting(_ startOnLogin: Bool) {
         do {
             let service = SMAppService.mainApp
@@ -161,6 +179,7 @@ final class SettingsManager {
         UserDefaults.standard.removeObject(forKey: Keys.aerialsDirectoryBookmark)
         UserDefaults.standard.removeObject(forKey: Keys.bookmarks)
         UserDefaults.standard.removeObject(forKey: Keys.trustedHosts)
+        UserDefaults.standard.removeObject(forKey: Keys.workshopLibraryRootBookmark)
         BookmarkStore.shared.resetAfterSettingsCleared()
         TrustedHostStore.shared.resetAfterSettingsCleared()
         if applyLoginSetting {
