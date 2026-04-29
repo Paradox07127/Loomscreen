@@ -51,11 +51,15 @@ final class ScreenManager {
     private(set) var screens: [Screen] = []
     private(set) var wallpaperSessionStateVersion: UInt64 = 0
     private(set) var wallpaperSessionSummaryCache = WallpaperSessionSummaryCache()
+    /// Last error encountered during a Wallpaper Engine import, surfaced for the
+    /// Scene tab UI. `nil` clears any previous error.
+    var lastWPEImportError: AppError?
 
     @ObservationIgnored private var cleanupTasks: Set<AnyCancellable> = []
     @ObservationIgnored private let displayRegistry = DisplayRegistry()
     @ObservationIgnored private let configurationStore = WallpaperConfigurationStore()
     @ObservationIgnored private let ambientSessionBuilder = AmbientWallpaperSessionBuilder()
+    @ObservationIgnored private let wpeImportService = WallpaperEngineImportService()
     @ObservationIgnored private let automationCoordinator = WallpaperAutomationCoordinator()
     @ObservationIgnored private let powerPolicy = PowerPolicyController()
     @ObservationIgnored private let powerMonitor: PowerMonitor = .shared
@@ -65,6 +69,8 @@ final class ScreenManager {
     @ObservationIgnored private let restoresSavedWallpapersOnScreenRefresh: Bool
     /// Drops stale async video transitions.
     @ObservationIgnored private var transitionGeneration: [CGDirectDisplayID: Int] = [:]
+    /// Drops stale async WPE imports per screen (mirrors `transitionGeneration`).
+    @ObservationIgnored private var wpeImportGeneration: [CGDirectDisplayID: Int] = [:]
     @ObservationIgnored private var assetReadinessWork: [CGDirectDisplayID: WallpaperAssetReadinessWork] = [:]
     @ObservationIgnored let weatherService = WeatherReactiveService()
     @ObservationIgnored private lazy var lockScreenSnapshotCoordinator = LockScreenSnapshotCoordinator { [weak self] in
@@ -383,6 +389,7 @@ final class ScreenManager {
                 videoBookmarkData: bookmarkData
             )
         }
+        reconcileWPEOrigin(&configuration)
         if isSameURL, screen.videoPlayer != nil {
             configurationStore.save(configuration)
             applyConfiguration(configuration, to: screen, preservingState: true)
@@ -928,6 +935,138 @@ final class ScreenManager {
         restoreWallpaperSession(for: screen, configuration: configuration, preservingState: false)
     }
     
+    // MARK: - Wallpaper Engine Import
+
+    func importWallpaperEngineProject(at folderURL: URL, for screen: Screen) async {
+        let generation = bumpWPEImportGeneration(for: screen.id)
+        do {
+            let result = try await wpeImportService.importProject(folder: folderURL)
+            guard isCurrentWPEImportGeneration(generation, for: screen.id) else { return }
+            switch result {
+            case .ready(let content, let origin):
+                let now = Date()
+                SettingsManager.shared.recordWPEImport(
+                    WPEHistoryEntry(origin: origin, importedAt: now, lastUsedAt: now)
+                )
+
+                var config = configurationStore.get(for: screen.id) ?? ScreenConfiguration(
+                    screenID: screen.id,
+                    wallpaper: content
+                )
+                config.activeWallpaper = content
+                if case .html(let source, let htmlConfig) = content {
+                    config.savedHTMLSource = source
+                    config.savedHTMLConfig = htmlConfig
+                } else if case .video(let bookmarkData) = content {
+                    config.savedVideoBookmarkData = bookmarkData
+                }
+                config.wpeOrigin = origin
+                saveConfiguration(config)
+                restoreWallpaperSession(for: screen, configuration: config, preservingState: false)
+                postWPEImportDidComplete(screenID: screen.id, type: origin.originalType)
+                lastWPEImportError = nil
+
+            case .unsupported(let origin):
+                // Plan §A4/A5: scene/application imports must be non-destructive —
+                // record history, fire wpeImportDidComplete so the Scene tab can
+                // surface the placeholder card, and DO NOT raise an error alert.
+                SettingsManager.shared.recordWPEImport(
+                    WPEHistoryEntry(origin: origin, importedAt: Date(), lastUsedAt: nil)
+                )
+                postWPEImportDidComplete(screenID: screen.id, type: origin.originalType)
+                lastWPEImportError = nil
+
+            case .rejected(let reason):
+                lastWPEImportError = .wpePackageInvalid(reason)
+            }
+        } catch {
+            guard isCurrentWPEImportGeneration(generation, for: screen.id) else { return }
+            lastWPEImportError = .wpeImportFailed(error.localizedDescription)
+        }
+    }
+
+    func activateWPEHistoryEntry(_ entry: WPEHistoryEntry, for screen: Screen) async {
+        do {
+            var isStale = false
+            let folderURL = try URL(
+                resolvingBookmarkData: entry.origin.sourceFolderBookmark,
+                options: .withSecurityScope,
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            )
+            let didStartScope = folderURL.startAccessingSecurityScopedResource()
+            defer {
+                if didStartScope {
+                    folderURL.stopAccessingSecurityScopedResource()
+                }
+            }
+
+            guard didStartScope || FileManager.default.fileExists(atPath: folderURL.path) else {
+                lastWPEImportError = .fileAccessDenied(entry.origin.title)
+                return
+            }
+
+            await importWallpaperEngineProject(at: folderURL, for: screen)
+        } catch {
+            lastWPEImportError = .wpeImportFailed(error.localizedDescription)
+        }
+    }
+
+    func removeWPEImport(workshopID: String) {
+        SettingsManager.shared.removeWPEImport(workshopID: workshopID)
+
+        for var config in configurationStore.loadAll() where config.wpeOrigin?.workshopID == workshopID {
+            config.wpeOrigin = nil
+            saveConfiguration(config)
+        }
+    }
+
+    private func reconcileWPEOrigin(_ config: inout ScreenConfiguration) {
+        guard let origin = config.wpeOrigin else { return }
+        guard origin.cacheRelativePath != nil else {
+            config.wpeOrigin = nil
+            return
+        }
+
+        switch config.activeWallpaper {
+        case .video(let bookmarkData):
+            if !WPEOrigin.matchesBookmark(bookmarkData, origin: origin) {
+                config.wpeOrigin = nil
+            }
+        case .html(let source, _):
+            guard case .folder(let bookmarkData, _) = source,
+                  WPEOrigin.matchesBookmark(bookmarkData, origin: origin) else {
+                config.wpeOrigin = nil
+                return
+            }
+        case .metalShader:
+            // Plan §A11: switching to Shader is transient — preserve wpeOrigin
+            // so switching back to Video/HTML restores the WPE badge intact.
+            return
+        }
+    }
+
+    private func postWPEImportDidComplete(screenID: CGDirectDisplayID, type: WPEType) {
+        NotificationCenter.default.post(
+            name: .wpeImportDidComplete,
+            object: nil,
+            userInfo: [
+                "screenID": screenID,
+                "type": type.rawValue,
+            ]
+        )
+    }
+
+    private func bumpWPEImportGeneration(for screenID: CGDirectDisplayID) -> Int {
+        let next = (wpeImportGeneration[screenID] ?? 0) &+ 1
+        wpeImportGeneration[screenID] = next
+        return next
+    }
+
+    private func isCurrentWPEImportGeneration(_ generation: Int, for screenID: CGDirectDisplayID) -> Bool {
+        wpeImportGeneration[screenID] == generation
+    }
+
     // MARK: - Configuration Update Helpers
 
     private func saveConfiguration(_ configuration: ScreenConfiguration) {
@@ -1304,6 +1443,7 @@ final class ScreenManager {
             wallpaper: .html(source: source, config: config)
         )
         configuration.setHTMLWallpaper(source: source, config: config)
+        reconcileWPEOrigin(&configuration)
         saveConfiguration(configuration)
 
         restoreWallpaperSession(for: screen, configuration: configuration, preservingState: false)
@@ -1335,6 +1475,7 @@ final class ScreenManager {
             screenID: screen.id, wallpaper: .metalShader(preset)
         )
         config.setShaderWallpaper(preset)
+        reconcileWPEOrigin(&config)
         saveConfiguration(config)
 
         restoreWallpaperSession(for: screen, configuration: config, preservingState: false)

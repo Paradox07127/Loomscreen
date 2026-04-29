@@ -1,4 +1,4 @@
-enum MetalShaderPreset: String, Codable, CaseIterable, Identifiable {
+enum MetalShaderPreset: String, Codable, CaseIterable, Identifiable, Sendable {
     case waves = "Waves"
     case plasma = "Plasma"
     case gradient = "Gradient"

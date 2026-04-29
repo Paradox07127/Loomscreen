@@ -1,6 +1,6 @@
 import Foundation
 
-enum WallpaperContent: Equatable {
+enum WallpaperContent: Equatable, Sendable {
     case video(bookmarkData: Data)
     case html(source: HTMLSource, config: HTMLConfig)
     case metalShader(MetalShaderPreset)

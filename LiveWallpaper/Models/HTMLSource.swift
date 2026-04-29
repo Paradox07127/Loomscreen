@@ -1,7 +1,7 @@
 import Foundation
 
 /// Persisted source for an HTML wallpaper.
-enum HTMLSource: Codable, Equatable {
+enum HTMLSource: Codable, Equatable, Sendable {
     case file(bookmarkData: Data)
     case folder(bookmarkData: Data, indexFileName: String)
     case url(URL)
