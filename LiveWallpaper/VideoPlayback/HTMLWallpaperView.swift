@@ -33,11 +33,6 @@ final class HTMLWebView: WKWebView {
 final class HTMLWallpaperView: NSView {
 
     // MARK: - Properties
-    //
-    // 注：macOS 12 起 WKProcessPool 已被废弃 — 系统会在所有 WKWebView
-    // 实例之间自动共享底层 process pool，应用层再显式共享反而会触发
-    // deprecation 警告。所以这里不再持有 sharedProcessPool。
-
     private let webView: HTMLWebView
     private let folderHandler: FolderURLSchemeHandler
     private var allowMouseInteraction = false
