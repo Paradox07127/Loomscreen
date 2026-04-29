@@ -32,12 +32,11 @@ final class HTMLWebView: WKWebView {
 @MainActor
 final class HTMLWallpaperView: NSView {
 
-    // MARK: - Shared Resources
-
-    /// 跨屏 / 跨实例共享，避免每个壁纸都拉起独立的 WebContent 进程。
-    private static let sharedProcessPool = WKProcessPool()
-
     // MARK: - Properties
+    //
+    // 注：macOS 12 起 WKProcessPool 已被废弃 — 系统会在所有 WKWebView
+    // 实例之间自动共享底层 process pool，应用层再显式共享反而会触发
+    // deprecation 警告。所以这里不再持有 sharedProcessPool。
 
     private let webView: HTMLWebView
     private let folderHandler: FolderURLSchemeHandler
@@ -54,7 +53,6 @@ final class HTMLWallpaperView: NSView {
 
     override init(frame frameRect: NSRect) {
         let configuration = WKWebViewConfiguration()
-        configuration.processPool = HTMLWallpaperView.sharedProcessPool
         let preferences = WKWebpagePreferences()
         preferences.allowsContentJavaScript = true
         configuration.defaultWebpagePreferences = preferences
@@ -161,6 +159,45 @@ final class HTMLWallpaperView: NSView {
         return super.hitTest(point)
     }
 
+    // MARK: - Scroll Forwarding
+    //
+    // macOS 在桌面图标层之上的自定义 window level 下，scroll wheel 事件
+    // 偶发不会直接命中 WKWebView（hitTest 返回 self 或事件由 NSWindow 自身
+    // 吞掉），双指上下滑动失效。这里强制把 scroll 事件转发给 webView，
+    // 同时对 swipe / magnify / rotate 一并兜底，保证 trackpad 手势可用。
+
+    override func scrollWheel(with event: NSEvent) {
+        guard allowMouseInteraction else {
+            super.scrollWheel(with: event)
+            return
+        }
+        webView.scrollWheel(with: event)
+    }
+
+    override func swipe(with event: NSEvent) {
+        guard allowMouseInteraction else {
+            super.swipe(with: event)
+            return
+        }
+        webView.swipe(with: event)
+    }
+
+    override func magnify(with event: NSEvent) {
+        guard allowMouseInteraction else {
+            super.magnify(with: event)
+            return
+        }
+        webView.magnify(with: event)
+    }
+
+    override func rotate(with event: NSEvent) {
+        guard allowMouseInteraction else {
+            super.rotate(with: event)
+            return
+        }
+        webView.rotate(with: event)
+    }
+
     // MARK: - Public API
 
     func apply(_ config: HTMLConfig) {
@@ -189,6 +226,17 @@ final class HTMLWallpaperView: NSView {
         if previous?.blockTrackers != config.blockTrackers {
             applyTrackerBlocking(enabled: config.blockTrackers)
         }
+
+        if previous?.physicalPixelLayout != config.physicalPixelLayout {
+            applyPhysicalPixelZoom()
+        }
+
+        // 交互态启用时让 webView 成为 firstResponder —
+        // 部分键盘 / scroll 事件不依赖 hitTest，需要直接送给 firstResponder。
+        if config.allowMouseInteraction, let host = webView.window {
+            host.makeFirstResponder(webView)
+        }
+
         lastAppliedConfig = config
     }
 
@@ -370,6 +418,39 @@ final class HTMLWallpaperView: NSView {
     override func layout() {
         super.layout()
         webView.frame = bounds
+    }
+
+    /// Re-apply pageZoom whenever the host display's backing scale changes
+    /// (window dragged across screens, resolution changed, Spaces switched).
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        applyPhysicalPixelZoom()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        applyPhysicalPixelZoom()
+    }
+
+    // MARK: - Physical-pixel layout (WPE compatibility)
+
+    /// Maps logical points → physical pixels for `window.innerWidth/Height`.
+    /// Wallpaper Engine web wallpapers assume Windows DIP (innerWidth = physical
+    /// pixels); on Retina that returns half the expected value, so canvas /
+    /// Pixi / Spine misalign. `pageZoom = 1/scale` shrinks CSS pixels by the
+    /// same factor the OS upscales for Retina, leaving visual size unchanged
+    /// while bringing innerWidth back up to the physical-pixel count.
+    private func applyPhysicalPixelZoom() {
+        let enabled = lastAppliedConfig?.physicalPixelLayout ?? false
+        guard enabled, let scale = webView.window?.backingScaleFactor, scale > 0 else {
+            if webView.pageZoom != 1.0 { webView.pageZoom = 1.0 }
+            return
+        }
+        let target = 1.0 / scale
+        if abs(webView.pageZoom - target) > 0.001 {
+            Logger.info("HTML wallpaper pageZoom → \(target) (backingScale=\(scale))", category: .screenManager)
+            webView.pageZoom = target
+        }
     }
 
     // MARK: - Cleanup
