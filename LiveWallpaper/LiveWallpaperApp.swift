@@ -57,6 +57,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         Logger.notice("Application starting", category: .startup)
 
+        // 把 tracker rule list 提前编译进 WKContentRuleListStore，
+        // 后续 HTML 壁纸首次启用过滤时直接 lookUp，省掉同步编译开销。
+        HTMLWallpaperView.precompileTrackerRules()
+
         let startupPlan = AppStartupPlan(
             runtimeOptions: runtimeOptions,
             onboardingCompleted: UserDefaults.standard.bool(forKey: "Onboarding.Completed")

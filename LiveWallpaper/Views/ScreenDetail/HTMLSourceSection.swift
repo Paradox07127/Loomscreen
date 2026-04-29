@@ -172,8 +172,27 @@ struct HTMLSourceSection: View {
                 .controlSize(.small)
             }
             Text(config.allowMouseInteraction
-                 ? "Clicks and scrolls reach the wallpaper. Useful for interactive demos."
-                 : "Clicks fall through to the desktop, so Finder and Dock stay usable.")
+                 ? "Clicks and scrolls reach the wallpaper. Desktop icons are hidden behind the page while this is on."
+                 : "Clicks fall through to the desktop, so Finder icons and the Dock stay usable.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Label("Mute Audio", systemImage: "speaker.slash")
+                Spacer()
+                Toggle("", isOn: Binding(
+                    get: { config.muteAudio },
+                    set: { newValue in
+                        config.muteAudio = newValue
+                        commitConfig()
+                    }
+                ))
+                .labelsHidden()
+                .accessibilityLabel("Mute Audio")
+                .toggleStyle(.switch)
+                .controlSize(.small)
+            }
+            Text("Silences any <audio> or <video> elements without pausing the visuals.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
