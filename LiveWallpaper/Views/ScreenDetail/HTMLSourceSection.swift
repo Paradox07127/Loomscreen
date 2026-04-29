@@ -9,6 +9,7 @@ struct HTMLSourceSection: View {
     @Binding var config: HTMLConfig
 
     @Environment(ScreenManager.self) private var screenManager
+    @State private var trustStore = TrustedHostStore.shared
 
     @State private var selectedKind: HTMLSourceKind = .url
     @State private var urlInput: String = ""
@@ -35,6 +36,7 @@ struct HTMLSourceSection: View {
                 if let source, source.isInsecureURL {
                     insecureURLBanner
                 }
+                if let source { trustBanner(for: source) }
 
                 Divider()
 
@@ -135,6 +137,60 @@ struct HTMLSourceSection: View {
             .padding(.vertical, 4)
             .padding(.horizontal, 8)
             .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    @ViewBuilder
+    private func trustBanner(for source: HTMLSource) -> some View {
+        let trust = HTMLTrust.evaluate(source: source, trustedHosts: trustStore.hostSet)
+        switch trust {
+        case .localContent:
+            EmptyView()
+        case .trustedRemote(let host):
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.shield.fill")
+                    .foregroundStyle(.green)
+                Text("Trusted — JavaScript runs as configured.")
+                    .font(.caption)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button("Revoke") { trustStore.revoke(host) }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                    .help("Remove \(host) from trusted hosts")
+                    .fixedSize()
+            }
+            .padding(.vertical, 4)
+            .padding(.horizontal, 8)
+            .background(Color.green.opacity(0.10), in: RoundedRectangle(cornerRadius: 6))
+        case .untrustedRemote(let host):
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.shield")
+                    .foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("JavaScript disabled for untrusted source.")
+                        .font(.caption)
+                        .lineLimit(2)
+                    Text("\(host) can run scripts only after you trust it.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Button("Trust this site") {
+                    trustStore.trust(host)
+                    // Re-apply with the now-trusted host so JS turns on.
+                    screenManager.setHTMLWallpaper(source: source, config: config, for: screen)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.mini)
+                .help("Allow \(host) to run JavaScript")
+                .fixedSize()
+            }
+            .padding(.vertical, 4)
+            .padding(.horizontal, 8)
+            .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+        }
     }
 
     // MARK: - Toggles
