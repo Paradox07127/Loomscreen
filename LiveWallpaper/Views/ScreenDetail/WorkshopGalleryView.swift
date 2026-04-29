@@ -238,15 +238,20 @@ struct WorkshopGalleryView: View {
         guard !candidates.isEmpty else { return }
         bulkImportInProgress = true
         bulkImportProgress = (0, candidates.count)
+        var failures: [WPEBulkImportFailureSummary.Rejection] = []
 
         for (index, project) in candidates.enumerated() {
             bulkImportProgress = (index + 1, candidates.count)
-            _ = await importWithLibraryAccess(project)
+            let outcome = await importWithLibraryAccess(project)
+            if case .rejected(let reason) = outcome {
+                failures.append(.init(title: project.title, reason: reason))
+            }
         }
 
         bulkImportInProgress = false
         bulkImportProgress = (0, 0)
         await refreshScan()
+        errorMessage = WPEBulkImportFailureSummary.message(for: failures)
     }
 
     /// Re-acquires the persisted root bookmark's security scope for the
@@ -296,6 +301,26 @@ struct WorkshopGalleryView: View {
         case needsRoot
         case scanning
         case results
+    }
+}
+
+struct WPEBulkImportFailureSummary {
+    struct Rejection: Equatable, Sendable {
+        let title: String
+        let reason: String
+    }
+
+    static func message(for rejections: [Rejection]) -> String? {
+        guard !rejections.isEmpty else { return nil }
+        let header = rejections.count == 1
+            ? "1 import failed"
+            : "\(rejections.count) imports failed"
+        let visible = rejections.prefix(5).map { "\($0.title): \($0.reason)" }
+        let remaining = rejections.count - visible.count
+        if remaining > 0 {
+            return ([header] + visible + ["+\(remaining) more"]).joined(separator: "\n")
+        }
+        return ([header] + visible).joined(separator: "\n")
     }
 }
 

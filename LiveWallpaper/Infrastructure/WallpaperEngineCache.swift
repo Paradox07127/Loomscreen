@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 /// Manages on-disk caches of extracted Wallpaper Engine `scene.pkg` archives
 /// under `~/Library/Application Support/LiveWallpaper/wpe-cache/<workshopID>/`.
@@ -32,7 +33,8 @@ actor WallpaperEngineCache {
 
     func ensureExtracted(workshopID: String, sourcePkgURL: URL) async throws -> URL {
         let cacheURL = try cacheDirectory(for: workshopID)
-        let fingerprint = try fingerprint(for: sourcePkgURL)
+        let sourcePackage = try readSourcePackage(sourcePkgURL)
+        let fingerprint = sourcePackage.fingerprint
 
         if let manifest = readManifest(in: cacheURL),
            manifest.fingerprint == fingerprint,
@@ -42,13 +44,7 @@ actor WallpaperEngineCache {
         }
 
         Logger.info("WPE cache extracting workshop \(workshopID)", category: .screenManager)
-        let data: Data
-        do {
-            data = try Data(contentsOf: sourcePkgURL, options: .mappedIfSafe)
-        } catch {
-            Logger.error("WPE pkg unreadable: \(error.localizedDescription)", category: .screenManager)
-            throw WPECacheError.pkgUnreadable(error.localizedDescription)
-        }
+        let data = sourcePackage.data
 
         do {
             let package = try WallpaperEnginePackage.parseIndex(of: data)
@@ -209,7 +205,18 @@ actor WallpaperEngineCache {
         cacheURL.appendingPathComponent("manifest.json")
     }
 
-    private func fingerprint(for sourcePkgURL: URL) throws -> Fingerprint {
+    private func readSourcePackage(_ sourcePkgURL: URL) throws -> SourcePackage {
+        let data: Data
+        do {
+            data = try Data(contentsOf: sourcePkgURL, options: .mappedIfSafe)
+        } catch {
+            Logger.error("WPE pkg unreadable: \(error.localizedDescription)", category: .screenManager)
+            throw WPECacheError.pkgUnreadable(error.localizedDescription)
+        }
+        return SourcePackage(data: data, fingerprint: try fingerprint(for: sourcePkgURL, data: data))
+    }
+
+    private func fingerprint(for sourcePkgURL: URL, data: Data) throws -> Fingerprint {
         do {
             let values = try sourcePkgURL.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
             guard let size = values.fileSize,
@@ -217,12 +224,18 @@ actor WallpaperEngineCache {
                   let mtime = values.contentModificationDate?.timeIntervalSince1970 else {
                 throw WPECacheError.pkgUnreadable("Missing file metadata")
             }
-            return Fingerprint(size: UInt64(size), mtime: mtime)
+            return Fingerprint(size: UInt64(size), mtime: mtime, sha256: Self.sha256Hex(data))
         } catch let error as WPECacheError {
             throw error
         } catch {
             throw WPECacheError.pkgUnreadable(error.localizedDescription)
         }
+    }
+
+    private static func sha256Hex(_ data: Data) -> String {
+        SHA256.hash(data: data)
+            .map { String(format: "%02x", $0) }
+            .joined()
     }
 
     private func readManifest(in cacheURL: URL) -> Manifest? {
@@ -251,9 +264,15 @@ private struct Manifest: Codable, Equatable, Sendable {
     let extractedAt: Double
 }
 
+private struct SourcePackage: Sendable {
+    let data: Data
+    let fingerprint: Fingerprint
+}
+
 private struct Fingerprint: Codable, Equatable, Sendable {
     let size: UInt64
     let mtime: Double
+    let sha256: String
 }
 
 enum WPECacheError: Error, Equatable, Sendable {

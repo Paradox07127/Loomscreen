@@ -412,7 +412,7 @@ struct ScreenConfiguration: Codable, Equatable {
     /// origin is preserved so switching back to Video/HTML restores the badge.
     mutating func reconcileWPEOrigin() {
         guard let origin = wpeOrigin else { return }
-        guard origin.cacheRelativePath != nil else {
+        guard origin.resourceLocation != .unsupported else {
             wpeOrigin = nil
             return
         }

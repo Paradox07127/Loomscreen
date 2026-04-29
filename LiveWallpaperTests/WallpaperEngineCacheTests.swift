@@ -47,6 +47,33 @@ struct WallpaperEngineCacheTests {
                 "atomic re-extract must wipe stale payloads")
     }
 
+    @Test("Cache miss when source pkg bytes change but size and mtime stay the same")
+    func cacheMissOnSameSizeSameMTimeContentChange() async throws {
+        let env = try TempCacheEnvironment.make(workshopID: "same-fingerprint", payload: [0x01, 0x02])
+        defer { env.cleanup() }
+
+        let firstURL = try await env.cache.ensureExtracted(workshopID: env.workshopID, sourcePkgURL: env.pkgURL)
+        let payloadURL = firstURL.appendingPathComponent("payload.bin")
+        #expect(try Data(contentsOf: payloadURL) == Data([0x01, 0x02]))
+
+        let originalMTime = try #require(
+            env.pkgURL.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+        )
+        let changed = SyntheticPackage.makeData(entries: [
+            .init(name: "payload.bin", bytes: [0xAA, 0xBB])
+        ])
+        try changed.write(to: env.pkgURL, options: .atomic)
+        try FileManager.default.setAttributes(
+            [.modificationDate: originalMTime],
+            ofItemAtPath: env.pkgURL.path
+        )
+
+        let secondURL = try await env.cache.ensureExtracted(workshopID: env.workshopID, sourcePkgURL: env.pkgURL)
+
+        #expect(secondURL == firstURL)
+        #expect(try Data(contentsOf: payloadURL) == Data([0xAA, 0xBB]))
+    }
+
     @Test("Cache miss when manifest exists but payload was deleted")
     func cacheMissWhenPayloadDeleted() async throws {
         let env = try TempCacheEnvironment.make(workshopID: "333")
