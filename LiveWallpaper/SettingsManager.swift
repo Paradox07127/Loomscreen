@@ -128,13 +128,19 @@ final class SettingsManager {
         persistConfigurations(configs)
     }
 
-    func cleanAllSettings() {
+    func cleanAllSettings(applyLoginSetting: Bool = true) {
         cachedGlobalSettings = nil
         cachedConfigurations = nil
         UserDefaults.standard.removeObject(forKey: Keys.screenConfigurations)
         UserDefaults.standard.removeObject(forKey: Keys.globalSettings)
         UserDefaults.standard.removeObject(forKey: Keys.aerialsDirectoryBookmark)
-        applyStartOnLoginSetting(false)
+        UserDefaults.standard.removeObject(forKey: Keys.bookmarks)
+        UserDefaults.standard.removeObject(forKey: Keys.trustedHosts)
+        BookmarkStore.shared.resetAfterSettingsCleared()
+        TrustedHostStore.shared.resetAfterSettingsCleared()
+        if applyLoginSetting {
+            applyStartOnLoginSetting(false)
+        }
     }
     
     // MARK: - Validation
@@ -142,15 +148,26 @@ final class SettingsManager {
     func validateConfiguration(for screenID: CGDirectDisplayID) -> Bool {
         guard let configuration = loadConfigurations().first(where: { $0.screenID == screenID }) else { return false }
 
-        guard configuration.wallpaperType == .video else {
-            return true
-        }
-
-        guard let bookmarkData = configuration.videoBookmarkData else {
-            Logger.error("Missing video bookmark for active video wallpaper on screen \(screenID)", category: .fileAccess)
+        guard let definition = WallpaperSessionDefinition(configuration: configuration) else {
+            Logger.error("Malformed wallpaper configuration for screen \(screenID)", category: .settings)
             return false
         }
 
+        switch definition {
+        case .video(let bookmarkData):
+            return validateVideoBookmark(bookmarkData, for: screenID, configuration: configuration)
+        case .html(let source, _):
+            return validateHTMLSource(source, for: screenID)
+        case .metalShader:
+            return true
+        }
+    }
+
+    private func validateVideoBookmark(
+        _ bookmarkData: Data,
+        for screenID: CGDirectDisplayID,
+        configuration: ScreenConfiguration
+    ) -> Bool {
         do {
             var isStale = false
             let url = try URL(
@@ -184,6 +201,69 @@ final class SettingsManager {
             return canAccess
         } catch {
             Logger.error("Failed to resolve bookmark for screen \(screenID): \(error.localizedDescription)", category: .fileAccess)
+            return false
+        }
+    }
+
+    private func validateHTMLSource(_ source: HTMLSource, for screenID: CGDirectDisplayID) -> Bool {
+        switch source {
+        case .inline:
+            return true
+        case .url(let url):
+            guard let scheme = url.scheme?.lowercased(),
+                  scheme == "http" || scheme == "https" else {
+                Logger.error("Invalid remote HTML URL for screen \(screenID): \(url.absoluteString)", category: .fileAccess)
+                return false
+            }
+            return true
+        case .file(let bookmarkData):
+            return validateLocalHTMLBookmark(bookmarkData, indexFileName: nil, for: screenID)
+        case .folder(let bookmarkData, let indexFileName):
+            return validateLocalHTMLBookmark(bookmarkData, indexFileName: indexFileName, for: screenID)
+        }
+    }
+
+    private func validateLocalHTMLBookmark(
+        _ bookmarkData: Data,
+        indexFileName: String?,
+        for screenID: CGDirectDisplayID
+    ) -> Bool {
+        do {
+            var isStale = false
+            let url = try URL(
+                resolvingBookmarkData: bookmarkData,
+                options: .withSecurityScope,
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            )
+
+            let canAccess = url.startAccessingSecurityScopedResource()
+            defer {
+                if canAccess {
+                    url.stopAccessingSecurityScopedResource()
+                }
+            }
+            guard canAccess else {
+                Logger.error("Cannot access local HTML resource for screen \(screenID)", category: .fileAccess)
+                return false
+            }
+
+            if let indexFileName {
+                let escapedIndex = indexFileName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? indexFileName
+                guard let requestURL = URL(string: "\(FolderURLSchemeHandler.scheme)://\(FolderURLSchemeHandler.host)/\(escapedIndex)") else {
+                    Logger.error("Invalid HTML folder index name for screen \(screenID): \(indexFileName)", category: .fileAccess)
+                    return false
+                }
+                let indexURL = try FolderURLSchemeHandler.resolvedFileURL(
+                    for: requestURL,
+                    inside: url
+                )
+                return FileManager.default.fileExists(atPath: indexURL.path(percentEncoded: false))
+            }
+
+            return FileManager.default.fileExists(atPath: url.path(percentEncoded: false))
+        } catch {
+            Logger.error("Failed to resolve local HTML bookmark for screen \(screenID): \(error.localizedDescription)", category: .fileAccess)
             return false
         }
     }

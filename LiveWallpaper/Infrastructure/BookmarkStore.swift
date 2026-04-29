@@ -45,6 +45,10 @@ final class BookmarkStore {
         persist()
     }
 
+    func resetAfterSettingsCleared() {
+        bookmarks.removeAll()
+    }
+
     func rename(_ id: UUID, to newLabel: String) {
         let trimmed = newLabel.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty,

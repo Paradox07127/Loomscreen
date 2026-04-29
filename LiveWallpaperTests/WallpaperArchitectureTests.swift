@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import Metal
 import Testing
+import WebKit
 @testable import LiveWallpaper
 
 @Suite("WallpaperSessionDefinition")
@@ -367,6 +368,92 @@ struct HTMLWallpaperLocalFileAccessTests {
     }
 }
 
+@Suite("HTML folder URL scheme")
+@MainActor
+struct HTMLFolderURLSchemeTests {
+    @Test("Folder scheme rejects traversal outside the granted folder")
+    func rejectsTraversalOutsideGrantedFolder() throws {
+        let fixture = try makeFolderFixture()
+        let handler = FolderURLSchemeHandler()
+        handler.folderURL = fixture.folder
+
+        let task = CapturingURLSchemeTask(url: URL(string: "livewallpaper://wallpaper/%2e%2e/secret.txt")!)
+
+        handler.webView(WKWebView(), start: task)
+
+        #expect(task.failure != nil)
+        #expect(task.receivedData.isEmpty)
+    }
+
+    @Test("Folder scheme rejects symlinks that resolve outside the granted folder")
+    func rejectsSymlinkEscapes() throws {
+        let fixture = try makeFolderFixture()
+        let symlink = fixture.folder.appendingPathComponent("linked-secret.txt")
+        try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: fixture.secret)
+        let handler = FolderURLSchemeHandler()
+        handler.folderURL = fixture.folder
+
+        let task = CapturingURLSchemeTask(url: URL(string: "livewallpaper://wallpaper/linked-secret.txt")!)
+
+        handler.webView(WKWebView(), start: task)
+
+        #expect(task.failure != nil)
+        #expect(task.receivedData.isEmpty)
+    }
+
+    @Test("Folder scheme sends large assets in bounded chunks")
+    func sendsLargeAssetsInBoundedChunks() throws {
+        let fixture = try makeFolderFixture()
+        let largeFile = fixture.folder.appendingPathComponent("large.bin")
+        let payload = Data(repeating: 0xA5, count: 200 * 1024)
+        try payload.write(to: largeFile)
+        let handler = FolderURLSchemeHandler()
+        handler.folderURL = fixture.folder
+
+        let task = CapturingURLSchemeTask(url: URL(string: "livewallpaper://wallpaper/large.bin")!)
+
+        handler.webView(WKWebView(), start: task)
+
+        #expect(task.failure == nil)
+        #expect(task.didFinishCallCount == 1)
+        #expect(task.receivedData.count > 1)
+        #expect(task.receivedData.allSatisfy { $0.count <= 64 * 1024 })
+        #expect(task.receivedData.reduce(0) { $0 + $1.count } == payload.count)
+    }
+
+    private func makeFolderFixture() throws -> (root: URL, folder: URL, secret: URL) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LiveWallpaperSchemeTests-\(UUID().uuidString)", isDirectory: true)
+        let folder = root.appendingPathComponent("site", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let secret = root.appendingPathComponent("secret.txt")
+        try Data("secret".utf8).write(to: secret)
+        return (root, folder, secret)
+    }
+}
+
+@Suite("HTML navigation policy")
+struct HTMLNavigationPolicyTests {
+    @Test("Same-origin comparison includes scheme host and effective port")
+    func sameOriginIncludesSchemeHostAndPort() {
+        let current = URL(string: "https://example.com/path")!
+
+        #expect(HTMLWallpaperView.isSameOrigin(navigationURL: URL(string: "https://example.com/next")!, current: current))
+        #expect(!HTMLWallpaperView.isSameOrigin(navigationURL: URL(string: "http://example.com/next")!, current: current))
+        #expect(!HTMLWallpaperView.isSameOrigin(navigationURL: URL(string: "https://example.com:8443/next")!, current: current))
+        #expect(!HTMLWallpaperView.isSameOrigin(navigationURL: URL(string: "https://other.example.com/next")!, current: current))
+    }
+
+    @Test("Only HTTP and HTTPS links may be opened externally")
+    func externalOpeningIsRestrictedToHTTPAndHTTPS() {
+        #expect(HTMLWallpaperView.isExternallyOpenableURL(URL(string: "https://example.com")!))
+        #expect(HTMLWallpaperView.isExternallyOpenableURL(URL(string: "http://example.com")!))
+        #expect(!HTMLWallpaperView.isExternallyOpenableURL(URL(string: "file:///etc/passwd")!))
+        #expect(!HTMLWallpaperView.isExternallyOpenableURL(URL(string: "javascript:alert(1)")!))
+        #expect(!HTMLWallpaperView.isExternallyOpenableURL(URL(string: "livewallpaper://wallpaper/index.html")!))
+    }
+}
+
 @Suite("HTML wallpaper mouse interaction")
 @MainActor
 struct HTMLWallpaperMouseInteractionTests {
@@ -397,6 +484,34 @@ struct HTMLWallpaperMouseInteractionTests {
 
         #expect(session.wallpaperWindow?.ignoresMouseEvents == true)
         #expect((session.wallpaperWindow?.level.rawValue ?? 0) == CGWindowLevelForKey(.desktopWindow) - 1)
+    }
+}
+
+private final class CapturingURLSchemeTask: NSObject, WKURLSchemeTask {
+    let request: URLRequest
+    private(set) var responses: [URLResponse] = []
+    private(set) var receivedData: [Data] = []
+    private(set) var didFinishCallCount = 0
+    private(set) var failure: Error?
+
+    init(url: URL) {
+        request = URLRequest(url: url)
+    }
+
+    func didReceive(_ response: URLResponse) {
+        responses.append(response)
+    }
+
+    func didReceive(_ data: Data) {
+        receivedData.append(data)
+    }
+
+    func didFinish() {
+        didFinishCallCount += 1
+    }
+
+    func didFailWithError(_ error: any Error) {
+        failure = error
     }
 }
 
@@ -552,6 +667,27 @@ struct WallpaperConfigurationStoreInvalidConfigTests {
         #expect(pruned.contains(where: { $0.screenID == 2 && $0.wallpaperType == .html }))
         #expect(pruned.contains(where: { $0.screenID == 3 && $0.wallpaperType == .metalShader }))
         #expect(!pruned.contains(where: { $0.screenID == 1 }))
+    }
+
+    @Test("Invalid local HTML configurations are removed while shader wallpapers survive")
+    func invalidLocalHTMLConfigurationsAreRemoved() {
+        let configs = [
+            ScreenConfiguration(screenID: 1, videoBookmarkData: Data([0x01]), wallpaperType: .video),
+            ScreenConfiguration(
+                screenID: 2,
+                wallpaper: .html(source: .file(bookmarkData: Data([0x02])), config: .default)
+            ),
+            ScreenConfiguration(screenID: 3, videoBookmarkData: Data(), wallpaperType: .metalShader, shaderPreset: .aurora),
+        ]
+
+        let pruned = WallpaperConfigurationStore.removingInvalidResourceConfigurations(
+            from: configs,
+            invalidScreenIDs: [1, 2, 3]
+        )
+
+        #expect(pruned.count == 1)
+        #expect(pruned.first?.screenID == 3)
+        #expect(pruned.first?.wallpaperType == .metalShader)
     }
 }
 
@@ -1189,6 +1325,33 @@ struct ScreenRuntimeOwnershipTests {
         #expect(session.cleanupCallCount == 1)
         #expect(screen.wallpaperSessionSummary == .notConfigured)
         #expect(screen.activeWallpaperWindow == nil)
+    }
+
+    @Test("Refreshing without preserving sessions cleans up connected screen sessions")
+    func refreshWithoutPreservingSessionsCleansUpConnectedSessions() {
+        let manager = ScreenManager(startupOptions: ScreenManagerStartupOptions(
+            restoreSavedWallpapers: false,
+            startAutomation: false
+        ))
+        guard let screen = manager.screens.first else {
+            Issue.record("No screen available for test")
+            return
+        }
+        let session = TestWallpaperRuntimeSession(
+            summary: WallpaperSessionSummary(
+                wallpaperType: .metalShader,
+                activity: .active,
+                supportsPlaybackControl: false,
+                subtitle: "Aurora"
+            ),
+            wallpaperType: .metalShader
+        )
+
+        screen.installRuntimeSession(session)
+
+        manager.refreshScreens(preserveRuntimeSessions: false)
+
+        #expect(session.cleanupCallCount == 1)
     }
 }
 

@@ -45,6 +45,67 @@ struct ResourceUtilitiesTests {
     }
 }
 
+// MARK: - SettingsManager Tests
+
+@Suite("SettingsManager") @MainActor
+struct SettingsManagerTests {
+    private let screenConfigurationsKey = "screenConfigurations"
+    private let globalSettingsKey = "globalSettings"
+    private let aerialsDirectoryBookmarkKey = "AerialsLibrary.DirectoryBookmark"
+    private let bookmarksKey = "WallpaperBookmarks.v1"
+    private let trustedHostsKey = "TrustedHTMLHosts.v1"
+
+    @Test("Clean all settings clears trusted hosts and saved bookmarks")
+    func cleanAllSettingsClearsTrustAndBookmarks() {
+        let defaults = UserDefaults.standard
+        let keys = [
+            screenConfigurationsKey,
+            globalSettingsKey,
+            aerialsDirectoryBookmarkKey,
+            bookmarksKey,
+            trustedHostsKey,
+        ]
+        let previousValues = keys.reduce(into: [String: Any]()) { result, key in
+            result[key] = defaults.object(forKey: key)
+        }
+        defer { restore(defaults: defaults, values: previousValues, keys: keys) }
+
+        defaults.set(["trusted.example"], forKey: trustedHostsKey)
+        defaults.set(Data([0x01, 0x02]), forKey: bookmarksKey)
+
+        SettingsManager.shared.cleanAllSettings(applyLoginSetting: false)
+
+        #expect(defaults.object(forKey: trustedHostsKey) == nil)
+        #expect(defaults.object(forKey: bookmarksKey) == nil)
+    }
+
+    @Test("Invalid local HTML bookmark fails configuration validation")
+    func invalidLocalHTMLBookmarkFailsValidation() {
+        let manager = SettingsManager.shared
+        let previousConfigurations = manager.loadConfigurations()
+        defer { manager.replaceAllConfigurations(previousConfigurations) }
+
+        let screenID: CGDirectDisplayID = 909_001
+        let config = ScreenConfiguration(
+            screenID: screenID,
+            wallpaper: .html(source: .file(bookmarkData: Data([0x01, 0x02])), config: .default)
+        )
+        manager.replaceAllConfigurations([config])
+
+        #expect(!manager.validateConfiguration(for: screenID))
+    }
+
+    private func restore(defaults: UserDefaults, values: [String: Any], keys: [String]) {
+        for key in keys {
+            if let value = values[key] {
+                defaults.set(value, forKey: key)
+            } else {
+                defaults.removeObject(forKey: key)
+            }
+        }
+    }
+}
+
 // MARK: - PowerPolicyController Tests
 
 @Suite("PowerPolicyController") @MainActor

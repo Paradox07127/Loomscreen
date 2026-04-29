@@ -13,6 +13,7 @@ import UniformTypeIdentifiers
 final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendable {
     static let scheme = "livewallpaper"
     static let host = "wallpaper"
+    nonisolated static let responseChunkSize = 64 * 1024
 
     /// Updated each time `HTMLWallpaperView.loadSource(.folder)` swaps content.
     var folderURL: URL?
@@ -35,33 +36,30 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
             return
         }
 
-        // Strip leading "/" then resolve relative to the folder.
-        let path = url.path.removingPercentEncoding ?? url.path
-        let relative = path.hasPrefix("/") ? String(path.dropFirst()) : path
-        let fileURL = folderURL.appendingPathComponent(relative)
-
-        guard fileURL.path.hasPrefix(folderURL.path) else {
-            // Reject path traversal (`/../foo`).
-            urlSchemeTask.didFailWithError(Self.error(.noPermissionsToReadFile, "Path escapes folder"))
+        let fileURL: URL
+        do {
+            fileURL = try Self.resolvedFileURL(for: url, inside: folderURL)
+        } catch {
+            urlSchemeTask.didFailWithError(error)
             return
         }
 
         do {
-            let data = try Data(contentsOf: fileURL)
             let mime = Self.mimeType(for: fileURL)
+            let fileSize = try Self.fileSize(for: fileURL)
             let response = HTTPURLResponse(
                 url: url,
                 statusCode: 200,
                 httpVersion: "HTTP/1.1",
                 headerFields: [
                     "Content-Type": mime,
-                    "Content-Length": "\(data.count)",
+                    "Content-Length": "\(fileSize)",
                     // Same-origin for everything served under this scheme.
                     "Access-Control-Allow-Origin": "*"
                 ]
-            ) ?? URLResponse(url: url, mimeType: mime, expectedContentLength: data.count, textEncodingName: nil) as URLResponse
+            ) ?? URLResponse(url: url, mimeType: mime, expectedContentLength: fileSize, textEncodingName: nil) as URLResponse
             urlSchemeTask.didReceive(response)
-            urlSchemeTask.didReceive(data)
+            try Self.sendFile(fileURL, to: urlSchemeTask)
             urlSchemeTask.didFinish()
         } catch {
             Logger.warning("FolderScheme: \(fileURL.lastPathComponent) — \(error.localizedDescription)", category: .screenManager)
@@ -70,6 +68,57 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
     }
 
     // MARK: - Helpers
+
+    nonisolated static func resolvedFileURL(for requestURL: URL, inside folderURL: URL) throws -> URL {
+        let rootURL = folderURL.standardizedFileURL.resolvingSymlinksInPath()
+        let requestPath = requestURL.path.removingPercentEncoding ?? requestURL.path
+        let relativePath = requestPath.hasPrefix("/") ? String(requestPath.dropFirst()) : requestPath
+        let candidate = rootURL
+            .appendingPathComponent(relativePath)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+
+        let rootPath = normalizedPath(rootURL.path(percentEncoded: false))
+        let candidatePath = normalizedPath(candidate.path(percentEncoded: false))
+
+        guard candidatePath == rootPath || candidatePath.hasPrefix(rootPath + "/") else {
+            throw Self.error(.noPermissionsToReadFile, "Path escapes folder")
+        }
+
+        return candidate
+    }
+
+    nonisolated private static func normalizedPath(_ path: String) -> String {
+        var normalized = path
+        while normalized.count > 1 && normalized.hasSuffix("/") {
+            normalized.removeLast()
+        }
+        return normalized
+    }
+
+    nonisolated private static func fileSize(for url: URL) throws -> Int {
+        let values = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        guard values.isRegularFile == true else {
+            throw Self.error(.cannotOpenFile, "Requested resource is not a regular file")
+        }
+        guard let fileSize = values.fileSize else {
+            throw Self.error(.cannotOpenFile, "Missing file size")
+        }
+        return fileSize
+    }
+
+    nonisolated private static func sendFile(_ url: URL, to urlSchemeTask: any WKURLSchemeTask) throws {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer {
+            try? handle.close()
+        }
+
+        while true {
+            let chunk = try handle.read(upToCount: responseChunkSize) ?? Data()
+            guard !chunk.isEmpty else { break }
+            urlSchemeTask.didReceive(chunk)
+        }
+    }
 
     nonisolated private static func mimeType(for url: URL) -> String {
         let ext = url.pathExtension.lowercased()
