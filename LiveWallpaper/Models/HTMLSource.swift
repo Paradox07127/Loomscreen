@@ -99,4 +99,20 @@ enum HTMLSource: Codable, Equatable {
         }
         return false
     }
+
+    /// Stable identity used to detect the same source running on multiple
+    /// screens (multi-instance audio + GPU avoidance). Equatable already
+    /// gives us comparison; this gives us a Dictionary key.
+    var diagnosticSignature: String {
+        switch self {
+        case .file(let data):
+            return "file:" + data.base64EncodedString()
+        case .folder(let data, let index):
+            return "folder:" + data.base64EncodedString() + ":" + index
+        case .url(let url):
+            return "url:" + url.absoluteString
+        case .inline(let html):
+            return "inline:" + String(html.hashValue)
+        }
+    }
 }
