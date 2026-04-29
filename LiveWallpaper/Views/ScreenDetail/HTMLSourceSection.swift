@@ -270,6 +270,25 @@ struct HTMLSourceSection: View {
             Text("Filters common analytics and ad scripts from URL wallpapers.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+
+            HStack {
+                Label("Physical-pixel layout", systemImage: "rectangle.split.2x1")
+                Spacer()
+                Toggle("", isOn: Binding(
+                    get: { config.physicalPixelLayout },
+                    set: { newValue in
+                        config.physicalPixelLayout = newValue
+                        commitConfig()
+                    }
+                ))
+                .labelsHidden()
+                .accessibilityLabel("Physical-pixel layout")
+                .toggleStyle(.switch)
+                .controlSize(.small)
+            }
+            Text("Maps window.innerWidth to physical pixels (Wallpaper Engine compatibility). Auto-enabled for folders containing project.json.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
     }
 
