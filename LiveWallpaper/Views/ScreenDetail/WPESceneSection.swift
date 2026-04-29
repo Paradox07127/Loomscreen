@@ -22,8 +22,12 @@ struct WPESceneSection: View {
                 historyList
             }
         }
+        // Animate only the empty↔grid transition (both pure-SwiftUI subtrees).
+        // Cross-branch animation into `unsupportedDetail` is deliberately
+        // skipped because that branch hosts `WPEPreviewView` (NSViewRepresentable)
+        // and animating across NSView boundaries triggers an AppKit Auto-Layout
+        // constraint cycle (`needs Update Constraints in Window pass …`).
         .animation(.default, value: recentImports.isEmpty)
-        .animation(.default, value: selectedHistoryEntry?.id)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { reloadHistory() }
         .onReceive(NotificationCenter.default.publisher(for: .wpeImportDidComplete)) { notification in
@@ -152,17 +156,22 @@ struct WPESceneSection: View {
     /// Plan §A4/A5: when a `scene` / `application` / `unknown` import lands for
     /// THIS screen, auto-promote the user into the unsupported placeholder card
     /// so they see the preview + tip without having to dig through the grid.
+    /// Defers state mutation to the next runloop tick so we don't ask SwiftUI
+    /// to switch branches (and remount `NSViewRepresentable` previews) during
+    /// the same body evaluation that just refreshed `recentImports`.
     private func selectUnsupportedImportIfNeeded(from notification: Notification) {
         guard let screenID = notification.userInfo?["screenID"] as? CGDirectDisplayID,
               screenID == screen.id,
               let rawType = notification.userInfo?["type"] as? String,
               let type = WPEType(rawValue: rawType) else { return }
 
-        switch type {
-        case .scene, .application, .unknown:
-            selectedHistoryEntry = recentImports.first { $0.origin.originalType == type }
-        case .video, .web:
-            selectedHistoryEntry = nil
+        DispatchQueue.main.async {
+            switch type {
+            case .scene, .application, .unknown:
+                selectedHistoryEntry = recentImports.first { $0.origin.originalType == type }
+            case .video, .web:
+                selectedHistoryEntry = nil
+            }
         }
     }
 
