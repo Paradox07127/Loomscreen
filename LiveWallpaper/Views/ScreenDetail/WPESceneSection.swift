@@ -11,6 +11,7 @@ struct WPESceneSection: View {
     @State private var recentImports: [WPEHistoryEntry] = []
     @State private var selectedHistoryEntry: WPEHistoryEntry?
     @State private var showImportErrorAlert = false
+    @State private var showWorkshopGallery: Bool = false
 
     var body: some View {
         Group {
@@ -39,6 +40,10 @@ struct WPESceneSection: View {
         }
         .onChange(of: screenManager.lastWPEImportError) { _, error in
             showImportErrorAlert = (error != nil)
+        }
+        .sheet(isPresented: $showWorkshopGallery) {
+            WorkshopGalleryView()
+                .environment(screenManager)
         }
         .alert("Import Failed", isPresented: $showImportErrorAlert, presenting: screenManager.lastWPEImportError) { _ in
             Button("OK", role: .cancel) {
@@ -70,15 +75,26 @@ struct WPESceneSection: View {
                     .foregroundStyle(.secondary)
             }
 
-            Button {
-                presentFolderPicker()
-            } label: {
-                Label("Choose Folder…", systemImage: "folder.badge.plus")
+            VStack(spacing: 10) {
+                Button {
+                    presentFolderPicker()
+                } label: {
+                    Label("Choose Folder…", systemImage: "folder.badge.plus")
+                }
+                .buttonStyle(.glassProminent)
+                .controlSize(.large)
+                .accessibilityHint("Opens a folder chooser to import a Wallpaper Engine project")
+
+                Button {
+                    showWorkshopGallery = true
+                } label: {
+                    Label("Browse Workshop Library…", systemImage: "books.vertical")
+                }
+                .buttonStyle(.glass)
+                .controlSize(.regular)
+                .accessibilityHint("Discover every project under your Steam library and import in bulk")
             }
-            .buttonStyle(.glassProminent)
-            .controlSize(.large)
-            .padding(.top, 8)
-            .accessibilityHint("Opens a folder chooser to import a Wallpaper Engine project")
+            .padding(.top, 4)
 
             Text("Supports Video / Web · Scene preview only")
                 .font(.caption)
@@ -91,10 +107,19 @@ struct WPESceneSection: View {
     private var historyList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                HStack(alignment: .firstTextBaseline) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text("Recently Imported")
                         .font(.headline)
                     Spacer()
+                    Button {
+                        showWorkshopGallery = true
+                    } label: {
+                        Label("Browse Library…", systemImage: "books.vertical")
+                    }
+                    .buttonStyle(.glass)
+                    .controlSize(.regular)
+                    .accessibilityHint("Bulk-discover and import projects from your Steam Workshop folder")
+
                     Button {
                         presentFolderPicker()
                     } label: {
