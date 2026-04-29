@@ -162,9 +162,9 @@ struct WorkshopGalleryView: View {
             LazyVGrid(
                 // Fixed-width columns so the 1:1 square preview area is
                 // identical across cards regardless of window width.
-                columns: Array(repeating: GridItem(.fixed(180), spacing: 14), count: 4),
+                columns: Array(repeating: GridItem(.fixed(160), spacing: 16), count: 4),
                 alignment: .leading,
-                spacing: 14
+                spacing: 16
             ) {
                 ForEach(projects) { project in
                     WorkshopGalleryCard(
@@ -207,12 +207,25 @@ struct WorkshopGalleryView: View {
 
     private func refreshScan() async {
         state = .scanning
+
+        // Resolve persisted state on the main actor before crossing onto the
+        // detached scan task. SettingsManager is @MainActor isolated and the
+        // scanner itself runs off main.
+        guard let bookmark = SettingsManager.shared.loadWorkshopLibraryRootBookmark() else {
+            state = .needsRoot
+            return
+        }
+        let alreadyImported = Set(
+            SettingsManager.shared.loadGlobalSettings().recentWPEImports.map(\.origin.workshopID)
+        )
+
         do {
-            let discovered = try await scanner.scan()
+            let discovered = try await scanner.scan(
+                rootBookmarkData: bookmark,
+                alreadyImportedWorkshopIDs: alreadyImported
+            )
             projects = discovered
             state = .results
-        } catch WallpaperEngineLibraryScanner.ScanError.rootBookmarkMissing {
-            state = .needsRoot
         } catch WallpaperEngineLibraryScanner.ScanError.rootInaccessible(let detail) {
             errorMessage = "Workshop folder is unreachable: \(detail). Try re-granting access."
             SettingsManager.shared.clearWorkshopLibraryRootBookmark()
@@ -335,17 +348,17 @@ private struct WorkshopGalleryCard: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Square preview occupies the full 180pt card width (180×180).
+            // Square preview occupies the full 160pt card width (160×160).
             WPEPreviewView(
                 imageURL: project.previewURL,
                 securityScopedBookmarkData: project.libraryRootBookmarkData
             )
                 .clipShape(
                     UnevenRoundedRectangle(
-                        topLeadingRadius: 14,
+                        topLeadingRadius: 16,
                         bottomLeadingRadius: 0,
                         bottomTrailingRadius: 0,
-                        topTrailingRadius: 14,
+                        topTrailingRadius: 16,
                         style: .continuous
                     )
                 )
@@ -366,11 +379,11 @@ private struct WorkshopGalleryCard: View {
             .padding(12)
             .frame(maxHeight: .infinity, alignment: .top)
         }
-        .frame(width: 180, height: 280)
-        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 14))
+        .frame(width: 160, height: 240)
+        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 16))
         .scaleEffect(isHovering ? 1.02 : 1.0)
         .shadow(
-            color: Color.black.opacity(isHovering ? 0.15 : 0.05),
+            color: Color.black.opacity(isHovering ? 0.18 : 0.06),
             radius: isHovering ? 8 : 4,
             y: isHovering ? 4 : 2
         )

@@ -33,8 +33,7 @@ actor WallpaperEngineCache {
 
     func ensureExtracted(workshopID: String, sourcePkgURL: URL) async throws -> URL {
         let cacheURL = try cacheDirectory(for: workshopID)
-        let sourcePackage = try readSourcePackage(sourcePkgURL)
-        let fingerprint = sourcePackage.fingerprint
+        let fingerprint = try fingerprint(for: sourcePkgURL)
 
         if let manifest = readManifest(in: cacheURL),
            manifest.fingerprint == fingerprint,
@@ -44,17 +43,24 @@ actor WallpaperEngineCache {
         }
 
         Logger.info("WPE cache extracting workshop \(workshopID)", category: .screenManager)
-        let data = sourcePackage.data
-
         do {
-            let package = try WallpaperEnginePackage.parseIndex(of: data)
-            try package.extractAll(from: data, to: cacheURL)
+            // Streaming parse + extract: reads the index from the pkg's
+            // header bytes, then per-entry seeks the same handle. Memory
+            // peak is bounded by the 1 MiB chunk inside the package.
+            let handle = try FileHandle(forReadingFrom: sourcePkgURL)
+            defer { try? handle.close() }
+
+            let package = try WallpaperEnginePackage.parseIndex(streamingFrom: handle)
+            try package.extractAll(streamingFrom: handle, to: cacheURL)
             try writeManifest(
                 Manifest(fingerprint: fingerprint, extractedAt: Date().timeIntervalSince1970),
                 in: cacheURL
             )
             Logger.info("WPE cache extracted workshop \(workshopID)", category: .screenManager)
             return cacheURL
+        } catch let error as WPECacheError {
+            Logger.error("WPE extraction failed: \(error.localizedDescription)", category: .screenManager)
+            throw error
         } catch {
             Logger.error("WPE extraction failed: \(error.localizedDescription)", category: .screenManager)
             throw WPECacheError.extractionFailed(String(describing: error))
@@ -205,18 +211,10 @@ actor WallpaperEngineCache {
         cacheURL.appendingPathComponent("manifest.json")
     }
 
-    private func readSourcePackage(_ sourcePkgURL: URL) throws -> SourcePackage {
-        let data: Data
-        do {
-            data = try Data(contentsOf: sourcePkgURL, options: .mappedIfSafe)
-        } catch {
-            Logger.error("WPE pkg unreadable: \(error.localizedDescription)", category: .screenManager)
-            throw WPECacheError.pkgUnreadable(error.localizedDescription)
-        }
-        return SourcePackage(data: data, fingerprint: try fingerprint(for: sourcePkgURL, data: data))
-    }
-
-    private func fingerprint(for sourcePkgURL: URL, data: Data) throws -> Fingerprint {
+    /// Streaming fingerprint: hashes the source pkg in 64 KiB chunks instead
+    /// of mapping the entire file. Keeps idempotency guarantees (size + mtime
+    /// + sha256) while bounding peak memory regardless of pkg size.
+    private func fingerprint(for sourcePkgURL: URL) throws -> Fingerprint {
         do {
             let values = try sourcePkgURL.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
             guard let size = values.fileSize,
@@ -224,7 +222,8 @@ actor WallpaperEngineCache {
                   let mtime = values.contentModificationDate?.timeIntervalSince1970 else {
                 throw WPECacheError.pkgUnreadable("Missing file metadata")
             }
-            return Fingerprint(size: UInt64(size), mtime: mtime, sha256: Self.sha256Hex(data))
+            let sha = try Self.streamingSHA256Hex(of: sourcePkgURL)
+            return Fingerprint(size: UInt64(size), mtime: mtime, sha256: sha)
         } catch let error as WPECacheError {
             throw error
         } catch {
@@ -232,8 +231,15 @@ actor WallpaperEngineCache {
         }
     }
 
-    private static func sha256Hex(_ data: Data) -> String {
-        SHA256.hash(data: data)
+    private static func streamingSHA256Hex(of url: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        var hasher = SHA256()
+        let chunkSize = 64 * 1024
+        while let chunk = try handle.read(upToCount: chunkSize), !chunk.isEmpty {
+            hasher.update(data: chunk)
+        }
+        return hasher.finalize()
             .map { String(format: "%02x", $0) }
             .joined()
     }
@@ -262,11 +268,6 @@ actor WallpaperEngineCache {
 private struct Manifest: Codable, Equatable, Sendable {
     let fingerprint: Fingerprint
     let extractedAt: Double
-}
-
-private struct SourcePackage: Sendable {
-    let data: Data
-    let fingerprint: Fingerprint
 }
 
 private struct Fingerprint: Codable, Equatable, Sendable {

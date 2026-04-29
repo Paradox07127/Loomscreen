@@ -9,6 +9,11 @@ struct OnboardingStepFirstWallpaper: View {
     @Environment(ScreenManager.self) private var screenManager
     @State private var isRequestingAerials = false
     @State private var showHTMLSheet = false
+    @State private var showWorkshopGallery = false
+    /// Auto-detected on appear. Drives the WPE entry-point: if the user
+    /// already has a Wallpaper Engine library, jump straight to the
+    /// Workshop Gallery instead of presenting a single-folder picker.
+    @State private var wpeFolderExists = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -24,20 +29,55 @@ struct OnboardingStepFirstWallpaper: View {
                     .foregroundStyle(.secondary)
             }
 
-            Spacer().frame(height: 22)
+            Spacer().frame(height: 24)
 
-            VStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 16) {
+                sectionHeader("From your Mac")
+                VStack(spacing: 8) {
+                    OnboardingOptionCard(
+                        icon: "film",
+                        iconTint: .blue,
+                        title: "Choose Your Video",
+                        subtitle: "Pick an MP4 or MOV from your Mac.",
+                        isFeatured: !wpeFolderExists,
+                        isLoading: false,
+                        action: chooseVideoFile
+                    )
+                    .keyboardShortcut("1", modifiers: [])
+
+                    OnboardingOptionCard(
+                        icon: "globe",
+                        iconTint: .green,
+                        title: "Add a Web Page",
+                        subtitle: "Use a website or local HTML as a live wallpaper.",
+                        isFeatured: false,
+                        isLoading: false,
+                        action: { showHTMLSheet = true }
+                    )
+                    .keyboardShortcut("2", modifiers: [])
+                }
+
+                sectionHeader("From Steam")
                 OnboardingOptionCard(
-                    icon: "film",
-                    iconTint: Color.accentColor,
-                    title: "Choose Your Video",
-                    subtitle: "Pick an MP4 or MOV from your Mac.",
-                    isFeatured: true,
+                    icon: "cube.transparent",
+                    iconTint: .orange,
+                    title: wpeFolderExists ? "Browse Workshop Library" : "Import from Wallpaper Engine",
+                    subtitle: wpeFolderExists
+                        ? "We found your Steam folder. Browse Video / Web projects instantly."
+                        : "Use your Steam Workshop wallpapers. Scene types are preview-only.",
+                    isFeatured: wpeFolderExists,
                     isLoading: false,
-                    action: chooseVideoFile
+                    action: {
+                        if wpeFolderExists {
+                            showWorkshopGallery = true
+                        } else {
+                            chooseWPEFolder()
+                        }
+                    }
                 )
-                .keyboardShortcut("1", modifiers: [])
+                .keyboardShortcut("3", modifiers: [])
 
+                sectionHeader("Built-in")
                 OnboardingOptionCard(
                     icon: "sparkles.tv",
                     iconTint: .secondary,
@@ -46,28 +86,6 @@ struct OnboardingStepFirstWallpaper: View {
                     isFeatured: false,
                     isLoading: isRequestingAerials,
                     action: chooseAerials
-                )
-                .keyboardShortcut("2", modifiers: [])
-
-                OnboardingOptionCard(
-                    icon: "globe",
-                    iconTint: .secondary,
-                    title: "Add a Web Page",
-                    subtitle: "Use a website or local HTML as a live wallpaper.",
-                    isFeatured: false,
-                    isLoading: false,
-                    action: { showHTMLSheet = true }
-                )
-                .keyboardShortcut("3", modifiers: [])
-
-                OnboardingOptionCard(
-                    icon: "cube.transparent",
-                    iconTint: .secondary,
-                    title: "Import from Wallpaper Engine",
-                    subtitle: "Use your Steam Workshop wallpapers.",
-                    isFeatured: false,
-                    isLoading: false,
-                    action: chooseWPEFolder
                 )
                 .keyboardShortcut("4", modifiers: [])
 
@@ -81,10 +99,16 @@ struct OnboardingStepFirstWallpaper: View {
                     action: skip
                 )
                 .keyboardShortcut("5", modifiers: [])
+                .padding(.top, 4)
             }
             .padding(.horizontal, 36)
 
             Spacer()
+        }
+        .onAppear { detectWPELibrary() }
+        .sheet(isPresented: $showWorkshopGallery, onDismiss: nextStep) {
+            WorkshopGalleryView()
+                .environment(screenManager)
         }
         .sheet(isPresented: $showHTMLSheet) {
             HTMLPickerSheet(
@@ -92,6 +116,24 @@ struct OnboardingStepFirstWallpaper: View {
                 onConfirm: { source in applyHTML(source) }
             )
         }
+    }
+
+    @ViewBuilder
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.tertiary)
+            .textCase(.uppercase)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    private func detectWPELibrary() {
+        guard let docs = FileManager.default.urls(
+            for: .documentDirectory,
+            in: .userDomainMask
+        ).first else { return }
+        let lwDir = docs.appendingPathComponent("Live Wallpapers")
+        wpeFolderExists = FileManager.default.fileExists(atPath: lwDir.path)
     }
 
     private func chooseAerials() {
@@ -358,6 +400,9 @@ private struct OnboardingOptionCard: View {
 
     @State private var isHovering = false
     @FocusState private var isFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var isActive: Bool { isHovering || isFocused }
 
     var body: some View {
         Button(action: action) {
@@ -402,16 +447,20 @@ private struct OnboardingOptionCard: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(RoundedRectangle(cornerRadius: 12))
+            .contentShape(RoundedRectangle(cornerRadius: 16))
             .background(
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: 16)
                     .fill(.regularMaterial)
             )
         }
         .buttonStyle(.plain)
         .focused($isFocused)
-        .scaleEffect(isHovering || isFocused ? 1.01 : 1.0)
-        .shadow(color: .black.opacity(isHovering || isFocused ? 0.18 : (isFeatured ? 0.06 : 0)), radius: 8, y: 3)
+        .scaleEffect(isActive && !reduceMotion ? 1.02 : 1.0)
+        .shadow(
+            color: .black.opacity(isActive ? 0.18 : (isFeatured ? 0.06 : 0)),
+            radius: isActive ? 8 : 4,
+            y: isActive ? 4 : 2
+        )
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: isHovering)
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: isFocused)
         .onHover { isHovering = $0 }
