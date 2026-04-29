@@ -48,10 +48,11 @@ struct WPEPreviewView: View {
         // (512×512). Combined with `.resizeAspectFill` inside the layer, the
         // image fully covers the slot — square sources draw flush, 16:9
         // sources crop top/bottom equally, vertical sources crop sides.
+        //
+        // Clipping + shadow are intentionally delegated to the parent so
+        // cards can apply uneven (top-only) corner radii without double-clip.
         .aspectRatio(1, contentMode: .fit)
         .clipped()
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .shadow(color: Color.black.opacity(0.12), radius: 6, y: 2)
         .onChange(of: imageURL) { _, _ in
             loadFailed = false
         }

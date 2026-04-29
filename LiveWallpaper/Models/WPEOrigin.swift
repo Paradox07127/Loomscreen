@@ -93,7 +93,8 @@ struct WPEOrigin: Codable, Equatable, Sendable {
     }
 
     private static func matchesCacheBookmark(_ bookmarkData: Data, origin: WPEOrigin) -> Bool {
-        guard let cacheRel = origin.cacheRelativePath, !cacheRel.isEmpty else {
+        guard let cacheRel = origin.cacheRelativePath,
+              isSafeCacheRelativePath(cacheRel) else {
             return false
         }
         guard let resolved = resolveBookmark(bookmarkData) else { return false }
@@ -105,13 +106,28 @@ struct WPEOrigin: Codable, Equatable, Sendable {
             create: false
         ) else { return false }
 
-        let expectedURL = appSupport
+        let rootURL = appSupport
             .appendingPathComponent("LiveWallpaper", isDirectory: true)
+            .standardizedFileURL
+        let expectedURL = rootURL
             .appendingPathComponent(cacheRel)
             .standardizedFileURL
+        // Defense-in-depth: reject persisted paths that escape root after
+        // standardization, even if they passed the textual safety check.
+        guard expectedURL.path == rootURL.path
+                || expectedURL.path.hasPrefix(rootURL.path + "/") else {
+            return false
+        }
         let resolvedPath = resolved.standardizedFileURL.path
         let expectedPath = expectedURL.path
         return resolvedPath == expectedPath || resolvedPath.hasPrefix(expectedPath + "/")
+    }
+
+    private static func isSafeCacheRelativePath(_ path: String) -> Bool {
+        path.hasPrefix("wpe-cache/")
+            && !path.contains("\\")
+            && !path.contains("..")
+            && !path.contains("//")
     }
 
     private static func matchesSourceFolderBookmark(_ bookmarkData: Data, origin: WPEOrigin) -> Bool {
@@ -119,8 +135,27 @@ struct WPEOrigin: Codable, Equatable, Sendable {
               let source = resolveBookmark(origin.sourceFolderBookmark) else {
             return false
         }
-        return resolved.standardizedFileURL.resolvingSymlinksInPath().path
-            == source.standardizedFileURL.resolvingSymlinksInPath().path
+        let resolvedPath = resolved.standardizedFileURL.resolvingSymlinksInPath().path
+        let sourceURL = source.standardizedFileURL.resolvingSymlinksInPath()
+        let sourcePath = sourceURL.path
+
+        // Branch by `originalType` so a sibling file inside the same WPE folder
+        // does not falsely keep the badge attached. Web stays folder-anchored;
+        // video must match its declared `entryFile` exactly.
+        switch origin.originalType {
+        case .video:
+            guard let entryFile = origin.entryFile, !entryFile.isEmpty else { return false }
+            let expected = sourceURL
+                .appendingPathComponent(entryFile)
+                .standardizedFileURL
+                .resolvingSymlinksInPath()
+                .path
+            return resolvedPath == expected
+        case .web:
+            return resolvedPath == sourcePath
+        case .scene, .application, .unknown:
+            return false
+        }
     }
 
     private static func resolveBookmark(_ data: Data) -> URL? {

@@ -37,7 +37,9 @@ struct WallpaperEnginePackage: Sendable, Equatable {
 
         for index in 0..<Int(entryCount) {
             let nameLength = try data.wpeReadU32(cursor: &cursor)
-            guard nameLength >= 1 && nameLength <= 1_024 else {
+            // 255 matches the upstream RePKG reader cap. Generous for every
+            // UTF-8 path observed in real workshops.
+            guard nameLength >= 1 && nameLength <= 255 else {
                 throw WPEPackageError.invalidEntryName(index: index)
             }
 
@@ -69,9 +71,187 @@ struct WallpaperEnginePackage: Sendable, Equatable {
         try dataRange(for: entry, dataCount: Int.max)
     }
 
+    /// Streaming variant of `parseIndex(of:)`. Reads only the header bytes
+    /// from the given handle so multi-hundred-MB packages don't have to be
+    /// memory-mapped just to discover their entry table. The handle's offset
+    /// is left at the start of the payload (i.e. equal to `dataStart`),
+    /// ready for `extractAll(streamingFrom:to:)` to seek per-entry.
+    static func parseIndex(streamingFrom handle: FileHandle) throws -> Self {
+        let totalLength: UInt64
+        do {
+            totalLength = try handle.seekToEnd()
+            try handle.seek(toOffset: 0)
+        } catch {
+            throw WPEPackageError.truncatedHeader
+        }
+
+        var headerData = Data()
+        var cursor = 0
+
+        try Self.streamAppend(into: &headerData, from: handle, count: 4)
+        let magicLength = try headerData.wpeReadU32(cursor: &cursor)
+        guard magicLength >= 4 && magicLength <= 16 else {
+            throw WPEPackageError.invalidMagic("length:\(magicLength)")
+        }
+
+        try Self.streamAppend(into: &headerData, from: handle, count: Int(magicLength))
+        let magic = try headerData.wpeReadString(cursor: &cursor, length: Int(magicLength))
+        guard magic.hasPrefix("PKGV") else {
+            throw WPEPackageError.invalidMagic(magic)
+        }
+
+        try Self.streamAppend(into: &headerData, from: handle, count: 4)
+        let entryCount = try headerData.wpeReadU32(cursor: &cursor)
+        guard entryCount <= 65_535 else {
+            throw WPEPackageError.invalidMagic("entryCount:\(entryCount)")
+        }
+
+        var entries: [Entry] = []
+        entries.reserveCapacity(Int(entryCount))
+        var seenNames = Set<String>()
+
+        for index in 0..<Int(entryCount) {
+            try Self.streamAppend(into: &headerData, from: handle, count: 4)
+            let nameLength = try headerData.wpeReadU32(cursor: &cursor)
+            guard nameLength >= 1 && nameLength <= 255 else {
+                throw WPEPackageError.invalidEntryName(index: index)
+            }
+
+            try Self.streamAppend(into: &headerData, from: handle, count: Int(nameLength))
+            let name = try headerData.wpeReadEntryName(
+                cursor: &cursor,
+                length: Int(nameLength),
+                index: index
+            )
+            guard !name.isEmpty else { throw WPEPackageError.invalidEntryName(index: index) }
+            guard !Self.isUnsafeEntryName(name) else { throw WPEPackageError.pathTraversal(name: name) }
+            guard seenNames.insert(name).inserted else { throw WPEPackageError.duplicateEntry(name: name) }
+
+            try Self.streamAppend(into: &headerData, from: handle, count: 8)
+            let offset = UInt64(try headerData.wpeReadU32(cursor: &cursor))
+            let size = UInt64(try headerData.wpeReadU32(cursor: &cursor))
+            entries.append(Entry(name: name, dataOffset: offset, dataSize: size))
+        }
+
+        let dataStart = UInt64(cursor)
+        // Validate every entry stays within the actual file length without
+        // mapping the payload — bounds checks mirror `parseIndex(of:)`.
+        for entry in entries {
+            let (absoluteStart, startOverflow) = dataStart.addingReportingOverflow(entry.dataOffset)
+            let (absoluteEnd, endOverflow) = absoluteStart.addingReportingOverflow(entry.dataSize)
+            guard !startOverflow, !endOverflow,
+                  absoluteEnd <= totalLength,
+                  absoluteStart <= absoluteEnd else {
+                throw WPEPackageError.entryOutOfBounds(name: entry.name)
+            }
+        }
+        do {
+            try handle.seek(toOffset: dataStart)
+        } catch {
+            throw WPEPackageError.truncatedHeader
+        }
+        return Self(magic: magic, entries: entries, dataStart: dataStart)
+    }
+
+    /// Streaming companion to `extractAll(from:to:)`. Reads each entry from
+    /// the supplied handle in fixed-size chunks and writes it to the
+    /// inflight directory without ever holding the full pkg in memory.
+    /// Same atomicity + crash-recovery behaviour as the Data-based variant.
+    func extractAll(streamingFrom handle: FileHandle, to rootURL: URL) throws {
+        let fileManager = FileManager.default
+        let parentURL = rootURL.deletingLastPathComponent()
+        let rootName = rootURL.lastPathComponent
+        let inflightURL = parentURL.appendingPathComponent("\(rootName).inflight", isDirectory: true)
+        let backupURL = parentURL.appendingPathComponent("\(rootName).replaced", isDirectory: true)
+
+        try fileManager.createDirectory(at: parentURL, withIntermediateDirectories: true)
+
+        if !fileManager.fileExists(atPath: rootURL.path),
+           fileManager.fileExists(atPath: backupURL.path) {
+            try fileManager.moveItem(at: backupURL, to: rootURL)
+        }
+
+        try? fileManager.removeItem(at: inflightURL)
+        try? fileManager.removeItem(at: backupURL)
+        try fileManager.createDirectory(at: inflightURL, withIntermediateDirectories: true)
+
+        let inflightPath = inflightURL.standardizedFileURL.path
+        var movedExistingRoot = false
+
+        do {
+            let chunkSize = 1 << 20  // 1 MiB
+            for entry in entries {
+                let targetURL = inflightURL.appendingPathComponent(entry.name)
+                let standardizedTarget = targetURL.standardizedFileURL
+                guard standardizedTarget.path.hasPrefix(inflightPath + "/") else {
+                    throw WPEPackageError.pathTraversal(name: entry.name)
+                }
+                try fileManager.createDirectory(
+                    at: standardizedTarget.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+
+                let absoluteStart = dataStart + entry.dataOffset
+                try handle.seek(toOffset: absoluteStart)
+
+                fileManager.createFile(atPath: standardizedTarget.path, contents: nil)
+                let writer = try FileHandle(forWritingTo: standardizedTarget)
+                do {
+                    var remaining = entry.dataSize
+                    while remaining > 0 {
+                        let toRead = Int(min(UInt64(chunkSize), remaining))
+                        guard let chunk = try handle.read(upToCount: toRead),
+                              chunk.count == toRead else {
+                            try? writer.close()
+                            throw WPEPackageError.entryOutOfBounds(name: entry.name)
+                        }
+                        try writer.write(contentsOf: chunk)
+                        remaining -= UInt64(chunk.count)
+                    }
+                    try writer.close()
+                } catch {
+                    try? writer.close()
+                    throw error
+                }
+            }
+
+            if fileManager.fileExists(atPath: rootURL.path) {
+                try fileManager.moveItem(at: rootURL, to: backupURL)
+                movedExistingRoot = true
+            }
+            try fileManager.moveItem(at: inflightURL, to: rootURL)
+            if movedExistingRoot {
+                try? fileManager.removeItem(at: backupURL)
+            }
+        } catch {
+            try? fileManager.removeItem(at: inflightURL)
+            if movedExistingRoot,
+               !fileManager.fileExists(atPath: rootURL.path),
+               fileManager.fileExists(atPath: backupURL.path) {
+                try? fileManager.moveItem(at: backupURL, to: rootURL)
+            }
+            throw error
+        }
+    }
+
+    private static func streamAppend(into buffer: inout Data, from handle: FileHandle, count: Int) throws {
+        guard count >= 0 else { throw WPEPackageError.truncatedHeader }
+        guard count > 0 else { return }
+        guard let chunk = try handle.read(upToCount: count), chunk.count == count else {
+            throw WPEPackageError.truncatedHeader
+        }
+        buffer.append(chunk)
+    }
+
     /// Atomic extraction: writes into `<root>.inflight` first, then swaps via
     /// `<root>.replaced` so a partially extracted directory is never observed
     /// at `rootURL`. Rolls back on failure.
+    ///
+    /// Crash recovery: if a previous extract crashed AFTER moving the live
+    /// `rootURL` into `.replaced` but BEFORE moving `.inflight` into place,
+    /// the next launch finds `rootURL` missing while `.replaced` still holds
+    /// the last-good cache. We restore it before any cleanup so the
+    /// pre-existing wallpaper isn't lost just because we tried to replace it.
     func extractAll(from data: Data, to rootURL: URL) throws {
         let fileManager = FileManager.default
         let parentURL = rootURL.deletingLastPathComponent()
@@ -80,6 +260,14 @@ struct WallpaperEnginePackage: Sendable, Equatable {
         let backupURL = parentURL.appendingPathComponent("\(rootName).replaced", isDirectory: true)
 
         try fileManager.createDirectory(at: parentURL, withIntermediateDirectories: true)
+
+        // Restore must succeed before cleanup runs, otherwise the next line
+        // would silently delete the only good copy.
+        if !fileManager.fileExists(atPath: rootURL.path),
+           fileManager.fileExists(atPath: backupURL.path) {
+            try fileManager.moveItem(at: backupURL, to: rootURL)
+        }
+
         try? fileManager.removeItem(at: inflightURL)
         try? fileManager.removeItem(at: backupURL)
         try fileManager.createDirectory(at: inflightURL, withIntermediateDirectories: true)
