@@ -57,8 +57,11 @@ final class Logger {
 
     // MARK: - Core Logging
 
+    /// `@autoclosure` defers string interpolation; the message is only
+    /// evaluated when this level is actually being logged.
+
     static func log(
-        _ message: String,
+        _ message: @autoclosure () -> String,
         category: Category,
         level: Level = .info,
         file: String = #file,
@@ -70,42 +73,45 @@ final class Logger {
         #endif
 
         let fileName = (file as NSString).lastPathComponent
-        // Swift `os.Logger` keeps the level-aware short-circuit: when the
-        // system log level disables a category, the formatted string is never
-        // built. Privacy is `.public` so console output matches the legacy
-        // `os_log("%{public}@", ...)` behavior.
+        let body = message()
         category.logger.log(
             level: level.osLogType,
-            "\(level.prefix, privacy: .public) [\(fileName, privacy: .public):\(line, privacy: .public)] \(function, privacy: .public) - \(message, privacy: .public)"
+            "\(level.prefix, privacy: .public) [\(fileName, privacy: .public):\(line, privacy: .public)] \(function, privacy: .public) - \(body, privacy: .public)"
         )
     }
 
     // MARK: - Convenience Methods
 
-    static func debug(_ message: String, category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
+
+    static func debug(_ message: @autoclosure () -> String, category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
         #if DEBUG
-        log(message, category: category, level: .debug, file: file, function: function, line: line)
+        log(message(), category: category, level: .debug, file: file, function: function, line: line)
         #endif
     }
 
-    static func info(_ message: String, category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
-        log(message, category: category, level: .info, file: file, function: function, line: line)
+
+    static func info(_ message: @autoclosure () -> String, category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
+        log(message(), category: category, level: .info, file: file, function: function, line: line)
     }
 
-    static func notice(_ message: String, category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
-        log(message, category: category, level: .notice, file: file, function: function, line: line)
+
+    static func notice(_ message: @autoclosure () -> String, category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
+        log(message(), category: category, level: .notice, file: file, function: function, line: line)
     }
 
-    static func warning(_ message: String, category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
-        log(message, category: category, level: .warning, file: file, function: function, line: line)
+
+    static func warning(_ message: @autoclosure () -> String, category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
+        log(message(), category: category, level: .warning, file: file, function: function, line: line)
     }
 
-    static func error(_ message: String, category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
-        log(message, category: category, level: .error, file: file, function: function, line: line)
+
+    static func error(_ message: @autoclosure () -> String, category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
+        log(message(), category: category, level: .error, file: file, function: function, line: line)
     }
 
-    static func fault(_ message: String, category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
-        log(message, category: category, level: .fault, file: file, function: function, line: line)
+
+    static func fault(_ message: @autoclosure () -> String, category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
+        log(message(), category: category, level: .fault, file: file, function: function, line: line)
     }
 
     // MARK: - Lifecycle Logging

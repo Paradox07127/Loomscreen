@@ -1,6 +1,20 @@
 import Foundation
 import Observation
 
+/// Persistence seam — production binds to UserDefaults via SettingsManager,
+/// tests inject an in-memory implementation.
+@MainActor
+protocol BookmarkPersisting {
+    func load() -> [WallpaperBookmark]
+    func save(_ bookmarks: [WallpaperBookmark])
+}
+
+@MainActor
+struct SettingsManagerBookmarkPersistence: BookmarkPersisting {
+    func load() -> [WallpaperBookmark] { SettingsManager.shared.loadWallpaperBookmarks() }
+    func save(_ bookmarks: [WallpaperBookmark]) { SettingsManager.shared.saveWallpaperBookmarks(bookmarks) }
+}
+
 /// Single source of truth for the user's saved wallpaper shortcuts.
 @MainActor
 @Observable
@@ -8,9 +22,11 @@ final class BookmarkStore {
     static let shared = BookmarkStore()
 
     private(set) var bookmarks: [WallpaperBookmark]
+    @ObservationIgnored private let persistence: any BookmarkPersisting
 
-    init() {
-        self.bookmarks = SettingsManager.shared.loadWallpaperBookmarks()
+    init(persistence: any BookmarkPersisting = SettingsManagerBookmarkPersistence()) {
+        self.persistence = persistence
+        self.bookmarks = persistence.load()
     }
 
     /// Append a new bookmark and persist immediately.
@@ -44,7 +60,7 @@ final class BookmarkStore {
     }
 
     private func persist() {
-        SettingsManager.shared.saveWallpaperBookmarks(bookmarks)
+        persistence.save(bookmarks)
     }
 
     /// Friendly fallback label derived from the content itself.
