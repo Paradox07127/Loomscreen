@@ -7,6 +7,9 @@ struct GlobalSettings: Codable {
     var minimumBatteryLevel: Double?
     var defaultFrameRateLimit: FrameRateLimit
     var pauseOnFullScreen: Bool
+    /// LRU of recently imported Wallpaper Engine projects (capped at 20 by
+    /// `SettingsManager.recordWPEImport(_:)`). Most recent at index 0.
+    var recentWPEImports: [WPEHistoryEntry] = []
 
     init(
         // Default `false` so a freshly-installed or reset app plays its
@@ -17,7 +20,8 @@ struct GlobalSettings: Codable {
         startOnLogin: Bool = false,
         minimumBatteryLevel: Double? = nil,
         defaultFrameRateLimit: FrameRateLimit = .fps60,
-        pauseOnFullScreen: Bool = true
+        pauseOnFullScreen: Bool = true,
+        recentWPEImports: [WPEHistoryEntry] = []
     ) {
         self.globalPauseOnBattery = globalPauseOnBattery
         self.preservePlaybackOnLock = preservePlaybackOnLock
@@ -25,6 +29,7 @@ struct GlobalSettings: Codable {
         self.minimumBatteryLevel = minimumBatteryLevel
         self.defaultFrameRateLimit = defaultFrameRateLimit
         self.pauseOnFullScreen = pauseOnFullScreen
+        self.recentWPEImports = recentWPEImports
     }
 
     init(from decoder: Decoder) throws {
@@ -35,6 +40,9 @@ struct GlobalSettings: Codable {
         minimumBatteryLevel = try c.decodeIfPresent(Double.self, forKey: .minimumBatteryLevel)
         defaultFrameRateLimit = try c.decodeIfPresent(FrameRateLimit.self, forKey: .defaultFrameRateLimit) ?? .fps60
         pauseOnFullScreen = try c.decodeIfPresent(Bool.self, forKey: .pauseOnFullScreen) ?? true
+        // Lossy decode: a malformed WPE history entry should not invalidate the
+        // entire settings blob. Falls back to empty array if any entry breaks.
+        recentWPEImports = (try? c.decodeIfPresent([WPEHistoryEntry].self, forKey: .recentWPEImports)) ?? []
         // Legacy `batteryResolutionCap` key is silently ignored on decode — superseded
         // by the "pause on battery = static wallpaper" model; no frame-rate or resolution
         // degradation is applied anymore.

@@ -219,6 +219,8 @@ struct ScreenRow: View {
             return "globe"
         case .metalShader:
             return "sparkles.rectangle.stack"
+        case .scene:
+            return "cube.transparent"
         case nil:
             return "display"
         }
@@ -247,6 +249,8 @@ struct ScreenRow: View {
             return "Shader"
         case .video:
             return summary.activity == .active ? "Playing" : "Paused"
+        case .scene:
+            return "Scene"
         case nil:
             return "Not configured"
         }
@@ -260,6 +264,8 @@ struct ScreenRow: View {
             return "Shader wallpaper active"
         case .video:
             return summary.activity == .active ? "Playing video" : "Video paused"
+        case .scene:
+            return "Scene wallpaper"
         case nil:
             return "No wallpaper configured"
         }

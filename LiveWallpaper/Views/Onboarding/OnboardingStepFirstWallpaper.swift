@@ -61,6 +61,17 @@ struct OnboardingStepFirstWallpaper: View {
                 .keyboardShortcut("3", modifiers: [])
 
                 OnboardingOptionCard(
+                    icon: "cube.transparent",
+                    iconTint: .secondary,
+                    title: "Import from Wallpaper Engine",
+                    subtitle: "Use your Steam Workshop wallpapers.",
+                    isFeatured: false,
+                    isLoading: false,
+                    action: chooseWPEFolder
+                )
+                .keyboardShortcut("4", modifiers: [])
+
+                OnboardingOptionCard(
                     icon: "arrow.right.circle",
                     iconTint: .secondary,
                     title: "Skip for Now",
@@ -69,7 +80,7 @@ struct OnboardingStepFirstWallpaper: View {
                     isLoading: false,
                     action: skip
                 )
-                .keyboardShortcut("4", modifiers: [])
+                .keyboardShortcut("5", modifiers: [])
             }
             .padding(.horizontal, 36)
 
@@ -121,6 +132,33 @@ struct OnboardingStepFirstWallpaper: View {
         }
         showHTMLSheet = false
         nextStep()
+    }
+
+    private func chooseWPEFolder() {
+        NSApp.activate(ignoringOtherApps: true)
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Import Project"
+
+        if let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            let lwDir = docs.appendingPathComponent("Live Wallpapers")
+            if FileManager.default.fileExists(atPath: lwDir.path) {
+                panel.directoryURL = lwDir
+            }
+        }
+
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        if let screen = screenManager.screens.first {
+            Task { @MainActor in
+                await screenManager.importWallpaperEngineProject(at: url, for: screen)
+                nextStep()
+            }
+        } else {
+            nextStep()
+        }
     }
 }
 
@@ -377,7 +415,7 @@ private struct OnboardingOptionCard: View {
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: isHovering)
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: isFocused)
         .onHover { isHovering = $0 }
-        .accessibilityLabel(title)
+        .accessibilityLabel(isFeatured ? "Recommended: \(title)" : title)
         .accessibilityHint(subtitle)
     }
 }
