@@ -1,0 +1,226 @@
+import Foundation
+import Testing
+@testable import LiveWallpaper
+
+@Suite("WallpaperEngineCache idempotency")
+struct WallpaperEngineCacheTests {
+    @Test("Cache hit when manifest fingerprint matches and payload present")
+    func cacheHitWithMatchingManifest() async throws {
+        let env = try TempCacheEnvironment.make(workshopID: "111")
+        defer { env.cleanup() }
+
+        let firstURL = try await env.cache.ensureExtracted(workshopID: env.workshopID, sourcePkgURL: env.pkgURL)
+        // Drop a sentinel inside the cache; a hit must NOT delete it.
+        let sentinel = firstURL.appendingPathComponent("hit-marker.txt")
+        try Data("hit".utf8).write(to: sentinel)
+
+        let secondURL = try await env.cache.ensureExtracted(workshopID: env.workshopID, sourcePkgURL: env.pkgURL)
+
+        #expect(secondURL == firstURL)
+        #expect(FileManager.default.fileExists(atPath: sentinel.path))
+    }
+
+    @Test("Cache miss when source pkg fingerprint changes")
+    func cacheMissOnFingerprintChange() async throws {
+        let env = try TempCacheEnvironment.make(workshopID: "222")
+        defer { env.cleanup() }
+
+        let firstURL = try await env.cache.ensureExtracted(workshopID: env.workshopID, sourcePkgURL: env.pkgURL)
+        let originalEntry = firstURL.appendingPathComponent("payload.bin")
+        #expect(try Data(contentsOf: originalEntry) == Data([0x01, 0x02]))
+
+        // Use a SECOND pkg at a different path with a different entry layout —
+        // guarantees both `size` and `mtime` of the URL differ from what the
+        // manifest captured, regardless of FS mtime resolution.
+        let secondPkgURL = env.pkgURL.deletingLastPathComponent().appendingPathComponent("scene-v2.pkg")
+        let secondPkg = SyntheticPackage.makeData(entries: [
+            .init(name: "fresh-payload.bin", bytes: Array(repeating: 0xAA, count: 64))
+        ])
+        try secondPkg.write(to: secondPkgURL)
+
+        let secondURL = try await env.cache.ensureExtracted(workshopID: env.workshopID, sourcePkgURL: secondPkgURL)
+        #expect(secondURL == firstURL, "cache directory key is workshopID, not pkg path")
+
+        let freshEntry = secondURL.appendingPathComponent("fresh-payload.bin")
+        #expect(try Data(contentsOf: freshEntry).count == 64)
+        #expect(!FileManager.default.fileExists(atPath: originalEntry.path),
+                "atomic re-extract must wipe stale payloads")
+    }
+
+    @Test("Cache miss when manifest exists but payload was deleted")
+    func cacheMissWhenPayloadDeleted() async throws {
+        let env = try TempCacheEnvironment.make(workshopID: "333")
+        defer { env.cleanup() }
+
+        let cacheURL = try await env.cache.ensureExtracted(workshopID: env.workshopID, sourcePkgURL: env.pkgURL)
+        // Delete every payload file but keep manifest.json so the cache appears
+        // populated by metadata only.
+        let entries = try FileManager.default.contentsOfDirectory(atPath: cacheURL.path)
+        for entry in entries where entry != "manifest.json" {
+            try FileManager.default.removeItem(at: cacheURL.appendingPathComponent(entry))
+        }
+
+        let secondURL = try await env.cache.ensureExtracted(workshopID: env.workshopID, sourcePkgURL: env.pkgURL)
+
+        #expect(secondURL == cacheURL)
+        let restored = cacheURL.appendingPathComponent("payload.bin")
+        #expect(FileManager.default.fileExists(atPath: restored.path))
+    }
+
+    @Test("Invalid workshop IDs are rejected before touching disk")
+    func invalidWorkshopIDRejection() async throws {
+        let env = try TempCacheEnvironment.make(workshopID: "444")
+        defer { env.cleanup() }
+
+        for badID in ["", ".", "..", "/etc/passwd", "..\\foo", "foo/bar"] {
+            await #expect(throws: WPECacheError.self) {
+                _ = try await env.cache.ensureExtracted(workshopID: badID, sourcePkgURL: env.pkgURL)
+            }
+        }
+    }
+
+    @Test("Purge removes the cache directory and is safe when missing")
+    func purgeRemovesCacheDirectory() async throws {
+        let env = try TempCacheEnvironment.make(workshopID: "555")
+        defer { env.cleanup() }
+
+        let cacheURL = try await env.cache.ensureExtracted(workshopID: env.workshopID, sourcePkgURL: env.pkgURL)
+        #expect(FileManager.default.fileExists(atPath: cacheURL.path))
+
+        try await env.cache.purge(workshopID: env.workshopID)
+        #expect(!FileManager.default.fileExists(atPath: cacheURL.path))
+
+        // Calling purge again on a non-existent cache must not throw.
+        try await env.cache.purge(workshopID: env.workshopID)
+    }
+
+    @Test("stats() returns aggregated bytes and entries sorted by last-used")
+    func statsAggregatesAcrossWorkshopDirectories() async throws {
+        let env = try TempCacheEnvironment.make(workshopID: "stats-a")
+        defer { env.cleanup() }
+
+        // Create 2 distinct workshop caches via the same cache root.
+        _ = try await env.cache.ensureExtracted(workshopID: "alpha", sourcePkgURL: env.pkgURL)
+        _ = try await env.cache.ensureExtracted(workshopID: "beta", sourcePkgURL: env.pkgURL)
+
+        let snapshot = await env.cache.stats()
+
+        #expect(snapshot.entries.count == 2)
+        #expect(snapshot.totalBytes > 0)
+        #expect(snapshot.entries.map(\.workshopID).sorted() == ["alpha", "beta"])
+        for entry in snapshot.entries {
+            #expect(entry.sizeBytes > 0)
+            #expect(entry.lastUsed != nil)
+        }
+    }
+
+    @Test("purgeAll() removes every workshop subdirectory and reports freed bytes")
+    func purgeAllRemovesAllWorkshops() async throws {
+        let env = try TempCacheEnvironment.make(workshopID: "purgeall")
+        defer { env.cleanup() }
+
+        _ = try await env.cache.ensureExtracted(workshopID: "one", sourcePkgURL: env.pkgURL)
+        _ = try await env.cache.ensureExtracted(workshopID: "two", sourcePkgURL: env.pkgURL)
+        let beforeStats = await env.cache.stats()
+        #expect(beforeStats.entries.count == 2)
+        #expect(beforeStats.totalBytes > 0)
+
+        let freed = await env.cache.purgeAll()
+        #expect(freed > 0)
+
+        let afterStats = await env.cache.stats()
+        #expect(afterStats.entries.isEmpty)
+        #expect(afterStats.totalBytes == 0)
+    }
+
+    @Test("purgeOlderThan() only drops entries whose lastUsed predates the cutoff")
+    func purgeOlderThanScopesByLastUsed() async throws {
+        let env = try TempCacheEnvironment.make(workshopID: "older")
+        defer { env.cleanup() }
+
+        _ = try await env.cache.ensureExtracted(workshopID: "fresh", sourcePkgURL: env.pkgURL)
+        _ = try await env.cache.ensureExtracted(workshopID: "stale", sourcePkgURL: env.pkgURL)
+
+        // Cutoff in the future drops everything; cutoff in the past drops nothing.
+        let allFreed = await env.cache.purgeOlderThan(Date().addingTimeInterval(60))
+        #expect(allFreed > 0)
+        #expect(await env.cache.stats().entries.isEmpty)
+
+        // Recreate then verify the past-cutoff is a no-op.
+        _ = try await env.cache.ensureExtracted(workshopID: "fresh-again", sourcePkgURL: env.pkgURL)
+        let nothingFreed = await env.cache.purgeOlderThan(Date(timeIntervalSince1970: 0))
+        #expect(nothingFreed == 0)
+        #expect(await env.cache.stats().entries.count == 1)
+    }
+}
+
+private struct TempCacheEnvironment {
+    let cache: WallpaperEngineCache
+    let pkgURL: URL
+    let cacheRoot: URL
+    let workshopID: String
+
+    static func make(workshopID: String, payload: [UInt8] = [0x01, 0x02]) throws -> TempCacheEnvironment {
+        let scratch = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let cacheRoot = scratch.appendingPathComponent("cache", isDirectory: true)
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+
+        let pkgURL = scratch.appendingPathComponent("scene.pkg")
+        let pkgData = SyntheticPackage.makeData(entries: [.init(name: "payload.bin", bytes: payload)])
+        try pkgData.write(to: pkgURL)
+
+        return TempCacheEnvironment(
+            cache: WallpaperEngineCache(rootURL: cacheRoot),
+            pkgURL: pkgURL,
+            cacheRoot: cacheRoot,
+            workshopID: workshopID
+        )
+    }
+
+    func cleanup() {
+        try? FileManager.default.removeItem(at: cacheRoot.deletingLastPathComponent())
+    }
+}
+
+/// Builder for a minimal `PKGV0022` archive used across cache tests.
+fileprivate enum SyntheticPackage {
+    struct Entry {
+        let name: String
+        let bytes: [UInt8]
+    }
+
+    static func makeData(entries: [Entry]) -> Data {
+        var payload = Data()
+        var offsets: [(name: String, offset: UInt32, size: UInt32)] = []
+
+        for entry in entries {
+            let offset = UInt32(payload.count)
+            payload.append(contentsOf: entry.bytes)
+            offsets.append((entry.name, offset, UInt32(entry.bytes.count)))
+        }
+
+        var data = Data()
+        let magicBytes = Array("PKGV0022".utf8)
+        appendU32(UInt32(magicBytes.count), to: &data)
+        data.append(contentsOf: magicBytes)
+        appendU32(UInt32(offsets.count), to: &data)
+
+        for entry in offsets {
+            let nameBytes = Array(entry.name.utf8)
+            appendU32(UInt32(nameBytes.count), to: &data)
+            data.append(contentsOf: nameBytes)
+            appendU32(entry.offset, to: &data)
+            appendU32(entry.size, to: &data)
+        }
+
+        data.append(payload)
+        return data
+    }
+
+    private static func appendU32(_ value: UInt32, to data: inout Data) {
+        data.append(UInt8(value & 0xff))
+        data.append(UInt8((value >> 8) & 0xff))
+        data.append(UInt8((value >> 16) & 0xff))
+        data.append(UInt8((value >> 24) & 0xff))
+    }
+}

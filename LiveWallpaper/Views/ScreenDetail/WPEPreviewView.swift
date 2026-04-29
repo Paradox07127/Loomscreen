@@ -10,6 +10,9 @@ struct WPEPreviewView: View {
     let imageURL: URL?
     let securityScopedBookmarkData: Data?
 
+    @State private var loadAttempt: Int = 0
+    @State private var loadFailed: Bool = false
+
     init(imageURL: URL?, securityScopedBookmarkData: Data? = nil) {
         self.imageURL = imageURL
         self.securityScopedBookmarkData = securityScopedBookmarkData
@@ -25,20 +28,56 @@ struct WPEPreviewView: View {
             } else {
                 AnimatedImage(
                     imageURL: imageURL,
-                    securityScopedBookmarkData: securityScopedBookmarkData
+                    securityScopedBookmarkData: securityScopedBookmarkData,
+                    loadAttempt: loadAttempt,
+                    onLoadResult: { success in
+                        loadFailed = !success
+                    }
                 )
+
+                if loadFailed {
+                    retryOverlay
+                }
             }
         }
         .aspectRatio(16/9, contentMode: .fit)
         .clipped()
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .shadow(color: Color.black.opacity(0.12), radius: 6, y: 2)
+        .onChange(of: imageURL) { _, _ in
+            loadFailed = false
+        }
+    }
+
+    @ViewBuilder
+    private var retryOverlay: some View {
+        VStack(spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(.orange)
+            Text("Preview unavailable")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Button {
+                loadFailed = false
+                loadAttempt &+= 1
+            } label: {
+                Label("Retry", systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(.glass)
+            .controlSize(.small)
+            .accessibilityHint("Re-attempt to load this preview")
+        }
+        .padding(12)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
 private struct AnimatedImage: NSViewRepresentable {
     let imageURL: URL?
     let securityScopedBookmarkData: Data?
+    let loadAttempt: Int
+    let onLoadResult: (Bool) -> Void
 
     func makeNSView(context: Context) -> NSImageView {
         let imageView = NSImageView()
@@ -58,13 +97,27 @@ private struct AnimatedImage: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSImageView, context: Context) {
         guard let url = imageURL else {
-            context.coordinator.currentURL = nil
+            context.coordinator.reset()
             nsView.image = nil
             return
         }
-        guard context.coordinator.currentURL != url else { return }
+
+        // Re-evaluate whenever URL OR loadAttempt changes; otherwise skip.
+        if context.coordinator.currentURL == url,
+           context.coordinator.lastAttempt == loadAttempt {
+            return
+        }
+
         context.coordinator.currentURL = url
-        nsView.image = loadImage(from: url)
+        context.coordinator.lastAttempt = loadAttempt
+
+        let image = loadImage(from: url)
+        nsView.image = image
+        // Defer state mutation off the current render frame to avoid
+        // "modifying state during view update" warnings.
+        DispatchQueue.main.async {
+            onLoadResult(image != nil)
+        }
     }
 
     private func loadImage(from url: URL) -> NSImage? {
@@ -88,5 +141,11 @@ private struct AnimatedImage: NSViewRepresentable {
 
     final class Coordinator {
         var currentURL: URL?
+        var lastAttempt: Int = 0
+
+        func reset() {
+            currentURL = nil
+            lastAttempt = 0
+        }
     }
 }
