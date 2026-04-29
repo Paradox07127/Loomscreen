@@ -303,9 +303,26 @@ final class HTMLWallpaperView: NSView {
         activeSecurityScopedURL = nil
     }
 
-    fileprivate static func isAllowedRemoteURL(_ url: URL) -> Bool {
+    nonisolated static func isAllowedRemoteURL(_ url: URL) -> Bool {
         guard let scheme = url.scheme?.lowercased() else { return false }
         return scheme == "http" || scheme == "https"
+    }
+
+    nonisolated static func isExternallyOpenableURL(_ url: URL) -> Bool {
+        isAllowedRemoteURL(url)
+    }
+
+    nonisolated static func isSameOrigin(navigationURL: URL, current: URL?) -> Bool {
+        guard let current,
+              let lhsScheme = navigationURL.scheme?.lowercased(),
+              let rhsScheme = current.scheme?.lowercased(),
+              let lhsHost = navigationURL.host?.lowercased(),
+              let rhsHost = current.host?.lowercased(),
+              lhsScheme == rhsScheme,
+              lhsHost == rhsHost else { return false }
+
+        return effectivePort(for: navigationURL, scheme: lhsScheme)
+            == effectivePort(for: current, scheme: rhsScheme)
     }
 
     func loadHTML(_ htmlString: String) {
@@ -556,10 +573,12 @@ extension HTMLWallpaperView: WKNavigationDelegate {
                 decisionHandler(.cancel)
                 return
             }
-            if isSameOrigin(navigationURL: url, current: webView.url) || url.isFileURL {
+            if HTMLWallpaperView.isSameOrigin(navigationURL: url, current: webView.url) || url.isFileURL {
                 decisionHandler(.allow)
-            } else {
+            } else if HTMLWallpaperView.isExternallyOpenableURL(url) {
                 NSWorkspace.shared.open(url)
+                decisionHandler(.cancel)
+            } else {
                 decisionHandler(.cancel)
             }
         case .formSubmitted, .backForward, .formResubmitted:
@@ -567,14 +586,6 @@ extension HTMLWallpaperView: WKNavigationDelegate {
         @unknown default:
             decisionHandler(.cancel)
         }
-    }
-
-    /// 同源判断 — host 一致即视为同源；缺 host（例如 about:blank）当作不同源。
-    private func isSameOrigin(navigationURL: URL, current: URL?) -> Bool {
-        guard let current,
-              let lhsHost = navigationURL.host,
-              let rhsHost = current.host else { return false }
-        return lhsHost == rhsHost
     }
 
     /// 导航完成后兜底：autoplay nudge + 静音状态再施加一次（覆盖晚到的元素）。
@@ -637,7 +648,9 @@ extension HTMLWallpaperView: WKUIDelegate {
         for navigationAction: WKNavigationAction,
         windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
-        if let url = navigationAction.request.url, allowMouseInteraction {
+        if let url = navigationAction.request.url,
+           allowMouseInteraction,
+           HTMLWallpaperView.isExternallyOpenableURL(url) {
             NSWorkspace.shared.open(url)
         }
         return nil
@@ -653,4 +666,13 @@ private func jsStringLiteral(_ value: String) -> String {
         return literal
     }
     return "\"\""
+}
+
+private func effectivePort(for url: URL, scheme: String) -> Int? {
+    if let port = url.port { return port }
+    switch scheme {
+    case "http": return 80
+    case "https": return 443
+    default: return nil
+    }
 }

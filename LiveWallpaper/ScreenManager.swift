@@ -236,6 +236,12 @@ final class ScreenManager {
             }
             
         }
+
+        if !preserveRuntimeSessions {
+            for screen in oldScreens where newScreenIDs.contains(screen.id) {
+                releaseRuntimeSession(screen)
+            }
+        }
         
         var updatedScreens = [Screen]()
 
@@ -294,10 +300,10 @@ final class ScreenManager {
     
     // MARK: - Configuration Management
 
-    /// Light launch-time pass: prunes configurations whose video bookmark
-    /// is no longer resolvable. Does not tear down healthy sessions.
+    /// Light launch-time pass: prunes configurations whose local resource
+    /// bookmark is no longer resolvable. Does not tear down healthy sessions.
     func pruneInvalidConfigurationsIfNeeded() {
-        let removedScreenIDs = configurationStore.pruneInvalidVideoConfigurations(
+        let removedScreenIDs = configurationStore.pruneInvalidResourceConfigurations(
             using: SettingsManager.shared.validateConfiguration
         )
 
@@ -305,7 +311,7 @@ final class ScreenManager {
 
         for removedScreenID in removedScreenIDs {
             if let screen = screens.first(where: { $0.id == removedScreenID }) {
-                Logger.warning("Removing invalid video configuration for screen \(removedScreenID)", category: .settings)
+                Logger.warning("Removing invalid resource configuration for screen \(removedScreenID)", category: .settings)
                 releaseRuntimeSession(screen)
             }
         }
@@ -1032,7 +1038,7 @@ final class ScreenManager {
     func reloadAllScreens() {
         Logger.notice("Reloading all screens", category: .screenManager)
 
-        let removedScreenIDs = configurationStore.pruneInvalidVideoConfigurations(
+        let removedScreenIDs = configurationStore.pruneInvalidResourceConfigurations(
             using: SettingsManager.shared.validateConfiguration
         )
 

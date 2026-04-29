@@ -53,6 +53,10 @@ final class TrustedHostStore {
         return true
     }
 
+    func resetAfterSettingsCleared() {
+        hosts.removeAll()
+    }
+
     private func persist() {
         persistence.save(hosts)
     }
