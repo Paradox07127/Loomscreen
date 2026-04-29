@@ -58,11 +58,24 @@ final class WallpaperEngineImportService {
         folderURL: URL,
         sourceBookmark: Data
     ) async -> ImportResult {
+        // WPE distributes video wallpapers in two shapes (per
+        // help.wallpaperengine.io and linux-wallpaperengine docs):
+        //   1) packaged: `scene.pkg` archive containing the video file,
+        //   2) unpackaged: `<entryFile>` directly inside the project folder.
+        // Both are valid; rejecting unpackaged videos cuts off the majority
+        // of community video wallpapers.
         let pkgURL = folderURL.appendingPathComponent("scene.pkg")
-        guard fileManager.fileExists(atPath: pkgURL.path) else {
-            return .rejected(reason: "Missing scene.pkg")
+        if fileManager.fileExists(atPath: pkgURL.path) {
+            return await importPackagedVideo(project: project, pkgURL: pkgURL, sourceBookmark: sourceBookmark)
         }
+        return await importUnpackagedVideo(project: project, folderURL: folderURL, sourceBookmark: sourceBookmark)
+    }
 
+    private func importPackagedVideo(
+        project: WallpaperEngineProject,
+        pkgURL: URL,
+        sourceBookmark: Data
+    ) async -> ImportResult {
         let cacheResult = await ensureExtracted(project: project, pkgURL: pkgURL)
         guard case .success(let cacheURL) = cacheResult else {
             if case .failure(let failure) = cacheResult { return .rejected(reason: failure.reason) }
@@ -89,6 +102,37 @@ final class WallpaperEngineImportService {
             sourceBookmark: sourceBookmark,
             cacheRelativePath: cacheRelativePath(for: project),
             resourceLocation: .cache
+        )
+        return .ready(.video(bookmarkData: videoBookmark), origin: origin)
+    }
+
+    private func importUnpackagedVideo(
+        project: WallpaperEngineProject,
+        folderURL: URL,
+        sourceBookmark: Data
+    ) async -> ImportResult {
+        guard let videoURL = resourceURL(root: folderURL, relativePath: project.entryFile),
+              fileManager.fileExists(atPath: videoURL.path) else {
+            return .rejected(reason: "Missing video entry \(project.entryFile)")
+        }
+
+        do {
+            try await validateVideo(videoURL)
+        } catch {
+            return .rejected(reason: describe(error))
+        }
+
+        guard let videoBookmark = makeBookmark(videoURL) else {
+            return .rejected(reason: "Cannot create video bookmark")
+        }
+
+        // Source-folder backed: cacheRelativePath is nil; reconcile uses
+        // the source-folder bookmark's prefix-path match to keep the badge.
+        let origin = makeOrigin(
+            project: project,
+            sourceBookmark: sourceBookmark,
+            cacheRelativePath: nil,
+            resourceLocation: .sourceFolder
         )
         return .ready(.video(bookmarkData: videoBookmark), origin: origin)
     }
@@ -245,15 +289,21 @@ struct WPECachedContentResolver {
     func content(for origin: WPEOrigin) -> WallpaperContent? {
         guard origin.resourceLocation == .cache,
               let cacheRelativePath = origin.cacheRelativePath,
-              !cacheRelativePath.isEmpty,
+              Self.isSafeCacheRelativePath(cacheRelativePath),
               let entryFile = origin.entryFile,
               !entryFile.isEmpty else {
             return nil
         }
 
+        let rootPath = applicationSupportRootURL.standardizedFileURL.path
         let cacheURL = applicationSupportRootURL
             .appendingPathComponent(cacheRelativePath, isDirectory: true)
             .standardizedFileURL
+        // Defense-in-depth: refuse persisted paths that escape the
+        // application-support root after standardization.
+        guard cacheURL.path == rootPath || cacheURL.path.hasPrefix(rootPath + "/") else {
+            return nil
+        }
         guard let entryURL = resourceURL(root: cacheURL, relativePath: entryFile),
               fileManager.fileExists(atPath: entryURL.path) else {
             return nil
@@ -282,5 +332,16 @@ struct WPECachedContentResolver {
             .resolvingSymlinksInPath()
         guard url.path.hasPrefix(rootURL.path + "/") else { return nil }
         return url
+    }
+
+    /// Rejects malformed persisted cache paths before they get appended to the
+    /// application-support root. Mirrors the rules enforced when writing.
+    /// Requires the `wpe-cache/` prefix so persisted state can never resolve
+    /// to a sibling subtree under `Application Support/LiveWallpaper/`.
+    fileprivate static func isSafeCacheRelativePath(_ path: String) -> Bool {
+        path.hasPrefix("wpe-cache/")
+            && !path.contains("\\")
+            && !path.contains("..")
+            && !path.contains("//")
     }
 }
