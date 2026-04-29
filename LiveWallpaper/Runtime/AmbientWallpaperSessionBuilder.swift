@@ -16,6 +16,13 @@ final class AmbientWallpaperSessionBuilder {
             Logger.warning("HTML wallpaper: dropping JS for untrusted host \(host)", category: .screenManager)
         }
 
+        // Auto-enable physical-pixel layout for Wallpaper Engine folders
+        // (detected by sibling project.json) so canvas coords match Windows DIP.
+        if !effective.physicalPixelLayout, Self.looksLikeWallpaperEngineFolder(source) {
+            effective.physicalPixelLayout = true
+            Logger.info("HTML wallpaper: detected Wallpaper Engine project — enabling physical-pixel layout", category: .screenManager)
+        }
+
         htmlView.apply(effective)
         htmlView.loadSource(source)
 
@@ -25,6 +32,24 @@ final class AmbientWallpaperSessionBuilder {
         // 导致 "Click wallpaper to reveal desktop" 重新生效。
         window.setWallpaperMouseInteractionEnabled(config.allowMouseInteraction)
         return AmbientWallpaperSession(window: window, wallpaperType: .html, performanceTarget: htmlView)
+    }
+
+    /// Wallpaper Engine workshop projects ship a `project.json` next to the
+    /// entry HTML; presence is a strong signal we should run them in
+    /// Windows-DIP mode.
+    private static func looksLikeWallpaperEngineFolder(_ source: HTMLSource) -> Bool {
+        guard case .folder(let bookmarkData, _) = source else { return false }
+        var isStale = false
+        guard let folderURL = try? URL(
+            resolvingBookmarkData: bookmarkData,
+            options: .withSecurityScope,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        ) else { return false }
+        let didStart = folderURL.startAccessingSecurityScopedResource()
+        defer { if didStart { folderURL.stopAccessingSecurityScopedResource() } }
+        let manifest = folderURL.appendingPathComponent("project.json")
+        return FileManager.default.fileExists(atPath: manifest.path)
     }
 
     func makeShaderSession(preset: MetalShaderPreset, frame: CGRect) -> AmbientWallpaperSession {
