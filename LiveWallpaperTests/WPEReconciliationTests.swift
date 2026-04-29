@@ -144,7 +144,7 @@ struct WPEReconciliationTests {
 
     @Test("Plan §A14: SettingsManager.removeWPEImport drops only the requested workshop")
     func removeWPEImportTargetsOnlyMatchingWorkshop() throws {
-        try withIsolatedGlobalSettings {
+        withIsolatedGlobalSettings {
             let manager = SettingsManager.shared
             let now = Date()
             manager.recordWPEImport(WPEHistoryEntry(origin: makeOrigin(workshopID: "alpha"), importedAt: now, lastUsedAt: now))

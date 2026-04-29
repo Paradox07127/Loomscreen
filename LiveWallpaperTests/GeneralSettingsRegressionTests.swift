@@ -10,7 +10,7 @@ import Testing
 struct GeneralSettingsRegressionTests {
     @Test("Saving with only pause/login flags preserved must keep recentWPEImports")
     func savingPartialFieldsPreservesWPEHistory() throws {
-        try withIsolatedGlobalSettings {
+        withIsolatedGlobalSettings {
             let manager = SettingsManager.shared
 
             // Seed history first.
@@ -46,7 +46,7 @@ struct GeneralSettingsRegressionTests {
 
     @Test("The legacy bug pattern (rebuild GlobalSettings without recentWPEImports) wipes history")
     func legacyRebuildPatternWipesHistory() throws {
-        try withIsolatedGlobalSettings {
+        withIsolatedGlobalSettings {
             let manager = SettingsManager.shared
             let entry = WPEHistoryEntry(
                 origin: WPEOrigin(
