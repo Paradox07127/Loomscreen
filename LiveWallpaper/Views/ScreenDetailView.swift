@@ -12,6 +12,13 @@ struct ScreenDetailView: View {
     private var wallpaperSessionSummary: WallpaperSessionSummary {
         screenManager.wallpaperSummary(for: screen)
     }
+    /// Resolved Wallpaper Engine origin metadata for the active wallpaper, or
+    /// nil when the user picked content directly. Recomputed on every body
+    /// evaluation so save/import flows propagate without local @State.
+    private var wpeOrigin: WPEOrigin? {
+        screenManager.getConfiguration(for: screen)?.wpeOrigin
+    }
+
     private var sessionStatusText: String {
         switch wallpaperSessionSummary.wallpaperType {
         case .html:
@@ -20,6 +27,8 @@ struct ScreenDetailView: View {
             return "Shader Active"
         case .video:
             return wallpaperSessionSummary.activity == .active ? "Playing" : "Paused"
+        case .scene:
+            return "Scene"
         case nil:
             return "Not configured"
         }
@@ -160,6 +169,11 @@ struct ScreenDetailView: View {
                             ScreenDetailLoadingView()
                         } else if hasPreviewSource || previewController.hasPreviewContent {
                             VStack(spacing: 16) {
+                                if let origin = wpeOrigin {
+                                    WPEOriginBadge(origin: origin) {
+                                        selectedWallpaperType = .scene
+                                    }
+                                }
                                 VideoPreviewSection(
                                     previewController: previewController,
                                     hasPreviewSource: hasPreviewSource,
@@ -214,15 +228,24 @@ struct ScreenDetailView: View {
                                 .padding(24)
                         }
                     } else if selectedWallpaperType == .html {
-                        HTMLSourceSection(
-                            screen: screen,
-                            source: $htmlSource,
-                            config: $htmlConfig
-                        )
+                        VStack(spacing: 16) {
+                            if let origin = wpeOrigin {
+                                WPEOriginBadge(origin: origin) {
+                                    selectedWallpaperType = .scene
+                                }
+                            }
+                            HTMLSourceSection(
+                                screen: screen,
+                                source: $htmlSource,
+                                config: $htmlConfig
+                            )
+                        }
                         .padding(24)
                     } else if selectedWallpaperType == .metalShader {
                         ShaderWallpaperSection(screen: screen, selectedShaderPreset: $selectedShaderPreset)
                             .padding(24)
+                    } else if selectedWallpaperType == .scene {
+                        WPESceneSection(screen: screen)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -483,6 +506,8 @@ struct ScreenDetailView: View {
                         screenManager.switchToHTMLWallpaper(for: screen)
                     case .metalShader:
                         break // shader picker drives its own activation
+                    case .scene:
+                        break // Scene tab content lands in Day 4; Day 1+2 only register the segment.
                     }
                 }
             }
@@ -556,6 +581,7 @@ struct ScreenDetailView: View {
         case .video:        return "Video file (.mp4, .mov, …)"
         case .html:         return "HTML file or folder"
         case .metalShader:  return "Switch to Video or HTML to drop"
+        case .scene:        return "Switch to Video or HTML to drop"
         }
     }
 

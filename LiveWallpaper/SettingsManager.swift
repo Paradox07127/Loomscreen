@@ -98,7 +98,32 @@ final class SettingsManager {
             return defaults
         }
     }
-    
+
+    // MARK: - Wallpaper Engine History (LRU, capped at 20)
+
+    func recordWPEImport(_ entry: WPEHistoryEntry) {
+        var settings = loadGlobalSettings()
+        var recent = settings.recentWPEImports.filter {
+            $0.origin.workshopID != entry.origin.workshopID
+        }
+        recent.insert(entry, at: 0)
+        if recent.count > 20 {
+            recent = Array(recent.prefix(20))
+        }
+        settings.recentWPEImports = recent
+        saveGlobalSettings(settings)
+        NotificationCenter.default.post(name: .wpeHistoryDidChange, object: nil)
+    }
+
+    func removeWPEImport(workshopID: String) {
+        var settings = loadGlobalSettings()
+        let previous = settings.recentWPEImports
+        settings.recentWPEImports.removeAll { $0.origin.workshopID == workshopID }
+        guard settings.recentWPEImports != previous else { return }
+        saveGlobalSettings(settings)
+        NotificationCenter.default.post(name: .wpeHistoryDidChange, object: nil)
+    }
+
     private func applyStartOnLoginSetting(_ startOnLogin: Bool) {
         do {
             let service = SMAppService.mainApp

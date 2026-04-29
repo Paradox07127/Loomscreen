@@ -1,7 +1,7 @@
 import Foundation
 
 /// Per-screen behavior toggles for an HTML wallpaper.
-struct HTMLConfig: Codable, Equatable {
+struct HTMLConfig: Codable, Equatable, Sendable {
     /// When `false`, `WKWebView` runs with JS disabled. Useful for static
     /// HTML/SVG art and as a safety hatch for untrusted URLs.
     var allowJavaScript: Bool = true

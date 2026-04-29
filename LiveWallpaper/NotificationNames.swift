@@ -21,4 +21,15 @@ extension Notification.Name {
     /// Inspectors / detail views should reload their @State from the manager
     /// when the screenID matches the one they currently display.
     static let wallpaperConfigurationDidChange = Notification.Name("WallpaperConfigurationDidChange")
+
+    /// A Wallpaper Engine import finished (success or unsupported variant).
+    /// `userInfo["screenID"]: CGDirectDisplayID` identifies the target screen.
+    /// `userInfo["type"]: String` is the WPE original type rawValue
+    /// (`"video"` / `"web"` / `"scene"` / `"application"` / `"unknown"`).
+    static let wpeImportDidComplete = Notification.Name("WPEImportDidComplete")
+
+    /// The recent Wallpaper Engine import history (LRU) was mutated.
+    /// Listeners — including the Scene tab UI — should reload from
+    /// `SettingsManager.shared.loadGlobalSettings().recentWPEImports`.
+    static let wpeHistoryDidChange = Notification.Name("WPEHistoryDidChange")
 }

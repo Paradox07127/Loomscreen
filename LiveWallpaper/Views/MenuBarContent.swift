@@ -512,6 +512,7 @@ private struct MenuBarScreenCard: View {
         case .html: return "globe"
         case .metalShader: return "sparkles.rectangle.stack"
         case .video: return summary.activity == .active ? "play.rectangle.fill" : "pause.rectangle.fill"
+        case .scene: return "cube.transparent"
         case nil: return "display"
         }
     }
@@ -531,6 +532,7 @@ private struct MenuBarScreenCard: View {
         case .html: return "HTML wallpaper"
         case .metalShader: return "Shader wallpaper"
         case .video: return "Not configured"
+        case .scene: return "Scene wallpaper"
         case nil: return "Not configured"
         }
     }
