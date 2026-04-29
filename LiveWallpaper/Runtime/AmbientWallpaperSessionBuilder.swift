@@ -9,7 +9,15 @@ final class AmbientWallpaperSessionBuilder {
         window.setWallpaperMouseInteractionEnabled(config.allowMouseInteraction)
         window.contentView = htmlView
 
-        htmlView.apply(config)
+        // Untrusted remote URLs run with JS off no matter what config says.
+        let trust = HTMLTrust.evaluate(source: source, trustedHosts: TrustedHostStore.shared.hostSet)
+        var effective = config
+        effective.allowJavaScript = trust.effectiveAllowJavaScript(requested: config.allowJavaScript)
+        if case .untrustedRemote(let host) = trust, config.allowJavaScript {
+            Logger.warning("HTML wallpaper: dropping JS for untrusted host \(host)", category: .screenManager)
+        }
+
+        htmlView.apply(effective)
         htmlView.loadSource(source)
 
         window.orderBack(nil)
