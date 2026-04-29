@@ -6,7 +6,6 @@ final class AmbientWallpaperSessionBuilder {
     func makeHTMLSession(source: HTMLSource, config: HTMLConfig, frame: CGRect) -> AmbientWallpaperSession {
         let window = VideoWallpaperWindow(frame: frame)
         let htmlView = HTMLWallpaperView(frame: frame)
-        window.setWallpaperMouseInteractionEnabled(config.allowMouseInteraction)
         window.contentView = htmlView
 
         // Untrusted remote URLs run with JS off no matter what config says.
@@ -20,7 +19,11 @@ final class AmbientWallpaperSessionBuilder {
         htmlView.apply(effective)
         htmlView.loadSource(source)
 
-        window.orderBack(nil)
+        // 必须在 contentView 装好之后再切交互态。该方法已经负责 ordering
+        // (interactive → makeKeyAndOrderFront / passive → orderBack)，
+        // 别再追加额外的 orderBack — 否则会把抬升的交互窗户拉回桌面层、
+        // 导致 "Click wallpaper to reveal desktop" 重新生效。
+        window.setWallpaperMouseInteractionEnabled(config.allowMouseInteraction)
         return AmbientWallpaperSession(window: window, wallpaperType: .html, performanceTarget: htmlView)
     }
 

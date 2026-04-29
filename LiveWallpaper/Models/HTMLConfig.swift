@@ -17,6 +17,10 @@ struct HTMLConfig: Codable, Equatable {
     /// `nil` (the default) means no extra CSS is injected.
     var customCSS: String? = nil
 
+    /// 静音页面内所有 `<audio>` / `<video>` 元素。与 `applyPerformanceProfile`
+    /// 解耦：用户可能希望保留视觉动画但去掉声音。
+    var muteAudio: Bool = false
+
     static let `default` = HTMLConfig()
 
     private enum CodingKeys: String, CodingKey {
@@ -24,18 +28,21 @@ struct HTMLConfig: Codable, Equatable {
         case allowMouseInteraction
         case blockTrackers
         case customCSS
+        case muteAudio
     }
 
     init(
         allowJavaScript: Bool = true,
         allowMouseInteraction: Bool = false,
         blockTrackers: Bool = true,
-        customCSS: String? = nil
+        customCSS: String? = nil,
+        muteAudio: Bool = false
     ) {
         self.allowJavaScript = allowJavaScript
         self.allowMouseInteraction = allowMouseInteraction
         self.blockTrackers = blockTrackers
         self.customCSS = customCSS
+        self.muteAudio = muteAudio
     }
 
     init(from decoder: Decoder) throws {
@@ -44,5 +51,6 @@ struct HTMLConfig: Codable, Equatable {
         allowMouseInteraction = try c.decodeIfPresent(Bool.self, forKey: .allowMouseInteraction) ?? false
         blockTrackers = try c.decodeIfPresent(Bool.self, forKey: .blockTrackers) ?? true
         customCSS = try c.decodeIfPresent(String.self, forKey: .customCSS)
+        muteAudio = try c.decodeIfPresent(Bool.self, forKey: .muteAudio) ?? false
     }
 }

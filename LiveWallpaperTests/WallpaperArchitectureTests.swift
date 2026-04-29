@@ -380,7 +380,10 @@ struct HTMLWallpaperMouseInteractionTests {
         defer { session.cleanup() }
 
         #expect(session.wallpaperWindow?.ignoresMouseEvents == false)
-        #expect((session.wallpaperWindow?.level.rawValue ?? 0) == CGWindowLevelForKey(.desktopIconWindow) - 1)
+        // 抬到桌面图标层之上 (`desktopIcon + 1`) 是绕过 macOS Sonoma
+        // "Click wallpaper to reveal desktop" 手势的关键 — 与 Plash 的 DesktopWindow 一致。
+        #expect((session.wallpaperWindow?.level.rawValue ?? 0) == CGWindowLevelForKey(.desktopIconWindow) + 1)
+        #expect(session.wallpaperWindow?.canBecomeKey == true)
     }
 
     @Test("Passive HTML wallpapers keep mouse events passing through")
