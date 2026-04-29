@@ -19,6 +19,7 @@ final class SettingsManager {
         static let lastUsedDirectory = "lastUsedDirectory"
         static let aerialsDirectoryBookmark = "AerialsLibrary.DirectoryBookmark"
         static let bookmarks = "WallpaperBookmarks.v1"
+        static let trustedHosts = "TrustedHTMLHosts.v1"
     }
 
     // MARK: - Screen Configurations
@@ -238,6 +239,16 @@ final class SettingsManager {
         } catch {
             Logger.error("Failed to encode wallpaper bookmarks: \(error.localizedDescription)", category: .settings)
         }
+    }
+
+    // MARK: - Trusted HTML Hosts
+
+    func loadTrustedHosts() -> [String] {
+        UserDefaults.standard.stringArray(forKey: Keys.trustedHosts) ?? []
+    }
+
+    func saveTrustedHosts(_ hosts: [String]) {
+        UserDefaults.standard.set(hosts, forKey: Keys.trustedHosts)
     }
 }
 
