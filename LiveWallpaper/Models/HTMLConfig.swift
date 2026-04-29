@@ -21,6 +21,12 @@ struct HTMLConfig: Codable, Equatable {
     /// 解耦：用户可能希望保留视觉动画但去掉声音。
     var muteAudio: Bool = false
 
+    /// Sets `pageZoom = 1/backingScaleFactor` so `window.innerWidth` reports
+    /// physical pixel count instead of logical points. Required for Wallpaper
+    /// Engine web wallpapers (designed against Windows DIP) to avoid canvas
+    /// misalignment on Retina displays.
+    var physicalPixelLayout: Bool = false
+
     static let `default` = HTMLConfig()
 
     private enum CodingKeys: String, CodingKey {
@@ -29,6 +35,7 @@ struct HTMLConfig: Codable, Equatable {
         case blockTrackers
         case customCSS
         case muteAudio
+        case physicalPixelLayout
     }
 
     init(
@@ -36,13 +43,15 @@ struct HTMLConfig: Codable, Equatable {
         allowMouseInteraction: Bool = false,
         blockTrackers: Bool = true,
         customCSS: String? = nil,
-        muteAudio: Bool = false
+        muteAudio: Bool = false,
+        physicalPixelLayout: Bool = false
     ) {
         self.allowJavaScript = allowJavaScript
         self.allowMouseInteraction = allowMouseInteraction
         self.blockTrackers = blockTrackers
         self.customCSS = customCSS
         self.muteAudio = muteAudio
+        self.physicalPixelLayout = physicalPixelLayout
     }
 
     init(from decoder: Decoder) throws {
@@ -52,5 +61,6 @@ struct HTMLConfig: Codable, Equatable {
         blockTrackers = try c.decodeIfPresent(Bool.self, forKey: .blockTrackers) ?? true
         customCSS = try c.decodeIfPresent(String.self, forKey: .customCSS)
         muteAudio = try c.decodeIfPresent(Bool.self, forKey: .muteAudio) ?? false
+        physicalPixelLayout = try c.decodeIfPresent(Bool.self, forKey: .physicalPixelLayout) ?? false
     }
 }
