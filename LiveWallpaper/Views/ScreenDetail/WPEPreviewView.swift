@@ -29,7 +29,8 @@ struct WPEPreviewView: View {
                 )
             }
         }
-        .aspectRatio(16/9, contentMode: .fill)
+        .aspectRatio(16/9, contentMode: .fit)
+        .clipped()
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .shadow(color: Color.black.opacity(0.12), radius: 6, y: 2)
     }
@@ -43,6 +44,11 @@ private struct AnimatedImage: NSViewRepresentable {
         let imageView = NSImageView()
         imageView.imageScaling = .scaleProportionallyUpOrDown
         imageView.animates = true
+        // Layer-back so SwiftUI's clipShape reliably clips animated-GIF frames
+        // drawn through CoreAnimation. Without this, AppKit-side layers can
+        // paint past the SwiftUI clip during animated transitions.
+        imageView.wantsLayer = true
+        imageView.layer?.masksToBounds = true
         return imageView
     }
 
