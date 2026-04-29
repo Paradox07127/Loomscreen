@@ -6,7 +6,7 @@ import Testing
 struct WPEHistoryTests {
     @Test("Record pushes to front")
     func recordPushesToFront() throws {
-        try withIsolatedGlobalSettings {
+        withIsolatedGlobalSettings {
             let manager = SettingsManager.shared
             manager.recordWPEImport(makeEntry("1"))
             manager.recordWPEImport(makeEntry("2"))
@@ -18,7 +18,7 @@ struct WPEHistoryTests {
 
     @Test("Duplicate moves to front")
     func duplicateMovesToFront() throws {
-        try withIsolatedGlobalSettings {
+        withIsolatedGlobalSettings {
             let manager = SettingsManager.shared
             let lastUsedAt = Date(timeIntervalSince1970: 50)
             manager.recordWPEImport(makeEntry("1"))
@@ -34,7 +34,7 @@ struct WPEHistoryTests {
 
     @Test("Caps at 20")
     func capsAt20() throws {
-        try withIsolatedGlobalSettings {
+        withIsolatedGlobalSettings {
             let manager = SettingsManager.shared
             for index in 0..<25 {
                 manager.recordWPEImport(makeEntry("\(index)"))
