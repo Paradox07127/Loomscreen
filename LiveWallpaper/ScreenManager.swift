@@ -389,7 +389,7 @@ final class ScreenManager {
                 videoBookmarkData: bookmarkData
             )
         }
-        reconcileWPEOrigin(&configuration)
+        configuration.reconcileWPEOrigin()
         if isSameURL, screen.videoPlayer != nil {
             configurationStore.save(configuration)
             applyConfiguration(configuration, to: screen, preservingState: true)
@@ -985,6 +985,46 @@ final class ScreenManager {
         }
     }
 
+    /// Result of a non-destructive (library-only) WPE import.
+    enum WPELibraryImportOutcome: Sendable, Equatable {
+        case imported(workshopID: String, type: WPEType)
+        case alreadyKnown(workshopID: String)
+        case unsupported(workshopID: String, type: WPEType)
+        case rejected(reason: String)
+    }
+
+    /// Imports a Wallpaper Engine project into the cache + history WITHOUT
+    /// applying it to any screen. Used by the Workshop Library Gallery for
+    /// bulk imports — the active wallpaper stays untouched.
+    func importWPEToLibrary(at folderURL: URL) async -> WPELibraryImportOutcome {
+        do {
+            let result = try await wpeImportService.importProject(folder: folderURL)
+            switch result {
+            case .ready(_, let origin):
+                let alreadyKnown = SettingsManager.shared.loadGlobalSettings()
+                    .recentWPEImports
+                    .contains { $0.origin.workshopID == origin.workshopID }
+                SettingsManager.shared.recordWPEImport(
+                    WPEHistoryEntry(origin: origin, importedAt: Date(), lastUsedAt: nil)
+                )
+                return alreadyKnown
+                    ? .alreadyKnown(workshopID: origin.workshopID)
+                    : .imported(workshopID: origin.workshopID, type: origin.originalType)
+
+            case .unsupported(let origin):
+                SettingsManager.shared.recordWPEImport(
+                    WPEHistoryEntry(origin: origin, importedAt: Date(), lastUsedAt: nil)
+                )
+                return .unsupported(workshopID: origin.workshopID, type: origin.originalType)
+
+            case .rejected(let reason):
+                return .rejected(reason: reason)
+            }
+        } catch {
+            return .rejected(reason: error.localizedDescription)
+        }
+    }
+
     func activateWPEHistoryEntry(_ entry: WPEHistoryEntry, for screen: Screen) async {
         do {
             var isStale = false
@@ -1018,31 +1058,6 @@ final class ScreenManager {
         for var config in configurationStore.loadAll() where config.wpeOrigin?.workshopID == workshopID {
             config.wpeOrigin = nil
             saveConfiguration(config)
-        }
-    }
-
-    private func reconcileWPEOrigin(_ config: inout ScreenConfiguration) {
-        guard let origin = config.wpeOrigin else { return }
-        guard origin.cacheRelativePath != nil else {
-            config.wpeOrigin = nil
-            return
-        }
-
-        switch config.activeWallpaper {
-        case .video(let bookmarkData):
-            if !WPEOrigin.matchesBookmark(bookmarkData, origin: origin) {
-                config.wpeOrigin = nil
-            }
-        case .html(let source, _):
-            guard case .folder(let bookmarkData, _) = source,
-                  WPEOrigin.matchesBookmark(bookmarkData, origin: origin) else {
-                config.wpeOrigin = nil
-                return
-            }
-        case .metalShader:
-            // Plan §A11: switching to Shader is transient — preserve wpeOrigin
-            // so switching back to Video/HTML restores the WPE badge intact.
-            return
         }
     }
 
@@ -1443,7 +1458,7 @@ final class ScreenManager {
             wallpaper: .html(source: source, config: config)
         )
         configuration.setHTMLWallpaper(source: source, config: config)
-        reconcileWPEOrigin(&configuration)
+        configuration.reconcileWPEOrigin()
         saveConfiguration(configuration)
 
         restoreWallpaperSession(for: screen, configuration: configuration, preservingState: false)
@@ -1475,7 +1490,7 @@ final class ScreenManager {
             screenID: screen.id, wallpaper: .metalShader(preset)
         )
         config.setShaderWallpaper(preset)
-        reconcileWPEOrigin(&config)
+        config.reconcileWPEOrigin()
         saveConfiguration(config)
 
         restoreWallpaperSession(for: screen, configuration: config, preservingState: false)

@@ -31,6 +31,9 @@ struct GeneralSettingsView: View {
             powerTab
                 .tabItem { Label("Power", systemImage: "bolt.batteryblock") }
 
+            WPECacheManagementView()
+                .tabItem { Label("Cache", systemImage: "internaldrive") }
+
             aboutTab
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
@@ -272,13 +275,15 @@ struct GeneralSettingsView: View {
     // MARK: - Settings Persistence
 
     private func updateGlobalSettings() {
-        let settings = GlobalSettings(
-            globalPauseOnBattery: globalPauseOnBattery,
-            preservePlaybackOnLock: preservePlaybackOnLock,
-            startOnLogin: startOnLogin,
-            minimumBatteryLevel: useBatteryThreshold ? minimumBatteryLevel : nil,
-            pauseOnFullScreen: pauseOnFullScreen
-        )
+        // Read current persisted state so toggling unrelated fields does NOT
+        // wipe Wallpaper Engine import history (or any other field added
+        // outside this form). Only override what this view actually owns.
+        var settings = SettingsManager.shared.loadGlobalSettings()
+        settings.globalPauseOnBattery = globalPauseOnBattery
+        settings.preservePlaybackOnLock = preservePlaybackOnLock
+        settings.startOnLogin = startOnLogin
+        settings.minimumBatteryLevel = useBatteryThreshold ? minimumBatteryLevel : nil
+        settings.pauseOnFullScreen = pauseOnFullScreen
         SettingsManager.shared.saveGlobalSettings(settings)
         screenManager.handleGlobalSettingsChanged()
     }
