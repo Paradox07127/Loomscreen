@@ -8,6 +8,9 @@ enum AppError: LocalizedError, Equatable {
     case effectsPipelineFailed(String)
     case shaderLoadFailed
     case htmlLoadFailed(String)
+    case wpePackageInvalid(String)
+    case wpeUnsupportedType(String)
+    case wpeImportFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -17,6 +20,9 @@ enum AppError: LocalizedError, Equatable {
         case .effectsPipelineFailed(let detail): return "Effects error: \(detail)"
         case .shaderLoadFailed: return "Failed to load shader wallpaper"
         case .htmlLoadFailed(let url): return "Failed to load web content: \(url)"
+        case .wpePackageInvalid(let detail): return "Invalid Wallpaper Engine package: \(detail)"
+        case .wpeUnsupportedType(let kind): return "Wallpaper Engine \"\(kind)\" type is not supported"
+        case .wpeImportFailed(let detail): return "Wallpaper Engine import failed: \(detail)"
         }
     }
 
@@ -28,6 +34,9 @@ enum AppError: LocalizedError, Equatable {
         case .effectsPipelineFailed: return "Try disabling effects"
         case .shaderLoadFailed: return "Your GPU may not support this shader"
         case .htmlLoadFailed: return "Check the URL and try again"
+        case .wpePackageInvalid: return "Try re-downloading from Steam Workshop"
+        case .wpeUnsupportedType: return "Look for a video version of this wallpaper"
+        case .wpeImportFailed: return "Re-select the workshop folder and try again"
         }
     }
 

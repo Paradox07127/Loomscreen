@@ -24,6 +24,11 @@ struct ScreenConfiguration: Codable, Equatable {
     var wallpaperMode: WallpaperMode = .single
     /// Muted by default so wallpaper videos do not take over audio output.
     var muted: Bool = true
+    /// Wallpaper Engine workshop origin metadata, set when the active wallpaper
+    /// was imported from a `~/Documents/Live Wallpapers/<appid>/<wid>/` project.
+    /// Cleared automatically when the user replaces the wallpaper with non-WPE
+    /// content via the standard pickers.
+    var wpeOrigin: WPEOrigin?
 
     private enum CodingKeys: String, CodingKey {
         case screenID
@@ -44,6 +49,7 @@ struct ScreenConfiguration: Codable, Equatable {
         case setAsLockScreen
         case wallpaperMode
         case muted
+        case wpeOrigin
 
         case videoBookmarkData
         case wallpaperType
@@ -157,7 +163,10 @@ struct ScreenConfiguration: Codable, Equatable {
                 playlistCursorIndex: playlistCursorIndex,
                 setAsLockScreen: setAsLockScreen
             )
-        case .html, .metalShader:
+        case .html, .metalShader, .scene:
+            // .scene is a UI-only label without direct WallpaperContent;
+            // legacy/test paths that hit this branch get the same safe
+            // degraded mapping as `.html` (empty inline source).
             let wallpaper: WallpaperContent = switch wallpaperType {
             case .html:
                 .html(source: HTMLSource(legacyString: htmlContent ?? ""), config: .default)
@@ -165,6 +174,8 @@ struct ScreenConfiguration: Codable, Equatable {
                 .metalShader(shaderPreset ?? .waves)
             case .video:
                 .video(bookmarkData: videoBookmarkData)
+            case .scene:
+                .html(source: HTMLSource(legacyString: ""), config: .default)
             }
 
             self.init(
@@ -249,6 +260,9 @@ struct ScreenConfiguration: Codable, Equatable {
 
         savedHTMLSource = try c.decodeIfPresent(HTMLSource.self, forKey: .savedHTMLSource)
         savedHTMLConfig = try c.decodeIfPresent(HTMLConfig.self, forKey: .savedHTMLConfig)
+        // Lossy decode: a malformed wpeOrigin should not invalidate the whole
+        // screen configuration; fallback to nil so the wallpaper itself loads.
+        wpeOrigin = (try? c.decodeIfPresent(WPEOrigin.self, forKey: .wpeOrigin)) ?? nil
 
         if let decodedWallpaper = try c.decodeIfPresent(WallpaperContent.self, forKey: .activeWallpaper) {
             activeWallpaper = decodedWallpaper
@@ -283,6 +297,13 @@ struct ScreenConfiguration: Codable, Equatable {
                 try c.decodeIfPresent(MetalShaderPreset.self, forKey: .shaderPreset) ?? .waves
             )
             savedVideoBookmarkData = legacySavedBookmark
+        case .scene:
+            // .scene cannot legitimately appear in legacy data (the case did
+            // not exist before the WPE-import feature). Treat as empty video
+            // wallpaper to keep the configuration valid; ScreenManager's
+            // restoration path then surfaces the Scene tab placeholder.
+            activeWallpaper = .video(bookmarkData: Data())
+            savedVideoBookmarkData = legacySavedBookmark
         }
     }
 
@@ -306,6 +327,7 @@ struct ScreenConfiguration: Codable, Equatable {
         try c.encode(setAsLockScreen, forKey: .setAsLockScreen)
         try c.encode(wallpaperMode, forKey: .wallpaperMode)
         try c.encode(muted, forKey: .muted)
+        try c.encodeIfPresent(wpeOrigin, forKey: .wpeOrigin)
     }
 
     mutating func setHTMLWallpaper(source: HTMLSource, config: HTMLConfig = .default) {
