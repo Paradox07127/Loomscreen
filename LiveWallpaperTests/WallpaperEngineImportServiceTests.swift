@@ -48,6 +48,8 @@ struct WallpaperEngineImportServiceTests {
         #expect(indexFileName == "index.html")
         #expect(config.physicalPixelLayout)
         #expect(origin.cacheRelativePath == nil)
+        #expect(origin.resourceLocation == .sourceFolder)
+        #expect(origin.entryFile == "index.html")
     }
 
     @Test("Unsupported scene returns unsupported result")
@@ -135,6 +137,8 @@ struct WallpaperEngineImportServiceTests {
             return
         }
         #expect(origin.cacheRelativePath == "wpe-cache/\(fixture.workshopID)")
+        #expect(origin.resourceLocation == .cache)
+        #expect(origin.entryFile == "video.mp4")
     }
 
     @Test("Scene import sets origin without cache path")
@@ -149,6 +153,55 @@ struct WallpaperEngineImportServiceTests {
             return
         }
         #expect(origin.cacheRelativePath == nil)
+        #expect(origin.resourceLocation == .unsupported)
+        #expect(origin.entryFile == "scene.json")
+    }
+
+    @Test("Cached content resolver rebuilds packaged video without source folder access")
+    func cachedContentResolverRebuildsPackagedVideoWithoutSourceFolderAccess() throws {
+        let fileManager = FileManager.default
+        let rootURL = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: rootURL) }
+        let appSupportRoot = rootURL.appendingPathComponent("ApplicationSupport/LiveWallpaper", isDirectory: true)
+        let cacheURL = appSupportRoot.appendingPathComponent("wpe-cache/resolve-video", isDirectory: true)
+        try fileManager.createDirectory(at: cacheURL, withIntermediateDirectories: true)
+        let videoURL = cacheURL.appendingPathComponent("video.mp4")
+        try Data([0x00, 0x01]).write(to: videoURL)
+
+        let origin = WPEOrigin(
+            workshopID: "resolve-video",
+            title: "Cached Video",
+            originalType: .video,
+            sourceFolderBookmark: Data("missing-source".utf8),
+            cacheRelativePath: "wpe-cache/resolve-video",
+            previewFileName: nil,
+            entryFile: "video.mp4",
+            resourceLocation: .cache
+        )
+        let resolver = WPECachedContentResolver(
+            applicationSupportRootURL: appSupportRoot,
+            makeBookmark: { url in Data(url.path.utf8) }
+        )
+
+        let content = resolver.content(for: origin)
+
+        guard case .video(let bookmarkData) = content else {
+            Issue.record("Expected cached video content, got \(String(describing: content))")
+            return
+        }
+        #expect(bookmarkData == Data(videoURL.path.utf8))
+    }
+
+    @Test("Bulk import failure summary reports rejected projects")
+    func bulkImportFailureSummaryReportsRejectedProjects() {
+        let message = WPEBulkImportFailureSummary.message(for: [
+            .init(title: "Broken One", reason: "Missing scene.pkg"),
+            .init(title: "Broken Two", reason: "Invalid package")
+        ])
+
+        #expect(message?.contains("2 imports failed") == true)
+        #expect(message?.contains("Broken One: Missing scene.pkg") == true)
+        #expect(message?.contains("Broken Two: Invalid package") == true)
     }
 
     private func makeFixture(

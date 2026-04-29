@@ -60,6 +60,7 @@ final class ScreenManager {
     @ObservationIgnored private let configurationStore = WallpaperConfigurationStore()
     @ObservationIgnored private let ambientSessionBuilder = AmbientWallpaperSessionBuilder()
     @ObservationIgnored private let wpeImportService = WallpaperEngineImportService()
+    @ObservationIgnored private let wpeCachedContentResolver = WPECachedContentResolver()
     @ObservationIgnored private let automationCoordinator = WallpaperAutomationCoordinator()
     @ObservationIgnored private let powerPolicy = PowerPolicyController()
     @ObservationIgnored private let powerMonitor: PowerMonitor = .shared
@@ -945,26 +946,7 @@ final class ScreenManager {
             switch result {
             case .ready(let content, let origin):
                 let now = Date()
-                SettingsManager.shared.recordWPEImport(
-                    WPEHistoryEntry(origin: origin, importedAt: now, lastUsedAt: now)
-                )
-
-                var config = configurationStore.get(for: screen.id) ?? ScreenConfiguration(
-                    screenID: screen.id,
-                    wallpaper: content
-                )
-                config.activeWallpaper = content
-                if case .html(let source, let htmlConfig) = content {
-                    config.savedHTMLSource = source
-                    config.savedHTMLConfig = htmlConfig
-                } else if case .video(let bookmarkData) = content {
-                    config.savedVideoBookmarkData = bookmarkData
-                }
-                config.wpeOrigin = origin
-                saveConfiguration(config)
-                restoreWallpaperSession(for: screen, configuration: config, preservingState: false)
-                postWPEImportDidComplete(screenID: screen.id, type: origin.originalType)
-                lastWPEImportError = nil
+                applyReadyWPEImport(content, origin: origin, importedAt: now, lastUsedAt: now, for: screen)
 
             case .unsupported(let origin):
                 // Plan §A4/A5: scene/application imports must be non-destructive —
@@ -1042,12 +1024,22 @@ final class ScreenManager {
             }
 
             guard didStartScope || FileManager.default.fileExists(atPath: folderURL.path) else {
+                if applyCachedWPEHistoryEntry(entry, for: screen) {
+                    return
+                }
                 lastWPEImportError = .fileAccessDenied(entry.origin.title)
                 return
             }
 
+            lastWPEImportError = nil
             await importWallpaperEngineProject(at: folderURL, for: screen)
+            if lastWPEImportError != nil {
+                _ = applyCachedWPEHistoryEntry(entry, for: screen)
+            }
         } catch {
+            if applyCachedWPEHistoryEntry(entry, for: screen) {
+                return
+            }
             lastWPEImportError = .wpeImportFailed(error.localizedDescription)
         }
     }
@@ -1070,6 +1062,50 @@ final class ScreenManager {
                 "type": type.rawValue,
             ]
         )
+    }
+
+    private func applyReadyWPEImport(
+        _ content: WallpaperContent,
+        origin: WPEOrigin,
+        importedAt: Date,
+        lastUsedAt: Date?,
+        for screen: Screen
+    ) {
+        SettingsManager.shared.recordWPEImport(
+            WPEHistoryEntry(origin: origin, importedAt: importedAt, lastUsedAt: lastUsedAt)
+        )
+
+        var config = configurationStore.get(for: screen.id) ?? ScreenConfiguration(
+            screenID: screen.id,
+            wallpaper: content
+        )
+        config.activeWallpaper = content
+        if case .html(let source, let htmlConfig) = content {
+            config.savedHTMLSource = source
+            config.savedHTMLConfig = htmlConfig
+        } else if case .video(let bookmarkData) = content {
+            config.savedVideoBookmarkData = bookmarkData
+        }
+        config.wpeOrigin = origin
+        saveConfiguration(config)
+        restoreWallpaperSession(for: screen, configuration: config, preservingState: false)
+        postWPEImportDidComplete(screenID: screen.id, type: origin.originalType)
+        lastWPEImportError = nil
+    }
+
+    @discardableResult
+    private func applyCachedWPEHistoryEntry(_ entry: WPEHistoryEntry, for screen: Screen) -> Bool {
+        guard let content = wpeCachedContentResolver.content(for: entry.origin) else {
+            return false
+        }
+        applyReadyWPEImport(
+            content,
+            origin: entry.origin,
+            importedAt: entry.importedAt,
+            lastUsedAt: Date(),
+            for: screen
+        )
+        return true
     }
 
     private func bumpWPEImportGeneration(for screenID: CGDirectDisplayID) -> Int {

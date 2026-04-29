@@ -44,7 +44,12 @@ final class WallpaperEngineImportService {
         case .web:
             return await importWeb(project: project, folderURL: folderURL, sourceBookmark: sourceBookmark)
         case .scene, .application, .unknown:
-            return .unsupported(origin: makeOrigin(project: project, sourceBookmark: sourceBookmark, cacheRelativePath: nil))
+            return .unsupported(origin: makeOrigin(
+                project: project,
+                sourceBookmark: sourceBookmark,
+                cacheRelativePath: nil,
+                resourceLocation: .unsupported
+            ))
         }
     }
 
@@ -82,7 +87,8 @@ final class WallpaperEngineImportService {
         let origin = makeOrigin(
             project: project,
             sourceBookmark: sourceBookmark,
-            cacheRelativePath: cacheRelativePath(for: project)
+            cacheRelativePath: cacheRelativePath(for: project),
+            resourceLocation: .cache
         )
         return .ready(.video(bookmarkData: videoBookmark), origin: origin)
     }
@@ -106,9 +112,14 @@ final class WallpaperEngineImportService {
             return .rejected(reason: "Cannot create web folder bookmark")
         }
 
-        // Unpacked web wallpapers stay in the user's Steam folder; cacheRelativePath
-        // is nil because the runtime references the source bookmark directly.
-        let origin = makeOrigin(project: project, sourceBookmark: sourceBookmark, cacheRelativePath: nil)
+        // Unpacked web wallpapers stay in the user's Steam folder. They are
+        // supported source-folder-backed imports, not unsupported nil-cache entries.
+        let origin = makeOrigin(
+            project: project,
+            sourceBookmark: sourceBookmark,
+            cacheRelativePath: nil,
+            resourceLocation: .sourceFolder
+        )
         let content = WallpaperContent.html(
             source: .folder(bookmarkData: folderBookmark, indexFileName: project.entryFile),
             config: HTMLConfig(physicalPixelLayout: true)
@@ -139,7 +150,8 @@ final class WallpaperEngineImportService {
         let origin = makeOrigin(
             project: project,
             sourceBookmark: sourceBookmark,
-            cacheRelativePath: cacheRelativePath(for: project)
+            cacheRelativePath: cacheRelativePath(for: project),
+            resourceLocation: .cache
         )
         let content = WallpaperContent.html(
             source: .folder(bookmarkData: folderBookmark, indexFileName: project.entryFile),
@@ -157,14 +169,21 @@ final class WallpaperEngineImportService {
         }
     }
 
-    private func makeOrigin(project: WallpaperEngineProject, sourceBookmark: Data, cacheRelativePath: String?) -> WPEOrigin {
+    private func makeOrigin(
+        project: WallpaperEngineProject,
+        sourceBookmark: Data,
+        cacheRelativePath: String?,
+        resourceLocation: WPEResourceLocation
+    ) -> WPEOrigin {
         WPEOrigin(
             workshopID: project.workshopID,
             title: project.title,
             originalType: project.type,
             sourceFolderBookmark: sourceBookmark,
             cacheRelativePath: cacheRelativePath,
-            previewFileName: project.previewFileName
+            previewFileName: project.previewFileName,
+            entryFile: project.entryFile,
+            resourceLocation: resourceLocation
         )
     }
 
@@ -191,4 +210,77 @@ final class WallpaperEngineImportService {
 
 private struct ExtractionFailure: Error, Sendable {
     let reason: String
+}
+
+@MainActor
+struct WPECachedContentResolver {
+    private let applicationSupportRootURL: URL
+    private let fileManager: FileManager
+    private let makeBookmark: @MainActor @Sendable (URL) -> Data?
+
+    init(
+        applicationSupportRootURL: URL? = nil,
+        fileManager: FileManager = .default,
+        makeBookmark: @escaping @MainActor @Sendable (URL) -> Data? = { url in
+            ResourceUtilities.createBookmark(for: url)
+        }
+    ) {
+        self.fileManager = fileManager
+        if let applicationSupportRootURL {
+            self.applicationSupportRootURL = applicationSupportRootURL
+        } else if let applicationSupport = try? fileManager.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        ) {
+            self.applicationSupportRootURL = applicationSupport.appendingPathComponent("LiveWallpaper", isDirectory: true)
+        } else {
+            self.applicationSupportRootURL = URL(fileURLWithPath: NSHomeDirectory())
+                .appendingPathComponent("Library/Application Support/LiveWallpaper", isDirectory: true)
+        }
+        self.makeBookmark = makeBookmark
+    }
+
+    func content(for origin: WPEOrigin) -> WallpaperContent? {
+        guard origin.resourceLocation == .cache,
+              let cacheRelativePath = origin.cacheRelativePath,
+              !cacheRelativePath.isEmpty,
+              let entryFile = origin.entryFile,
+              !entryFile.isEmpty else {
+            return nil
+        }
+
+        let cacheURL = applicationSupportRootURL
+            .appendingPathComponent(cacheRelativePath, isDirectory: true)
+            .standardizedFileURL
+        guard let entryURL = resourceURL(root: cacheURL, relativePath: entryFile),
+              fileManager.fileExists(atPath: entryURL.path) else {
+            return nil
+        }
+
+        switch origin.originalType {
+        case .video:
+            guard let bookmark = makeBookmark(entryURL) else { return nil }
+            return .video(bookmarkData: bookmark)
+        case .web:
+            guard let bookmark = makeBookmark(cacheURL) else { return nil }
+            return .html(
+                source: .folder(bookmarkData: bookmark, indexFileName: entryFile),
+                config: HTMLConfig(physicalPixelLayout: true)
+            )
+        case .scene, .application, .unknown:
+            return nil
+        }
+    }
+
+    private func resourceURL(root: URL, relativePath: String) -> URL? {
+        let rootURL = root.standardizedFileURL.resolvingSymlinksInPath()
+        let url = root
+            .appendingPathComponent(relativePath)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+        guard url.path.hasPrefix(rootURL.path + "/") else { return nil }
+        return url
+    }
 }

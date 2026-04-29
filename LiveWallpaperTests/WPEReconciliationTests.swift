@@ -27,6 +27,38 @@ struct WPEReconciliationTests {
         #expect(config.wpeOrigin == nil)
     }
 
+    @Test("Reconcile preserves unpacked WPE web imports backed by the source folder")
+    func reconcilePreservesSourceFolderWebOrigin() throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("wpe-source-web-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data("<html></html>".utf8).write(to: folder.appendingPathComponent("index.html"))
+
+        let bookmark = try folder.bookmarkData(
+            options: [.withSecurityScope],
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
+        let origin = WPEOrigin(
+            workshopID: "source-web",
+            title: "Source Web",
+            originalType: .web,
+            sourceFolderBookmark: bookmark,
+            cacheRelativePath: nil,
+            previewFileName: "preview.gif"
+        )
+        var config = makeConfiguration(activeWallpaper: .html(
+            source: .folder(bookmarkData: bookmark, indexFileName: "index.html"),
+            config: .default
+        ))
+        config.wpeOrigin = origin
+
+        config.reconcileWPEOrigin()
+
+        #expect(config.wpeOrigin == origin)
+    }
+
     @Test("Plan §A11: reconcile preserves wpeOrigin when active wallpaper is metalShader")
     func reconcilePreservesOriginForShader() {
         var config = makeConfiguration(activeWallpaper: .metalShader(.waves))
