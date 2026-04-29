@@ -4,7 +4,11 @@ class VideoWallpaperWindow: NSWindow {
     private static let desktopWindowLevel = Int(CGWindowLevelForKey(.desktopWindow))
     private static let desktopIconWindowLevel = Int(CGWindowLevelForKey(.desktopIconWindow))
     private static let passiveWallpaperWindowLevel = desktopWindowLevel - 1
-    private static let interactiveWallpaperWindowLevel = desktopIconWindowLevel - 1
+    // Plash 模式：交互态把 window 抬到桌面图标层之上。
+    // 这样 macOS Sonoma 的 "Click wallpaper to reveal desktop" 手势再也拿不到点击 —
+    // 该手势是派发给系统桌面壁纸 window 的，我们盖在它和图标层之上后事件被消费在自己的 window 里。
+    // 代价：交互态会遮住桌面图标（与 Plash 一致）。
+    private static let interactiveWallpaperWindowLevel = desktopIconWindowLevel + 1
     private var allowsWallpaperMouseInteraction = false
 
     private var wallpaperWindowLevel: Int {
@@ -44,8 +48,9 @@ class VideoWallpaperWindow: NSWindow {
     }
     
     // MARK: - Window Behavior
-    override var canBecomeKey: Bool { false }
-    override var canBecomeMain: Bool { false }
+    // 交互态需要成为 key window，否则 WKWebView 收不到键盘 / 焦点事件。
+    override var canBecomeKey: Bool { allowsWallpaperMouseInteraction }
+    override var canBecomeMain: Bool { allowsWallpaperMouseInteraction }
     
     override func setFrame(_ frameRect: NSRect, display flag: Bool) {
         guard frameRect.width > 0 && frameRect.height > 0 else {
@@ -58,7 +63,13 @@ class VideoWallpaperWindow: NSWindow {
     }
     
     override func makeKeyAndOrderFront(_ sender: Any?) {
-        orderBack(nil)
+        // 非交互态：保持壁纸语义，强制排到背后。
+        // 交互态：放行真正的 key window 行为。
+        if allowsWallpaperMouseInteraction {
+            super.makeKeyAndOrderFront(sender)
+        } else {
+            orderBack(nil)
+        }
     }
     
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
@@ -85,6 +96,13 @@ extension VideoWallpaperWindow {
         level = NSWindow.Level(rawValue: wallpaperWindowLevel)
         ignoresMouseEvents = !allowsWallpaperMouseInteraction
         acceptsMouseMovedEvents = allowsWallpaperMouseInteraction
+        if allowsWallpaperMouseInteraction {
+            // 抬到 desktopIcon + 1 后必须主动 makeKeyAndOrderFront，
+            // 否则 window 仍处于 ordered-back 状态、点击不触发 hit-test。
+            super.makeKeyAndOrderFront(nil)
+        } else {
+            orderBack(nil)
+        }
     }
 
     func updateFrame(_ frame: CGRect, animate: Bool = false) {
