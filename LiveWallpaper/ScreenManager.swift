@@ -51,9 +51,9 @@ final class ScreenManager {
     private(set) var screens: [Screen] = []
     private(set) var wallpaperSessionStateVersion: UInt64 = 0
     private(set) var wallpaperSessionSummaryCache = WallpaperSessionSummaryCache()
-    /// Last error encountered during a Wallpaper Engine import, surfaced for the
-    /// Scene tab UI. `nil` clears any previous error.
-    var lastWPEImportError: AppError?
+    /// Per-screen WPE import error state. Keying on `CGDirectDisplayID` keeps
+    /// concurrent multi-screen imports from overwriting each other's alerts.
+    private(set) var lastWPEImportErrors: [CGDirectDisplayID: AppError] = [:]
 
     @ObservationIgnored private var cleanupTasks: Set<AnyCancellable> = []
     @ObservationIgnored private let displayRegistry = DisplayRegistry()
@@ -938,6 +938,17 @@ final class ScreenManager {
     
     // MARK: - Wallpaper Engine Import
 
+    /// Returns the most recent WPE import error for the given screen, or `nil`.
+    /// Used by the Scene tab to surface failures without bleeding state across
+    /// concurrent imports on different displays.
+    func wpeImportError(for screen: Screen) -> AppError? {
+        lastWPEImportErrors[screen.id]
+    }
+
+    func clearWPEImportError(for screen: Screen) {
+        lastWPEImportErrors.removeValue(forKey: screen.id)
+    }
+
     func importWallpaperEngineProject(at folderURL: URL, for screen: Screen) async {
         let generation = bumpWPEImportGeneration(for: screen.id)
         do {
@@ -955,15 +966,19 @@ final class ScreenManager {
                 SettingsManager.shared.recordWPEImport(
                     WPEHistoryEntry(origin: origin, importedAt: Date(), lastUsedAt: nil)
                 )
-                postWPEImportDidComplete(screenID: screen.id, type: origin.originalType)
-                lastWPEImportError = nil
+                postWPEImportDidComplete(
+                    screenID: screen.id,
+                    type: origin.originalType,
+                    workshopID: origin.workshopID
+                )
+                lastWPEImportErrors.removeValue(forKey: screen.id)
 
             case .rejected(let reason):
-                lastWPEImportError = .wpePackageInvalid(reason)
+                lastWPEImportErrors[screen.id] = .wpePackageInvalid(reason)
             }
         } catch {
             guard isCurrentWPEImportGeneration(generation, for: screen.id) else { return }
-            lastWPEImportError = .wpeImportFailed(error.localizedDescription)
+            lastWPEImportErrors[screen.id] = .wpeImportFailed(error.localizedDescription)
         }
     }
 
@@ -1027,20 +1042,20 @@ final class ScreenManager {
                 if applyCachedWPEHistoryEntry(entry, for: screen) {
                     return
                 }
-                lastWPEImportError = .fileAccessDenied(entry.origin.title)
+                lastWPEImportErrors[screen.id] = .fileAccessDenied(entry.origin.title)
                 return
             }
 
-            lastWPEImportError = nil
+            lastWPEImportErrors.removeValue(forKey: screen.id)
             await importWallpaperEngineProject(at: folderURL, for: screen)
-            if lastWPEImportError != nil {
+            if lastWPEImportErrors[screen.id] != nil {
                 _ = applyCachedWPEHistoryEntry(entry, for: screen)
             }
         } catch {
             if applyCachedWPEHistoryEntry(entry, for: screen) {
                 return
             }
-            lastWPEImportError = .wpeImportFailed(error.localizedDescription)
+            lastWPEImportErrors[screen.id] = .wpeImportFailed(error.localizedDescription)
         }
     }
 
@@ -1053,13 +1068,18 @@ final class ScreenManager {
         }
     }
 
-    private func postWPEImportDidComplete(screenID: CGDirectDisplayID, type: WPEType) {
+    private func postWPEImportDidComplete(
+        screenID: CGDirectDisplayID,
+        type: WPEType,
+        workshopID: String
+    ) {
         NotificationCenter.default.post(
             name: .wpeImportDidComplete,
             object: nil,
             userInfo: [
                 "screenID": screenID,
                 "type": type.rawValue,
+                "workshopID": workshopID,
             ]
         )
     }
@@ -1089,8 +1109,12 @@ final class ScreenManager {
         config.wpeOrigin = origin
         saveConfiguration(config)
         restoreWallpaperSession(for: screen, configuration: config, preservingState: false)
-        postWPEImportDidComplete(screenID: screen.id, type: origin.originalType)
-        lastWPEImportError = nil
+        postWPEImportDidComplete(
+            screenID: screen.id,
+            type: origin.originalType,
+            workshopID: origin.workshopID
+        )
+        lastWPEImportErrors.removeValue(forKey: screen.id)
     }
 
     @discardableResult

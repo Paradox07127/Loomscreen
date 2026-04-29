@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-/// Single recent-import card in the Scene tab grid. 140×180pt,
+/// Single recent-import card in the Scene tab grid. 160×240pt,
 /// glass-effect background, hover lift, context menu for Finder/remove.
 struct WPEHistoryRow: View {
     let entry: WPEHistoryEntry
@@ -22,21 +22,21 @@ struct WPEHistoryRow: View {
                 )
                     .clipShape(
                         UnevenRoundedRectangle(
-                            topLeadingRadius: 14,
+                            topLeadingRadius: 16,
                             bottomLeadingRadius: 0,
                             bottomTrailingRadius: 0,
-                            topTrailingRadius: 14,
+                            topTrailingRadius: 16,
                             style: .continuous
                         )
                     )
 
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 8) {
                     Text(entry.origin.title)
                         .font(.system(size: 13, weight: .medium))
                         .lineLimit(2)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
-                    HStack(spacing: 4) {
+                    HStack(spacing: 6) {
                         Circle()
                             .fill(typeColor)
                             .frame(width: 6, height: 6)
@@ -59,16 +59,16 @@ struct WPEHistoryRow: View {
                         }
                     }
                 }
-                .padding(10)
+                .padding(12)
                 .frame(maxHeight: .infinity, alignment: .top)
             }
         }
         .buttonStyle(.plain)
-        .frame(width: 140, height: 220)
-        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 14))
+        .frame(width: 160, height: 240)
+        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 16))
         .scaleEffect(isHovering ? 1.02 : 1.0)
         .shadow(
-            color: Color.black.opacity(isHovering ? 0.15 : 0.05),
+            color: Color.black.opacity(isHovering ? 0.18 : 0.06),
             radius: isHovering ? 8 : 4,
             y: isHovering ? 4 : 2
         )

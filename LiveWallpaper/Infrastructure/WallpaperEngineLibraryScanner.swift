@@ -3,8 +3,17 @@ import Foundation
 /// Scans a user-granted Steam Workshop root (e.g. `~/Documents/Live Wallpapers/431960/`)
 /// and returns metadata for every valid Wallpaper Engine project found inside.
 /// Used by the Workshop Library Gallery for bulk-discovery + selective import.
-@MainActor
-final class WallpaperEngineLibraryScanner {
+///
+/// Off-main: heavy directory enumeration + per-project JSON decoding runs on
+/// a detached cooperative task so very large libraries don't hang the UI.
+/// Caller (which is @MainActor) is responsible for resolving the persisted
+/// bookmark + already-imported set first, since both depend on the
+/// `@MainActor`-isolated `SettingsManager`.
+///
+/// `@unchecked Sendable`: `FileManager.default` is documented thread-safe for
+/// the read-only operations we use (enumeration, existence checks). All other
+/// stored state is immutable by construction.
+final class WallpaperEngineLibraryScanner: @unchecked Sendable {
 
     enum ScanError: Error, Equatable, Sendable {
         case rootBookmarkMissing
@@ -12,9 +21,10 @@ final class WallpaperEngineLibraryScanner {
     }
 
     /// Snapshot of one project discovered under the workshop root.
-    /// Carries the shared `libraryRootBookmarkData` so the gallery can re-acquire
-    /// security scope for each child URL after the scan returns — `scan()`'s
-    /// own `startAccessingSecurityScopedResource` lifetime ends with the call.
+    /// Carries the shared `libraryRootBookmarkData` so the gallery can
+    /// re-acquire security scope for each child URL after the scan returns —
+    /// `scan()`'s own `startAccessingSecurityScopedResource` lifetime ends
+    /// with the call.
     struct DiscoveredProject: Sendable, Identifiable {
         let workshopID: String
         let title: String
@@ -29,34 +39,46 @@ final class WallpaperEngineLibraryScanner {
     }
 
     private let fileManager: FileManager
-    private let importedWorkshopIDs: () -> Set<String>
 
-    init(
-        fileManager: FileManager = .default,
-        importedWorkshopIDs: @escaping () -> Set<String> = {
-            Set(SettingsManager.shared.loadGlobalSettings().recentWPEImports.map(\.origin.workshopID))
-        }
-    ) {
+    init(fileManager: FileManager = .default) {
         self.fileManager = fileManager
-        self.importedWorkshopIDs = importedWorkshopIDs
     }
 
-    /// Resolves the persisted security-scoped bookmark and walks the immediate
-    /// children of the root, parsing each `<workshopID>/project.json`.
-    /// Skips children that are not directories or whose project.json is
-    /// missing / malformed — they're not part of a WPE library by definition.
-    func scan() async throws -> [DiscoveredProject] {
-        guard let bookmark = SettingsManager.shared.loadWorkshopLibraryRootBookmark() else {
-            throw ScanError.rootBookmarkMissing
-        }
+    /// Off-main scan. Resolves `rootBookmarkData`, walks the immediate
+    /// children of the root, and parses each `<workshopID>/project.json`.
+    /// Children that are not directories or whose project.json is missing
+    /// or malformed are silently skipped — they're not part of a WPE
+    /// library by definition.
+    func scan(
+        rootBookmarkData: Data,
+        alreadyImportedWorkshopIDs: Set<String>
+    ) async throws -> [DiscoveredProject] {
+        try await Task.detached(priority: .userInitiated) { [fileManager] in
+            try Self.performScan(
+                rootBookmarkData: rootBookmarkData,
+                alreadyImportedWorkshopIDs: alreadyImportedWorkshopIDs,
+                fileManager: fileManager
+            )
+        }.value
+    }
 
+    private static func performScan(
+        rootBookmarkData: Data,
+        alreadyImportedWorkshopIDs: Set<String>,
+        fileManager: FileManager
+    ) throws -> [DiscoveredProject] {
         var isStale = false
-        let rootURL = try URL(
-            resolvingBookmarkData: bookmark,
-            options: .withSecurityScope,
-            relativeTo: nil,
-            bookmarkDataIsStale: &isStale
-        )
+        let rootURL: URL
+        do {
+            rootURL = try URL(
+                resolvingBookmarkData: rootBookmarkData,
+                options: .withSecurityScope,
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            )
+        } catch {
+            throw ScanError.rootInaccessible(error.localizedDescription)
+        }
 
         let didStartScope = rootURL.startAccessingSecurityScopedResource()
         defer { if didStartScope { rootURL.stopAccessingSecurityScopedResource() } }
@@ -72,7 +94,6 @@ final class WallpaperEngineLibraryScanner {
             throw ScanError.rootInaccessible(error.localizedDescription)
         }
 
-        let alreadyImported = importedWorkshopIDs()
         var results: [DiscoveredProject] = []
 
         for child in children {
@@ -95,8 +116,8 @@ final class WallpaperEngineLibraryScanner {
                 entryFile: project.entryFile,
                 folderURL: child,
                 previewURL: previewURL,
-                importedAlready: alreadyImported.contains(project.workshopID),
-                libraryRootBookmarkData: bookmark
+                importedAlready: alreadyImportedWorkshopIDs.contains(project.workshopID),
+                libraryRootBookmarkData: rootBookmarkData
             ))
         }
 
@@ -110,7 +131,7 @@ final class WallpaperEngineLibraryScanner {
         return results
     }
 
-    private func compatibilityRank(_ type: WPEType) -> Int {
+    private static func compatibilityRank(_ type: WPEType) -> Int {
         switch type {
         case .video, .web:           return 0
         case .scene:                 return 1

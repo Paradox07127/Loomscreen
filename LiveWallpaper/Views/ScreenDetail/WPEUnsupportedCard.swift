@@ -16,6 +16,8 @@ struct WPEUnsupportedCard: View {
                 securityScopedBookmarkData: origin.sourceFolderBookmark
             )
                 .frame(width: 280)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .shadow(color: Color.black.opacity(0.18), radius: 8, y: 4)
 
             VStack(spacing: 8) {
                 Text(origin.title)
@@ -48,7 +50,7 @@ struct WPEUnsupportedCard: View {
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.orange.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
+            .background(Color.orange.opacity(0.14), in: RoundedRectangle(cornerRadius: 16))
 
             Button {
                 openWorkshop()

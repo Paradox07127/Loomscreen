@@ -38,16 +38,16 @@ struct WPESceneSection: View {
         .onReceive(NotificationCenter.default.publisher(for: .wpeHistoryDidChange)) { _ in
             reloadHistory()
         }
-        .onChange(of: screenManager.lastWPEImportError) { _, error in
+        .onChange(of: screenManager.wpeImportError(for: screen)) { _, error in
             showImportErrorAlert = (error != nil)
         }
         .sheet(isPresented: $showWorkshopGallery) {
             WorkshopGalleryView()
                 .environment(screenManager)
         }
-        .alert("Import Failed", isPresented: $showImportErrorAlert, presenting: screenManager.lastWPEImportError) { _ in
+        .alert("Import Failed", isPresented: $showImportErrorAlert, presenting: screenManager.wpeImportError(for: screen)) { _ in
             Button("OK", role: .cancel) {
-                screenManager.lastWPEImportError = nil
+                screenManager.clearWPEImportError(for: screen)
             }
         } message: { error in
             VStack(alignment: .leading) {
@@ -62,7 +62,7 @@ struct WPESceneSection: View {
     // MARK: - States
 
     private var emptyState: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 24) {
             Image(systemName: "tray.and.arrow.down")
                 .font(.system(size: 56, weight: .light))
                 .foregroundStyle(.secondary)
@@ -75,7 +75,7 @@ struct WPESceneSection: View {
                     .foregroundStyle(.secondary)
             }
 
-            VStack(spacing: 10) {
+            VStack(spacing: 12) {
                 Button {
                     presentFolderPicker()
                 } label: {
@@ -130,9 +130,9 @@ struct WPESceneSection: View {
                 }
 
                 LazyVGrid(
-                    columns: Array(repeating: GridItem(.fixed(140), spacing: 12), count: 4),
+                    columns: Array(repeating: GridItem(.fixed(160), spacing: 16), count: 4),
                     alignment: .leading,
-                    spacing: 12
+                    spacing: 16
                 ) {
                     ForEach(recentImports) { entry in
                         WPEHistoryRow(
@@ -184,16 +184,23 @@ struct WPESceneSection: View {
     /// Defers state mutation to the next runloop tick so we don't ask SwiftUI
     /// to switch branches (and remount `NSViewRepresentable` previews) during
     /// the same body evaluation that just refreshed `recentImports`.
+    /// Selects by `workshopID` so two scene imports back-to-back never collide.
     private func selectUnsupportedImportIfNeeded(from notification: Notification) {
         guard let screenID = notification.userInfo?["screenID"] as? CGDirectDisplayID,
               screenID == screen.id,
               let rawType = notification.userInfo?["type"] as? String,
               let type = WPEType(rawValue: rawType) else { return }
 
+        let workshopID = notification.userInfo?["workshopID"] as? String
+
         DispatchQueue.main.async {
             switch type {
             case .scene, .application, .unknown:
-                selectedHistoryEntry = recentImports.first { $0.origin.originalType == type }
+                if let workshopID {
+                    selectedHistoryEntry = recentImports.first { $0.origin.workshopID == workshopID }
+                } else {
+                    selectedHistoryEntry = recentImports.first { $0.origin.originalType == type }
+                }
             case .video, .web:
                 selectedHistoryEntry = nil
             }
