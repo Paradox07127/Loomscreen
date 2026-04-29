@@ -44,7 +44,11 @@ struct WPEPreviewView: View {
                 }
             }
         }
-        .aspectRatio(16/9, contentMode: .fit)
+        // 1:1 matches Wallpaper Engine editor's "Generate preview" default
+        // (512×512). Combined with `.resizeAspectFill` inside the layer, the
+        // image fully covers the slot — square sources draw flush, 16:9
+        // sources crop top/bottom equally, vertical sources crop sides.
+        .aspectRatio(1, contentMode: .fit)
         .clipped()
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .shadow(color: Color.black.opacity(0.12), radius: 6, y: 2)
