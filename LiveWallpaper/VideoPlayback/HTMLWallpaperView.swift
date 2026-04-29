@@ -40,6 +40,7 @@ final class HTMLWallpaperView: NSView {
     // MARK: - Properties
 
     private let webView: HTMLWebView
+    private let folderHandler: FolderURLSchemeHandler
     private var allowMouseInteraction = false
     private var compiledTrackerRuleList: WKContentRuleList?
     private var hasTrackerRulesAttached = false
@@ -58,6 +59,12 @@ final class HTMLWallpaperView: NSView {
         preferences.allowsContentJavaScript = true
         configuration.defaultWebpagePreferences = preferences
         configuration.mediaTypesRequiringUserActionForPlayback = []
+
+        // Register the custom scheme BEFORE the webView is created —
+        // schemes cannot be added after WKWebView init.
+        let handler = FolderURLSchemeHandler()
+        configuration.setURLSchemeHandler(handler, forURLScheme: FolderURLSchemeHandler.scheme)
+        self.folderHandler = handler
 
         webView = HTMLWebView(frame: NSRect(origin: .zero, size: frameRect.size), configuration: configuration)
 
@@ -224,8 +231,17 @@ final class HTMLWallpaperView: NSView {
         case .folder(let bookmarkData, let indexFileName):
             guard let folderURL = HTMLWallpaperView.resolveBookmark(bookmarkData) else { return }
             activeSecurityScopedURL = folderURL
-            let indexURL = folderURL.appendingPathComponent(indexFileName)
-            webView.loadFileURL(indexURL, allowingReadAccessTo: folderURL)
+            // Route through custom scheme so ES module / CORS / fetch all
+            // behave like normal HTTP. file:// would block `<script type="module" crossorigin>`.
+            folderHandler.folderURL = folderURL
+            let escapedIndex = indexFileName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? indexFileName
+            let urlString = "\(FolderURLSchemeHandler.scheme)://\(FolderURLSchemeHandler.host)/\(escapedIndex)"
+            guard let url = URL(string: urlString) else {
+                Logger.error("HTML folder load: failed to build scheme URL for \(indexFileName)", category: .screenManager)
+                return
+            }
+            Logger.info("HTML folder load: \(url.absoluteString) (folder=\(folderURL.lastPathComponent))", category: .screenManager)
+            webView.load(URLRequest(url: url))
         case .url(let url):
             guard HTMLWallpaperView.isAllowedRemoteURL(url) else { return }
             webView.load(URLRequest(url: url))
@@ -444,7 +460,9 @@ extension HTMLWallpaperView: WKNavigationDelegate {
         switch navigationAction.navigationType {
         case .other, .reload:
             if let url = navigationAction.request.url,
-               HTMLWallpaperView.isAllowedRemoteURL(url) || url.isFileURL {
+               HTMLWallpaperView.isAllowedRemoteURL(url)
+                || url.isFileURL
+                || url.scheme?.lowercased() == FolderURLSchemeHandler.scheme {
                 decisionHandler(.allow)
             } else {
                 decisionHandler(.cancel)
@@ -480,6 +498,7 @@ extension HTMLWallpaperView: WKNavigationDelegate {
 
     /// 导航完成后兜底：autoplay nudge + 静音状态再施加一次（覆盖晚到的元素）。
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        Logger.info("HTML wallpaper finished loading: \(webView.url?.absoluteString ?? "<no url>")", category: .screenManager)
         let muted = lastAppliedConfig?.muteAudio == true ? "true" : "false"
         let nudge = """
         (function() {
@@ -498,6 +517,32 @@ extension HTMLWallpaperView: WKNavigationDelegate {
         })();
         """
         webView.evaluateJavaScript(nudge, completionHandler: nil)
+    }
+
+    /// Server-side / authentication failures.
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        let nsError = error as NSError
+        Logger.error(
+            "HTML wallpaper didFail [domain=\(nsError.domain) code=\(nsError.code)] url=\(webView.url?.absoluteString ?? "<no url>") — \(nsError.localizedDescription); userInfo=\(nsError.userInfo)",
+            category: .screenManager
+        )
+    }
+
+    /// Pre-commit failures (file not found, sandbox denial, scheme blocked).
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        let nsError = error as NSError
+        Logger.error(
+            "HTML wallpaper didFailProvisionalNavigation [domain=\(nsError.domain) code=\(nsError.code)] url=\(webView.url?.absoluteString ?? "<no url>") — \(nsError.localizedDescription); userInfo=\(nsError.userInfo)",
+            category: .screenManager
+        )
+    }
+
+    /// Captures unhandled JS exceptions + console messages from the page.
+    func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping @MainActor @Sendable (WKNavigationResponsePolicy) -> Void) {
+        if let response = navigationResponse.response as? HTTPURLResponse, response.statusCode >= 400 {
+            Logger.warning("HTML wallpaper response: HTTP \(response.statusCode) for \(response.url?.absoluteString ?? "?")", category: .screenManager)
+        }
+        decisionHandler(.allow)
     }
 }
 
