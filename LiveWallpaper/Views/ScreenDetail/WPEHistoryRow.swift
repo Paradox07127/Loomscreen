@@ -14,11 +14,12 @@ struct WPEHistoryRow: View {
     var body: some View {
         Button(action: onTap) {
             VStack(spacing: 0) {
+                // Square preview occupies the full card width (140×140) so
+                // 1:1 sources render flush. Card height adjusts below to fit.
                 WPEPreviewView(
                     imageURL: previewURL,
                     securityScopedBookmarkData: entry.origin.sourceFolderBookmark
                 )
-                    .frame(height: 80)
                     .clipShape(
                         UnevenRoundedRectangle(
                             topLeadingRadius: 14,
@@ -63,7 +64,7 @@ struct WPEHistoryRow: View {
             }
         }
         .buttonStyle(.plain)
-        .frame(width: 140, height: 180)
+        .frame(width: 140, height: 220)
         .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 14))
         .scaleEffect(isHovering ? 1.02 : 1.0)
         .shadow(

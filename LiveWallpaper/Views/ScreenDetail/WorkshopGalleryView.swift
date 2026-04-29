@@ -160,7 +160,9 @@ struct WorkshopGalleryView: View {
     private var resultsView: some View {
         ScrollView {
             LazyVGrid(
-                columns: Array(repeating: GridItem(.flexible(minimum: 180), spacing: 14), count: 4),
+                // Fixed-width columns so the 1:1 square preview area is
+                // identical across cards regardless of window width.
+                columns: Array(repeating: GridItem(.fixed(180), spacing: 14), count: 4),
                 alignment: .leading,
                 spacing: 14
             ) {
@@ -308,11 +310,11 @@ private struct WorkshopGalleryCard: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Square preview occupies the full 180pt card width (180×180).
             WPEPreviewView(
                 imageURL: project.previewURL,
                 securityScopedBookmarkData: project.libraryRootBookmarkData
             )
-                .frame(height: 110)
                 .clipShape(
                     UnevenRoundedRectangle(
                         topLeadingRadius: 14,
@@ -339,7 +341,7 @@ private struct WorkshopGalleryCard: View {
             .padding(12)
             .frame(maxHeight: .infinity, alignment: .top)
         }
-        .frame(height: 220)
+        .frame(width: 180, height: 280)
         .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 14))
         .scaleEffect(isHovering ? 1.02 : 1.0)
         .shadow(

@@ -8,11 +8,14 @@ struct WPEUnsupportedCard: View {
 
     var body: some View {
         VStack(spacing: 24) {
+            // 1:1 preview now produces a 280×280 square — large enough to
+            // showcase the workshop GIF without dominating the entire
+            // detail card (max-width 480 with 32pt padding).
             WPEPreviewView(
                 imageURL: previewURL,
                 securityScopedBookmarkData: origin.sourceFolderBookmark
             )
-                .frame(width: 320)
+                .frame(width: 280)
 
             VStack(spacing: 8) {
                 Text(origin.title)
