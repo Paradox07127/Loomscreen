@@ -37,6 +37,7 @@ struct HTMLSourceSection: View {
                     insecureURLBanner
                 }
                 if let source { trustBanner(for: source) }
+                if let source { multiInstanceBanner(for: source) }
 
                 Divider()
 
@@ -137,6 +138,31 @@ struct HTMLSourceSection: View {
             .padding(.vertical, 4)
             .padding(.horizontal, 8)
             .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    @ViewBuilder
+    private func multiInstanceBanner(for source: HTMLSource) -> some View {
+        let others = screenManager.screensRunningSameHTMLSource(as: source, excluding: screen.id)
+        if !others.isEmpty {
+            let names = others.map(\.name).joined(separator: ", ")
+            HStack(spacing: 8) {
+                Image(systemName: "rectangle.on.rectangle.angled")
+                    .foregroundStyle(.indigo)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Same wallpaper is running on \(others.count) other screen\(others.count == 1 ? "" : "s")")
+                        .font(.caption)
+                    Text("Audio is locked to the first screen. GPU cost scales with screen count — consider a different source per display.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .help("Also active on: \(names)")
+            }
+            .padding(.vertical, 4)
+            .padding(.horizontal, 8)
+            .background(Color.indigo.opacity(0.10), in: RoundedRectangle(cornerRadius: 6))
+        }
     }
 
     @ViewBuilder

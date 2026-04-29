@@ -1229,8 +1229,19 @@ final class ScreenManager {
 
         switch definition {
         case .html(let source, let htmlConfig):
-            session = ambientSessionBuilder.makeHTMLSession(source: source, config: htmlConfig, frame: screen.frame)
-            Logger.info("Set HTML wallpaper for screen \(screen.id) — \(source.displayName)", category: .screenManager)
+            // Audio-leader policy: same source on multiple screens means N
+            // independent webviews would each decode audio + render WebGL.
+            // Force-mute all but the leader to avoid stacked audio. The
+            // visual remains identical so users still get N×GPU — they're
+            // warned via the Inspector banner.
+            let isLeader = isAudioLeaderForHTML(source: source, excluding: screen.id)
+            var effectiveConfig = htmlConfig
+            if !isLeader, !effectiveConfig.muteAudio {
+                effectiveConfig.muteAudio = true
+                Logger.info("Multi-instance HTML wallpaper: muting screen \(screen.id) (audio leader is another screen running same source)", category: .screenManager)
+            }
+            session = ambientSessionBuilder.makeHTMLSession(source: source, config: effectiveConfig, frame: screen.frame)
+            Logger.info("Set HTML wallpaper for screen \(screen.id) — \(source.displayName) [leader=\(isLeader)]", category: .screenManager)
         case .metalShader(let preset):
             session = ambientSessionBuilder.makeShaderSession(preset: preset, frame: screen.frame)
             Logger.info("Set shader wallpaper (\(preset.rawValue)) for screen \(screen.id)", category: .screenManager)
@@ -1248,6 +1259,41 @@ final class ScreenManager {
                 fullScreenDetector.isDesktopHidden(for: screen.id)
         )
         notifyWallpaperSessionChanged()
+    }
+
+    // MARK: - HTML Multi-Instance Diagnostics
+
+    /// Maps each currently-active HTML source signature to the screens that
+    /// run it. Inspector uses this to surface "also active on N other screen(s)"
+    /// when the user is configuring a wallpaper that's already in use elsewhere.
+    func htmlSourceMultiplicity() -> [String: [CGDirectDisplayID]] {
+        var map: [String: [CGDirectDisplayID]] = [:]
+        for screen in screens {
+            guard screen.runtimeSession?.wallpaperType == .html,
+                  let config = configurationStore.get(for: screen.id),
+                  case .html(let source, _) = config.activeWallpaper else { continue }
+            map[source.diagnosticSignature, default: []].append(screen.id)
+        }
+        return map
+    }
+
+    /// Screens (other than `excluding`) currently running the same HTML source.
+    func screensRunningSameHTMLSource(as source: HTMLSource, excluding: CGDirectDisplayID) -> [Screen] {
+        let signature = source.diagnosticSignature
+        return screens.filter { other in
+            other.id != excluding
+                && other.runtimeSession?.wallpaperType == .html
+                && (configurationStore.get(for: other.id)?.activeWallpaper).flatMap { content -> String? in
+                    if case .html(let s, _) = content { return s.diagnosticSignature }
+                    return nil
+                } == signature
+        }
+    }
+
+    /// True when no other screen is already playing this HTML source — the
+    /// caller becomes the audio leader.
+    private func isAudioLeaderForHTML(source: HTMLSource, excluding screenID: CGDirectDisplayID) -> Bool {
+        screensRunningSameHTMLSource(as: source, excluding: screenID).isEmpty
     }
 
     // MARK: - HTML Wallpaper
