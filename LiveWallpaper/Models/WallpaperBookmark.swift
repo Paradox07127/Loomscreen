@@ -28,6 +28,7 @@ struct WallpaperBookmark: Identifiable, Codable, Equatable {
         case .video: return "play.rectangle"
         case .html(let source, _): return source.iconName
         case .metalShader: return "sparkles.rectangle.stack"
+        case .scene: return "cube.transparent"
         }
     }
 }

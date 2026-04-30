@@ -137,6 +137,11 @@ final class WallpaperConfigurationStore {
             return false
         case .metalShader:
             return false
+        case .scene:
+            // Scene wallpapers live under our own application support cache,
+            // not under a user-granted security scope; the resolver checks
+            // existence on its own. No bookmark reachability test needed.
+            return false
         }
     }
 }
