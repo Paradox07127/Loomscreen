@@ -62,16 +62,33 @@ struct SceneResourceResolverTests {
         }
     }
 
-    @Test(".tex texture returns unsupportedTexture without crashing")
-    func texTextureUnsupported() throws {
+    @Test("Truncated .tex surfaces as a texture-specific resolve error")
+    func texTruncatedSurfacesTextureError() throws {
+        // Phase 2.1 routes `.tex` through `WPETexDecoder` instead of the
+        // Phase 2.0 stub. A 2-byte payload now produces a precise
+        // `truncatedBlock` decode error wrapped in
+        // `ResolveError.texture(...)` so the UI can show the failing
+        // block name and offset rather than a generic "unsupported".
         let fixture = try makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         try Data([0x00, 0x01]).write(to: fixture.cacheRoot.appendingPathComponent("layer.tex"))
 
         let resolver = SceneResourceResolver(cacheRootURL: fixture.cacheRoot)
 
-        #expect(throws: SceneResourceResolver.ResolveError.unsupportedTexture) {
-            try resolver.resolveImage(relativePath: "layer.tex")
+        do {
+            _ = try resolver.resolveImage(relativePath: "layer.tex")
+            Issue.record("Expected resolveImage to throw on truncated .tex")
+        } catch SceneResourceResolver.ResolveError.texture(let texError) {
+            // Either truncatedBlock or unsupportedContainer is acceptable —
+            // both are precise failure modes. Reject vague decodeFailed.
+            switch texError {
+            case .truncatedBlock, .unsupportedContainer:
+                break
+            default:
+                Issue.record("Expected truncatedBlock/unsupportedContainer, got \(texError)")
+            }
+        } catch {
+            Issue.record("Expected ResolveError.texture, got \(error)")
         }
     }
 

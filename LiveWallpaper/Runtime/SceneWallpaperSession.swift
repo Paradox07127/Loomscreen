@@ -14,6 +14,10 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
     private var didStartLoad = false
     private(set) var isThrottled = false
     private(set) var loadError: SceneRenderingError?
+    /// Latest per-layer progress message reported by the controller.
+    /// Phase 2.1 surfaces this via `WPESceneDetailView` so the user sees
+    /// "Decoding 7/12 textures…" instead of an opaque spinner.
+    private(set) var loadProgress: String?
 
     init(window: NSWindow, controller: SceneRenderingController) {
         self.window = window
@@ -87,10 +91,12 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
     func startLoadIfNeeded() {
         guard !didStartLoad, let controller else { return }
         didStartLoad = true
+        installProgressHandler(on: controller)
         Task { @MainActor [weak self] in
             do {
                 try await controller.load()
                 self?.loadError = nil
+                self?.loadProgress = nil
             } catch let error as SceneRenderingError {
                 Logger.warning("Scene wallpaper load failed: \(error.errorDescription ?? "(no description)")", category: .screenManager)
                 self?.loadError = error
@@ -104,4 +110,32 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
     // No prepareForDisplay override: the protocol-extension default
     // (50ms warm-up) gives the SpriteKit pipeline enough lead time before
     // the wallpaper window is brought to screen.
+
+    /// Tears the controller's scene down and re-runs `load()`. Used by
+    /// the inspector's Retry button so the user has a recovery path
+    /// without manually clearing + re-importing the wallpaper. Clears
+    /// the previous `loadError` on success so the state machine can move
+    /// back to `.playing` instead of latching on the old failure.
+    func reload() async {
+        guard let controller else {
+            loadError = .cacheRootMissing
+            return
+        }
+        installProgressHandler(on: controller)
+        do {
+            try await controller.reload()
+            loadError = nil
+            loadProgress = nil
+        } catch let error as SceneRenderingError {
+            loadError = error
+        } catch {
+            loadError = .parseFailed(error.localizedDescription)
+        }
+    }
+
+    private func installProgressHandler(on controller: SceneRenderingController) {
+        controller.onProgress = { [weak self] progress in
+            self?.loadProgress = progress
+        }
+    }
 }
