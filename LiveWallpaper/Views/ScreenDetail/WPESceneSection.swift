@@ -15,7 +15,9 @@ struct WPESceneSection: View {
 
     var body: some View {
         Group {
-            if recentImports.isEmpty {
+            if hasActiveSceneWallpaper {
+                activeSceneCard
+            } else if recentImports.isEmpty {
                 emptyState
             } else if let selected = selectedHistoryEntry {
                 unsupportedDetail(for: selected)
@@ -162,10 +164,60 @@ struct WPESceneSection: View {
                 .accessibilityHint("Return to the recent imports grid")
                 Spacer()
             }
-            WPEUnsupportedCard(origin: entry.origin)
+            WPEFallbackCard(origin: entry.origin)
         }
         .padding(24)
         .frame(maxWidth: .infinity, alignment: .top)
+    }
+
+    private var hasActiveSceneWallpaper: Bool {
+        guard let configuration = screenManager.getConfiguration(for: screen),
+              case .scene = configuration.activeWallpaper,
+              configuration.wpeOrigin != nil else { return false }
+        return true
+    }
+
+    /// When the active wallpaper for this screen is a scene, render the
+    /// detail card directly so the user sees the live preview + state machine
+    /// instead of having to dig back to the imports grid.
+    @ViewBuilder
+    private var activeSceneCard: some View {
+        if let configuration = screenManager.getConfiguration(for: screen),
+           case .scene(let descriptor) = configuration.activeWallpaper,
+           let origin = configuration.wpeOrigin {
+            let session = screen.runtimeSession as? SceneWallpaperSession
+            VStack(spacing: 16) {
+                HStack {
+                    Button {
+                        showWorkshopGallery = true
+                    } label: {
+                        Label("Browse Library…", systemImage: "books.vertical")
+                    }
+                    .buttonStyle(.glass)
+                    .controlSize(.regular)
+                    Spacer()
+                    Button {
+                        presentFolderPicker()
+                    } label: {
+                        Label("Import New…", systemImage: "plus")
+                    }
+                    .buttonStyle(.glass)
+                    .controlSize(.regular)
+                }
+                WPESceneDetailView(
+                    origin: origin,
+                    descriptor: descriptor,
+                    session: session,
+                    onClearWallpaper: {
+                        screenManager.clearWallpaperForScreen(screen)
+                    }
+                )
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .top)
+        } else {
+            EmptyView()
+        }
     }
 
     // MARK: - Actions

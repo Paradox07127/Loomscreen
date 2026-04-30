@@ -164,9 +164,11 @@ struct ScreenConfiguration: Codable, Equatable {
                 setAsLockScreen: setAsLockScreen
             )
         case .html, .metalShader, .scene:
-            // .scene is a UI-only label without direct WallpaperContent;
-            // legacy/test paths that hit this branch get the same safe
-            // degraded mapping as `.html` (empty inline source).
+            // `.scene` no longer maps to a synthetic HTML placeholder — Phase 2.0
+            // ships a real renderer. This convenience initializer is still
+            // hit by legacy tests and migration paths that have no descriptor;
+            // they degrade to an empty video so the type-pivot UI surfaces a
+            // "not configured" Scene tab instead of crashing.
             let wallpaper: WallpaperContent = switch wallpaperType {
             case .html:
                 .html(source: HTMLSource(legacyString: htmlContent ?? ""), config: .default)
@@ -175,7 +177,7 @@ struct ScreenConfiguration: Codable, Equatable {
             case .video:
                 .video(bookmarkData: videoBookmarkData)
             case .scene:
-                .html(source: HTMLSource(legacyString: ""), config: .default)
+                .video(bookmarkData: Data())
             }
 
             self.init(
@@ -298,13 +300,44 @@ struct ScreenConfiguration: Codable, Equatable {
             )
             savedVideoBookmarkData = legacySavedBookmark
         case .scene:
-            // .scene cannot legitimately appear in legacy data (the case did
-            // not exist before the WPE-import feature). Treat as empty video
-            // wallpaper to keep the configuration valid; ScreenManager's
-            // restoration path then surfaces the Scene tab placeholder.
-            activeWallpaper = .video(bookmarkData: Data())
-            savedVideoBookmarkData = legacySavedBookmark
+            // Legacy payloads predate `WallpaperContent.scene`. Backfill from
+            // wpeOrigin when the user already imported a Steam scene workshop:
+            // a valid `cacheRelativePath` + `entryFile` lets us reconstruct
+            // a `SceneDescriptor` (.imageOnly is the optimistic default — the
+            // import service will downgrade on next reconcile if needed).
+            // Otherwise fall back to an empty video so the Scene tab surfaces
+            // its placeholder instead of throwing decode errors.
+            if let backfilled = Self.backfillSceneFromLegacyOrigin(wpeOrigin) {
+                activeWallpaper = .scene(backfilled)
+                savedVideoBookmarkData = legacySavedBookmark
+            } else {
+                activeWallpaper = .video(bookmarkData: Data())
+                savedVideoBookmarkData = legacySavedBookmark
+            }
         }
+    }
+
+    /// Phase 2.0 migration: a previously-stored `wallpaperType == .scene`
+    /// blob from before the `.scene(SceneDescriptor)` case existed cannot
+    /// carry a descriptor in `activeWallpaper`. Reconstruct one when the
+    /// sibling `wpeOrigin` has the necessary fields; otherwise return nil
+    /// so the caller falls back to an empty placeholder configuration.
+    private static func backfillSceneFromLegacyOrigin(_ origin: WPEOrigin?) -> SceneDescriptor? {
+        guard let origin,
+              origin.originalType == .scene,
+              origin.resourceLocation == .cache,
+              let cacheRelativePath = origin.cacheRelativePath,
+              !cacheRelativePath.isEmpty,
+              let entryFile = origin.entryFile,
+              !entryFile.isEmpty else {
+            return nil
+        }
+        return SceneDescriptor(
+            workshopID: origin.workshopID,
+            cacheRelativePath: cacheRelativePath,
+            entryFile: entryFile,
+            capabilityTier: .imageOnly
+        )
     }
 
     func encode(to encoder: Encoder) throws {
@@ -430,6 +463,16 @@ struct ScreenConfiguration: Codable, Equatable {
             }
         case .metalShader:
             return
+        case .scene(let descriptor):
+            // Scene content is cache-backed and identified by workshopID +
+            // cacheRelativePath. Drop the origin only if either side disagrees
+            // with the persisted descriptor (e.g. user re-imported a different
+            // workshop project in-place).
+            guard origin.workshopID == descriptor.workshopID,
+                  origin.cacheRelativePath == descriptor.cacheRelativePath else {
+                wpeOrigin = nil
+                return
+            }
         }
     }
 

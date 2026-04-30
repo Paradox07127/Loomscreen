@@ -133,6 +133,10 @@ struct BookmarksLibraryView: View {
             screenManager.setHTMLWallpaper(source: source, config: config, for: screen)
         case .metalShader(let preset):
             screenManager.setShaderWallpaper(preset: preset, for: screen)
+        case .scene:
+            // Scene bookmarks need the import service path; ignore here so we
+            // never reapply a stale descriptor to a different screen.
+            Logger.warning("Scene bookmark apply is not supported in Phase 2.0", category: .screenManager)
         }
     }
 
@@ -288,6 +292,7 @@ private struct BookmarkCard: View {
         case .video: return .blue
         case .html: return .green
         case .metalShader: return .purple
+        case .scene: return .orange
         }
     }
 
@@ -299,6 +304,8 @@ private struct BookmarkCard: View {
             return source.displayName
         case .metalShader(let preset):
             return preset.rawValue
+        case .scene(let descriptor):
+            return "Workshop \(descriptor.workshopID)"
         }
     }
 }

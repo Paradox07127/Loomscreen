@@ -135,6 +135,12 @@ struct BookmarksPopover: View {
             screenManager.setHTMLWallpaper(source: source, config: config, for: screen)
         case .metalShader(let preset):
             screenManager.setShaderWallpaper(preset: preset, for: screen)
+        case .scene:
+            // Scene bookmarks are not yet user-applicable from the popover —
+            // the import flow owns SceneDescriptor lifecycle. Surface a log
+            // for diagnostics and ignore so we never hand a stale descriptor
+            // to ScreenManager without going through the import service.
+            Logger.warning("Scene bookmark apply is not supported in Phase 2.0", category: .screenManager)
         }
     }
 }
@@ -231,6 +237,7 @@ private struct BookmarkRow: View {
         case .video: return .blue
         case .html: return .green
         case .metalShader: return .purple
+        case .scene: return .orange
         }
     }
 
@@ -242,6 +249,8 @@ private struct BookmarkRow: View {
             return source.displayName
         case .metalShader(let preset):
             return preset.rawValue
+        case .scene(let descriptor):
+            return "Workshop \(descriptor.workshopID)"
         }
     }
 }

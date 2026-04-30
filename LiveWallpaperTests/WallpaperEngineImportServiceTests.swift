@@ -1,5 +1,8 @@
+import CoreGraphics
 import Foundation
+import ImageIO
 import Testing
+import UniformTypeIdentifiers
 @testable import LiveWallpaper
 
 @Suite("WallpaperEngineImportService") @MainActor
@@ -157,6 +160,181 @@ struct WallpaperEngineImportServiceTests {
         #expect(origin.entryFile == "scene.json")
     }
 
+    @Test("Scene with scene.pkg + valid scene.json + image asset returns ready scene content")
+    func sceneWithPackageAndAssetReturnsReady() async throws {
+        // The synthetic scene.json declares one image layer; we ship a real
+        // PNG inside the same scene.pkg so the import service classifies it
+        // as `.imageOnly`.
+        let pngBytes = try makeFixturePNG(width: 4, height: 4)
+        let sceneJSON = """
+        {
+            "camera": { "center": "0 0 0" },
+            "general": {
+                "orthogonalprojection": { "width": 1920, "height": 1080, "auto": true }
+            },
+            "objects": [{
+                "id": "layer1",
+                "name": "Layer 1",
+                "type": "image",
+                "image": "materials/layer1.png",
+                "origin": "0.5 0.5 0",
+                "scale": "1 1 1",
+                "alpha": 1.0,
+                "blendmode": "normal"
+            }]
+        }
+        """
+        let fixture = try makeFixture(
+            type: .scene,
+            entryFile: "scene.json",
+            pkgEntries: [
+                PackageEntrySpec("scene.json", Array(sceneJSON.utf8)),
+                PackageEntrySpec("materials/layer1.png", Array(pngBytes))
+            ]
+        )
+        defer { fixture.cleanup() }
+
+        let result = try await fixture.service.importProject(folder: fixture.folderURL)
+
+        guard case .ready(let content, let origin) = result else {
+            Issue.record("Expected .ready, got \(result)")
+            return
+        }
+        guard case .scene(let descriptor) = content else {
+            Issue.record("Expected .scene content, got \(content)")
+            return
+        }
+        #expect(descriptor.workshopID == fixture.workshopID)
+        #expect(descriptor.cacheRelativePath == "wpe-cache/\(fixture.workshopID)")
+        #expect(descriptor.entryFile == "scene.json")
+        #expect(descriptor.capabilityTier == .imageOnly)
+        #expect(origin.cacheRelativePath == "wpe-cache/\(fixture.workshopID)")
+        #expect(origin.resourceLocation == .cache)
+    }
+
+    @Test("Scene with image layers AND unsupported objects is classified degraded")
+    func sceneWithMixedObjectsIsDegraded() async throws {
+        let pngBytes = try makeFixturePNG(width: 4, height: 4)
+        let sceneJSON = """
+        {
+            "camera": { "center": "0 0 0" },
+            "general": {
+                "orthogonalprojection": { "width": 1920, "height": 1080, "auto": true }
+            },
+            "objects": [
+                {
+                    "id": "layer1",
+                    "name": "Layer 1",
+                    "type": "image",
+                    "image": "materials/layer1.png"
+                },
+                {
+                    "id": "particle1",
+                    "name": "Sparks",
+                    "type": "particle"
+                }
+            ]
+        }
+        """
+        let fixture = try makeFixture(
+            type: .scene,
+            entryFile: "scene.json",
+            pkgEntries: [
+                PackageEntrySpec("scene.json", Array(sceneJSON.utf8)),
+                PackageEntrySpec("materials/layer1.png", Array(pngBytes))
+            ]
+        )
+        defer { fixture.cleanup() }
+
+        let result = try await fixture.service.importProject(folder: fixture.folderURL)
+
+        guard case .ready(let content, _) = result else {
+            Issue.record("Expected .ready, got \(result)")
+            return
+        }
+        guard case .scene(let descriptor) = content else {
+            Issue.record("Expected .scene content, got \(content)")
+            return
+        }
+        // The image layer renders but the particle layer doesn't — this is
+        // exactly the case the plan's `.degraded` tier is meant to signal so
+        // the UI can warn the user even though the image-only renderer
+        // happily mounts the SKScene.
+        #expect(descriptor.capabilityTier == .degraded)
+    }
+
+    @Test("Scene whose declared layers are all missing assets is classified unsupported")
+    func sceneWithMissingAssetsIsUnsupported() async throws {
+        let sceneJSON = """
+        {
+            "camera": { "center": "0 0 0" },
+            "general": {
+                "orthogonalprojection": { "width": 1920, "height": 1080, "auto": true }
+            },
+            "objects": [{
+                "id": "layer1",
+                "name": "Layer 1",
+                "type": "image",
+                "image": "materials/missing.png"
+            }]
+        }
+        """
+        let fixture = try makeFixture(
+            type: .scene,
+            entryFile: "scene.json",
+            pkgEntries: [
+                PackageEntrySpec("scene.json", Array(sceneJSON.utf8))
+            ]
+        )
+        defer { fixture.cleanup() }
+
+        let result = try await fixture.service.importProject(folder: fixture.folderURL)
+
+        guard case .unsupported(let origin) = result else {
+            Issue.record("Expected .unsupported, got \(result)")
+            return
+        }
+        // Cache extraction still happened for the unsupported scene — the
+        // origin records the cache path so a future user-driven re-attempt
+        // (e.g. workshop ships a fix) can re-evaluate without re-extracting.
+        #expect(origin.cacheRelativePath == "wpe-cache/\(fixture.workshopID)")
+        #expect(origin.resourceLocation == .cache)
+    }
+
+    @Test("Cached content resolver rebuilds scene descriptor without re-parsing scene.json")
+    func cachedContentResolverRebuildsSceneDescriptor() throws {
+        let fileManager = FileManager.default
+        let rootURL = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: rootURL) }
+        let appSupportRoot = rootURL.appendingPathComponent("ApplicationSupport/LiveWallpaper", isDirectory: true)
+        let cacheURL = appSupportRoot.appendingPathComponent("wpe-cache/resolve-scene", isDirectory: true)
+        try fileManager.createDirectory(at: cacheURL, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: cacheURL.appendingPathComponent("scene.json"))
+
+        let origin = WPEOrigin(
+            workshopID: "resolve-scene",
+            title: "Cached Scene",
+            originalType: .scene,
+            sourceFolderBookmark: Data("missing-source".utf8),
+            cacheRelativePath: "wpe-cache/resolve-scene",
+            previewFileName: nil,
+            entryFile: "scene.json",
+            resourceLocation: .cache
+        )
+        let resolver = WPECachedContentResolver(
+            applicationSupportRootURL: appSupportRoot,
+            makeBookmark: { url in Data(url.path.utf8) }
+        )
+
+        guard case .scene(let descriptor) = resolver.content(for: origin) else {
+            Issue.record("Expected cached scene content")
+            return
+        }
+        #expect(descriptor.workshopID == "resolve-scene")
+        #expect(descriptor.cacheRelativePath == "wpe-cache/resolve-scene")
+        #expect(descriptor.entryFile == "scene.json")
+    }
+
     @Test("Cached content resolver rebuilds packaged video without source folder access")
     func cachedContentResolverRebuildsPackagedVideoWithoutSourceFolderAccess() throws {
         let fileManager = FileManager.default
@@ -244,6 +422,36 @@ struct WallpaperEngineImportServiceTests {
             workshopID: workshopID,
             service: service
         )
+    }
+
+    /// Produces a real (decodable) PNG so `SceneResourceResolver.exists`
+    /// returns true for image-only capability detection.
+    private func makeFixturePNG(width: Int, height: Int) throws -> Data {
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            throw NSError(domain: "fixture", code: -1)
+        }
+        context.setFillColor(CGColor(red: 1, green: 0.5, blue: 0.2, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        guard let image = context.makeImage() else {
+            throw NSError(domain: "fixture", code: -2)
+        }
+        let mutableData = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(mutableData, UTType.png.identifier as CFString, 1, nil) else {
+            throw NSError(domain: "fixture", code: -3)
+        }
+        CGImageDestinationAddImage(dest, image, nil)
+        if !CGImageDestinationFinalize(dest) {
+            throw NSError(domain: "fixture", code: -4)
+        }
+        return mutableData as Data
     }
 
     private func makePackage(entries: [PackageEntrySpec]) -> Data {
