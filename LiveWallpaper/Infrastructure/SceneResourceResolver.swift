@@ -17,6 +17,14 @@ struct SceneResourceResolver: Sendable {
         case decodeFailed
         case unsupportedTexture                          // legacy alias
         case texture(WPETexDecodeError)
+        /// scene.json's `image` field pointed at a `.json` model/material
+        /// descriptor that we couldn't follow to a real texture file. The
+        /// descriptor either references a built-in WPE utility model
+        /// (`models/util/*.json`) we don't have a substitute for, or its
+        /// shape doesn't expose any `material`/`passes[].textures[]`
+        /// fields. Distinct case so the UI can say "scene relies on
+        /// engine-built layers" rather than "tex decode failed".
+        case materialUnresolved(reason: String)
     }
 
     let cacheRootURL: URL
@@ -45,7 +53,14 @@ struct SceneResourceResolver: Sendable {
     /// `.decodeFailed` to match Phase 2.0 contracts.
     func resolveImage(relativePath: String) throws -> CGImage {
         guard !relativePath.isEmpty else { throw ResolveError.fileMissing }
-        let target = try resolveURL(for: relativePath)
+        // WPE's `scene.json` does not point image layers at texture files
+        // directly. Instead it references a tiny `models/<name>.json`
+        // wrapper that names a `materials/<name>.json` descriptor, which
+        // in turn lists the actual `.tex` payload via `passes[0].textures[0]`.
+        // Resolve the chain up-front so the rest of this method only ever
+        // deals with the terminal asset path.
+        let resolvedPath = try resolveImageReference(relativePath: relativePath, depth: 0)
+        let target = try resolveURL(for: resolvedPath)
 
         guard fileManager.fileExists(atPath: target.path) else {
             throw ResolveError.fileMissing
@@ -72,6 +87,86 @@ struct SceneResourceResolver: Sendable {
             throw ResolveError.decodeFailed
         }
         return image
+    }
+
+    /// Walks WPE's image-reference chain until it produces a path to a
+    /// real asset (`.tex` / `.png` / `.jpg` / `.gif`). Recursion depth is
+    /// capped at 4 to defuse pathological self-referential descriptors —
+    /// real-world chains are at most 3 deep (model → material → texture).
+    ///
+    /// Recognised JSON shapes:
+    ///   - Model wrapper: `{ "material": "materials/X.json", … }`
+    ///   - Material descriptor: `{ "passes": [{ "textures": ["X"], … }] }`
+    /// Anything else (or a missing util model like `models/util/solidlayer.json`)
+    /// surfaces as `materialUnresolved` so the UI can show a precise hint.
+    private func resolveImageReference(relativePath: String, depth: Int) throws -> String {
+        let lowered = (relativePath as NSString).pathExtension.lowercased()
+        if lowered != "json" {
+            return relativePath
+        }
+        if depth >= 4 {
+            throw ResolveError.materialUnresolved(reason: "Reference depth exceeded for \(relativePath)")
+        }
+
+        let url = try resolveURL(for: relativePath)
+        guard fileManager.fileExists(atPath: url.path) else {
+            // WPE ships several built-in utility models (e.g.
+            // `models/util/solidlayer.json`) that the engine substitutes
+            // at runtime. We don't have access to them; surface a precise
+            // reason rather than a generic missing-file error.
+            if relativePath.contains("models/util/") {
+                throw ResolveError.materialUnresolved(reason: "Built-in WPE layer \(relativePath) is not available on macOS")
+            }
+            throw ResolveError.fileMissing
+        }
+
+        let payload: Data
+        do {
+            payload = try Data(contentsOf: url)
+        } catch {
+            throw ResolveError.fileMissing
+        }
+        let parsed: Any
+        do {
+            parsed = try JSONSerialization.jsonObject(with: payload, options: [.fragmentsAllowed])
+        } catch {
+            throw ResolveError.materialUnresolved(reason: "Couldn't parse \(relativePath) as JSON")
+        }
+        guard let dict = parsed as? [String: Any] else {
+            throw ResolveError.materialUnresolved(reason: "\(relativePath) is not a JSON object")
+        }
+
+        if let materialPath = dict["material"] as? String, !materialPath.isEmpty {
+            return try resolveImageReference(relativePath: materialPath, depth: depth + 1)
+        }
+
+        if let textureName = firstTextureName(in: dict) {
+            // WPE convention: the textures array carries identifiers
+            // without extension or directory. The asset always lives at
+            // `materials/<name>.tex` next to the descriptor.
+            return "materials/\(textureName).tex"
+        }
+
+        throw ResolveError.materialUnresolved(reason: "\(relativePath) has no `material` or `passes[].textures[]`")
+    }
+
+    /// Drills into a material descriptor's `passes[0].textures[0]` and
+    /// returns its bare identifier. Materials sometimes wrap textures in
+    /// dictionaries (`{"name": "foo", "size": [...]}`); accept both the
+    /// flat string form and a `name` key under the dict form.
+    private func firstTextureName(in dict: [String: Any]) -> String? {
+        guard let passes = dict["passes"] as? [[String: Any]] else { return nil }
+        for pass in passes {
+            guard let textures = pass["textures"] as? [Any] else { continue }
+            for entry in textures {
+                if let name = entry as? String, !name.isEmpty { return name }
+                if let nested = entry as? [String: Any],
+                   let name = nested["name"] as? String, !name.isEmpty {
+                    return name
+                }
+            }
+        }
+        return nil
     }
 
     /// Cheap header-only probe used by `WallpaperEngineImportService` during
