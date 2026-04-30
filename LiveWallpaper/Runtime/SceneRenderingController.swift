@@ -29,6 +29,14 @@ final class SceneRenderingController {
     private var didLoad = false
     private var isThrottled = false
     private var currentProfile: WallpaperPerformanceProfile = .quality
+    /// First per-layer failure we observed during `load()`. Surfaced to the
+    /// detail view's diagnostic panel so power users can see *why* a layer
+    /// was skipped without diving into Console logs.
+    private(set) var loadDiagnostics: SceneLoadDiagnostic?
+    /// Per-layer progress callback driven by `load()`. The controller
+    /// invokes this on the main actor with strings like "3/12" so the
+    /// inspector card can surface them in `LiquidGlassSpinner`.
+    var onProgress: (@MainActor (String) -> Void)?
 
     init(descriptor: SceneDescriptor, cacheRootURL: URL, frame: CGRect) {
         self.descriptor = descriptor
@@ -98,7 +106,14 @@ final class SceneRenderingController {
         )
 
         var renderableLayers = 0
-        for object in document.imageObjects where object.visible && object.alpha > 0.001 {
+        var firstFailure: SceneLoadDiagnostic?
+        let visibleLayers = document.imageObjects.filter { $0.visible && $0.alpha > 0.001 }
+        let totalLayers = visibleLayers.count
+        var processed = 0
+
+        for object in visibleLayers {
+            processed += 1
+            onProgress?("Decoding \(processed)/\(totalLayers) textures…")
             do {
                 let cgImage = try resolver.resolveImage(relativePath: object.imageRelativePath)
                 let texture = SKTexture(cgImage: cgImage)
@@ -106,22 +121,36 @@ final class SceneRenderingController {
                 let node = makeSpriteNode(texture: texture, object: object, canvas: canvasSize)
                 scene.addChild(node)
                 renderableLayers += 1
+            } catch SceneResourceResolver.ResolveError.texture(let texError) {
+                Logger.warning("Scene \(descriptor.workshopID): tex decode failed for \(object.name) — \(texError.errorDescription ?? "?")", category: .screenManager)
+                firstFailure = firstFailure ?? .texture(layer: object.name, error: texError)
             } catch SceneResourceResolver.ResolveError.unsupportedTexture {
                 Logger.warning("Scene \(descriptor.workshopID): skipping .tex layer \(object.name)", category: .screenManager)
+                firstFailure = firstFailure ?? .legacyUnsupportedTexture(layer: object.name)
             } catch SceneResourceResolver.ResolveError.fileMissing {
                 Logger.warning("Scene \(descriptor.workshopID): missing asset for layer \(object.name)", category: .screenManager)
+                firstFailure = firstFailure ?? .fileMissing(layer: object.name, path: object.imageRelativePath)
             } catch SceneResourceResolver.ResolveError.pathEscape {
                 // Cross-package reference (e.g. `../<workshopid>/materials/foo.png`).
                 // Phase 2.0 has no multi-root resolver; skipping the layer
                 // keeps the scene partially renderable and the import
                 // service flagged the project as `.degraded` upstream.
                 Logger.warning("Scene \(descriptor.workshopID): cross-package reference rejected for \(object.name) — \(object.imageRelativePath)", category: .screenManager)
+                firstFailure = firstFailure ?? .crossPackageReference(layer: object.name, path: object.imageRelativePath)
             } catch {
                 Logger.warning("Scene \(descriptor.workshopID): failed to load \(object.name): \(error.localizedDescription)", category: .screenManager)
+                firstFailure = firstFailure ?? .other(layer: object.name, message: error.localizedDescription)
             }
         }
 
+        loadDiagnostics = firstFailure
+
         guard renderableLayers > 0 else {
+            // Surface the most specific failure we saw so the UI can map
+            // it to a precise FallbackReason instead of a generic message.
+            if let firstFailure {
+                throw SceneRenderingError.resourceFailed(firstFailure)
+            }
             throw SceneRenderingError.noRenderableObjects
         }
 
@@ -154,6 +183,23 @@ final class SceneRenderingController {
         skView.presentScene(nil)
         scene = nil
         didLoad = false
+        loadDiagnostics = nil
+    }
+
+    /// Tears the current SKScene down and re-runs `load()`. Used by the
+    /// inspector's Retry button — keeps the SKView itself alive (and on
+    /// the wallpaper window) so the user doesn't see a black flicker
+    /// while the new scene materialises.
+    func reload() async throws {
+        if didLoad {
+            scene?.removeAllChildren()
+            scene?.removeAllActions()
+            skView.presentScene(nil)
+            scene = nil
+            didLoad = false
+            loadDiagnostics = nil
+        }
+        try await load()
     }
 
     // MARK: - Private

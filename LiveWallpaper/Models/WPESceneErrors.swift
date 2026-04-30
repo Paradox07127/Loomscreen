@@ -36,6 +36,11 @@ enum SceneRenderingError: Error, LocalizedError, Equatable, Sendable {
     case parseFailed(String)
     case unsupportedShader
     case noRenderableObjects
+    /// Every layer hit a resource-level failure (decode / missing / unsupported
+    /// format / etc.). The associated diagnostic carries the *first* such
+    /// failure we encountered so the UI can surface a precise reason instead
+    /// of a generic "no renderable objects" message.
+    case resourceFailed(SceneLoadDiagnostic)
 
     var errorDescription: String? {
         switch self {
@@ -49,6 +54,46 @@ enum SceneRenderingError: Error, LocalizedError, Equatable, Sendable {
             return "Scene uses unsupported shader features."
         case .noRenderableObjects:
             return "Scene has no renderable image layers."
+        case .resourceFailed(let diagnostic):
+            return diagnostic.errorDescription
+        }
+    }
+}
+
+/// Per-layer failure recorded by `SceneRenderingController.load()`. Phase 2.1
+/// uses this to (a) decide whether the scene mounts in degraded mode (≥1
+/// layer renders) or fails outright, and (b) surface a concrete reason in
+/// the developer diagnostic panel and the fallback card.
+enum SceneLoadDiagnostic: Equatable, Sendable {
+    case texture(layer: String, error: WPETexDecodeError)
+    case legacyUnsupportedTexture(layer: String)
+    case fileMissing(layer: String, path: String)
+    case crossPackageReference(layer: String, path: String)
+    case other(layer: String, message: String)
+
+    var layerName: String {
+        switch self {
+        case .texture(let layer, _),
+             .legacyUnsupportedTexture(let layer),
+             .fileMissing(let layer, _),
+             .crossPackageReference(let layer, _),
+             .other(let layer, _):
+            return layer
+        }
+    }
+
+    var errorDescription: String {
+        switch self {
+        case .texture(let layer, let error):
+            return "Layer \(layer): \(error.errorDescription ?? "tex decode failed")"
+        case .legacyUnsupportedTexture(let layer):
+            return "Layer \(layer): legacy .tex layer skipped"
+        case .fileMissing(let layer, let path):
+            return "Layer \(layer): missing asset \(path)"
+        case .crossPackageReference(let layer, let path):
+            return "Layer \(layer): cross-package reference \(path) rejected"
+        case .other(let layer, let message):
+            return "Layer \(layer): \(message)"
         }
     }
 }

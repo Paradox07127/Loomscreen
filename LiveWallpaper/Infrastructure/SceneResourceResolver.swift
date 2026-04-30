@@ -2,28 +2,30 @@ import CoreGraphics
 import Foundation
 import ImageIO
 
-/// Phase 2.0 resource resolver for `.scene` content. Reads images out of the
-/// extracted cache root using `ImageIO`. Path safety mirrors the WPE folder
-/// scheme handler — every relative path is standardized + symlink-resolved
-/// and rejected if it escapes the cache root.
+/// Resource resolver for `.scene` content. Reads PNG/JPG via ImageIO and
+/// `.tex` via the Phase 2.1 `WPETexDecoder`. Path safety mirrors the WPE
+/// folder scheme handler — every relative path is standardized + symlink-
+/// resolved and rejected if it escapes the cache root.
 ///
-/// `.tex` is a Wallpaper Engine binary texture format that Phase 2.0 does
-/// not parse yet. `resolveImage(...)` will throw `.unsupportedTexture` so
-/// the import service can flag the scene as `degraded`/`unsupported` and the
-/// runtime can render the scene minus that layer instead of crashing.
+/// Phase 2.1: `.tex` no longer auto-fails. The decoder routes by container
+/// version + format enum; only genuinely unsupported formats (RGBA1010102,
+/// unknown V6+ containers, animation frames) surface as precise errors.
 struct SceneResourceResolver: Sendable {
     enum ResolveError: Error, Equatable, Sendable {
         case pathEscape
         case fileMissing
         case decodeFailed
-        case unsupportedTexture
+        case unsupportedTexture                          // legacy alias
+        case texture(WPETexDecodeError)
     }
 
     let cacheRootURL: URL
+    private let decoder: WPETexDecoder
 
-    init(cacheRootURL: URL) {
+    init(cacheRootURL: URL, decoder: WPETexDecoder = WPETexDecoder()) {
         // Standardize once so subsequent prefix checks are stable.
         self.cacheRootURL = cacheRootURL.standardizedFileURL.resolvingSymlinksInPath()
+        self.decoder = decoder
     }
 
     /// Single point where the resolver touches the filesystem. Pulled out as
@@ -35,20 +37,34 @@ struct SceneResourceResolver: Sendable {
     /// Returns a CGImage decoded from the cache. The returned image is
     /// independent of the source file handle so the caller can hold it as
     /// long as needed.
+    ///
+    /// `.tex` files are routed through `WPETexDecoder`; PNG / JPG / GIF go
+    /// through ImageIO. Decode failures for `.tex` surface as
+    /// `.texture(WPETexDecodeError)` so the UI can map them to a precise
+    /// FallbackReason. Decode failures for other extensions stay on
+    /// `.decodeFailed` to match Phase 2.0 contracts.
     func resolveImage(relativePath: String) throws -> CGImage {
         guard !relativePath.isEmpty else { throw ResolveError.fileMissing }
         let target = try resolveURL(for: relativePath)
 
-        let lowered = target.pathExtension.lowercased()
-        if lowered == "tex" {
-            // Phase 2.0 stub: surface as unsupported so the caller picks a
-            // policy (skip layer / show fallback). 2.1 will add a real .tex
-            // first-frame extractor.
-            throw ResolveError.unsupportedTexture
-        }
-
         guard fileManager.fileExists(atPath: target.path) else {
             throw ResolveError.fileMissing
+        }
+
+        let lowered = target.pathExtension.lowercased()
+        if lowered == "tex" {
+            let payload: Data
+            do {
+                payload = try Data(contentsOf: target)
+            } catch {
+                throw ResolveError.fileMissing
+            }
+            switch decoder.decode(data: payload) {
+            case .success(let image):
+                return image
+            case .failure(let error):
+                throw ResolveError.texture(error)
+            }
         }
 
         guard let source = CGImageSourceCreateWithURL(target as CFURL, nil),
@@ -57,6 +73,48 @@ struct SceneResourceResolver: Sendable {
         }
         return image
     }
+
+    /// Cheap header-only probe used by `WallpaperEngineImportService` during
+    /// capability tier classification. We read only the first 64 bytes —
+    /// enough to cover TEXV (9) + TEXI magic (9) + every field the V3 info
+    /// block exposes (28 bytes) — so import scanning a 100 MB / 50-layer
+    /// scene.pkg doesn't churn memory mapping every payload.
+    func probeImage(relativePath: String) -> Result<WPETexInfo, ResolveError> {
+        guard !relativePath.isEmpty else { return .failure(.fileMissing) }
+        let target: URL
+        do {
+            target = try resolveURL(for: relativePath)
+        } catch let error as ResolveError {
+            return .failure(error)
+        } catch {
+            return .failure(.fileMissing)
+        }
+        guard fileManager.fileExists(atPath: target.path) else {
+            return .failure(.fileMissing)
+        }
+        let lowered = target.pathExtension.lowercased()
+        guard lowered == "tex" else {
+            return .failure(.unsupportedTexture)
+        }
+        let header: Data
+        do {
+            let handle = try FileHandle(forReadingFrom: target)
+            defer { try? handle.close() }
+            header = (try handle.read(upToCount: Self.texProbeByteLimit)) ?? Data()
+        } catch {
+            return .failure(.fileMissing)
+        }
+        switch decoder.probe(data: header) {
+        case .success(let info):
+            return .success(info)
+        case .failure(let error):
+            return .failure(.texture(error))
+        }
+    }
+
+    /// Worst-case header size: 9 (TEXV) + 9 (TEXI) + 7×4 (V3 fields) = 46.
+    /// Round up to 64 for safety.
+    private static let texProbeByteLimit = 64
 
     /// File existence probe used by tests + the import service to decide
     /// whether a scene's declared image layers are actually shipped.

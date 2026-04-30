@@ -304,11 +304,10 @@ final class WallpaperEngineImportService {
         return .ready(.scene(descriptor), origin: origin)
     }
 
-    /// Walk `imageObjects` against the cache root: if every layer's asset is
-    /// present the scene is `.imageOnly`; if some are present and others are
-    /// missing we tag it `.degraded` so the UI shows a "missing assets"
-    /// notice; if none are renderable we surface as `.unsupported` and let
-    /// the import flow fall back to the placeholder card.
+    /// Walk `imageObjects` against the cache root: PNG/JPG go through file
+    /// existence; `.tex` go through the lightweight `WPETexDecoder.probe`
+    /// so a scene composed entirely of `.tex` (the modal Workshop case) is
+    /// classified accurately instead of always sliding into `.unsupported`.
     private func capabilityTier(for document: WPESceneDocument, cacheURL: URL) -> SceneCapabilityTier {
         guard !document.imageObjects.isEmpty else {
             return .unsupported
@@ -318,10 +317,23 @@ final class WallpaperEngineImportService {
         var unresolvable = 0
         for object in document.imageObjects {
             let path = object.imageRelativePath
-            // Treat .tex as unresolvable for tier purposes — the resolver
-            // throws unsupportedTexture, the runtime will skip the layer.
             if path.lowercased().hasSuffix(".tex") {
-                unresolvable += 1
+                // Header probe is cheap (≤ a few KB read) and avoids paying
+                // for the full mip-chain decode at import time.
+                switch resolver.probeImage(relativePath: path) {
+                case .success(let info):
+                    // A known-but-unsupported format (e.g. RGBA1010102 or
+                    // any BC variant in Phase 2.1) is not "resolvable" —
+                    // it would render as an empty layer. Use the explicit
+                    // `isPhase21Decodable` predicate instead of a nil check.
+                    if info.format?.isPhase21Decodable == true {
+                        resolvable += 1
+                    } else {
+                        unresolvable += 1
+                    }
+                case .failure:
+                    unresolvable += 1
+                }
                 continue
             }
             if resolver.exists(relativePath: path) {
@@ -333,11 +345,16 @@ final class WallpaperEngineImportService {
 
         if resolvable == 0 { return .unsupported }
         // Pure imageOnly only when EVERY layer resolves AND the parser saw no
-        // diagnostics at all. Info-level diagnostics include unsupported
-        // particle/text/sound objects — a scene that mixes a PNG layer with
-        // a particle emitter is degraded (the PNG renders, the particles
-        // don't), not fully imageOnly.
-        if unresolvable == 0 && document.diagnostics.isEmpty {
+        // *blocking* diagnostics. The parser emits info-level notes for
+        // every `.tex` layer ("falls back to first-frame stub"); those are
+        // expected for the modal Workshop scene and shouldn't downgrade the
+        // tier from imageOnly to degraded. We only count diagnostics that
+        // signal genuinely unsupported features (particles, text, sound,
+        // shaders) toward the `.degraded` decision.
+        let blockingDiagnostics = document.diagnostics.filter { diagnostic in
+            !diagnostic.message.contains(".tex texture")
+        }
+        if unresolvable == 0 && blockingDiagnostics.isEmpty {
             return .imageOnly
         }
         return .degraded
