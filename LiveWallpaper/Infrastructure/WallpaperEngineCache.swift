@@ -67,6 +67,31 @@ actor WallpaperEngineCache {
         }
     }
 
+    /// Workshop IDs whose extracted payload currently lives under the cache
+    /// root. Used by the import service to flag missing dependencies before
+    /// mounting an unrenderable scene. Filters out subdirectories whose name
+    /// fails the workshop-id safety check (mirrors `stats()`).
+    func listAvailableWorkshopIDs() -> Set<String> {
+        guard fileManager.fileExists(atPath: rootURL.path),
+              let children = try? fileManager.contentsOfDirectory(
+                at: rootURL,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+              ) else {
+            return []
+        }
+        var ids: Set<String> = []
+        for child in children {
+            let id = child.lastPathComponent
+            guard Self.isSafeWorkshopID(id) else { continue }
+            guard (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
+            if cacheHasPayload(child) {
+                ids.insert(id)
+            }
+        }
+        return ids
+    }
+
     func purge(workshopID: String) throws {
         let cacheURL = try cacheDirectory(for: workshopID)
         guard fileManager.fileExists(atPath: cacheURL.path) else { return }
