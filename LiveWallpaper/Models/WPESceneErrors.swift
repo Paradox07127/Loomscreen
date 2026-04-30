@@ -69,6 +69,10 @@ enum SceneLoadDiagnostic: Equatable, Sendable {
     case legacyUnsupportedTexture(layer: String)
     case fileMissing(layer: String, path: String)
     case crossPackageReference(layer: String, path: String)
+    /// scene.json points at a `.json` model/material descriptor we
+    /// can't follow to a real texture. Used for both built-in WPE util
+    /// layers (`models/util/*.json`) and malformed material chains.
+    case materialUnresolved(layer: String, reason: String)
     case other(layer: String, message: String)
 
     var layerName: String {
@@ -77,6 +81,7 @@ enum SceneLoadDiagnostic: Equatable, Sendable {
              .legacyUnsupportedTexture(let layer),
              .fileMissing(let layer, _),
              .crossPackageReference(let layer, _),
+             .materialUnresolved(let layer, _),
              .other(let layer, _):
             return layer
         }
@@ -92,6 +97,8 @@ enum SceneLoadDiagnostic: Equatable, Sendable {
             return "Layer \(layer): missing asset \(path)"
         case .crossPackageReference(let layer, let path):
             return "Layer \(layer): cross-package reference \(path) rejected"
+        case .materialUnresolved(let layer, let reason):
+            return "Layer \(layer): \(reason)"
         case .other(let layer, let message):
             return "Layer \(layer): \(message)"
         }
