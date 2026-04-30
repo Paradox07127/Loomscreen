@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import LiveWallpaper
 
@@ -13,6 +14,59 @@ struct WPESceneSectionStateTests {
         #expect(SceneRenderState.idle == SceneRenderState.idle)
         #expect(SceneRenderState.loading == SceneRenderState.loading)
         #expect(SceneRenderState.idle != SceneRenderState.loading)
+    }
+
+    @Test("loading distinguishes nil vs progress text payloads")
+    func loadingPayloadDifferentiates() {
+        let plain = SceneRenderState.loading(progress: nil)
+        let labelled = SceneRenderState.loading(progress: "Decoding 3/12 textures…")
+        #expect(plain != labelled)
+        #expect(plain == SceneRenderState.loading)
+        #expect(plain.isLoading)
+        #expect(labelled.isLoading)
+    }
+
+    @MainActor
+    @Test("Texture decoder error → FallbackReason mapping is precise")
+    func textureFallbackMapping() {
+        let unsupportedFormat: SceneLoadDiagnostic = .texture(
+            layer: "background",
+            error: .unsupportedFormat(code: 8)
+        )
+        let unsupportedContainer: SceneLoadDiagnostic = .texture(
+            layer: "fg",
+            error: .unsupportedContainer(magic: "TEXV9999")
+        )
+        let truncated: SceneLoadDiagnostic = .texture(
+            layer: "fg",
+            error: .truncatedBlock(block: "TEXB", offset: 42)
+        )
+        #expect(WPESceneDetailView.fallbackReason(for: unsupportedFormat) == .texUnsupportedFormat(code: 8))
+        #expect(WPESceneDetailView.fallbackReason(for: unsupportedContainer) == .texContainerUnsupported(magic: "TEXV9999"))
+        if case .texDecodeFailed = WPESceneDetailView.fallbackReason(for: truncated) {
+            // OK
+        } else {
+            Issue.record("Truncated tex should map to .texDecodeFailed")
+        }
+    }
+
+    @Test("FallbackReason severity tint distinguishes warn vs hard block")
+    func severityTintIsHonest() {
+        #expect(FallbackReason.missingDependency(workshopIDs: ["1"]).severityTint == .yellow)
+        #expect(FallbackReason.sceneResourceMissing.severityTint == .yellow)
+        #expect(FallbackReason.texDecodeFailed(detail: "x").severityTint == .yellow)
+        #expect(FallbackReason.requiresWindowsPlugin.severityTint == .orange)
+        #expect(FallbackReason.texContainerUnsupported(magic: "X").severityTint == .orange)
+        #expect(FallbackReason.texUnsupportedFormat(code: 8).severityTint == .orange)
+    }
+
+    @Test("isActionable matches the Retry button visibility policy")
+    func isActionableMatchesRetry() {
+        #expect(FallbackReason.missingDependency(workshopIDs: []).isActionable)
+        #expect(FallbackReason.texDecodeFailed(detail: "x").isActionable)
+        #expect(!FallbackReason.requiresWindowsPlugin.isActionable)
+        #expect(!FallbackReason.texContainerUnsupported(magic: "X").isActionable)
+        #expect(!FallbackReason.texUnsupportedFormat(code: 8).isActionable)
     }
 
     @Test("paused state preserves the reason")
