@@ -372,6 +372,8 @@ struct WPESceneDetailView: View {
             return .texDecodeFailed(detail: "legacy .tex stub")
         case .fileMissing, .crossPackageReference:
             return .sceneResourceMissing
+        case .materialUnresolved(_, let reason):
+            return .texDecodeFailed(detail: reason)
         case .other(_, let message):
             return .texDecodeFailed(detail: message)
         }

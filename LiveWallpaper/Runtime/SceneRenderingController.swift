@@ -124,6 +124,9 @@ final class SceneRenderingController {
             } catch SceneResourceResolver.ResolveError.texture(let texError) {
                 Logger.warning("Scene \(descriptor.workshopID): tex decode failed for \(object.name) — \(texError.errorDescription ?? "?")", category: .screenManager)
                 firstFailure = firstFailure ?? .texture(layer: object.name, error: texError)
+            } catch SceneResourceResolver.ResolveError.materialUnresolved(let reason) {
+                Logger.warning("Scene \(descriptor.workshopID): material chain unresolved for \(object.name) — \(reason)", category: .screenManager)
+                firstFailure = firstFailure ?? .materialUnresolved(layer: object.name, reason: reason)
             } catch SceneResourceResolver.ResolveError.unsupportedTexture {
                 Logger.warning("Scene \(descriptor.workshopID): skipping .tex layer \(object.name)", category: .screenManager)
                 firstFailure = firstFailure ?? .legacyUnsupportedTexture(layer: object.name)
