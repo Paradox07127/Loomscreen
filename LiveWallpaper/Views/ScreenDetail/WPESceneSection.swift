@@ -164,7 +164,10 @@ struct WPESceneSection: View {
                 .accessibilityHint("Return to the recent imports grid")
                 Spacer()
             }
-            WPEFallbackCard(origin: entry.origin)
+            WPEFallbackCard(
+                origin: entry.origin,
+                reason: WPEFallbackCard.reason(for: entry.origin)
+            )
         }
         .padding(24)
         .frame(maxWidth: .infinity, alignment: .top)
