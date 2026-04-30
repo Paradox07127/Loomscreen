@@ -19,6 +19,16 @@ struct WPEOrigin: Codable, Equatable, Sendable {
     let entryFile: String?
     /// Explicit runtime backing. Avoids overloading `cacheRelativePath == nil`.
     let resourceLocation: WPEResourceLocation
+    /// Workshop IDs the project declares as dependencies that are NOT
+    /// currently available in our cache. Empty unless we successfully
+    /// classified the project as unsupported because of missing deps.
+    /// Persisted so the fallback card can reproduce the same hint after
+    /// app relaunch without re-parsing `project.json`.
+    var missingDependencyIDs: [String]
+    /// True when the source folder ships a Windows `.dll` plugin under
+    /// `bin/`. Such projects can never run on macOS; the inspector shows
+    /// a permanent "won't run" badge instead of a generic error.
+    var requiresWindowsPlugin: Bool
 
     init(
         workshopID: String,
@@ -28,7 +38,9 @@ struct WPEOrigin: Codable, Equatable, Sendable {
         cacheRelativePath: String?,
         previewFileName: String?,
         entryFile: String? = nil,
-        resourceLocation: WPEResourceLocation? = nil
+        resourceLocation: WPEResourceLocation? = nil,
+        missingDependencyIDs: [String] = [],
+        requiresWindowsPlugin: Bool = false
     ) {
         self.workshopID = workshopID
         self.title = title
@@ -41,6 +53,8 @@ struct WPEOrigin: Codable, Equatable, Sendable {
             originalType: originalType,
             cacheRelativePath: cacheRelativePath
         )
+        self.missingDependencyIDs = missingDependencyIDs
+        self.requiresWindowsPlugin = requiresWindowsPlugin
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -52,6 +66,8 @@ struct WPEOrigin: Codable, Equatable, Sendable {
         case previewFileName
         case entryFile
         case resourceLocation
+        case missingDependencyIDs
+        case requiresWindowsPlugin
     }
 
     init(from decoder: Decoder) throws {
@@ -65,6 +81,10 @@ struct WPEOrigin: Codable, Equatable, Sendable {
         entryFile = try container.decodeIfPresent(String.self, forKey: .entryFile)
         resourceLocation = try container.decodeIfPresent(WPEResourceLocation.self, forKey: .resourceLocation)
             ?? Self.defaultResourceLocation(originalType: originalType, cacheRelativePath: cacheRelativePath)
+        // Lossy decode for both new fields so a Phase 2.0 plist (predating
+        // them) loads cleanly without invalidating the surrounding origin.
+        missingDependencyIDs = (try? container.decodeIfPresent([String].self, forKey: .missingDependencyIDs)) ?? []
+        requiresWindowsPlugin = (try? container.decodeIfPresent(Bool.self, forKey: .requiresWindowsPlugin)) ?? false
     }
 
     var displayTypeName: String {

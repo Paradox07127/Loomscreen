@@ -9,6 +9,13 @@ enum FallbackReason: Equatable, Sendable {
     case sceneParseFailed(String)
     case sceneShaderUnsupported
     case sceneResourceMissing
+    /// Project declares Steam Workshop dependencies we couldn't satisfy
+    /// from the local cache. Lists IDs the user must subscribe to in
+    /// Steam before retrying the import.
+    case missingDependency(workshopIDs: [String])
+    /// Project ships a Windows `.dll` plugin under `bin/`. Permanent on
+    /// macOS — subscribing more workshop items will not help.
+    case requiresWindowsPlugin
 }
 
 /// Renders the explanatory card for any WPE workshop import that cannot be
@@ -22,6 +29,17 @@ struct WPEFallbackCard: View {
     init(origin: WPEOrigin, reason: FallbackReason = .unsupportedType) {
         self.origin = origin
         self.reason = reason
+    }
+
+    /// Picks the card-level reason from a freshly imported origin so callers
+    /// don't have to reach into the new `WPEOrigin` flags themselves. Order
+    /// matters: plugin > missing-deps > generic unsupported.
+    static func reason(for origin: WPEOrigin) -> FallbackReason {
+        if origin.requiresWindowsPlugin { return .requiresWindowsPlugin }
+        if !origin.missingDependencyIDs.isEmpty {
+            return .missingDependency(workshopIDs: origin.missingDependencyIDs)
+        }
+        return .unsupportedType
     }
 
     var body: some View {
@@ -57,6 +75,10 @@ struct WPEFallbackCard: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
+                if case .missingDependency(let ids) = reason {
+                    dependencyList(ids: ids)
+                }
+
                 if origin.originalType == .scene && reason == .unsupportedType {
                     Text("Tip: many creators publish a video version of the same wallpaper.")
                         .font(.caption)
@@ -66,7 +88,88 @@ struct WPEFallbackCard: View {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.orange.opacity(0.14), in: RoundedRectangle(cornerRadius: 16))
+            // Combine ONLY the warning text into a single VoiceOver element
+            // so the title + body announce together, while leaving the
+            // dependency list rows and primary buttons individually
+            // focusable. Applying `.combine` at the card root would flatten
+            // every interactive control into the same element and hide them
+            // from assistive tech.
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(origin.title). \(warningTitle). \(warningBody)")
 
+            primaryAction
+        }
+        .padding(32)
+        .frame(maxWidth: 480)
+        .glassEffect(.regular, in: .rect(cornerRadius: 24))
+    }
+
+    /// Renders one row per missing workshop ID. Wraps the list in a
+    /// bounded `ScrollView` so a project that declares 10+ dependencies
+    /// (rare but real for composite scenes) does not push the primary
+    /// action buttons off-screen.
+    @ViewBuilder
+    private func dependencyList(ids: [String]) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(ids, id: \.self) { id in
+                    HStack(spacing: 8) {
+                        Image(systemName: "link")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(id)
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                        Spacer()
+                        Button {
+                            openWorkshop(workshopID: id)
+                        } label: {
+                            Label("Open", systemImage: "arrow.up.right.square")
+                                .labelStyle(.iconOnly)
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Open workshop \(id) in browser")
+                        .accessibilityLabel("Open workshop \(id) in browser")
+                        Button {
+                            copyToPasteboard(id)
+                        } label: {
+                            Label("Copy", systemImage: "doc.on.doc")
+                                .labelStyle(.iconOnly)
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Copy workshop ID to clipboard")
+                        .accessibilityLabel("Copy workshop ID \(id)")
+                    }
+                }
+            }
+        }
+        .frame(maxHeight: 160)
+    }
+
+    @ViewBuilder
+    private var primaryAction: some View {
+        switch reason {
+        case .missingDependency(let ids):
+            HStack(spacing: 8) {
+                Button {
+                    copyToPasteboard(ids.joined(separator: "\n"))
+                } label: {
+                    Label("Copy all IDs", systemImage: "doc.on.doc")
+                }
+                .buttonStyle(.glass)
+                .controlSize(.regular)
+                .accessibilityHint("Copies every missing workshop ID to your clipboard so you can subscribe in Steam")
+
+                Button {
+                    openWorkshop()
+                } label: {
+                    Label("Open this project", systemImage: "arrow.up.right.square")
+                }
+                .buttonStyle(.glass)
+                .controlSize(.regular)
+            }
+
+        default:
             Button {
                 openWorkshop()
             } label: {
@@ -76,11 +179,6 @@ struct WPEFallbackCard: View {
             .controlSize(.regular)
             .accessibilityHint("Opens this wallpaper's Steam Workshop page in your browser")
         }
-        .padding(32)
-        .frame(maxWidth: 480)
-        .glassEffect(.regular, in: .rect(cornerRadius: 24))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(origin.title). \(warningTitle). \(warningBody)")
     }
 
     private var warningTitle: String {
@@ -97,6 +195,10 @@ struct WPEFallbackCard: View {
             return "Scene uses unsupported shaders"
         case .sceneResourceMissing:
             return "Some scene assets are missing"
+        case .missingDependency(let ids):
+            return "Missing \(ids.count) Workshop \(ids.count == 1 ? "dependency" : "dependencies")"
+        case .requiresWindowsPlugin:
+            return "Windows plugin required"
         }
     }
 
@@ -117,6 +219,10 @@ struct WPEFallbackCard: View {
             return "This scene relies on custom shaders that the image-only Phase 2.0 renderer can't compile yet."
         case .sceneResourceMissing:
             return "Some image layers couldn't be located inside the cache. The wallpaper may have been published partially or your cache is corrupted."
+        case .missingDependency:
+            return "This wallpaper relies on other Workshop projects we don't have on disk yet. Subscribe to them in Steam, then re-import this folder."
+        case .requiresWindowsPlugin:
+            return "This wallpaper bundles a Windows `.dll` plugin (e.g. an audio visualizer or screensaver runtime). macOS can't load Windows native code, so the project is permanently unsupported here."
         }
     }
 
@@ -133,10 +239,20 @@ struct WPEFallbackCard: View {
     }
 
     private func openWorkshop() {
+        openWorkshop(workshopID: origin.workshopID)
+    }
+
+    private func openWorkshop(workshopID: String) {
         var components = URLComponents(string: "https://steamcommunity.com/sharedfiles/filedetails/")
-        components?.queryItems = [URLQueryItem(name: "id", value: origin.workshopID)]
+        components?.queryItems = [URLQueryItem(name: "id", value: workshopID)]
         guard let url = components?.url else { return }
         NSWorkspace.shared.open(url)
+    }
+
+    private func copyToPasteboard(_ value: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(value, forType: .string)
     }
 }
 
@@ -147,6 +263,6 @@ struct WPEUnsupportedCard: View {
     let origin: WPEOrigin
 
     var body: some View {
-        WPEFallbackCard(origin: origin, reason: .unsupportedType)
+        WPEFallbackCard(origin: origin, reason: WPEFallbackCard.reason(for: origin))
     }
 }

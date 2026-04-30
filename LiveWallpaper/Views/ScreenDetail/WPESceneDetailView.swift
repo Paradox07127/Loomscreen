@@ -133,6 +133,9 @@ struct WPESceneDetailView: View {
         case .sceneParseFailed:       return "Couldn't read scene.json"
         case .sceneShaderUnsupported: return "Scene uses unsupported shaders"
         case .sceneResourceMissing:   return "Some scene assets are missing"
+        case .missingDependency(let ids):
+            return "Missing \(ids.count) Workshop \(ids.count == 1 ? "dependency" : "dependencies")"
+        case .requiresWindowsPlugin:  return "Windows plugin required"
         }
     }
 
@@ -146,6 +149,17 @@ struct WPESceneDetailView: View {
             return "Phase 2.0 ships an image-only renderer."
         case .sceneResourceMissing:
             return "Image layers couldn't be located inside the cache."
+        case .missingDependency(let ids):
+            // Cap visible IDs so a composite scene with many deps doesn't
+            // explode the inline overlay; the full list is still rendered
+            // by `WPEFallbackCard` when the user navigates to the error.
+            if ids.count <= 2 {
+                return "Subscribe to \(ids.joined(separator: ", ")) in Steam, then re-import."
+            }
+            let head = ids.prefix(2).joined(separator: ", ")
+            return "Subscribe to \(head) and \(ids.count - 2) more in Steam, then re-import."
+        case .requiresWindowsPlugin:
+            return "macOS can't load Windows native plugins."
         }
     }
 
