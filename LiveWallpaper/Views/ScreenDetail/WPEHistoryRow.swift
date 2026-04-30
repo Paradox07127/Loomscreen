@@ -29,6 +29,18 @@ struct WPEHistoryRow: View {
                             style: .continuous
                         )
                     )
+                    .overlay(alignment: .topTrailing) {
+                        if let badge = compatibilityBadge {
+                            Text(badge.label)
+                                .font(.system(size: 9, weight: .semibold))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(badge.tint.opacity(0.85), in: Capsule())
+                                .foregroundStyle(.white)
+                                .padding(8)
+                                .accessibilityLabel(badge.accessibility)
+                        }
+                    }
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text(entry.origin.title)
@@ -112,6 +124,33 @@ struct WPEHistoryRow: View {
         case .scene: return .orange
         case .application: return .red
         case .unknown: return .gray
+        }
+    }
+
+    /// Phase 2.1 thumbnail badge for honest expectation-setting BEFORE the
+    /// user taps Apply. Three tiers — clean (no badge), Experimental
+    /// (likely degraded), and Won't Run (Windows plugin / unknown).
+    /// We deliberately keep this conservative: PNG/JPG video and web
+    /// imports get no badge; scene + application + unknown carry one.
+    private var compatibilityBadge: (label: String, tint: Color, accessibility: String)? {
+        switch entry.origin.originalType {
+        case .video, .web:
+            return nil
+        case .application:
+            return ("Won't run", .orange, "Wallpaper requires a Windows executable; cannot run on macOS")
+        case .scene:
+            if entry.origin.requiresWindowsPlugin {
+                return ("Won't run", .orange, "Wallpaper bundles a Windows DLL plugin; cannot run on macOS")
+            }
+            if !entry.origin.missingDependencyIDs.isEmpty {
+                return ("Needs deps", .yellow, "Wallpaper depends on Workshop projects you haven't subscribed to")
+            }
+            // Phase 2.1: scenes are renderable when image-only; default
+            // tier is best-effort, so we tag them Experimental until the
+            // import service can persist a richer capability summary.
+            return ("Experimental", .yellow, "Scene wallpapers are rendered with the Phase 2.1 image-only engine")
+        case .unknown:
+            return ("Untested", .gray, "Wallpaper Engine project type is unknown")
         }
     }
 }

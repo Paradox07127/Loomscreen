@@ -5,10 +5,12 @@ import AppKit
 /// to the inspector so the user gets a specific reason instead of a generic
 /// "unsupported" message.
 enum FallbackReason: Equatable, Sendable {
+    // Phase 2.0
     case unsupportedType
     case sceneParseFailed(String)
     case sceneShaderUnsupported
     case sceneResourceMissing
+    // Phase 2.0.1
     /// Project declares Steam Workshop dependencies we couldn't satisfy
     /// from the local cache. Lists IDs the user must subscribe to in
     /// Steam before retrying the import.
@@ -16,6 +18,12 @@ enum FallbackReason: Equatable, Sendable {
     /// Project ships a Windows `.dll` plugin under `bin/`. Permanent on
     /// macOS — subscribing more workshop items will not help.
     case requiresWindowsPlugin
+    // Phase 2.1 — `.tex` decoder failures with precise codes so the user
+    // sees "Format 8 (RGBA1010102) not yet supported" instead of a vague
+    // "scene unsupported".
+    case texContainerUnsupported(magic: String)
+    case texUnsupportedFormat(code: Int)
+    case texDecodeFailed(detail: String)
 }
 
 /// Renders the explanatory card for any WPE workshop import that cannot be
@@ -42,6 +50,11 @@ struct WPEFallbackCard: View {
         return .unsupportedType
     }
 
+    /// True when the user can probably take an action (subscribe, retry,
+    /// re-download) and have the wallpaper start working. Drives both the
+    /// warning chip color and the Retry button visibility.
+    var canRetry: Bool { reason.isActionable }
+
     var body: some View {
         VStack(spacing: 24) {
             WPEPreviewView(
@@ -65,7 +78,11 @@ struct WPEFallbackCard: View {
                 HStack(spacing: 12) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.title2)
-                        .foregroundStyle(.orange)
+                        // Apple HIG warning semantic — `.yellow` matches
+                        // System Settings/Photos warning chips on macOS 26.
+                        // We keep the orange accent strictly for hard
+                        // permanent blockers (`.requiresWindowsPlugin`).
+                        .foregroundStyle(reason.severityTint)
                     Text(warningTitle)
                         .font(.headline)
                 }
@@ -199,6 +216,12 @@ struct WPEFallbackCard: View {
             return "Missing \(ids.count) Workshop \(ids.count == 1 ? "dependency" : "dependencies")"
         case .requiresWindowsPlugin:
             return "Windows plugin required"
+        case .texContainerUnsupported:
+            return "Texture container not supported yet"
+        case .texUnsupportedFormat:
+            return "Image format not supported yet"
+        case .texDecodeFailed:
+            return "Couldn't read texture file"
         }
     }
 
@@ -223,6 +246,19 @@ struct WPEFallbackCard: View {
             return "This wallpaper relies on other Workshop projects we don't have on disk yet. Subscribe to them in Steam, then re-import this folder."
         case .requiresWindowsPlugin:
             return "This wallpaper bundles a Windows `.dll` plugin (e.g. an audio visualizer or screensaver runtime). macOS can't load Windows native code, so the project is permanently unsupported here."
+        case .texContainerUnsupported(let magic):
+            return "This wallpaper uses a `.tex` container we don't decode yet (\(magic)). Phase 2.x will keep widening coverage as new versions appear."
+        case .texUnsupportedFormat(let code):
+            switch code {
+            case 8:
+                return "WPE format 8 (RGBA1010102) is rare and pending decoder support. Most other layers in this scene should still render."
+            case -1:
+                return "This format requires Metal-backed GPU decoding that this Mac doesn't support. Try rendering on a newer GPU."
+            default:
+                return "Wallpaper Engine format \(code) is not in the Phase 2.1 decoder. The renderer skips just this layer; the rest of the scene continues."
+            }
+        case .texDecodeFailed(let detail):
+            return "A texture failed to decode (\(detail)). Re-downloading the wallpaper in Steam usually fixes it."
         }
     }
 
@@ -264,5 +300,46 @@ struct WPEUnsupportedCard: View {
 
     var body: some View {
         WPEFallbackCard(origin: origin, reason: WPEFallbackCard.reason(for: origin))
+    }
+}
+
+extension FallbackReason {
+    /// Apple HIG warning semantics. `.yellow` for "needs attention but
+    /// recoverable", `.orange` for "permanent block, no action will help".
+    /// Keeping the two distinct lets users skim the inspector for the
+    /// difference between "subscribe to fix" vs "macOS can't run this".
+    var severityTint: Color {
+        switch self {
+        case .requiresWindowsPlugin:
+            return .orange
+        case .unsupportedType,
+             .sceneShaderUnsupported,
+             .texContainerUnsupported,
+             .texUnsupportedFormat:
+            return .orange
+        case .missingDependency,
+             .sceneParseFailed,
+             .sceneResourceMissing,
+             .texDecodeFailed:
+            return .yellow
+        }
+    }
+
+    /// Reason categories where the user can take a concrete action and
+    /// retry — drives the inline Retry button on the detail view.
+    var isActionable: Bool {
+        switch self {
+        case .missingDependency,
+             .sceneParseFailed,
+             .sceneResourceMissing,
+             .texDecodeFailed:
+            return true
+        case .unsupportedType,
+             .sceneShaderUnsupported,
+             .requiresWindowsPlugin,
+             .texContainerUnsupported,
+             .texUnsupportedFormat:
+            return false
+        }
     }
 }

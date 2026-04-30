@@ -15,11 +15,16 @@ struct WPESceneDetailView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var state: SceneRenderState = .idle
+    /// Hidden developer disclosure toggled by Option-click on the metadata
+    /// row. Surfaces capability tier + first failure diagnostic so power
+    /// users can see *why* a layer was skipped without diving into Console.
+    @State private var showDiagnostics = false
 
     var body: some View {
         VStack(spacing: 16) {
             previewCard
             metadata
+            if showDiagnostics { diagnosticsPanel }
             actions
         }
         .padding(24)
@@ -42,7 +47,7 @@ struct WPESceneDetailView: View {
             // becomes a no-op (Timer.publish itself can't be cancelled
             // reactively from inside .onReceive without keeping a Cancellable
             // bag, which costs more than the early return).
-            guard state == .idle || state == .loading else { return }
+            guard state == .idle || state.isLoading else { return }
             Task { @MainActor in
                 await refreshState()
             }
@@ -59,9 +64,12 @@ struct WPESceneDetailView: View {
             // when the user toggles ReduceMotion / focus / throttle. Pause
             // is communicated by overlay, not by replacing the SKView.
             switch state {
-            case .idle, .loading:
+            case .idle:
                 fallbackBackground
                 LiquidGlassSpinner()
+            case .loading(let progress):
+                fallbackBackground
+                LiquidGlassSpinner(progressText: progress)
             case .playing(let controller):
                 ScenePreviewContainer(controller: controller)
                     .aspectRatio(16.0 / 9.0, contentMode: .fit)
@@ -136,6 +144,9 @@ struct WPESceneDetailView: View {
         case .missingDependency(let ids):
             return "Missing \(ids.count) Workshop \(ids.count == 1 ? "dependency" : "dependencies")"
         case .requiresWindowsPlugin:  return "Windows plugin required"
+        case .texContainerUnsupported: return "Unknown texture container"
+        case .texUnsupportedFormat:    return "Texture format not supported"
+        case .texDecodeFailed:         return "Texture decode failed"
         }
     }
 
@@ -160,6 +171,12 @@ struct WPESceneDetailView: View {
             return "Subscribe to \(head) and \(ids.count - 2) more in Steam, then re-import."
         case .requiresWindowsPlugin:
             return "macOS can't load Windows native plugins."
+        case .texContainerUnsupported(let magic):
+            return "Container \(magic) — Phase 2.x will add it."
+        case .texUnsupportedFormat(let code):
+            return "Format \(code) — not yet decoded."
+        case .texDecodeFailed(let detail):
+            return detail
         }
     }
 
@@ -169,8 +186,8 @@ struct WPESceneDetailView: View {
             securityScopedBookmarkData: origin.sourceFolderBookmark
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .blur(radius: state == .loading ? 6 : 0)
-        .overlay(Color.black.opacity(state == .loading ? 0.35 : 0.0))
+        .blur(radius: state.isLoading ? 6 : 0)
+        .overlay(Color.black.opacity(state.isLoading ? 0.35 : 0.0))
     }
 
     private var metadata: some View {
@@ -181,11 +198,61 @@ struct WPESceneDetailView: View {
                 Spacer()
                 statusPill
             }
-            Text("Workshop ID \(origin.workshopID) · capability: \(descriptor.capabilityTier.rawValue)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                Text("Workshop ID \(origin.workshopID) · capability: \(descriptor.capabilityTier.rawValue)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                // Tiny info glyph hints that there's a developer panel
+                // hiding under Option-click. Without this affordance the
+                // panel was completely undiscoverable (gemini audit).
+                Image(systemName: "info.circle")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .help("Option-click for renderer diagnostics")
+                    .accessibilityHidden(true)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        // Option-click toggles the hidden developer diagnostic panel. We
+        // attach the gesture to the metadata row (rather than the whole
+        // card) so retry / clear buttons aren't intercepted. SwiftUI for
+        // macOS doesn't expose a typed modifier-aware tap gesture, so
+        // we sniff `NSEvent.modifierFlags` at click time — plain clicks
+        // become a no-op and only Option-clicks toggle the panel.
+        .onTapGesture {
+            guard NSEvent.modifierFlags.contains(.option) else { return }
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                showDiagnostics.toggle()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var diagnosticsPanel: some View {
+        // Build the VoiceOver label up-front so the panel announces both
+        // the title AND the active diagnostic in one pass — the previous
+        // implementation overrode `accessibilityLabel` on the parent and
+        // hid the error text from screen readers entirely (gemini audit).
+        let diagnosticText = session?.sceneController?.loadDiagnostics?.errorDescription
+            ?? "All declared layers decoded cleanly."
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Renderer Diagnostics")
+                .font(.caption.bold())
+            Text("Capability: \(descriptor.capabilityTier.rawValue) · Phase 2.1")
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+            Text(diagnosticText)
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+                .lineLimit(4)
+                .textSelection(.enabled)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Renderer diagnostics: capability \(descriptor.capabilityTier.rawValue). \(diagnosticText)")
     }
 
     private var statusPill: some View {
@@ -203,6 +270,11 @@ struct WPESceneDetailView: View {
     }
 
     private var actions: some View {
+        // Apple HIG: destructive "Clear" sits leading; the constructive
+        // recovery action ("Retry") sits trailing and gets prominent
+        // styling so the recommended path is visually obvious. Without
+        // this swap, an Option-button-mash could land on the destructive
+        // button by accident.
         HStack(spacing: 12) {
             Button(role: .destructive) {
                 onClearWallpaper()
@@ -214,6 +286,21 @@ struct WPESceneDetailView: View {
             .accessibilityHint("Removes the scene wallpaper from this display")
 
             Spacer()
+
+            if case .error(let reason) = state, reason.isActionable {
+                Button {
+                    Task { @MainActor in
+                        state = .loading
+                        await session?.reload()
+                        await refreshState()
+                    }
+                } label: {
+                    Label("Retry", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+                .accessibilityHint("Re-decodes the scene with the current cache state")
+            }
         }
     }
 
@@ -233,7 +320,7 @@ struct WPESceneDetailView: View {
             return
         }
         if controller.view.scene == nil {
-            state = .loading
+            state = .loading(progress: session.loadProgress)
             return
         }
         // Drive the runtime profile from the same env signals the state
@@ -258,6 +345,35 @@ struct WPESceneDetailView: View {
             return .sceneShaderUnsupported
         case .noRenderableObjects:
             return .sceneResourceMissing
+        case .resourceFailed(let diagnostic):
+            return Self.fallbackReason(for: diagnostic)
+        }
+    }
+
+    /// Maps the most-specific per-layer failure into the corresponding
+    /// FallbackReason. Phase 2.1 surfaces .tex container/format errors with
+    /// their precise codes so the user understands why a layer was skipped.
+    static func fallbackReason(for diagnostic: SceneLoadDiagnostic) -> FallbackReason {
+        switch diagnostic {
+        case .texture(_, let error):
+            switch error {
+            case .unsupportedContainer(let magic):
+                return .texContainerUnsupported(magic: magic)
+            case .unsupportedFormat(let code):
+                return .texUnsupportedFormat(code: code)
+            case .metalUnavailable:
+                return .texUnsupportedFormat(code: -1)
+            case .unsupportedAnimation:
+                return .texDecodeFailed(detail: "animation/sequence frames")
+            default:
+                return .texDecodeFailed(detail: error.errorDescription ?? "decode failed")
+            }
+        case .legacyUnsupportedTexture:
+            return .texDecodeFailed(detail: "legacy .tex stub")
+        case .fileMissing, .crossPackageReference:
+            return .sceneResourceMissing
+        case .other(_, let message):
+            return .texDecodeFailed(detail: message)
         }
     }
 
@@ -321,15 +437,25 @@ struct WPESceneDetailView: View {
 
 enum SceneRenderState: Equatable {
     case idle
-    case loading
+    case loading(progress: String?)
     case playing(SceneRenderingController)
     case paused(reason: PausedReason)
     case error(FallbackReason)
 
+    /// Convenience for "loading without specific progress text" — keeps
+    /// the dozens of existing call sites that just wrote `.loading`
+    /// pinned to a single source of truth.
+    static var loading: SceneRenderState { .loading(progress: nil) }
+
+    var isLoading: Bool {
+        if case .loading = self { return true }
+        return false
+    }
+
     static func == (lhs: SceneRenderState, rhs: SceneRenderState) -> Bool {
         switch (lhs, rhs) {
         case (.idle, .idle): return true
-        case (.loading, .loading): return true
+        case (.loading(let l), .loading(let r)): return l == r
         case (.playing(let lhsCtrl), .playing(let rhsCtrl)): return lhsCtrl === rhsCtrl
         case (.paused(let l), .paused(let r)): return l == r
         case (.error(let l), .error(let r)): return l == r
