@@ -4,6 +4,7 @@ enum WallpaperContent: Equatable, Sendable {
     case video(bookmarkData: Data)
     case html(source: HTMLSource, config: HTMLConfig)
     case metalShader(MetalShaderPreset)
+    case scene(SceneDescriptor)
 
     var wallpaperType: WallpaperType {
         switch self {
@@ -13,6 +14,8 @@ enum WallpaperContent: Equatable, Sendable {
             return .html
         case .metalShader:
             return .metalShader
+        case .scene:
+            return .scene
         }
     }
 
@@ -35,13 +38,18 @@ enum WallpaperContent: Equatable, Sendable {
         guard case .metalShader(let preset) = self else { return nil }
         return preset
     }
+
+    var sceneDescriptor: SceneDescriptor? {
+        guard case .scene(let descriptor) = self else { return nil }
+        return descriptor
+    }
 }
 
 // MARK: - Codable
 
 extension WallpaperContent: Codable {
     private enum CodingKeys: String, CodingKey {
-        case video, html, metalShader
+        case video, html, metalShader, scene
     }
 
     private enum VideoCodingKeys: String, CodingKey {
@@ -56,6 +64,10 @@ extension WallpaperContent: Codable {
 
     private enum ShaderCodingKeys: String, CodingKey {
         case preset = "_0"
+    }
+
+    private enum SceneCodingKeys: String, CodingKey {
+        case descriptor
     }
 
     init(from decoder: Decoder) throws {
@@ -86,6 +98,12 @@ extension WallpaperContent: Codable {
             return
         }
 
+        if let sceneNested = try? container.nestedContainer(keyedBy: SceneCodingKeys.self, forKey: .scene) {
+            let descriptor = try sceneNested.decode(SceneDescriptor.self, forKey: .descriptor)
+            self = .scene(descriptor)
+            return
+        }
+
         throw DecodingError.dataCorrupted(
             DecodingError.Context(
                 codingPath: decoder.codingPath,
@@ -107,6 +125,9 @@ extension WallpaperContent: Codable {
         case .metalShader(let preset):
             var nested = container.nestedContainer(keyedBy: ShaderCodingKeys.self, forKey: .metalShader)
             try nested.encode(preset, forKey: .preset)
+        case .scene(let descriptor):
+            var nested = container.nestedContainer(keyedBy: SceneCodingKeys.self, forKey: .scene)
+            try nested.encode(descriptor, forKey: .descriptor)
         }
     }
 }

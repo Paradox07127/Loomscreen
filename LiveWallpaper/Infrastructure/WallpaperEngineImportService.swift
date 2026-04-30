@@ -43,7 +43,9 @@ final class WallpaperEngineImportService {
             return await importVideo(project: project, folderURL: folderURL, sourceBookmark: sourceBookmark)
         case .web:
             return await importWeb(project: project, folderURL: folderURL, sourceBookmark: sourceBookmark)
-        case .scene, .application, .unknown:
+        case .scene:
+            return await importScene(project: project, folderURL: folderURL, sourceBookmark: sourceBookmark)
+        case .application, .unknown:
             return .unsupported(origin: makeOrigin(
                 project: project,
                 sourceBookmark: sourceBookmark,
@@ -204,6 +206,113 @@ final class WallpaperEngineImportService {
         return .ready(content, origin: origin)
     }
 
+    private func importScene(
+        project: WallpaperEngineProject,
+        folderURL: URL,
+        sourceBookmark: Data
+    ) async -> ImportResult {
+        // Phase 2.0 contract: scene wallpapers must ship a `scene.pkg` (the
+        // unpacked-folder shape rarely lands in workshop downloads). If the
+        // pkg is missing we still surface as unsupported with a clear reason
+        // so the UI can show the fallback card instead of a generic error.
+        let pkgURL = folderURL.appendingPathComponent("scene.pkg")
+        guard fileManager.fileExists(atPath: pkgURL.path) else {
+            return .unsupported(origin: makeOrigin(
+                project: project,
+                sourceBookmark: sourceBookmark,
+                cacheRelativePath: nil,
+                resourceLocation: .unsupported
+            ))
+        }
+
+        let cacheResult = await ensureExtracted(project: project, pkgURL: pkgURL)
+        guard case .success(let cacheURL) = cacheResult else {
+            if case .failure(let failure) = cacheResult { return .rejected(reason: failure.reason) }
+            return .rejected(reason: "Extraction failed")
+        }
+
+        guard let entryURL = resourceURL(root: cacheURL, relativePath: project.entryFile),
+              fileManager.fileExists(atPath: entryURL.path) else {
+            return .rejected(reason: "Missing scene entry \(project.entryFile)")
+        }
+
+        // Parse `scene.json` to classify capability tier. Failures here are
+        // user-actionable (file shipped malformed) so we reject rather than
+        // mark unsupported — the UI surfaces the parse error to help the
+        // user nudge the wallpaper author.
+        let sceneData: Data
+        do {
+            sceneData = try Data(contentsOf: entryURL)
+        } catch {
+            return .rejected(reason: "Cannot read \(project.entryFile): \(describe(error))")
+        }
+
+        let document: WPESceneDocument
+        do {
+            document = try WPESceneDocumentParser.parse(data: sceneData)
+        } catch {
+            return .rejected(reason: describe(error))
+        }
+
+        let tier = capabilityTier(for: document, cacheURL: cacheURL)
+        let descriptor = SceneDescriptor(
+            workshopID: project.workshopID,
+            cacheRelativePath: cacheRelativePath(for: project),
+            entryFile: project.entryFile,
+            capabilityTier: tier
+        )
+        let origin = makeOrigin(
+            project: project,
+            sourceBookmark: sourceBookmark,
+            cacheRelativePath: cacheRelativePath(for: project),
+            resourceLocation: .cache
+        )
+
+        if tier == .unsupported {
+            return .unsupported(origin: origin)
+        }
+        return .ready(.scene(descriptor), origin: origin)
+    }
+
+    /// Walk `imageObjects` against the cache root: if every layer's asset is
+    /// present the scene is `.imageOnly`; if some are present and others are
+    /// missing we tag it `.degraded` so the UI shows a "missing assets"
+    /// notice; if none are renderable we surface as `.unsupported` and let
+    /// the import flow fall back to the placeholder card.
+    private func capabilityTier(for document: WPESceneDocument, cacheURL: URL) -> SceneCapabilityTier {
+        guard !document.imageObjects.isEmpty else {
+            return .unsupported
+        }
+        let resolver = SceneResourceResolver(cacheRootURL: cacheURL)
+        var resolvable = 0
+        var unresolvable = 0
+        for object in document.imageObjects {
+            let path = object.imageRelativePath
+            // Treat .tex as unresolvable for tier purposes — the resolver
+            // throws unsupportedTexture, the runtime will skip the layer.
+            if path.lowercased().hasSuffix(".tex") {
+                unresolvable += 1
+                continue
+            }
+            if resolver.exists(relativePath: path) {
+                resolvable += 1
+            } else {
+                unresolvable += 1
+            }
+        }
+
+        if resolvable == 0 { return .unsupported }
+        // Pure imageOnly only when EVERY layer resolves AND the parser saw no
+        // diagnostics at all. Info-level diagnostics include unsupported
+        // particle/text/sound objects — a scene that mixes a PNG layer with
+        // a particle emitter is degraded (the PNG renders, the particles
+        // don't), not fully imageOnly.
+        if unresolvable == 0 && document.diagnostics.isEmpty {
+            return .imageOnly
+        }
+        return .degraded
+    }
+
     private func ensureExtracted(project: WallpaperEngineProject, pkgURL: URL) async -> Result<URL, ExtractionFailure> {
         do {
             let url = try await cache.ensureExtracted(workshopID: project.workshopID, sourcePkgURL: pkgURL)
@@ -295,12 +404,15 @@ struct WPECachedContentResolver {
             return nil
         }
 
-        let rootPath = applicationSupportRootURL.standardizedFileURL.path
-        let cacheURL = applicationSupportRootURL
+        // Resolve symlinks before containment check — otherwise an
+        // attacker-controlled symlink at `Application Support/LiveWallpaper`
+        // could point at a sibling directory and still pass the prefix test.
+        let safeSupportRoot = applicationSupportRootURL.standardizedFileURL.resolvingSymlinksInPath()
+        let rootPath = safeSupportRoot.path
+        let cacheURL = safeSupportRoot
             .appendingPathComponent(cacheRelativePath, isDirectory: true)
             .standardizedFileURL
-        // Defense-in-depth: refuse persisted paths that escape the
-        // application-support root after standardization.
+            .resolvingSymlinksInPath()
         guard cacheURL.path == rootPath || cacheURL.path.hasPrefix(rootPath + "/") else {
             return nil
         }
@@ -319,7 +431,20 @@ struct WPECachedContentResolver {
                 source: .folder(bookmarkData: bookmark, indexFileName: entryFile),
                 config: HTMLConfig(physicalPixelLayout: true)
             )
-        case .scene, .application, .unknown:
+        case .scene:
+            // Phase 2.0 cache rebuild: do NOT re-parse `scene.json` here —
+            // the runtime layer already validates the descriptor on mount.
+            // We only need to confirm the cache entry exists, then hand back
+            // a `.scene(SceneDescriptor)` so ScreenManager can restore it
+            // without help from the import service.
+            return .scene(SceneDescriptor(
+                workshopID: origin.workshopID,
+                cacheRelativePath: cacheRelativePath,
+                entryFile: entryFile,
+                // Optimistic — runtime downgrades on first parse if needed.
+                capabilityTier: .imageOnly
+            ))
+        case .application, .unknown:
             return nil
         }
     }

@@ -1,16 +1,31 @@
 import SwiftUI
 import AppKit
 
-/// Centered placeholder shown when the user picks a scene-type or
-/// application-type history entry — non-destructive (no wallpaper change).
-struct WPEUnsupportedCard: View {
+/// Why a Wallpaper Engine workshop project couldn't be activated. Surfaced
+/// to the inspector so the user gets a specific reason instead of a generic
+/// "unsupported" message.
+enum FallbackReason: Equatable, Sendable {
+    case unsupportedType
+    case sceneParseFailed(String)
+    case sceneShaderUnsupported
+    case sceneResourceMissing
+}
+
+/// Renders the explanatory card for any WPE workshop import that cannot be
+/// promoted to a live wallpaper. Replaces the Phase 1.x `WPEUnsupportedCard`
+/// with a reason-aware variant so scene parse failures, missing assets, and
+/// genuinely unsupported types each get their own copy.
+struct WPEFallbackCard: View {
     let origin: WPEOrigin
+    let reason: FallbackReason
+
+    init(origin: WPEOrigin, reason: FallbackReason = .unsupportedType) {
+        self.origin = origin
+        self.reason = reason
+    }
 
     var body: some View {
         VStack(spacing: 24) {
-            // 1:1 preview now produces a 280×280 square — large enough to
-            // showcase the workshop GIF without dominating the entire
-            // detail card (max-width 480 with 32pt padding).
             WPEPreviewView(
                 imageURL: previewURL,
                 securityScopedBookmarkData: origin.sourceFolderBookmark
@@ -42,7 +57,7 @@ struct WPEUnsupportedCard: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                if origin.originalType == .scene {
+                if origin.originalType == .scene && reason == .unsupportedType {
                     Text("Tip: many creators publish a video version of the same wallpaper.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -64,24 +79,44 @@ struct WPEUnsupportedCard: View {
         .padding(32)
         .frame(maxWidth: 480)
         .glassEffect(.regular, in: .rect(cornerRadius: 24))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(origin.title). \(warningTitle). \(warningBody)")
     }
 
     private var warningTitle: String {
-        switch origin.originalType {
-        case .scene:       return "Scene format coming later"
-        case .application: return "Executable wallpapers can't be imported"
-        default:           return "This wallpaper type is not supported"
+        switch reason {
+        case .unsupportedType:
+            switch origin.originalType {
+            case .scene:       return "Scene format coming later"
+            case .application: return "Executable wallpapers can't be imported"
+            default:           return "This wallpaper type is not supported"
+            }
+        case .sceneParseFailed:
+            return "Couldn't read scene.json"
+        case .sceneShaderUnsupported:
+            return "Scene uses unsupported shaders"
+        case .sceneResourceMissing:
+            return "Some scene assets are missing"
         }
     }
 
     private var warningBody: String {
-        switch origin.originalType {
-        case .scene:
-            return "This wallpaper needs Wallpaper Engine's own 3D rendering engine to play. We're working on Phase 2 support — your other wallpapers continue to play unaffected."
-        case .application:
-            return "For your security, LiveWallpaper does not run executable workshop projects."
-        default:
-            return "We couldn't recognize this Wallpaper Engine project type."
+        switch reason {
+        case .unsupportedType:
+            switch origin.originalType {
+            case .scene:
+                return "This wallpaper needs Wallpaper Engine's own 3D rendering engine to play. We're working on broader Phase 2 support — your other wallpapers continue to play unaffected."
+            case .application:
+                return "For your security, LiveWallpaper does not run executable workshop projects."
+            default:
+                return "We couldn't recognize this Wallpaper Engine project type."
+            }
+        case .sceneParseFailed(let detail):
+            return "Phase 2.0 ships an image-only renderer. The author's scene.json couldn't be parsed: \(detail)"
+        case .sceneShaderUnsupported:
+            return "This scene relies on custom shaders that the image-only Phase 2.0 renderer can't compile yet."
+        case .sceneResourceMissing:
+            return "Some image layers couldn't be located inside the cache. The wallpaper may have been published partially or your cache is corrupted."
         }
     }
 
@@ -102,5 +137,16 @@ struct WPEUnsupportedCard: View {
         components?.queryItems = [URLQueryItem(name: "id", value: origin.workshopID)]
         guard let url = components?.url else { return }
         NSWorkspace.shared.open(url)
+    }
+}
+
+/// Compatibility shim — keeps the old name compiling while Phase 2.x consumers
+/// migrate. Defaults the reason to `.unsupportedType` so the historical
+/// behaviour (badge for unsupported workshop types) is unchanged.
+struct WPEUnsupportedCard: View {
+    let origin: WPEOrigin
+
+    var body: some View {
+        WPEFallbackCard(origin: origin, reason: .unsupportedType)
     }
 }
