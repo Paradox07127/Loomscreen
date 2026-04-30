@@ -211,6 +211,36 @@ final class WallpaperEngineImportService {
         folderURL: URL,
         sourceBookmark: Data
     ) async -> ImportResult {
+        // Windows plugins are a hard "won't run on macOS" condition — short
+        // circuit before extraction so the UI shows the permanent unsupported
+        // badge instead of a parse-failure copy.
+        if project.requiresWindowsPlugin {
+            return .unsupported(origin: makeOrigin(
+                project: project,
+                sourceBookmark: sourceBookmark,
+                cacheRelativePath: nil,
+                resourceLocation: .unsupported
+            ))
+        }
+
+        // Dependency gate: bail before touching `scene.pkg` when the project
+        // declares workshop IDs we cannot satisfy. Surfaces missing deps in
+        // the import alert (where the user is paying attention) rather than
+        // after the extraction churn.
+        let missingDeps = await missingDependencies(
+            declared: project.dependencyWorkshopIDs,
+            sourceFolderURL: folderURL
+        )
+        if !missingDeps.isEmpty {
+            return .unsupported(origin: makeOrigin(
+                project: project,
+                sourceBookmark: sourceBookmark,
+                cacheRelativePath: nil,
+                resourceLocation: .unsupported,
+                missingDependencyIDs: missingDeps
+            ))
+        }
+
         // Phase 2.0 contract: scene wallpapers must ship a `scene.pkg` (the
         // unpacked-folder shape rarely lands in workshop downloads). If the
         // pkg is missing we still surface as unsupported with a clear reason
@@ -326,7 +356,8 @@ final class WallpaperEngineImportService {
         project: WallpaperEngineProject,
         sourceBookmark: Data,
         cacheRelativePath: String?,
-        resourceLocation: WPEResourceLocation
+        resourceLocation: WPEResourceLocation,
+        missingDependencyIDs: [String] = []
     ) -> WPEOrigin {
         WPEOrigin(
             workshopID: project.workshopID,
@@ -336,8 +367,48 @@ final class WallpaperEngineImportService {
             cacheRelativePath: cacheRelativePath,
             previewFileName: project.previewFileName,
             entryFile: project.entryFile,
-            resourceLocation: resourceLocation
+            resourceLocation: resourceLocation,
+            missingDependencyIDs: missingDependencyIDs,
+            requiresWindowsPlugin: project.requiresWindowsPlugin
         )
+    }
+
+    /// Returns the subset of `declared` workshop IDs whose extracted payload
+    /// is NOT currently available either in our cache OR as a sibling
+    /// `~/Documents/Live Wallpapers/<appid>/<wid>/` folder. Empty when the
+    /// project declares no dependencies. The sibling-folder check is what
+    /// makes Solution A actually work — Steam Workshop downloads land next
+    /// to the project the user is importing, not in our cache. Without this
+    /// the user would subscribe in Steam, re-import, and still see the
+    /// "missing dependency" message indefinitely.
+    private func missingDependencies(declared: [String], sourceFolderURL: URL) async -> [String] {
+        guard !declared.isEmpty else { return [] }
+        let cached = await cache.listAvailableWorkshopIDs()
+        let subscribed = subscribedWorkshopIDs(declared: declared, sourceFolderURL: sourceFolderURL)
+        let available = cached.union(subscribed)
+        return declared.filter { !available.contains($0) }
+    }
+
+    /// Inspects the parent of `sourceFolderURL` (the Steam Workshop content
+    /// directory) for sibling folders matching declared dependency IDs.
+    /// Each sibling must be a directory carrying a `project.json` to count
+    /// as installed — empty or partial folders are ignored.
+    private func subscribedWorkshopIDs(declared: [String], sourceFolderURL: URL) -> Set<String> {
+        let workshopRoot = sourceFolderURL.deletingLastPathComponent()
+        var hits: Set<String> = []
+        for id in declared {
+            let dependencyURL = workshopRoot.appendingPathComponent(id, isDirectory: true)
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: dependencyURL.path, isDirectory: &isDirectory),
+                  isDirectory.boolValue else {
+                continue
+            }
+            let manifest = dependencyURL.appendingPathComponent("project.json")
+            if fileManager.fileExists(atPath: manifest.path) {
+                hits.insert(id)
+            }
+        }
+        return hits
     }
 
     private func cacheRelativePath(for project: WallpaperEngineProject) -> String {

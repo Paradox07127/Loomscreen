@@ -110,6 +110,12 @@ final class SceneRenderingController {
                 Logger.warning("Scene \(descriptor.workshopID): skipping .tex layer \(object.name)", category: .screenManager)
             } catch SceneResourceResolver.ResolveError.fileMissing {
                 Logger.warning("Scene \(descriptor.workshopID): missing asset for layer \(object.name)", category: .screenManager)
+            } catch SceneResourceResolver.ResolveError.pathEscape {
+                // Cross-package reference (e.g. `../<workshopid>/materials/foo.png`).
+                // Phase 2.0 has no multi-root resolver; skipping the layer
+                // keeps the scene partially renderable and the import
+                // service flagged the project as `.degraded` upstream.
+                Logger.warning("Scene \(descriptor.workshopID): cross-package reference rejected for \(object.name) — \(object.imageRelativePath)", category: .screenManager)
             } catch {
                 Logger.warning("Scene \(descriptor.workshopID): failed to load \(object.name): \(error.localizedDescription)", category: .screenManager)
             }

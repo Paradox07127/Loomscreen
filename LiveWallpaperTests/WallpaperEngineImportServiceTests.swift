@@ -263,6 +263,288 @@ struct WallpaperEngineImportServiceTests {
         #expect(descriptor.capabilityTier == .degraded)
     }
 
+    // MARK: - Phase 2.0.1 — Dependency awareness
+
+    @Test("Scene with declared workshop dependencies missing from cache surfaces as unsupported with the missing IDs")
+    func sceneWithMissingDependenciesIsUnsupported() async throws {
+        let manifest = """
+        {
+            "workshopid": "deps-missing",
+            "title": "Composed Scene",
+            "type": "scene",
+            "file": "scene.json",
+            "preview": "preview.gif",
+            "dependencies": ["123456789012", "987654321098"]
+        }
+        """
+        let fixture = try makeFixture(
+            type: .scene,
+            entryFile: "scene.json",
+            pkgEntries: nil,
+            manifestOverride: manifest,
+            workshopIDOverride: "deps-missing"
+        )
+        defer { fixture.cleanup() }
+
+        let result = try await fixture.service.importProject(folder: fixture.folderURL)
+
+        guard case .unsupported(let origin) = result else {
+            Issue.record("Expected .unsupported, got \(result)")
+            return
+        }
+        #expect(origin.missingDependencyIDs == ["123456789012", "987654321098"])
+        #expect(origin.cacheRelativePath == nil)
+        #expect(origin.resourceLocation == .unsupported)
+    }
+
+    @Test("Sibling Workshop folder satisfies the dependency check (Solution A re-import flow)")
+    func siblingFolderSubscribeRecognised() async throws {
+        // Simulates: user imports project A → sees missing dep B → opens
+        // Steam, subscribes B → B downloads next to A under
+        // `~/Documents/Live Wallpapers/<appid>/<wid>/` → re-import A. The
+        // dependency gate must now treat B as satisfied even though our
+        // own cache hasn't seen B yet.
+        let pngBytes = try makeFixturePNG(width: 4, height: 4)
+        let sceneJSON = """
+        {
+            "camera": { "center": "0 0 0" },
+            "general": {
+                "orthogonalprojection": { "width": 1920, "height": 1080, "auto": true }
+            },
+            "objects": [{
+                "id": "layer1", "name": "Layer 1", "type": "image",
+                "image": "materials/layer1.png"
+            }]
+        }
+        """
+        let manifest = """
+        {
+            "workshopid": "deps-sibling",
+            "title": "Composed Scene",
+            "type": "scene",
+            "file": "scene.json",
+            "preview": "preview.gif",
+            "dependencies": ["123456789012"]
+        }
+        """
+        let fixture = try makeFixture(
+            type: .scene,
+            entryFile: "scene.json",
+            pkgEntries: [
+                PackageEntrySpec("scene.json", Array(sceneJSON.utf8)),
+                PackageEntrySpec("materials/layer1.png", Array(pngBytes))
+            ],
+            manifestOverride: manifest,
+            workshopIDOverride: "deps-sibling"
+        )
+        defer { fixture.cleanup() }
+
+        // Plant a sibling workshop folder for the dependency at the parent
+        // of the importing folder (the Steam Workshop root layout).
+        let workshopRoot = fixture.folderURL.deletingLastPathComponent()
+        let depDir = workshopRoot.appendingPathComponent("123456789012", isDirectory: true)
+        try FileManager.default.createDirectory(at: depDir, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: depDir.appendingPathComponent("project.json"))
+
+        let result = try await fixture.service.importProject(folder: fixture.folderURL)
+
+        guard case .ready(_, let origin) = result else {
+            Issue.record("Expected .ready, got \(result)")
+            return
+        }
+        #expect(origin.missingDependencyIDs.isEmpty)
+    }
+
+    @Test("Sibling folder without project.json does NOT count as a satisfied dependency")
+    func siblingFolderRequiresProjectManifest() async throws {
+        let manifest = """
+        {
+            "workshopid": "deps-stub",
+            "title": "Stub",
+            "type": "scene",
+            "file": "scene.json",
+            "dependencies": ["123456789012"]
+        }
+        """
+        let fixture = try makeFixture(
+            type: .scene,
+            entryFile: "scene.json",
+            pkgEntries: nil,
+            manifestOverride: manifest,
+            workshopIDOverride: "deps-stub"
+        )
+        defer { fixture.cleanup() }
+
+        // Empty sibling directory — must NOT be considered a satisfied dep.
+        let workshopRoot = fixture.folderURL.deletingLastPathComponent()
+        let depDir = workshopRoot.appendingPathComponent("123456789012", isDirectory: true)
+        try FileManager.default.createDirectory(at: depDir, withIntermediateDirectories: true)
+
+        let result = try await fixture.service.importProject(folder: fixture.folderURL)
+
+        guard case .unsupported(let origin) = result else {
+            Issue.record("Expected .unsupported, got \(result)")
+            return
+        }
+        #expect(origin.missingDependencyIDs == ["123456789012"])
+    }
+
+    @Test("Nested bin/x64/*.dll layout is detected as Windows plugin")
+    func nestedWindowsPluginDetected() async throws {
+        let fixture = try makeFixture(
+            type: .scene,
+            entryFile: "scene.json",
+            pkgEntries: [PackageEntrySpec("scene.json", Array("{}".utf8))]
+        )
+        defer { fixture.cleanup() }
+
+        // bin/x64/plugin.dll — flat-only scan would miss this.
+        let nestedBin = fixture.folderURL.appendingPathComponent("bin/x64", isDirectory: true)
+        try FileManager.default.createDirectory(at: nestedBin, withIntermediateDirectories: true)
+        try Data([0x4D, 0x5A]).write(to: nestedBin.appendingPathComponent("plugin.dll"))
+
+        let result = try await fixture.service.importProject(folder: fixture.folderURL)
+
+        guard case .unsupported(let origin) = result else {
+            Issue.record("Expected .unsupported, got \(result)")
+            return
+        }
+        #expect(origin.requiresWindowsPlugin)
+    }
+
+    @Test("Phase 2.0 WPEOrigin plist (no missingDependencyIDs / requiresWindowsPlugin) decodes lossily")
+    func phase20OriginMigrates() throws {
+        // Encode a current-shape origin then strip the new fields to mimic a
+        // payload written by Phase 2.0. Decode must succeed with both
+        // defaults applied.
+        let origin = WPEOrigin(
+            workshopID: "legacy",
+            title: "Legacy",
+            originalType: .scene,
+            sourceFolderBookmark: Data([0xAA]),
+            cacheRelativePath: "wpe-cache/legacy",
+            previewFileName: nil,
+            entryFile: "scene.json",
+            resourceLocation: .cache
+        )
+        let encoded = try JSONEncoder().encode(origin)
+        var dict = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        dict.removeValue(forKey: "missingDependencyIDs")
+        dict.removeValue(forKey: "requiresWindowsPlugin")
+        let stripped = try JSONSerialization.data(withJSONObject: dict, options: .sortedKeys)
+
+        let decoded = try JSONDecoder().decode(WPEOrigin.self, from: stripped)
+
+        #expect(decoded.missingDependencyIDs.isEmpty)
+        #expect(decoded.requiresWindowsPlugin == false)
+        #expect(decoded.workshopID == "legacy")
+    }
+
+    @Test("Scene with all dependencies satisfied skips the dependency gate")
+    func sceneWithSatisfiedDependenciesPassesGate() async throws {
+        // Subscribe scenario: dependency cache pre-populated, scene.pkg exists
+        // and parses cleanly → import service must reach the renderer instead
+        // of returning unsupported.
+        let pngBytes = try makeFixturePNG(width: 4, height: 4)
+        let sceneJSON = """
+        {
+            "camera": { "center": "0 0 0" },
+            "general": {
+                "orthogonalprojection": { "width": 1920, "height": 1080, "auto": true }
+            },
+            "objects": [{
+                "id": "layer1", "name": "Layer 1", "type": "image",
+                "image": "materials/layer1.png"
+            }]
+        }
+        """
+        let manifest = """
+        {
+            "workshopid": "deps-ok",
+            "title": "Composed Scene",
+            "type": "scene",
+            "file": "scene.json",
+            "preview": "preview.gif",
+            "dependencies": ["123456789012"]
+        }
+        """
+        let fixture = try makeFixture(
+            type: .scene,
+            entryFile: "scene.json",
+            pkgEntries: [
+                PackageEntrySpec("scene.json", Array(sceneJSON.utf8)),
+                PackageEntrySpec("materials/layer1.png", Array(pngBytes))
+            ],
+            manifestOverride: manifest,
+            workshopIDOverride: "deps-ok",
+            prefilledCacheWorkshopIDs: ["123456789012"]
+        )
+        defer { fixture.cleanup() }
+
+        let result = try await fixture.service.importProject(folder: fixture.folderURL)
+
+        guard case .ready(_, let origin) = result else {
+            Issue.record("Expected .ready, got \(result)")
+            return
+        }
+        #expect(origin.missingDependencyIDs.isEmpty)
+        #expect(origin.cacheRelativePath == "wpe-cache/deps-ok")
+    }
+
+    @Test("Scene with bin/*.dll plugin is rejected as requires-windows-plugin before extraction")
+    func sceneWithWindowsPluginIsRejectedEarly() async throws {
+        let fixture = try makeFixture(
+            type: .scene,
+            entryFile: "scene.json",
+            pkgEntries: [
+                PackageEntrySpec("scene.json", Array("{}".utf8))
+            ]
+        )
+        defer { fixture.cleanup() }
+
+        let binDir = fixture.folderURL.appendingPathComponent("bin", isDirectory: true)
+        try FileManager.default.createDirectory(at: binDir, withIntermediateDirectories: true)
+        try Data([0x4D, 0x5A]).write(to: binDir.appendingPathComponent("plugin.dll"))
+
+        let result = try await fixture.service.importProject(folder: fixture.folderURL)
+
+        guard case .unsupported(let origin) = result else {
+            Issue.record("Expected .unsupported, got \(result)")
+            return
+        }
+        #expect(origin.requiresWindowsPlugin)
+        // Plugin gate runs BEFORE dependency check; ensure we never extracted
+        // scene.pkg (cacheRelativePath would be non-nil if we did).
+        #expect(origin.cacheRelativePath == nil)
+    }
+
+    @Test("Project.json with non-numeric dependency entries silently filters them out")
+    func projectFiltersNonNumericDependencies() throws {
+        let manifest = """
+        {
+            "workshopid": "filter-test",
+            "title": "Filter",
+            "type": "scene",
+            "file": "scene.json",
+            "dependencies": ["123456789012", "not-a-workshop-id", 987654321098, "1.0.0"]
+        }
+        """
+        let fileManager = FileManager.default
+        let rootURL = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let folderURL = rootURL.appendingPathComponent("workshop", isDirectory: true)
+        try fileManager.createDirectory(at: folderURL, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: rootURL) }
+        try Data(manifest.utf8).write(to: folderURL.appendingPathComponent("project.json"))
+
+        let project = try WallpaperEngineProject.read(from: folderURL)
+
+        // Numeric strings + flexibly-decoded ints survive; "not-a-workshop-id"
+        // and "1.0.0" are filtered. Order is sorted because the heuristic
+        // unions IDs into a Set before emitting.
+        #expect(project.dependencyWorkshopIDs == ["123456789012", "987654321098"])
+        #expect(!project.requiresWindowsPlugin)
+    }
+
     @Test("Scene whose declared layers are all missing assets is classified unsupported")
     func sceneWithMissingAssetsIsUnsupported() async throws {
         let sceneJSON = """
@@ -385,7 +667,10 @@ struct WallpaperEngineImportServiceTests {
     private func makeFixture(
         type: WPEType,
         entryFile: String,
-        pkgEntries: [PackageEntrySpec]?
+        pkgEntries: [PackageEntrySpec]?,
+        manifestOverride: String? = nil,
+        workshopIDOverride: String? = nil,
+        prefilledCacheWorkshopIDs: [String] = []
     ) throws -> ImportFixture {
         let fileManager = FileManager.default
         let rootURL = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -393,8 +678,8 @@ struct WallpaperEngineImportServiceTests {
         let cacheURL = rootURL.appendingPathComponent("cache", isDirectory: true)
         try fileManager.createDirectory(at: folderURL, withIntermediateDirectories: true)
 
-        let workshopID = "3351072238"
-        let manifest = """
+        let workshopID = workshopIDOverride ?? "3351072238"
+        let manifest = manifestOverride ?? """
         {
             "workshopid": "\(workshopID)",
             "title": "Synthetic Wallpaper",
@@ -405,6 +690,14 @@ struct WallpaperEngineImportServiceTests {
         """
         try Data(manifest.utf8).write(to: folderURL.appendingPathComponent("project.json"))
         try Data([0x47, 0x49, 0x46]).write(to: folderURL.appendingPathComponent("preview.gif"))
+
+        // Pre-populate the synthetic cache root with sibling workshop IDs so
+        // dependency-gating tests can simulate "user has already subscribed".
+        for depID in prefilledCacheWorkshopIDs {
+            let depDir = cacheURL.appendingPathComponent(depID, isDirectory: true)
+            try fileManager.createDirectory(at: depDir, withIntermediateDirectories: true)
+            try Data([0x00]).write(to: depDir.appendingPathComponent("payload.bin"))
+        }
 
         if let pkgEntries {
             try makePackage(entries: pkgEntries).write(to: folderURL.appendingPathComponent("scene.pkg"))
