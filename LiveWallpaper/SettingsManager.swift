@@ -204,6 +204,13 @@ final class SettingsManager {
             return validateHTMLSource(source, for: screenID)
         case .metalShader:
             return true
+        case .scene(let descriptor):
+            // The cache resolver re-validates `cacheRelativePath` on resume,
+            // so here we only confirm the descriptor still has the parts
+            // needed to even attempt a cache lookup.
+            return !descriptor.workshopID.isEmpty
+                && !descriptor.cacheRelativePath.isEmpty
+                && !descriptor.entryFile.isEmpty
         }
     }
 

@@ -68,6 +68,8 @@ final class ScreenManager {
     @ObservationIgnored private let fullScreenDetector = FullScreenDetector()
     @ObservationIgnored private let videoEffectsApplier = VideoEffectsApplicationService()
     @ObservationIgnored private let restoresSavedWallpapersOnScreenRefresh: Bool
+    @ObservationIgnored private let exclusiveRenderingCoordinator = ExclusiveRenderingCoordinator()
+    @ObservationIgnored private var exclusiveRenderingObservation: NSObjectProtocol?
     /// Drops stale async video transitions.
     @ObservationIgnored private var transitionGeneration: [CGDirectDisplayID: Int] = [:]
     /// Drops stale async WPE imports per screen (mirrors `transitionGeneration`).
@@ -86,6 +88,7 @@ final class ScreenManager {
         setupScreenObservers()
         setupMemoryMonitoring()
         setupFullScreenDetection()
+        setupExclusiveRenderingCoordinator()
         _ = lockScreenSnapshotCoordinator
 
         NotificationCenter.default.publisher(for: WallpaperVideoPlayer.didChangePlaybackStateNotification)
@@ -174,6 +177,39 @@ final class ScreenManager {
         observeFullScreenChanges()
         fullScreenDetector.checkNow()
         handleFullScreenChange(fullScreenDetector.hiddenScreens)
+    }
+
+    /// Wires the console-key-window observer so scene wallpapers throttle to
+    /// 1 fps while the user is interacting with the LiveWallpaper UI. This is
+    /// the Phase 2.0 "exclusive rendering" policy — scene rendering is the
+    /// most expensive wallpaper type and should yield to anything in the
+    /// foreground.
+    private func setupExclusiveRenderingCoordinator() {
+        exclusiveRenderingCoordinator.start()
+        // Observation framework: register a withObservationTracking loop so
+        // the throttle propagates to every scene session.
+        scheduleConsoleKeyTracking()
+    }
+
+    private func scheduleConsoleKeyTracking() {
+        let snapshot = exclusiveRenderingCoordinator.isConsoleKeyWindow
+        applyConsoleKeyState(isConsoleKey: snapshot)
+        withObservationTracking {
+            _ = exclusiveRenderingCoordinator.isConsoleKeyWindow
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.applyConsoleKeyState(isConsoleKey: self.exclusiveRenderingCoordinator.isConsoleKeyWindow)
+                self.scheduleConsoleKeyTracking()
+            }
+        }
+    }
+
+    private func applyConsoleKeyState(isConsoleKey: Bool) {
+        for screen in screens {
+            guard let session = screen.runtimeSession as? SceneWallpaperSession else { continue }
+            session.setThrottled(isConsoleKey)
+        }
     }
 
     private func observeFullScreenChanges() {
@@ -357,6 +393,8 @@ final class ScreenManager {
             activateAmbientWallpaper(.html(source, htmlConfig), for: screen)
         case .metalShader(let preset):
             activateAmbientWallpaper(.metalShader(preset), for: screen)
+        case .scene(let descriptor):
+            activateAmbientWallpaper(.scene(descriptor), for: screen)
         }
     }
     
@@ -1459,6 +1497,30 @@ final class ScreenManager {
         case .metalShader(let preset):
             session = ambientSessionBuilder.makeShaderSession(preset: preset, frame: screen.frame)
             Logger.info("Set shader wallpaper (\(preset.rawValue)) for screen \(screen.id)", category: .screenManager)
+        case .scene(let descriptor):
+            guard let sceneSession = ambientSessionBuilder.makeSceneSession(
+                descriptor: descriptor,
+                frame: screen.frame
+            ) else {
+                Logger.warning("Scene wallpaper for screen \(screen.id) (workshop \(descriptor.workshopID)) could not be built — cache missing or descriptor invalid", category: .screenManager)
+                return
+            }
+            screen.installRuntimeSession(sceneSession)
+            // Sync exclusive-rendering state on install so a scene mounted
+            // while the inspector window is already key starts at 1 fps
+            // instead of waiting for the next focus toggle to throttle it.
+            sceneSession.setThrottled(exclusiveRenderingCoordinator.isConsoleKeyWindow)
+            let globalSettings = SettingsManager.shared.loadGlobalSettings()
+            applyPerformancePolicy(
+                to: screen,
+                globalSettings: globalSettings,
+                powerSource: powerMonitor.currentPowerSource,
+                isHiddenByFullScreen: globalSettings.pauseOnFullScreen &&
+                    fullScreenDetector.isDesktopHidden(for: screen.id)
+            )
+            Logger.info("Set scene wallpaper (workshop \(descriptor.workshopID)) for screen \(screen.id)", category: .screenManager)
+            notifyWallpaperSessionChanged()
+            return
         case .video:
             return
         }

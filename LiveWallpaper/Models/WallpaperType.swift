@@ -15,9 +15,10 @@ enum WallpaperType: String, Codable, CaseIterable, Identifiable {
         }
     }
 
-    /// `false` when this segment is a UI-only label (Wallpaper Engine import surface)
-    /// that does not map to a `WallpaperContent` case at runtime.
+    /// Phase 2.0+: every wallpaper type — including `.scene` — now maps to a
+    /// `WallpaperContent` case at runtime. Kept around as an explicit hook so
+    /// future UI-only labels can opt out without rewriting call sites.
     var hasDirectContent: Bool {
-        self != .scene
+        true
     }
 }

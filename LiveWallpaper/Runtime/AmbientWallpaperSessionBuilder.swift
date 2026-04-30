@@ -60,4 +60,81 @@ final class AmbientWallpaperSessionBuilder {
         window.orderBack(nil)
         return AmbientWallpaperSession(window: window, wallpaperType: .metalShader, performanceTarget: metalView)
     }
+
+    /// Builds the SpriteKit-backed scene wallpaper session.
+    /// Returns nil when the descriptor's cache directory cannot be located —
+    /// caller falls back to the not-configured Scene tab placeholder rather
+    /// than mounting an empty SKView.
+    func makeSceneSession(
+        descriptor: SceneDescriptor,
+        frame: CGRect,
+        applicationSupportRootURL: URL? = nil,
+        fileManager: FileManager = .default
+    ) -> SceneWallpaperSession? {
+        let supportRoot: URL
+        if let applicationSupportRootURL {
+            supportRoot = applicationSupportRootURL
+        } else if let resolved = try? fileManager.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        ) {
+            supportRoot = resolved.appendingPathComponent("LiveWallpaper", isDirectory: true)
+        } else {
+            return nil
+        }
+
+        // Re-validate cache path before joining — a tampered descriptor
+        // with `..` segments must never escape application support.
+        guard isSafeCacheRelativePath(descriptor.cacheRelativePath) else {
+            Logger.warning("Scene descriptor cache path failed safety check: \(descriptor.cacheRelativePath)", category: .screenManager)
+            return nil
+        }
+        // Resolve symlinks BEFORE the containment check — otherwise a cache
+        // root that is itself a symlink (e.g. from a malicious migration
+        // tool) would point outside Application Support and still pass the
+        // textual prefix match.
+        let safeSupportRoot = supportRoot.standardizedFileURL.resolvingSymlinksInPath()
+        let cacheURL = safeSupportRoot
+            .appendingPathComponent(descriptor.cacheRelativePath, isDirectory: true)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+        let rootPath = safeSupportRoot.path
+        guard cacheURL.path == rootPath || cacheURL.path.hasPrefix(rootPath + "/") else {
+            Logger.warning("Scene descriptor cache escapes app support: \(descriptor.cacheRelativePath)", category: .screenManager)
+            return nil
+        }
+        guard fileManager.fileExists(atPath: cacheURL.path) else {
+            Logger.warning("Scene descriptor cache directory missing: \(cacheURL.path)", category: .screenManager)
+            return nil
+        }
+        // Last-mile entry file probe so we don't mount an SKView that the
+        // controller will immediately throw out of `load()`.
+        let entryProbe = SceneResourceResolver(cacheRootURL: cacheURL)
+        guard (try? entryProbe.resolveExistingFileURL(relativePath: descriptor.entryFile)) != nil else {
+            Logger.warning("Scene descriptor entry file failed safety check: \(descriptor.entryFile)", category: .screenManager)
+            return nil
+        }
+
+        let window = VideoWallpaperWindow(frame: frame)
+        let controller = SceneRenderingController(
+            descriptor: descriptor,
+            cacheRootURL: cacheURL,
+            frame: CGRect(origin: .zero, size: frame.size)
+        )
+        window.contentView = controller.view
+        window.orderBack(nil)
+
+        let session = SceneWallpaperSession(window: window, controller: controller)
+        session.startLoadIfNeeded()
+        return session
+    }
+
+    private func isSafeCacheRelativePath(_ path: String) -> Bool {
+        path.hasPrefix("wpe-cache/")
+            && !path.contains("\\")
+            && !path.contains("..")
+            && !path.contains("//")
+    }
 }

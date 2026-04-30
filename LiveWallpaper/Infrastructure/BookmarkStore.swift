@@ -76,6 +76,8 @@ final class BookmarkStore {
             return source.displayName
         case .metalShader(let preset):
             return preset.rawValue
+        case .scene(let descriptor):
+            return "Scene \(descriptor.workshopID)"
         }
     }
 }

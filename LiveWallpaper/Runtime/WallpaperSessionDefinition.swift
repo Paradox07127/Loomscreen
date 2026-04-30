@@ -5,6 +5,7 @@ enum WallpaperSessionDefinition: Equatable {
     case video(bookmarkData: Data)
     case html(HTMLSource, HTMLConfig)
     case metalShader(MetalShaderPreset)
+    case scene(SceneDescriptor)
 
     init?(configuration: ScreenConfiguration) {
         switch configuration.activeWallpaper {
@@ -18,6 +19,14 @@ enum WallpaperSessionDefinition: Equatable {
             self = .html(source, config)
         case .metalShader(let preset):
             self = .metalShader(preset)
+        case .scene(let descriptor):
+            // Reject obviously broken descriptors so ScreenManager falls
+            // back to the not-configured Scene tab placeholder. The cache
+            // resolver re-validates the path on its end too.
+            guard !descriptor.workshopID.isEmpty,
+                  !descriptor.cacheRelativePath.isEmpty,
+                  !descriptor.entryFile.isEmpty else { return nil }
+            self = .scene(descriptor)
         }
     }
 
@@ -29,6 +38,8 @@ enum WallpaperSessionDefinition: Equatable {
             return source.displayName
         case .metalShader(let preset):
             return preset.rawValue
+        case .scene(let descriptor):
+            return "Scene \(descriptor.workshopID)"
         }
     }
 }
