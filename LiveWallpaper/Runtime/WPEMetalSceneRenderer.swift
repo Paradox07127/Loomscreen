@@ -1,6 +1,13 @@
 import AppKit
 import MetalKit
 
+/// Wraps a texture-load failure with the requested asset path so the H1
+/// diagnostic mapper can blame the exact file, not the scene entry point.
+private struct WPEMetalTextureLoadContextError: Error {
+    let path: String
+    let underlying: any Error
+}
+
 @MainActor
 final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
     private let descriptor: SceneDescriptor
@@ -44,7 +51,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         super.init()
 
         mtkView.delegate = self
-        mtkView.colorPixelFormat = .rgba8Unorm
+        mtkView.colorPixelFormat = WPEMetalRenderExecutor.outputPixelFormat
         mtkView.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
         mtkView.preferredFramesPerSecond = SceneRenderingController.defaultPreferredFPS
         mtkView.autoresizingMask = [.width, .height]
@@ -56,7 +63,20 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
 
     func load() async throws {
         guard !didLoad else { return }
+        do {
+            try await performLoad()
+            loadDiagnostics = nil
+        } catch {
+            // Surface a precise reason via `loadDiagnostics` so the detail
+            // view's honesty pass shows the actual failure (unsupported
+            // shader, missing texture, …) instead of "All declared layers
+            // decoded cleanly."
+            loadDiagnostics = diagnostic(for: error)
+            throw error
+        }
+    }
 
+    private func performLoad() async throws {
         onProgress?("Reading scene")
         let entryURL = try entryResolver.resolveExistingFileURL(relativePath: descriptor.entryFile)
         let document = try await Task.detached(priority: .userInitiated) {
@@ -101,6 +121,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         outputTexture = nil
         renderGraph = nil
         renderPipeline = nil
+        loadDiagnostics = nil
         try await load()
     }
 
@@ -168,7 +189,13 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         guard let path = externalTexturePath(for: reference), textures[path] == nil else {
             return
         }
-        textures[path] = try makeTexture(relativePath: path, label: "WPE texture \(path)")
+        do {
+            textures[path] = try makeTexture(relativePath: path, label: "WPE texture \(path)")
+        } catch {
+            // Carry the asset path through so `diagnostic(for:)` can blame the
+            // exact texture instead of falling back to the scene entry file.
+            throw WPEMetalTextureLoadContextError(path: path, underlying: error)
+        }
     }
 
     private func externalTexturePath(for reference: WPETextureReference) -> String? {
@@ -267,5 +294,64 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         let parts = relativePath.split(separator: "/", omittingEmptySubsequences: false)
         guard parts.count >= 3, parts[0] == ".." else { return nil }
         return (String(parts[1]), parts.dropFirst(2).joined(separator: "/"))
+    }
+
+    /// Maps any error raised during `performLoad()` onto the same
+    /// `SceneLoadDiagnostic` taxonomy `SceneRenderingController` populates, so
+    /// the SpriteKit and Metal backends report failures through one UI path.
+    /// `fallbackPath` carries an asset path through `WPEMetalTextureLoadContextError`
+    /// so missing-asset diagnostics blame the exact texture, not the scene
+    /// entry file. Layer attribution still uses `"scene"` — per-layer
+    /// granularity ships in Phase 2B.
+    private func diagnostic(for error: Error) -> SceneLoadDiagnostic {
+        diagnostic(for: error, fallbackPath: nil)
+    }
+
+    private func diagnostic(for error: Error, fallbackPath: String?) -> SceneLoadDiagnostic {
+        let layer = "scene"
+        switch error {
+        case let context as WPEMetalTextureLoadContextError:
+            return diagnostic(for: context.underlying, fallbackPath: context.path)
+        case let executorError as WPEMetalRenderExecutorError:
+            switch executorError {
+            case .unsupportedShader(let name):
+                return .materialUnresolved(layer: layer, reason: "Shader \"\(name)\" is not supported by the Metal renderer yet.")
+            case .unsupportedTarget:
+                return .materialUnresolved(layer: layer, reason: "This wallpaper uses an unsupported rendering target.")
+            case .missingTexture(let reference):
+                switch reference {
+                case .image(let path), .asset(let path), .fbo(let path):
+                    return .fileMissing(layer: layer, path: path)
+                case .previous:
+                    return .materialUnresolved(layer: layer, reason: "Previous-frame effects (motion blur, feedback) are not yet supported.")
+                }
+            case .noRenderablePasses:
+                return .materialUnresolved(layer: layer, reason: "Scene contains no renderable passes.")
+            case .commandQueueUnavailable, .libraryUnavailable, .pipelineUnavailable, .commandBufferFailed:
+                return .other(layer: layer, message: executorError.errorDescription ?? "Metal renderer failed.")
+            }
+        case let loaderError as WPEMetalTextureLoaderError:
+            switch loaderError {
+            case .unsupportedFormat, .unsupportedCompressedFormat, .malformedPayload, .textureAllocationFailed:
+                return .other(layer: layer, message: loaderError.errorDescription ?? "Texture upload failed.")
+            }
+        case let resolveError as SceneResourceResolver.ResolveError:
+            switch resolveError {
+            case .fileMissing:
+                return .fileMissing(layer: layer, path: fallbackPath ?? descriptor.entryFile)
+            case .pathEscape:
+                return .crossPackageReference(layer: layer, path: fallbackPath ?? descriptor.entryFile)
+            case .materialUnresolved(let reason):
+                return .materialUnresolved(layer: layer, reason: reason)
+            case .texture(let texError):
+                return .texture(layer: layer, error: texError)
+            case .unsupportedTexture:
+                return .legacyUnsupportedTexture(layer: layer)
+            case .decodeFailed:
+                return .other(layer: layer, message: "A texture or image file is corrupted and cannot be decoded.")
+            }
+        default:
+            return .other(layer: layer, message: error.localizedDescription)
+        }
     }
 }

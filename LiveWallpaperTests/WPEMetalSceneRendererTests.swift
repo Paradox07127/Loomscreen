@@ -90,6 +90,61 @@ struct WPEMetalSceneRendererTests {
         #expect(pixel.g > pixel.r)
         #expect(pixel.g > pixel.b)
     }
+
+    @Test("Load failure populates loadDiagnostics with a SceneLoadDiagnostic")
+    func loadFailurePopulatesDiagnostics() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let descriptor = SceneDescriptor(
+            workshopID: UUID().uuidString,
+            cacheRelativePath: "wpe-cache/missing-\(UUID().uuidString)",
+            entryFile: "scene.json",
+            capabilityTier: .imageOnly
+        )
+        // Pointing the renderer at a directory that does not exist forces
+        // `entryResolver.resolveExistingFileURL` to throw `.fileMissing`,
+        // exercising the H1 diagnostic mapping path without depending on a
+        // real WPE scene fixture.
+        let nonExistentRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPEMetalDiagnostics-\(UUID().uuidString)", isDirectory: true)
+
+        let renderer = try WPEMetalSceneRenderer(
+            descriptor: descriptor,
+            cacheRootURL: nonExistentRoot,
+            dependencyMounts: [],
+            frame: CGRect(x: 0, y: 0, width: 64, height: 64),
+            device: device
+        )
+
+        await #expect(throws: (any Error).self) {
+            try await renderer.load()
+        }
+
+        let diagnostic = try #require(renderer.loadDiagnostics)
+        if case .fileMissing(_, let path) = diagnostic {
+            #expect(path == descriptor.entryFile)
+        } else {
+            Issue.record("Expected .fileMissing diagnostic, got \(diagnostic)")
+        }
+    }
+
+    @Test("Successful reload clears stale loadDiagnostics")
+    func reloadClearsStaleDiagnostics() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let fixture = try MetalSceneFixture.solidColorScene()
+        defer { fixture.cleanup() }
+        let renderer = try WPEMetalSceneRenderer(
+            descriptor: fixture.descriptor,
+            cacheRootURL: fixture.root,
+            dependencyMounts: [],
+            frame: CGRect(x: 0, y: 0, width: 64, height: 64),
+            device: device
+        )
+
+        try await renderer.load()
+        try await renderer.reload()
+
+        #expect(renderer.loadDiagnostics == nil)
+    }
 }
 
 private struct MetalSceneFixture {
@@ -246,7 +301,11 @@ private struct MetalPixel {
 
 private extension MTLTexture {
     func readPixel(x: Int, y: Int) -> MetalPixel? {
-        guard pixelFormat == .rgba8Unorm,
+        // RGBA8 unorm and rgba8 unorm-sRGB share the same byte layout — the
+        // sRGB variant simply tags the texture so hardware applies gamma on
+        // sample/store. Both are fine for raw byte readback.
+        let supportedFormats: [MTLPixelFormat] = [.rgba8Unorm, .rgba8Unorm_srgb]
+        guard supportedFormats.contains(pixelFormat),
               x >= 0, x < width,
               y >= 0, y < height else {
             return nil
