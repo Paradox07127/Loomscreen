@@ -1,12 +1,11 @@
 import Foundation
 import Metal
 
-/// BC1/2/3/7 → RGBA8 transcode entry point. Phase 2.1 scaffolds the API
-/// but does NOT ship a real GPU transcode: a `blitEncoder.copy(...)`
-/// cannot transcode between pixel formats, so the original implementation
-/// produced black/garbage output. A correct transcode requires a render
-/// or compute pipeline that *samples* the BC source texture and writes
-/// the result into an `.rgba8Unorm` target — that's Phase 2.2 work.
+/// Legacy BC1/2/3/7 → RGBA8 transcode entry point for callers that still
+/// require a CPU-side `CGImage`. Phase 2A does not extend this path:
+/// Apple Silicon Metal renderers sample supported BC textures natively via
+/// `WPEMetalTextureFormatMapper`, while SpriteKit/CGImage decode remains
+/// fail-closed for compressed formats.
 ///
 /// Until then `transcode(...)` returns `.metalUnavailable(format:)` so
 /// the resolver maps the error to a precise `texUnsupportedFormat` UI
@@ -18,12 +17,10 @@ import Metal
 /// resorting to `@unchecked Sendable` on `MTLDevice` / `MTLCommandQueue`.
 enum WPETexMetalTranscoder {
 
-    /// Reports whether Phase 2.1 can transcode the given format. Always
-    /// `false` for BC family right now; honest answer for the import
-    /// service so it can mark the layer as unresolvable up front.
+    /// Reports whether the legacy CGImage path can transcode the given
+    /// format. Always `false` for BC family; the Phase 2A Metal path uses
+    /// native compressed texture mapping instead of RGBA8 conversion.
     static func isAvailable(for format: WPETexFormat) -> Bool {
-        // Phase 2.2 will return `MTLCreateSystemDefaultDevice()?.supportsBCTextureCompression ?? false`
-        // once the render-pass-backed transcoder lands.
         _ = format
         return false
     }

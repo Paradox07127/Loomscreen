@@ -42,6 +42,45 @@ struct WPETexDecoder: Sendable {
         }
     }
 
+    /// Metal path. Extracts normalized mip bytes without forcing ImageIO /
+    /// CGImage decode, so compressed BC payloads can be uploaded for native
+    /// GPU sampling on devices that support them.
+    func extractTexturePayload(data: Data) -> Result<WPETexTexturePayload, WPETexDecodeError> {
+        do {
+            let parsed = try parse(data: data)
+            guard !parsed.bitmap.isVideoPayload,
+                  !parsed.bitmap.mipmaps.contains(where: { looksLikeMP4Payload($0.payload) }) else {
+                throw WPETexDecodeError.unsupportedAnimation
+            }
+            guard !parsed.bitmap.usesEncodedImagePayload else {
+                throw WPETexDecodeError.unsupportedFormat(code: parsed.info.textureFormatCode)
+            }
+
+            let mipmaps = try parsed.bitmap.mipmaps.map { mipmap in
+                WPETexTextureMipmap(
+                    index: mipmap.index,
+                    width: mipmap.width,
+                    height: mipmap.height,
+                    bytes: try normalizedBytes(
+                        for: mipmap,
+                        format: parsed.info.format,
+                        textureFormatCode: parsed.info.textureFormatCode
+                    )
+                )
+            }
+
+            return .success(WPETexTexturePayload(
+                info: parsed.info,
+                mipmaps: mipmaps,
+                hasAnimationFrames: parsed.hasAnimationFrames
+            ))
+        } catch let error as WPETexDecodeError {
+            return .failure(error)
+        } catch {
+            return .failure(.decodeFailed(mipmap: 0, detail: error.localizedDescription))
+        }
+    }
+
     // MARK: - Parsing
 
     private struct ParsedTex {
@@ -353,6 +392,23 @@ struct WPETexDecoder: Sendable {
             throw WPETexDecodeError.decodeFailed(mipmap: mipmap, detail: "ImageIO could not decode encoded mip payload")
         }
         return image
+    }
+
+    private func normalizedBytes(
+        for mipmap: WPETexMipmap,
+        format: WPETexFormat?,
+        textureFormatCode: Int
+    ) throws -> Data {
+        guard let format else {
+            throw WPETexDecodeError.unsupportedFormat(code: textureFormatCode)
+        }
+        return try inflateIfNeeded(
+            payload: mipmap.payload,
+            expectedByteCount: format.expectedByteCount(width: mipmap.width, height: mipmap.height),
+            decompressedByteCount: mipmap.decompressedByteCount,
+            isCompressed: mipmap.isCompressed,
+            mipmap: mipmap.index
+        )
     }
 
     /// Reconciles `payload` against `expectedByteCount`. Three cases:

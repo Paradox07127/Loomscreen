@@ -89,6 +89,36 @@ struct SceneResourceResolver: Sendable {
         return image
     }
 
+    /// Returns the raw texture payload for Metal-backed renderers. This uses
+    /// the same WPE model/material JSON chain as `resolveImage(relativePath:)`
+    /// so import-time probes and runtime texture binding agree on the terminal
+    /// asset.
+    func resolveTexturePayload(relativePath: String) throws -> WPETexTexturePayload {
+        guard !relativePath.isEmpty else { throw ResolveError.fileMissing }
+        let resolvedPath = try resolveImageReference(relativePath: relativePath, depth: 0)
+        let target = try resolveURL(for: resolvedPath)
+
+        guard fileManager.fileExists(atPath: target.path) else {
+            throw ResolveError.fileMissing
+        }
+        guard target.pathExtension.lowercased() == "tex" else {
+            throw ResolveError.unsupportedTexture
+        }
+
+        let payload: Data
+        do {
+            payload = try Data(contentsOf: target)
+        } catch {
+            throw ResolveError.fileMissing
+        }
+        switch decoder.extractTexturePayload(data: payload) {
+        case .success(let texture):
+            return texture
+        case .failure(let error):
+            throw ResolveError.texture(error)
+        }
+    }
+
     /// Walks WPE's image-reference chain until it produces a path to a
     /// real asset (`.tex` / `.png` / `.jpg` / `.gif`). Recursion depth is
     /// capped at 4 to defuse pathological self-referential descriptors —

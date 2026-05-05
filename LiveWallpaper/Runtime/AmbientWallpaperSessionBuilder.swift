@@ -1,4 +1,5 @@
 import AppKit
+import Metal
 
 /// Builds non-video wallpaper sessions backed by a window.
 @MainActor
@@ -61,14 +62,15 @@ final class AmbientWallpaperSessionBuilder {
         return AmbientWallpaperSession(window: window, wallpaperType: .metalShader, performanceTarget: metalView)
     }
 
-    /// Builds the SpriteKit-backed scene wallpaper session.
+    /// Builds a scene wallpaper session.
     /// Returns nil when the descriptor's cache directory cannot be located —
     /// caller falls back to the not-configured Scene tab placeholder rather
-    /// than mounting an empty SKView.
+    /// than mounting an empty renderer view.
     func makeSceneSession(
         descriptor: SceneDescriptor,
         frame: CGRect,
         dependencyMounts: [WPEAssetMount] = [],
+        rendererBackend: WPESceneRendererBackend = .spriteKit,
         applicationSupportRootURL: URL? = nil,
         fileManager: FileManager = .default
     ) -> SceneWallpaperSession? {
@@ -118,17 +120,40 @@ final class AmbientWallpaperSessionBuilder {
             return nil
         }
 
+        let rendererFrame = CGRect(origin: .zero, size: frame.size)
+        let renderer: WPESceneRenderer
+        switch rendererBackend {
+        case .spriteKit:
+            renderer = SceneRenderingController(
+                descriptor: descriptor,
+                cacheRootURL: cacheURL,
+                dependencyMounts: dependencyMounts,
+                frame: rendererFrame
+            )
+        case .metalExperimental:
+            guard let device = MTLCreateSystemDefaultDevice() else {
+                Logger.warning("Experimental Metal scene renderer requested but Metal is unavailable", category: .screenManager)
+                return nil
+            }
+            do {
+                renderer = try WPEMetalSceneRenderer(
+                    descriptor: descriptor,
+                    cacheRootURL: cacheURL,
+                    dependencyMounts: dependencyMounts,
+                    frame: rendererFrame,
+                    device: device
+                )
+            } catch {
+                Logger.warning("Experimental Metal scene renderer could not be created: \(error.localizedDescription)", category: .screenManager)
+                return nil
+            }
+        }
+
         let window = VideoWallpaperWindow(frame: frame)
-        let controller = SceneRenderingController(
-            descriptor: descriptor,
-            cacheRootURL: cacheURL,
-            dependencyMounts: dependencyMounts,
-            frame: CGRect(origin: .zero, size: frame.size)
-        )
-        window.contentView = controller.view
+        window.contentView = renderer.nsView
         window.orderBack(nil)
 
-        let session = SceneWallpaperSession(window: window, controller: controller)
+        let session = SceneWallpaperSession(window: window, renderer: renderer)
         session.startLoadIfNeeded()
         return session
     }
