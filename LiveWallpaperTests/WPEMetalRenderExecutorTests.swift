@@ -201,6 +201,77 @@ private func copyPass() -> WPERenderPass {
     )
 }
 
+private extension WPEMetalRenderExecutorTests {
+    @Test("Offscreen output is sRGB-tagged for SpriteKit gamma parity")
+    func outputTextureIsSRGB() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let pass = solidPass()
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: graphLayer(pass: pass),
+                passes: [WPEPreparedRenderPass(
+                    pass: pass,
+                    shader: WPEShaderProgram(name: "solidcolor", vertexSource: "", fragmentSource: "", isBuiltin: true),
+                    textureBindings: [:],
+                    comboValues: [:],
+                    uniformValues: ["g_Color": .vector([1, 1, 1, 1])]
+                )]
+            )
+        ])
+
+        let output = try executor.render(pipeline: pipeline, size: CGSize(width: 4, height: 4), textures: [:])
+
+        #expect(output.pixelFormat == .rgba8Unorm_srgb)
+        #expect(WPEMetalRenderExecutor.outputPixelFormat == .rgba8Unorm_srgb)
+    }
+
+    @Test("solidcolor mid-tone uniform round-trips through sRGB target without gamma double-encoding")
+    func solidcolorMidToneSRGBRoundTrip() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let pass = WPERenderPass(
+            id: "midgray.0",
+            phase: .material,
+            shader: "solidcolor",
+            source: .previous,
+            target: .scene,
+            textures: [:],
+            binds: [:],
+            constants: ["g_Color": .vector([0.5, 0.5, 0.5, 1])],
+            combos: [:],
+            blending: "normal",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: graphLayer(pass: pass),
+                passes: [WPEPreparedRenderPass(
+                    pass: pass,
+                    shader: WPEShaderProgram(name: "solidcolor", vertexSource: "", fragmentSource: "", isBuiltin: true),
+                    textureBindings: [:],
+                    comboValues: [:],
+                    uniformValues: ["g_Color": .vector([0.5, 0.5, 0.5, 1])]
+                )]
+            )
+        ])
+
+        let output = try executor.render(pipeline: pipeline, size: CGSize(width: 4, height: 4), textures: [:])
+        let pixel = try readPixel(output, x: 2, y: 2)
+
+        // sRGB "0.5" round-trips back to byte 128 ±2 when uniforms are
+        // linearized before reaching the sRGB-tagged target. Without the
+        // sRGB→linear conversion the byte would read ~188 (gamma double-
+        // encoded). This test pins the H3 gamma fix.
+        #expect(abs(Int(pixel.r) - 128) <= 3)
+        #expect(abs(Int(pixel.g) - 128) <= 3)
+        #expect(abs(Int(pixel.b) - 128) <= 3)
+        #expect(pixel.a >= 250)
+    }
+}
+
 private func makeRGBAInputTexture(device: MTLDevice, bytes: Data) throws -> MTLTexture {
     let descriptor = MTLTextureDescriptor.texture2DDescriptor(
         pixelFormat: .rgba8Unorm,
