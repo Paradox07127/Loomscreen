@@ -87,20 +87,25 @@ enum SceneLoadDiagnostic: Equatable, Sendable {
         }
     }
 
+    /// User-facing copy. Phase 2B Task 6 rewrote these strings per the
+    /// UX & Frontend Spec in `2026-05-05-wpe-phase2b-scene-runtime-hardening.md`
+    /// — the messages name the failing layer in plain language and avoid
+    /// engineering jargon ("texture", "shader") that confused users in the
+    /// detail view's diagnostic card.
     var errorDescription: String {
         switch self {
-        case .texture(let layer, let error):
-            return "Layer \(layer): \(error.errorDescription ?? "tex decode failed")"
+        case .texture(let layer, _):
+            return "The image for '\(layer)' couldn't be loaded."
         case .legacyUnsupportedTexture(let layer):
-            return "Layer \(layer): legacy .tex layer skipped"
-        case .fileMissing(let layer, let path):
-            return "Layer \(layer): missing asset \(path)"
-        case .crossPackageReference(let layer, let path):
-            return "Layer \(layer): cross-package reference \(path) rejected"
-        case .materialUnresolved(let layer, let reason):
-            return "Layer \(layer): \(reason)"
+            return "The image format used by '\(layer)' is no longer supported."
+        case .fileMissing(let layer, _):
+            return "A file required by the '\(layer)' layer is missing."
+        case .crossPackageReference(let layer, _):
+            return "The layer '\(layer)' requires files from an external package, which is not supported."
+        case .materialUnresolved(let layer, _):
+            return "A rendering feature needed by '\(layer)' is not supported yet."
         case .other(let layer, let message):
-            return "Layer \(layer): \(message)"
+            return "The layer '\(layer)' encountered an issue: \(message)."
         }
     }
 }

@@ -73,10 +73,15 @@ struct WPESceneDetailView: View {
             case .playing(let controller):
                 ScenePreviewContainer(controller: controller)
                     .aspectRatio(16.0 / 9.0, contentMode: .fit)
+            case .playingSnapshot(let image):
+                MetalSnapshotPreview(image: image)
             case .paused(let reason):
                 if let controller = session?.sceneController {
                     ScenePreviewContainer(controller: controller)
                         .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                        .overlay(pausedOverlay(reason: reason))
+                } else if let image = session?.sceneRenderer?.previewSnapshot {
+                    MetalSnapshotPreview(image: image)
                         .overlay(pausedOverlay(reason: reason))
                 } else {
                     fallbackBackground
@@ -332,11 +337,20 @@ struct WPESceneDetailView: View {
             state = .paused(reason: reduceMotion ? .reduceMotion : .throttled)
             return
         }
-        guard let controller = session.sceneController else {
-            state = .paused(reason: .previewUnavailable)
+        if let controller = session.sceneController {
+            state = .playing(controller)
             return
         }
-        state = .playing(controller)
+        // Phase 2B Task 5: Metal backend has a CGImage readback once load
+        // completes. Surface it as `.playingSnapshot` so the view shows the
+        // actual rendered scene instead of the static preview-unavailable
+        // card; only fall back to `.previewUnavailable` if the snapshot
+        // pipeline somehow returned nil (offscreen-only fixtures).
+        if let snapshot = renderer.previewSnapshot {
+            state = .playingSnapshot(snapshot)
+            return
+        }
+        state = .paused(reason: .previewUnavailable)
     }
 
     private func mapToFallbackReason(_ error: SceneRenderingError) -> FallbackReason {
@@ -388,41 +402,52 @@ struct WPESceneDetailView: View {
         // associated values (controller / fallback) compare poorly so we
         // map down to ints.
         switch state {
-        case .idle:    return 0
-        case .loading: return 1
-        case .playing: return 2
-        case .paused:  return 3
-        case .error:   return 4
+        case .idle:            return 0
+        case .loading:         return 1
+        case .playing:         return 2
+        case .playingSnapshot: return 2
+        case .paused:          return 3
+        case .error:           return 4
         }
     }
 
     private var stateLabel: String {
         switch state {
-        case .idle:    return "Idle"
-        case .loading: return "Loading"
-        case .playing: return "Playing"
-        case .paused:  return "Paused"
-        case .error:   return "Error"
+        case .idle:            return "Idle"
+        case .loading:         return "Loading"
+        case .playing:         return "Playing"
+        // Phase 2B: the Metal experimental backend renders one frame at
+        // load and pauses the displaylink, so the detail card shows a
+        // static thumbnail. Surface that explicitly so the user does not
+        // mistake a frozen frame for a hung renderer.
+        case .playingSnapshot: return "Static Preview"
+        case .paused:          return "Paused"
+        case .error:           return "Error"
         }
     }
 
     private var stateAccessibilityText: String {
         switch state {
-        case .idle:    return "Idle"
-        case .loading: return "Loading scene assets"
-        case .playing: return "Scene playing"
+        case .idle:            return "Idle"
+        case .loading:         return "Loading scene assets"
+        case .playing:         return "Scene playing"
+        case .playingSnapshot: return "Scene preview, static"
         case .paused(let reason): return "Paused, \(reason.label)"
-        case .error:   return "Scene cannot be played"
+        case .error:           return "Scene cannot be played"
         }
     }
 
     private var statusColor: Color {
         switch state {
-        case .playing: return .green
-        case .loading: return .yellow
-        case .paused:  return .orange
-        case .error:   return .red
-        case .idle:    return .secondary
+        case .playing:         return .green
+        // Distinguish the Metal static preview with a blue pill — green
+        // would imply "live" which is misleading until the per-frame
+        // readback timer ships in Phase 2C.
+        case .playingSnapshot: return .blue
+        case .loading:         return .yellow
+        case .paused:          return .orange
+        case .error:           return .red
+        case .idle:            return .secondary
         }
     }
 
@@ -445,6 +470,12 @@ enum SceneRenderState: Equatable {
     case idle
     case loading(progress: String?)
     case playing(SceneRenderingController)
+    /// Phase 2B Task 5: Metal-backed scene with a CGImage readback. The
+    /// SpriteKit live preview path stays on `.playing(controller)` because
+    /// `SKView` runs its own runloop; this case lets the detail view show
+    /// a static thumbnail for the Metal backend instead of falling through
+    /// to `.previewUnavailable`.
+    case playingSnapshot(NSImage)
     case paused(reason: PausedReason)
     case error(FallbackReason)
 
@@ -463,6 +494,7 @@ enum SceneRenderState: Equatable {
         case (.idle, .idle): return true
         case (.loading(let l), .loading(let r)): return l == r
         case (.playing(let lhsCtrl), .playing(let rhsCtrl)): return lhsCtrl === rhsCtrl
+        case (.playingSnapshot(let l), .playingSnapshot(let r)): return l === r
         case (.paused(let l), .paused(let r)): return l == r
         case (.error(let l), .error(let r)): return l == r
         default: return false
@@ -483,5 +515,31 @@ enum PausedReason: Equatable, Sendable {
         case .suspended:    return "Suspended"
         case .previewUnavailable: return "Preview Unavailable"
         }
+    }
+}
+
+// MARK: - Metal snapshot preview
+
+/// Static thumbnail for the Metal scene backend per the UX & Frontend Spec
+/// in `2026-05-05-wpe-phase2b-scene-runtime-hardening.md` §1. Honours the
+/// rendered texture's intrinsic aspect ratio (orthogonal projections are
+/// often square or portrait) and letterboxes inside the controlBackground
+/// fill so the card chrome stays consistent with the SpriteKit path.
+@MainActor
+private struct MetalSnapshotPreview: View {
+    let image: NSImage
+
+    var body: some View {
+        // Phase 2B Task 5 ships a one-shot static snapshot — no
+        // `.updatesFrequently` trait until the per-frame readback timer
+        // (Phase 2C) makes the image actually animate, otherwise VoiceOver
+        // would announce stale "updates" on a frozen frame.
+        Image(nsImage: image)
+            .resizable()
+            .interpolation(.medium)
+            .aspectRatio(contentMode: .fit)
+            .background(Color(nsColor: .controlBackgroundColor))
+            .accessibilityLabel("Scene preview snapshot")
+            .transition(.opacity)
     }
 }

@@ -95,7 +95,8 @@ struct WPERenderGraphBuilder: Sendable {
             compositeA: compositeA,
             compositeB: compositeB,
             localFBOs: context.localFBOs,
-            passes: context.finalizedPasses()
+            passes: context.finalizedPasses(),
+            parallaxDepth: object.parallaxDepth
         )
     }
 

@@ -78,6 +78,22 @@ final class SceneRenderingController: WPESceneRenderer {
     var nsView: NSView { skView }
     var hasPresentedFrame: Bool { skView.scene != nil }
 
+    /// SpriteKit snapshot via AppKit's offscreen bitmap cache. Returns `nil`
+    /// when the SKView has zero bounds (early load) so consumers can choose a
+    /// loading placeholder instead of an opaque blank image.
+    var previewSnapshot: NSImage? {
+        guard skView.bounds.width > 0, skView.bounds.height > 0 else {
+            return nil
+        }
+        guard let representation = skView.bitmapImageRepForCachingDisplay(in: skView.bounds) else {
+            return nil
+        }
+        skView.cacheDisplay(in: skView.bounds, to: representation)
+        let image = NSImage(size: skView.bounds.size)
+        image.addRepresentation(representation)
+        return image
+    }
+
     /// Materialises the SpriteKit scene from disk. Idempotent — calling it
     /// twice is a no-op on the second pass so the wallpaper session can
     /// safely re-prepare on focus changes.
