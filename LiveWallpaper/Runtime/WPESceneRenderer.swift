@@ -13,6 +13,11 @@ protocol WPESceneRenderer: AnyObject, WallpaperPerformanceConfigurable {
     var renderGraph: WPERenderGraph? { get }
     var renderPipeline: WPEPreparedRenderPipeline? { get }
     var hasPresentedFrame: Bool { get }
+    /// Static thumbnail of the most recent rendered frame. `nil` until a
+    /// frame has been produced. SpriteKit reads back via
+    /// `bitmapImageRepForCachingDisplay`; Metal returns the cached snapshot
+    /// produced by Task 5 in Phase 2B.
+    var previewSnapshot: NSImage? { get }
 
     func load() async throws
     func reload() async throws

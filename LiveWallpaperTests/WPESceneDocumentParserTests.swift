@@ -254,4 +254,26 @@ struct WPESceneDocumentParserTests {
         #expect(animation.blend == 0.5)
         #expect(animation.animation == 9)
     }
+
+    @Test("Parses image parallax depth from scene object")
+    func parsesImageParallaxDepth() throws {
+        let json = """
+        {
+          "camera": { "center": "0 0 0" },
+          "general": { "orthogonalprojection": { "width": 100, "height": 50, "auto": true } },
+          "objects": [{
+            "id": "layer",
+            "name": "Layer",
+            "type": "image",
+            "image": "materials/base.png",
+            "parallaxDepth": 0.125
+          }]
+        }
+        """
+
+        let document = try WPESceneDocumentParser.parse(data: Data(json.utf8))
+        let object = try #require(document.imageObjects.first)
+
+        #expect(object.parallaxDepth == 0.125)
+    }
 }
