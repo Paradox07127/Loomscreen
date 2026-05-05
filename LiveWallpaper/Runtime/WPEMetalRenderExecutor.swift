@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 import Metal
 import MetalKit
 
@@ -39,6 +40,13 @@ struct WPESolidUniforms {
 }
 
 final class WPEMetalRenderExecutor {
+    /// Phase 2A H3: every offscreen target and the on-screen swapchain share a
+    /// single sRGB pixel format so render pipelines built for the offscreen
+    /// pass can be reused by `present()` without re-creation, and so the
+    /// rendered gamma matches the SpriteKit/CGImage fallback on the same
+    /// scene fixture.
+    static let outputPixelFormat: MTLPixelFormat = .rgba8Unorm_srgb
+
     private let device: MTLDevice
     private let commandQueue: MTLCommandQueue
     private let library: MTLLibrary
@@ -204,7 +212,7 @@ final class WPEMetalRenderExecutor {
         let descriptor = MTLRenderPipelineDescriptor()
         descriptor.vertexFunction = vertex
         descriptor.fragmentFunction = fragment
-        descriptor.colorAttachments[0].pixelFormat = .rgba8Unorm
+        descriptor.colorAttachments[0].pixelFormat = Self.outputPixelFormat
 
         let state = try device.makeRenderPipelineState(descriptor: descriptor)
         pipelines[fragmentName] = state
@@ -213,7 +221,7 @@ final class WPEMetalRenderExecutor {
 
     private func makeOutputTexture(size: CGSize) throws -> MTLTexture {
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .rgba8Unorm,
+            pixelFormat: Self.outputPixelFormat,
             width: max(Int(size.width), 1),
             height: max(Int(size.height), 1),
             mipmapped: false
@@ -228,15 +236,29 @@ final class WPEMetalRenderExecutor {
     }
 
     private func colorVector(for pass: WPEPreparedRenderPass) -> SIMD4<Float> {
+        // WPE scene JSON authors `g_Color` in sRGB perceptual space ("0.5 0.5
+        // 0.5" → mid-gray on screen). The render target is sRGB-tagged, so the
+        // hardware applies linear→sRGB encode on store; we therefore must feed
+        // the shader linear-space RGB. Alpha stays unchanged — Metal does not
+        // gamma-encode the alpha channel on sRGB targets.
         let vector = pass.uniformValues["g_Color"]?.vectorValue
             ?? pass.pass.constants["g_Color"]?.vectorValue
             ?? [1, 1, 1, 1]
         return SIMD4<Float>(
-            Float(vector[safe: 0] ?? 1),
-            Float(vector[safe: 1] ?? 1),
-            Float(vector[safe: 2] ?? 1),
+            Self.sRGBToLinear(Float(vector[safe: 0] ?? 1)),
+            Self.sRGBToLinear(Float(vector[safe: 1] ?? 1)),
+            Self.sRGBToLinear(Float(vector[safe: 2] ?? 1)),
             Float(vector[safe: 3] ?? 1)
         )
+    }
+
+    /// Standard sRGB EOTF used by Metal's `_srgb` pixel formats.
+    private static func sRGBToLinear(_ value: Float) -> Float {
+        let clamped = min(max(value, 0), 1)
+        if clamped <= 0.04045 {
+            return clamped / 12.92
+        }
+        return Float(pow(Double((clamped + 0.055) / 1.055), 2.4))
     }
 
     private func resolve(reference: WPETextureReference, textures: [String: MTLTexture]) throws -> MTLTexture {
