@@ -86,6 +86,48 @@ struct WPESceneImageObject: Equatable, Sendable, Identifiable {
     let size: CGSize?
     let effects: [WPESceneImageEffect]
     let animationLayers: [WPESceneAnimationLayer]
+    /// Mouse-parallax depth (0 = locked to scene). Phase 2B applies a
+    /// conservative UV offset bounded to ±0.05 in built-in copy passes; full
+    /// camera-parallax fidelity is deferred until shader translation lands.
+    let parallaxDepth: Double
+
+    init(
+        id: String,
+        name: String,
+        imageRelativePath: String,
+        materialRelativePath: String?,
+        origin: SIMD3<Double>,
+        scale: SIMD3<Double>,
+        angles: SIMD3<Double>,
+        visible: Bool,
+        alpha: Double,
+        color: SIMD3<Double>,
+        brightness: Double,
+        blendMode: WPESceneBlendMode,
+        alignment: WPESceneAlignment,
+        size: CGSize?,
+        effects: [WPESceneImageEffect],
+        animationLayers: [WPESceneAnimationLayer],
+        parallaxDepth: Double = 0
+    ) {
+        self.id = id
+        self.name = name
+        self.imageRelativePath = imageRelativePath
+        self.materialRelativePath = materialRelativePath
+        self.origin = origin
+        self.scale = scale
+        self.angles = angles
+        self.visible = visible
+        self.alpha = alpha
+        self.color = color
+        self.brightness = brightness
+        self.blendMode = blendMode
+        self.alignment = alignment
+        self.size = size
+        self.effects = effects
+        self.animationLayers = animationLayers
+        self.parallaxDepth = parallaxDepth
+    }
 }
 
 struct WPESceneImageEffect: Equatable, Sendable, Identifiable {

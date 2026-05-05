@@ -21,6 +21,32 @@ struct WPERenderLayer: Equatable, Sendable, Identifiable {
     let compositeB: String
     let localFBOs: [WPERenderFBO]
     let passes: [WPERenderPass]
+    /// Mirrors `WPESceneImageObject.parallaxDepth`. Phase 2B uses this as
+    /// the bound for the built-in mouse-parallax UV offset; later phases
+    /// will route it into custom shaders via the prepared uniform table.
+    let parallaxDepth: Double
+
+    init(
+        objectID: String,
+        objectName: String,
+        imagePath: String,
+        materialPath: String?,
+        compositeA: String,
+        compositeB: String,
+        localFBOs: [WPERenderFBO],
+        passes: [WPERenderPass],
+        parallaxDepth: Double = 0
+    ) {
+        self.objectID = objectID
+        self.objectName = objectName
+        self.imagePath = imagePath
+        self.materialPath = materialPath
+        self.compositeA = compositeA
+        self.compositeB = compositeB
+        self.localFBOs = localFBOs
+        self.passes = passes
+        self.parallaxDepth = parallaxDepth
+    }
 }
 
 struct WPERenderFBO: Equatable, Sendable {

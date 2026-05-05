@@ -145,6 +145,97 @@ struct WPEMetalSceneRendererTests {
 
         #expect(renderer.loadDiagnostics == nil)
     }
+
+    @Test("Computes runtime uniforms from clock pointer and performance profile during load render")
+    func computesRuntimeUniformsDuringLoadRender() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let fixture = try MetalSceneFixture.solidColorScene()
+        defer { fixture.cleanup() }
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let date = try #require(DateComponents(
+            calendar: calendar,
+            timeZone: calendar.timeZone,
+            year: 2026,
+            month: 5,
+            day: 5,
+            hour: 12,
+            minute: 0,
+            second: 0
+        ).date)
+
+        let renderer = try WPEMetalSceneRenderer(
+            descriptor: fixture.descriptor,
+            cacheRootURL: fixture.root,
+            dependencyMounts: [],
+            frame: CGRect(x: 0, y: 0, width: 64, height: 64),
+            device: device,
+            frameClock: WPEMetalFrameClock(
+                loadTime: 100,
+                currentMediaTime: { 101.25 },
+                currentDate: { date },
+                calendar: calendar
+            ),
+            pointerSampler: .fixed(SIMD2<Double>(0.25, 0.75))
+        )
+        renderer.applyPerformanceProfile(.suspended)
+
+        try await renderer.load()
+
+        let uniforms = try #require(renderer.lastRuntimeUniforms)
+        #expect(abs(uniforms.time - 1.25) < 0.0001)
+        #expect(abs(uniforms.daytime - 0.5) < 0.0001)
+        #expect(uniforms.brightness == 0)
+        #expect(uniforms.pointerPosition == SIMD2<Double>(0.25, 0.75))
+    }
+
+    @Test("Loads preview snapshot from Metal offscreen output")
+    func loadsPreviewSnapshotFromMetalOutput() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let fixture = try MetalSceneFixture.solidColorScene()
+        defer { fixture.cleanup() }
+
+        let renderer = try WPEMetalSceneRenderer(
+            descriptor: fixture.descriptor,
+            cacheRootURL: fixture.root,
+            dependencyMounts: [],
+            frame: CGRect(x: 0, y: 0, width: 64, height: 64),
+            device: device
+        )
+
+        try await renderer.load()
+
+        let snapshot = try #require(renderer.previewSnapshot)
+        #expect(snapshot.size.width == 64)
+        #expect(snapshot.size.height == 64)
+    }
+
+    @Test("Texture load failure attributes diagnostic to the WPE object name that referenced it")
+    func textureLoadDiagnosticsUseLayerObjectName() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let fixture = try MetalSceneFixture.missingTextureScene()
+        defer { fixture.cleanup() }
+
+        let renderer = try WPEMetalSceneRenderer(
+            descriptor: fixture.descriptor,
+            cacheRootURL: fixture.root,
+            dependencyMounts: [],
+            frame: CGRect(x: 0, y: 0, width: 64, height: 64),
+            device: device
+        )
+
+        await #expect(throws: (any Error).self) {
+            try await renderer.load()
+        }
+
+        let diagnostic = try #require(renderer.loadDiagnostics)
+        #expect(diagnostic.layerName == "Hero Layer")
+        #expect(diagnostic.errorDescription.contains("Hero Layer"))
+        // The user-facing copy must avoid raw engineering jargon.
+        #expect(!diagnostic.errorDescription.lowercased().contains("texture"))
+        #expect(!diagnostic.errorDescription.lowercased().contains("shader"))
+    }
 }
 
 private struct MetalSceneFixture {
@@ -203,6 +294,45 @@ private struct MetalSceneFixture {
         try Data(#"{ "passes": [{ "shader": "genericimage2", "textures": ["materials/base.png"] }] }"#.utf8)
             .write(to: materials.appendingPathComponent("base.json"))
         try writeScene(imagePath: "models/base.json", to: root)
+        return MetalSceneFixture(
+            root: root,
+            descriptor: SceneDescriptor(
+                workshopID: UUID().uuidString,
+                cacheRelativePath: "wpe-cache/test",
+                entryFile: "scene.json",
+                capabilityTier: .imageOnly
+            ),
+            dependencyRoot: nil
+        )
+    }
+
+    static func missingTextureScene() throws -> MetalSceneFixture {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPEMetalSceneRenderer-\(UUID().uuidString)", isDirectory: true)
+        let models = root.appendingPathComponent("models", isDirectory: true)
+        let materials = root.appendingPathComponent("materials", isDirectory: true)
+        try FileManager.default.createDirectory(at: models, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: materials, withIntermediateDirectories: true)
+        try Data(#"{ "material": "materials/missing-material.json" }"#.utf8)
+            .write(to: models.appendingPathComponent("hero.json"))
+        try Data(#"{ "passes": [{ "shader": "genericimage2", "textures": ["materials/missing.png"] }] }"#.utf8)
+            .write(to: materials.appendingPathComponent("missing-material.json"))
+        let scene = """
+        {
+          "camera": { "center": "0 0 0" },
+          "general": { "orthogonalprojection": { "width": 64, "height": 64, "auto": true } },
+          "objects": [{
+            "id": "hero",
+            "name": "Hero Layer",
+            "type": "image",
+            "image": "models/hero.json",
+            "origin": "0.5 0.5 0",
+            "scale": "1 1 1",
+            "alpha": 1
+          }]
+        }
+        """
+        try Data(scene.utf8).write(to: root.appendingPathComponent("scene.json"))
         return MetalSceneFixture(
             root: root,
             descriptor: SceneDescriptor(

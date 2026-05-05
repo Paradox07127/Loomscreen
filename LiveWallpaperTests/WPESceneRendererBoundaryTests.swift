@@ -117,6 +117,7 @@ private final class FakeSceneRenderer: WPESceneRenderer {
     var renderGraph: WPERenderGraph?
     var renderPipeline: WPEPreparedRenderPipeline?
     var hasPresentedFrame = false
+    var previewSnapshot: NSImage?
     var nsView: NSView { view }
 
     func load() async throws {

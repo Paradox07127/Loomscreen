@@ -1,9 +1,12 @@
 import AppKit
 import MetalKit
 
-/// Wraps a texture-load failure with the requested asset path so the H1
-/// diagnostic mapper can blame the exact file, not the scene entry point.
+/// Wraps a texture-load failure with the requested asset path AND the WPE
+/// object/layer name that referenced it so the H1 diagnostic mapper can
+/// blame the exact file and surface the failing layer instead of falling
+/// back to the scene entry point.
 private struct WPEMetalTextureLoadContextError: Error {
+    let layerName: String
     let path: String
     let underlying: any Error
 }
@@ -19,6 +22,13 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
     private let executor: WPEMetalRenderExecutor
     private let textureLoader: WPEMetalTextureLoader
     private var outputTexture: MTLTexture?
+    private var loadedTextures: [String: MTLTexture] = [:]
+    private var sceneRenderSize: CGSize = CGSize(width: 1, height: 1)
+    private var cameraUniforms: WPEMetalCameraUniforms = .identity
+    private var frameClock: WPEMetalFrameClock
+    private let pointerSampler: WPEMetalPointerSampler
+    private let snapshotter: WPEMetalTextureSnapshotter
+    private var cachedSnapshot: NSImage?
     private var didLoad = false
     private var isThrottled = false
     private var currentProfile: WallpaperPerformanceProfile = .quality
@@ -27,7 +37,13 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
     private(set) var loadDiagnostics: SceneLoadDiagnostic?
     private(set) var renderGraph: WPERenderGraph?
     private(set) var renderPipeline: WPEPreparedRenderPipeline?
+    private(set) var lastRuntimeUniforms: WPEMetalRuntimeUniforms?
     var renderedTexture: MTLTexture? { outputTexture }
+    /// CGImage readback of the most recent rendered frame; populated at the
+    /// end of `performLoad()` so `WPESceneDetailView` can show a thumbnail
+    /// instead of falling into `.previewUnavailable`. Refreshed by `reload()`
+    /// and cleared by `cleanup()`.
+    var previewSnapshot: NSImage? { cachedSnapshot }
     var onProgress: (@MainActor (String) -> Void)?
 
     init(
@@ -35,7 +51,10 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         cacheRootURL: URL,
         dependencyMounts: [WPEAssetMount],
         frame: CGRect,
-        device: MTLDevice
+        device: MTLDevice,
+        frameClock: WPEMetalFrameClock = WPEMetalFrameClock(),
+        pointerSampler: WPEMetalPointerSampler = .live,
+        snapshotter: WPEMetalTextureSnapshotter = .shared
     ) throws {
         self.descriptor = descriptor
         self.cacheRootURL = cacheRootURL
@@ -48,6 +67,9 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         self.executor = try WPEMetalRenderExecutor(device: device)
         self.textureLoader = WPEMetalTextureLoader(device: device)
         self.mtkView = MTKView(frame: frame, device: device)
+        self.frameClock = frameClock
+        self.pointerSampler = pointerSampler
+        self.snapshotter = snapshotter
         super.init()
 
         mtkView.delegate = self
@@ -55,7 +77,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         mtkView.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
         mtkView.preferredFramesPerSecond = SceneRenderingController.defaultPreferredFPS
         mtkView.autoresizingMask = [.width, .height]
-        mtkView.enableSetNeedsDisplay = true
+        mtkView.enableSetNeedsDisplay = false
         mtkView.isPaused = true
     }
 
@@ -98,21 +120,47 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
 
         renderGraph = graph
         renderPipeline = pipeline
-        let projection = document.general.orthogonalProjection
+        cameraUniforms = WPEMetalCameraUniforms(
+            orthogonalProjection: document.general.orthogonalProjection,
+            sceneCamera: document.camera
+        )
+        sceneRenderSize = cameraUniforms.renderSize
 
         onProgress?("Loading textures")
-        let textures = try loadTextures(for: pipeline)
+        loadedTextures = try await loadTextures(for: pipeline)
 
         onProgress?("Rendering scene")
-        outputTexture = try executor.render(
-            pipeline: pipeline,
-            size: CGSize(width: max(projection.width, 1), height: max(projection.height, 1)),
-            textures: textures
-        )
+        outputTexture = try renderCurrentFrame()
+        if let outputTexture {
+            cachedSnapshot = snapshotter.snapshot(from: outputTexture)
+        }
         hasPresentedFrame = true
         didLoad = true
         applyPerformanceProfile(currentProfile)
         mtkView.setNeedsDisplay(mtkView.bounds)
+    }
+
+    /// Computes one frame's runtime uniforms (clock, daytime, brightness,
+    /// pointer) and submits the render pipeline with both runtime and camera
+    /// uniforms. Called once during `performLoad()` and then per-frame from
+    /// `draw(in:)` so animated scenes refresh without rebuilding the
+    /// pipeline. `lastRuntimeUniforms` is exposed for tests.
+    private func renderCurrentFrame() throws -> MTLTexture {
+        guard let pipeline = renderPipeline else {
+            throw WPEMetalRenderExecutorError.noRenderablePasses
+        }
+        let uniforms = frameClock.runtimeUniforms(
+            profile: currentProfile,
+            pointerPosition: pointerSampler.sample(mtkView)
+        )
+        lastRuntimeUniforms = uniforms
+        return try executor.render(
+            pipeline: pipeline,
+            size: sceneRenderSize,
+            textures: loadedTextures,
+            runtimeUniforms: uniforms,
+            cameraUniforms: cameraUniforms
+        )
     }
 
     func reload() async throws {
@@ -122,6 +170,11 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         renderGraph = nil
         renderPipeline = nil
         loadDiagnostics = nil
+        loadedTextures = [:]
+        sceneRenderSize = CGSize(width: 1, height: 1)
+        cameraUniforms = .identity
+        lastRuntimeUniforms = nil
+        cachedSnapshot = nil
         try await load()
     }
 
@@ -137,14 +190,21 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         currentProfile = profile
         switch profile {
         case .quality:
-            mtkView.isPaused = false
+            // Phase 2B presents the cached `outputTexture` once per
+            // visibility change rather than re-rendering every display
+            // tick. Built-in shaders (solidcolor / genericimage / copy) do
+            // not consume `g_Time`, so the per-frame work would just burn
+            // GPU on a 6-display setup. Phase 2C/2D will re-enable
+            // continuous draw once GLSL translation lands and shaders
+            // actually use the runtime uniforms.
+            mtkView.isPaused = true
             mtkView.enableSetNeedsDisplay = true
             mtkView.preferredFramesPerSecond = isThrottled
                 ? SceneRenderingController.throttledPreferredFPS
                 : SceneRenderingController.defaultPreferredFPS
         case .suspended:
             mtkView.isPaused = true
-            mtkView.enableSetNeedsDisplay = false
+            mtkView.enableSetNeedsDisplay = true
             mtkView.releaseDrawables()
         }
     }
@@ -152,13 +212,16 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
     func cleanup() {
         mtkView.delegate = nil
         outputTexture = nil
+        loadedTextures = [:]
+        lastRuntimeUniforms = nil
+        cachedSnapshot = nil
     }
 
     nonisolated func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
     nonisolated func draw(in view: MTKView) {
         MainActor.assumeIsolated { [weak self] in
-            guard let self, let outputTexture else { return }
+            guard let self, didLoad, let outputTexture else { return }
             do {
                 if try executor.present(texture: outputTexture, in: view) {
                     SystemMonitor.shared.tickFrame()
@@ -169,32 +232,44 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         }
     }
 
-    private func loadTextures(for pipeline: WPEPreparedRenderPipeline) throws -> [String: MTLTexture] {
+    private func loadTextures(for pipeline: WPEPreparedRenderPipeline) async throws -> [String: MTLTexture] {
         var textures: [String: MTLTexture] = [:]
         for layer in pipeline.layers {
             if layer.passes.isEmpty {
-                try loadTexture(reference: .image(layer.graphLayer.imagePath), into: &textures)
+                try await loadTexture(
+                    reference: .image(layer.graphLayer.imagePath),
+                    layerName: layer.graphLayer.objectName,
+                    into: &textures
+                )
                 continue
             }
             for preparedPass in layer.passes {
                 for reference in requiredTextureReferences(for: preparedPass) {
-                    try loadTexture(reference: reference, into: &textures)
+                    try await loadTexture(
+                        reference: reference,
+                        layerName: layer.graphLayer.objectName,
+                        into: &textures
+                    )
                 }
             }
         }
         return textures
     }
 
-    private func loadTexture(reference: WPETextureReference, into textures: inout [String: MTLTexture]) throws {
+    private func loadTexture(
+        reference: WPETextureReference,
+        layerName: String,
+        into textures: inout [String: MTLTexture]
+    ) async throws {
         guard let path = externalTexturePath(for: reference), textures[path] == nil else {
             return
         }
         do {
-            textures[path] = try makeTexture(relativePath: path, label: "WPE texture \(path)")
+            textures[path] = try await makeTexture(relativePath: path, label: "WPE texture \(path)")
         } catch {
-            // Carry the asset path through so `diagnostic(for:)` can blame the
-            // exact texture instead of falling back to the scene entry file.
-            throw WPEMetalTextureLoadContextError(path: path, underlying: error)
+            // Carry the asset path AND layer name through so `diagnostic(for:)`
+            // can attribute the failure to the WPE object that referenced it.
+            throw WPEMetalTextureLoadContextError(layerName: layerName, path: path, underlying: error)
         }
     }
 
@@ -217,20 +292,20 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         return []
     }
 
-    private func makeTexture(relativePath: String, label: String) throws -> MTLTexture {
+    private func makeTexture(relativePath: String, label: String) async throws -> MTLTexture {
         var lastError: Error?
         for candidate in textureCandidates(for: relativePath) {
             do {
                 if shouldTryTexturePayload(candidate) {
                     do {
                         let payload = try resourceResolver.resolveTexturePayload(relativePath: candidate)
-                        return try textureLoader.makeTexture(from: payload, label: label)
+                        return try await textureLoader.makeTexture(from: payload, label: label)
                     } catch {
                         lastError = error
                     }
                 }
                 let image = try resourceResolver.resolveImage(relativePath: candidate)
-                return try textureLoader.makeTexture(from: image, label: label)
+                return try await textureLoader.makeTexture(from: image, label: label)
             } catch {
                 lastError = error
             }
@@ -297,61 +372,67 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
     }
 
     /// Maps any error raised during `performLoad()` onto the same
-    /// `SceneLoadDiagnostic` taxonomy `SceneRenderingController` populates, so
-    /// the SpriteKit and Metal backends report failures through one UI path.
-    /// `fallbackPath` carries an asset path through `WPEMetalTextureLoadContextError`
-    /// so missing-asset diagnostics blame the exact texture, not the scene
-    /// entry file. Layer attribution still uses `"scene"` — per-layer
-    /// granularity ships in Phase 2B.
+    /// `SceneLoadDiagnostic` taxonomy `SceneRenderingController` populates so
+    /// SpriteKit and Metal report failures through one UI path. The
+    /// `WPEMetalTextureLoadContextError` wrapper carries both the asset path
+    /// and the failing WPE object name through the recursion so missing-asset
+    /// diagnostics blame the exact layer instead of the generic scene entry.
     private func diagnostic(for error: Error) -> SceneLoadDiagnostic {
-        diagnostic(for: error, fallbackPath: nil)
+        diagnostic(for: error, fallbackPath: nil, layerName: "scene")
     }
 
-    private func diagnostic(for error: Error, fallbackPath: String?) -> SceneLoadDiagnostic {
-        let layer = "scene"
+    private func diagnostic(
+        for error: Error,
+        fallbackPath: String?,
+        layerName: String
+    ) -> SceneLoadDiagnostic {
         switch error {
         case let context as WPEMetalTextureLoadContextError:
-            return diagnostic(for: context.underlying, fallbackPath: context.path)
+            return diagnostic(
+                for: context.underlying,
+                fallbackPath: context.path,
+                layerName: context.layerName
+            )
         case let executorError as WPEMetalRenderExecutorError:
             switch executorError {
             case .unsupportedShader(let name):
-                return .materialUnresolved(layer: layer, reason: "Shader \"\(name)\" is not supported by the Metal renderer yet.")
+                return .materialUnresolved(layer: layerName, reason: "Shader \"\(name)\" is not supported by the Metal renderer yet.")
             case .unsupportedTarget:
-                return .materialUnresolved(layer: layer, reason: "This wallpaper uses an unsupported rendering target.")
+                return .materialUnresolved(layer: layerName, reason: "This wallpaper uses an unsupported rendering target.")
             case .missingTexture(let reference):
                 switch reference {
                 case .image(let path), .asset(let path), .fbo(let path):
-                    return .fileMissing(layer: layer, path: path)
+                    return .fileMissing(layer: layerName, path: path)
                 case .previous:
-                    return .materialUnresolved(layer: layer, reason: "Previous-frame effects (motion blur, feedback) are not yet supported.")
+                    return .materialUnresolved(layer: layerName, reason: "Previous-frame effects (motion blur, feedback) are not yet supported.")
                 }
             case .noRenderablePasses:
-                return .materialUnresolved(layer: layer, reason: "Scene contains no renderable passes.")
+                return .materialUnresolved(layer: layerName, reason: "Scene contains no renderable passes.")
             case .commandQueueUnavailable, .libraryUnavailable, .pipelineUnavailable, .commandBufferFailed:
-                return .other(layer: layer, message: executorError.errorDescription ?? "Metal renderer failed.")
+                return .other(layer: layerName, message: executorError.errorDescription ?? "Metal renderer failed.")
             }
         case let loaderError as WPEMetalTextureLoaderError:
             switch loaderError {
             case .unsupportedFormat, .unsupportedCompressedFormat, .malformedPayload, .textureAllocationFailed:
-                return .other(layer: layer, message: loaderError.errorDescription ?? "Texture upload failed.")
+                return .other(layer: layerName, message: loaderError.errorDescription ?? "Texture upload failed.")
             }
         case let resolveError as SceneResourceResolver.ResolveError:
             switch resolveError {
             case .fileMissing:
-                return .fileMissing(layer: layer, path: fallbackPath ?? descriptor.entryFile)
+                return .fileMissing(layer: layerName, path: fallbackPath ?? descriptor.entryFile)
             case .pathEscape:
-                return .crossPackageReference(layer: layer, path: fallbackPath ?? descriptor.entryFile)
+                return .crossPackageReference(layer: layerName, path: fallbackPath ?? descriptor.entryFile)
             case .materialUnresolved(let reason):
-                return .materialUnresolved(layer: layer, reason: reason)
+                return .materialUnresolved(layer: layerName, reason: reason)
             case .texture(let texError):
-                return .texture(layer: layer, error: texError)
+                return .texture(layer: layerName, error: texError)
             case .unsupportedTexture:
-                return .legacyUnsupportedTexture(layer: layer)
+                return .legacyUnsupportedTexture(layer: layerName)
             case .decodeFailed:
-                return .other(layer: layer, message: "A texture or image file is corrupted and cannot be decoded.")
+                return .other(layer: layerName, message: "A texture or image file is corrupted and cannot be decoded.")
             }
         default:
-            return .other(layer: layer, message: error.localizedDescription)
+            return .other(layer: layerName, message: error.localizedDescription)
         }
     }
 }

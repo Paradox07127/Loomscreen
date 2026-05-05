@@ -108,7 +108,16 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
                 self?.loadError = error
             } catch {
                 Logger.warning("Scene wallpaper load failed: \(error.localizedDescription)", category: .screenManager)
-                self?.loadError = .parseFailed(error.localizedDescription)
+                // Phase 2B: Metal renderer maps load failures onto
+                // `loadDiagnostics` before rethrowing the raw error type;
+                // surface that taxonomy here so the detail view shows the
+                // precise `SceneLoadDiagnostic` reason instead of a generic
+                // "parse failed" message.
+                if let diagnostic = renderer.loadDiagnostics {
+                    self?.loadError = .resourceFailed(diagnostic)
+                } else {
+                    self?.loadError = .parseFailed(error.localizedDescription)
+                }
             }
         }
     }
@@ -135,7 +144,11 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
         } catch let error as SceneRenderingError {
             loadError = error
         } catch {
-            loadError = .parseFailed(error.localizedDescription)
+            if let diagnostic = renderer.loadDiagnostics {
+                loadError = .resourceFailed(diagnostic)
+            } else {
+                loadError = .parseFailed(error.localizedDescription)
+            }
         }
     }
 

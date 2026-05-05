@@ -39,6 +39,11 @@ struct WPESolidUniforms {
     var color: SIMD4<Float>
 }
 
+struct WPECopyUniforms {
+    var uvOffset: SIMD2<Float>
+    var padding: SIMD2<Float> = SIMD2<Float>(0, 0)
+}
+
 final class WPEMetalRenderExecutor {
     /// Phase 2A H3: every offscreen target and the on-screen swapchain share a
     /// single sRGB pixel format so render pipelines built for the offscreen
@@ -67,8 +72,11 @@ final class WPEMetalRenderExecutor {
     func render(
         pipeline: WPEPreparedRenderPipeline,
         size: CGSize,
-        textures: [String: MTLTexture]
+        textures: [String: MTLTexture],
+        runtimeUniforms: WPEMetalRuntimeUniforms = .zero,
+        cameraUniforms: WPEMetalCameraUniforms = .identity
     ) throws -> MTLTexture {
+        let preparedPipeline = pipeline.addingMetalRuntimeUniforms(runtimeUniforms, camera: cameraUniforms)
         let output = try makeOutputTexture(size: size)
         guard let commandBuffer = commandQueue.makeCommandBuffer() else {
             throw WPEMetalRenderExecutorError.commandBufferFailed
@@ -76,10 +84,12 @@ final class WPEMetalRenderExecutor {
 
         var shouldClear = true
         var didEncode = false
-        for layer in pipeline.layers {
+        for layer in preparedPipeline.layers {
             if layer.passes.isEmpty {
                 try encodeCopy(
                     reference: .image(layer.graphLayer.imagePath),
+                    layer: layer.graphLayer,
+                    runtimeUniforms: runtimeUniforms,
                     output: output,
                     textures: textures,
                     commandBuffer: commandBuffer,
@@ -92,6 +102,7 @@ final class WPEMetalRenderExecutor {
             for pass in layer.passes {
                 try encode(
                     pass: pass,
+                    layer: layer.graphLayer,
                     output: output,
                     textures: textures,
                     commandBuffer: commandBuffer,
@@ -131,6 +142,8 @@ final class WPEMetalRenderExecutor {
         }
         encoder.setRenderPipelineState(try renderPipeline(fragmentName: "wpe_copy_fragment"))
         encoder.setFragmentTexture(source, index: 0)
+        var uniforms = WPECopyUniforms(uvOffset: SIMD2<Float>(0, 0))
+        encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPECopyUniforms>.stride, index: 0)
         encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
         encoder.endEncoding()
 
@@ -141,6 +154,7 @@ final class WPEMetalRenderExecutor {
 
     private func encode(
         pass: WPEPreparedRenderPass,
+        layer: WPERenderLayer,
         output: MTLTexture,
         textures: [String: MTLTexture],
         commandBuffer: MTLCommandBuffer,
@@ -169,7 +183,9 @@ final class WPEMetalRenderExecutor {
             encoder.setRenderPipelineState(try renderPipeline(fragmentName: "wpe_copy_fragment"))
             let reference = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
             let texture = try resolve(reference: reference, textures: textures)
+            var uniforms = copyUniforms(for: pass, layer: layer)
             encoder.setFragmentTexture(texture, index: 0)
+            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPECopyUniforms>.stride, index: 0)
         } else {
             throw WPEMetalRenderExecutorError.unsupportedShader(pass.pass.shader)
         }
@@ -179,6 +195,8 @@ final class WPEMetalRenderExecutor {
 
     private func encodeCopy(
         reference: WPETextureReference,
+        layer: WPERenderLayer,
+        runtimeUniforms: WPEMetalRuntimeUniforms,
         output: MTLTexture,
         textures: [String: MTLTexture],
         commandBuffer: MTLCommandBuffer,
@@ -197,7 +215,51 @@ final class WPEMetalRenderExecutor {
 
         encoder.setRenderPipelineState(try renderPipeline(fragmentName: "wpe_copy_fragment"))
         encoder.setFragmentTexture(try resolve(reference: reference, textures: textures), index: 0)
+        var uniforms = WPECopyUniforms(
+            uvOffset: Self.parallaxUVOffset(
+                pointerPosition: runtimeUniforms.pointerPosition,
+                parallaxDepth: layer.parallaxDepth
+            )
+        )
+        encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPECopyUniforms>.stride, index: 0)
         encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+    }
+
+    /// Conservative WPE mouse-parallax model. The shader receives a UV
+    /// offset bounded to ±0.05 so a layer with depth 0.1 and the cursor at
+    /// the screen edge shifts samples by 5% — enough to feel parallax
+    /// without exposing texture borders. Phase 2D's GLSL translator will
+    /// replace this with the full WPE camera-parallax math.
+    static func parallaxUVOffset(
+        pointerPosition: SIMD2<Double>,
+        parallaxDepth: Double
+    ) -> SIMD2<Float> {
+        guard parallaxDepth != 0 else {
+            return SIMD2<Float>(0, 0)
+        }
+        let delta = SIMD2<Double>(
+            pointerPosition.x - 0.5,
+            pointerPosition.y - 0.5
+        )
+        let offset = delta * parallaxDepth * 0.1
+        return SIMD2<Float>(
+            Float(min(max(offset.x, -0.05), 0.05)),
+            Float(min(max(offset.y, -0.05), 0.05))
+        )
+    }
+
+    private func copyUniforms(for pass: WPEPreparedRenderPass, layer: WPERenderLayer) -> WPECopyUniforms {
+        let vector = pass.uniformValues["g_PointerPosition"]?.vectorValue ?? [0.5, 0.5]
+        let pointer = SIMD2<Double>(
+            vector[safe: 0] ?? 0.5,
+            vector[safe: 1] ?? 0.5
+        )
+        return WPECopyUniforms(
+            uvOffset: Self.parallaxUVOffset(
+                pointerPosition: pointer,
+                parallaxDepth: layer.parallaxDepth
+            )
+        )
     }
 
     private func renderPipeline(fragmentName: String) throws -> MTLRenderPipelineState {
