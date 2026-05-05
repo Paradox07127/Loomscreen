@@ -234,7 +234,7 @@ struct WPESceneDetailView: View {
         // the title AND the active diagnostic in one pass — the previous
         // implementation overrode `accessibilityLabel` on the parent and
         // hid the error text from screen readers entirely (gemini audit).
-        let diagnosticText = session?.sceneController?.loadDiagnostics?.errorDescription
+        let diagnosticText = session?.sceneRenderer?.loadDiagnostics?.errorDescription
             ?? "All declared layers decoded cleanly."
         VStack(alignment: .leading, spacing: 6) {
             Text("Renderer Diagnostics")
@@ -315,11 +315,11 @@ struct WPESceneDetailView: View {
             state = .error(mapToFallbackReason(error))
             return
         }
-        guard let controller = session.sceneController else {
+        guard let renderer = session.sceneRenderer else {
             state = .idle
             return
         }
-        if controller.view.scene == nil {
+        if !renderer.hasPresentedFrame {
             state = .loading(progress: session.loadProgress)
             return
         }
@@ -327,9 +327,13 @@ struct WPESceneDetailView: View {
         // machine consults — this is the single point where ReduceMotion
         // / throttle propagate down to the controller. `applyPerformanceProfile`
         // is idempotent so re-issuing the current profile every poll is cheap.
-        controller.applyPerformanceProfile(reduceMotion ? .suspended : .quality)
+        renderer.applyPerformanceProfile(reduceMotion ? .suspended : .quality)
         if reduceMotion || session.isThrottled {
             state = .paused(reason: reduceMotion ? .reduceMotion : .throttled)
+            return
+        }
+        guard let controller = session.sceneController else {
+            state = .paused(reason: .previewUnavailable)
             return
         }
         state = .playing(controller)
@@ -470,12 +474,14 @@ enum PausedReason: Equatable, Sendable {
     case reduceMotion
     case throttled
     case suspended
+    case previewUnavailable
 
     var label: String {
         switch self {
         case .reduceMotion: return "Reduce Motion"
         case .throttled:    return "Throttled"
         case .suspended:    return "Suspended"
+        case .previewUnavailable: return "Preview Unavailable"
         }
     }
 }

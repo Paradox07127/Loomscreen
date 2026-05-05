@@ -34,6 +34,16 @@ struct WPEMultiRootResourceResolver: Sendable {
         return try primary.resolveExistingFileURL(relativePath: relativePath)
     }
 
+    func resolveTexturePayload(relativePath: String) throws -> WPETexTexturePayload {
+        if let dependency = dependencyReference(relativePath) {
+            guard let resolver = dependencyMounts[dependency.workshopID] else {
+                throw SceneResourceResolver.ResolveError.pathEscape
+            }
+            return try resolver.resolveTexturePayload(relativePath: dependency.childPath)
+        }
+        return try primary.resolveTexturePayload(relativePath: relativePath)
+    }
+
     private func dependencyReference(_ relativePath: String) -> (workshopID: String, childPath: String)? {
         guard relativePath.hasPrefix("../") else { return nil }
         let parts = relativePath.split(separator: "/", omittingEmptySubsequences: false)

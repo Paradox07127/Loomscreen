@@ -182,6 +182,23 @@ struct WPETexBitmapBlock: Sendable, Equatable {
     }
 }
 
+struct WPETexTexturePayload: Sendable, Equatable {
+    let info: WPETexInfo
+    let mipmaps: [WPETexTextureMipmap]
+    let hasAnimationFrames: Bool
+
+    var largestMipmap: WPETexTextureMipmap? {
+        mipmaps.first
+    }
+}
+
+struct WPETexTextureMipmap: Sendable, Equatable {
+    let index: Int
+    let width: Int
+    let height: Int
+    let bytes: Data
+}
+
 /// CPU-side RGBA8 image emitted by every decode path (CPU or Metal). A
 /// thin Sendable container so the actual `CGImage` can be created at the
 /// resolver boundary.

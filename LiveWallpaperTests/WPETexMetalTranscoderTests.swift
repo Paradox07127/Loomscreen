@@ -5,14 +5,11 @@ import Testing
 @Suite("WPETexMetalTranscoder — BC compatibility gate")
 struct WPETexMetalTranscoderTests {
 
-    @Test("Phase 2.1 transcoder always reports BC formats as unavailable")
-    func bcFormatsReportUnavailable() {
-        // The Metal blit-based transcode in Day 2 was incorrect (a blit
-        // copy cannot transcode between pixel formats), so Phase 2.1
-        // ships with BC explicitly marked unavailable until the
-        // shader/compute pipeline arrives in Phase 2.2. The capability
-        // tier classifier reads `isAvailable(for:)`, so this test pins
-        // the contract that all four BC variants stay non-decodable.
+    @Test("Legacy transcoder remains unavailable; Phase 2A uses native texture mapping")
+    func legacyTranscoderRemainsUnavailable() {
+        // The SpriteKit/CGImage path cannot consume BC payloads, so the
+        // legacy transcoder remains fail-closed. Phase 2A's Metal renderer
+        // samples supported BC payloads directly as compressed textures.
         #expect(!WPETexMetalTranscoder.isAvailable(for: .dxt1))
         #expect(!WPETexMetalTranscoder.isAvailable(for: .dxt3))
         #expect(!WPETexMetalTranscoder.isAvailable(for: .dxt5))
