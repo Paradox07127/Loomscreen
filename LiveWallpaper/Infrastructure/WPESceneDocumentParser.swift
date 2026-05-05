@@ -212,6 +212,10 @@ enum WPESceneDocumentParser {
             diagnostics.append(.init(severity: .warning, message: "Image \(name) uses .tex texture — falls back to first-frame stub if available"))
         }
 
+        // WPE writes the field as `parallaxDepth` in newer scenes and the
+        // legacy lowercase `parallaxdepth` in older Workshop content.
+        let parallaxDepth = parseDouble(dict["parallaxDepth"]) ?? parseDouble(dict["parallaxdepth"]) ?? 0
+
         return WPESceneImageObject(
             id: id,
             name: name,
@@ -228,7 +232,8 @@ enum WPESceneDocumentParser {
             alignment: alignment,
             size: size,
             effects: effects,
-            animationLayers: animationLayers
+            animationLayers: animationLayers,
+            parallaxDepth: parallaxDepth
         )
     }
 

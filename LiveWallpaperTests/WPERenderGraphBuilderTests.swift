@@ -227,6 +227,41 @@ struct WPERenderGraphBuilderTests {
         #expect(layer.passes[1].target == .scene)
     }
 
+    @Test("Render graph preserves image object parallax depth on layer")
+    func renderGraphPreservesParallaxDepth() throws {
+        let object = WPESceneImageObject(
+            id: "hero",
+            name: "Hero",
+            imageRelativePath: "materials/hero.png",
+            materialRelativePath: nil,
+            origin: SIMD3<Double>(0, 0, 0),
+            scale: SIMD3<Double>(1, 1, 1),
+            angles: SIMD3<Double>(0, 0, 0),
+            visible: true,
+            alpha: 1,
+            color: SIMD3<Double>(1, 1, 1),
+            brightness: 1,
+            blendMode: .normal,
+            alignment: .center,
+            size: nil,
+            effects: [],
+            animationLayers: [],
+            parallaxDepth: 0.2
+        )
+        let document = WPESceneDocument(
+            camera: .defaultCamera,
+            general: .defaultGeneral,
+            imageObjects: [object],
+            diagnostics: []
+        )
+
+        let graph = try WPERenderGraphBuilder(
+            cacheRootURL: FileManager.default.temporaryDirectory
+        ).build(document: document)
+
+        #expect(graph.layers.first?.parallaxDepth == 0.2)
+    }
+
     private func writeJSON(_ object: Any, to url: URL) throws {
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(),

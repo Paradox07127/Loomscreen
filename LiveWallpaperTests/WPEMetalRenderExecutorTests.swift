@@ -146,7 +146,7 @@ struct WPEMetalRenderExecutorTests {
     }
 }
 
-private struct Pixel {
+private struct Pixel: Equatable {
     let r: UInt8
     let g: UInt8
     let b: UInt8
@@ -270,13 +270,157 @@ private extension WPEMetalRenderExecutorTests {
         #expect(abs(Int(pixel.b) - 128) <= 3)
         #expect(pixel.a >= 250)
     }
+
+    @Test("Runtime clock uniforms do not change solidcolor built-in output")
+    func runtimeClockDoesNotChangeSolidColorOutput() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let pass = solidPass()
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: graphLayer(pass: pass, parallaxDepth: 0),
+                passes: [
+                    WPEPreparedRenderPass(
+                        pass: pass,
+                        shader: WPEShaderProgram(
+                            name: "solidcolor",
+                            vertexSource: "",
+                            fragmentSource: "",
+                            isBuiltin: true
+                        ),
+                        textureBindings: [:],
+                        comboValues: [:],
+                        uniformValues: ["g_Color": .vector([0.5, 0.5, 0.5, 1])]
+                    )
+                ]
+            )
+        ])
+        let camera = WPEMetalCameraUniforms(
+            orthogonalProjection: WPESceneOrthogonalProjection(width: 4, height: 4, auto: true),
+            sceneCamera: .defaultCamera
+        )
+
+        let output0 = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 4, height: 4),
+            textures: [:],
+            runtimeUniforms: WPEMetalRuntimeUniforms(
+                time: 0,
+                daytime: 0,
+                brightness: 1,
+                pointerPosition: SIMD2<Double>(0.5, 0.5)
+            ),
+            cameraUniforms: camera
+        )
+        let output1 = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 4, height: 4),
+            textures: [:],
+            runtimeUniforms: WPEMetalRuntimeUniforms(
+                time: 1,
+                daytime: 0.5,
+                brightness: 1,
+                pointerPosition: SIMD2<Double>(0.9, 0.1)
+            ),
+            cameraUniforms: camera
+        )
+
+        #expect(try readPixel(output0, x: 2, y: 2) == readPixel(output1, x: 2, y: 2))
+    }
+
+    @Test("Generic image parallax offset is bounded by pointer delta and layer depth")
+    func genericImageParallaxOffsetIsBounded() throws {
+        let offset = WPEMetalRenderExecutor.parallaxUVOffset(
+            pointerPosition: SIMD2<Double>(1.5, 0.5),
+            parallaxDepth: 0.1
+        )
+
+        #expect(abs(offset.x - 0.01) < 0.0001)
+        #expect(abs(offset.y) < 0.0001)
+    }
+
+    @Test("Generic image copy path shifts samples when parallax depth is non-zero")
+    func genericImageCopyPathShiftsSamplesWithParallax() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+
+        var bytes = Data()
+        for x in 0..<100 {
+            bytes.append(UInt8(x))
+            bytes.append(0)
+            bytes.append(0)
+            bytes.append(255)
+        }
+        let input = try makeRGBAInputTexture(device: device, width: 100, height: 1, bytes: bytes)
+        let pass = copyPass()
+        let layer = graphLayer(pass: pass, parallaxDepth: 0.1)
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: layer,
+                passes: [
+                    WPEPreparedRenderPass(
+                        pass: pass,
+                        shader: WPEShaderProgram(
+                            name: "genericimage2",
+                            vertexSource: "",
+                            fragmentSource: "",
+                            isBuiltin: true
+                        ),
+                        textureBindings: [0: .image("materials/base.png")],
+                        comboValues: [:],
+                        uniformValues: [:]
+                    )
+                ]
+            )
+        ])
+
+        let camera = WPEMetalCameraUniforms(
+            orthogonalProjection: WPESceneOrthogonalProjection(width: 100, height: 1, auto: true),
+            sceneCamera: .defaultCamera
+        )
+        let baseline = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 100, height: 1),
+            textures: ["materials/base.png": input],
+            runtimeUniforms: WPEMetalRuntimeUniforms(
+                time: 0,
+                daytime: 0,
+                brightness: 1,
+                pointerPosition: SIMD2<Double>(0.5, 0.5)
+            ),
+            cameraUniforms: camera
+        )
+        let shifted = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 100, height: 1),
+            textures: ["materials/base.png": input],
+            runtimeUniforms: WPEMetalRuntimeUniforms(
+                time: 0,
+                daytime: 0,
+                brightness: 1,
+                pointerPosition: SIMD2<Double>(1.5, 0.5)
+            ),
+            cameraUniforms: camera
+        )
+
+        let baselinePixel = try readPixel(baseline, x: 50, y: 0)
+        let shiftedPixel = try readPixel(shifted, x: 50, y: 0)
+
+        #expect(shiftedPixel.r >= baselinePixel.r)
+        #expect(Int(shiftedPixel.r) - Int(baselinePixel.r) <= 10)
+    }
 }
 
-private func makeRGBAInputTexture(device: MTLDevice, bytes: Data) throws -> MTLTexture {
+private func makeRGBAInputTexture(
+    device: MTLDevice,
+    width: Int = 2,
+    height: Int = 2,
+    bytes: Data
+) throws -> MTLTexture {
     let descriptor = MTLTextureDescriptor.texture2DDescriptor(
         pixelFormat: .rgba8Unorm,
-        width: 2,
-        height: 2,
+        width: width,
+        height: height,
         mipmapped: false
     )
     descriptor.usage = [.shaderRead]
@@ -284,16 +428,16 @@ private func makeRGBAInputTexture(device: MTLDevice, bytes: Data) throws -> MTLT
     let texture = try #require(device.makeTexture(descriptor: descriptor))
     bytes.withUnsafeBytes { raw in
         texture.replace(
-            region: MTLRegionMake2D(0, 0, 2, 2),
+            region: MTLRegionMake2D(0, 0, width, height),
             mipmapLevel: 0,
             withBytes: raw.baseAddress!,
-            bytesPerRow: 8
+            bytesPerRow: width * 4
         )
     }
     return texture
 }
 
-private func graphLayer(pass: WPERenderPass) -> WPERenderLayer {
+private func graphLayer(pass: WPERenderPass, parallaxDepth: Double = 0) -> WPERenderLayer {
     WPERenderLayer(
         objectID: "layer",
         objectName: "Layer",
@@ -302,6 +446,7 @@ private func graphLayer(pass: WPERenderPass) -> WPERenderLayer {
         compositeA: "a",
         compositeB: "b",
         localFBOs: [],
-        passes: [pass]
+        passes: [pass],
+        parallaxDepth: parallaxDepth
     )
 }

@@ -1,0 +1,164 @@
+import AppKit
+import QuartzCore
+import Testing
+@testable import LiveWallpaper
+
+@MainActor
+@Suite("WPE Metal runtime uniforms")
+struct WPEMetalRuntimeUniformsTests {
+
+    @Test("Frame clock computes time daytime brightness and pointer uniforms")
+    func frameClockComputesRuntimeUniforms() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+
+        let date = try #require(DateComponents(
+            calendar: calendar,
+            timeZone: calendar.timeZone,
+            year: 2026,
+            month: 5,
+            day: 5,
+            hour: 6,
+            minute: 30,
+            second: 0
+        ).date)
+
+        let clock = WPEMetalFrameClock(
+            loadTime: 10,
+            currentMediaTime: { 12.5 },
+            currentDate: { date },
+            calendar: calendar
+        )
+
+        let uniforms = clock.runtimeUniforms(
+            profile: .quality,
+            pointerPosition: SIMD2<Double>(0.25, 0.75)
+        )
+
+        #expect(abs(uniforms.time - 2.5) < 0.0001)
+        #expect(abs(uniforms.daytime - 0.2708333333) < 0.0001)
+        #expect(uniforms.brightness == 1)
+        #expect(uniforms.pointerPosition == SIMD2<Double>(0.25, 0.75))
+        #expect(uniforms.uniformValues["g_Time"]?.numberValue == 2.5)
+        #expect(uniforms.uniformValues["g_Brightness"]?.numberValue == 1)
+        #expect(uniforms.uniformValues["g_PointerPosition"]?.vectorValue == [0.25, 0.75])
+    }
+
+    @Test("Suspended profile maps brightness uniform to zero")
+    func suspendedProfileMapsBrightnessToZero() {
+        let uniforms = WPEMetalRuntimeUniforms(
+            time: 4,
+            daytime: 0.5,
+            brightness: WallpaperPerformanceProfile.suspended.metalBrightnessUniformValue,
+            pointerPosition: SIMD2<Double>(0.5, 0.5)
+        )
+
+        #expect(uniforms.brightness == 0)
+        #expect(uniforms.uniformValues["g_Brightness"]?.numberValue == 0)
+    }
+
+    @Test("Pointer sampler normalizes global mouse position to top-left scene UV")
+    func pointerSamplerNormalizesGlobalMousePosition() throws {
+        let window = NSWindow(
+            contentRect: CGRect(x: 100, y: 100, width: 200, height: 100),
+            styleMask: [],
+            backing: .buffered,
+            defer: false
+        )
+        let view = NSView(frame: CGRect(x: 0, y: 0, width: 200, height: 100))
+        window.contentView = view
+
+        let uv = WPEMetalPointerSampler.normalizedSceneUV(
+            mouseLocation: CGPoint(x: 200, y: 125),
+            in: view
+        )
+
+        #expect(abs(uv.x - 0.5) < 0.0001)
+        #expect(abs(uv.y - 0.75) < 0.0001)
+    }
+
+    @Test("Orthographic camera uses scene projection dimensions")
+    func orthographicCameraUsesSceneProjectionDimensions() {
+        let projection = WPESceneOrthogonalProjection(width: 200, height: 100, auto: true)
+        let camera = WPEMetalCameraUniforms(
+            orthogonalProjection: projection,
+            sceneCamera: .defaultCamera
+        )
+
+        #expect(camera.renderSize == CGSize(width: 200, height: 100))
+        #expect(camera.viewProjectionMatrix.count == 16)
+        #expect(abs(camera.viewProjectionMatrix[0] - 0.01) < 0.0001)
+        #expect(abs(camera.viewProjectionMatrix[5] + 0.02) < 0.0001)
+        #expect(abs(camera.viewProjectionMatrix[12] + 1.0) < 0.0001)
+        #expect(abs(camera.viewProjectionMatrix[13] - 1.0) < 0.0001)
+    }
+
+    @Test("Prepared pipeline receives runtime and camera uniforms without losing material uniforms")
+    func preparedPipelineReceivesRuntimeAndCameraUniforms() {
+        let pass = WPERenderPass(
+            id: "solid.0",
+            phase: .material,
+            shader: "solidcolor",
+            source: .previous,
+            target: .scene,
+            textures: [:],
+            binds: [:],
+            constants: ["g_Color": .vector([1, 0, 0, 1])],
+            combos: [:],
+            blending: "normal",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let layer = WPERenderLayer(
+            objectID: "layer",
+            objectName: "Layer",
+            imagePath: "materials/base.png",
+            materialPath: nil,
+            compositeA: "a",
+            compositeB: "b",
+            localFBOs: [],
+            passes: [pass]
+        )
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: layer,
+                passes: [
+                    WPEPreparedRenderPass(
+                        pass: pass,
+                        shader: WPEShaderProgram(
+                            name: "solidcolor",
+                            vertexSource: "",
+                            fragmentSource: "",
+                            isBuiltin: true
+                        ),
+                        textureBindings: [:],
+                        comboValues: [:],
+                        uniformValues: ["g_Color": .vector([1, 0, 0, 1])]
+                    )
+                ]
+            )
+        ])
+
+        let runtime = WPEMetalRuntimeUniforms(
+            time: 1,
+            daytime: 0.25,
+            brightness: 1,
+            pointerPosition: SIMD2<Double>(0.2, 0.8)
+        )
+        let camera = WPEMetalCameraUniforms(
+            orthogonalProjection: WPESceneOrthogonalProjection(width: 64, height: 32, auto: true),
+            sceneCamera: .defaultCamera
+        )
+
+        let prepared = pipeline.addingMetalRuntimeUniforms(runtime, camera: camera)
+        let values = prepared.layers[0].passes[0].uniformValues
+
+        #expect(values["g_Color"]?.vectorValue == [1, 0, 0, 1])
+        #expect(values["g_Time"]?.numberValue == 1)
+        #expect(values["g_Daytime"]?.numberValue == 0.25)
+        #expect(values["g_Brightness"]?.numberValue == 1)
+        #expect(values["g_PointerPosition"]?.vectorValue == [0.2, 0.8])
+        #expect(values["g_ViewProjectionMatrix"]?.vectorValue?.count == 16)
+    }
+}

@@ -5,13 +5,77 @@ import MetalKit
 struct WPEMetalTextureLoader {
     private let device: MTLDevice
     private let capabilities: WPEMetalTextureCapabilities
+    private let uploadQueue: WPEMetalTextureUploadQueue
 
-    init(device: MTLDevice, capabilities: WPEMetalTextureCapabilities? = nil) {
+    init(
+        device: MTLDevice,
+        capabilities: WPEMetalTextureCapabilities? = nil,
+        uploadQueue: WPEMetalTextureUploadQueue = .shared
+    ) {
         self.device = device
         self.capabilities = capabilities ?? WPEMetalTextureCapabilities(device: device)
+        self.uploadQueue = uploadQueue
     }
 
-    func makeTexture(from payload: WPETexTexturePayload, label: String) throws -> MTLTexture {
+    func makeTexture(from payload: WPETexTexturePayload, label: String) async throws -> MTLTexture {
+        let device = self.device
+        let capabilities = self.capabilities
+        return try await uploadQueue.perform {
+            try Self.makeTextureSynchronously(
+                from: payload,
+                label: label,
+                device: device,
+                capabilities: capabilities
+            )
+        }
+    }
+
+    func makeTexture(from image: DecodedRGBAImage, label: String) async throws -> MTLTexture {
+        let payload = WPETexTexturePayload(
+            info: WPETexInfo(
+                containerVersion: 0,
+                infoVersion: 0,
+                width: image.width,
+                height: image.height,
+                textureFormatCode: WPETexFormat.rgba8888.rawValue,
+                format: .rgba8888,
+                mipmapCount: 1,
+                flags: 0
+            ),
+            mipmaps: [WPETexTextureMipmap(index: 0, width: image.width, height: image.height, bytes: image.pixels)],
+            hasAnimationFrames: false
+        )
+        return try await makeTexture(from: payload, label: label)
+    }
+
+    func makeTexture(from cgImage: CGImage, label: String) async throws -> MTLTexture {
+        let device = self.device
+        return try await uploadQueue.perform {
+            // Phase 2A H3: explicitly request sRGB so untagged CGImages do not
+            // fall back to the linear path and re-introduce gamma divergence.
+            let loader = MTKTextureLoader(device: device)
+            do {
+                let texture = try loader.newTexture(
+                    cgImage: cgImage,
+                    options: [
+                        MTKTextureLoader.Option.SRGB: true,
+                        MTKTextureLoader.Option.textureUsage: MTLTextureUsage.shaderRead.rawValue
+                    ]
+                )
+                texture.label = label
+                return texture
+            } catch {
+                throw WPEMetalTextureLoaderError.malformedPayload(error.localizedDescription)
+            }
+        }
+    }
+
+    private static func makeTextureSynchronously(
+        from payload: WPETexTexturePayload,
+        label: String,
+        device: MTLDevice,
+        capabilities: WPEMetalTextureCapabilities
+    ) throws -> MTLTexture {
         guard let format = payload.info.format else {
             throw WPEMetalTextureLoaderError.malformedPayload("unknown texture format \(payload.info.textureFormatCode)")
         }
@@ -40,7 +104,7 @@ struct WPEMetalTextureLoader {
                 "mip bytes \(mip.bytes.count) smaller than expected \(expected)"
             )
         }
-        let bytesPerRow = try Self.bytesPerRow(width: mip.width, mapping: mapping)
+        let bytesPerRow = try bytesPerRow(width: mip.width, mapping: mapping)
 
         mip.bytes.withUnsafeBytes { raw in
             texture.replace(
@@ -51,46 +115,6 @@ struct WPEMetalTextureLoader {
             )
         }
         return texture
-    }
-
-    func makeTexture(from image: DecodedRGBAImage, label: String) throws -> MTLTexture {
-        let payload = WPETexTexturePayload(
-            info: WPETexInfo(
-                containerVersion: 0,
-                infoVersion: 0,
-                width: image.width,
-                height: image.height,
-                textureFormatCode: WPETexFormat.rgba8888.rawValue,
-                format: .rgba8888,
-                mipmapCount: 1,
-                flags: 0
-            ),
-            mipmaps: [WPETexTextureMipmap(index: 0, width: image.width, height: image.height, bytes: image.pixels)],
-            hasAnimationFrames: false
-        )
-        return try makeTexture(from: payload, label: label)
-    }
-
-    func makeTexture(from cgImage: CGImage, label: String) throws -> MTLTexture {
-        let loader = MTKTextureLoader(device: device)
-        do {
-            // Phase 2A H3: explicitly request sRGB. WPE Workshop ships color
-            // imagery as sRGB-encoded PNG/JPG; relying on MTKTextureLoader to
-            // infer color space leaves untagged or device-RGB CGImages on the
-            // linear path, which would re-introduce the gamma divergence we
-            // are fixing. Forcing the option locks the contract.
-            let texture = try loader.newTexture(
-                cgImage: cgImage,
-                options: [
-                    MTKTextureLoader.Option.SRGB: true,
-                    MTKTextureLoader.Option.textureUsage: MTLTextureUsage.shaderRead.rawValue
-                ]
-            )
-            texture.label = label
-            return texture
-        } catch {
-            throw WPEMetalTextureLoaderError.malformedPayload(error.localizedDescription)
-        }
     }
 
     private static func bytesPerRow(width: Int, mapping: WPEMetalTextureFormatMapping) throws -> Int {
