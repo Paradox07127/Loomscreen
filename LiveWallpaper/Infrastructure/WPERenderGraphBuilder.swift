@@ -1,12 +1,13 @@
 import Foundation
 
 struct WPERenderGraphBuilder: Sendable {
-    private let cacheRootURL: URL
-    private let resolver: SceneResourceResolver
+    private let resolver: WPEMultiRootResourceResolver
 
-    init(cacheRootURL: URL) {
-        self.cacheRootURL = cacheRootURL
-        self.resolver = SceneResourceResolver(cacheRootURL: cacheRootURL)
+    init(cacheRootURL: URL, dependencyMounts: [WPEAssetMount] = []) {
+        self.resolver = WPEMultiRootResourceResolver(
+            primaryRootURL: cacheRootURL,
+            dependencyMounts: dependencyMounts
+        )
     }
 
     func build(document: WPESceneDocument) throws -> WPERenderGraph {
@@ -66,7 +67,7 @@ struct WPERenderGraphBuilder: Sendable {
                 case .command(let command, let source, let target):
                     let virtualPass = WPEMaterialPass(
                         shader: "commands/\(command)",
-                        textures: [0: source.map(textureReference) ?? .previous],
+                        textures: [0: source.map { textureReference($0, ownerPath: effect.fileRelativePath) } ?? .previous],
                         constants: [:],
                         combos: [:],
                         blending: "normal",
@@ -151,7 +152,7 @@ struct WPERenderGraphBuilder: Sendable {
         guard let material = dict["material"] as? String, !material.isEmpty else {
             throw WPERenderGraphError.materialUnresolved(object.imageRelativePath)
         }
-        return material
+        return inheritDependencyPrefix(material, from: object.imageRelativePath)
     }
 
     private func isBuiltinModelPath(_ path: String) -> Bool {
@@ -188,7 +189,7 @@ struct WPERenderGraphBuilder: Sendable {
         guard let rawPasses = dict["passes"] as? [Any] else {
             throw WPERenderGraphError.malformedMaterial(path)
         }
-        let passes = rawPasses.compactMap(parseMaterialPass)
+        let passes = rawPasses.compactMap { parseMaterialPass($0, ownerPath: path) }
         guard !passes.isEmpty else {
             throw WPERenderGraphError.malformedMaterial(path)
         }
@@ -200,7 +201,7 @@ struct WPERenderGraphBuilder: Sendable {
         guard let rawPasses = dict["passes"] as? [Any] else {
             throw WPERenderGraphError.malformedEffect(path)
         }
-        let passes = rawPasses.compactMap(parseEffectPass)
+        let passes = rawPasses.compactMap { parseEffectPass($0, ownerPath: path) }
         guard !passes.isEmpty else {
             throw WPERenderGraphError.malformedEffect(path)
         }
@@ -233,7 +234,7 @@ struct WPERenderGraphBuilder: Sendable {
         }
     }
 
-    private func parseMaterialPass(_ raw: Any) -> WPEMaterialPass? {
+    private func parseMaterialPass(_ raw: Any, ownerPath: String) -> WPEMaterialPass? {
         guard let dict = raw as? [String: Any],
               let shader = dict["shader"] as? String,
               !shader.isEmpty else {
@@ -241,7 +242,7 @@ struct WPERenderGraphBuilder: Sendable {
         }
         return WPEMaterialPass(
             shader: shader,
-            textures: parseTextureArray(dict["textures"]),
+            textures: parseTextureArray(dict["textures"], ownerPath: ownerPath),
             constants: parseShaderConstants(dict["constantshadervalues"]),
             combos: parseComboMap(dict["combos"]),
             blending: (dict["blending"] as? String) ?? "normal",
@@ -251,18 +252,22 @@ struct WPERenderGraphBuilder: Sendable {
         )
     }
 
-    private func parseEffectPass(_ raw: Any) -> WPEEffectPass? {
+    private func parseEffectPass(_ raw: Any, ownerPath: String) -> WPEEffectPass? {
         guard let dict = raw as? [String: Any] else { return nil }
-        let binds = parseBinds(dict["bind"])
+        let binds = parseBinds(dict["bind"], ownerPath: ownerPath)
         let target = dict["target"] as? String
         if let material = dict["material"] as? String, !material.isEmpty {
-            return WPEEffectPass(kind: .material(material), binds: binds, target: target)
+            return WPEEffectPass(
+                kind: .material(inheritDependencyPrefix(material, from: ownerPath)),
+                binds: binds,
+                target: target
+            )
         }
         if let command = dict["command"] as? String, !command.isEmpty {
             return WPEEffectPass(
                 kind: .command(
                     command,
-                    source: dict["source"] as? String,
+                    source: (dict["source"] as? String).map { inheritDependencyPrefix($0, from: ownerPath) },
                     target: target
                 ),
                 binds: binds,
@@ -286,7 +291,7 @@ struct WPERenderGraphBuilder: Sendable {
         )
     }
 
-    private func parseBinds(_ raw: Any?) -> [Int: WPETextureReference] {
+    private func parseBinds(_ raw: Any?, ownerPath: String) -> [Int: WPETextureReference] {
         guard let array = raw as? [Any] else { return [:] }
         var result: [Int: WPETextureReference] = [:]
         for entry in array {
@@ -296,30 +301,44 @@ struct WPERenderGraphBuilder: Sendable {
                   !name.isEmpty else {
                 continue
             }
-            result[index] = textureReference(name)
+            result[index] = textureReference(name, ownerPath: ownerPath)
         }
         return result
     }
 
-    private func parseTextureArray(_ raw: Any?) -> [Int: WPETextureReference] {
+    private func parseTextureArray(_ raw: Any?, ownerPath: String) -> [Int: WPETextureReference] {
         guard let array = raw as? [Any] else { return [:] }
         var result: [Int: WPETextureReference] = [:]
         for (index, value) in array.enumerated() {
             if let name = value as? String, !name.isEmpty {
-                result[index] = textureReference(name)
+                result[index] = textureReference(name, ownerPath: ownerPath)
             }
         }
         return result
     }
 
-    private func textureReference(_ name: String) -> WPETextureReference {
+    private func textureReference(_ name: String, ownerPath: String) -> WPETextureReference {
         if name == "previous" {
             return .previous
         }
         if name.hasPrefix("_rt_") || name.hasPrefix("_alias_") {
             return .fbo(name)
         }
-        return .asset(name)
+        return .asset(inheritDependencyPrefix(name, from: ownerPath))
+    }
+
+    private func inheritDependencyPrefix(_ path: String, from ownerPath: String) -> String {
+        guard !path.hasPrefix("../"),
+              let prefix = dependencyPrefix(in: ownerPath) else {
+            return path
+        }
+        return "\(prefix)/\(path)"
+    }
+
+    private func dependencyPrefix(in path: String) -> String? {
+        let parts = path.split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count >= 2, parts[0] == ".." else { return nil }
+        return "../\(parts[1])"
     }
 
     private func parseShaderConstants(_ raw: Any?) -> [String: WPESceneShaderConstantValue] {

@@ -1,6 +1,6 @@
 import AppKit
 
-/// Adapter that exposes the SpriteKit-backed `SceneRenderingController` to
+/// Adapter that exposes a WPE scene renderer to
 /// `ScreenManager` through the shared `WallpaperRuntimeSession` protocol so
 /// the rest of the runtime stack does not need a scene-specific code path.
 @MainActor
@@ -8,20 +8,25 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
     let wallpaperType: WallpaperType = .scene
 
     private var window: NSWindow?
-    private var controller: SceneRenderingController?
+    private var renderer: WPESceneRenderer?
     private var currentProfile: WallpaperPerformanceProfile = .quality
     private var isVisible = true
     private var didStartLoad = false
     private(set) var isThrottled = false
     private(set) var loadError: SceneRenderingError?
-    /// Latest per-layer progress message reported by the controller.
+    /// Latest per-layer progress message reported by the renderer.
     /// Phase 2.1 surfaces this via `WPESceneDetailView` so the user sees
     /// "Decoding 7/12 textures…" instead of an opaque spinner.
     private(set) var loadProgress: String?
 
     init(window: NSWindow, controller: SceneRenderingController) {
         self.window = window
-        self.controller = controller
+        self.renderer = controller
+    }
+
+    init(window: NSWindow, renderer: WPESceneRenderer) {
+        self.window = window
+        self.renderer = renderer
     }
 
     var summary: WallpaperSessionSummary {
@@ -44,31 +49,32 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
     var videoPlayer: WallpaperVideoPlayer? { nil }
     var wallpaperWindow: NSWindow? { window }
 
-    /// Hand the controller out so coordinators outside the session (e.g.
+    /// Hand the renderer out so coordinators outside the session (e.g.
     /// the exclusive-rendering coordinator) can flip throttle state without
     /// reaching through `wallpaperWindow.contentView`.
-    var sceneController: SceneRenderingController? { controller }
+    var sceneRenderer: WPESceneRenderer? { renderer }
+    var sceneController: SceneRenderingController? { renderer as? SceneRenderingController }
 
     func updateFrame(to frame: CGRect) {
         window?.setFrame(frame, display: true)
-        controller?.view.frame = CGRect(origin: .zero, size: frame.size)
+        renderer?.nsView.frame = CGRect(origin: .zero, size: frame.size)
     }
 
     func show() {
         isVisible = true
         window?.orderBack(nil)
-        controller?.applyPerformanceProfile(currentProfile)
+        renderer?.applyPerformanceProfile(currentProfile)
     }
 
     func hide() {
         isVisible = false
         window?.orderOut(nil)
-        controller?.applyPerformanceProfile(.suspended)
+        renderer?.applyPerformanceProfile(.suspended)
     }
 
     func applyPerformanceProfile(_ profile: WallpaperPerformanceProfile) {
         currentProfile = profile
-        controller?.applyPerformanceProfile(isVisible ? profile : .suspended)
+        renderer?.applyPerformanceProfile(isVisible ? profile : .suspended)
     }
 
     /// Exclusive-rendering coordinator entry point. Throttling is orthogonal
@@ -76,25 +82,25 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
     /// `.quality`, then bounce back when the user goes away.
     func setThrottled(_ throttled: Bool) {
         isThrottled = throttled
-        controller?.setThrottled(throttled)
+        renderer?.setThrottled(throttled)
     }
 
     func cleanup() {
-        controller?.cleanup()
-        controller = nil
+        renderer?.cleanup()
+        renderer = nil
         window?.close()
         window = nil
     }
 
-    /// Loads the SpriteKit scene. Safe to call multiple times — only the
+    /// Loads the scene renderer. Safe to call multiple times — only the
     /// first call performs I/O.
     func startLoadIfNeeded() {
-        guard !didStartLoad, let controller else { return }
+        guard !didStartLoad, let renderer else { return }
         didStartLoad = true
-        installProgressHandler(on: controller)
+        installProgressHandler(on: renderer)
         Task { @MainActor [weak self] in
             do {
-                try await controller.load()
+                try await renderer.load()
                 self?.loadError = nil
                 self?.loadProgress = nil
             } catch let error as SceneRenderingError {
@@ -117,13 +123,13 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
     /// the previous `loadError` on success so the state machine can move
     /// back to `.playing` instead of latching on the old failure.
     func reload() async {
-        guard let controller else {
+        guard let renderer else {
             loadError = .cacheRootMissing
             return
         }
-        installProgressHandler(on: controller)
+        installProgressHandler(on: renderer)
         do {
-            try await controller.reload()
+            try await renderer.reload()
             loadError = nil
             loadProgress = nil
         } catch let error as SceneRenderingError {
@@ -133,8 +139,8 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
         }
     }
 
-    private func installProgressHandler(on controller: SceneRenderingController) {
-        controller.onProgress = { [weak self] progress in
+    private func installProgressHandler(on renderer: WPESceneRenderer) {
+        renderer.onProgress = { [weak self] progress in
             self?.loadProgress = progress
         }
     }

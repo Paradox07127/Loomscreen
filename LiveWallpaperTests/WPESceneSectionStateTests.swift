@@ -90,6 +90,7 @@ struct WPESceneSectionStateTests {
         #expect(PausedReason.reduceMotion.label == "Reduce Motion")
         #expect(PausedReason.throttled.label == "Throttled")
         #expect(PausedReason.suspended.label == "Suspended")
+        #expect(PausedReason.previewUnavailable.label == "Preview Unavailable")
     }
 
     @Test("FallbackReason rendering distinguishes parse vs resource failure copy")
