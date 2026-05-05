@@ -13,7 +13,7 @@ import SpriteKit
 /// scene is mounted; the caller can then ask for `view` to insert into a
 /// wallpaper window.
 @MainActor
-final class SceneRenderingController {
+final class SceneRenderingController: WPESceneRenderer {
     /// Default frame rate target when not throttled. `SKView` clamps this to
     /// the display's refresh rate so 60 means "render every vsync".
     static let defaultPreferredFPS = 60
@@ -75,6 +75,8 @@ final class SceneRenderingController {
     }
 
     var view: SKView { skView }
+    var nsView: NSView { skView }
+    var hasPresentedFrame: Bool { skView.scene != nil }
 
     /// Materialises the SpriteKit scene from disk. Idempotent — calling it
     /// twice is a no-op on the second pass so the wallpaper session can
