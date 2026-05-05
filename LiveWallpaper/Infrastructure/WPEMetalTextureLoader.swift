@@ -74,10 +74,15 @@ struct WPEMetalTextureLoader {
     func makeTexture(from cgImage: CGImage, label: String) throws -> MTLTexture {
         let loader = MTKTextureLoader(device: device)
         do {
+            // Phase 2A H3: explicitly request sRGB. WPE Workshop ships color
+            // imagery as sRGB-encoded PNG/JPG; relying on MTKTextureLoader to
+            // infer color space leaves untagged or device-RGB CGImages on the
+            // linear path, which would re-introduce the gamma divergence we
+            // are fixing. Forcing the option locks the contract.
             let texture = try loader.newTexture(
                 cgImage: cgImage,
                 options: [
-                    MTKTextureLoader.Option.SRGB: false,
+                    MTKTextureLoader.Option.SRGB: true,
                     MTKTextureLoader.Option.textureUsage: MTLTextureUsage.shaderRead.rawValue
                 ]
             )

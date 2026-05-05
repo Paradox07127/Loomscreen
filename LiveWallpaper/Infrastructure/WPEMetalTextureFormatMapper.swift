@@ -1,5 +1,14 @@
 import Metal
 
+/// Color-space intent for a Metal texture upload. Phase 2A H3 introduces this
+/// so the renderer can request sRGB-encoded pixel formats — matching the
+/// SpriteKit/CGImage fallback path — while data textures (masks, normal maps,
+/// future R8/RG8 channels) stay linear.
+enum WPEMetalColorSpace: Equatable, Sendable {
+    case sRGB
+    case linear
+}
+
 struct WPEMetalTextureCapabilities: Equatable, Sendable {
     let supportsBCTextureCompression: Bool
 
@@ -39,13 +48,24 @@ enum WPEMetalTextureLoaderError: Error, Equatable, LocalizedError, Sendable {
 }
 
 enum WPEMetalTextureFormatMapper {
+    /// Maps a WPE texture container format to the concrete `MTLPixelFormat` the
+    /// renderer should allocate. `colorSpace` defaults to `.sRGB` because WPE
+    /// Workshop content (PNG/JPG/BC) ships as sRGB-encoded perceptual color and
+    /// the SpriteKit fallback decodes through CGImage's sRGB pipeline.
+    /// Single-channel `R8` and two-channel `RG8` are forced to linear because
+    /// Metal does not expose sRGB variants for those formats.
     static func mapping(
         for format: WPETexFormat,
-        capabilities: WPEMetalTextureCapabilities
+        capabilities: WPEMetalTextureCapabilities,
+        colorSpace: WPEMetalColorSpace = .sRGB
     ) throws -> WPEMetalTextureFormatMapping {
         switch format {
         case .rgba8888:
-            return WPEMetalTextureFormatMapping(pixelFormat: .rgba8Unorm, bytesPerPixel: 4, bytesPerBlock: nil)
+            return WPEMetalTextureFormatMapping(
+                pixelFormat: colorSpace == .sRGB ? .rgba8Unorm_srgb : .rgba8Unorm,
+                bytesPerPixel: 4,
+                bytesPerBlock: nil
+            )
         case .r8:
             return WPEMetalTextureFormatMapping(pixelFormat: .r8Unorm, bytesPerPixel: 1, bytesPerBlock: nil)
         case .rg88:
@@ -54,22 +74,38 @@ enum WPEMetalTextureFormatMapper {
             guard capabilities.supportsBCTextureCompression else {
                 throw WPEMetalTextureLoaderError.unsupportedCompressedFormat(format)
             }
-            return WPEMetalTextureFormatMapping(pixelFormat: .bc1_rgba, bytesPerPixel: nil, bytesPerBlock: 8)
+            return WPEMetalTextureFormatMapping(
+                pixelFormat: colorSpace == .sRGB ? .bc1_rgba_srgb : .bc1_rgba,
+                bytesPerPixel: nil,
+                bytesPerBlock: 8
+            )
         case .dxt3:
             guard capabilities.supportsBCTextureCompression else {
                 throw WPEMetalTextureLoaderError.unsupportedCompressedFormat(format)
             }
-            return WPEMetalTextureFormatMapping(pixelFormat: .bc2_rgba, bytesPerPixel: nil, bytesPerBlock: 16)
+            return WPEMetalTextureFormatMapping(
+                pixelFormat: colorSpace == .sRGB ? .bc2_rgba_srgb : .bc2_rgba,
+                bytesPerPixel: nil,
+                bytesPerBlock: 16
+            )
         case .dxt5:
             guard capabilities.supportsBCTextureCompression else {
                 throw WPEMetalTextureLoaderError.unsupportedCompressedFormat(format)
             }
-            return WPEMetalTextureFormatMapping(pixelFormat: .bc3_rgba, bytesPerPixel: nil, bytesPerBlock: 16)
+            return WPEMetalTextureFormatMapping(
+                pixelFormat: colorSpace == .sRGB ? .bc3_rgba_srgb : .bc3_rgba,
+                bytesPerPixel: nil,
+                bytesPerBlock: 16
+            )
         case .bc7:
             guard capabilities.supportsBCTextureCompression else {
                 throw WPEMetalTextureLoaderError.unsupportedCompressedFormat(format)
             }
-            return WPEMetalTextureFormatMapping(pixelFormat: .bc7_rgbaUnorm, bytesPerPixel: nil, bytesPerBlock: 16)
+            return WPEMetalTextureFormatMapping(
+                pixelFormat: colorSpace == .sRGB ? .bc7_rgbaUnorm_srgb : .bc7_rgbaUnorm,
+                bytesPerPixel: nil,
+                bytesPerBlock: 16
+            )
         case .rgba1010102:
             throw WPEMetalTextureLoaderError.unsupportedFormat(format)
         }
