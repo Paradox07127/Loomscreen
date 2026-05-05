@@ -390,11 +390,11 @@ final class ScreenManager {
         case .video:
             applyConfiguration(configuration, to: screen, preservingState: preservingState)
         case .html(let source, let htmlConfig):
-            activateAmbientWallpaper(.html(source, htmlConfig), for: screen)
+            activateAmbientWallpaper(.html(source, htmlConfig), for: screen, configuration: configuration)
         case .metalShader(let preset):
-            activateAmbientWallpaper(.metalShader(preset), for: screen)
+            activateAmbientWallpaper(.metalShader(preset), for: screen, configuration: configuration)
         case .scene(let descriptor):
-            activateAmbientWallpaper(.scene(descriptor), for: screen)
+            activateAmbientWallpaper(.scene(descriptor), for: screen, configuration: configuration)
         }
     }
     
@@ -1474,7 +1474,11 @@ final class ScreenManager {
         restoreWallpaperSession(for: screen, configuration: config, preservingState: false)
     }
 
-    private func activateAmbientWallpaper(_ definition: WallpaperSessionDefinition, for screen: Screen) {
+    private func activateAmbientWallpaper(
+        _ definition: WallpaperSessionDefinition,
+        for screen: Screen,
+        configuration: ScreenConfiguration
+    ) {
         releaseRuntimeSession(screen)
 
         let session: AmbientWallpaperSession
@@ -1498,9 +1502,14 @@ final class ScreenManager {
             session = ambientSessionBuilder.makeShaderSession(preset: preset, frame: screen.frame)
             Logger.info("Set shader wallpaper (\(preset.rawValue)) for screen \(screen.id)", category: .screenManager)
         case .scene(let descriptor):
+            let dependencyMounts = WPEDependencyMountResolver().mounts(
+                dependencyWorkshopIDs: descriptor.dependencyWorkshopIDs,
+                origin: configuration.wpeOrigin
+            )
             guard let sceneSession = ambientSessionBuilder.makeSceneSession(
                 descriptor: descriptor,
-                frame: screen.frame
+                frame: screen.frame,
+                dependencyMounts: dependencyMounts
             ) else {
                 Logger.warning("Scene wallpaper for screen \(screen.id) (workshop \(descriptor.workshopID)) could not be built — cache missing or descriptor invalid", category: .screenManager)
                 return

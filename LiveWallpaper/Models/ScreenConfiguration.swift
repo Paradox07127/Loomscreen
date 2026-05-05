@@ -336,7 +336,8 @@ struct ScreenConfiguration: Codable, Equatable {
             workshopID: origin.workshopID,
             cacheRelativePath: cacheRelativePath,
             entryFile: entryFile,
-            capabilityTier: .imageOnly
+            capabilityTier: .imageOnly,
+            dependencyWorkshopIDs: origin.dependencyWorkshopIDs
         )
     }
 

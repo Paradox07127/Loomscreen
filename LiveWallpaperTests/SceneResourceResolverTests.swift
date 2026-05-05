@@ -92,6 +92,25 @@ struct SceneResourceResolverTests {
         }
     }
 
+    @Test("Probe rejects MP4-backed .tex that advertises RGBA8888")
+    func texProbeRejectsMP4BackedRGBA() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        try writeRGBA8888Tex(
+            at: fixture.cacheRoot.appendingPathComponent("video.tex"),
+            width: 1,
+            height: 1,
+            payload: mp4HeaderPayload()
+        )
+
+        let resolver = SceneResourceResolver(cacheRootURL: fixture.cacheRoot)
+        let result = resolver.probeImage(relativePath: "video.tex")
+        guard case .failure(.texture(.unsupportedAnimation)) = result else {
+            Issue.record("Expected unsupportedAnimation for MP4-backed .tex probe, got \(result)")
+            return
+        }
+    }
+
     @Test("Model wrapper JSON resolves to materials/<name>.tex via material chain")
     func materialChainResolves() throws {
         // Synthesise the WPE chain: scene.json points at a model wrapper
@@ -120,6 +139,27 @@ struct SceneResourceResolverTests {
 
         #expect(image.width == 4)
         #expect(image.height == 4)
+    }
+
+    @Test("Renderable probe follows model material chain to terminal asset")
+    func renderableProbeFollowsMaterialChain() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+
+        let modelsDir = fixture.cacheRoot.appendingPathComponent("models", isDirectory: true)
+        let materialsDir = fixture.cacheRoot.appendingPathComponent("materials", isDirectory: true)
+        try FileManager.default.createDirectory(at: modelsDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: materialsDir, withIntermediateDirectories: true)
+        try Data(#"{ "material": "materials/foo.json" }"#.utf8).write(to: modelsDir.appendingPathComponent("foo.json"))
+        try Data(#"{ "passes": [{ "textures": ["missing"], "shader": "genericimage4" }] }"#.utf8).write(to: materialsDir.appendingPathComponent("foo.json"))
+
+        let resolver = SceneResourceResolver(cacheRootURL: fixture.cacheRoot)
+        let result = resolver.probeRenderableImage(relativePath: "models/foo.json")
+
+        guard case .failure(.fileMissing) = result else {
+            Issue.record("Expected missing terminal texture, got \(result)")
+            return
+        }
     }
 
     @Test("Built-in util model surfaces materialUnresolved with a friendly hint")
@@ -186,10 +226,16 @@ struct SceneResourceResolverTests {
         return Fixture(root: root, cacheRoot: cacheRoot)
     }
 
-    /// Writes a synthetic 4×4 RGBA8888 `.tex` file matching the layout
-    /// the decoder expects (TEXV0005 / TEXI0003 / TEXB0003). Used by the
-    /// material-chain test so a real `CGImage` comes out the other end.
-    private func writeRGBA8888Tex(at url: URL) throws {
+    /// Writes a synthetic 4×4 RGBA8888 `.tex` file matching the RePKG /
+    /// linux-wallpaperengine layout (TEXV0005 / TEXI0001 / TEXB0003).
+    /// Used by the material-chain test so a real `CGImage` comes out the
+    /// other end.
+    private func writeRGBA8888Tex(
+        at url: URL,
+        width: Int = 4,
+        height: Int = 4,
+        payload: Data? = nil
+    ) throws {
         var data = Data()
         func appendMagic(_ s: String) {
             data.append(contentsOf: s.utf8)
@@ -204,23 +250,37 @@ struct SceneResourceResolverTests {
             withUnsafeBytes(of: &le) { data.append(contentsOf: $0) }
         }
         appendMagic("TEXV0005")
-        appendMagic("TEXI0003")
+        appendMagic("TEXI0001")
         appendInt32(0)            // format = RGBA8888
         appendUInt32(0)           // flags
-        appendInt32(4)            // textureWidth
-        appendInt32(4)            // textureHeight
-        appendInt32(4)            // imageWidth
-        appendInt32(4)            // imageHeight
-        appendInt32(0)            // unkInt0 (V3)
+        appendInt32(Int32(width)) // textureWidth
+        appendInt32(Int32(height)) // textureHeight
+        appendInt32(Int32(width)) // imageWidth
+        appendInt32(Int32(height)) // imageHeight
+        appendInt32(0)            // unkInt0
         appendMagic("TEXB0003")
+        appendInt32(1)            // imageCount
+        appendInt32(-1)           // FreeImage FIF_UNKNOWN/raw pixels
         appendInt32(1)            // mipmapCount
-        appendInt32(4)            // mip width
-        appendInt32(4)            // mip height
+        appendInt32(Int32(width)) // mip width
+        appendInt32(Int32(height)) // mip height
         appendUInt32(0)           // not compressed
-        let pixels = Data(repeating: 0xFF, count: 4 * 4 * 4)
+        let pixels = payload ?? Data(repeating: 0xFF, count: width * height * 4)
+        appendUInt32(UInt32(pixels.count))
         appendUInt32(UInt32(pixels.count))
         data.append(pixels)
         try data.write(to: url)
+    }
+
+    private func mp4HeaderPayload() -> Data {
+        Data([
+            0x00, 0x00, 0x00, 0x18,
+            0x66, 0x74, 0x79, 0x70,
+            0x6d, 0x70, 0x34, 0x32,
+            0x00, 0x00, 0x00, 0x00,
+            0x6d, 0x70, 0x34, 0x32,
+            0x69, 0x73, 0x6f, 0x6d
+        ])
     }
 
     /// Writes a 4×4 opaque PNG. ImageIO needs at least a real PNG header

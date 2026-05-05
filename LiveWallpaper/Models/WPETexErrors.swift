@@ -7,13 +7,13 @@ import Foundation
 /// `TEXI0001` / `TEXB0003` is the modal layout).
 enum WPETexFormat: Int, Sendable, Equatable {
     case rgba8888 = 0
-    case dxt5 = 1   // BC3
-    case dxt3 = 2   // BC2
-    case dxt1 = 3   // BC1
-    case r8 = 4
-    case rg88 = 5
-    case rgba1010102 = 8
-    case bc7 = 13
+    case dxt5 = 4   // BC3
+    case dxt3 = 6   // BC2
+    case dxt1 = 7   // BC1
+    case rg88 = 8
+    case r8 = 9
+    case bc7 = 12
+    case rgba1010102 = 13
 
     /// Bytes per pixel for uncompressed formats; nil for block-compressed
     /// (BC) formats where the unit is a 4×4 block.
@@ -157,6 +157,7 @@ struct WPETexMipmap: Sendable, Equatable {
     let width: Int
     let height: Int
     let storedByteCount: Int
+    let decompressedByteCount: Int?
     let payload: Data
     /// Set when the bitmap header marked this mip as LZ4-compressed (`TEXB`
     /// V3+ exposes the flag explicitly). Drives `WPETexDecoder.inflate`
@@ -167,10 +168,17 @@ struct WPETexMipmap: Sendable, Equatable {
 
 struct WPETexBitmapBlock: Sendable, Equatable {
     let version: Int
+    let sourceImageFormatCode: Int?
+    let isVideoPayload: Bool
     let mipmaps: [WPETexMipmap]
 
     var largestMipmap: WPETexMipmap? {
         mipmaps.first
+    }
+
+    var usesEncodedImagePayload: Bool {
+        guard let sourceImageFormatCode else { return false }
+        return sourceImageFormatCode != -1 && !isVideoPayload
     }
 }
 

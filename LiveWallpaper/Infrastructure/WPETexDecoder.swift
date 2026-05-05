@@ -1,6 +1,7 @@
 import CoreGraphics
 import Compression
 import Foundation
+import ImageIO
 
 /// Stateless `.tex` decoder. Parses `TEXVxxxx` containers emitted by the
 /// Wallpaper Engine publish pipeline and returns either the largest mipmap
@@ -10,8 +11,8 @@ import Foundation
 ///
 /// Format coverage in Phase 2.1:
 ///   - CPU: RGBA8888, R8, RG88
-///   - GPU (Metal transcode, see `WPETexMetalTranscoder`): DXT1/3/5, BC7
-///   - Reject precisely: RGBA1010102, animation/sequence frames
+///   - ImageIO-backed TEXB payloads: PNG/JPEG/etc. (`FreeImage` formats)
+///   - Reject precisely: DXT1/3/5, BC7, RGBA1010102, animation/sequence frames
 struct WPETexDecoder: Sendable {
     init() {}
 
@@ -129,15 +130,14 @@ struct WPETexDecoder: Sendable {
     ) throws -> WPETexInfo {
         let infoVersion = parseTrailingVersion(versionedMagic)
 
-        // Layout cross-checked against linux-wallpaperengine's `CTexture`
-        // and confirmed against the user's `TEXV0005`/`TEXI0001` samples:
+        // Layout cross-checked against RePKG and linux-wallpaperengine:
         //   format (uint32)
         //   flags (uint32)
         //   textureWidth  (uint32, padded to power of 2)
         //   textureHeight (uint32)
         //   imageWidth    (uint32, actual visible pixels)
         //   imageHeight   (uint32)
-        //   [unkInt0 (uint32) — V3+ only]
+        //   unkInt0       (uint32)
         // The image-vs-texture distinction matters: WPE pads compressed
         // textures to power-of-two for GPU upload, but stores the visible
         // sub-rect as `imageWidth/imageHeight`. We use the texture
@@ -150,13 +150,7 @@ struct WPETexDecoder: Sendable {
         let imageWidth = Int(try reader.readInt32(blockName: "TEXI.imageWidth"))
         let imageHeight = Int(try reader.readInt32(blockName: "TEXI.imageHeight"))
         _ = imageWidth; _ = imageHeight
-        // V3 adds a trailing `unkInt0`. We tolerate both shapes by peeking
-        // — TEXB starts with the 9-byte ASCII magic, so the very next
-        // bytes deciding whether to consume a uint32 is "if reader sees
-        // 'TEXB' next, skip; otherwise consume". TEXI0003 reliably has it.
-        if infoVersion >= 3 {
-            _ = try reader.readInt32(blockName: "TEXI.unkInt0")
-        }
+        _ = try reader.readInt32(blockName: "TEXI.unkInt0")
 
         let format = WPETexFormat(rawValue: formatCode)
         let info = WPETexInfo(
@@ -183,35 +177,94 @@ struct WPETexDecoder: Sendable {
         reader: inout WPETexByteReader
     ) throws -> WPETexBitmapBlock {
         let bitmapVersion = parseTrailingVersion(versionedMagic)
-        let mipmapCount = Int(try reader.readInt32(blockName: "TEXB.mipCount"))
-        guard mipmapCount > 0 && mipmapCount <= 32 else {
-            throw WPETexDecodeError.mipmapOutOfBounds(index: mipmapCount)
+        let imageCount = Int(try reader.readInt32(blockName: "TEXB.imageCount"))
+        guard imageCount > 0 && imageCount <= 4_096 else {
+            throw WPETexDecodeError.mipmapOutOfBounds(index: imageCount)
+        }
+
+        var sourceImageFormatCode: Int?
+        var isVideoPayload = false
+        var effectiveBitmapVersion = bitmapVersion
+        switch bitmapVersion {
+        case 1, 2:
+            break
+        case 3:
+            sourceImageFormatCode = Int(try reader.readInt32(blockName: "TEXB.imageFormat"))
+        case 4:
+            sourceImageFormatCode = Int(try reader.readInt32(blockName: "TEXB.imageFormat"))
+            isVideoPayload = try reader.readInt32(blockName: "TEXB.isVideoMP4") == 1
+            // RePKG and linux-wallpaperengine both treat non-MP4 TEXB0004
+            // as TEXB0003 for the mipmap layout.
+            if !isVideoPayload {
+                effectiveBitmapVersion = 3
+            }
+        default:
+            throw WPETexDecodeError.unsupportedBlock(magic: versionedMagic)
         }
 
         var mipmaps: [WPETexMipmap] = []
-        mipmaps.reserveCapacity(mipmapCount)
-        for index in 0..<mipmapCount {
-            let mipWidth = Int(try reader.readInt32(blockName: "TEXB.mipWidth"))
-            let mipHeight = Int(try reader.readInt32(blockName: "TEXB.mipHeight"))
-            // V3 prepends a `compressed` flag UInt32; V2 / V1 omit it but
-            // store the byte count next either way.
-            var compressedFlag: UInt32 = 0
-            if bitmapVersion >= 3 {
-                compressedFlag = try reader.readUInt32(blockName: "TEXB.mipCompressed")
+        for imageIndex in 0..<imageCount {
+            let mipmapCount = Int(try reader.readInt32(blockName: "TEXB.mipCount"))
+            guard mipmapCount > 0 && mipmapCount <= 32 else {
+                throw WPETexDecodeError.mipmapOutOfBounds(index: mipmapCount)
             }
-            let storedSize = Int(try reader.readUInt32(blockName: "TEXB.mipSize"))
-            let payload = try reader.readBytes(count: storedSize, blockName: "TEXB.mipPayload")
+            if imageIndex == 0 {
+                mipmaps.reserveCapacity(mipmapCount)
+            }
 
-            mipmaps.append(WPETexMipmap(
-                index: index,
-                width: max(mipWidth, 1),
-                height: max(mipHeight, 1),
-                storedByteCount: storedSize,
-                payload: payload,
-                isCompressed: compressedFlag != 0
-            ))
+            for mipmapIndex in 0..<mipmapCount {
+                let mipmap = try parseMipmap(
+                    version: effectiveBitmapVersion,
+                    index: mipmapIndex,
+                    reader: &reader
+                )
+                if imageIndex == 0 {
+                    mipmaps.append(mipmap)
+                }
+            }
         }
-        return WPETexBitmapBlock(version: bitmapVersion, mipmaps: mipmaps)
+        return WPETexBitmapBlock(
+            version: bitmapVersion,
+            sourceImageFormatCode: sourceImageFormatCode,
+            isVideoPayload: isVideoPayload,
+            mipmaps: mipmaps
+        )
+    }
+
+    private func parseMipmap(
+        version: Int,
+        index: Int,
+        reader: inout WPETexByteReader
+    ) throws -> WPETexMipmap {
+        if version == 4 {
+            _ = try reader.readInt32(blockName: "TEXB.v4Param1")
+            _ = try reader.readInt32(blockName: "TEXB.v4Param2")
+            try reader.skipNullTerminatedString(blockName: "TEXB.v4Condition")
+            _ = try reader.readInt32(blockName: "TEXB.v4Param3")
+        }
+
+        let mipWidth = Int(try reader.readInt32(blockName: "TEXB.mipWidth"))
+        let mipHeight = Int(try reader.readInt32(blockName: "TEXB.mipHeight"))
+
+        var compressedFlag: UInt32 = 0
+        var decompressedByteCount: Int?
+        if version >= 2 {
+            compressedFlag = try reader.readUInt32(blockName: "TEXB.mipCompressed")
+            decompressedByteCount = Int(try reader.readUInt32(blockName: "TEXB.mipDecompressedSize"))
+        }
+
+        let storedSize = Int(try reader.readUInt32(blockName: "TEXB.mipSize"))
+        let payload = try reader.readBytes(count: storedSize, blockName: "TEXB.mipPayload")
+
+        return WPETexMipmap(
+            index: index,
+            width: max(mipWidth, 1),
+            height: max(mipHeight, 1),
+            storedByteCount: storedSize,
+            decompressedByteCount: decompressedByteCount,
+            payload: payload,
+            isCompressed: compressedFlag != 0
+        )
     }
 
     // MARK: - Pixel dispatch
@@ -220,14 +273,29 @@ struct WPETexDecoder: Sendable {
         guard let mip = parsed.bitmap.largestMipmap else {
             throw WPETexDecodeError.missingBitmapBlock
         }
+        if parsed.bitmap.isVideoPayload || looksLikeMP4Payload(mip.payload) {
+            throw WPETexDecodeError.unsupportedAnimation
+        }
         guard let format = parsed.info.format else {
             throw WPETexDecodeError.unsupportedFormat(code: parsed.info.textureFormatCode)
+        }
+
+        if parsed.bitmap.usesEncodedImagePayload {
+            let imageBytes = try inflateIfNeeded(
+                payload: mip.payload,
+                expectedByteCount: nil,
+                decompressedByteCount: mip.decompressedByteCount,
+                isCompressed: mip.isCompressed,
+                mipmap: mip.index
+            )
+            return try makeEncodedCGImage(from: imageBytes, mipmap: mip.index)
         }
 
         let expected = format.expectedByteCount(width: mip.width, height: mip.height)
         let pixelBytes: Data = try inflateIfNeeded(
             payload: mip.payload,
             expectedByteCount: expected,
+            decompressedByteCount: mip.decompressedByteCount,
             isCompressed: mip.isCompressed,
             mipmap: mip.index
         )
@@ -271,6 +339,22 @@ struct WPETexDecoder: Sendable {
         return try decoded.makeCGImage()
     }
 
+    private func looksLikeMP4Payload(_ data: Data) -> Bool {
+        guard data.count >= 12 else { return false }
+        return data[4] == 0x66
+            && data[5] == 0x74
+            && data[6] == 0x79
+            && data[7] == 0x70
+    }
+
+    private func makeEncodedCGImage(from data: Data, mipmap: Int) throws -> CGImage {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+            throw WPETexDecodeError.decodeFailed(mipmap: mipmap, detail: "ImageIO could not decode encoded mip payload")
+        }
+        return image
+    }
+
     /// Reconciles `payload` against `expectedByteCount`. Three cases:
     /// 1. Exact match → return as-is.
     /// 2. Mip flagged `compressed` (V3+) OR payload is shorter than
@@ -282,19 +366,36 @@ struct WPETexDecoder: Sendable {
     ///    early Phase 2.1 testing.
     private func inflateIfNeeded(
         payload: Data,
-        expectedByteCount: Int,
+        expectedByteCount: Int?,
+        decompressedByteCount: Int?,
         isCompressed: Bool,
         mipmap: Int
     ) throws -> Data {
-        if payload.count == expectedByteCount { return payload }
-        guard expectedByteCount > 0 else {
-            throw WPETexDecodeError.decompressionFailed(mipmap: mipmap)
+        if isCompressed {
+            let outputCount = decompressedByteCount.flatMap { $0 > 0 ? $0 : nil } ?? expectedByteCount ?? 0
+            guard outputCount > 0 else {
+                throw WPETexDecodeError.decompressionFailed(mipmap: mipmap)
+            }
+            let inflated = try lz4Inflate(payload: payload, outputCount: outputCount, mipmap: mipmap)
+            if let expectedByteCount, inflated.count > expectedByteCount {
+                return inflated.prefix(expectedByteCount)
+            }
+            return inflated
         }
-        if !isCompressed && payload.count > expectedByteCount {
+
+        guard let expectedByteCount else { return payload }
+        if payload.count == expectedByteCount { return payload }
+        if payload.count > expectedByteCount {
             return payload.prefix(expectedByteCount)
         }
 
-        var output = Data(count: expectedByteCount)
+        // Legacy tolerance for old fixtures and early WPE variants that omit
+        // the explicit compression flag but still store an LZ4 block.
+        return try lz4Inflate(payload: payload, outputCount: expectedByteCount, mipmap: mipmap)
+    }
+
+    private func lz4Inflate(payload: Data, outputCount: Int, mipmap: Int) throws -> Data {
+        var output = Data(count: outputCount)
         let written = output.withUnsafeMutableBytes { (out: UnsafeMutableRawBufferPointer) -> Int in
             payload.withUnsafeBytes { (input: UnsafeRawBufferPointer) -> Int in
                 guard let dst = out.bindMemory(to: UInt8.self).baseAddress,
@@ -302,14 +403,14 @@ struct WPETexDecoder: Sendable {
                     return -1
                 }
                 return compression_decode_buffer(
-                    dst, expectedByteCount,
+                    dst, outputCount,
                     src, payload.count,
                     nil,
                     COMPRESSION_LZ4_RAW
                 )
             }
         }
-        guard written == expectedByteCount else {
+        guard written == outputCount else {
             throw WPETexDecodeError.decompressionFailed(mipmap: mipmap)
         }
         return output

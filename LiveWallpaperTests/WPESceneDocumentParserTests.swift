@@ -122,6 +122,54 @@ struct WPESceneDocumentParserTests {
         #expect(document.diagnostics.contains(where: { $0.message.contains("Sound") }))
     }
 
+    @Test("Shape-based object kind detection handles WPE objects without type")
+    func shapeBasedObjectKindDetection() throws {
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1, "height": 1, "auto": true]],
+            "objects": [
+                ["name": "BG", "image": "materials/bg.png"],
+                ["name": "Loop", "sound": ["file": "sounds/loop.ogg"]],
+                ["name": "Sparks", "particle": ["emitters": []]],
+                ["name": "Title", "text": "Hello"],
+                ["name": "Lamp", "light": ["color": "1 1 1"]]
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+
+        let document = try WPESceneDocumentParser.parse(data: data)
+
+        #expect(document.imageObjects.count == 1)
+        #expect(document.imageObjects.first?.name == "BG")
+        #expect(document.diagnostics.contains(where: { $0.message.contains("Sound object Loop") }))
+        #expect(document.diagnostics.contains(where: { $0.message.contains("Particle object Sparks") }))
+        #expect(document.diagnostics.contains(where: { $0.message.contains("Text object Title") }))
+        #expect(document.diagnostics.contains(where: { $0.message.contains("Light object Lamp") }))
+        #expect(!document.diagnostics.contains(where: { $0.message.contains("has no image path") }))
+    }
+
+    @Test("Ambiguous WPE object emits warning and preserves renderable image layer")
+    func ambiguousObjectEmitsWarningAndPreservesImage() throws {
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1, "height": 1, "auto": true]],
+            "objects": [[
+                "name": "ImageWithSound",
+                "image": "materials/bg.png",
+                "sound": ["file": "sounds/loop.ogg"]
+            ]]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+
+        let document = try WPESceneDocumentParser.parse(data: data)
+
+        #expect(document.imageObjects.count == 1)
+        #expect(document.diagnostics.contains(where: {
+            $0.severity == .warning && $0.message.contains("Ambiguous object ImageWithSound")
+        }))
+        #expect(document.diagnostics.contains(where: { $0.message.contains("Sound object ImageWithSound") }))
+    }
+
     @Test(".tex texture path emits a warning diagnostic")
     func texTextureEmitsWarning() throws {
         let payload: [String: Any] = [
@@ -139,5 +187,71 @@ struct WPESceneDocumentParserTests {
 
         #expect(document.imageObjects.first?.imageRelativePath == "materials/sky.tex")
         #expect(document.diagnostics.contains(where: { $0.severity == .warning && $0.message.contains(".tex") }))
+    }
+
+    @Test("Image effects preserve file, pass overrides, constants, textures, material, and animation metadata")
+    func imageEffectsPreserveRenderMetadata() throws {
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1920, "height": 1080, "auto": true]],
+            "objects": [[
+                "id": "layer1",
+                "name": "Foreground",
+                "type": "image",
+                "image": "models/foreground.json",
+                "material": "materials/foreground.json",
+                "effects": [[
+                    "id": 7,
+                    "name": "Shake",
+                    "file": "effects/shake/effect.json",
+                    "visible": true,
+                    "passes": [[
+                        "id": 2,
+                        "combos": ["MASK": 1],
+                        "constantshadervalues": [
+                            "speed": 0.59,
+                            "strength": 0.133,
+                            "bounds": "0.1 0.2 0.3 0.4"
+                        ],
+                        "textures": [NSNull(), "masks/shake_mask"]
+                    ]]
+                ]],
+                "animationlayers": [[
+                    "id": 3,
+                    "rate": 24,
+                    "visible": true,
+                    "blend": 0.5,
+                    "animation": 9
+                ]]
+            ]]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+
+        let document = try WPESceneDocumentParser.parse(data: data)
+
+        let layer = try #require(document.imageObjects.first)
+        #expect(layer.materialRelativePath == "materials/foreground.json")
+        #expect(layer.effects.count == 1)
+        let effect = try #require(layer.effects.first)
+        #expect(effect.id == "7")
+        #expect(effect.name == "Shake")
+        #expect(effect.fileRelativePath == "effects/shake/effect.json")
+        #expect(effect.visible == true)
+        #expect(effect.isShakeEffect)
+
+        let pass = try #require(effect.passOverrides.first)
+        #expect(pass.id == 2)
+        #expect(pass.combos["MASK"] == 1)
+        #expect(pass.constants["speed"]?.numberValue == 0.59)
+        #expect(pass.constants["strength"]?.numberValue == 0.133)
+        #expect(pass.constants["bounds"]?.vectorValue == [0.1, 0.2, 0.3, 0.4])
+        #expect(pass.textures[1] == "masks/shake_mask")
+
+        let animation = try #require(layer.animationLayers.first)
+        #expect(animation.id == 3)
+        #expect(animation.rate == 24)
+        #expect(animation.visible == true)
+        #expect(animation.blend == 0.5)
+        #expect(animation.animation == 9)
     }
 }

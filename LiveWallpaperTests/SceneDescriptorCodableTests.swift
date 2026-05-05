@@ -43,6 +43,37 @@ struct SceneDescriptorCodableTests {
         #expect(decoded.workshopID == "abc")
     }
 
+    @Test("SceneDescriptor decodes missing dependencyWorkshopIDs as empty")
+    func sceneDescriptorMissingDependenciesDecodeAsEmpty() throws {
+        let payload: [String: Any] = [
+            "workshopID": "abc",
+            "cacheRelativePath": "wpe-cache/abc",
+            "entryFile": "scene.json",
+            "capabilityTier": "imageOnly"
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: .sortedKeys)
+
+        let decoded = try JSONDecoder().decode(SceneDescriptor.self, from: data)
+
+        #expect(decoded.dependencyWorkshopIDs == [])
+    }
+
+    @Test("SceneDescriptor round-trips dependencyWorkshopIDs")
+    func sceneDescriptorDependenciesRoundTrip() throws {
+        let descriptor = SceneDescriptor(
+            workshopID: "main",
+            cacheRelativePath: "wpe-cache/main",
+            entryFile: "scene.json",
+            capabilityTier: .degraded,
+            dependencyWorkshopIDs: ["111", "222"]
+        )
+
+        let data = try JSONEncoder().encode(descriptor)
+        let decoded = try JSONDecoder().decode(SceneDescriptor.self, from: data)
+
+        #expect(decoded == descriptor)
+    }
+
     // MARK: - WallpaperContent.scene
 
     @Test("WallpaperContent.scene round-trips through ScreenConfiguration")
@@ -110,6 +141,7 @@ struct SceneDescriptorCodableTests {
         #expect(descriptor.cacheRelativePath == "wpe-cache/legacy-id")
         #expect(descriptor.entryFile == "scene.json")
         #expect(descriptor.capabilityTier == .imageOnly)
+        #expect(descriptor.dependencyWorkshopIDs == [])
     }
 
     @Test("Legacy ScreenConfiguration with wallpaperType=scene but no wpeOrigin falls back to empty video")
