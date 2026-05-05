@@ -68,6 +68,7 @@ final class AmbientWallpaperSessionBuilder {
     func makeSceneSession(
         descriptor: SceneDescriptor,
         frame: CGRect,
+        dependencyMounts: [WPEAssetMount] = [],
         applicationSupportRootURL: URL? = nil,
         fileManager: FileManager = .default
     ) -> SceneWallpaperSession? {
@@ -121,6 +122,7 @@ final class AmbientWallpaperSessionBuilder {
         let controller = SceneRenderingController(
             descriptor: descriptor,
             cacheRootURL: cacheURL,
+            dependencyMounts: dependencyMounts,
             frame: CGRect(origin: .zero, size: frame.size)
         )
         window.contentView = controller.view

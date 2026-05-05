@@ -64,11 +64,14 @@ struct WPESceneOrthogonalProjection: Equatable, Sendable {
     let auto: Bool
 }
 
-/// One renderable image layer. Drives a single SKSpriteNode in the runtime.
+/// One renderable image layer. Drives a single SKSpriteNode in the fallback
+/// runtime, while preserving WPE material/effect metadata for later renderer
+/// phases.
 struct WPESceneImageObject: Equatable, Sendable, Identifiable {
     let id: String
     let name: String
     let imageRelativePath: String
+    let materialRelativePath: String?
     let origin: SIMD3<Double>
     let scale: SIMD3<Double>
     let angles: SIMD3<Double>
@@ -81,6 +84,56 @@ struct WPESceneImageObject: Equatable, Sendable, Identifiable {
     /// Explicit pixel dimensions when WPE provided them; otherwise nil and
     /// the runtime falls back to the underlying image size.
     let size: CGSize?
+    let effects: [WPESceneImageEffect]
+    let animationLayers: [WPESceneAnimationLayer]
+}
+
+struct WPESceneImageEffect: Equatable, Sendable, Identifiable {
+    let id: String
+    let name: String
+    let fileRelativePath: String
+    let visible: Bool
+    let passOverrides: [WPESceneEffectPassOverride]
+
+    var isShakeEffect: Bool {
+        let normalizedFile = fileRelativePath.lowercased()
+        let normalizedName = name.lowercased()
+        return normalizedFile.contains("/shake/")
+            || normalizedFile.hasSuffix("shake/effect.json")
+            || normalizedName == "shake"
+    }
+}
+
+struct WPESceneEffectPassOverride: Equatable, Sendable {
+    let id: Int?
+    let combos: [String: Int]
+    let constants: [String: WPESceneShaderConstantValue]
+    let textures: [Int: String]
+}
+
+enum WPESceneShaderConstantValue: Equatable, Sendable {
+    case bool(Bool)
+    case number(Double)
+    case string(String)
+    case vector([Double])
+
+    var numberValue: Double? {
+        if case .number(let value) = self { return value }
+        return nil
+    }
+
+    var vectorValue: [Double]? {
+        if case .vector(let value) = self { return value }
+        return nil
+    }
+}
+
+struct WPESceneAnimationLayer: Equatable, Sendable, Identifiable {
+    let id: Int
+    let rate: Double
+    let visible: Bool
+    let blend: Double
+    let animation: Int
 }
 
 enum WPESceneAlignment: String, Equatable, Sendable {

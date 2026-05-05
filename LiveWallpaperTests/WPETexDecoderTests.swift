@@ -83,6 +83,19 @@ struct WPETexDecoderTests {
         #expect(image.height == 4)
     }
 
+    @Test("Decode accepts RePKG TEXB0003 PNG-backed texture")
+    func decodeRePKGTEXB0003PNGBackedTexture() throws {
+        let buffer = makeRePKGPNGBackedImage()
+        let result = WPETexDecoder().decode(data: buffer)
+        guard case .success(let image) = result else {
+            Issue.record("Expected decode success for RePKG layout, got \(result)")
+            return
+        }
+
+        #expect(image.width == 1)
+        #expect(image.height == 1)
+    }
+
     @Test("Unknown format code surfaces unsupportedFormat with the offending code")
     func unsupportedFormatCode() {
         // Format 99 doesn't map to any WPETexFormat — the decoder must
@@ -114,7 +127,9 @@ struct WPETexDecoderTests {
             width: width,
             height: height,
             formatCode: WPETexFormat.rgba8888.rawValue,
-            payload: compressed
+            payload: compressed,
+            isLZ4Compressed: true,
+            decompressedByteCount: raw.count
         )
 
         let result = WPETexDecoder().decode(data: buffer)
@@ -124,6 +139,22 @@ struct WPETexDecoderTests {
         }
         #expect(image.width == width)
         #expect(image.height == height)
+    }
+
+    @Test("MP4-backed TEXB payload is rejected instead of decoded as raw RGBA")
+    func mp4PayloadIsUnsupportedAnimation() {
+        let buffer = makeImage(
+            width: 1,
+            height: 1,
+            formatCode: WPETexFormat.rgba8888.rawValue,
+            payload: mp4HeaderPayload()
+        )
+
+        let result = WPETexDecoder().decode(data: buffer)
+        guard case .failure(.unsupportedAnimation) = result else {
+            Issue.record("Expected unsupportedAnimation for MP4-backed TEXB payload, got \(result)")
+            return
+        }
     }
 
     // MARK: - Fixture helpers
@@ -149,31 +180,85 @@ struct WPETexDecoderTests {
         width: Int,
         height: Int,
         formatCode: Int,
-        payload: Data
+        payload: Data,
+        isLZ4Compressed: Bool = false,
+        decompressedByteCount: Int? = nil
     ) -> Data {
-        // Mirrors the field order observed in the user's `TEXV0005` /
-        // `TEXI0001` samples (format → flags → textureW → textureH →
-        // imageW → imageH). We emit the V3 info block (extra unkInt0) so
-        // the decoder exercises the optional read.
+        // Mirrors RePKG / linux-wallpaperengine's TEXV0005 → TEXI0001 →
+        // TEXB0003 layout.
         var buffer = Data()
         appendMagic(&buffer, magic: "TEXV0005")
-        appendMagic(&buffer, magic: "TEXI0003")
+        appendMagic(&buffer, magic: "TEXI0001")
         appendInt32(&buffer, Int32(formatCode))
         appendUInt32(&buffer, 0)              // flags
         appendInt32(&buffer, Int32(width))    // textureWidth
         appendInt32(&buffer, Int32(height))   // textureHeight
         appendInt32(&buffer, Int32(width))    // imageWidth
         appendInt32(&buffer, Int32(height))   // imageHeight
-        appendInt32(&buffer, 0)               // unkInt0 (V3)
+        appendInt32(&buffer, 0)               // unkInt0
 
         appendMagic(&buffer, magic: "TEXB0003")
+        appendInt32(&buffer, 1)               // imageCount
+        appendInt32(&buffer, -1)              // FreeImage FIF_UNKNOWN
         appendInt32(&buffer, 1)               // mipmapCount
         appendInt32(&buffer, Int32(width))
         appendInt32(&buffer, Int32(height))
-        appendUInt32(&buffer, 0)              // compressed flag (false)
+        appendUInt32(&buffer, isLZ4Compressed ? 1 : 0)
+        appendUInt32(&buffer, UInt32(decompressedByteCount ?? payload.count))
         appendUInt32(&buffer, UInt32(payload.count))
         buffer.append(payload)
         return buffer
+    }
+
+    private func makeRePKGPNGBackedImage() -> Data {
+        let payload = onePixelPNG()
+        var buffer = Data()
+        appendMagic(&buffer, magic: "TEXV0005")
+        appendMagic(&buffer, magic: "TEXI0001")
+        appendInt32(&buffer, Int32(WPETexFormat.rgba8888.rawValue))
+        appendUInt32(&buffer, 2)              // clamp UVs
+        appendInt32(&buffer, 1)               // textureWidth
+        appendInt32(&buffer, 1)               // textureHeight
+        appendInt32(&buffer, 1)               // imageWidth
+        appendInt32(&buffer, 1)               // imageHeight
+        appendInt32(&buffer, 0)               // unkInt0, present in TEXI0001
+
+        appendMagic(&buffer, magic: "TEXB0003")
+        appendInt32(&buffer, 1)               // imageCount
+        appendInt32(&buffer, 13)              // FreeImage FIF_PNG
+        appendInt32(&buffer, 1)               // mipmapCount
+        appendInt32(&buffer, 1)               // mip width
+        appendInt32(&buffer, 1)               // mip height
+        appendUInt32(&buffer, 0)              // not LZ4-compressed
+        appendUInt32(&buffer, 0)              // decompressed byte count unused for image payload
+        appendUInt32(&buffer, UInt32(payload.count))
+        buffer.append(payload)
+        return buffer
+    }
+
+    private func onePixelPNG() -> Data {
+        Data([
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+            0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+            0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+            0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41,
+            0x54, 0x78, 0x9c, 0x63, 0xf8, 0xcf, 0xc0, 0xf0,
+            0x1f, 0x00, 0x05, 0x00, 0x01, 0xff, 0x89, 0x99,
+            0x3d, 0x1d, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45,
+            0x4e, 0x44, 0xae, 0x42, 0x60, 0x82
+        ])
+    }
+
+    private func mp4HeaderPayload() -> Data {
+        Data([
+            0x00, 0x00, 0x00, 0x18,
+            0x66, 0x74, 0x79, 0x70, // ftyp
+            0x6d, 0x70, 0x34, 0x32, // mp42
+            0x00, 0x00, 0x00, 0x00,
+            0x6d, 0x70, 0x34, 0x32,
+            0x69, 0x73, 0x6f, 0x6d
+        ])
     }
 
     private func appendMagic(_ data: inout Data, magic: String) {

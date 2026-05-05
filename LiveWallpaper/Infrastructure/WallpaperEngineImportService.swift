@@ -284,12 +284,13 @@ final class WallpaperEngineImportService {
             return .rejected(reason: describe(error))
         }
 
-        let tier = capabilityTier(for: document, cacheURL: cacheURL)
+        let tier = WPESceneCapabilityClassifier().capabilityTier(for: document, cacheURL: cacheURL)
         let descriptor = SceneDescriptor(
             workshopID: project.workshopID,
             cacheRelativePath: cacheRelativePath(for: project),
             entryFile: project.entryFile,
-            capabilityTier: tier
+            capabilityTier: tier,
+            dependencyWorkshopIDs: project.dependencyWorkshopIDs
         )
         let origin = makeOrigin(
             project: project,
@@ -302,62 +303,6 @@ final class WallpaperEngineImportService {
             return .unsupported(origin: origin)
         }
         return .ready(.scene(descriptor), origin: origin)
-    }
-
-    /// Walk `imageObjects` against the cache root: PNG/JPG go through file
-    /// existence; `.tex` go through the lightweight `WPETexDecoder.probe`
-    /// so a scene composed entirely of `.tex` (the modal Workshop case) is
-    /// classified accurately instead of always sliding into `.unsupported`.
-    private func capabilityTier(for document: WPESceneDocument, cacheURL: URL) -> SceneCapabilityTier {
-        guard !document.imageObjects.isEmpty else {
-            return .unsupported
-        }
-        let resolver = SceneResourceResolver(cacheRootURL: cacheURL)
-        var resolvable = 0
-        var unresolvable = 0
-        for object in document.imageObjects {
-            let path = object.imageRelativePath
-            if path.lowercased().hasSuffix(".tex") {
-                // Header probe is cheap (≤ a few KB read) and avoids paying
-                // for the full mip-chain decode at import time.
-                switch resolver.probeImage(relativePath: path) {
-                case .success(let info):
-                    // A known-but-unsupported format (e.g. RGBA1010102 or
-                    // any BC variant in Phase 2.1) is not "resolvable" —
-                    // it would render as an empty layer. Use the explicit
-                    // `isPhase21Decodable` predicate instead of a nil check.
-                    if info.format?.isPhase21Decodable == true {
-                        resolvable += 1
-                    } else {
-                        unresolvable += 1
-                    }
-                case .failure:
-                    unresolvable += 1
-                }
-                continue
-            }
-            if resolver.exists(relativePath: path) {
-                resolvable += 1
-            } else {
-                unresolvable += 1
-            }
-        }
-
-        if resolvable == 0 { return .unsupported }
-        // Pure imageOnly only when EVERY layer resolves AND the parser saw no
-        // *blocking* diagnostics. The parser emits info-level notes for
-        // every `.tex` layer ("falls back to first-frame stub"); those are
-        // expected for the modal Workshop scene and shouldn't downgrade the
-        // tier from imageOnly to degraded. We only count diagnostics that
-        // signal genuinely unsupported features (particles, text, sound,
-        // shaders) toward the `.degraded` decision.
-        let blockingDiagnostics = document.diagnostics.filter { diagnostic in
-            !diagnostic.message.contains(".tex texture")
-        }
-        if unresolvable == 0 && blockingDiagnostics.isEmpty {
-            return .imageOnly
-        }
-        return .degraded
     }
 
     private func ensureExtracted(project: WallpaperEngineProject, pkgURL: URL) async -> Result<URL, ExtractionFailure> {
@@ -385,6 +330,7 @@ final class WallpaperEngineImportService {
             previewFileName: project.previewFileName,
             entryFile: project.entryFile,
             resourceLocation: resourceLocation,
+            dependencyWorkshopIDs: project.dependencyWorkshopIDs,
             missingDependencyIDs: missingDependencyIDs,
             requiresWindowsPlugin: project.requiresWindowsPlugin
         )
@@ -520,17 +466,20 @@ struct WPECachedContentResolver {
                 config: HTMLConfig(physicalPixelLayout: true)
             )
         case .scene:
-            // Phase 2.0 cache rebuild: do NOT re-parse `scene.json` here —
-            // the runtime layer already validates the descriptor on mount.
-            // We only need to confirm the cache entry exists, then hand back
-            // a `.scene(SceneDescriptor)` so ScreenManager can restore it
-            // without help from the import service.
+            let tier: SceneCapabilityTier
+            do {
+                let data = try Data(contentsOf: entryURL)
+                let document = try WPESceneDocumentParser.parse(data: data)
+                tier = WPESceneCapabilityClassifier().capabilityTier(for: document, cacheURL: cacheURL)
+            } catch {
+                tier = .unsupported
+            }
             return .scene(SceneDescriptor(
                 workshopID: origin.workshopID,
                 cacheRelativePath: cacheRelativePath,
                 entryFile: entryFile,
-                // Optimistic — runtime downgrades on first parse if needed.
-                capabilityTier: .imageOnly
+                capabilityTier: tier,
+                dependencyWorkshopIDs: origin.dependencyWorkshopIDs
             ))
         case .application, .unknown:
             return nil

@@ -19,6 +19,9 @@ struct WPEOrigin: Codable, Equatable, Sendable {
     let entryFile: String?
     /// Explicit runtime backing. Avoids overloading `cacheRelativePath == nil`.
     let resourceLocation: WPEResourceLocation
+    /// Workshop IDs declared by `project.json`; runtime uses these to mount
+    /// dependency roots for safe cross-package asset references.
+    var dependencyWorkshopIDs: [String]
     /// Workshop IDs the project declares as dependencies that are NOT
     /// currently available in our cache. Empty unless we successfully
     /// classified the project as unsupported because of missing deps.
@@ -39,6 +42,7 @@ struct WPEOrigin: Codable, Equatable, Sendable {
         previewFileName: String?,
         entryFile: String? = nil,
         resourceLocation: WPEResourceLocation? = nil,
+        dependencyWorkshopIDs: [String] = [],
         missingDependencyIDs: [String] = [],
         requiresWindowsPlugin: Bool = false
     ) {
@@ -53,6 +57,7 @@ struct WPEOrigin: Codable, Equatable, Sendable {
             originalType: originalType,
             cacheRelativePath: cacheRelativePath
         )
+        self.dependencyWorkshopIDs = dependencyWorkshopIDs
         self.missingDependencyIDs = missingDependencyIDs
         self.requiresWindowsPlugin = requiresWindowsPlugin
     }
@@ -66,6 +71,7 @@ struct WPEOrigin: Codable, Equatable, Sendable {
         case previewFileName
         case entryFile
         case resourceLocation
+        case dependencyWorkshopIDs
         case missingDependencyIDs
         case requiresWindowsPlugin
     }
@@ -83,6 +89,7 @@ struct WPEOrigin: Codable, Equatable, Sendable {
             ?? Self.defaultResourceLocation(originalType: originalType, cacheRelativePath: cacheRelativePath)
         // Lossy decode for both new fields so a Phase 2.0 plist (predating
         // them) loads cleanly without invalidating the surrounding origin.
+        dependencyWorkshopIDs = (try? container.decodeIfPresent([String].self, forKey: .dependencyWorkshopIDs)) ?? []
         missingDependencyIDs = (try? container.decodeIfPresent([String].self, forKey: .missingDependencyIDs)) ?? []
         requiresWindowsPlugin = (try? container.decodeIfPresent(Bool.self, forKey: .requiresWindowsPlugin)) ?? false
     }

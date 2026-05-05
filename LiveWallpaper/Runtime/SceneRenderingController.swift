@@ -22,6 +22,7 @@ final class SceneRenderingController {
     private let descriptor: SceneDescriptor
     private let cacheRootURL: URL
     private let resolver: SceneResourceResolver
+    private let imageResolver: WPEMultiRootResourceResolver
     private let initialFrame: CGRect
 
     private let skView: SKView
@@ -33,15 +34,31 @@ final class SceneRenderingController {
     /// detail view's diagnostic panel so power users can see *why* a layer
     /// was skipped without diving into Console logs.
     private(set) var loadDiagnostics: SceneLoadDiagnostic?
+    /// Renderer-neutral WPE pass graph built from scene/material/effect JSON.
+    /// SpriteKit currently remains the visible fallback, but this graph is
+    /// the single input model for the Metal WPE executor.
+    private(set) var renderGraph: WPERenderGraph?
+    /// Shader-source prepared form of `renderGraph`. This is the immediate
+    /// input for the Metal WPE executor once the backend is enabled.
+    private(set) var renderPipeline: WPEPreparedRenderPipeline?
     /// Per-layer progress callback driven by `load()`. The controller
     /// invokes this on the main actor with strings like "3/12" so the
     /// inspector card can surface them in `LiquidGlassSpinner`.
     var onProgress: (@MainActor (String) -> Void)?
 
-    init(descriptor: SceneDescriptor, cacheRootURL: URL, frame: CGRect) {
+    init(
+        descriptor: SceneDescriptor,
+        cacheRootURL: URL,
+        dependencyMounts: [WPEAssetMount] = [],
+        frame: CGRect
+    ) {
         self.descriptor = descriptor
         self.cacheRootURL = cacheRootURL
         self.resolver = SceneResourceResolver(cacheRootURL: cacheRootURL)
+        self.imageResolver = WPEMultiRootResourceResolver(
+            primaryRootURL: cacheRootURL,
+            dependencyMounts: dependencyMounts
+        )
         self.initialFrame = frame
         let view = SKView(frame: frame)
         view.allowsTransparency = true
@@ -96,6 +113,42 @@ final class SceneRenderingController {
             height: max(projection.height, 1)
         )
 
+        do {
+            let graph = try await Task.detached(priority: .userInitiated) { [cacheRootURL] in
+                try WPERenderGraphBuilder(cacheRootURL: cacheRootURL).build(document: document)
+            }.value
+            renderGraph = graph
+            let passCount = graph.layers.reduce(0) { $0 + $1.passes.count }
+            Logger.info(
+                "Scene \(descriptor.workshopID): built WPE render graph with \(graph.layers.count) layers / \(passCount) passes",
+                category: .screenManager
+            )
+            do {
+                let pipeline = try await Task.detached(priority: .userInitiated) { [cacheRootURL] in
+                    try WPERenderPipelineBuilder(cacheRootURL: cacheRootURL).build(graph: graph)
+                }.value
+                renderPipeline = pipeline
+                let preparedPassCount = pipeline.layers.reduce(0) { $0 + $1.passes.count }
+                Logger.info(
+                    "Scene \(descriptor.workshopID): prepared WPE shader pipeline with \(preparedPassCount) passes",
+                    category: .screenManager
+                )
+            } catch {
+                renderPipeline = nil
+                Logger.warning(
+                    "Scene \(descriptor.workshopID): WPE shader pipeline unavailable — \(error.localizedDescription)",
+                    category: .screenManager
+                )
+            }
+        } catch {
+            renderGraph = nil
+            renderPipeline = nil
+            Logger.warning(
+                "Scene \(descriptor.workshopID): WPE render graph unavailable — \(error.localizedDescription)",
+                category: .screenManager
+            )
+        }
+
         let scene = SKScene(size: canvasSize)
         scene.scaleMode = .aspectFill
         scene.backgroundColor = NSColor(
@@ -115,7 +168,7 @@ final class SceneRenderingController {
             processed += 1
             onProgress?("Decoding \(processed)/\(totalLayers) textures…")
             do {
-                let cgImage = try resolver.resolveImage(relativePath: object.imageRelativePath)
+                let cgImage = try imageResolver.resolveImage(relativePath: object.imageRelativePath)
                 let texture = SKTexture(cgImage: cgImage)
                 texture.filteringMode = .linear
                 let node = makeSpriteNode(texture: texture, object: object, canvas: canvasSize)
@@ -135,9 +188,8 @@ final class SceneRenderingController {
                 firstFailure = firstFailure ?? .fileMissing(layer: object.name, path: object.imageRelativePath)
             } catch SceneResourceResolver.ResolveError.pathEscape {
                 // Cross-package reference (e.g. `../<workshopid>/materials/foo.png`).
-                // Phase 2.0 has no multi-root resolver; skipping the layer
-                // keeps the scene partially renderable and the import
-                // service flagged the project as `.degraded` upstream.
+                // Missing or undeclared mounts stay rejected, while declared
+                // dependency roots are resolved by `imageResolver` above.
                 Logger.warning("Scene \(descriptor.workshopID): cross-package reference rejected for \(object.name) — \(object.imageRelativePath)", category: .screenManager)
                 firstFailure = firstFailure ?? .crossPackageReference(layer: object.name, path: object.imageRelativePath)
             } catch {
@@ -187,6 +239,8 @@ final class SceneRenderingController {
         scene = nil
         didLoad = false
         loadDiagnostics = nil
+        renderGraph = nil
+        renderPipeline = nil
     }
 
     /// Tears the current SKScene down and re-runs `load()`. Used by the
@@ -201,6 +255,8 @@ final class SceneRenderingController {
             scene = nil
             didLoad = false
             loadDiagnostics = nil
+            renderGraph = nil
+            renderPipeline = nil
         }
         try await load()
     }
@@ -250,17 +306,15 @@ final class SceneRenderingController {
         )
         node.colorBlendFactor = colorBlendFactor(for: object.color, brightness: object.brightness)
         node.blendMode = blendMode(for: object.blendMode)
-        node.zRotation = CGFloat(object.angles.z) * .pi / 180
 
-        // WPE origin is the absolute world position in projection-space
-        // pixels with the origin at the bottom-left of the canvas. SpriteKit
-        // uses the same origin convention so we plug origin in directly,
-        // clamped to the canvas size if the value is normalized 0–1.
-        node.position = position(
-            for: object.origin,
-            canvas: canvas,
-            alignment: object.alignment
+        let transform = WPESceneTransformMapper.spriteTransform(
+            origin: object.origin,
+            angles: object.angles,
+            alignment: object.alignment,
+            canvas: canvas
         )
+        node.zRotation = transform.zRotation
+        node.position = transform.position
 
         return node
     }
@@ -281,29 +335,4 @@ final class SceneRenderingController {
         }
     }
 
-    private func position(
-        for origin: SIMD3<Double>,
-        canvas: CGSize,
-        alignment: WPESceneAlignment
-    ) -> CGPoint {
-        let x = CGFloat(origin.x)
-        let y = CGFloat(origin.y)
-        // Treat values inside 0..1 as normalized — community wallpapers mix
-        // both conventions and the documentation is silent on which is
-        // canonical. Outside that range we trust the absolute pixel value.
-        let xPx = (x >= 0 && x <= 1) ? x * canvas.width : x
-        let yPx = (y >= 0 && y <= 1) ? y * canvas.height : y
-
-        switch alignment {
-        case .center:       return CGPoint(x: xPx, y: yPx)
-        case .topLeft:      return CGPoint(x: xPx, y: canvas.height - yPx)
-        case .topRight:     return CGPoint(x: canvas.width - xPx, y: canvas.height - yPx)
-        case .bottomLeft:   return CGPoint(x: xPx, y: yPx)
-        case .bottomRight:  return CGPoint(x: canvas.width - xPx, y: yPx)
-        case .top:          return CGPoint(x: xPx, y: canvas.height - yPx)
-        case .bottom:       return CGPoint(x: xPx, y: yPx)
-        case .left:         return CGPoint(x: xPx, y: yPx)
-        case .right:        return CGPoint(x: canvas.width - xPx, y: yPx)
-        }
-    }
 }

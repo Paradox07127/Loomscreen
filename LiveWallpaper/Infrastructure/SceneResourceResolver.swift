@@ -8,8 +8,8 @@ import ImageIO
 /// resolved and rejected if it escapes the cache root.
 ///
 /// Phase 2.1: `.tex` no longer auto-fails. The decoder routes by container
-/// version + format enum; only genuinely unsupported formats (RGBA1010102,
-/// unknown V6+ containers, animation frames) surface as precise errors.
+/// version + format enum; unsupported BC formats, RGBA1010102, unknown
+/// containers, and animation frames surface as precise errors.
 struct SceneResourceResolver: Sendable {
     enum ResolveError: Error, Equatable, Sendable {
         case pathEscape
@@ -169,11 +169,10 @@ struct SceneResourceResolver: Sendable {
         return nil
     }
 
-    /// Cheap header-only probe used by `WallpaperEngineImportService` during
-    /// capability tier classification. We read only the first 64 bytes —
-    /// enough to cover TEXV (9) + TEXI magic (9) + every field the V3 info
-    /// block exposes (28 bytes) — so import scanning a 100 MB / 50-layer
-    /// scene.pkg doesn't churn memory mapping every payload.
+    /// Decode-backed probe used by `WallpaperEngineImportService` during
+    /// capability tier classification. Header-only probing is not enough for
+    /// real WPE samples: some `RGBA8888` TEXB payloads actually contain MP4
+    /// bytes and would otherwise be classified as renderable.
     func probeImage(relativePath: String) -> Result<WPETexInfo, ResolveError> {
         guard !relativePath.isEmpty else { return .failure(.fileMissing) }
         let target: URL
@@ -191,25 +190,63 @@ struct SceneResourceResolver: Sendable {
         guard lowered == "tex" else {
             return .failure(.unsupportedTexture)
         }
-        let header: Data
+        let data: Data
         do {
-            let handle = try FileHandle(forReadingFrom: target)
-            defer { try? handle.close() }
-            header = (try handle.read(upToCount: Self.texProbeByteLimit)) ?? Data()
+            data = try Data(contentsOf: target, options: [.mappedIfSafe])
         } catch {
             return .failure(.fileMissing)
         }
-        switch decoder.probe(data: header) {
+        switch decoder.probe(data: data) {
         case .success(let info):
+            guard info.format?.isPhase21Decodable == true else {
+                return .success(info)
+            }
+            switch decoder.decode(data: data) {
+            case .success:
+                break
+            case .failure(let error):
+                return .failure(.texture(error))
+            }
             return .success(info)
         case .failure(let error):
             return .failure(.texture(error))
         }
     }
 
-    /// Worst-case header size: 9 (TEXV) + 9 (TEXI) + 7×4 (V3 fields) = 46.
-    /// Round up to 64 for safety.
-    private static let texProbeByteLimit = 64
+    /// Import-time renderability probe for WPE image references. Unlike
+    /// `exists(relativePath:)`, this follows WPE model/material JSON wrappers
+    /// to the terminal asset so a wrapper file cannot be mistaken for a
+    /// renderable layer when the underlying texture is absent or unsupported.
+    func probeRenderableImage(relativePath: String) -> Result<Void, ResolveError> {
+        guard !relativePath.isEmpty else { return .failure(.fileMissing) }
+        let resolvedPath: String
+        do {
+            resolvedPath = try resolveImageReference(relativePath: relativePath, depth: 0)
+        } catch let error as ResolveError {
+            return .failure(error)
+        } catch {
+            return .failure(.fileMissing)
+        }
+
+        let lowered = (resolvedPath as NSString).pathExtension.lowercased()
+        if lowered == "tex" {
+            switch probeImage(relativePath: resolvedPath) {
+            case .success(let info):
+                return info.format?.isPhase21Decodable == true ? .success(()) : .failure(.unsupportedTexture)
+            case .failure(let error):
+                return .failure(error)
+            }
+        }
+
+        do {
+            _ = try resolveExistingFileURL(relativePath: resolvedPath)
+            return .success(())
+        } catch let error as ResolveError {
+            return .failure(error)
+        } catch {
+            return .failure(.fileMissing)
+        }
+    }
 
     /// File existence probe used by tests + the import service to decide
     /// whether a scene's declared image layers are actually shipped.

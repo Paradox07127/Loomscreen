@@ -412,7 +412,7 @@ struct WallpaperEngineImportServiceTests {
         #expect(origin.requiresWindowsPlugin)
     }
 
-    @Test("Phase 2.0 WPEOrigin plist (no missingDependencyIDs / requiresWindowsPlugin) decodes lossily")
+    @Test("Phase 2.0 WPEOrigin plist (no dependency metadata fields) decodes lossily")
     func phase20OriginMigrates() throws {
         // Encode a current-shape origin then strip the new fields to mimic a
         // payload written by Phase 2.0. Decode must succeed with both
@@ -429,12 +429,14 @@ struct WallpaperEngineImportServiceTests {
         )
         let encoded = try JSONEncoder().encode(origin)
         var dict = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        dict.removeValue(forKey: "dependencyWorkshopIDs")
         dict.removeValue(forKey: "missingDependencyIDs")
         dict.removeValue(forKey: "requiresWindowsPlugin")
         let stripped = try JSONSerialization.data(withJSONObject: dict, options: .sortedKeys)
 
         let decoded = try JSONDecoder().decode(WPEOrigin.self, from: stripped)
 
+        #expect(decoded.dependencyWorkshopIDs.isEmpty)
         #expect(decoded.missingDependencyIDs.isEmpty)
         #expect(decoded.requiresWindowsPlugin == false)
         #expect(decoded.workshopID == "legacy")
@@ -483,11 +485,17 @@ struct WallpaperEngineImportServiceTests {
 
         let result = try await fixture.service.importProject(folder: fixture.folderURL)
 
-        guard case .ready(_, let origin) = result else {
+        guard case .ready(let content, let origin) = result else {
             Issue.record("Expected .ready, got \(result)")
             return
         }
+        guard case .scene(let descriptor) = content else {
+            Issue.record("Expected .scene content, got \(content)")
+            return
+        }
+        #expect(descriptor.dependencyWorkshopIDs == ["123456789012"])
         #expect(origin.missingDependencyIDs.isEmpty)
+        #expect(origin.dependencyWorkshopIDs == ["123456789012"])
         #expect(origin.cacheRelativePath == "wpe-cache/deps-ok")
     }
 
@@ -583,7 +591,7 @@ struct WallpaperEngineImportServiceTests {
         #expect(origin.resourceLocation == .cache)
     }
 
-    @Test("Cached content resolver rebuilds scene descriptor without re-parsing scene.json")
+    @Test("Cached content resolver rebuilds scene descriptor by reclassifying scene.json")
     func cachedContentResolverRebuildsSceneDescriptor() throws {
         let fileManager = FileManager.default
         let rootURL = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -591,7 +599,19 @@ struct WallpaperEngineImportServiceTests {
         let appSupportRoot = rootURL.appendingPathComponent("ApplicationSupport/LiveWallpaper", isDirectory: true)
         let cacheURL = appSupportRoot.appendingPathComponent("wpe-cache/resolve-scene", isDirectory: true)
         try fileManager.createDirectory(at: cacheURL, withIntermediateDirectories: true)
-        try Data("{}".utf8).write(to: cacheURL.appendingPathComponent("scene.json"))
+        let sceneJSON = """
+        {
+            "camera": { "center": "0 0 0" },
+            "general": {
+                "orthogonalprojection": { "width": 1920, "height": 1080, "auto": true }
+            },
+            "objects": [{
+                "name": "Missing layer",
+                "image": "materials/missing.png"
+            }]
+        }
+        """
+        try Data(sceneJSON.utf8).write(to: cacheURL.appendingPathComponent("scene.json"))
 
         let origin = WPEOrigin(
             workshopID: "resolve-scene",
@@ -615,6 +635,8 @@ struct WallpaperEngineImportServiceTests {
         #expect(descriptor.workshopID == "resolve-scene")
         #expect(descriptor.cacheRelativePath == "wpe-cache/resolve-scene")
         #expect(descriptor.entryFile == "scene.json")
+        #expect(descriptor.capabilityTier == .unsupported)
+        #expect(descriptor.dependencyWorkshopIDs == [])
     }
 
     @Test("Cached content resolver rebuilds packaged video without source folder access")

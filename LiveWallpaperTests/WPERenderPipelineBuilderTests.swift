@@ -1,0 +1,433 @@
+import Foundation
+import Testing
+@testable import LiveWallpaper
+
+@Suite("WPE render pipeline builder")
+struct WPERenderPipelineBuilderTests {
+
+    @Test("Builds prepared shader programs from render graph passes")
+    func buildsPreparedShaderProgramsFromGraphPasses() throws {
+        let fixture = try makeFixture(files: [
+            "shaders/effects/custom.vert": """
+            // [COMBO] {"combo":"KERNEL","default":1}
+            #include "common.h"
+            void main() { gl_Position = vec4(0.0); }
+            """,
+            "shaders/effects/custom.frag": """
+            uniform sampler2D g_Texture0;
+            void main() { gl_FragColor = texSample2D(g_Texture0, vec2(0.5)); }
+            """
+        ])
+        defer { fixture.cleanup() }
+
+        let graph = WPERenderGraph(layers: [
+            WPERenderLayer(
+                objectID: "7",
+                objectName: "Layer",
+                imagePath: "materials/base.png",
+                materialPath: "materials/base.json",
+                compositeA: "_rt_imageLayerComposite_7_a",
+                compositeB: "_rt_imageLayerComposite_7_b",
+                localFBOs: [],
+                passes: [
+                    WPERenderPass(
+                        id: "7.0",
+                        phase: .material,
+                        shader: "genericimage2",
+                        source: .image("materials/base.png"),
+                        target: .layerComposite(name: "_rt_imageLayerComposite_7_a"),
+                        textures: [:],
+                        binds: [:],
+                        constants: [:],
+                        combos: [:],
+                        blending: "normal",
+                        cullMode: "nocull",
+                        depthTest: "disabled",
+                        depthWrite: "disabled"
+                    ),
+                    WPERenderPass(
+                        id: "7.1",
+                        phase: .effect(file: "effects/custom/effect.json"),
+                        shader: "effects/custom",
+                        source: .fbo("_rt_imageLayerComposite_7_a"),
+                        target: .scene,
+                        textures: [:],
+                        binds: [0: .previous],
+                        constants: [:],
+                        combos: ["KERNEL": 2],
+                        blending: "normal",
+                        cullMode: "nocull",
+                        depthTest: "disabled",
+                        depthWrite: "disabled"
+                    )
+                ]
+            )
+        ])
+
+        let pipeline = try WPERenderPipelineBuilder(cacheRootURL: fixture.root).build(graph: graph)
+        let layer = try #require(pipeline.layers.first)
+
+        #expect(layer.passes.map(\.pass.shader) == ["genericimage2", "effects/custom"])
+        #expect(layer.passes[0].shader?.isBuiltin == true)
+        #expect(layer.passes[1].shader?.vertexSource.contains("#define KERNEL 2") == true)
+        #expect(layer.passes[1].shader?.vertexSource.contains("wpe_common_included") == true)
+        #expect(layer.passes[1].shader?.vertexSource.contains("#include") == false)
+        #expect(layer.passes[1].shader?.fragmentSource.contains("#define texSample2D") == true)
+    }
+
+    @Test("Missing shader source is reported with the pass shader name")
+    func missingShaderSourceReportsName() throws {
+        let fixture = try makeFixture(files: [:])
+        defer { fixture.cleanup() }
+
+        let pass = WPERenderPass(
+            id: "1.0",
+            phase: .effect(file: "effects/missing/effect.json"),
+            shader: "effects/missing",
+            source: .image("materials/base.png"),
+            target: .scene,
+            textures: [:],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "normal",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let graph = WPERenderGraph(layers: [
+            WPERenderLayer(
+                objectID: "1",
+                objectName: "Layer",
+                imagePath: "materials/base.png",
+                materialPath: nil,
+                compositeA: "a",
+                compositeB: "b",
+                localFBOs: [],
+                passes: [pass]
+            )
+        ])
+
+        #expect(throws: WPERenderPipelineError.self) {
+            _ = try WPERenderPipelineBuilder(cacheRootURL: fixture.root).build(graph: graph)
+        }
+    }
+
+    @Test("Expands WPE composite helper include used by blur combine shaders")
+    func expandsCompositeHelperInclude() throws {
+        let fixture = try makeFixture(files: [
+            "shaders/effects/blur_combine.vert": """
+            void main() { gl_Position = vec4(0.0); }
+            """,
+            "shaders/effects/blur_combine.frag": """
+            // [COMBO] {"combo":"COMPOSITE","default":0}
+            #include "common_composite.h"
+            uniform sampler2D g_Texture0;
+            uniform vec4 g_Texture0Resolution;
+            void main() {
+                vec2 uv = ApplyCompositeOffset(vec2(0.5), g_Texture0Resolution.xy);
+                gl_FragColor = ApplyComposite(vec4(0.0), texSample2D(g_Texture0, uv));
+            }
+            """
+        ])
+        defer { fixture.cleanup() }
+
+        let graph = WPERenderGraph(layers: [
+            WPERenderLayer(
+                objectID: "1",
+                objectName: "Layer",
+                imagePath: "materials/base.png",
+                materialPath: nil,
+                compositeA: "a",
+                compositeB: "b",
+                localFBOs: [],
+                passes: [
+                    WPERenderPass(
+                        id: "1.0",
+                        phase: .effect(file: "effects/blur/effect.json"),
+                        shader: "effects/blur_combine",
+                        source: .image("materials/base.png"),
+                        target: .scene,
+                        textures: [:],
+                        binds: [:],
+                        constants: [:],
+                        combos: [:],
+                        blending: "normal",
+                        cullMode: "nocull",
+                        depthTest: "disabled",
+                        depthWrite: "disabled"
+                    )
+                ]
+            )
+        ])
+
+        let pipeline = try WPERenderPipelineBuilder(cacheRootURL: fixture.root).build(graph: graph)
+        let fragmentSource = try #require(pipeline.layers.first?.passes.first?.shader?.fragmentSource)
+
+        #expect(fragmentSource.contains("wpe_common_composite_included"))
+        #expect(fragmentSource.contains("vec2 ApplyCompositeOffset"))
+        #expect(fragmentSource.contains("vec4 ApplyComposite"))
+        #expect(fragmentSource.contains("#include") == false)
+    }
+
+    @Test("Treats generic image shader variants as builtins")
+    func treatsGenericImageShaderVariantsAsBuiltins() throws {
+        let fixture = try makeFixture(files: [:])
+        defer { fixture.cleanup() }
+
+        let graph = WPERenderGraph(layers: [
+            WPERenderLayer(
+                objectID: "1",
+                objectName: "Layer",
+                imagePath: "materials/base.png",
+                materialPath: nil,
+                compositeA: "a",
+                compositeB: "b",
+                localFBOs: [],
+                passes: [
+                    WPERenderPass(
+                        id: "1.0",
+                        phase: .material,
+                        shader: "genericimage4",
+                        source: .image("materials/base.png"),
+                        target: .scene,
+                        textures: [:],
+                        binds: [:],
+                        constants: [:],
+                        combos: [:],
+                        blending: "normal",
+                        cullMode: "nocull",
+                        depthTest: "disabled",
+                        depthWrite: "disabled"
+                    )
+                ]
+            )
+        ])
+
+        let pipeline = try WPERenderPipelineBuilder(cacheRootURL: fixture.root).build(graph: graph)
+        let shader = try #require(pipeline.layers.first?.passes.first?.shader)
+
+        #expect(shader.name == "genericimage4")
+        #expect(shader.isBuiltin)
+    }
+
+    @Test("Builds built-in solid color shader")
+    func buildsBuiltinSolidColorShader() throws {
+        let fixture = try makeFixture(files: [:])
+        defer { fixture.cleanup() }
+
+        let graph = WPERenderGraph(layers: [
+            WPERenderLayer(
+                objectID: "1",
+                objectName: "Solid",
+                imagePath: "models/util/solidlayer.json",
+                materialPath: "models/util/solidlayer.json",
+                compositeA: "a",
+                compositeB: "b",
+                localFBOs: [],
+                passes: [
+                    WPERenderPass(
+                        id: "1.0",
+                        phase: .material,
+                        shader: "solidcolor",
+                        source: .image("models/util/solidlayer.json"),
+                        target: .scene,
+                        textures: [:],
+                        binds: [:],
+                        constants: ["g_Color": .vector([1, 0, 0, 1])],
+                        combos: [:],
+                        blending: "normal",
+                        cullMode: "nocull",
+                        depthTest: "disabled",
+                        depthWrite: "disabled"
+                    )
+                ]
+            )
+        ])
+
+        let pipeline = try WPERenderPipelineBuilder(cacheRootURL: fixture.root).build(graph: graph)
+        let shader = try #require(pipeline.layers.first?.passes.first?.shader)
+
+        #expect(shader.name == "solidcolor")
+        #expect(shader.isBuiltin)
+        #expect(shader.fragmentSource.contains("uniform vec4 g_Color"))
+    }
+
+    @Test("Builds executable copy command passes")
+    func buildsExecutableCopyCommandPasses() throws {
+        let fixture = try makeFixture(files: [:])
+        defer { fixture.cleanup() }
+
+        let graph = WPERenderGraph(layers: [
+            WPERenderLayer(
+                objectID: "1",
+                objectName: "Layer",
+                imagePath: "materials/base.png",
+                materialPath: nil,
+                compositeA: "a",
+                compositeB: "b",
+                localFBOs: [],
+                passes: [
+                    WPERenderPass(
+                        id: "1.0",
+                        phase: .command(file: "effects/copy/effect.json"),
+                        shader: "commands/copy",
+                        source: .fbo("_rt_Previous"),
+                        target: .fbo(name: "_rt_Target"),
+                        textures: [0: .fbo("_rt_Source")],
+                        binds: [:],
+                        constants: [:],
+                        combos: [:],
+                        blending: "normal",
+                        cullMode: "nocull",
+                        depthTest: "disabled",
+                        depthWrite: "disabled"
+                    )
+                ]
+            )
+        ])
+
+        let pipeline = try WPERenderPipelineBuilder(cacheRootURL: fixture.root).build(graph: graph)
+        let pass = try #require(pipeline.layers.first?.passes.first)
+
+        #expect(pass.shader?.name == "commands/copy")
+        #expect(pass.shader?.isBuiltin == true)
+        #expect(pass.textureBindings[0] == .fbo("_rt_Source"))
+    }
+
+    @Test("Merges shader annotation defaults into prepared pass metadata")
+    func mergesShaderAnnotationDefaultsIntoPreparedPassMetadata() throws {
+        let fixture = try makeFixture(files: [
+            "shaders/effects/annotated.vert": """
+            // [COMBO] {"combo":"QUALITY","default":2}
+            attribute vec3 a_Position;
+            void main() { gl_Position = vec4(a_Position, 1.0); }
+            """,
+            "shaders/effects/annotated.frag": """
+            uniform sampler2D g_Texture1; // {"material":"noise","default":"util/noise","hidden":true}
+            uniform sampler2D g_Texture2; // {"material":"flow","combo":"FLOWMASK"}
+            uniform float u_Strength; // {"material":"strength","default":0.2}
+            void main() { gl_FragColor = texSample2D(g_Texture1, vec2(u_Strength)); }
+            """
+        ])
+        defer { fixture.cleanup() }
+
+        let graph = WPERenderGraph(layers: [
+            WPERenderLayer(
+                objectID: "1",
+                objectName: "Layer",
+                imagePath: "materials/base.png",
+                materialPath: nil,
+                compositeA: "a",
+                compositeB: "b",
+                localFBOs: [],
+                passes: [
+                    WPERenderPass(
+                        id: "1.0",
+                        phase: .effect(file: "effects/annotated/effect.json"),
+                        shader: "effects/annotated",
+                        source: .image("materials/base.png"),
+                        target: .scene,
+                        textures: [2: .asset("masks/flow")],
+                        binds: [:],
+                        constants: ["strength": .number(0.75)],
+                        combos: [:],
+                        blending: "normal",
+                        cullMode: "nocull",
+                        depthTest: "disabled",
+                        depthWrite: "disabled"
+                    )
+                ]
+            )
+        ])
+
+        let pipeline = try WPERenderPipelineBuilder(cacheRootURL: fixture.root).build(graph: graph)
+        let pass = try #require(pipeline.layers.first?.passes.first)
+
+        #expect(pass.comboValues["QUALITY"] == 2)
+        #expect(pass.comboValues["FLOWMASK"] == 1)
+        #expect(pass.textureBindings[0] == .image("materials/base.png"))
+        #expect(pass.textureBindings[1] == .asset("util/noise"))
+        #expect(pass.textureBindings[2] == .asset("masks/flow"))
+        #expect(pass.uniformValues["u_Strength"]?.numberValue == 0.75)
+    }
+
+    @Test("Comments require directives and emits WPE compatibility prelude")
+    func commentsRequireDirectivesAndEmitsCompatibilityPrelude() throws {
+        let fixture = try makeFixture(files: [
+            "shaders/effects/compat.vert": """
+            #require SOME_FEATURE
+            attribute vec3 a_Position;
+            varying vec2 v_TexCoord;
+            void main() { gl_Position = vec4(a_Position, 1.0); }
+            """,
+            "shaders/effects/compat.frag": """
+            varying vec2 v_TexCoord;
+            void main() { gl_FragColor = lerp(vec4(0.0), vec4(1.0), 0.5); }
+            """
+        ])
+        defer { fixture.cleanup() }
+
+        let graph = WPERenderGraph(layers: [
+            WPERenderLayer(
+                objectID: "1",
+                objectName: "Layer",
+                imagePath: "materials/base.png",
+                materialPath: nil,
+                compositeA: "a",
+                compositeB: "b",
+                localFBOs: [],
+                passes: [
+                    WPERenderPass(
+                        id: "1.0",
+                        phase: .effect(file: "effects/compat/effect.json"),
+                        shader: "effects/compat",
+                        source: .image("materials/base.png"),
+                        target: .scene,
+                        textures: [:],
+                        binds: [:],
+                        constants: [:],
+                        combos: [:],
+                        blending: "normal",
+                        cullMode: "nocull",
+                        depthTest: "disabled",
+                        depthWrite: "disabled"
+                    )
+                ]
+            )
+        ])
+
+        let pipeline = try WPERenderPipelineBuilder(cacheRootURL: fixture.root).build(graph: graph)
+        let shader = try #require(pipeline.layers.first?.passes.first?.shader)
+
+        #expect(shader.vertexSource.contains("#require") == false)
+        #expect(shader.vertexSource.contains("#define attribute in"))
+        #expect(shader.fragmentSource.contains("out vec4 out_FragColor"))
+        #expect(shader.fragmentSource.contains("gl_FragColor") == false)
+        #expect(shader.fragmentSource.contains("#define texSample2DLod textureLod"))
+        #expect(shader.fragmentSource.contains("#define lerp mix"))
+    }
+
+    private struct Fixture {
+        let root: URL
+
+        func cleanup() {
+            try? FileManager.default.removeItem(at: root)
+        }
+    }
+
+    private func makeFixture(files: [String: String]) throws -> Fixture {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPERenderPipelineBuilderTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        for (relativePath, contents) in files {
+            let fileURL = root.appendingPathComponent(relativePath)
+            try FileManager.default.createDirectory(
+                at: fileURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try Data(contents.utf8).write(to: fileURL)
+        }
+        return Fixture(root: root)
+    }
+}

@@ -18,17 +18,22 @@ struct SceneDescriptor: Codable, Equatable, Sendable {
     let entryFile: String
     /// Best-effort runtime capability assessment from the import flow.
     let capabilityTier: SceneCapabilityTier
+    /// Declared Workshop dependencies that may be mounted as sibling cache or
+    /// source roots at runtime.
+    let dependencyWorkshopIDs: [String]
 
     init(
         workshopID: String,
         cacheRelativePath: String,
         entryFile: String,
-        capabilityTier: SceneCapabilityTier
+        capabilityTier: SceneCapabilityTier,
+        dependencyWorkshopIDs: [String] = []
     ) {
         self.workshopID = workshopID
         self.cacheRelativePath = cacheRelativePath
         self.entryFile = entryFile
         self.capabilityTier = capabilityTier
+        self.dependencyWorkshopIDs = dependencyWorkshopIDs
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -36,6 +41,7 @@ struct SceneDescriptor: Codable, Equatable, Sendable {
         case cacheRelativePath
         case entryFile
         case capabilityTier
+        case dependencyWorkshopIDs
     }
 
     init(from decoder: Decoder) throws {
@@ -46,6 +52,7 @@ struct SceneDescriptor: Codable, Equatable, Sendable {
         // Lossy: an unrecognised tier (e.g. future Phase 2.x value) decodes
         // to `.unsupported` so an old build does not blow up on new payloads.
         capabilityTier = (try? c.decode(SceneCapabilityTier.self, forKey: .capabilityTier)) ?? .unsupported
+        dependencyWorkshopIDs = (try? c.decodeIfPresent([String].self, forKey: .dependencyWorkshopIDs)) ?? []
     }
 }
 

@@ -10,8 +10,8 @@ import Metal
 ///
 /// Until then `transcode(...)` returns `.metalUnavailable(format:)` so
 /// the resolver maps the error to a precise `texUnsupportedFormat` UI
-/// reason. Empirically, the user's 9 imported scenes are 100%
-/// RGBA8888/RGBA1010102, so deferring BC has zero impact on coverage.
+/// reason. The 431960 sample set includes BC-family textures, so those
+/// layers stay degraded until the Phase 2.2 transcoder lands.
 ///
 /// Modeled as an `enum` (no instance, no stored Metal state) so the
 /// type is trivially `Sendable` under Swift 6 strict concurrency without

@@ -66,6 +66,16 @@ struct WPETexByteReader {
         cursor += count
     }
 
+    mutating func skipNullTerminatedString(blockName: String) throws {
+        guard cursor <= data.count else {
+            throw WPETexDecodeError.truncatedBlock(block: blockName, offset: cursor)
+        }
+        guard let terminator = data[cursor...].firstIndex(of: 0) else {
+            throw WPETexDecodeError.truncatedBlock(block: blockName, offset: cursor)
+        }
+        cursor = terminator + 1
+    }
+
     private func ensure(byteCount: Int, blockName: String) throws {
         guard byteCount >= 0, cursor + byteCount <= data.count else {
             throw WPETexDecodeError.truncatedBlock(block: blockName, offset: cursor)

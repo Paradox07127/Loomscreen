@@ -122,6 +122,212 @@ struct SceneRenderingControllerTests {
         }
     }
 
+    @Test("Scene renderer does not attach ad-hoc SpriteKit actions for WPE shader effects")
+    func shaderEffectsDoNotAttachSpriteKitFallbackActions() async throws {
+        let fixture = try makeFixture(
+            layers: ["a.png"],
+            textFiles: [
+                "effects/shake/effect.json": """
+                {
+                    "passes": [{
+                        "material": "materials/effects/shake.json"
+                    }]
+                }
+                """,
+                "materials/effects/shake.json": """
+                {
+                    "passes": [{
+                        "shader": "effects/shake"
+                    }]
+                }
+                """
+            ],
+            objectOverrides: [
+                """
+                {
+                    "id": "layer-0",
+                    "name": "Layer 0",
+                    "type": "image",
+                    "image": "materials/a.png",
+                    "origin": "0.5 0.5 0",
+                    "scale": "1 1 1",
+                    "alpha": 1,
+                    "effects": [{
+                        "id": 1,
+                        "name": "Shake",
+                        "file": "effects/shake/effect.json",
+                        "visible": true,
+                        "passes": [{
+                            "constantshadervalues": {
+                                "speed": 0.59,
+                                "strength": 0.133
+                            }
+                        }]
+                    }]
+                }
+                """
+            ]
+        )
+        defer { fixture.cleanup() }
+
+        let controller = SceneRenderingController(
+            descriptor: fixture.descriptor,
+            cacheRootURL: fixture.cacheRoot,
+            frame: CGRect(x: 0, y: 0, width: 200, height: 200)
+        )
+        try await controller.load()
+
+        let sprite = try #require(controller.view.scene?.childNode(withName: "Layer 0") as? SKSpriteNode)
+        #expect(sprite.action(forKey: "wpe.effect.shake") == nil)
+    }
+
+    @Test("Scene load builds the WPE render graph for material/effect metadata")
+    func loadBuildsWPERenderGraph() async throws {
+        let fixture = try makeFixture(
+            layers: ["a.png"],
+            textFiles: [
+                "materials/base.json": """
+                {
+                    "passes": [{
+                        "shader": "genericimage2"
+                    }]
+                }
+                """,
+                "effects/custom/effect.json": """
+                {
+                    "passes": [{
+                        "material": "materials/effects/custom.json",
+                        "bind": [{ "index": 1, "name": "previous" }]
+                    }]
+                }
+                """,
+                "materials/effects/custom.json": """
+                {
+                    "passes": [{
+                        "shader": "effects/custom",
+                        "constantshadervalues": { "strength": 0.5 }
+                    }]
+                }
+                """,
+                "shaders/effects/custom.vert": """
+                attribute vec3 a_Position;
+                void main() { gl_Position = vec4(a_Position, 1.0); }
+                """,
+                "shaders/effects/custom.frag": """
+                uniform sampler2D g_Texture0;
+                void main() { gl_FragColor = texSample2D(g_Texture0, vec2(0.5)); }
+                """
+            ],
+            objectOverrides: [
+                """
+                {
+                    "id": "layer-graph",
+                    "name": "Layer Graph",
+                    "type": "image",
+                    "image": "materials/a.png",
+                    "material": "materials/base.json",
+                    "origin": "0.5 0.5 0",
+                    "scale": "1 1 1",
+                    "alpha": 1,
+                    "effects": [{
+                        "id": 1,
+                        "name": "Custom",
+                        "file": "effects/custom/effect.json",
+                        "visible": true
+                    }]
+                }
+                """
+            ]
+        )
+        defer { fixture.cleanup() }
+
+        let controller = SceneRenderingController(
+            descriptor: fixture.descriptor,
+            cacheRootURL: fixture.cacheRoot,
+            frame: CGRect(x: 0, y: 0, width: 200, height: 200)
+        )
+        try await controller.load()
+
+        let graph = try #require(controller.renderGraph)
+        let layer = try #require(graph.layers.first)
+        #expect(layer.passes.map(\.shader) == ["genericimage2", "effects/custom"])
+        #expect(layer.passes[1].binds[1] == .previous)
+
+        let pipeline = try #require(controller.renderPipeline)
+        let preparedLayer = try #require(pipeline.layers.first)
+        #expect(preparedLayer.passes.map(\.pass.shader) == ["genericimage2", "effects/custom"])
+        #expect(preparedLayer.passes[0].shader?.isBuiltin == true)
+        #expect(preparedLayer.passes[1].shader?.fragmentSource.contains("#define texSample2D") == true)
+    }
+
+    @Test("Scene renderer treats WPE angles as radians")
+    func sceneRendererUsesRadianAngles() async throws {
+        let fixture = try makeFixture(
+            layers: ["a.png"],
+            objectOverrides: [
+                """
+                {
+                    "id": "layer-radians",
+                    "name": "Layer Radians",
+                    "type": "image",
+                    "image": "materials/a.png",
+                    "origin": "0.5 0.5 0",
+                    "scale": "1 1 1",
+                    "angles": "0 0 1.5707963267948966",
+                    "alpha": 1
+                }
+                """
+            ]
+        )
+        defer { fixture.cleanup() }
+
+        let controller = SceneRenderingController(
+            descriptor: fixture.descriptor,
+            cacheRootURL: fixture.cacheRoot,
+            frame: CGRect(x: 0, y: 0, width: 200, height: 200)
+        )
+        try await controller.load()
+
+        let sprite = try #require(controller.view.scene?.childNode(withName: "Layer Radians") as? SKSpriteNode)
+        #expect(abs(sprite.zRotation - CGFloat(Double.pi / 2)) < 0.0001)
+    }
+
+    @Test("Scene renderer resolves declared dependency image references")
+    func sceneRendererResolvesDeclaredDependencyImageReferences() async throws {
+        let fixture = try makeFixture(
+            layers: [],
+            objectOverrides: [
+                """
+                {
+                    "id": "dependency-layer",
+                    "name": "Dependency Layer",
+                    "type": "image",
+                    "image": "../123/materials/dep.png",
+                    "origin": "0.5 0.5 0",
+                    "scale": "1 1 1",
+                    "alpha": 1
+                }
+                """
+            ]
+        )
+        defer { fixture.cleanup() }
+        let dependencyRoot = fixture.root.appendingPathComponent("dependency-123", isDirectory: true)
+        let dependencyMaterials = dependencyRoot.appendingPathComponent("materials", isDirectory: true)
+        try FileManager.default.createDirectory(at: dependencyMaterials, withIntermediateDirectories: true)
+        try writePNG(at: dependencyMaterials.appendingPathComponent("dep.png"))
+
+        let controller = SceneRenderingController(
+            descriptor: fixture.descriptor,
+            cacheRootURL: fixture.cacheRoot,
+            dependencyMounts: [WPEAssetMount(workshopID: "123", rootURL: dependencyRoot)],
+            frame: CGRect(x: 0, y: 0, width: 200, height: 200)
+        )
+        try await controller.load()
+
+        let sprite = controller.view.scene?.childNode(withName: "Dependency Layer") as? SKSpriteNode
+        #expect(sprite != nil)
+    }
+
     // MARK: - Fixture
 
     private struct Fixture {
@@ -137,6 +343,8 @@ struct SceneRenderingControllerTests {
     private func makeFixture(
         layers: [String],
         declaredLayers: [String]? = nil,
+        textFiles: [String: String] = [:],
+        objectOverrides: [String]? = nil,
         includeSceneJSON: Bool = true
     ) throws -> Fixture {
         let root = FileManager.default.temporaryDirectory
@@ -151,23 +359,36 @@ struct SceneRenderingControllerTests {
         for layer in layers {
             try writePNG(at: materials.appendingPathComponent(layer))
         }
+        for (relativePath, contents) in textFiles {
+            let fileURL = cacheRoot.appendingPathComponent(relativePath)
+            try FileManager.default.createDirectory(
+                at: fileURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try Data(contents.utf8).write(to: fileURL)
+        }
 
         if includeSceneJSON {
-            let layerJSONPaths = (declaredLayers ?? layers.map { "materials/\($0)" })
-            let objects = layerJSONPaths.enumerated().map { index, path in
-                """
-                {
-                    "id": "layer-\(index)",
-                    "name": "Layer \(index)",
-                    "type": "image",
-                    "image": "\(path)",
-                    "origin": "0.5 0.5 0",
-                    "scale": "1 1 1",
-                    "alpha": 1,
-                    "blendmode": "normal"
-                }
-                """
-            }.joined(separator: ",\n")
+            let objects: String
+            if let objectOverrides {
+                objects = objectOverrides.joined(separator: ",\n")
+            } else {
+                let layerJSONPaths = (declaredLayers ?? layers.map { "materials/\($0)" })
+                objects = layerJSONPaths.enumerated().map { index, path in
+                    """
+                    {
+                        "id": "layer-\(index)",
+                        "name": "Layer \(index)",
+                        "type": "image",
+                        "image": "\(path)",
+                        "origin": "0.5 0.5 0",
+                        "scale": "1 1 1",
+                        "alpha": 1,
+                        "blendmode": "normal"
+                    }
+                    """
+                }.joined(separator: ",\n")
+            }
 
             let json = """
             {

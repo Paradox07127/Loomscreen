@@ -8,11 +8,11 @@ import Foundation
 ///
 /// Phase 2.0 contract:
 ///   - Required: top-level object with `camera` + `general` blocks.
-///   - Image objects (`type` either missing or "image") feed
-///     `WPESceneDocument.imageObjects`.
-///   - Anything else (text / particles / sound / shaders / FBO passes /
-///     bloom / parallax) emits a `WPESceneDiagnostic` and the parser keeps
-///     going so the import flow can still light up image-only scenes.
+    ///   - Image objects feed `WPESceneDocument.imageObjects`; object kind is
+    ///     inferred from WPE shape keys when `type` is missing.
+///   - Material/effect/animation metadata is preserved for renderer fallbacks
+///     and future shader passes; unsupported objects and full FBO shader
+///     pipelines still emit diagnostics so import can downgrade capability.
 enum WPESceneDocumentParser {
 
     static func parse(data: Data) throws -> WPESceneDocument {
@@ -45,19 +45,27 @@ enum WPESceneDocumentParser {
         var imageObjects: [WPESceneImageObject] = []
 
         for entry in rawObjects {
-            let type = (entry["type"] as? String)?.lowercased() ?? "image"
-            switch type {
-            case "image", "":
-                if let object = parseImageObject(entry, diagnostics: &diagnostics) {
-                    imageObjects.append(object)
-                }
-            case "text":
-                diagnostics.append(.init(severity: .info, message: "Text object \(entry["name"] as? String ?? "?") is unsupported in Phase 2.0"))
-            case "sound":
-                diagnostics.append(.init(severity: .info, message: "Sound object \(entry["name"] as? String ?? "?") is unsupported in Phase 2.0"))
-            case "particle":
-                diagnostics.append(.init(severity: .info, message: "Particle object \(entry["name"] as? String ?? "?") is unsupported in Phase 2.0"))
-            default:
+            let objectName = entry["name"] as? String ?? "?"
+            let resolution = objectKindResolution(for: entry)
+            if resolution.isAmbiguous {
+                let declared = resolution.candidates.map(\.rawValue).joined(separator: ", ")
+                diagnostics.append(.init(severity: .warning, message: "Ambiguous object \(objectName) declares \(declared)"))
+            }
+
+            if resolution.primary == .image, let object = parseImageObject(entry, diagnostics: &diagnostics) {
+                imageObjects.append(object)
+            }
+
+            var unsupportedKinds = resolution.candidates.filter { $0 != .image && $0 != .unknown }
+            if resolution.primary != .image && resolution.primary != .unknown && !unsupportedKinds.contains(resolution.primary) {
+                unsupportedKinds.append(resolution.primary)
+            }
+            for kind in unsupportedKinds {
+                diagnostics.append(.init(severity: .info, message: "\(kind.displayName) object \(objectName) is unsupported in Phase 2.0"))
+            }
+
+            if resolution.primary == .unknown {
+                let type = resolution.explicitType ?? "missing"
                 diagnostics.append(.init(severity: .info, message: "Object type \(type) is unsupported in Phase 2.0"))
             }
         }
@@ -82,6 +90,42 @@ enum WPESceneDocumentParser {
             imageObjects: imageObjects,
             diagnostics: diagnostics
         )
+    }
+
+    private static func objectKindResolution(for entry: [String: Any]) -> WPESceneObjectKindResolution {
+        let candidates = shapeCandidates(in: entry)
+        if let explicit = (entry["type"] as? String)?.lowercased(), !explicit.isEmpty {
+            return WPESceneObjectKindResolution(
+                primary: objectKind(explicitType: explicit),
+                candidates: candidates,
+                explicitType: explicit
+            )
+        }
+        if candidates.contains(.image) {
+            return WPESceneObjectKindResolution(primary: .image, candidates: candidates, explicitType: nil)
+        }
+        return WPESceneObjectKindResolution(primary: candidates.first ?? .unknown, candidates: candidates, explicitType: nil)
+    }
+
+    private static func objectKind(explicitType: String) -> WPESceneObjectKind {
+        switch explicitType {
+        case "image": return .image
+        case "sound": return .sound
+        case "particle": return .particle
+        case "text": return .text
+        case "light": return .light
+        default: return .unknown
+        }
+    }
+
+    private static func shapeCandidates(in entry: [String: Any]) -> [WPESceneObjectKind] {
+        var kinds: [WPESceneObjectKind] = []
+        if entry["image"] != nil { kinds.append(.image) }
+        if entry["sound"] != nil { kinds.append(.sound) }
+        if entry["particle"] != nil { kinds.append(.particle) }
+        if entry["text"] != nil { kinds.append(.text) }
+        if entry["light"] != nil { kinds.append(.light) }
+        return kinds
     }
 
     // MARK: - Camera
@@ -147,15 +191,22 @@ enum WPESceneDocumentParser {
             size = nil
         }
 
-        // Track unsupported features so the import flow can downgrade tier.
-        if let effects = dict["effects"] as? [Any], !effects.isEmpty {
-            diagnostics.append(.init(severity: .info, message: "Image \(name) declares effects — rendered without effects in Phase 2.0"))
+        let materialRelativePath = dict["material"] as? String
+        let effects = parseImageEffects(dict["effects"], imageName: name, diagnostics: &diagnostics)
+        let animationLayers = parseAnimationLayers(dict["animationlayers"], imageName: name, diagnostics: &diagnostics)
+
+        // Track partially implemented features so the import flow can
+        // downgrade tier, while preserving enough metadata for fallbacks and
+        // future shader passes.
+        if !effects.isEmpty {
+            let names = effects.map(\.name).joined(separator: ", ")
+            diagnostics.append(.init(severity: .info, message: "Image \(name) declares effects (\(names)) — shader pipeline partially supported"))
         }
-        if dict["material"] != nil {
-            diagnostics.append(.init(severity: .info, message: "Image \(name) declares material — Phase 2.0 ignores material/shader"))
+        if materialRelativePath != nil {
+            diagnostics.append(.init(severity: .info, message: "Image \(name) declares material — material shader pass not yet rendered"))
         }
-        if dict["animationlayers"] != nil {
-            diagnostics.append(.init(severity: .info, message: "Image \(name) declares animationlayers — unsupported in Phase 2.0"))
+        if !animationLayers.isEmpty {
+            diagnostics.append(.init(severity: .info, message: "Image \(name) declares animationlayers — puppet warp not yet rendered"))
         }
         if imagePath.lowercased().hasSuffix(".tex") {
             diagnostics.append(.init(severity: .warning, message: "Image \(name) uses .tex texture — falls back to first-frame stub if available"))
@@ -165,6 +216,7 @@ enum WPESceneDocumentParser {
             id: id,
             name: name,
             imageRelativePath: imagePath,
+            materialRelativePath: materialRelativePath,
             origin: origin,
             scale: scale,
             angles: angles,
@@ -174,8 +226,136 @@ enum WPESceneDocumentParser {
             brightness: brightness,
             blendMode: blend,
             alignment: alignment,
-            size: size
+            size: size,
+            effects: effects,
+            animationLayers: animationLayers
         )
+    }
+
+    private static func parseImageEffects(
+        _ raw: Any?,
+        imageName: String,
+        diagnostics: inout [WPESceneDiagnostic]
+    ) -> [WPESceneImageEffect] {
+        guard let array = raw as? [Any] else { return [] }
+        var effects: [WPESceneImageEffect] = []
+        for (index, entry) in array.enumerated() {
+            guard let dict = entry as? [String: Any] else {
+                diagnostics.append(.init(severity: .warning, message: "Image \(imageName) effect \(index) is malformed"))
+                continue
+            }
+            guard let file = dict["file"] as? String, !file.isEmpty else {
+                diagnostics.append(.init(severity: .warning, message: "Image \(imageName) effect \(index) has no file"))
+                continue
+            }
+            let id = (dict["id"] as? String)
+                ?? parseInt(dict["id"]).map(String.init)
+                ?? "\(index)"
+            let name = (dict["name"] as? String) ?? effectName(from: file)
+            effects.append(WPESceneImageEffect(
+                id: id,
+                name: name,
+                fileRelativePath: file,
+                visible: parseBool(dict["visible"]) ?? true,
+                passOverrides: parseEffectPassOverrides(dict["passes"])
+            ))
+        }
+        return effects
+    }
+
+    private static func parseEffectPassOverrides(_ raw: Any?) -> [WPESceneEffectPassOverride] {
+        guard let array = raw as? [Any] else { return [] }
+        return array.compactMap { entry in
+            guard let dict = entry as? [String: Any] else { return nil }
+            return WPESceneEffectPassOverride(
+                id: parseInt(dict["id"]),
+                combos: parseComboMap(dict["combos"]),
+                constants: parseShaderConstants(dict["constantshadervalues"]),
+                textures: parseTextureSlots(dict["textures"])
+            )
+        }
+    }
+
+    private static func parseAnimationLayers(
+        _ raw: Any?,
+        imageName: String,
+        diagnostics: inout [WPESceneDiagnostic]
+    ) -> [WPESceneAnimationLayer] {
+        guard let array = raw as? [Any] else { return [] }
+        var layers: [WPESceneAnimationLayer] = []
+        for (index, entry) in array.enumerated() {
+            guard let dict = entry as? [String: Any],
+                  let id = parseInt(dict["id"]),
+                  let animation = parseInt(dict["animation"]) else {
+                diagnostics.append(.init(severity: .warning, message: "Image \(imageName) animation layer \(index) is malformed"))
+                continue
+            }
+            layers.append(WPESceneAnimationLayer(
+                id: id,
+                rate: parseDouble(dict["rate"]) ?? 0,
+                visible: parseBool(dict["visible"]) ?? true,
+                blend: parseDouble(dict["blend"]) ?? 1,
+                animation: animation
+            ))
+        }
+        return layers
+    }
+
+    private static func parseComboMap(_ raw: Any?) -> [String: Int] {
+        guard let dict = raw as? [String: Any] else { return [:] }
+        var result: [String: Int] = [:]
+        for (key, value) in dict {
+            if let intValue = parseInt(value) {
+                result[key] = intValue
+            }
+        }
+        return result
+    }
+
+    private static func parseShaderConstants(_ raw: Any?) -> [String: WPESceneShaderConstantValue] {
+        guard let dict = raw as? [String: Any] else { return [:] }
+        var result: [String: WPESceneShaderConstantValue] = [:]
+        for (key, value) in dict {
+            if let parsed = parseShaderConstant(value) {
+                result[key] = parsed
+            }
+        }
+        return result
+    }
+
+    private static func parseShaderConstant(_ raw: Any?) -> WPESceneShaderConstantValue? {
+        if let bool = raw as? Bool {
+            return .bool(bool)
+        }
+        if let vector = parseNumberVector(raw) {
+            return .vector(vector)
+        }
+        if let double = parseDouble(raw) {
+            return .number(double)
+        }
+        if let string = raw as? String {
+            return .string(string)
+        }
+        return nil
+    }
+
+    private static func parseTextureSlots(_ raw: Any?) -> [Int: String] {
+        guard let array = raw as? [Any] else { return [:] }
+        var result: [Int: String] = [:]
+        for (index, value) in array.enumerated() {
+            if let string = value as? String, !string.isEmpty {
+                result[index] = string
+            }
+        }
+        return result
+    }
+
+    private static func effectName(from file: String) -> String {
+        let pieces = file.split(separator: "/")
+        if pieces.count >= 2 {
+            return String(pieces[pieces.count - 2])
+        }
+        return file
     }
 
     // MARK: - Primitive parsing
@@ -210,6 +390,19 @@ enum WPESceneDocumentParser {
         return nil
     }
 
+    private static func parseNumberVector(_ raw: Any?) -> [Double]? {
+        if let array = raw as? [Any] {
+            let values = array.compactMap(parseDouble)
+            return values.count == array.count && values.count >= 2 ? values : nil
+        }
+        if let string = raw as? String {
+            let pieces = string.split(whereSeparator: { $0.isWhitespace || $0 == "," })
+            let values = pieces.compactMap { Double($0) }
+            return values.count == pieces.count && values.count >= 2 ? values : nil
+        }
+        return nil
+    }
+
     static func parseDouble(_ raw: Any?) -> Double? {
         if let number = raw as? NSNumber {
             return number.doubleValue
@@ -222,6 +415,19 @@ enum WPESceneDocumentParser {
         }
         if let string = raw as? String {
             return Double(string)
+        }
+        return nil
+    }
+
+    private static func parseInt(_ raw: Any?) -> Int? {
+        if let number = raw as? NSNumber {
+            return number.intValue
+        }
+        if let int = raw as? Int {
+            return int
+        }
+        if let string = raw as? String {
+            return Int(string)
         }
         return nil
     }
