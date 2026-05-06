@@ -1320,6 +1320,32 @@ final class ScreenManager {
     func getConfiguration(for screen: Screen) -> ScreenConfiguration? {
         configurationStore.get(for: screen.id)
     }
+
+    /// Copies the active wallpaper + per-screen settings from `source` onto
+    /// every other registered screen, restoring each runtime session so the
+    /// new content shows immediately. Used by the "Apply to All" toolbar
+    /// action; no-op when there's only one screen.
+    ///
+    /// The target's existing runtime session is torn down BEFORE
+    /// `restoreWallpaperSession`, otherwise the video path's reuse-existing-
+    /// player branch would persist the new config but keep playing the old
+    /// URL. `releaseRuntimeSession` also bumps the per-screen transition
+    /// generation, so any in-flight async video load on the target invalidates
+    /// itself instead of overwriting the apply-to-all result.
+    func applyConfigurationToAllDisplays(from source: Screen) {
+        guard screens.count > 1,
+              let template = configurationStore.get(for: source.id) else { return }
+
+        for target in screens where target.id != source.id {
+            var copy = template
+            copy.screenID = target.id
+            releaseRuntimeSession(target)
+            saveConfiguration(copy)
+            restoreWallpaperSession(for: target, configuration: copy, preservingState: false)
+            Logger.info("Apply to All: copied configuration from screen \(source.id) → \(target.id)", category: .screenManager)
+        }
+        notifyWallpaperSessionChanged()
+    }
     
     func validateAllConfigurations() -> (valid: Int, invalid: Int) {
         let screenIDs = configurationStore.allScreenIDs()
