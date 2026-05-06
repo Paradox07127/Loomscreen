@@ -43,6 +43,12 @@ final class HTMLWallpaperView: NSView {
     /// Tracks the last applied `HTMLConfig` so re-`apply()` calls with the
     /// same toggles skip the user-script teardown / re-install.
     private var lastAppliedConfig: HTMLConfig?
+    /// Replays into `loadSource(_:)` for retry / re-entry (sleep wake, error banner).
+    private var lastSource: HTMLSource?
+
+    /// Forwarded to the owning `AmbientWallpaperSession` so failures surface as
+    /// `RuntimeErrorBanner` and can be retried from the screen-detail UI.
+    var onError: (@MainActor (WallpaperRuntimeError) -> Void)?
 
     // MARK: - Initialization
 
@@ -265,20 +271,39 @@ final class HTMLWallpaperView: NSView {
     }
 
     func loadSource(_ source: HTMLSource) {
+        lastSource = source
         stopActiveSecurityScope()
+        // Cut every non-folder source off from the previous folder's scheme handler
+        // (C1): if folderURL stayed live, a remote page could probe livewallpaper://.
+        if case .folder = source {
+            // folderURL is set below — do not clear here.
+        } else {
+            folderHandler.folderURL = nil
+        }
+
         switch source {
         case .file(let bookmarkData):
-            guard let url = HTMLWallpaperView.resolveBookmark(bookmarkData) else { return }
+            guard let url = HTMLWallpaperView.resolveBookmark(bookmarkData) else {
+                reportError(.sandboxRevoked)
+                return
+            }
             activeSecurityScopedURL = url
             webView.loadFileURL(url, allowingReadAccessTo: Self.readAccessRoot(forFileURL: url))
         case .folder(let bookmarkData, let indexFileName):
-            guard let folderURL = HTMLWallpaperView.resolveBookmark(bookmarkData) else { return }
+            guard let folderURL = HTMLWallpaperView.resolveBookmark(bookmarkData) else {
+                reportError(.sandboxRevoked)
+                return
+            }
             activeSecurityScopedURL = folderURL
             // Route through custom scheme so ES module / CORS / fetch all
             // behave like normal HTTP. file:// would block `<script type="module" crossorigin>`.
             folderHandler.folderURL = folderURL
+            guard let nonce = folderHandler.currentSessionNonce else {
+                Logger.error("HTML folder load: missing session nonce for \(indexFileName)", category: .screenManager)
+                return
+            }
             let escapedIndex = indexFileName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? indexFileName
-            let urlString = "\(FolderURLSchemeHandler.scheme)://\(FolderURLSchemeHandler.host)/\(escapedIndex)"
+            let urlString = "\(FolderURLSchemeHandler.scheme)://\(FolderURLSchemeHandler.host)/\(escapedIndex)?n=\(nonce)"
             guard let url = URL(string: urlString) else {
                 Logger.error("HTML folder load: failed to build scheme URL for \(indexFileName)", category: .screenManager)
                 return
@@ -291,6 +316,12 @@ final class HTMLWallpaperView: NSView {
         case .inline(let html):
             webView.loadHTMLString(html, baseURL: nil)
         }
+    }
+
+    /// Re-applies the most recent `HTMLSource`. Used by `WallpaperRuntimeSession.retry()`.
+    func reloadCurrentSource() {
+        guard let lastSource else { return }
+        loadSource(lastSource)
     }
 
     private func stopActiveSecurityScope() {
@@ -345,8 +376,37 @@ final class HTMLWallpaperView: NSView {
         }
     }
 
+    /// Sleep / wake suspend hook. Identical to `applyPerformanceProfile(.suspended)`
+    /// today, but kept distinct so the AmbientWallpaperSession can layer
+    /// "system asleep" on top of the existing power-policy profile state.
+    func suspend() {
+        setMediaPlaybackSuspended(true)
+    }
+
+    func resume() {
+        setMediaPlaybackSuspended(false)
+    }
+
     private func setMediaPlaybackSuspended(_ suspended: Bool) {
         webView.setAllMediaPlaybackSuspended(suspended) {}
+    }
+
+    private func reportError(_ error: WallpaperRuntimeError) {
+        onError?(error)
+    }
+
+    private func navigationFailureURL(webView: WKWebView, error: NSError) -> URL {
+        if let url = webView.url {
+            return url
+        }
+        if let url = error.userInfo[NSURLErrorFailingURLErrorKey] as? URL {
+            return url
+        }
+        if let urlString = error.userInfo[NSURLErrorFailingURLStringErrorKey] as? String,
+           let url = URL(string: urlString) {
+            return url
+        }
+        return URL(string: "about:blank") ?? URL(fileURLWithPath: "/")
     }
 
     // MARK: - Tracker Blocking
@@ -613,6 +673,11 @@ extension HTMLWallpaperView: WKNavigationDelegate {
             "HTML wallpaper didFail [domain=\(nsError.domain) code=\(nsError.code)] url=\(webView.url?.absoluteString ?? "<no url>") — \(nsError.localizedDescription); userInfo=\(nsError.userInfo)",
             category: .screenManager
         )
+        reportError(.webNavigationFailed(
+            navigationFailureURL(webView: webView, error: nsError),
+            code: nsError.code,
+            description: nsError.localizedDescription
+        ))
     }
 
     /// Pre-commit failures (file not found, sandbox denial, scheme blocked).
@@ -622,12 +687,23 @@ extension HTMLWallpaperView: WKNavigationDelegate {
             "HTML wallpaper didFailProvisionalNavigation [domain=\(nsError.domain) code=\(nsError.code)] url=\(webView.url?.absoluteString ?? "<no url>") — \(nsError.localizedDescription); userInfo=\(nsError.userInfo)",
             category: .screenManager
         )
+        if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorNotConnectedToInternet {
+            reportError(.networkOffline)
+        } else {
+            reportError(.webNavigationFailed(
+                navigationFailureURL(webView: webView, error: nsError),
+                code: nsError.code,
+                description: nsError.localizedDescription
+            ))
+        }
     }
 
     /// Captures unhandled JS exceptions + console messages from the page.
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping @MainActor @Sendable (WKNavigationResponsePolicy) -> Void) {
         if let response = navigationResponse.response as? HTTPURLResponse, response.statusCode >= 400 {
             Logger.warning("HTML wallpaper response: HTTP \(response.statusCode) for \(response.url?.absoluteString ?? "?")", category: .screenManager)
+            let failingURL = response.url ?? webView.url ?? URL(string: "about:blank") ?? URL(fileURLWithPath: "/")
+            reportError(.webNavigationFailed(failingURL, code: response.statusCode, description: "HTTP \(response.statusCode)"))
         }
         decisionHandler(.allow)
     }

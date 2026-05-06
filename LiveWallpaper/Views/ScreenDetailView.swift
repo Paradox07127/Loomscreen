@@ -12,6 +12,9 @@ struct ScreenDetailView: View {
     private var wallpaperSessionSummary: WallpaperSessionSummary {
         screenManager.wallpaperSummary(for: screen)
     }
+    private var runtimeError: WallpaperRuntimeError? {
+        screenManager.runtimeError(for: screen)
+    }
     /// Resolved Wallpaper Engine origin metadata for the active wallpaper, or
     /// nil when the user picked content directly. Recomputed on every body
     /// evaluation so save/import flows propagate without local @State.
@@ -77,6 +80,7 @@ struct ScreenDetailView: View {
     @AppStorage("Inspector.DisplayExpanded") private var isDisplayExpanded = false
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 0) {
@@ -157,6 +161,18 @@ struct ScreenDetailView: View {
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 14)
+
+            if let runtimeError {
+                let activeType = screen.runtimeSession?.wallpaperType ?? selectedWallpaperType
+                let canRePick = activeType == .video || activeType == .html
+                RuntimeErrorBanner(
+                    error: runtimeError,
+                    canRePick: canRePick,
+                    onRetry: { screenManager.retryRuntimeSession(for: screen) },
+                    onRePick: rePickRuntimeSource
+                )
+                .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
+            }
 
             Divider()
 
@@ -703,6 +719,38 @@ struct ScreenDetailView: View {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         SettingsManager.shared.saveLastUsedDirectory(url.deletingLastPathComponent())
         handleSelectedFile(url: url)
+    }
+
+    /// Routes the banner's "Re-pick" button to the picker matching the current
+    /// session type. Falls back to the video picker for non-pickable backends
+    /// (scene / shader sessions are switched via the type segmented control).
+    private func rePickRuntimeSource() {
+        let activeType = screen.runtimeSession?.wallpaperType ?? selectedWallpaperType
+        switch activeType {
+        case .video:
+            showFilePicker()
+        case .html:
+            showHTMLSourcePicker()
+        case .metalShader, .scene:
+            selectedWallpaperType = activeType
+        }
+    }
+
+    private func showHTMLSourcePicker() {
+        NSApp.activate(ignoringOtherApps: true)
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Use as Wallpaper"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard isHTMLDrop(url) else {
+            errorMessage = "Choose an HTML file or folder."
+            showErrorAlert = true
+            return
+        }
+        selectedWallpaperType = .html
+        applyHTMLDrop(url)
     }
 
     private func handleSelectedFile(url: URL) {
