@@ -7,10 +7,12 @@ struct CollapsibleSection<Content: View>: View {
     @Binding var isExpanded: Bool
     @ViewBuilder var content: () -> Content
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
-                withAnimation(.snappy(duration: 0.28)) {
+                withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.28))) {
                     isExpanded.toggle()
                 }
             } label: {
@@ -23,7 +25,7 @@ struct CollapsibleSection<Content: View>: View {
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.secondary)
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                        .animation(.snappy(duration: 0.28), value: isExpanded)
+                        .animation(reduceMotion ? nil : .snappy(duration: 0.28), value: isExpanded)
                 }
                 .contentShape(Rectangle())
             }
