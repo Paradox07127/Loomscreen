@@ -16,6 +16,8 @@ struct ScheduleSection: View {
     @State private var addSlotErrorMessage: String?
     @State private var conflictMessage: String?
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if scheduleSlots.isEmpty {
@@ -174,7 +176,7 @@ struct ScheduleSection: View {
             scheduleSlots[index].startHour = start
             scheduleSlots[index].endHour = end
             screenManager.updateScheduleSlots(scheduleSlots, for: screen)
-            withAnimation(.snappy(duration: 0.2)) { conflictMessage = nil }
+            withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.2))) { conflictMessage = nil }
             return
         }
         // Conflict: revert stepper change, show persistent banner, flash outline 1.5s.
@@ -182,15 +184,15 @@ struct ScheduleSection: View {
             .filter { conflicts.contains($0.id) }
             .map(\.label)
             .joined(separator: ", ")
-        withAnimation(.snappy(duration: 0.2)) {
+        withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.2))) {
             conflictMessage = "Time range overlaps with: \(conflictingLabels)"
         }
         var highlighted = conflicts
         highlighted.insert(slotID)
-        withAnimation(.snappy(duration: 0.18)) { conflictHighlight = highlighted }
+        withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.18))) { conflictHighlight = highlighted }
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(1500))
-            withAnimation(.snappy(duration: 0.2)) { conflictHighlight.removeAll() }
+            withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.2))) { conflictHighlight.removeAll() }
         }
     }
 
