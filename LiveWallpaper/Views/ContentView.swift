@@ -36,6 +36,8 @@ struct ContentView: View {
                             Image(systemName: "gearshape")
                         }
                         .help("Preferences")
+                        .accessibilityLabel("Preferences")
+                        .accessibilityHint("Open application preferences")
                     }
                 }
         }
@@ -164,6 +166,8 @@ struct Sidebar: View {
                 }
                 .buttonStyle(.plain)
                 .help("Reload all wallpapers")
+                .accessibilityLabel("Reload all wallpapers")
+                .accessibilityHint("Reapplies the active wallpaper on every display")
             }) {
                 if screenManager.screens.isEmpty {
                     HStack {

@@ -69,6 +69,7 @@ struct OnboardingStepDone: View {
             }
             .buttonStyle(GlassCapsuleButtonStyle(fontSize: 14, horizontalPadding: 24, verticalPadding: 10))
             .keyboardShortcut(.defaultAction)
+            .accessibilityHint("Close onboarding and open LiveWallpaper")
 
             Spacer().frame(height: 28)
         }
