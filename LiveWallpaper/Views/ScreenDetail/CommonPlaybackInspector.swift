@@ -16,6 +16,7 @@ struct CommonPlaybackInspector: View {
     var wallpaperType: WallpaperType
 
     @Environment(ScreenManager.self) private var screenManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @Binding var muted: Bool
     @Binding var frameRateLimit: FrameRateLimit
@@ -129,10 +130,10 @@ struct CommonPlaybackInspector: View {
                         screenManager.updateSetAsDesktopPicture(newValue, for: screen)
                         guard newValue else { return }
                         screenManager.extractLockScreenFrame(for: screen)
-                        withAnimation(.snappy(duration: 0.25)) { lockScreenExtracted = true }
+                        withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.25))) { lockScreenExtracted = true }
                         Task {
                             try? await Task.sleep(for: .seconds(2))
-                            withAnimation(.snappy(duration: 0.25)) { lockScreenExtracted = false }
+                            withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.25))) { lockScreenExtracted = false }
                         }
                     }
                     .accessibilityLabel("Set current frame as desktop picture")

@@ -22,6 +22,7 @@ struct MenuBarContent: View {
     @State private var isWebURLEntryExpanded: Bool = false
     @State private var webURLDraft: String = ""
     @State private var showBookmarksPopover = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var monitor: SystemMonitor { .shared }
     private var ramPercent: Double {
@@ -34,7 +35,7 @@ struct MenuBarContent: View {
     @ViewBuilder
     private func ramScopeButton(label: String, value: String) -> some View {
         Button {
-            withAnimation(.snappy(duration: 0.18)) { ramScopeRaw = value }
+            withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.18))) { ramScopeRaw = value }
         } label: {
             Text(label)
                 .font(.system(size: 10, weight: ramScopeRaw == value ? .semibold : .regular))
@@ -75,12 +76,14 @@ struct MenuBarContent: View {
             Image(systemName: "play.rectangle.fill")
                 .font(.system(size: 16))
                 .foregroundStyle(Color.accentColor)
+                .accessibilityHidden(true)
             Text("LiveWallpaper")
                 .font(.system(size: 14, weight: .semibold))
             Spacer()
             Text(versionString)
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(.secondary)
+                .accessibilityLabel("Version \(versionString)")
         }
     }
 
@@ -89,7 +92,7 @@ struct MenuBarContent: View {
     private var miniDashboard: some View {
         VStack(alignment: .leading, spacing: 6) {
             Button {
-                withAnimation(.snappy(duration: 0.18)) { dashboardExpanded.toggle() }
+                withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.18))) { dashboardExpanded.toggle() }
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "chevron.right")
@@ -187,7 +190,7 @@ struct MenuBarContent: View {
 
             HStack(spacing: 6) {
                 QuickActionButton(label: "Web Page", systemImage: "globe") {
-                    withAnimation(.snappy(duration: 0.18)) { isWebURLEntryExpanded.toggle() }
+                    withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.18))) { isWebURLEntryExpanded.toggle() }
                 }
                 QuickActionButton(label: "HTML File", systemImage: "doc.richtext") {
                     requestAddWallpaper(kind: "html-file")
@@ -231,6 +234,8 @@ struct MenuBarContent: View {
             .buttonStyle(.plain)
             .disabled(webURLDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             .help("Use as wallpaper for the first display")
+            .accessibilityLabel("Apply web URL")
+            .accessibilityHint("Use the URL above as wallpaper for the first display")
         }
     }
 
@@ -321,7 +326,7 @@ struct MenuBarContent: View {
               let target = screenManager.screens.first else { return }
         screenManager.setHTMLWallpaperPreservingConfig(source: source, for: target)
         webURLDraft = ""
-        withAnimation(.snappy(duration: 0.18)) { isWebURLEntryExpanded = false }
+        withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.18))) { isWebURLEntryExpanded = false }
     }
 
     /// Hands the picker off to the main window via a synchronous closure

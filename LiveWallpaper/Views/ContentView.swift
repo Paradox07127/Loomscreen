@@ -151,6 +151,7 @@ enum Navigation: Hashable {
 struct Sidebar: View {
     @Binding var selection: Navigation?
     @Environment(ScreenManager.self) private var screenManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isReloading = false
     @State private var workshopLibraryAvailable = false
 
@@ -248,7 +249,7 @@ struct Sidebar: View {
     }
 
     private func reloadWallpapers() {
-        withAnimation(.snappy(duration: 0.2)) {
+        withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.2))) {
             isReloading = true
         }
 
@@ -256,7 +257,7 @@ struct Sidebar: View {
 
         Task {
             try? await Task.sleep(for: .milliseconds(500))
-            withAnimation(.snappy(duration: 0.2)) {
+            withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.2))) {
                 isReloading = false
             }
         }
@@ -276,6 +277,7 @@ struct Sidebar: View {
 struct ScreenRow: View {
     var screen: Screen
     @Environment(ScreenManager.self) private var screenManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var hasEffectBadge: Bool = false
 
@@ -325,7 +327,7 @@ struct ScreenRow: View {
         .onReceive(NotificationCenter.default.publisher(for: .wallpaperConfigurationDidChange)) { notification in
             if let changedID = notification.userInfo?["screenID"] as? CGDirectDisplayID,
                changedID == screen.id {
-                withAnimation(.snappy(duration: 0.2)) { refreshEffectBadge() }
+                withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.2))) { refreshEffectBadge() }
             }
         }
         .accessibilityElement(children: .combine)
