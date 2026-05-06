@@ -38,6 +38,12 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
     private(set) var renderGraph: WPERenderGraph?
     private(set) var renderPipeline: WPEPreparedRenderPipeline?
     private(set) var lastRuntimeUniforms: WPEMetalRuntimeUniforms?
+    /// Test-only forwarder for the executor's pooled FBO/composite texture
+    /// count so suspended-release behaviour can be asserted at the renderer
+    /// boundary (Phase 2C Task 2).
+    var transientTargetTextureCountForTesting: Int {
+        executor.transientTargetTextureCountForTesting
+    }
     var renderedTexture: MTLTexture? { outputTexture }
     /// CGImage readback of the most recent rendered frame; populated at the
     /// end of `performLoad()` so `WPESceneDetailView` can show a thumbnail
@@ -175,6 +181,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         cameraUniforms = .identity
         lastRuntimeUniforms = nil
         cachedSnapshot = nil
+        executor.releaseTransientResources()
         try await load()
     }
 
@@ -206,6 +213,11 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             mtkView.isPaused = true
             mtkView.enableSetNeedsDisplay = true
             mtkView.releaseDrawables()
+            // Phase 2C Task 2: pooled FBO/layer-composite textures live
+            // across `render(...)` calls; release them when the wallpaper
+            // is suspended so a 6-display setup does not retain hundreds
+            // of MB of transient render targets while paused.
+            executor.releaseTransientResources()
         }
     }
 
@@ -215,6 +227,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         loadedTextures = [:]
         lastRuntimeUniforms = nil
         cachedSnapshot = nil
+        executor.releaseTransientResources()
     }
 
     nonisolated func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
@@ -283,13 +296,42 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
     }
 
     private func requiredTextureReferences(for pass: WPEPreparedRenderPass) -> [WPETextureReference] {
-        if pass.pass.shader == "solidcolor" {
+        switch normalizedBuiltinShaderName(pass.pass.shader) {
+        case "solidcolor", "solidlayer":
+            return []
+
+        case "copy":
+            let reference = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
+            return [reference].filter(\.isExternalTextureReference)
+
+        case "compose":
+            let first = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
+            let second = pass.textureBindings[1] ?? pass.pass.textures[1] ?? first
+            return [first, second].filter(\.isExternalTextureReference)
+
+        default:
             return []
         }
-        if pass.pass.shader == "commands/copy" || pass.pass.shader.hasPrefix("genericimage") {
-            return [pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source]
+    }
+
+    private func normalizedBuiltinShaderName(_ shaderName: String) -> String {
+        let lower = shaderName.lowercased()
+        let withoutJSON = lower.hasSuffix(".json") ? String(lower.dropLast(5)) : lower
+        switch withoutJSON {
+        case "solidcolor":
+            return "solidcolor"
+        case "solidlayer", "materials/util/solidlayer", "models/util/solidlayer":
+            return "solidlayer"
+        case "copy", "commands/copy", "materials/util/copy":
+            return "copy"
+        case "compose", "materials/util/compose":
+            return "compose"
+        default:
+            if withoutJSON.hasPrefix("genericimage") {
+                return "copy"
+            }
+            return withoutJSON
         }
-        return []
     }
 
     private func makeTexture(relativePath: String, label: String) async throws -> MTLTexture {
@@ -433,6 +475,20 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             }
         default:
             return .other(layer: layerName, message: error.localizedDescription)
+        }
+    }
+}
+
+/// Phase 2C: filters out FBO/previous references at the texture-discovery
+/// layer so the renderer never tries to load an in-graph FBO from disk.
+/// Those references resolve at executor time via the frame state.
+private extension WPETextureReference {
+    var isExternalTextureReference: Bool {
+        switch self {
+        case .image, .asset:
+            return true
+        case .fbo, .previous:
+            return false
         }
     }
 }

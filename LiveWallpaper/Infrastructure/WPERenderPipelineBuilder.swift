@@ -104,16 +104,99 @@ private struct WPEShaderSourceLoader: Sendable {
     }
 
     private func builtinProgram(shaderName: String, combos: [String: Int]) -> WPEShaderProgram? {
-        if shaderName == "solidcolor" {
+        switch normalizedBuiltinShaderName(shaderName) {
+        case "solidcolor":
             return solidColorProgram(shaderName: shaderName, combos: combos)
-        }
-        if shaderName == "commands/copy" {
+        case "solidlayer":
+            return solidLayerProgram(shaderName: shaderName, combos: combos)
+        case "copy":
+            return copyProgram(shaderName: shaderName, combos: combos)
+        case "compose":
+            return composeProgram(shaderName: shaderName, combos: combos)
+        default:
+            guard isGenericImageShader(shaderName) else {
+                return nil
+            }
             return copyProgram(shaderName: shaderName, combos: combos)
         }
-        guard isGenericImageShader(shaderName) else {
-            return nil
+    }
+
+    private func normalizedBuiltinShaderName(_ shaderName: String) -> String {
+        let lower = shaderName.lowercased()
+        let withoutJSON = lower.hasSuffix(".json") ? String(lower.dropLast(5)) : lower
+        switch withoutJSON {
+        case "solidcolor":
+            return "solidcolor"
+        case "solidlayer", "materials/util/solidlayer", "models/util/solidlayer":
+            return "solidlayer"
+        case "copy", "commands/copy", "materials/util/copy":
+            return "copy"
+        case "compose", "materials/util/compose":
+            return "compose"
+        default:
+            return withoutJSON
         }
-        return copyProgram(shaderName: shaderName, combos: combos)
+    }
+
+    private func solidLayerProgram(shaderName: String, combos: [String: Int]) -> WPEShaderProgram {
+        let vertex = """
+        attribute vec3 a_Position;
+
+        void main() {
+            gl_Position = vec4(a_Position, 1.0);
+        }
+        """
+        let fragment = """
+        uniform vec4 g_Color;
+
+        void main() {
+            gl_FragColor = vec4(g_Color.rgb * g_Color.a, g_Color.a);
+        }
+        """
+        return WPEShaderProgram(
+            name: shaderName,
+            vertexSource: shaderPrelude(comboValues: combos, stage: .vertex) + vertex,
+            fragmentSource: shaderPrelude(comboValues: combos, stage: .fragment) + fragment.replacingOccurrences(
+                of: "gl_FragColor",
+                with: "out_FragColor"
+            ),
+            isBuiltin: true
+        )
+    }
+
+    private func composeProgram(shaderName: String, combos: [String: Int]) -> WPEShaderProgram {
+        let vertex = """
+        attribute vec3 a_Position;
+        attribute vec2 a_TexCoord;
+        varying vec2 v_TexCoord;
+
+        void main() {
+            gl_Position = vec4(a_Position, 1.0);
+            v_TexCoord = a_TexCoord;
+        }
+        """
+        let fragment = """
+        uniform sampler2D g_Texture0;
+        uniform sampler2D g_Texture1;
+        uniform vec4 g_Color;
+        varying vec2 v_TexCoord;
+
+        void main() {
+            vec4 a = texSample2D(g_Texture0, v_TexCoord);
+            vec4 b = texSample2D(g_Texture1, v_TexCoord);
+            vec4 composed = mix(a, b, b.a);
+            gl_FragColor = vec4(composed.rgb * g_Color.rgb, composed.a * g_Color.a);
+        }
+        """
+        return WPEShaderProgram(
+            name: shaderName,
+            vertexSource: shaderPrelude(comboValues: combos, stage: .vertex) + vertex,
+            fragmentSource: shaderPrelude(comboValues: combos, stage: .fragment) + fragment.replacingOccurrences(
+                of: "gl_FragColor",
+                with: "out_FragColor"
+            ),
+            isBuiltin: true
+        )
     }
 
     private func copyProgram(shaderName: String, combos: [String: Int]) -> WPEShaderProgram {
