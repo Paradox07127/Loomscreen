@@ -77,6 +77,7 @@ final class ScreenManager {
         powerMonitor: powerMonitor,
         fullScreenDetector: fullScreenDetector,
         powerPolicy: powerPolicy,
+        playableVideoLoader: playableVideoLoader,
         applyVideoEffects: { [weak self] screen, config in
             self?.applyVideoEffects(for: screen, config: config)
         },
@@ -88,6 +89,12 @@ final class ScreenManager {
         },
         markSessionStateChanged: { [weak self] in
             self?.markWallpaperSessionStateChanged()
+        },
+        releaseRuntimeSession: { [weak self] screen in
+            self?.releaseRuntimeSession(screen)
+        },
+        notifyWallpaperSessionChanged: { [weak self] in
+            self?.notifyWallpaperSessionChanged()
         }
     )
     @ObservationIgnored private var transitionRegistry: PlaybackTransitionRegistry {
@@ -438,67 +445,7 @@ final class ScreenManager {
 
     /// Replaces the primary video while preserving per-screen settings.
     func setVideo(url: URL, bookmarkData: Data, for screen: Screen) {
-        Logger.info("Setting video for screen \(screen.id): \(url.lastPathComponent)", category: .screenManager)
-
-        let existing = configurationStore.get(for: screen.id)
-
-        let isSameURL: Bool = {
-            guard let existingBookmark = existing?.videoBookmarkData else { return false }
-            var isStale = false
-            let resolved = try? URL(
-                resolvingBookmarkData: existingBookmark,
-                options: .withSecurityScope,
-                relativeTo: nil,
-                bookmarkDataIsStale: &isStale
-            )
-            return resolved == url
-        }()
-
-        var configuration: ScreenConfiguration
-        if var prior = existing {
-            prior.replacePrimaryVideo(bookmarkData: bookmarkData)
-            configuration = prior
-        } else {
-            configuration = ScreenConfiguration(
-                screenID: screen.id,
-                videoBookmarkData: bookmarkData
-            )
-        }
-        configuration.reconcileWPEOrigin()
-        if isSameURL, screen.videoPlayer != nil {
-            configurationStore.save(configuration)
-            applyConfiguration(configuration, to: screen, preservingState: true)
-            return
-        }
-
-        let screenID = screen.id
-        let generation = bumpTransition(for: screenID)
-        let videoLoader = playableVideoLoader
-        Task {
-            do {
-                try await videoLoader.validatePlayableVideo(at: url)
-                await MainActor.run { [weak self] in
-                    guard let self,
-                          self.isCurrentTransition(generation, for: screenID),
-                          let liveScreen = self.screens.first(where: { $0.id == screenID }) else { return }
-                    self.configurationStore.save(configuration)
-                    guard SettingsManager.shared.validateConfiguration(for: screenID) else {
-                        Logger.error("Failed to save video configuration for screen \(screenID)", category: .screenManager)
-                        if let existing {
-                            self.configurationStore.save(existing)
-                        } else {
-                            self.configurationStore.remove(for: screenID)
-                        }
-                        return
-                    }
-                    self.setupVideoPlayback(url: url, screen: liveScreen)
-                }
-            } catch {
-                await MainActor.run {
-                    Logger.error("Failed to setup video: \(error.localizedDescription)", category: .screenManager)
-                }
-            }
-        }
+        playbackCoordinator.setVideo(url: url, bookmarkData: bookmarkData, for: screen)
     }
 
     @discardableResult
@@ -511,184 +458,13 @@ final class ScreenManager {
     }
 
     private func applyConfiguration(_ configuration: ScreenConfiguration, to screen: Screen, preservingState: Bool = false) {
-        do {
-            guard let bookmarkData = configuration.videoBookmarkData else {
-                throw NSError(domain: "ScreenManager", code: 400, userInfo: [
-                    NSLocalizedDescriptionKey: "No saved video bookmark is available for this screen."
-                ])
-            }
-
-            var isStale = false
-            let url = try URL(
-                resolvingBookmarkData: bookmarkData,
-                options: .withSecurityScope,
-                relativeTo: nil,
-                bookmarkDataIsStale: &isStale
-            )
-            
-            guard url.startAccessingSecurityScopedResource() else {
-                throw NSError(domain: "ScreenManager", code: 403, userInfo: [
-                    NSLocalizedDescriptionKey: "Cannot access the video file. Permission denied."
-                ])
-            }
-            
-            defer {
-                url.stopAccessingSecurityScopedResource()
-            }
-            
-            if isStale {
-                do {
-                    let updatedBookmarkData = try url.bookmarkData(
-                        options: [.withSecurityScope, .securityScopeAllowOnlyReadAccess],
-                        includingResourceValuesForKeys: nil,
-                        relativeTo: nil
-                    )
-                    let updatedConfig = configuration.withUpdatedActiveBookmark(updatedBookmarkData)
-                    saveConfiguration(updatedConfig)
-                } catch {
-                    Logger.error("Failed to update stale bookmark: \(error.localizedDescription)", category: .fileAccess)
-                }
-            }
-            
-            let needsNewPlayer = screen.videoPlayer == nil
-            
-            if !needsNewPlayer {
-                let currentTime = preservingState ? screen.videoPlayer?.player?.currentTime() : .zero
-                let wasPlaying = screen.videoPlayer?.isPlaying ?? false
-                
-                if let player = screen.videoPlayer {
-                    player.setVideoFitMode(configuration.fitMode)
-                    
-                    let currentSpeed = player.player?.defaultRate ?? 1.0
-                    if abs(Float(configuration.playbackSpeed) - currentSpeed) > 0.01 {
-                        player.setPlaybackSpeed(configuration.playbackSpeed)
-                    }
-                    
-                    if player.videoFrameRate > 0 {
-                        if configuration.effectConfig.hasActiveEffect {
-                            applyVideoEffects(for: screen, config: configuration)
-                        } else {
-                            applyFrameRateLimit(configuration.frameRateLimit, to: screen)
-                        }
-                    }
-                    
-                    if let currentTime = currentTime {
-                        player.player?.seek(to: currentTime)
-                    }
-                    
-                    let globalSettings = SettingsManager.shared.loadGlobalSettings()
-                    let shouldPause = WallpaperPolicyEngine.shouldStartVideoPaused(
-                        globalSettings: globalSettings,
-                        powerSource: powerMonitor.currentPowerSource,
-                        isHiddenByFullScreen: fullScreenDetector.isDesktopHidden(for: screen.id)
-                    )
-
-                    if shouldPause {
-                        player.pause()
-                    } else if !wasPlaying {
-                        schedulePolicyAwarePlaybackStart(to: player, screenID: screen.id)
-                    }
-                }
-            } else {
-                let player = WallpaperVideoPlayer(
-                    url: url,
-                    frame: screen.frame,
-                    fitMode: configuration.fitMode
-                )
-                let session = VideoWallpaperSession(player: player)
-                observeRuntimeErrors(for: session)
-                screen.installRuntimeSession(session)
-                notifyWallpaperSessionChanged()
-
-                player.setPlaybackSpeed(configuration.playbackSpeed)
-
-                applyConfigurationWhenAssetReady(player: player, screen: screen, configuration: configuration)
-
-                applyStartupPlaybackPolicy(to: player, for: screen)
-            }
-
-            let globalSettings = SettingsManager.shared.loadGlobalSettings()
-            applyPerformancePolicy(
-                to: screen,
-                globalSettings: globalSettings,
-                powerSource: powerMonitor.currentPowerSource,
-                isHiddenByFullScreen: globalSettings.pauseOnFullScreen &&
-                    fullScreenDetector.isDesktopHidden(for: screen.id)
-            )
-
-        } catch let error as NSError {
-            Logger.error("Failed to apply configuration: \(error.localizedDescription) [domain=\(error.domain) code=\(error.code)]", category: .screenManager)
-            // Malformed persisted bookmark; clear it to avoid retry loops.
-            if error.domain == NSCocoaErrorDomain, error.code == NSFileReadCorruptFileError {
-                Logger.warning("Clearing unresolvable bookmark for screen \(screen.id); user must re-pick the source.", category: .screenManager)
-                configurationStore.remove(for: screen.id)
-                releaseRuntimeSession(screen)
-                notifyWallpaperSessionChanged()
-            }
-        } catch {
-            Logger.error("Failed to apply configuration: \(error.localizedDescription)", category: .screenManager)
-        }
-    }
-    
-    private func applyConfigurationWhenAssetReady(
-        player: WallpaperVideoPlayer,
-        screen: Screen,
-        configuration: ScreenConfiguration
-    ) {
-        playbackCoordinator.applyConfigurationWhenAssetReady(player: player, screen: screen, configuration: configuration)
+        playbackCoordinator.applyConfiguration(configuration, to: screen, preservingState: preservingState)
     }
 
     private func setupVideoPlayback(url: URL, screen: Screen) {
-        releaseRuntimeSession(screen)
-
-        let configuration = configurationStore.get(for: screen.id)
-        let player = WallpaperVideoPlayer(
-            url: url,
-            frame: screen.frame,
-            fitMode: configuration?.fitMode ?? .aspectFill
-        )
-
-        if let stored = configuration?.muted {
-            player.setMuted(stored)
-        }
-
-        if let index = screens.firstIndex(where: { $0.id == screen.id }) {
-            let session = VideoWallpaperSession(player: player)
-            observeRuntimeErrors(for: session)
-            screens[index].installRuntimeSession(session)
-            let liveScreen = screens[index]
-            let globalSettings = SettingsManager.shared.loadGlobalSettings()
-            applyPerformancePolicy(
-                to: liveScreen,
-                globalSettings: globalSettings,
-                powerSource: powerMonitor.currentPowerSource,
-                isHiddenByFullScreen: globalSettings.pauseOnFullScreen &&
-                    fullScreenDetector.isDesktopHidden(for: liveScreen.id)
-            )
-
-            if let configuration {
-                player.setPlaybackSpeed(configuration.playbackSpeed)
-                applyConfigurationWhenAssetReady(player: player, screen: liveScreen, configuration: configuration)
-            }
-
-            applyStartupPlaybackPolicy(to: player, for: liveScreen)
-
-            Logger.info("Video player setup complete for screen \(screen.id)", category: .screenManager)
-            notifyWallpaperSessionChanged()
-        } else {
-            Logger.warning("Screen with ID \(screen.id) not found in screens array", category: .screenManager)
-        }
+        playbackCoordinator.setupVideoPlayback(url: url, screen: screen)
     }
 
-    private func applyStartupPlaybackPolicy(to player: WallpaperVideoPlayer, for screen: Screen) {
-        playbackCoordinator.applyStartupPlaybackPolicy(to: player, for: screen)
-    }
-
-    private func schedulePolicyAwarePlaybackStart(to player: WallpaperVideoPlayer, screenID: CGDirectDisplayID) {
-        playbackCoordinator.schedulePolicyAwarePlaybackStart(to: player, screenID: screenID)
-    }
-
-    
     // MARK: - Icon Management
     var playbackStatePublisher: AnyPublisher<Bool, Never> {
         playbackStateSubject.eraseToAnyPublisher()
