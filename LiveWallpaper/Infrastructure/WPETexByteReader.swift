@@ -38,6 +38,13 @@ struct WPETexByteReader {
         return Int32(littleEndian: value)
     }
 
+    /// Phase 2E: reads a little-endian IEEE-754 single-precision float used
+    /// by `TEXS` blocks for per-frame timing and atlas UVs.
+    mutating func readFloat32(blockName: String = "?") throws -> Float {
+        let bits = try readUInt32(blockName: blockName)
+        return Float(bitPattern: bits)
+    }
+
     /// Reads a NUL-terminated 8-byte ASCII magic. Returns the trimmed
     /// canonical form (e.g. `"TEXV0005"`). Empty / non-printable runs
     /// surface as `truncatedBlock`.
