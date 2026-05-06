@@ -222,7 +222,7 @@ struct ScreenDetailView: View {
 
             Divider()
 
-            HStack(spacing: 0) {
+            HSplitView {
                 ZStack {
                     Color(NSColor.underPageBackgroundColor)
 
@@ -310,13 +310,11 @@ struct ScreenDetailView: View {
                         WPESceneSection(screen: screen)
                     }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(minWidth: DesignTokens.PreviewArea.minWidth, maxWidth: .infinity, maxHeight: .infinity)
                 .overlay {
                     dragHintOverlay
                         .animation(.smooth(duration: 0.2), value: isDraggingOver)
                 }
-
-                Divider()
 
                 inspectorPanel
             }
@@ -528,10 +526,14 @@ struct ScreenDetailView: View {
                         .padding(.horizontal, 12)
                         .padding(.vertical, 14)
                     }
-                    .frame(width: 320)
-                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(
+                        minWidth: DesignTokens.Inspector.minWidth,
+                        idealWidth: DesignTokens.Inspector.idealWidth,
+                        maxWidth: DesignTokens.Inspector.maxWidth
+                    )
                     .background(Color(NSColor.windowBackgroundColor))
                     .clipped()
+                    .accessibilityLabel("Wallpaper Properties")
         }
     }
 
