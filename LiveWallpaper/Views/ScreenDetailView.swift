@@ -222,7 +222,7 @@ struct ScreenDetailView: View {
 
             Divider()
 
-            HStack(spacing: 0) {
+            HSplitView {
                 ZStack {
                     Color(NSColor.underPageBackgroundColor)
 
@@ -250,7 +250,7 @@ struct ScreenDetailView: View {
                                     HStack(spacing: 8) {
                                         ForEach(VideoFitMode.allCases) { mode in
                                             FitModeButton(mode: mode, isSelected: selectedFitMode == mode) {
-                                                withAnimation(.snappy(duration: 0.2)) {
+                                                withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.2))) {
                                                     selectedFitMode = mode
                                                 }
                                                 screenManager.updateFitMode(mode, for: screen)
@@ -310,13 +310,11 @@ struct ScreenDetailView: View {
                         WPESceneSection(screen: screen)
                     }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(minWidth: DesignTokens.PreviewArea.minWidth, maxWidth: .infinity, maxHeight: .infinity)
                 .overlay {
                     dragHintOverlay
                         .animation(.smooth(duration: 0.2), value: isDraggingOver)
                 }
-
-                Divider()
 
                 inspectorPanel
             }
@@ -386,7 +384,7 @@ struct ScreenDetailView: View {
                         HStack(spacing: 0) {
                             ForEach(WallpaperMode.allCases) { mode in
                                 Button {
-                                    withAnimation(.snappy(duration: 0.18)) {
+                                    withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.18))) {
                                             selectedWallpaperMode = mode
                                         }
                                         screenManager.updateWallpaperMode(mode, for: screen)
@@ -528,10 +526,14 @@ struct ScreenDetailView: View {
                         .padding(.horizontal, 12)
                         .padding(.vertical, 14)
                     }
-                    .frame(width: 320)
-                    .fixedSize(horizontal: true, vertical: false)
+                    .frame(
+                        minWidth: DesignTokens.Inspector.minWidth,
+                        idealWidth: DesignTokens.Inspector.idealWidth,
+                        maxWidth: DesignTokens.Inspector.maxWidth
+                    )
                     .background(Color(NSColor.windowBackgroundColor))
                     .clipped()
+                    .accessibilityLabel("Wallpaper Properties")
         }
     }
 
@@ -727,7 +729,7 @@ struct ScreenDetailView: View {
     }
 
     private func handleSelectedFile(url: URL) {
-        withAnimation(.smooth(duration: 0.2)) { isLoading = true }
+        withAnimation(DesignTokens.motion(reduceMotion, .smooth(duration: 0.2))) { isLoading = true }
         cleanupPreviewPlayer()
 
         if let bookmarkData = ResourceUtilities.createBookmark(for: url) {
@@ -741,7 +743,7 @@ struct ScreenDetailView: View {
 
         Task {
             try? await Task.sleep(for: .milliseconds(500))
-            withAnimation(.smooth(duration: 0.2)) { isLoading = false }
+            withAnimation(DesignTokens.motion(reduceMotion, .smooth(duration: 0.2))) { isLoading = false }
         }
     }
 
