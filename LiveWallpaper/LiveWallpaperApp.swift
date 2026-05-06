@@ -98,11 +98,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Settings Window
 
     /// Opens settings, optionally selecting a display from the menu bar.
-    func showSettings(initialScreenID: CGDirectDisplayID? = nil) {
+    /// `initialAddWallpaperPromptKind`, when non-nil, is consumed by
+    /// `ContentView.onAppear` to launch the matching picker — this replaces
+    /// the racy `dismiss + DispatchQueue.async + post` chain that the menu
+    /// bar previously used to hand off picker requests.
+    func showSettings(initialScreenID: CGDirectDisplayID? = nil, initialAddWallpaperPromptKind: String? = nil) {
         guard let manager = screenManager else { return }
 
         if let controller = settingsWindowController {
             controller.showWindow(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            controller.window?.makeKeyAndOrderFront(nil)
+            controller.window?.orderFrontRegardless()
             if let id = initialScreenID {
                 NotificationCenter.default.post(
                     name: .selectScreenInSettings,
@@ -110,14 +117,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     userInfo: ["screenID": id]
                 )
             }
-            NSApp.activate(ignoringOtherApps: true)
-            controller.window?.makeKeyAndOrderFront(nil)
-            controller.window?.orderFrontRegardless()
+            if let kind = initialAddWallpaperPromptKind {
+                NotificationCenter.default.post(
+                    name: .promptAddWallpaper,
+                    object: nil,
+                    userInfo: ["kind": kind]
+                )
+            }
             return
         }
 
         let initialNavigation: Navigation? = initialScreenID.map { .screen($0) }
-        let contentView = ContentView(initialNavigation: initialNavigation)
+        let contentView = ContentView(
+            initialNavigation: initialNavigation,
+            initialAddWallpaperPromptKind: initialAddWallpaperPromptKind
+        )
             .environment(manager)
 
         let window = NSWindow(
@@ -225,6 +239,9 @@ struct LiveWallpaperApp: App {
                 },
                 openSettingsForScreen: { [appDelegate] id in
                     appDelegate.showSettings(initialScreenID: id)
+                },
+                promptAddWallpaper: { [appDelegate] kind in
+                    appDelegate.showSettings(initialAddWallpaperPromptKind: kind)
                 }
             )
             .environment(screenManager)

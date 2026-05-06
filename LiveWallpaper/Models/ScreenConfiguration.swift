@@ -2,7 +2,9 @@ import CoreGraphics
 import Foundation
 
 struct ScreenConfiguration: Codable, Equatable {
-    let screenID: UInt32
+    /// Mutable so `ScreenManager.applyConfigurationToAllDisplays` can clone
+    /// a template for every other screen without recomposing each field.
+    var screenID: UInt32
     var activeWallpaper: WallpaperContent
     var savedVideoBookmarkData: Data?
     /// Last applied HTML source — restored on type switch back to HTML.

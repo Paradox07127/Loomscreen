@@ -5,9 +5,12 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     @Environment(ScreenManager.self) private var screenManager
     @State private var selectedNavigation: Navigation?
+    @State private var didConsumeInitialAddWallpaperPrompt = false
+    private let initialAddWallpaperPromptKind: String?
 
-    init(initialNavigation: Navigation? = nil) {
+    init(initialNavigation: Navigation? = nil, initialAddWallpaperPromptKind: String? = nil) {
         _selectedNavigation = State(initialValue: initialNavigation)
+        self.initialAddWallpaperPromptKind = initialAddWallpaperPromptKind
     }
 
     var body: some View {
@@ -19,6 +22,9 @@ struct ContentView: View {
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .openAppleAerials)) { _ in
                     selectedNavigation = .appleAerials
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .promptAddWallpaper)) { notification in
+                    handleAddWallpaperPrompt(notification: notification)
                 }
         } detail: {
             DetailContent(selection: $selectedNavigation)
@@ -35,6 +41,97 @@ struct ContentView: View {
         }
         .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 1000, minHeight: 650)
+        .onAppear { consumeInitialAddWallpaperPromptIfNeeded() }
+    }
+
+    /// Receives `.promptAddWallpaper` notifications from a re-used settings
+    /// window (one already mounted). The fresh-window path uses
+    /// `initialAddWallpaperPromptKind` consumed in `onAppear`.
+    private func handleAddWallpaperPrompt(notification: Notification) {
+        guard let kind = notification.userInfo?["kind"] as? String else { return }
+        handleAddWallpaperPrompt(kind: kind)
+    }
+
+    private func consumeInitialAddWallpaperPromptIfNeeded() {
+        guard !didConsumeInitialAddWallpaperPrompt,
+              let kind = initialAddWallpaperPromptKind else { return }
+        didConsumeInitialAddWallpaperPrompt = true
+        handleAddWallpaperPrompt(kind: kind)
+    }
+
+    /// Routes a menu-bar quick-add request to the appropriate picker. Targets
+    /// the currently-selected screen if the user has one open; otherwise the
+    /// first registered display. Selection is also redirected so the user
+    /// sees the result land.
+    private func handleAddWallpaperPrompt(kind: String) {
+        guard let target = preferredAddWallpaperTarget() else { return }
+        selectedNavigation = .screen(target.id)
+
+        switch kind {
+        case "video":
+            promptVideoFile(for: target)
+        case "html-file":
+            promptHTMLFile(for: target)
+        case "html-folder":
+            promptHTMLFolder(for: target)
+        default:
+            break
+        }
+    }
+
+    private func preferredAddWallpaperTarget() -> Screen? {
+        if case .screen(let id) = selectedNavigation,
+           let match = screenManager.screens.first(where: { $0.id == id }) {
+            return match
+        }
+        return screenManager.screens.first
+    }
+
+    private func promptVideoFile(for screen: Screen) {
+        NSApp.activate(ignoringOtherApps: true)
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.movie, .video, .quickTimeMovie, .mpeg4Movie, .avi]
+        panel.directoryURL = SettingsManager.shared.getLastUsedDirectory()
+        panel.prompt = "Use as Wallpaper"
+        guard panel.runModal() == .OK, let url = panel.url,
+              let bookmark = ResourceUtilities.createBookmark(for: url) else { return }
+        SettingsManager.shared.saveLastUsedDirectory(url.deletingLastPathComponent())
+        screenManager.setVideo(url: url, bookmarkData: bookmark, for: screen)
+    }
+
+    private func promptHTMLFile(for screen: Screen) {
+        NSApp.activate(ignoringOtherApps: true)
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [UTType.html]
+        panel.prompt = "Use as Wallpaper"
+        guard panel.runModal() == .OK, let url = panel.url,
+              let source = ResourceUtilities.htmlSourceFromPickedFile(url) else { return }
+        screenManager.setHTMLWallpaperPreservingConfig(source: source, for: screen)
+    }
+
+    private func promptHTMLFolder(for screen: Screen) {
+        NSApp.activate(ignoringOtherApps: true)
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Use as Wallpaper"
+        guard panel.runModal() == .OK, let folderURL = panel.url,
+              let bookmark = ResourceUtilities.createBookmark(for: folderURL) else { return }
+        let didStart = folderURL.startAccessingSecurityScopedResource()
+        defer { if didStart { folderURL.stopAccessingSecurityScopedResource() } }
+        let entries = (try? FileManager.default.contentsOfDirectory(atPath: folderURL.path)) ?? []
+        let indexFileName = ResourceUtilities.inferHTMLIndexFileName(from: entries)
+        screenManager.setHTMLWallpaperPreservingConfig(
+            source: .folder(bookmarkData: bookmark, indexFileName: indexFileName),
+            for: screen
+        )
     }
 }
 
@@ -45,6 +142,7 @@ enum Navigation: Hashable {
     case screen(CGDirectDisplayID)
     case appleAerials
     case bookmarks
+    case workshop
 }
 
 // MARK: - Sidebar View
@@ -52,7 +150,8 @@ struct Sidebar: View {
     @Binding var selection: Navigation?
     @Environment(ScreenManager.self) private var screenManager
     @State private var isReloading = false
-    
+    @State private var workshopLibraryAvailable = false
+
     var body: some View {
         List(selection: $selection) {
             Section(header: HStack(spacing: 4) {
@@ -91,11 +190,19 @@ struct Sidebar: View {
                 Divider()
                 Text("Library").font(.caption).bold().foregroundStyle(.secondary)
             }) {
+                // "My Wallpapers" first so its position stays stable for users
+                // who never connect the conditional Workshop entry.
+                NavigationLink(value: Navigation.bookmarks) {
+                    Label("My Wallpapers", systemImage: "bookmark.fill")
+                }
                 NavigationLink(value: Navigation.appleAerials) {
                     Label("Apple Aerials", systemImage: "sparkles.tv")
                 }
-                NavigationLink(value: Navigation.bookmarks) {
-                    Label("Bookmarks", systemImage: "bookmark.fill")
+                if workshopLibraryAvailable {
+                    NavigationLink(value: Navigation.workshop) {
+                        Label("Steam Workshop", systemImage: "cube.transparent")
+                    }
+                    .accessibilityHint("Browse Wallpaper Engine workshop projects")
                 }
             }
 
@@ -114,6 +221,26 @@ struct Sidebar: View {
         .listStyle(.sidebar)
         // Ideal == min so sidebar opens compact; user can drag to 280.
         .navigationSplitViewColumnWidth(min: 200, ideal: 200, max: 280)
+        .onAppear { refreshWorkshopAvailability() }
+        .onReceive(NotificationCenter.default.publisher(for: .wallpaperConfigurationDidChange)) { _ in
+            refreshWorkshopAvailability()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .wpeHistoryDidChange)) { _ in
+            refreshWorkshopAvailability()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .workshopLibraryRootBookmarkDidChange)) { _ in
+            refreshWorkshopAvailability()
+        }
+    }
+
+    /// Workshop entry is shown only when the user has either bookmarked their
+    /// Steam library or already imported at least one Workshop project. Keeps
+    /// the sidebar tidy for users who never touch Wallpaper Engine.
+    private func refreshWorkshopAvailability() {
+        let settings = SettingsManager.shared.loadGlobalSettings()
+        let hasBookmark = SettingsManager.shared.loadWorkshopLibraryRootBookmark() != nil
+        let hasImports = !settings.recentWPEImports.isEmpty
+        workshopLibraryAvailable = hasBookmark || hasImports
     }
 
     private func reloadWallpapers() {
@@ -302,6 +429,10 @@ struct DetailContent: View {
 
             case .bookmarks:
                 BookmarksLibraryView()
+                    .transition(.opacity)
+
+            case .workshop:
+                WorkshopGalleryView()
                     .transition(.opacity)
 
             case .none:
