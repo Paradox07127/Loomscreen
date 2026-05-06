@@ -477,6 +477,7 @@ final class ScreenManager {
         }
     }
 
+    @discardableResult
     private func bumpTransition(for screenID: CGDirectDisplayID) -> Int {
         let next = (transitionGeneration[screenID] ?? 0) &+ 1
         transitionGeneration[screenID] = next

@@ -136,6 +136,15 @@ final class WPEMetalRenderTargetPool {
             let heapDescriptor = MTLHeapDescriptor()
             heapDescriptor.storageMode = descriptor.storageMode
             heapDescriptor.size = Self.align(sizeAndAlign.size, to: sizeAndAlign.align)
+            // `MTLHeap` defaults to `.untracked`, which makes the driver skip
+            // the implicit read-after-write barrier between two passes that
+            // touch the same heap-backed texture. Concurrent test runs (and
+            // Apple Silicon driver heap aliasing) made that observable as a
+            // flake on `routesLayerCompositeTargetIntoScene` /
+            // `routesDeclaredFBOTargetIntoScene`: pass 0 wrote the FBO, pass 1
+            // sampled before the write was visible, scene came back all zero.
+            // Switching to `.tracked` lets the executor stay encoder-only.
+            heapDescriptor.hazardTrackingMode = .tracked
             if let heap = device.makeHeap(descriptor: heapDescriptor),
                let texture = heap.makeTexture(descriptor: descriptor) {
                 texture.label = "WPE \(key.name) \(label) heap texture"

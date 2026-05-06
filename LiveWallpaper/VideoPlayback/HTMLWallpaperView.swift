@@ -402,10 +402,6 @@ final class HTMLWallpaperView: NSView {
         if let url = error.userInfo[NSURLErrorFailingURLErrorKey] as? URL {
             return url
         }
-        if let urlString = error.userInfo[NSURLErrorFailingURLStringErrorKey] as? String,
-           let url = URL(string: urlString) {
-            return url
-        }
         return URL(string: "about:blank") ?? URL(fileURLWithPath: "/")
     }
 

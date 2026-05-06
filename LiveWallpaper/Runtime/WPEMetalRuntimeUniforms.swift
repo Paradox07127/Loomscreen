@@ -187,8 +187,8 @@ extension WallpaperPerformanceProfile {
 private extension SIMD2 where Scalar == Double {
     var clampedToUnitSquare: SIMD2<Double> {
         SIMD2<Double>(
-            min(max(x, 0), 1),
-            min(max(y, 0), 1)
+            Swift.min(Swift.max(x, 0), 1),
+            Swift.min(Swift.max(y, 0), 1)
         )
     }
 }
