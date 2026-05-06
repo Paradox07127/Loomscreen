@@ -104,7 +104,8 @@ private struct WPEShaderSourceLoader: Sendable {
     }
 
     private func builtinProgram(shaderName: String, combos: [String: Int]) -> WPEShaderProgram? {
-        switch normalizedBuiltinShaderName(shaderName) {
+        let normalized = normalizedBuiltinShaderName(shaderName)
+        switch normalized {
         case "solidcolor":
             return solidColorProgram(shaderName: shaderName, combos: combos)
         case "solidlayer":
@@ -114,6 +115,13 @@ private struct WPEShaderSourceLoader: Sendable {
         case "compose":
             return composeProgram(shaderName: shaderName, combos: combos)
         default:
+            // Phase 2D-C: pre-compiled effects share `copyProgram`'s GLSL
+            // skeleton because the runtime renders them through dedicated
+            // MSL fragments — the prepared GLSL is only kept around for
+            // future shader-translator paths.
+            if normalized.hasPrefix("effect_") {
+                return copyProgram(shaderName: shaderName, combos: combos)
+            }
             guard isGenericImageShader(shaderName) else {
                 return nil
             }
@@ -124,18 +132,48 @@ private struct WPEShaderSourceLoader: Sendable {
     private func normalizedBuiltinShaderName(_ shaderName: String) -> String {
         let lower = shaderName.lowercased()
         let withoutJSON = lower.hasSuffix(".json") ? String(lower.dropLast(5)) : lower
-        switch withoutJSON {
+        let stripped = withoutJSON.hasPrefix("materials/")
+            ? String(withoutJSON.dropFirst("materials/".count))
+            : withoutJSON
+        switch stripped {
         case "solidcolor":
             return "solidcolor"
-        case "solidlayer", "materials/util/solidlayer", "models/util/solidlayer":
+        case "solidlayer", "util/solidlayer", "models/util/solidlayer":
             return "solidlayer"
-        case "copy", "commands/copy", "materials/util/copy":
+        case "copy", "commands/copy", "util/copy":
             return "copy"
-        case "compose", "materials/util/compose":
+        case "compose", "util/compose":
             return "compose"
         default:
-            return withoutJSON
+            // Phase 2D-C: recognise pre-compiled effect aliases so the
+            // builder marks them `isBuiltin: true` and routes the dispatch
+            // through the executor's MSL fragment table. The leading
+            // `materials/` prefix is pre-stripped above so Workshop paths
+            // such as `materials/effects/blur/blur.json` resolve here.
+            if Self.isEffectAlias(stripped, family: "colorbalance") {
+                return "effect_colorbalance"
+            }
+            if Self.isEffectAlias(stripped, family: "blur") {
+                return "effect_blur"
+            }
+            if Self.isEffectAlias(stripped, family: "vignette") {
+                return "effect_vignette"
+            }
+            if Self.isEffectAlias(stripped, family: "water")
+                || Self.isEffectAlias(stripped, family: "distort") {
+                return "effect_water"
+            }
+            if Self.isEffectAlias(stripped, family: "shake") {
+                return "effect_shake"
+            }
+            return stripped
         }
+    }
+
+    private static func isEffectAlias(_ shaderName: String, family: String) -> Bool {
+        shaderName == family
+            || shaderName == "effects/\(family)"
+            || shaderName == "effects/\(family)/\(family)"
     }
 
     private func solidLayerProgram(shaderName: String, combos: [String: Int]) -> WPEShaderProgram {

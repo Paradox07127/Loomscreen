@@ -408,6 +408,57 @@ struct WPERenderPipelineBuilderTests {
         #expect(shader.fragmentSource.contains("#define lerp mix"))
     }
 
+    @Test(
+        "Recognises Phase 2D-C effect aliases under bare, effects/, and materials/ paths",
+        arguments: [
+            "blur",
+            "effects/blur",
+            "effects/blur/blur",
+            "materials/effects/blur/blur",
+            "materials/effects/blur/blur.json",
+            "MATERIALS/Effects/Blur/Blur.JSON"
+        ]
+    )
+    func recognisesEffectAliasesAcrossPathStyles(shaderName: String) throws {
+        let fixture = try makeFixture(files: [:])
+        defer { fixture.cleanup() }
+
+        let graph = WPERenderGraph(layers: [
+            WPERenderLayer(
+                objectID: "1",
+                objectName: "Layer",
+                imagePath: "materials/base.png",
+                materialPath: nil,
+                compositeA: "a",
+                compositeB: "b",
+                localFBOs: [],
+                passes: [
+                    WPERenderPass(
+                        id: "1.0",
+                        phase: .effect(file: "effects/blur/effect.json"),
+                        shader: shaderName,
+                        source: .fbo("_rt_Source"),
+                        target: .scene,
+                        textures: [0: .fbo("_rt_Source")],
+                        binds: [:],
+                        constants: [:],
+                        combos: [:],
+                        blending: "normal",
+                        cullMode: "nocull",
+                        depthTest: "disabled",
+                        depthWrite: "disabled"
+                    )
+                ]
+            )
+        ])
+
+        let pipeline = try WPERenderPipelineBuilder(cacheRootURL: fixture.root).build(graph: graph)
+        let shader = try #require(pipeline.layers.first?.passes.first?.shader)
+
+        #expect(shader.isBuiltin)
+        #expect(shader.name == shaderName)
+    }
+
     private struct Fixture {
         let root: URL
 
