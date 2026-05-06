@@ -40,4 +40,10 @@ enum DesignTokens {
         static let shadowOpacity: Double = 0.18
         static let shadowYOffset: CGFloat = 4
     }
+
+    /// Returns the supplied animation when motion is allowed, otherwise nil so
+    /// the change applies instantly. Pairs with `@Environment(\.accessibilityReduceMotion)`.
+    static func motion(_ reduceMotion: Bool, _ animation: Animation) -> Animation? {
+        reduceMotion ? nil : animation
+    }
 }
