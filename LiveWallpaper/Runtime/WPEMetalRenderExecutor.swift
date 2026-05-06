@@ -166,6 +166,13 @@ final class WPEMetalRenderExecutor {
         self.targetPool = WPEMetalRenderTargetPool(device: device)
     }
 
+    /// Phase 2E: lets `WPEMetalSceneRenderer` hand the executor's MTLDevice
+    /// to `WPEVideoTextureSource` (which needs it to build a
+    /// `CVMetalTextureCache`) without exposing the device publicly.
+    var textureSourceDevice: MTLDevice {
+        device
+    }
+
     var transientTargetTextureCountForTesting: Int {
         targetPool.allocatedTextureCount
     }

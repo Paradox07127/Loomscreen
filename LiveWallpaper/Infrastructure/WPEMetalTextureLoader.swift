@@ -18,6 +18,19 @@ struct WPEMetalTextureLoader {
     }
 
     func makeTexture(from payload: WPETexTexturePayload, label: String) async throws -> MTLTexture {
+        // Phase 2E: video and animation payloads are routed via the dynamic
+        // texture sources; this static path must reject them so a stale
+        // upload does not silently take a single-frame snapshot.
+        if payload.videoPayload != nil {
+            throw WPEMetalTextureLoaderError.malformedPayload(
+                "video payload must be routed through WPEVideoTextureSource"
+            )
+        }
+        if payload.animationTrack != nil {
+            throw WPEMetalTextureLoaderError.malformedPayload(
+                "animated payload must be routed through WPETexAnimatedTextureSource"
+            )
+        }
         let device = self.device
         let capabilities = self.capabilities
         return try await uploadQueue.perform {
@@ -28,6 +41,40 @@ struct WPEMetalTextureLoader {
                 capabilities: capabilities
             )
         }
+    }
+
+    /// Phase 2E: pre-uploads every animation frame to GPU as a separate
+    /// `MTLTexture` and hands the pre-baked array to
+    /// `WPETexAnimatedTextureSource`. Frame selection by `g_Time` happens at
+    /// render time without any per-frame upload cost.
+    @MainActor
+    func makeAnimatedTextureSource(
+        from payload: WPETexTexturePayload,
+        label: String
+    ) async throws -> WPETexAnimatedTextureSource {
+        guard let animation = payload.animationTrack else {
+            throw WPEMetalTextureLoaderError.malformedPayload("missing animation track")
+        }
+
+        var frameTextures: [MTLTexture] = []
+        frameTextures.reserveCapacity(animation.frames.count)
+        for (frameIndex, frame) in animation.frames.enumerated() {
+            let framePayload = WPETexTexturePayload(
+                info: payload.info,
+                mipmaps: frame.mipmaps,
+                hasAnimationFrames: false
+            )
+            frameTextures.append(try await makeTexture(
+                from: framePayload,
+                label: "\(label) frame \(frameIndex)"
+            ))
+        }
+
+        return WPETexAnimatedTextureSource(
+            frames: frameTextures,
+            frameRate: animation.frameRate,
+            loop: animation.loop
+        )
     }
 
     func makeTexture(from image: DecodedRGBAImage, label: String) async throws -> MTLTexture {
