@@ -235,8 +235,13 @@ private final class AspectFillAnimatedImageView: NSView {
         let delay = frameDelays.indices.contains(currentFrameIndex)
             ? frameDelays[currentFrameIndex]
             : 0.1
+        // Timer fires on the main run loop because we're already on it when
+        // scheduling — `assumeIsolated` skips the unnecessary main-actor hop
+        // and silences the Swift 6 cross-isolation warning.
         animationTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
-            self?.advanceFrame()
+            MainActor.assumeIsolated {
+                self?.advanceFrame()
+            }
         }
     }
 

@@ -127,7 +127,7 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
                 await delivery.fail(with: error)
             }
 
-            await MainActor.run {
+            _ = await MainActor.run {
                 self?.activeTasks.removeValue(forKey: taskID)
             }
         }
