@@ -2,7 +2,17 @@ import AVFoundation
 import CoreMedia
 import Foundation
 
-enum PlayableVideoLoader {
+struct PlayableVideoLoader: PlayableVideoLoading, Sendable {
+    init() {}
+
+    func validatePlayableVideo(at url: URL) async throws {
+        try await Self.validatePlayableVideo(at: url)
+    }
+
+    func detectFormat(at url: URL) async throws -> VideoFormatInfo {
+        try await Self.detectFormat(at: url)
+    }
+
     static func validatePlayableVideo(at url: URL) async throws {
         let didStartScope = url.startAccessingSecurityScopedResource()
         defer {
