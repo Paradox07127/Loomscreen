@@ -6,6 +6,9 @@ protocol WallpaperRuntimeSession: AnyObject {
     var summary: WallpaperSessionSummary { get }
     var videoPlayer: WallpaperVideoPlayer? { get }
     var wallpaperWindow: NSWindow? { get }
+    /// Latest user-visible failure or `nil` while the session is healthy.
+    /// Surfaced through `RuntimeErrorBanner` in screen-detail UI.
+    var runtimeError: WallpaperRuntimeError? { get }
 
     func show()
     func hide()
@@ -13,11 +16,31 @@ protocol WallpaperRuntimeSession: AnyObject {
     func updateFrame(to frame: CGRect)
     func cleanup()
 
+    /// Suspend during `NSWorkspaceWillSleep` — pauses playback while
+    /// remembering enough state for `resume()` to restore it.
+    func suspend()
+    /// Resume after `NSWorkspaceDidWake`.
+    func resume()
+    /// User-triggered retry from the error banner.
+    func retry() async
+
     /// Wait for the first frame so transitions do not flash empty.
     func prepareForDisplay(timeout: Duration) async -> Bool
 }
 
 extension WallpaperRuntimeSession {
+    var runtimeError: WallpaperRuntimeError? { nil }
+
+    func suspend() {
+        applyPerformanceProfile(.suspended)
+    }
+
+    func resume() {
+        applyPerformanceProfile(.quality)
+    }
+
+    func retry() async {}
+
     func prepareForDisplay(timeout: Duration) async -> Bool {
         do {
             try await Task.sleep(for: .milliseconds(50))
@@ -49,9 +72,19 @@ protocol WallpaperPlaybackControllable: WallpaperRuntimeSession {
 @MainActor
 final class VideoWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackControllable {
     private var player: WallpaperVideoPlayer?
+    private var wasPlayingBeforeSuspend: Bool?
+    private(set) var runtimeError: WallpaperRuntimeError? {
+        didSet {
+            guard oldValue != runtimeError else { return }
+            onRuntimeErrorChange?()
+        }
+    }
+    var onRuntimeErrorChange: (@MainActor () -> Void)?
 
     init(player: WallpaperVideoPlayer) {
         self.player = player
+        runtimeError = player.runtimeError
+        attachErrorHandler(to: player)
     }
 
     var wallpaperType: WallpaperType {
@@ -60,11 +93,12 @@ final class VideoWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackCon
 
     var summary: WallpaperSessionSummary {
         guard let player else { return .notConfigured }
+        let isHealthy = runtimeError == nil
         return WallpaperSessionSummary(
             wallpaperType: .video,
-            activity: player.isPlaying ? .active : .paused,
+            activity: isHealthy && player.isPlaying ? .active : .paused,
             supportsPlaybackControl: true,
-            subtitle: nil
+            subtitle: runtimeError?.userMessage
         )
     }
 
@@ -105,9 +139,53 @@ final class VideoWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackCon
         player?.pause()
     }
 
+    func suspend() {
+        guard wasPlayingBeforeSuspend == nil else { return }
+        wasPlayingBeforeSuspend = player?.isPlaying ?? false
+        player?.suspend()
+    }
+
+    func resume() {
+        guard let wasPlayingBeforeSuspend else { return }
+        self.wasPlayingBeforeSuspend = nil
+        guard wasPlayingBeforeSuspend else { return }
+        player?.resume()
+    }
+
+    func retry() async {
+        guard let oldPlayer = player, let url = oldPlayer.videoURL else { return }
+        let frame = oldPlayer.currentWindowFrame
+        let fitMode = oldPlayer.currentFitMode
+        let muted = oldPlayer.isMuted
+        let speed = Double(oldPlayer.player?.defaultRate ?? 1)
+        let frameRateLimit = oldPlayer.requestedFrameRateLimit
+        let shouldAutoplay = oldPlayer.isPlaying || oldPlayer.shouldAutoplayWhenReady
+
+        oldPlayer.cleanup()
+
+        let replacement = WallpaperVideoPlayer(url: url, frame: frame, fitMode: fitMode)
+        attachErrorHandler(to: replacement)
+        replacement.setMuted(muted)
+        replacement.setPlaybackSpeed(speed)
+        if frameRateLimit > 0 {
+            replacement.setFrameRateLimit(frameRateLimit)
+        }
+        if !shouldAutoplay {
+            replacement.pause()
+        }
+        player = replacement
+        runtimeError = replacement.runtimeError
+    }
+
     func cleanup() {
         player?.cleanup()
         player = nil
+    }
+
+    private func attachErrorHandler(to player: WallpaperVideoPlayer) {
+        player.onError = { [weak self] error in
+            self?.runtimeError = error
+        }
     }
 }
 
@@ -116,8 +194,16 @@ final class AmbientWallpaperSession: WallpaperRuntimeSession {
     private var window: NSWindow?
     private weak var performanceTarget: (any WallpaperPerformanceConfigurable)?
     private var currentProfile: WallpaperPerformanceProfile = .quality
+    private var profileBeforeSuspend: WallpaperPerformanceProfile?
     private var isVisible = true
     let wallpaperType: WallpaperType
+    private(set) var runtimeError: WallpaperRuntimeError? {
+        didSet {
+            guard oldValue != runtimeError else { return }
+            onRuntimeErrorChange?()
+        }
+    }
+    var onRuntimeErrorChange: (@MainActor () -> Void)?
 
     init(
         window: NSWindow,
@@ -131,12 +217,13 @@ final class AmbientWallpaperSession: WallpaperRuntimeSession {
     }
 
     var summary: WallpaperSessionSummary {
-        let activity: WallpaperSessionActivity = isVisible && currentProfile != .suspended ? .active : .paused
+        let isHealthy = runtimeError == nil
+        let activity: WallpaperSessionActivity = isHealthy && isVisible && currentProfile != .suspended ? .active : .paused
         return WallpaperSessionSummary(
             wallpaperType: wallpaperType,
             activity: activity,
             supportsPlaybackControl: false,
-            subtitle: nil
+            subtitle: runtimeError?.userMessage
         )
     }
 
@@ -167,6 +254,28 @@ final class AmbientWallpaperSession: WallpaperRuntimeSession {
     func applyPerformanceProfile(_ profile: WallpaperPerformanceProfile) {
         currentProfile = profile
         performanceTarget?.applyPerformanceProfile(isVisible ? profile : .suspended)
+    }
+
+    func suspend() {
+        guard profileBeforeSuspend == nil else { return }
+        profileBeforeSuspend = currentProfile
+        applyPerformanceProfile(.suspended)
+    }
+
+    func resume() {
+        guard let profileBeforeSuspend else { return }
+        self.profileBeforeSuspend = nil
+        applyPerformanceProfile(profileBeforeSuspend)
+    }
+
+    func retry() async {
+        runtimeError = nil
+        (performanceTarget as? HTMLWallpaperView)?.reloadCurrentSource()
+    }
+
+    /// Bridged from `HTMLWallpaperView.onError` so the session keeps the user-visible error.
+    func recordRuntimeError(_ error: WallpaperRuntimeError) {
+        runtimeError = error
     }
 
     func cleanup() {

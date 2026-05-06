@@ -130,7 +130,16 @@ final class ScreenManager {
             }
             .store(in: &cleanupTasks)
         
-        NotificationCenter.default.publisher(for: NSWorkspace.didWakeNotification)
+        // Sleep / wake notifications are posted on NSWorkspace's notification
+        // center, NOT NotificationCenter.default. The previous version subscribed
+        // on the wrong center and effectively never fired on wake.
+        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.willSleepNotification)
+            .sink { [weak self] _ in
+                self?.handleSystemSleep()
+            }
+            .store(in: &cleanupTasks)
+
+        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)
             .sink { [weak self] _ in
                 self?.handleSystemWake()
             }
@@ -326,6 +335,10 @@ final class ScreenManager {
     /// Use `clearWallpaperForScreen(_:)` when you also want to delete the saved
     /// configuration for that screen.
     private func releaseRuntimeSession(_ screen: Screen) {
+        // Bump generation first so any in-flight async transition (e.g.
+        // setVideo / playlist / schedule) sees the new value and short-circuits
+        // before instantiating a player against a now-dead screen.
+        bumpTransition(for: screen.id)
         videoEffectsApplier.cancelInflight(for: screen.id)
         assetReadinessWork[screen.id]?.cancel()
         assetReadinessWork[screen.id] = nil
@@ -435,23 +448,26 @@ final class ScreenManager {
             return
         }
 
-        let generation = bumpTransition(for: screen.id)
+        let screenID = screen.id
+        let generation = bumpTransition(for: screenID)
         Task {
             do {
                 try await PlayableVideoLoader.validatePlayableVideo(at: url)
                 await MainActor.run { [weak self] in
-                    guard let self, self.isCurrentTransition(generation, for: screen.id) else { return }
+                    guard let self,
+                          self.isCurrentTransition(generation, for: screenID),
+                          let liveScreen = self.screens.first(where: { $0.id == screenID }) else { return }
                     self.configurationStore.save(configuration)
-                    guard SettingsManager.shared.validateConfiguration(for: screen.id) else {
-                        Logger.error("Failed to save video configuration for screen \(screen.id)", category: .screenManager)
+                    guard SettingsManager.shared.validateConfiguration(for: screenID) else {
+                        Logger.error("Failed to save video configuration for screen \(screenID)", category: .screenManager)
                         if let existing {
                             self.configurationStore.save(existing)
                         } else {
-                            self.configurationStore.remove(for: screen.id)
+                            self.configurationStore.remove(for: screenID)
                         }
                         return
                     }
-                    self.setupVideoPlayback(url: url, screen: screen)
+                    self.setupVideoPlayback(url: url, screen: liveScreen)
                 }
             } catch {
                 await MainActor.run {
@@ -556,7 +572,9 @@ final class ScreenManager {
                     frame: screen.frame,
                     fitMode: configuration.fitMode
                 )
-                screen.installRuntimeSession(VideoWallpaperSession(player: player))
+                let session = VideoWallpaperSession(player: player)
+                observeRuntimeErrors(for: session)
+                screen.installRuntimeSession(session)
                 notifyWallpaperSessionChanged()
 
                 player.setPlaybackSpeed(configuration.playbackSpeed)
@@ -665,7 +683,9 @@ final class ScreenManager {
         }
 
         if let index = screens.firstIndex(where: { $0.id == screen.id }) {
-            screens[index].installRuntimeSession(VideoWallpaperSession(player: player))
+            let session = VideoWallpaperSession(player: player)
+            observeRuntimeErrors(for: session)
+            screens[index].installRuntimeSession(session)
             let liveScreen = screens[index]
             let globalSettings = SettingsManager.shared.loadGlobalSettings()
             applyPerformancePolicy(
@@ -774,6 +794,35 @@ final class ScreenManager {
 
     func wallpaperSummary(for screen: Screen) -> WallpaperSessionSummary {
         wallpaperSessionSummaryCache.summary(for: screen.id, fallback: screen.wallpaperSessionSummary)
+    }
+
+    /// Currently surfaced error for a screen's runtime session (or `nil`).
+    /// Reads through `wallpaperSessionStateVersion` so SwiftUI re-evaluates
+    /// the banner when the session reports a new state.
+    func runtimeError(for screen: Screen) -> WallpaperRuntimeError? {
+        _ = wallpaperSessionStateVersion
+        return screen.runtimeSession?.runtimeError
+    }
+
+    func retryRuntimeSession(for screen: Screen) {
+        Task { @MainActor [weak self, weak screen] in
+            guard let self, let screen else { return }
+            await screen.runtimeSession?.retry()
+            self.markWallpaperSessionStateChanged()
+        }
+    }
+
+    /// Subscribes the manager to a session's error changes so the SwiftUI
+    /// banner refreshes when a player or web view starts / clears a failure.
+    private func observeRuntimeErrors(for session: any WallpaperRuntimeSession) {
+        let notify: @MainActor () -> Void = { [weak self] in
+            self?.markWallpaperSessionStateChanged()
+        }
+        if let session = session as? VideoWallpaperSession {
+            session.onRuntimeErrorChange = notify
+        } else if let session = session as? AmbientWallpaperSession {
+            session.onRuntimeErrorChange = notify
+        }
     }
 
     func wallpaperDisplayName(for screen: Screen) -> String? {
@@ -942,8 +991,19 @@ final class ScreenManager {
     }
     
     // MARK: - System Events
+    private func handleSystemSleep() {
+        Logger.info("System sleep detected", category: .lifecycle)
+        for screen in screens {
+            screen.runtimeSession?.suspend()
+        }
+        markWallpaperSessionStateChanged()
+    }
+
     private func handleSystemWake() {
         Logger.info("System wake detected", category: .lifecycle)
+        for screen in screens {
+            screen.runtimeSession?.resume()
+        }
         refreshScreens()
         powerMonitor.refreshPowerStatus()
         handlePowerStateChange(powerMonitor.currentPowerSource)
@@ -1514,6 +1574,7 @@ final class ScreenManager {
                 Logger.warning("Scene wallpaper for screen \(screen.id) (workshop \(descriptor.workshopID)) could not be built — cache missing or descriptor invalid", category: .screenManager)
                 return
             }
+            observeRuntimeErrors(for: sceneSession)
             screen.installRuntimeSession(sceneSession)
             // Sync exclusive-rendering state on install so a scene mounted
             // while the inspector window is already key starts at 1 fps
@@ -1534,6 +1595,7 @@ final class ScreenManager {
             return
         }
 
+        observeRuntimeErrors(for: session)
         screen.installRuntimeSession(session)
         let globalSettings = SettingsManager.shared.loadGlobalSettings()
         applyPerformancePolicy(

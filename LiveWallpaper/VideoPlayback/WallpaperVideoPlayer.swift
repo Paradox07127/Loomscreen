@@ -32,6 +32,19 @@ final class WallpaperVideoPlayer {
     private(set) var isMuted: Bool = true
     private(set) var shouldAutoplayWhenReady = true
     private(set) var requestedFrameRateLimit: Float = 0
+    private(set) var runtimeError: WallpaperRuntimeError?
+    /// Error sink consumed by `VideoWallpaperSession` for UI surfacing. The
+    /// sink replays any pre-existing error when assigned so late observers
+    /// don't miss failures raised during init.
+    var onError: (@MainActor (WallpaperRuntimeError) -> Void)? {
+        didSet {
+            if let runtimeError {
+                onError?(runtimeError)
+            }
+        }
+    }
+    var currentWindowFrame: CGRect { window?.frame ?? initialFrame }
+    var currentFitMode: VideoFitMode { fitMode }
 
     // MARK: - Private Properties
 
@@ -67,6 +80,7 @@ final class WallpaperVideoPlayer {
             )
             Logger.error("Invalid frame provided: \(frame)", category: .videoPlayer)
             Logger.error("WallpaperVideoPlayer init error: \(error.localizedDescription)", category: .videoPlayer)
+            reportError(.mediaNotPlayable(url, code: error.code))
             return
         }
 
@@ -91,9 +105,10 @@ final class WallpaperVideoPlayer {
             )
             Logger.error("Failed to access security scoped resource: \(url.lastPathComponent)", category: .videoPlayer)
             Logger.error("WallpaperVideoPlayer init error: \(error.localizedDescription)", category: .videoPlayer)
+            reportError(.fileAccessDenied(url))
             return
         }
-        
+
         loadingTask = Task { [weak self] in
             guard let self else { return }
 
@@ -108,6 +123,9 @@ final class WallpaperVideoPlayer {
                 guard isPlayable else {
                     self.stopAccessingResource()
                     Logger.error("Video is not playable: \(url.lastPathComponent)", category: .videoPlayer)
+                    await MainActor.run { [weak self] in
+                        self?.reportError(.mediaNotPlayable(url, code: nil))
+                    }
                     return
                 }
 
@@ -138,6 +156,10 @@ final class WallpaperVideoPlayer {
             } catch {
                 self.stopAccessingResource()
                 Logger.error("Error loading video: \(error.localizedDescription)", category: .videoPlayer)
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    self.reportError(self.makeRuntimeError(from: error, url: url))
+                }
             }
         }
     }
@@ -232,6 +254,9 @@ final class WallpaperVideoPlayer {
                     return
                 }
                 Logger.warning("Playback item failed (code: \(nsError.code)): \(error.localizedDescription)", category: .videoPlayer)
+                if let url = self.videoURL {
+                    self.reportError(self.makeRuntimeError(from: error, url: url))
+                }
             }
             .store(in: &cleanupTasks)
     }
@@ -527,7 +552,33 @@ final class WallpaperVideoPlayer {
         guard requestedFrameRateLimit > 0, currentVideoComposition == nil else { return }
         setFrameRateLimit(requestedFrameRateLimit)
     }
-    
+
+    /// Sleep / wake suspend hook. Distinct from `pause()` so the session can
+    /// remember "was playing before sleep" and resume to the right state.
+    func suspend() {
+        pause()
+    }
+
+    func resume() {
+        play()
+    }
+
+    private func reportError(_ error: WallpaperRuntimeError) {
+        runtimeError = error
+        onError?(error)
+    }
+
+    private func makeRuntimeError(from error: Error, url: URL) -> WallpaperRuntimeError {
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorNotConnectedToInternet {
+            return .networkOffline
+        }
+        if nsError.domain == NSCocoaErrorDomain, nsError.code == NSFileReadNoPermissionError {
+            return .fileAccessDenied(url)
+        }
+        return .mediaNotPlayable(url, code: nsError.code)
+    }
+
     private func stopAccessingResource() {
         if accessToken, let url = videoURL {
             url.stopAccessingSecurityScopedResource()
