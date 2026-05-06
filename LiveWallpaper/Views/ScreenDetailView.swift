@@ -423,6 +423,10 @@ struct ScreenDetailView: View {
                                 }
                             }
                             .groupBoxStyle(ContainerGroupBoxStyle())
+                            .transition(reduceMotion ? .opacity : .asymmetric(
+                                insertion: .opacity.combined(with: .scale(scale: 0.96, anchor: .top)),
+                                removal: .opacity
+                            ))
                             }
 
                             if selectedWallpaperMode == .schedule {
@@ -440,6 +444,10 @@ struct ScreenDetailView: View {
                                 }
                             }
                             .groupBoxStyle(ContainerGroupBoxStyle())
+                            .transition(reduceMotion ? .opacity : .asymmetric(
+                                insertion: .opacity.combined(with: .scale(scale: 0.96, anchor: .top)),
+                                removal: .opacity
+                            ))
                             }
 
                             GroupBox {
