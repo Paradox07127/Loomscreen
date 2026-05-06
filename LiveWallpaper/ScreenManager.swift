@@ -42,6 +42,18 @@ struct WallpaperSessionSummaryCache: Equatable {
 struct ScreenManagerStartupOptions: Equatable {
     var restoreSavedWallpapers: Bool = true
     var startAutomation: Bool = true
+    var powerMonitor: (any PowerMonitoring)? = nil
+    var fullScreenDetector: (any FullScreenDetecting)? = nil
+    var playableVideoLoader: (any PlayableVideoLoading)? = nil
+    var displayRegistry: (any DisplayRegistering)? = nil
+
+    // Reference-typed protocol fields are not synthesizable for Equatable.
+    // Compare only the value-typed boolean configuration; injected dependencies
+    // are test-time concerns and equality is irrelevant for them.
+    static func == (lhs: ScreenManagerStartupOptions, rhs: ScreenManagerStartupOptions) -> Bool {
+        lhs.restoreSavedWallpapers == rhs.restoreSavedWallpapers
+            && lhs.startAutomation == rhs.startAutomation
+    }
 }
 
 @MainActor @Observable
@@ -56,16 +68,17 @@ final class ScreenManager {
     private(set) var lastWPEImportErrors: [CGDirectDisplayID: AppError] = [:]
 
     @ObservationIgnored private var cleanupTasks: Set<AnyCancellable> = []
-    @ObservationIgnored private let displayRegistry = DisplayRegistry()
+    @ObservationIgnored private let displayRegistry: any DisplayRegistering
     @ObservationIgnored private let configurationStore = WallpaperConfigurationStore()
     @ObservationIgnored private let ambientSessionBuilder = AmbientWallpaperSessionBuilder()
     @ObservationIgnored private let wpeImportService = WallpaperEngineImportService()
     @ObservationIgnored private let wpeCachedContentResolver = WPECachedContentResolver()
     @ObservationIgnored private let automationCoordinator = WallpaperAutomationCoordinator()
     @ObservationIgnored private let powerPolicy = PowerPolicyController()
-    @ObservationIgnored private let powerMonitor: PowerMonitor = .shared
+    @ObservationIgnored private let powerMonitor: any PowerMonitoring
     @ObservationIgnored private let playbackStateSubject = CurrentValueSubject<Bool, Never>(false)
-    @ObservationIgnored private let fullScreenDetector = FullScreenDetector()
+    @ObservationIgnored private let fullScreenDetector: any FullScreenDetecting
+    @ObservationIgnored private let playableVideoLoader: any PlayableVideoLoading
     @ObservationIgnored private let videoEffectsApplier = VideoEffectsApplicationService()
     @ObservationIgnored private let restoresSavedWallpapersOnScreenRefresh: Bool
     @ObservationIgnored private let exclusiveRenderingCoordinator = ExclusiveRenderingCoordinator()
@@ -81,6 +94,10 @@ final class ScreenManager {
     }
     // MARK: - Initialization
     init(startupOptions: ScreenManagerStartupOptions = ScreenManagerStartupOptions()) {
+        displayRegistry = startupOptions.displayRegistry ?? DisplayRegistry()
+        powerMonitor = startupOptions.powerMonitor ?? PowerMonitor.shared
+        fullScreenDetector = startupOptions.fullScreenDetector ?? FullScreenDetector()
+        playableVideoLoader = startupOptions.playableVideoLoader ?? PlayableVideoLoader()
         restoresSavedWallpapersOnScreenRefresh = startupOptions.restoreSavedWallpapers
 
         Logger.notice("ScreenManager initializing", category: .screenManager)
@@ -450,9 +467,10 @@ final class ScreenManager {
 
         let screenID = screen.id
         let generation = bumpTransition(for: screenID)
+        let videoLoader = playableVideoLoader
         Task {
             do {
-                try await PlayableVideoLoader.validatePlayableVideo(at: url)
+                try await videoLoader.validatePlayableVideo(at: url)
                 await MainActor.run { [weak self] in
                     guard let self,
                           self.isCurrentTransition(generation, for: screenID),
@@ -1867,10 +1885,11 @@ final class ScreenManager {
 
         let screenID = screen.id
         let generation = bumpTransition(for: screenID)
+        let videoLoader = playableVideoLoader
 
         Task { [weak self] in
             do {
-                try await PlayableVideoLoader.validatePlayableVideo(at: url)
+                try await videoLoader.validatePlayableVideo(at: url)
                 await MainActor.run { [weak self] in
                     guard let self,
                           self.isCurrentTransition(generation, for: screenID),
@@ -1946,10 +1965,11 @@ final class ScreenManager {
 
         let screenID = screen.id
         let generation = bumpTransition(for: screenID)
+        let videoLoader = playableVideoLoader
 
         Task { [weak self] in
             do {
-                try await PlayableVideoLoader.validatePlayableVideo(at: url)
+                try await videoLoader.validatePlayableVideo(at: url)
                 await MainActor.run { [weak self] in
                     guard let self,
                           self.isCurrentTransition(generation, for: screenID),
