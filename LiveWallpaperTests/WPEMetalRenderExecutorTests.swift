@@ -965,3 +965,290 @@ private extension WPEMetalRenderExecutorTests {
         #expect(pixel.a >= 250)
     }
 }
+
+// MARK: - Phase 2D-C effect tests
+
+private func effectPass(
+    id: String,
+    shader: String,
+    source: WPETextureReference,
+    target: WPERenderTarget = .scene,
+    constants: [String: WPESceneShaderConstantValue],
+    blending: String = "disabled"
+) -> WPERenderPass {
+    WPERenderPass(
+        id: id,
+        phase: .effect(file: "\(shader)/effect.json"),
+        shader: shader,
+        source: source,
+        target: target,
+        textures: [0: source],
+        binds: [:],
+        constants: constants,
+        combos: [:],
+        blending: blending,
+        cullMode: "nocull",
+        depthTest: "disabled",
+        depthWrite: "disabled"
+    )
+}
+
+private func expectPixel(
+    _ pixel: Pixel,
+    approximately expected: Pixel,
+    tolerance: Int = 4
+) {
+    #expect(abs(Int(pixel.r) - Int(expected.r)) <= tolerance)
+    #expect(abs(Int(pixel.g) - Int(expected.g)) <= tolerance)
+    #expect(abs(Int(pixel.b) - Int(expected.b)) <= tolerance)
+    #expect(abs(Int(pixel.a) - Int(expected.a)) <= tolerance)
+}
+
+private extension WPEMetalRenderExecutorTests {
+    @Test("Color balance built-in desaturates red to luminance")
+    func colorBalanceDesaturatesRedToLuminance() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let input = try makeRGBAInputTexture(
+            device: device,
+            width: 1,
+            height: 1,
+            bytes: Data([255, 0, 0, 255])
+        )
+
+        let pass = effectPass(
+            id: "effect.colorbalance",
+            shader: "effects/colorbalance",
+            source: .image("materials/red.png"),
+            constants: [
+                "u_Brightness": .number(0),
+                "u_Contrast": .number(1),
+                "u_Saturation": .number(0)
+            ]
+        )
+        let pipeline = preparedPipeline(
+            localFBOs: [],
+            passes: [
+                preparedBuiltinPass(
+                    pass,
+                    bindings: [0: .image("materials/red.png")],
+                    uniforms: pass.constants
+                )
+            ]
+        )
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 1, height: 1),
+            textures: ["materials/red.png": input]
+        )
+        let pixel = try readPixel(output, x: 0, y: 0)
+
+        // Linear luma for red is 0.2126; storing to rgba8Unorm_srgb reads back ~127.
+        expectPixel(pixel, approximately: Pixel(r: 127, g: 127, b: 127, a: 255))
+    }
+
+    @Test("Blur built-in applies centered 9 tap kernel")
+    func blurAppliesCenteredNineTapKernel() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+
+        let input = try makeRGBAInputTexture(
+            device: device,
+            width: 9,
+            height: 1,
+            bytes: Data([
+                0, 0, 0, 255,
+                0, 0, 0, 255,
+                0, 0, 0, 255,
+                0, 0, 0, 255,
+                255, 0, 0, 255,
+                0, 0, 0, 255,
+                0, 0, 0, 255,
+                0, 0, 0, 255,
+                0, 0, 0, 255
+            ])
+        )
+
+        let pass = effectPass(
+            id: "effect.blur",
+            shader: "effects/blur",
+            source: .image("materials/pulse.png"),
+            constants: ["u_Radius": .number(1)]
+        )
+        let pipeline = preparedPipeline(
+            localFBOs: [],
+            passes: [
+                preparedBuiltinPass(
+                    pass,
+                    bindings: [0: .image("materials/pulse.png")],
+                    uniforms: pass.constants
+                )
+            ]
+        )
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 9, height: 1),
+            textures: ["materials/pulse.png": input]
+        )
+        let pixel = try readPixel(output, x: 4, y: 0)
+
+        // Center weight 0.18; storing 0.18 linear red to sRGB reads back ~118.
+        expectPixel(pixel, approximately: Pixel(r: 118, g: 0, b: 0, a: 255))
+    }
+
+    @Test("Vignette built-in darkens outside outer radius")
+    func vignetteDarkensOutsideOuterRadius() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+
+        let input = try makeRGBAInputTexture(
+            device: device,
+            width: 4,
+            height: 4,
+            bytes: Data(repeating: 255, count: 4 * 4 * 4)
+        )
+
+        let pass = effectPass(
+            id: "effect.vignette",
+            shader: "effects/vignette/vignette.json",
+            source: .image("materials/white.png"),
+            constants: [
+                "u_InnerRadius": .number(0),
+                "u_OuterRadius": .number(0.5),
+                "u_Intensity": .number(1)
+            ]
+        )
+        let pipeline = preparedPipeline(
+            localFBOs: [],
+            passes: [
+                preparedBuiltinPass(
+                    pass,
+                    bindings: [0: .image("materials/white.png")],
+                    uniforms: pass.constants
+                )
+            ]
+        )
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 4, height: 4),
+            textures: ["materials/white.png": input]
+        )
+        let pixel = try readPixel(output, x: 0, y: 0)
+
+        expectPixel(pixel, approximately: Pixel(r: 0, g: 0, b: 0, a: 255))
+    }
+
+    @Test("Water built-in displaces UVs with time driven wave")
+    func waterDisplacesUVsWithWave() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+
+        let input = try makeRGBAInputTexture(
+            device: device,
+            width: 2,
+            height: 2,
+            bytes: Data([
+                255, 0, 0, 255,
+                255, 0, 0, 255,
+                0, 0, 255, 255,
+                0, 0, 255, 255
+            ])
+        )
+
+        let pass = effectPass(
+            id: "effect.water",
+            shader: "effects/distort",
+            source: .image("materials/two_rows.png"),
+            constants: [
+                "u_Amplitude": .number(1),
+                "u_Frequency": .number(0),
+                "u_Speed": .number(0)
+            ]
+        )
+        let pipeline = preparedPipeline(
+            localFBOs: [],
+            passes: [
+                preparedBuiltinPass(
+                    pass,
+                    bindings: [0: .image("materials/two_rows.png")],
+                    uniforms: pass.constants
+                )
+            ]
+        )
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 2, height: 2),
+            textures: ["materials/two_rows.png": input],
+            runtimeUniforms: WPEMetalRuntimeUniforms(
+                time: 0,
+                daytime: 0,
+                brightness: 1,
+                pointerPosition: SIMD2<Double>(0.5, 0.5)
+            )
+        )
+        let pixel = try readPixel(output, x: 0, y: 0)
+
+        // amplitude 1 + frequency 0 + speed 0 → wave = (sin(0), cos(0)) * 1 = (0, 1).
+        // UV (0.25, 0.25) + (0, 1) clamps to (0.25, 1.0) → bottom row → blue.
+        expectPixel(pixel, approximately: Pixel(r: 0, g: 0, b: 255, a: 255))
+    }
+
+    @Test("Shake built-in applies bounded deterministic UV offset")
+    func shakeAppliesBoundedDeterministicUVOffset() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+
+        let input = try makeRGBAInputTexture(
+            device: device,
+            width: 4,
+            height: 1,
+            bytes: Data([
+                255, 0, 0, 255,
+                0, 255, 0, 255,
+                0, 0, 255, 255,
+                255, 255, 255, 255
+            ])
+        )
+
+        let pass = effectPass(
+            id: "effect.shake",
+            shader: "effects/shake/shake.json",
+            source: .image("materials/stripe.png"),
+            constants: [
+                "u_Magnitude": .number(0.25),
+                "u_Frequency": .number(1)
+            ]
+        )
+        let pipeline = preparedPipeline(
+            localFBOs: [],
+            passes: [
+                preparedBuiltinPass(
+                    pass,
+                    bindings: [0: .image("materials/stripe.png")],
+                    uniforms: pass.constants
+                )
+            ]
+        )
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 4, height: 1),
+            textures: ["materials/stripe.png": input],
+            runtimeUniforms: WPEMetalRuntimeUniforms(
+                time: 0,
+                daytime: 0,
+                brightness: 1,
+                pointerPosition: SIMD2<Double>(0.5, 0.5)
+            )
+        )
+        let pixel = try readPixel(output, x: 1, y: 0)
+
+        // At time 0, phase = floor(0*1) = 0; jitter = (cos(0), sin(0)) * 0.25 = (0.25, 0).
+        // Pixel x=1 (uv ≈ 0.375) + 0.25 = 0.625 → samples source x ≈ 2 → blue.
+        expectPixel(pixel, approximately: Pixel(r: 0, g: 0, b: 255, a: 255))
+    }
+}
