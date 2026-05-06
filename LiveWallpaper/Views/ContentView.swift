@@ -224,8 +224,10 @@ struct Sidebar: View {
             }
         }
         .listStyle(.sidebar)
-        // Ideal == min so sidebar opens compact; user can drag to 280.
-        .navigationSplitViewColumnWidth(min: 200, ideal: 200, max: 280)
+        // 220 lets "Built-in Retina Display" + dimensions + status fit on one
+        // row at minimum width; previous 200 caused tail truncation that
+        // looked like content overflow on tight layouts.
+        .navigationSplitViewColumnWidth(min: 220, ideal: 220, max: 300)
         .onAppear { refreshWorkshopAvailability() }
         .onReceive(NotificationCenter.default.publisher(for: .wallpaperConfigurationDidChange)) { _ in
             refreshWorkshopAvailability()
