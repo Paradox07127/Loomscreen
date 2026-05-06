@@ -35,6 +35,19 @@ final class PlayerHostView: NSView {
         playerLayer?.videoGravity = gravity
     }
 
+    /// Forwards an HDR / EDR preference to the underlying `AVPlayerLayer`.
+    /// Uses `preferredDynamicRange` on macOS 26+, falls back to the older
+    /// `wantsExtendedDynamicRangeContent` selector on macOS 14-25, and is a
+    /// no-op below 14 so HDR videos still render (just tone-mapped to SDR).
+    func setExtendedDynamicRangeEnabled(_ enabled: Bool) {
+        guard let playerLayer else { return }
+        if #available(macOS 26, *) {
+            playerLayer.preferredDynamicRange = enabled ? .high : .standard
+        } else if playerLayer.responds(to: NSSelectorFromString("setWantsExtendedDynamicRangeContent:")) {
+            playerLayer.setValue(enabled, forKey: "wantsExtendedDynamicRangeContent")
+        }
+    }
+
     override func layout() {
         super.layout()
         playerLayer?.frame = bounds
@@ -107,6 +120,10 @@ class VideoContainerView: NSView {
         currentPlayer = player
         playerHostView.setVideoGravity(fitMode.avLayerVideoGravity)
         playerHostView.setPlayer(player)
+    }
+
+    func applyHDRPreference(_ enabled: Bool) {
+        playerHostView.setExtendedDynamicRangeEnabled(enabled)
     }
 
     // MARK: - Public API — Particles
