@@ -227,7 +227,7 @@ struct WPESceneDetailView: View {
         // become a no-op and only Option-clicks toggle the panel.
         .onTapGesture {
             guard NSEvent.modifierFlags.contains(.option) else { return }
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+            withAnimation(DesignTokens.motion(reduceMotion, .spring(response: 0.35, dampingFraction: 0.85))) {
                 showDiagnostics.toggle()
             }
         }

@@ -29,6 +29,7 @@ struct ShaderWallpaperSection: View {
     var screen: Screen
     @Binding var selectedShaderPreset: MetalShaderPreset
     @Environment(ScreenManager.self) private var screenManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         GroupBox {
@@ -46,7 +47,7 @@ struct ShaderWallpaperSection: View {
                     HStack(spacing: 10) {
                         ForEach(MetalShaderPreset.allCases) { preset in
                             Button {
-                                withAnimation(.snappy(duration: 0.2)) {
+                                withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.2))) {
                                     selectedShaderPreset = preset
                                 }
                                 screenManager.setShaderWallpaper(preset: preset, for: screen)

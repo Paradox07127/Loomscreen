@@ -2,22 +2,6 @@ import SwiftUI
 import Combine
 import Observation
 
-private final class WallpaperAssetReadinessWork {
-    var frameRateSubscription: AnyCancellable?
-    var fallbackTask: Task<Void, Never>?
-
-    func cancel() {
-        frameRateSubscription?.cancel()
-        frameRateSubscription = nil
-        fallbackTask?.cancel()
-        fallbackTask = nil
-    }
-
-    deinit {
-        cancel()
-    }
-}
-
 struct WallpaperSessionSummaryCache: Equatable {
     private var summariesByScreenID: [CGDirectDisplayID: WallpaperSessionSummary] = [:]
 
@@ -83,11 +67,11 @@ final class ScreenManager {
     @ObservationIgnored private let restoresSavedWallpapersOnScreenRefresh: Bool
     @ObservationIgnored private let exclusiveRenderingCoordinator = ExclusiveRenderingCoordinator()
     @ObservationIgnored private var exclusiveRenderingObservation: NSObjectProtocol?
-    /// Drops stale async video transitions.
-    @ObservationIgnored private var transitionGeneration: [CGDirectDisplayID: Int] = [:]
-    /// Drops stale async WPE imports per screen (mirrors `transitionGeneration`).
+    /// Owns per-screen video transition generation tokens + asset-readiness
+    /// work. First step of Week 4 Task 4.5 coordinator extraction.
+    @ObservationIgnored private let transitionRegistry = PlaybackTransitionRegistry()
+    /// Drops stale async WPE imports per screen (mirrors `transitionRegistry`).
     @ObservationIgnored private var wpeImportGeneration: [CGDirectDisplayID: Int] = [:]
-    @ObservationIgnored private var assetReadinessWork: [CGDirectDisplayID: WallpaperAssetReadinessWork] = [:]
     @ObservationIgnored let weatherService = WeatherReactiveService()
     @ObservationIgnored private lazy var lockScreenSnapshotCoordinator = LockScreenSnapshotCoordinator { [weak self] in
         self?.captureDesktopSnapshotsForLockIfNeeded()
@@ -357,8 +341,7 @@ final class ScreenManager {
         // before instantiating a player against a now-dead screen.
         bumpTransition(for: screen.id)
         videoEffectsApplier.cancelInflight(for: screen.id)
-        assetReadinessWork[screen.id]?.cancel()
-        assetReadinessWork[screen.id] = nil
+        transitionRegistry.cancelAssetReadiness(for: screen.id)
         screen.resetRuntimeSession()
         powerPolicy.clearTracking(for: screen.id)
     }
@@ -497,13 +480,11 @@ final class ScreenManager {
 
     @discardableResult
     private func bumpTransition(for screenID: CGDirectDisplayID) -> Int {
-        let next = (transitionGeneration[screenID] ?? 0) &+ 1
-        transitionGeneration[screenID] = next
-        return next
+        transitionRegistry.bumpTransition(for: screenID)
     }
 
     private func isCurrentTransition(_ generation: Int, for screenID: CGDirectDisplayID) -> Bool {
-        transitionGeneration[screenID] == generation
+        transitionRegistry.isCurrentTransition(generation, for: screenID)
     }
 
     private func applyConfiguration(_ configuration: ScreenConfiguration, to screen: Screen, preservingState: Bool = false) {
@@ -632,8 +613,7 @@ final class ScreenManager {
         configuration: ScreenConfiguration
     ) {
         let screenID = screen.id
-        assetReadinessWork[screenID]?.cancel()
-        assetReadinessWork[screenID] = nil
+        transitionRegistry.cancelAssetReadiness(for: screenID)
 
         let apply: @MainActor () -> Void = { [weak self] in
             guard let self,
@@ -656,8 +636,8 @@ final class ScreenManager {
             return
         }
 
-        let work = WallpaperAssetReadinessWork()
-        assetReadinessWork[screenID] = work
+        let work = AssetReadinessWork()
+        transitionRegistry.setAssetReadiness(work, for: screenID)
         var didApply = false
 
         let finish: @MainActor () -> Void = { [weak self, weak work] in
@@ -665,8 +645,8 @@ final class ScreenManager {
             didApply = true
             apply()
             work?.cancel()
-            if self.assetReadinessWork[screenID] === work {
-                self.assetReadinessWork[screenID] = nil
+            if let work {
+                self.transitionRegistry.clearAssetReadinessIfMatch(work, for: screenID)
             }
         }
 
