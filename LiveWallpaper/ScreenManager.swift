@@ -67,9 +67,23 @@ final class ScreenManager {
     @ObservationIgnored private let restoresSavedWallpapersOnScreenRefresh: Bool
     @ObservationIgnored private let exclusiveRenderingCoordinator = ExclusiveRenderingCoordinator()
     @ObservationIgnored private var exclusiveRenderingObservation: NSObjectProtocol?
-    /// Owns per-screen video transition generation tokens + asset-readiness
-    /// work. First step of Week 4 Task 4.5 coordinator extraction.
-    @ObservationIgnored private let transitionRegistry = PlaybackTransitionRegistry()
+    /// Coordinates per-screen playback configuration mutations + transition
+    /// tokens. Lazy because it captures `self` for the effect-application and
+    /// refresh-rate-lookup callbacks; the stored properties used by those
+    /// callbacks (`videoEffectsApplier`, `refreshRateCache`, etc.) are already
+    /// initialised by the time the lazy var is touched.
+    @ObservationIgnored private lazy var playbackCoordinator = PlaybackCoordinator(
+        configurationStore: configurationStore,
+        applyVideoEffects: { [weak self] screen, config in
+            self?.applyVideoEffects(for: screen, config: config)
+        },
+        refreshRateLookup: { [weak self] screenID in
+            self?.getScreenRefreshRate(for: screenID) ?? 60
+        }
+    )
+    @ObservationIgnored private var transitionRegistry: PlaybackTransitionRegistry {
+        playbackCoordinator.transition
+    }
     /// Drops stale async WPE imports per screen (mirrors `transitionRegistry`).
     @ObservationIgnored private var wpeImportGeneration: [CGDirectDisplayID: Int] = [:]
     @ObservationIgnored let weatherService = WeatherReactiveService()
@@ -1255,65 +1269,23 @@ final class ScreenManager {
     }
 
     func updatePlaybackSpeed(_ speed: Double, for screen: Screen) {
-        guard var configuration = configurationStore.get(for: screen.id),
-              speed != configuration.playbackSpeed else { return }
-
-        configuration.playbackSpeed = speed
-        saveConfiguration(configuration)
-        screen.videoPlayer?.setPlaybackSpeed(speed)
+        playbackCoordinator.updatePlaybackSpeed(speed, for: screen)
     }
 
     func updateMuted(_ muted: Bool, for screen: Screen) {
-        guard var configuration = configurationStore.get(for: screen.id),
-              muted != configuration.muted else { return }
-
-        configuration.muted = muted
-        saveConfiguration(configuration)
-        screen.videoPlayer?.setMuted(muted)
+        playbackCoordinator.updateMuted(muted, for: screen)
     }
 
     func updateFitMode(_ fitMode: VideoFitMode, for screen: Screen) {
-        guard var configuration = configurationStore.get(for: screen.id),
-              fitMode != configuration.fitMode else { return }
-
-        configuration.fitMode = fitMode
-        saveConfiguration(configuration)
-        screen.videoPlayer?.setVideoFitMode(fitMode)
+        playbackCoordinator.updateFitMode(fitMode, for: screen)
     }
 
     func updateFrameRateLimit(_ frameRateLimit: FrameRateLimit, for screen: Screen) {
-        guard var configuration = configurationStore.get(for: screen.id) else {
-            Logger.warning("Cannot update frame rate limit: No configuration found for screen \(screen.id)", category: .videoPlayer)
-            return
-        }
-        guard frameRateLimit != configuration.frameRateLimit else { return }
-
-        configuration.frameRateLimit = frameRateLimit
-        saveConfiguration(configuration)
-        if configuration.effectConfig.hasActiveEffect {
-            applyVideoEffects(for: screen, config: configuration)
-        } else {
-            applyFrameRateLimit(frameRateLimit, to: screen)
-        }
+        playbackCoordinator.updateFrameRateLimit(frameRateLimit, for: screen)
     }
-    
+
     private func applyFrameRateLimit(_ frameRateLimit: FrameRateLimit, to screen: Screen) {
-        guard let player = screen.videoPlayer, player.videoFrameRate > 0 else { return }
-
-        let screenRefreshRate = getScreenRefreshRate(for: screen.id)
-        let limit = PlainVideoFrameRateCompositionPolicy.compositionLimit(
-            frameRateLimit: frameRateLimit,
-            videoFrameRate: player.videoFrameRate,
-            screenRefreshRate: Double(screenRefreshRate)
-        )
-
-        if let limit {
-            Logger.info("Applying frame rate limit of \(Int(limit)) FPS to screen \(screen.id)", category: .videoPlayer)
-            player.setFrameRateLimit(limit)
-        } else {
-            Logger.info("Using native playback path (\(Int(player.videoFrameRate)) FPS) for screen \(screen.id)", category: .videoPlayer)
-            player.setFrameRateLimit(0)
-        }
+        playbackCoordinator.applyFrameRateLimit(frameRateLimit, to: screen)
     }
     
     func getConfiguration(for screen: Screen) -> ScreenConfiguration? {
