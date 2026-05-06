@@ -32,4 +32,16 @@ extension Notification.Name {
     /// Listeners — including the Scene tab UI — should reload from
     /// `SettingsManager.shared.loadGlobalSettings().recentWPEImports`.
     static let wpeHistoryDidChange = Notification.Name("WPEHistoryDidChange")
+
+    /// Status-bar requested the main window to launch the appropriate
+    /// "Add Wallpaper" picker. The status bar can no longer host a modal
+    /// `NSOpenPanel` reliably — focus loss puts the panel behind the menu
+    /// bar overlay. `userInfo["kind"]: String` is one of "video" / "html-file"
+    /// / "html-folder" / "html-url".
+    static let promptAddWallpaper = Notification.Name("PromptAddWallpaper")
+
+    /// Workshop library root bookmark was set or cleared. Sidebar /
+    /// onboarding watch this so their conditional Workshop entry refreshes
+    /// without needing a manual reopen.
+    static let workshopLibraryRootBookmarkDidChange = Notification.Name("WorkshopLibraryRootBookmarkDidChange")
 }
