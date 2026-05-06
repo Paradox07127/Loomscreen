@@ -4,6 +4,7 @@ struct SystemMonitorView: View {
     private var monitor = SystemMonitor.shared
     @State private var powerSource: PowerMonitor.PowerSource = PowerMonitor.shared.currentPowerSource
     @AppStorage("Dashboard.RAMScope") private var ramScopeRaw: String = "system"
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var ramPercent: Double {
         ramScopeRaw == "app" ? monitor.memoryPercentage() : monitor.systemMemoryUsage * 100
@@ -16,7 +17,7 @@ struct SystemMonitorView: View {
     @ViewBuilder
     private func ramScopeButton(label: String, value: String) -> some View {
         Button {
-            withAnimation(.snappy(duration: 0.18)) { ramScopeRaw = value }
+            withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.18))) { ramScopeRaw = value }
         } label: {
             Text(label)
                 .font(.system(size: 10, weight: ramScopeRaw == value ? .semibold : .regular))

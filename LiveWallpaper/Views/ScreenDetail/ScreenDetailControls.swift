@@ -20,13 +20,14 @@ struct SegmentedSpeedPicker: View {
     @Binding var selectedSpeed: Double
     var onChange: (Double) -> Void
     private let speeds: [Double] = [0.5, 0.75, 1.0, 1.5, 2.0]
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         GlassEffectContainer(spacing: 2) {
             HStack(spacing: 2) {
                 ForEach(speeds, id: \.self) { speed in
                     Button(action: {
-                        withAnimation(.snappy(duration: 0.2)) {
+                        withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.2))) {
                             selectedSpeed = speed
                         }
                         onChange(speed)
