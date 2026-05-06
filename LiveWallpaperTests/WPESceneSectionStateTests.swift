@@ -93,6 +93,7 @@ struct WPESceneSectionStateTests {
         #expect(PausedReason.previewUnavailable.label == "Preview Unavailable")
     }
 
+    @MainActor
     @Test("FallbackReason rendering distinguishes parse vs resource failure copy")
     func fallbackReasonCopy() {
         let parse = WPEFallbackCard(
