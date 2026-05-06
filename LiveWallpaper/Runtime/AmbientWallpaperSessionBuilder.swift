@@ -24,6 +24,13 @@ final class AmbientWallpaperSessionBuilder {
             Logger.info("HTML wallpaper: detected Wallpaper Engine project — enabling physical-pixel layout", category: .screenManager)
         }
 
+        let session = AmbientWallpaperSession(window: window, wallpaperType: .html, performanceTarget: htmlView)
+        // Bridge HTML navigation failures to the session before kicking off the
+        // first load so an immediate sandbox failure still surfaces.
+        htmlView.onError = { [weak session] error in
+            session?.recordRuntimeError(error)
+        }
+
         htmlView.apply(effective)
         htmlView.loadSource(source)
 
@@ -32,7 +39,7 @@ final class AmbientWallpaperSessionBuilder {
         // 别再追加额外的 orderBack — 否则会把抬升的交互窗户拉回桌面层、
         // 导致 "Click wallpaper to reveal desktop" 重新生效。
         window.setWallpaperMouseInteractionEnabled(config.allowMouseInteraction)
-        return AmbientWallpaperSession(window: window, wallpaperType: .html, performanceTarget: htmlView)
+        return session
     }
 
     /// Wallpaper Engine workshop projects ship a `project.json` next to the
