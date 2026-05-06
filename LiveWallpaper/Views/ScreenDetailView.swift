@@ -15,6 +15,62 @@ struct ScreenDetailView: View {
     private var runtimeError: WallpaperRuntimeError? {
         screenManager.runtimeError(for: screen)
     }
+    private var applyToAllConfirmationMessage: String {
+        let others = max(0, screenManager.screens.count - 1)
+        let plural = others == 1 ? "" : "s"
+        return "This replaces the wallpaper on \(others) other display\(plural) with the same content and settings as this one."
+    }
+
+    @ViewBuilder
+    private var runtimeErrorBannerView: some View {
+        if let runtimeError {
+            let activeType = screen.runtimeSession?.wallpaperType ?? selectedWallpaperType
+            let canRePick = activeType == .video || activeType == .html
+            RuntimeErrorBanner(
+                error: runtimeError,
+                canRePick: canRePick,
+                onRetry: { screenManager.retryRuntimeSession(for: screen) },
+                onRePick: rePickRuntimeSource
+            )
+            .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var screenDetailToolbar: some ToolbarContent {
+        ToolbarItem(placement: .principal) {
+            Picker("Wallpaper Type", selection: $selectedWallpaperType) {
+                ForEach(WallpaperType.allCases) { type in
+                    Text(type.rawValue).tag(type)
+                }
+            }
+            .pickerStyle(.segmented)
+            .fixedSize(horizontal: true, vertical: false)
+            .accessibilityLabel("Wallpaper type")
+            .accessibilityHint("Choose between video, HTML, or Metal shader wallpaper")
+            .onChange(of: selectedWallpaperType) { _, newType in
+                switch newType {
+                case .video:
+                    screenManager.switchToVideoWallpaper(for: screen)
+                case .html:
+                    screenManager.switchToHTMLWallpaper(for: screen)
+                case .metalShader, .scene:
+                    break // pickers drive activation themselves
+                }
+            }
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                showApplyToAllConfirm = true
+            } label: {
+                Label("Apply to All", systemImage: "square.on.square")
+            }
+            .help("Copy this display's wallpaper and settings to every other display")
+            .accessibilityLabel("Apply to all displays")
+            .accessibilityHint("Copies the current wallpaper and settings to every other connected display")
+            .disabled(screenManager.screens.count <= 1 || screenManager.getConfiguration(for: screen) == nil)
+        }
+    }
     /// Resolved Wallpaper Engine origin metadata for the active wallpaper, or
     /// nil when the user picked content directly. Recomputed on every body
     /// evaluation so save/import flows propagate without local @State.
@@ -49,6 +105,7 @@ struct ScreenDetailView: View {
     @State private var showErrorAlert = false
     @State private var errorMessage = ""
     @State private var showClearConfirm = false
+    @State private var showApplyToAllConfirm = false
     @State private var previewController = InspectorPreviewController()
     @State private var hasPreviewSource = false
 
@@ -162,17 +219,7 @@ struct ScreenDetailView: View {
             .padding(.horizontal, 24)
             .padding(.vertical, 14)
 
-            if let runtimeError {
-                let activeType = screen.runtimeSession?.wallpaperType ?? selectedWallpaperType
-                let canRePick = activeType == .video || activeType == .html
-                RuntimeErrorBanner(
-                    error: runtimeError,
-                    canRePick: canRePick,
-                    onRetry: { screenManager.retryRuntimeSession(for: screen) },
-                    onRePick: rePickRuntimeSource
-                )
-                .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
-            }
+            runtimeErrorBannerView
 
             Divider()
 
@@ -272,14 +319,65 @@ struct ScreenDetailView: View {
 
                 Divider()
 
-                if selectedWallpaperType == .video {
-                    ScrollView {
-                        GlassEffectContainer(spacing: 16) {
-                            VStack(spacing: 16) {
-                            HStack(spacing: 0) {
-                                ForEach(WallpaperMode.allCases) { mode in
-                                    Button {
-                                        withAnimation(.snappy(duration: 0.18)) {
+                videoInspectorPanel
+            }
+            .transaction(value: selectedWallpaperType) { $0.animation = nil }
+        }
+        .toolbar { screenDetailToolbar }
+        .confirmationDialog(
+            "Apply this wallpaper to every other display?",
+            isPresented: $showApplyToAllConfirm
+        ) {
+            Button("Apply to All Displays", role: .destructive) {
+                screenManager.applyConfigurationToAllDisplays(from: screen)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(applyToAllConfirmationMessage)
+        }
+        .onAppear { loadScreenConfiguration() }
+        .onDisappear { cleanupPreviewPlayer() }
+        .onChange(of: screen.id) {
+            cleanupPreviewPlayer()
+            loadScreenConfiguration()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .wallpaperConfigurationDidChange)) { notification in
+            guard let changedID = notification.userInfo?["screenID"] as? CGDirectDisplayID,
+                  changedID == screen.id else { return }
+            loadScreenConfiguration()
+        }
+        .alert("Error", isPresented: $showErrorAlert) {
+            Button("OK", role: .cancel) { }
+        } message: { Text(errorMessage) }
+        .confirmationDialog(
+            "Clear Wallpaper Video",
+            isPresented: $showClearConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Clear Video", role: .destructive) {
+                performClearVideo()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Are you sure you want to remove this video? This will delete all configuration for this screen.")
+        }
+        .dropDestination(for: URL.self) { urls, _ in
+            handleDrop(urls: urls)
+        } isTargeted: { targeted in
+            isDraggingOver = targeted
+        }
+    }
+
+    @ViewBuilder
+    private var videoInspectorPanel: some View {
+        if selectedWallpaperType == .video {
+            ScrollView {
+                GlassEffectContainer(spacing: 16) {
+                    VStack(spacing: 16) {
+                        HStack(spacing: 0) {
+                            ForEach(WallpaperMode.allCases) { mode in
+                                Button {
+                                    withAnimation(.snappy(duration: 0.18)) {
                                             selectedWallpaperMode = mode
                                         }
                                         screenManager.updateWallpaperMode(mode, for: screen)
@@ -499,66 +597,6 @@ struct ScreenDetailView: View {
                     .fixedSize(horizontal: true, vertical: false)
                     .background(Color(NSColor.windowBackgroundColor))
                     .clipped()
-                }
-            }
-            .transaction(value: selectedWallpaperType) { $0.animation = nil }
-        }
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                Picker("Wallpaper Type", selection: $selectedWallpaperType) {
-                    ForEach(WallpaperType.allCases) { type in
-                        Text(type.rawValue).tag(type)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .fixedSize(horizontal: true, vertical: false)
-                .accessibilityLabel("Wallpaper type")
-                .accessibilityHint("Choose between video, HTML, or Metal shader wallpaper")
-                .onChange(of: selectedWallpaperType) { _, newType in
-                    switch newType {
-                    case .video:
-                        screenManager.switchToVideoWallpaper(for: screen)
-                    case .html:
-                        screenManager.switchToHTMLWallpaper(for: screen)
-                    case .metalShader:
-                        break // shader picker drives its own activation
-                    case .scene:
-                        break // Scene tab content lands in Day 4; Day 1+2 only register the segment.
-                    }
-                }
-            }
-        }
-        .onAppear { loadScreenConfiguration() }
-        .onDisappear { cleanupPreviewPlayer() }
-        .onChange(of: screen.id) {
-            cleanupPreviewPlayer()
-            loadScreenConfiguration()
-        }
-        // Keep inspector state aligned with background automation.
-        .onReceive(NotificationCenter.default.publisher(for: .wallpaperConfigurationDidChange)) { notification in
-            guard let changedID = notification.userInfo?["screenID"] as? CGDirectDisplayID,
-                  changedID == screen.id else { return }
-            loadScreenConfiguration()
-        }
-        .alert("Error", isPresented: $showErrorAlert) {
-            Button("OK", role: .cancel) { }
-        } message: { Text(errorMessage) }
-        .confirmationDialog(
-            "Clear Wallpaper Video",
-            isPresented: $showClearConfirm,
-            titleVisibility: .visible
-        ) {
-            Button("Clear Video", role: .destructive) {
-                performClearVideo()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Are you sure you want to remove this video? This will delete all configuration for this screen.")
-        }
-        .dropDestination(for: URL.self) { urls, _ in
-            handleDrop(urls: urls)
-        } isTargeted: { targeted in
-            isDraggingOver = targeted
         }
     }
 

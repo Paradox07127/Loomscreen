@@ -14,98 +14,38 @@ struct OnboardingStepFirstWallpaper: View {
     /// already has a Wallpaper Engine library, jump straight to the
     /// Workshop Gallery instead of presenting a single-folder picker.
     @State private var wpeFolderExists = false
+    /// Stage machine for the picker flow. Single-screen environments skip
+    /// `.screenSelection` entirely; video / HTML pickers route through
+    /// `.livePreview` so the user can confirm before applying.
+    @State private var stage: OnboardingPickerStage = .sourcePicker
+    @State private var selectedScreenIDs: Set<CGDirectDisplayID> = []
+    @State private var previewController = InspectorPreviewController()
 
     var body: some View {
         VStack(spacing: 0) {
             Spacer().frame(height: 32)
 
             VStack(spacing: 8) {
-                Text("Pick Your First Wallpaper")
+                Text(headerTitle)
                     .font(.system(size: 24, weight: .bold, design: .rounded))
                     .accessibilityAddTraits(.isHeader)
 
-                Text("You can always add more later from the menu bar.")
+                Text(headerSubtitle)
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
             }
 
             Spacer().frame(height: 24)
 
-            VStack(alignment: .leading, spacing: 16) {
-                sectionHeader("From your Mac")
-                VStack(spacing: 8) {
-                    OnboardingOptionCard(
-                        icon: "film",
-                        iconTint: .blue,
-                        title: "Choose Your Video",
-                        subtitle: "Pick an MP4 or MOV from your Mac.",
-                        isFeatured: !wpeFolderExists,
-                        isLoading: false,
-                        action: chooseVideoFile
-                    )
-                    .keyboardShortcut("1", modifiers: [])
-
-                    OnboardingOptionCard(
-                        icon: "globe",
-                        iconTint: .green,
-                        title: "Add a Web Page",
-                        subtitle: "Use a website or local HTML as a live wallpaper.",
-                        isFeatured: false,
-                        isLoading: false,
-                        action: { showHTMLSheet = true }
-                    )
-                    .keyboardShortcut("2", modifiers: [])
-                }
-
-                sectionHeader("From Steam")
-                OnboardingOptionCard(
-                    icon: "cube.transparent",
-                    iconTint: .orange,
-                    title: wpeFolderExists ? "Browse Workshop Library" : "Import from Wallpaper Engine",
-                    subtitle: wpeFolderExists
-                        ? "We found your Steam folder. Browse Video / Web projects instantly."
-                        : "Use your Steam Workshop wallpapers. Scene types are preview-only.",
-                    isFeatured: wpeFolderExists,
-                    isLoading: false,
-                    action: {
-                        if wpeFolderExists {
-                            showWorkshopGallery = true
-                        } else {
-                            chooseWPEFolder()
-                        }
-                    }
-                )
-                .keyboardShortcut("3", modifiers: [])
-
-                sectionHeader("Built-in")
-                OnboardingOptionCard(
-                    icon: "sparkles.tv",
-                    iconTint: .secondary,
-                    title: "Use Apple Aerials",
-                    subtitle: "Browse Apple's downloaded aerial wallpapers.",
-                    isFeatured: false,
-                    isLoading: isRequestingAerials,
-                    action: chooseAerials
-                )
-                .keyboardShortcut("4", modifiers: [])
-
-                OnboardingOptionCard(
-                    icon: "arrow.right.circle",
-                    iconTint: .secondary,
-                    title: "Skip for Now",
-                    subtitle: "I'll set this up later from the settings.",
-                    isFeatured: false,
-                    isLoading: false,
-                    action: skip
-                )
-                .keyboardShortcut("5", modifiers: [])
-                .padding(.top, 4)
-            }
-            .padding(.horizontal, 36)
+            stageContent
+                .padding(.horizontal, stageHorizontalPadding)
+                .animation(.snappy(duration: 0.22), value: stage)
 
             Spacer()
         }
-        .onAppear { detectWPELibrary() }
+        .onAppear { configureInitialStage() }
+        .onDisappear { previewController.cleanup() }
         .sheet(isPresented: $showWorkshopGallery, onDismiss: nextStep) {
             WorkshopGalleryView()
                 .environment(screenManager)
@@ -116,6 +56,245 @@ struct OnboardingStepFirstWallpaper: View {
                 onConfirm: { source in applyHTML(source) }
             )
         }
+    }
+
+    private var headerTitle: String {
+        switch stage {
+        case .screenSelection: return "Apply To Which Displays?"
+        case .sourcePicker:    return "Pick Your First Wallpaper"
+        case .livePreview:     return "Looks Good?"
+        }
+    }
+
+    private var headerSubtitle: String {
+        switch stage {
+        case .screenSelection:
+            let count = screenManager.screens.count
+            return "You can always tweak each display individually later. (\(count) displays detected)"
+        case .sourcePicker:
+            return "You can always add more later from the menu bar."
+        case .livePreview:
+            return "Confirm to apply to \(selectedScreenIDs.count) display\(selectedScreenIDs.count == 1 ? "" : "s")."
+        }
+    }
+
+    private var stageHorizontalPadding: CGFloat {
+        stage.isScreenSelection ? 24 : 36
+    }
+
+    @ViewBuilder
+    private var stageContent: some View {
+        switch stage {
+        case .screenSelection:
+            screenSelectionView
+        case .sourcePicker:
+            sourcePickerView
+        case .livePreview(let draft):
+            livePreviewView(for: draft)
+        }
+    }
+
+    @ViewBuilder
+    private var screenSelectionView: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12)], spacing: 12) {
+                ForEach(screenManager.screens, id: \.id) { screen in
+                    ScreenThumbnailCard(
+                        screen: screen,
+                        isSelected: selectedScreenIDs.contains(screen.id)
+                    ) {
+                        toggleScreenSelection(screen.id)
+                    }
+                }
+            }
+
+            HStack {
+                Button("Select All") {
+                    selectedScreenIDs = Set(screenManager.screens.map(\.id))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(selectedScreenIDs.count == screenManager.screens.count)
+
+                Spacer()
+
+                Button("Continue") {
+                    withAnimation { stage = .sourcePicker }
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(selectedScreenIDs.isEmpty)
+            }
+            .padding(.top, 4)
+        }
+    }
+
+    @ViewBuilder
+    private var sourcePickerView: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            sectionHeader("From your Mac")
+            VStack(spacing: 8) {
+                OnboardingOptionCard(
+                    icon: "film",
+                    iconTint: .blue,
+                    title: "Choose Your Video",
+                    subtitle: "Pick an MP4 or MOV from your Mac.",
+                    isFeatured: !wpeFolderExists,
+                    isLoading: false,
+                    action: chooseVideoFile
+                )
+                .keyboardShortcut("1", modifiers: [])
+
+                OnboardingOptionCard(
+                    icon: "globe",
+                    iconTint: .green,
+                    title: "Add a Web Page",
+                    subtitle: "Use a website or local HTML as a live wallpaper.",
+                    isFeatured: false,
+                    isLoading: false,
+                    action: { showHTMLSheet = true }
+                )
+                .keyboardShortcut("2", modifiers: [])
+            }
+
+            sectionHeader("From Steam")
+            OnboardingOptionCard(
+                icon: "cube.transparent",
+                iconTint: .orange,
+                title: wpeFolderExists ? "Browse Workshop Library" : "Import from Wallpaper Engine",
+                subtitle: wpeFolderExists
+                    ? "We found your Steam folder. Browse Video / Web projects instantly."
+                    : "Use your Steam Workshop wallpapers. Scene types are preview-only.",
+                isFeatured: wpeFolderExists,
+                isLoading: false,
+                action: {
+                    if wpeFolderExists {
+                        showWorkshopGallery = true
+                    } else {
+                        chooseWPEFolder()
+                    }
+                }
+            )
+            .keyboardShortcut("3", modifiers: [])
+
+            sectionHeader("Built-in")
+            OnboardingOptionCard(
+                icon: "sparkles.tv",
+                iconTint: .secondary,
+                title: "Use Apple Aerials",
+                subtitle: "Browse Apple's downloaded aerial wallpapers.",
+                isFeatured: false,
+                isLoading: isRequestingAerials,
+                action: chooseAerials
+            )
+            .keyboardShortcut("4", modifiers: [])
+
+            OnboardingOptionCard(
+                icon: "arrow.right.circle",
+                iconTint: .secondary,
+                title: "Skip for Now",
+                subtitle: "I'll set this up later from the settings.",
+                isFeatured: false,
+                isLoading: false,
+                action: skip
+            )
+            .keyboardShortcut("5", modifiers: [])
+            .padding(.top, 4)
+        }
+    }
+
+    @ViewBuilder
+    private func livePreviewView(for draft: SourceDraft) -> some View {
+        VStack(spacing: 20) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color(NSColor.windowBackgroundColor))
+                    .shadow(color: .black.opacity(0.1), radius: 8, y: 4)
+
+                switch draft {
+                case .video:
+                    if let player = previewController.player {
+                        CustomVideoPlayer(player: player, fitMode: .aspectFill)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    } else {
+                        ProgressView().controlSize(.regular)
+                    }
+                case .html:
+                    VStack(spacing: 12) {
+                        Image(systemName: "globe")
+                            .font(.system(size: 64))
+                            .foregroundStyle(.tertiary)
+                        Text("Web Preview Not Available")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.secondary)
+                        Text("The web wallpaper renders after you confirm.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                            .multilineTextAlignment(.center)
+                    }
+                }
+            }
+            .aspectRatio(16.0 / 10.0, contentMode: .fit)
+            .frame(maxHeight: 320)
+
+            HStack(spacing: 12) {
+                Button("Pick Different Source") {
+                    previewController.cleanup()
+                    withAnimation { stage = .sourcePicker }
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Button("Set as Wallpaper") {
+                    confirmAndApply(draft: draft)
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .onAppear {
+            if case .video(let url, _) = draft {
+                previewController.startPlaybackPreview(from: url, syncTo: nil)
+            }
+        }
+    }
+
+    private func toggleScreenSelection(_ id: CGDirectDisplayID) {
+        if selectedScreenIDs.contains(id) {
+            // Always keep at least one screen selected.
+            guard selectedScreenIDs.count > 1 else { return }
+            selectedScreenIDs.remove(id)
+        } else {
+            selectedScreenIDs.insert(id)
+        }
+    }
+
+    private func configureInitialStage() {
+        detectWPELibrary()
+        if screenManager.screens.count > 1 {
+            selectedScreenIDs = Set(screenManager.screens.map(\.id))
+            stage = .screenSelection
+        } else if let only = screenManager.screens.first {
+            selectedScreenIDs = [only.id]
+            stage = .sourcePicker
+        }
+    }
+
+    private func confirmAndApply(draft: SourceDraft) {
+        let targets = screenManager.screens.filter { selectedScreenIDs.contains($0.id) }
+        guard !targets.isEmpty else { return }
+        previewController.cleanup()
+
+        switch draft {
+        case .video(let url, let bookmark):
+            for screen in targets {
+                screenManager.setVideo(url: url, bookmarkData: bookmark, for: screen)
+            }
+        case .html(let source):
+            for screen in targets {
+                screenManager.setHTMLWallpaperPreservingConfig(source: source, for: screen)
+            }
+        }
+        nextStep()
     }
 
     @ViewBuilder
@@ -155,25 +334,18 @@ struct OnboardingStepFirstWallpaper: View {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = [.movie, .video, .quickTimeMovie, .mpeg4Movie, .avi]
-        panel.prompt = "Use Wallpaper"
+        panel.prompt = "Preview"
 
         let response = panel.runModal()
-        guard response == .OK, let url = panel.url else { return }
-
-        if let screen = screenManager.screens.first,
-           let bookmark = ResourceUtilities.createBookmark(for: url) {
-            screenManager.setVideo(url: url, bookmarkData: bookmark, for: screen)
-            SettingsManager.shared.saveLastUsedDirectory(url.deletingLastPathComponent())
-        }
-        nextStep()
+        guard response == .OK, let url = panel.url,
+              let bookmark = ResourceUtilities.createBookmark(for: url) else { return }
+        SettingsManager.shared.saveLastUsedDirectory(url.deletingLastPathComponent())
+        withAnimation { stage = .livePreview(.video(url, bookmark)) }
     }
 
     private func applyHTML(_ source: HTMLSource) {
-        if let screen = screenManager.screens.first {
-            screenManager.setHTMLWallpaper(source: source, for: screen)
-        }
         showHTMLSheet = false
-        nextStep()
+        withAnimation { stage = .livePreview(.html(source)) }
     }
 
     private func chooseWPEFolder() {
@@ -193,12 +365,18 @@ struct OnboardingStepFirstWallpaper: View {
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
-        if let screen = screenManager.screens.first {
-            Task { @MainActor in
+        // WPE import is async + multi-step (validation → cache extraction); the
+        // live-preview path doesn't apply. Apply directly to every selected
+        // display, then advance.
+        let targets = screenManager.screens.filter { selectedScreenIDs.contains($0.id) }
+        guard !targets.isEmpty else {
+            nextStep()
+            return
+        }
+        Task { @MainActor in
+            for screen in targets {
                 await screenManager.importWallpaperEngineProject(at: url, for: screen)
-                nextStep()
             }
-        } else {
             nextStep()
         }
     }
@@ -471,4 +649,72 @@ private struct OnboardingOptionCard: View {
 
 extension Notification.Name {
     static let openAppleAerials = Notification.Name("OpenAppleAerials")
+}
+
+// MARK: - Picker stage machine
+
+/// Tracks the current step of the onboarding picker. The associated value on
+/// `.livePreview` lets us defer applying until the user confirms.
+private enum OnboardingPickerStage: Equatable {
+    case screenSelection
+    case sourcePicker
+    case livePreview(SourceDraft)
+
+    var isScreenSelection: Bool {
+        if case .screenSelection = self { return true }
+        return false
+    }
+}
+
+/// Captures enough state to apply a wallpaper after the user confirms in
+/// the live-preview stage. WPE import / Apple Aerials skip the preview path.
+private enum SourceDraft: Equatable {
+    case video(URL, Data)
+    case html(HTMLSource)
+}
+
+private struct ScreenThumbnailCard: View {
+    let screen: Screen
+    let isSelected: Bool
+    let action: () -> Void
+
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Image(systemName: "display")
+                    .font(.system(size: 32))
+                    .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+                    .symbolRenderingMode(.hierarchical)
+
+                VStack(spacing: 2) {
+                    Text(screen.name)
+                        .font(.system(size: 13, weight: .medium))
+                        .lineLimit(1)
+                    Text("\(Int(screen.frame.width)) × \(Int(screen.frame.height))")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.vertical, 16)
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity)
+            .contentShape(RoundedRectangle(cornerRadius: 12))
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(.regularMaterial)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 3)
+            )
+        }
+        .buttonStyle(.plain)
+        .focused($isFocused)
+        .accessibilityLabel("\(screen.name), \(Int(screen.frame.width)) by \(Int(screen.frame.height)) pixels")
+        .accessibilityValue(isSelected ? "Selected" : "Not selected")
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityHint("Toggles whether the first wallpaper applies to this display")
+    }
 }
