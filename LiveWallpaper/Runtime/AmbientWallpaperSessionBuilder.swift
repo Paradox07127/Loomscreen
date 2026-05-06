@@ -6,8 +6,6 @@ import Metal
 final class AmbientWallpaperSessionBuilder {
     func makeHTMLSession(source: HTMLSource, config: HTMLConfig, frame: CGRect) -> AmbientWallpaperSession {
         let window = VideoWallpaperWindow(frame: frame)
-        let htmlView = HTMLWallpaperView(frame: frame)
-        window.contentView = htmlView
 
         // Untrusted remote URLs run with JS off no matter what config says.
         let trust = HTMLTrust.evaluate(source: source, trustedHosts: TrustedHostStore.shared.hostSet)
@@ -23,6 +21,12 @@ final class AmbientWallpaperSessionBuilder {
             effective.physicalPixelLayout = true
             Logger.info("HTML wallpaper: detected Wallpaper Engine project — enabling physical-pixel layout", category: .screenManager)
         }
+
+        // `WKWebsiteDataStore` is locked into the configuration at WKWebView
+        // init time, so the ephemeral preference must be resolved here before
+        // we instantiate the view.
+        let htmlView = HTMLWallpaperView(frame: frame, initialEphemeral: effective.useEphemeralStorage)
+        window.contentView = htmlView
 
         let session = AmbientWallpaperSession(window: window, wallpaperType: .html, performanceTarget: htmlView)
         // Bridge HTML navigation failures to the session before kicking off the
