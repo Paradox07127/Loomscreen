@@ -132,6 +132,7 @@ final class SettingsManager {
     /// is created via `NSOpenPanel` once and reused on subsequent scans.
     func saveWorkshopLibraryRootBookmark(_ bookmark: Data) {
         UserDefaults.standard.set(bookmark, forKey: Keys.workshopLibraryRootBookmark)
+        NotificationCenter.default.post(name: .workshopLibraryRootBookmarkDidChange, object: nil)
     }
 
     func loadWorkshopLibraryRootBookmark() -> Data? {
@@ -140,6 +141,7 @@ final class SettingsManager {
 
     func clearWorkshopLibraryRootBookmark() {
         UserDefaults.standard.removeObject(forKey: Keys.workshopLibraryRootBookmark)
+        NotificationCenter.default.post(name: .workshopLibraryRootBookmarkDidChange, object: nil)
     }
 
     private func applyStartOnLoginSetting(_ startOnLogin: Bool) {
