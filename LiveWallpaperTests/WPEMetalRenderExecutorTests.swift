@@ -450,3 +450,518 @@ private func graphLayer(pass: WPERenderPass, parallaxDepth: Double = 0) -> WPERe
         parallaxDepth: parallaxDepth
     )
 }
+
+// MARK: - Phase 2C helpers and tests
+
+private func solidPass(
+    id: String,
+    color: [Double],
+    target: WPERenderTarget,
+    blending: String = "normal",
+    cullMode: String = "nocull",
+    depthTest: String = "disabled",
+    depthWrite: String = "disabled"
+) -> WPERenderPass {
+    WPERenderPass(
+        id: id,
+        phase: .material,
+        shader: "solidcolor",
+        source: .previous,
+        target: target,
+        textures: [:],
+        binds: [:],
+        constants: ["g_Color": .vector(color)],
+        combos: [:],
+        blending: blending,
+        cullMode: cullMode,
+        depthTest: depthTest,
+        depthWrite: depthWrite
+    )
+}
+
+private func copyPass(
+    id: String,
+    source: WPETextureReference,
+    target: WPERenderTarget,
+    blending: String = "normal",
+    cullMode: String = "nocull",
+    depthTest: String = "disabled",
+    depthWrite: String = "disabled"
+) -> WPERenderPass {
+    WPERenderPass(
+        id: id,
+        phase: .command(file: "effects/copy/effect.json"),
+        shader: "commands/copy",
+        source: source,
+        target: target,
+        textures: [0: source],
+        binds: [:],
+        constants: [:],
+        combos: [:],
+        blending: blending,
+        cullMode: cullMode,
+        depthTest: depthTest,
+        depthWrite: depthWrite
+    )
+}
+
+private func preparedPipeline(
+    localFBOs: [WPERenderFBO],
+    passes: [WPEPreparedRenderPass]
+) -> WPEPreparedRenderPipeline {
+    let layer = WPERenderLayer(
+        objectID: "layer",
+        objectName: "Layer",
+        imagePath: "materials/base.png",
+        materialPath: nil,
+        compositeA: "_rt_imageLayerComposite_layer_a",
+        compositeB: "_rt_imageLayerComposite_layer_b",
+        localFBOs: localFBOs,
+        passes: passes.map(\.pass)
+    )
+    return WPEPreparedRenderPipeline(layers: [
+        WPEPreparedRenderLayer(graphLayer: layer, passes: passes)
+    ])
+}
+
+private func preparedBuiltinPass(
+    _ pass: WPERenderPass,
+    bindings: [Int: WPETextureReference] = [:],
+    uniforms: [String: WPESceneShaderConstantValue] = [:]
+) -> WPEPreparedRenderPass {
+    WPEPreparedRenderPass(
+        pass: pass,
+        shader: WPEShaderProgram(name: pass.shader, vertexSource: "", fragmentSource: "", isBuiltin: true),
+        textureBindings: bindings,
+        comboValues: [:],
+        uniformValues: uniforms
+    )
+}
+
+private func makeCheckerTexture(device: MTLDevice) throws -> MTLTexture {
+    try makeRGBAInputTexture(device: device, width: 2, height: 2, bytes: Data([
+        255, 0,   0,   255,
+        0,   255, 0,   255,
+        0,   0,   255, 255,
+        255, 255, 0,   255
+    ]))
+}
+
+private struct BlendFixture: Sendable {
+    let mode: String
+    let expected: Pixel
+}
+
+private let blendFixtures: [BlendFixture] = [
+    BlendFixture(mode: "normal", expected: Pixel(r: 188, g: 0, b: 188, a: 255)),
+    BlendFixture(mode: "additive", expected: Pixel(r: 188, g: 0, b: 255, a: 255)),
+    BlendFixture(mode: "multiply", expected: Pixel(r: 0, g: 0, b: 0, a: 255)),
+    BlendFixture(mode: "translucent", expected: Pixel(r: 255, g: 0, b: 188, a: 255)),
+    BlendFixture(mode: "normalmapped", expected: Pixel(r: 188, g: 0, b: 188, a: 255)),
+    BlendFixture(mode: "disabled", expected: Pixel(r: 255, g: 0, b: 0, a: 128))
+]
+
+private extension WPEMetalRenderExecutorTests {
+    @Test("Routes layerComposite target into a later FBO source")
+    func routesLayerCompositeTargetIntoScene() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+
+        let compositeName = "_rt_imageLayerComposite_layer_a"
+        let writeComposite = solidPass(
+            id: "layer.0",
+            color: [1, 0, 0, 1],
+            target: .layerComposite(name: compositeName),
+            blending: "disabled"
+        )
+        let copyToScene = copyPass(
+            id: "layer.1",
+            source: .fbo(compositeName),
+            target: .scene,
+            blending: "disabled"
+        )
+
+        let pipeline = preparedPipeline(
+            localFBOs: [],
+            passes: [
+                preparedBuiltinPass(writeComposite, uniforms: ["g_Color": .vector([1, 0, 0, 1])]),
+                preparedBuiltinPass(copyToScene, bindings: [0: .fbo(compositeName)])
+            ]
+        )
+
+        let output = try executor.render(pipeline: pipeline, size: CGSize(width: 4, height: 4), textures: [:])
+        let pixel = try readPixel(output, x: 2, y: 2)
+
+        #expect(pixel.r >= 250)
+        #expect(pixel.g <= 5)
+        #expect(pixel.b <= 5)
+        #expect(pixel.a >= 250)
+    }
+
+    @Test("Routes declared FBO target into a later FBO source")
+    func routesDeclaredFBOTargetIntoScene() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+
+        let fbo = WPERenderFBO(name: "_rt_CustomBuffer", scale: 1, format: "rgba8888")
+        let writeFBO = solidPass(
+            id: "layer.0",
+            color: [0, 1, 0, 1],
+            target: .fbo(name: fbo.name),
+            blending: "disabled"
+        )
+        let copyToScene = copyPass(
+            id: "layer.1",
+            source: .fbo(fbo.name),
+            target: .scene,
+            blending: "disabled"
+        )
+
+        let pipeline = preparedPipeline(
+            localFBOs: [fbo],
+            passes: [
+                preparedBuiltinPass(writeFBO, uniforms: ["g_Color": .vector([0, 1, 0, 1])]),
+                preparedBuiltinPass(copyToScene, bindings: [0: .fbo(fbo.name)])
+            ]
+        )
+
+        let output = try executor.render(pipeline: pipeline, size: CGSize(width: 4, height: 4), textures: [:])
+        let pixel = try readPixel(output, x: 2, y: 2)
+
+        #expect(pixel.r <= 5)
+        #expect(pixel.g >= 250)
+        #expect(pixel.b <= 5)
+        #expect(pixel.a >= 250)
+    }
+
+    @Test("Reuses pooled FBO allocations across render calls")
+    func reusesPooledFBOAllocationsAcrossFrames() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+
+        let fbo = WPERenderFBO(name: "_rt_Reused", scale: 1, format: "rgba8888")
+        let write = solidPass(
+            id: "layer.0",
+            color: [0, 0, 1, 1],
+            target: .fbo(name: fbo.name),
+            blending: "disabled"
+        )
+        let copy = copyPass(
+            id: "layer.1",
+            source: .fbo(fbo.name),
+            target: .scene,
+            blending: "disabled"
+        )
+        let pipeline = preparedPipeline(
+            localFBOs: [fbo],
+            passes: [
+                preparedBuiltinPass(write, uniforms: ["g_Color": .vector([0, 0, 1, 1])]),
+                preparedBuiltinPass(copy, bindings: [0: .fbo(fbo.name)])
+            ]
+        )
+
+        _ = try executor.render(pipeline: pipeline, size: CGSize(width: 8, height: 8), textures: [:])
+        let firstAllocationCount = executor.transientTargetTextureCountForTesting
+        _ = try executor.render(pipeline: pipeline, size: CGSize(width: 8, height: 8), textures: [:])
+        let secondAllocationCount = executor.transientTargetTextureCountForTesting
+
+        #expect(firstAllocationCount > 0)
+        #expect(secondAllocationCount == firstAllocationCount)
+    }
+
+    @Test("Releases pooled FBO allocations on explicit transient release")
+    func releasesPooledFBOAllocations() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+
+        let fbo = WPERenderFBO(name: "_rt_Releasable", scale: 1, format: "rgba8888")
+        let write = solidPass(
+            id: "layer.0",
+            color: [1, 1, 0, 1],
+            target: .fbo(name: fbo.name),
+            blending: "disabled"
+        )
+        let copy = copyPass(
+            id: "layer.1",
+            source: .fbo(fbo.name),
+            target: .scene,
+            blending: "disabled"
+        )
+        let pipeline = preparedPipeline(
+            localFBOs: [fbo],
+            passes: [
+                preparedBuiltinPass(write, uniforms: ["g_Color": .vector([1, 1, 0, 1])]),
+                preparedBuiltinPass(copy, bindings: [0: .fbo(fbo.name)])
+            ]
+        )
+
+        _ = try executor.render(pipeline: pipeline, size: CGSize(width: 8, height: 8), textures: [:])
+        #expect(executor.transientTargetTextureCountForTesting > 0)
+
+        executor.releaseTransientResources()
+
+        #expect(executor.transientTargetTextureCountForTesting == 0)
+    }
+
+    @Test("Resolves previous to the most recent write to the same FBO target")
+    func resolvesPreviousWithinSameFBOTarget() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+
+        let checker = try makeCheckerTexture(device: device)
+        let fbo = WPERenderFBO(name: "_rt_Checker", scale: 1, format: "rgba8888")
+
+        let seedFBO = copyPass(
+            id: "layer.0",
+            source: .image("materials/checker.png"),
+            target: .fbo(name: fbo.name),
+            blending: "disabled"
+        )
+        let copyPreviousBackIntoSameFBO = copyPass(
+            id: "layer.1",
+            source: .previous,
+            target: .fbo(name: fbo.name),
+            blending: "disabled"
+        )
+        let copyFBOToScene = copyPass(
+            id: "layer.2",
+            source: .fbo(fbo.name),
+            target: .scene,
+            blending: "disabled"
+        )
+
+        let pipeline = preparedPipeline(
+            localFBOs: [fbo],
+            passes: [
+                preparedBuiltinPass(seedFBO, bindings: [0: .image("materials/checker.png")]),
+                preparedBuiltinPass(copyPreviousBackIntoSameFBO, bindings: [0: .previous]),
+                preparedBuiltinPass(copyFBOToScene, bindings: [0: .fbo(fbo.name)])
+            ]
+        )
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 2, height: 2),
+            textures: ["materials/checker.png": checker]
+        )
+
+        #expect(try readPixel(output, x: 0, y: 0).r >= 250)
+        #expect(try readPixel(output, x: 1, y: 0).g >= 250)
+        #expect(try readPixel(output, x: 0, y: 1).b >= 250)
+        #expect(try readPixel(output, x: 1, y: 1).r >= 250)
+        #expect(try readPixel(output, x: 1, y: 1).g >= 250)
+    }
+
+    @Test("Missing previous fails closed before any write to the current target")
+    func missingPreviousFailsClosed() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+
+        let fbo = WPERenderFBO(name: "_rt_Empty", scale: 1, format: "rgba8888")
+        let pass = copyPass(
+            id: "layer.0",
+            source: .previous,
+            target: .fbo(name: fbo.name),
+            blending: "disabled"
+        )
+        let pipeline = preparedPipeline(
+            localFBOs: [fbo],
+            passes: [preparedBuiltinPass(pass, bindings: [0: .previous])]
+        )
+
+        #expect(throws: WPEMetalRenderExecutorError.missingTexture(.previous)) {
+            _ = try executor.render(pipeline: pipeline, size: CGSize(width: 2, height: 2), textures: [:])
+        }
+    }
+
+    @Test("Applies WPE blend factors", arguments: blendFixtures)
+    func appliesWPEBlendFactors(fixture: BlendFixture) throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+
+        let destination = solidPass(
+            id: "layer.0",
+            color: [0, 0, 1, 1],
+            target: .scene,
+            blending: "disabled"
+        )
+        let source = solidPass(
+            id: "layer.1",
+            color: [1, 0, 0, 0.5],
+            target: .scene,
+            blending: fixture.mode
+        )
+
+        let pipeline = preparedPipeline(
+            localFBOs: [],
+            passes: [
+                preparedBuiltinPass(destination, uniforms: ["g_Color": .vector([0, 0, 1, 1])]),
+                preparedBuiltinPass(source, uniforms: ["g_Color": .vector([1, 0, 0, 0.5])])
+            ]
+        )
+
+        let output = try executor.render(pipeline: pipeline, size: CGSize(width: 4, height: 4), textures: [:])
+        let pixel = try readPixel(output, x: 2, y: 2)
+
+        #expect(abs(Int(pixel.r) - Int(fixture.expected.r)) <= 2)
+        #expect(abs(Int(pixel.g) - Int(fixture.expected.g)) <= 2)
+        #expect(abs(Int(pixel.b) - Int(fixture.expected.b)) <= 2)
+        #expect(abs(Int(pixel.a) - Int(fixture.expected.a)) <= 2)
+    }
+
+    @Test("Front culling discards the fullscreen built-in quad")
+    func frontCullingDiscardsFullscreenQuad() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+
+        let red = solidPass(id: "layer.0", color: [1, 0, 0, 1], target: .scene, blending: "disabled")
+        let culledBlue = solidPass(
+            id: "layer.1",
+            color: [0, 0, 1, 1],
+            target: .scene,
+            blending: "disabled",
+            cullMode: "front"
+        )
+
+        let pipeline = preparedPipeline(
+            localFBOs: [],
+            passes: [
+                preparedBuiltinPass(red, uniforms: ["g_Color": .vector([1, 0, 0, 1])]),
+                preparedBuiltinPass(culledBlue, uniforms: ["g_Color": .vector([0, 0, 1, 1])])
+            ]
+        )
+
+        let output = try executor.render(pipeline: pipeline, size: CGSize(width: 4, height: 4), textures: [:])
+        let pixel = try readPixel(output, x: 2, y: 2)
+
+        #expect(pixel.r >= 250)
+        #expect(pixel.g <= 5)
+        #expect(pixel.b <= 5)
+    }
+
+    @Test("Depth less test rejects equal-depth fullscreen pass")
+    func depthLessRejectsEqualDepthPass() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+
+        let red = solidPass(
+            id: "layer.0",
+            color: [1, 0, 0, 1],
+            target: .scene,
+            blending: "disabled",
+            depthTest: "always",
+            depthWrite: "enabled"
+        )
+        let rejectedBlue = solidPass(
+            id: "layer.1",
+            color: [0, 0, 1, 1],
+            target: .scene,
+            blending: "disabled",
+            depthTest: "less",
+            depthWrite: "disabled"
+        )
+
+        let pipeline = preparedPipeline(
+            localFBOs: [],
+            passes: [
+                preparedBuiltinPass(red, uniforms: ["g_Color": .vector([1, 0, 0, 1])]),
+                preparedBuiltinPass(rejectedBlue, uniforms: ["g_Color": .vector([0, 0, 1, 1])])
+            ]
+        )
+
+        let output = try executor.render(pipeline: pipeline, size: CGSize(width: 4, height: 4), textures: [:])
+        let pixel = try readPixel(output, x: 2, y: 2)
+
+        #expect(pixel.r >= 250)
+        #expect(pixel.g <= 5)
+        #expect(pixel.b <= 5)
+    }
+
+    @Test("solidlayer writes color multiplied by alpha")
+    func solidlayerWritesColorMultipliedByAlpha() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+
+        let pass = WPERenderPass(
+            id: "solidlayer.0",
+            phase: .material,
+            shader: "materials/util/solidlayer.json",
+            source: .previous,
+            target: .scene,
+            textures: [:],
+            binds: [:],
+            constants: ["g_Color": .vector([0, 1, 0, 0.5])],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+
+        let output = try executor.render(
+            pipeline: preparedPipeline(
+                localFBOs: [],
+                passes: [preparedBuiltinPass(pass, uniforms: ["g_Color": .vector([0, 1, 0, 0.5])])]
+            ),
+            size: CGSize(width: 4, height: 4),
+            textures: [:]
+        )
+        let pixel = try readPixel(output, x: 2, y: 2)
+
+        #expect(pixel.r <= 5)
+        #expect(abs(Int(pixel.g) - 188) <= 4)
+        #expect(pixel.b <= 5)
+        #expect(abs(Int(pixel.a) - 128) <= 4)
+    }
+
+    @Test("compose tints layer composites into the scene")
+    func composeTintsLayerCompositesIntoScene() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+
+        let compositeA = "_rt_imageLayerComposite_layer_a"
+        let solid = solidPass(
+            id: "layer.0",
+            color: [1, 1, 1, 1],
+            target: .layerComposite(name: compositeA),
+            blending: "disabled"
+        )
+        let compose = WPERenderPass(
+            id: "layer.1",
+            phase: .command(file: "effects/compose/effect.json"),
+            shader: "materials/util/compose.json",
+            source: .fbo(compositeA),
+            target: .scene,
+            textures: [0: .fbo(compositeA), 1: .fbo(compositeA)],
+            binds: [:],
+            constants: ["g_Color": .vector([0, 1, 0, 1])],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+
+        let output = try executor.render(
+            pipeline: preparedPipeline(
+                localFBOs: [],
+                passes: [
+                    preparedBuiltinPass(solid, uniforms: ["g_Color": .vector([1, 1, 1, 1])]),
+                    preparedBuiltinPass(
+                        compose,
+                        bindings: [0: .fbo(compositeA), 1: .fbo(compositeA)],
+                        uniforms: ["g_Color": .vector([0, 1, 0, 1])]
+                    )
+                ]
+            ),
+            size: CGSize(width: 4, height: 4),
+            textures: [:]
+        )
+        let pixel = try readPixel(output, x: 2, y: 2)
+
+        #expect(pixel.r <= 5)
+        #expect(pixel.g >= 250)
+        #expect(pixel.b <= 5)
+        #expect(pixel.a >= 250)
+    }
+}
