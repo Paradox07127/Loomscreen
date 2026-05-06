@@ -23,6 +23,11 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
     private let textureLoader: WPEMetalTextureLoader
     private var outputTexture: MTLTexture?
     private var loadedTextures: [String: MTLTexture] = [:]
+    /// Phase 2E: animated and video texture sources keyed by the same path
+    /// the executor uses to look up `MTLTexture` for each pass. Populated
+    /// during `performLoad()`; refreshed each render via
+    /// `texturesForCurrentFrame(time:)` so the executor sees the live frame.
+    private var dynamicTextureSources: [String: WPEDynamicTextureSource] = [:]
     private var sceneRenderSize: CGSize = CGSize(width: 1, height: 1)
     private var cameraUniforms: WPEMetalCameraUniforms = .identity
     private var frameClock: WPEMetalFrameClock
@@ -43,6 +48,17 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
     /// boundary (Phase 2C Task 2).
     var transientTargetTextureCountForTesting: Int {
         executor.transientTargetTextureCountForTesting
+    }
+    /// Phase 2E test-only counters: number of animated/video sources and
+    /// the count of live AVAssetReader handles among them. Suspended
+    /// release tests assert the latter drops to zero.
+    var dynamicTextureSourceCountForTests: Int {
+        dynamicTextureSources.count
+    }
+    var dynamicVideoReaderCountForTests: Int {
+        dynamicTextureSources.values.compactMap { source in
+            (source as? WPEVideoTextureSource)?.readerHandleForTests
+        }.count
     }
     var renderedTexture: MTLTexture? { outputTexture }
     /// CGImage readback of the most recent rendered frame; populated at the
@@ -133,7 +149,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         sceneRenderSize = cameraUniforms.renderSize
 
         onProgress?("Loading textures")
-        loadedTextures = try await loadTextures(for: pipeline)
+        try await loadTextures(for: pipeline)
 
         onProgress?("Rendering scene")
         outputTexture = try renderCurrentFrame()
@@ -160,10 +176,11 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             pointerPosition: pointerSampler.sample(mtkView)
         )
         lastRuntimeUniforms = uniforms
+        let currentTextures = texturesForCurrentFrame(time: uniforms.time)
         return try executor.render(
             pipeline: pipeline,
             size: sceneRenderSize,
-            textures: loadedTextures,
+            textures: currentTextures,
             runtimeUniforms: uniforms,
             cameraUniforms: cameraUniforms
         )
@@ -176,7 +193,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         renderGraph = nil
         renderPipeline = nil
         loadDiagnostics = nil
-        loadedTextures = [:]
+        releaseDynamicTextureSources()
         sceneRenderSize = CGSize(width: 1, height: 1)
         cameraUniforms = .identity
         lastRuntimeUniforms = nil
@@ -195,17 +212,19 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
 
     func applyPerformanceProfile(_ profile: WallpaperPerformanceProfile) {
         currentProfile = profile
+        // Phase 2E: forward profile to dynamic sources so video readers
+        // pause cleanly on `.suspended` and resume on `.quality`.
+        dynamicTextureSources.values.forEach { $0.applyPerformanceProfile(profile) }
         switch profile {
         case .quality:
-            // Phase 2B presents the cached `outputTexture` once per
-            // visibility change rather than re-rendering every display
-            // tick. Built-in shaders (solidcolor / genericimage / copy) do
-            // not consume `g_Time`, so the per-frame work would just burn
-            // GPU on a 6-display setup. Phase 2C/2D will re-enable
-            // continuous draw once GLSL translation lands and shaders
-            // actually use the runtime uniforms.
-            mtkView.isPaused = true
-            mtkView.enableSetNeedsDisplay = true
+            // Phase 2E correction: enable continuous draw whenever the
+            // scene holds at least one dynamic texture source (animated
+            // TEX or video). Static built-in scenes keep the Phase 2B
+            // paused/present-cached behaviour to avoid burning GPU on a
+            // multi-display setup.
+            let hasDynamic = !dynamicTextureSources.isEmpty
+            mtkView.isPaused = !hasDynamic
+            mtkView.enableSetNeedsDisplay = !hasDynamic
             mtkView.preferredFramesPerSecond = isThrottled
                 ? SceneRenderingController.throttledPreferredFPS
                 : SceneRenderingController.defaultPreferredFPS
@@ -224,7 +243,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
     func cleanup() {
         mtkView.delegate = nil
         outputTexture = nil
-        loadedTextures = [:]
+        releaseDynamicTextureSources()
         lastRuntimeUniforms = nil
         cachedSnapshot = nil
         executor.releaseTransientResources()
@@ -234,9 +253,23 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
 
     nonisolated func draw(in view: MTKView) {
         MainActor.assumeIsolated { [weak self] in
-            guard let self, didLoad, let outputTexture else { return }
+            guard let self, didLoad else { return }
             do {
-                if try executor.present(texture: outputTexture, in: view) {
+                // Phase 2E: re-render when there are dynamic texture sources
+                // so animated/video frames advance with the runtime clock.
+                // Static scenes keep the Phase 2B cheap path (present the
+                // cached snapshot) so a 6-display wallpaper does not burn
+                // GPU producing identical frames.
+                let textureToPresent: MTLTexture?
+                if dynamicTextureSources.isEmpty {
+                    textureToPresent = outputTexture
+                } else {
+                    let frame = try renderCurrentFrame()
+                    outputTexture = frame
+                    textureToPresent = frame
+                }
+                guard let texture = textureToPresent else { return }
+                if try executor.present(texture: texture, in: view) {
                     SystemMonitor.shared.tickFrame()
                 }
             } catch {
@@ -245,14 +278,24 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         }
     }
 
-    private func loadTextures(for pipeline: WPEPreparedRenderPipeline) async throws -> [String: MTLTexture] {
-        var textures: [String: MTLTexture] = [:]
+    /// Phase 2E: differentiates between a one-shot static texture and a
+    /// dynamic source (animated TEX or video) so the renderer can either
+    /// stuff the result into `loadedTextures` or hold the source for
+    /// per-frame refresh via `texturesForCurrentFrame(time:)`.
+    private enum WPELoadedTextureResource {
+        case staticTexture(MTLTexture)
+        case dynamicSource(WPEDynamicTextureSource)
+    }
+
+    private func loadTextures(for pipeline: WPEPreparedRenderPipeline) async throws {
+        loadedTextures = [:]
+        dynamicTextureSources = [:]
+
         for layer in pipeline.layers {
             if layer.passes.isEmpty {
                 try await loadTexture(
                     reference: .image(layer.graphLayer.imagePath),
-                    layerName: layer.graphLayer.objectName,
-                    into: &textures
+                    layerName: layer.graphLayer.objectName
                 )
                 continue
             }
@@ -260,25 +303,40 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
                 for reference in requiredTextureReferences(for: preparedPass) {
                     try await loadTexture(
                         reference: reference,
-                        layerName: layer.graphLayer.objectName,
-                        into: &textures
+                        layerName: layer.graphLayer.objectName
                     )
                 }
             }
         }
-        return textures
     }
 
     private func loadTexture(
         reference: WPETextureReference,
-        layerName: String,
-        into textures: inout [String: MTLTexture]
+        layerName: String
     ) async throws {
-        guard let path = externalTexturePath(for: reference), textures[path] == nil else {
+        guard let path = externalTexturePath(for: reference),
+              loadedTextures[path] == nil,
+              dynamicTextureSources[path] == nil else {
             return
         }
         do {
-            textures[path] = try await makeTexture(relativePath: path, label: "WPE texture \(path)")
+            let resource = try await makeTextureResource(relativePath: path, label: "WPE texture \(path)")
+            switch resource {
+            case .staticTexture(let texture):
+                loadedTextures[path] = texture
+            case .dynamicSource(let source):
+                dynamicTextureSources[path] = source
+                // Phase 2E: video sources return nil before the background
+                // reader publishes its first frame. Seed `loadedTextures`
+                // with a 1×1 transparent placeholder so the executor's
+                // texture lookup does not throw `missingTexture` during
+                // the initial render pass.
+                if let texture = source.texture(at: lastRuntimeUniforms?.time ?? 0) {
+                    loadedTextures[path] = texture
+                } else {
+                    loadedTextures[path] = try makeDynamicPlaceholderTexture(label: "\(path) placeholder")
+                }
+            }
         } catch {
             // Carry the asset path AND layer name through so `diagnostic(for:)`
             // can attribute the failure to the WPE object that referenced it.
@@ -334,25 +392,116 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         }
     }
 
-    private func makeTexture(relativePath: String, label: String) async throws -> MTLTexture {
+    /// Phase 2E rewrite: returns a `WPELoadedTextureResource` instead of a
+    /// raw texture so the caller can route MP4 video and multi-frame
+    /// animations through dedicated dynamic sources.
+    private func makeTextureResource(relativePath: String, label: String) async throws -> WPELoadedTextureResource {
         var lastError: Error?
         for candidate in textureCandidates(for: relativePath) {
             do {
                 if shouldTryTexturePayload(candidate) {
                     do {
                         let payload = try resourceResolver.resolveTexturePayload(relativePath: candidate)
-                        return try await textureLoader.makeTexture(from: payload, label: label)
+
+                        if payload.videoPayload != nil {
+                            let source = try await makeVideoTextureSource(from: payload, label: label)
+                            return .dynamicSource(source)
+                        }
+                        if payload.animationTrack != nil {
+                            let source = try await textureLoader.makeAnimatedTextureSource(
+                                from: payload,
+                                label: label
+                            )
+                            return .dynamicSource(source)
+                        }
+
+                        return .staticTexture(try await textureLoader.makeTexture(from: payload, label: label))
                     } catch {
                         lastError = error
                     }
                 }
                 let image = try resourceResolver.resolveImage(relativePath: candidate)
-                return try await textureLoader.makeTexture(from: image, label: label)
+                return .staticTexture(try await textureLoader.makeTexture(from: image, label: label))
             } catch {
                 lastError = error
             }
         }
         throw lastError ?? WPEMetalRenderExecutorError.missingTexture(.image(relativePath))
+    }
+
+    /// Phase 2E: stages MP4 bytes into the per-process video cache and
+    /// constructs a `WPEVideoTextureSource` bound to the executor's
+    /// MTLDevice.
+    private func makeVideoTextureSource(
+        from payload: WPETexTexturePayload,
+        label: String
+    ) async throws -> WPEVideoTextureSource {
+        guard let videoPayload = payload.videoPayload else {
+            throw WPEMetalTextureLoaderError.malformedPayload("missing video payload")
+        }
+        let url = try await WPEVideoTextureSource.persistVideoData(
+            videoPayload.bytes,
+            cacheDirectory: Self.videoCacheDirectory()
+        )
+        let source = try WPEVideoTextureSource(
+            device: executor.textureSourceDevice,
+            videoURL: url
+        )
+        _ = label
+        return source
+    }
+
+    private static func videoCacheDirectory() -> URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("wpe-tex-video", isDirectory: true)
+    }
+
+    /// Phase 2E: returns a 1×1 transparent texture used as a temporary
+    /// stand-in for dynamic sources whose first frame has not yet decoded.
+    /// Replaced by the live texture on the next `texturesForCurrentFrame`
+    /// call once the source publishes a frame.
+    private func makeDynamicPlaceholderTexture(label: String) throws -> MTLTexture {
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: WPEMetalRenderExecutor.outputPixelFormat,
+            width: 1,
+            height: 1,
+            mipmapped: false
+        )
+        descriptor.usage = [.shaderRead]
+        descriptor.storageMode = .shared
+        guard let texture = executor.textureSourceDevice.makeTexture(descriptor: descriptor) else {
+            throw WPEMetalTextureLoaderError.textureAllocationFailed
+        }
+        texture.label = label
+        var pixel: UInt32 = 0
+        texture.replace(
+            region: MTLRegionMake2D(0, 0, 1, 1),
+            mipmapLevel: 0,
+            withBytes: &pixel,
+            bytesPerRow: 4
+        )
+        return texture
+    }
+
+    /// Phase 2E: pulls fresh `MTLTexture`s from any dynamic sources before
+    /// every render call. `loadedTextures` mirrors the latest texture so a
+    /// pass that samples the same path through the executor always sees a
+    /// live frame.
+    private func texturesForCurrentFrame(time: TimeInterval) -> [String: MTLTexture] {
+        var textures = loadedTextures
+        for (path, source) in dynamicTextureSources {
+            if let texture = source.texture(at: time) {
+                textures[path] = texture
+                loadedTextures[path] = texture
+            }
+        }
+        return textures
+    }
+
+    private func releaseDynamicTextureSources() {
+        dynamicTextureSources.values.forEach { $0.invalidate() }
+        dynamicTextureSources.removeAll()
+        loadedTextures.removeAll()
     }
 
     private func shouldTryTexturePayload(_ path: String) -> Bool {
