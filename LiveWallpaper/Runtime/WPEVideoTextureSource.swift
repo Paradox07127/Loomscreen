@@ -158,10 +158,7 @@ final class WPEVideoTextureSource: @unchecked Sendable {
             return
         }
 
-        let tracks = asset.tracks(withMediaType: .video)
-        guard let track = tracks.first else {
-            throw WPEMetalTextureLoaderError.malformedPayload("MP4 TEX has no video track")
-        }
+        let (track, durationSeconds) = try Self.loadVideoTrackAndDuration(asset: asset)
 
         let reader = try AVAssetReader(asset: asset)
         let output = AVAssetReaderTrackOutput(
@@ -188,13 +185,41 @@ final class WPEVideoTextureSource: @unchecked Sendable {
             throw reader.error ?? WPEMetalTextureLoaderError.malformedPayload("AVAssetReader failed to start")
         }
 
-        let duration = asset.duration.seconds.isFinite ? asset.duration.seconds : 0
-
         lock.lock()
         state.reader = reader
         state.output = output
-        state.duration = max(duration, 0)
+        state.duration = max(durationSeconds, 0)
         lock.unlock()
+    }
+
+    /// Bridges the async `AVAsset` API to our sync background reader loop.
+    /// The deprecated `tracks(withMediaType:)` + `asset.duration` accessors
+    /// would block silently on first access; the modern `loadTracks` /
+    /// `load(.duration)` are explicit. We block the reader queue here because
+    /// the rest of the loop already pulls samples synchronously — promoting
+    /// the loop to async is a wider refactor scheduled for a later phase.
+    nonisolated private static func loadVideoTrackAndDuration(asset: AVURLAsset) throws -> (AVAssetTrack, Double) {
+        let semaphore = DispatchSemaphore(value: 0)
+        nonisolated(unsafe) var result: Result<(AVAssetTrack, Double), Error> =
+            .failure(WPEMetalTextureLoaderError.malformedPayload("Asset load did not complete"))
+
+        Task.detached {
+            do {
+                let tracks = try await asset.loadTracks(withMediaType: .video)
+                guard let track = tracks.first else {
+                    throw WPEMetalTextureLoaderError.malformedPayload("MP4 TEX has no video track")
+                }
+                let duration = try await asset.load(.duration)
+                let seconds = duration.seconds.isFinite ? duration.seconds : 0
+                result = .success((track, seconds))
+            } catch {
+                result = .failure(error)
+            }
+            semaphore.signal()
+        }
+
+        semaphore.wait()
+        return try result.get()
     }
 
     private func publish(sampleBuffer: CMSampleBuffer) {
