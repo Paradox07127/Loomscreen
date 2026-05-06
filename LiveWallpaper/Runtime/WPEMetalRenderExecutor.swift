@@ -44,6 +44,44 @@ struct WPECopyUniforms {
     var padding: SIMD2<Float> = SIMD2<Float>(0, 0)
 }
 
+// Phase 2D-C: per-effect uniform structs. Field order MUST match the
+// matching MSL struct in `WPEMetalBuiltins.metal` exactly so that
+// `setFragmentBytes(...)` lays out correctly.
+
+struct WPEColorBalanceUniforms {
+    var brightness: Float
+    var contrast: Float
+    var saturation: Float
+    var padding: Float = 0
+}
+
+struct WPEBlurUniforms {
+    var texelSize: SIMD2<Float>
+    var radius: Float
+    var padding: Float = 0
+}
+
+struct WPEVignetteUniforms {
+    var innerRadius: Float
+    var outerRadius: Float
+    var intensity: Float
+    var padding: Float = 0
+}
+
+struct WPEWaterUniforms {
+    var amplitude: Float
+    var frequency: Float
+    var speed: Float
+    var time: Float
+}
+
+struct WPEShakeUniforms {
+    var magnitude: Float
+    var time: Float
+    var frequency: Float
+    var padding: Float = 0
+}
+
 /// Logical identity for a render target during one `render(...)` call.
 /// `.scene` is the persistent output texture; `.named(_)` covers FBOs and
 /// layer composites resolved through the pool.
@@ -772,26 +810,106 @@ final class WPEMetalRenderExecutor {
 
     /// Maps the WPE shader name onto one of the executor's built-in fragment
     /// functions. Phase 2C recognises `solidcolor`, `solidlayer`, `copy`,
-    /// `compose`, and `genericimage*` aliases (with or without the
-    /// `materials/util/` prefix and `.json` suffix). Custom shaders still
-    /// throw `unsupportedShader` until Phase 2D ships GLSL translation.
+    /// `compose`, and `genericimage*`. Phase 2D-C extends the table with the
+    /// pre-compiled MSL effect set: `colorbalance`, `blur`, `vignette`,
+    /// `water` (alias `distort`), `shake`. Custom shaders still throw
+    /// `unsupportedShader` until the full GLSL translator (Phase 2D-A/B)
+    /// lands.
     fileprivate func normalizedBuiltinShaderName(_ shaderName: String) -> String {
         let lower = shaderName.lowercased()
         let withoutJSON = lower.hasSuffix(".json") ? String(lower.dropLast(5)) : lower
-        switch withoutJSON {
+        let stripped = withoutJSON.hasPrefix("materials/")
+            ? String(withoutJSON.dropFirst("materials/".count))
+            : withoutJSON
+
+        switch stripped {
         case "solidcolor":
             return "solidcolor"
-        case "solidlayer", "materials/util/solidlayer", "models/util/solidlayer":
+        case "solidlayer", "util/solidlayer", "models/util/solidlayer":
             return "solidlayer"
-        case "copy", "commands/copy", "materials/util/copy":
+        case "copy", "commands/copy", "util/copy":
             return "copy"
-        case "compose", "materials/util/compose":
+        case "compose", "util/compose":
             return "compose"
         default:
-            if withoutJSON.hasPrefix("genericimage") {
+            if Self.isEffectAlias(stripped, family: "colorbalance") {
+                return "effect_colorbalance"
+            }
+            if Self.isEffectAlias(stripped, family: "blur") {
+                return "effect_blur"
+            }
+            if Self.isEffectAlias(stripped, family: "vignette") {
+                return "effect_vignette"
+            }
+            if Self.isEffectAlias(stripped, family: "water")
+                || Self.isEffectAlias(stripped, family: "distort") {
+                return "effect_water"
+            }
+            if Self.isEffectAlias(stripped, family: "shake") {
+                return "effect_shake"
+            }
+            if stripped.hasPrefix("genericimage") {
                 return "copy"
             }
-            return withoutJSON
+            return stripped
+        }
+    }
+
+    /// Phase 2D-C: matches `<family>`, `effects/<family>`, and
+    /// `effects/<family>/<family>` so a Workshop effect-pass shader name
+    /// like `effects/water/water` (or its `materials/effects/...` form,
+    /// already pre-stripped above) resolves to the same builtin.
+    private static func isEffectAlias(_ shaderName: String, family: String) -> Bool {
+        shaderName == family
+            || shaderName == "effects/\(family)"
+            || shaderName == "effects/\(family)/\(family)"
+    }
+
+    /// Phase 2D-C: scalar-uniform lookup that walks `pass.uniformValues`
+    /// first (runtime-merged values from Phase 2B) then `pass.pass.constants`
+    /// (authored material defaults). Multiple aliases supported because WPE
+    /// shader uniforms ship under several legacy names (`u_X`, `X`,
+    /// `g_XOffset`, etc.).
+    fileprivate func floatScalar(
+        named name: String,
+        in pass: WPEPreparedRenderPass,
+        default defaultValue: Float
+    ) -> Float {
+        Self.scalarFloat(pass.uniformValues[name])
+            ?? Self.scalarFloat(pass.pass.constants[name])
+            ?? defaultValue
+    }
+
+    fileprivate func floatScalar(
+        named names: [String],
+        in pass: WPEPreparedRenderPass,
+        default defaultValue: Float
+    ) -> Float {
+        for name in names {
+            if let value = Self.scalarFloat(pass.uniformValues[name]) {
+                return value
+            }
+        }
+        for name in names {
+            if let value = Self.scalarFloat(pass.pass.constants[name]) {
+                return value
+            }
+        }
+        return defaultValue
+    }
+
+    private static func scalarFloat(_ value: WPESceneShaderConstantValue?) -> Float? {
+        switch value {
+        case .number(let number):
+            return Float(number)
+        case .vector(let vector):
+            return vector.first.map(Float.init)
+        case .bool(let bool):
+            return bool ? 1 : 0
+        case .string(let string):
+            return Float(string)
+        case nil:
+            return nil
         }
     }
 }
@@ -881,6 +999,175 @@ private struct WPEMetalResolvedShaderInputs {
             encoder.setFragmentTexture(secondTexture, index: 1)
             var uniforms = WPESolidUniforms(color: executor.colorVector(for: pass))
             encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPESolidUniforms>.stride, index: 0)
+
+        case "effect_colorbalance":
+            encoder.setRenderPipelineState(try executor.renderPipeline(
+                fragmentName: "wpe_effect_colorbalance_fragment",
+                blendMode: pass.pass.blending,
+                colorPixelFormat: destination.texture.pixelFormat,
+                depthPixelFormat: depthPixelFormat
+            ))
+            let reference = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
+            let texture = try executor.resolve(
+                reference: reference,
+                textures: textures,
+                frameState: frameState,
+                currentTargetID: destination.id
+            )
+            encoder.setFragmentTexture(texture, index: 0)
+            var uniforms = WPEColorBalanceUniforms(
+                brightness: executor.floatScalar(
+                    named: ["u_Brightness", "brightness", "g_BrightnessOffset"],
+                    in: pass,
+                    default: 0
+                ),
+                contrast: executor.floatScalar(
+                    named: ["u_Contrast", "contrast"],
+                    in: pass,
+                    default: 1
+                ),
+                saturation: executor.floatScalar(
+                    named: ["u_Saturation", "saturation"],
+                    in: pass,
+                    default: 1
+                )
+            )
+            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEColorBalanceUniforms>.stride, index: 0)
+
+        case "effect_blur":
+            encoder.setRenderPipelineState(try executor.renderPipeline(
+                fragmentName: "wpe_effect_blur_fragment",
+                blendMode: pass.pass.blending,
+                colorPixelFormat: destination.texture.pixelFormat,
+                depthPixelFormat: depthPixelFormat
+            ))
+            let reference = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
+            let texture = try executor.resolve(
+                reference: reference,
+                textures: textures,
+                frameState: frameState,
+                currentTargetID: destination.id
+            )
+            encoder.setFragmentTexture(texture, index: 0)
+            var uniforms = WPEBlurUniforms(
+                texelSize: SIMD2<Float>(
+                    1 / Float(max(texture.width, 1)),
+                    1 / Float(max(texture.height, 1))
+                ),
+                radius: executor.floatScalar(
+                    named: ["u_Radius", "radius", "amount", "strength"],
+                    in: pass,
+                    default: 1
+                )
+            )
+            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEBlurUniforms>.stride, index: 0)
+
+        case "effect_vignette":
+            encoder.setRenderPipelineState(try executor.renderPipeline(
+                fragmentName: "wpe_effect_vignette_fragment",
+                blendMode: pass.pass.blending,
+                colorPixelFormat: destination.texture.pixelFormat,
+                depthPixelFormat: depthPixelFormat
+            ))
+            let reference = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
+            let texture = try executor.resolve(
+                reference: reference,
+                textures: textures,
+                frameState: frameState,
+                currentTargetID: destination.id
+            )
+            encoder.setFragmentTexture(texture, index: 0)
+            var uniforms = WPEVignetteUniforms(
+                innerRadius: executor.floatScalar(
+                    named: ["u_InnerRadius", "innerRadius", "inner"],
+                    in: pass,
+                    default: 0.35
+                ),
+                outerRadius: executor.floatScalar(
+                    named: ["u_OuterRadius", "outerRadius", "outer"],
+                    in: pass,
+                    default: 0.75
+                ),
+                intensity: executor.floatScalar(
+                    named: ["u_Intensity", "intensity", "amount", "strength"],
+                    in: pass,
+                    default: 0.5
+                )
+            )
+            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEVignetteUniforms>.stride, index: 0)
+
+        case "effect_water":
+            encoder.setRenderPipelineState(try executor.renderPipeline(
+                fragmentName: "wpe_effect_water_fragment",
+                blendMode: pass.pass.blending,
+                colorPixelFormat: destination.texture.pixelFormat,
+                depthPixelFormat: depthPixelFormat
+            ))
+            let reference = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
+            let texture = try executor.resolve(
+                reference: reference,
+                textures: textures,
+                frameState: frameState,
+                currentTargetID: destination.id
+            )
+            encoder.setFragmentTexture(texture, index: 0)
+            var uniforms = WPEWaterUniforms(
+                amplitude: executor.floatScalar(
+                    named: ["u_Amplitude", "amplitude", "amount", "strength"],
+                    in: pass,
+                    default: 0.01
+                ),
+                frequency: executor.floatScalar(
+                    named: ["u_Frequency", "frequency", "scale"],
+                    in: pass,
+                    default: 20
+                ),
+                speed: executor.floatScalar(
+                    named: ["u_Speed", "speed"],
+                    in: pass,
+                    default: 1
+                ),
+                time: executor.floatScalar(
+                    named: "g_Time",
+                    in: pass,
+                    default: 0
+                )
+            )
+            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEWaterUniforms>.stride, index: 0)
+
+        case "effect_shake":
+            encoder.setRenderPipelineState(try executor.renderPipeline(
+                fragmentName: "wpe_effect_shake_fragment",
+                blendMode: pass.pass.blending,
+                colorPixelFormat: destination.texture.pixelFormat,
+                depthPixelFormat: depthPixelFormat
+            ))
+            let reference = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
+            let texture = try executor.resolve(
+                reference: reference,
+                textures: textures,
+                frameState: frameState,
+                currentTargetID: destination.id
+            )
+            encoder.setFragmentTexture(texture, index: 0)
+            var uniforms = WPEShakeUniforms(
+                magnitude: executor.floatScalar(
+                    named: ["u_Magnitude", "magnitude", "amount", "strength"],
+                    in: pass,
+                    default: 0.01
+                ),
+                time: executor.floatScalar(
+                    named: "g_Time",
+                    in: pass,
+                    default: 0
+                ),
+                frequency: executor.floatScalar(
+                    named: ["u_Frequency", "frequency", "speed"],
+                    in: pass,
+                    default: 24
+                )
+            )
+            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEShakeUniforms>.stride, index: 0)
 
         default:
             throw WPEMetalRenderExecutorError.unsupportedShader(pass.pass.shader)
