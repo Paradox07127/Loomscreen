@@ -92,6 +92,13 @@ extension VideoWallpaperWindow {
         applyMouseInteractionPolicy()
     }
 
+    /// Switches the window's color space when an HDR video is loaded so the
+    /// composited output preserves the wider gamut. `nil` restores the
+    /// system default (sRGB-tagged) for SDR sources.
+    func setExtendedDynamicRangeEnabled(_ enabled: Bool) {
+        colorSpace = enabled ? NSColorSpace.displayP3 : nil
+    }
+
     private func applyMouseInteractionPolicy() {
         level = NSWindow.Level(rawValue: wallpaperWindowLevel)
         ignoresMouseEvents = !allowsWallpaperMouseInteraction

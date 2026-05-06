@@ -40,11 +40,21 @@ final class HTMLWallpaperView: NSView {
     private var hasTrackerRulesAttached = false
     private var trackerBlockingRequested = false
     private var activeSecurityScopedURL: URL?
+    /// `WKWebsiteDataStore` is locked at WKWebView init time. We track which
+    /// store the live view is using vs what config now requests so subsequent
+    /// `apply(_:)` calls can warn the caller that the swap will only take
+    /// effect on the next session rebuild.
+    private var currentDataStoreIsEphemeral: Bool
+    private var pendingEphemeral: Bool
     /// Tracks the last applied `HTMLConfig` so re-`apply()` calls with the
     /// same toggles skip the user-script teardown / re-install.
     private var lastAppliedConfig: HTMLConfig?
     /// Replays into `loadSource(_:)` for retry / re-entry (sleep wake, error banner).
     private var lastSource: HTMLSource?
+    /// Counts consecutive navigation failures since the last successful load.
+    /// Capped by `HTMLConfig.maxRetries`; used to drive exponential backoff.
+    private var consecutiveFailureCount: Int = 0
+    private var pendingRetryTask: Task<Void, Never>?
 
     /// Forwarded to the owning `AmbientWallpaperSession` so failures surface as
     /// `RuntimeErrorBanner` and can be retried from the screen-detail UI.
@@ -52,18 +62,23 @@ final class HTMLWallpaperView: NSView {
 
     // MARK: - Initialization
 
-    override init(frame frameRect: NSRect) {
+    init(frame frameRect: NSRect, initialEphemeral: Bool = false) {
         let configuration = WKWebViewConfiguration()
         let preferences = WKWebpagePreferences()
         preferences.allowsContentJavaScript = true
         configuration.defaultWebpagePreferences = preferences
         configuration.mediaTypesRequiringUserActionForPlayback = []
+        configuration.websiteDataStore = initialEphemeral
+            ? .nonPersistent()
+            : .default()
 
         // Register the custom scheme BEFORE the webView is created —
         // schemes cannot be added after WKWebView init.
         let handler = FolderURLSchemeHandler()
         configuration.setURLSchemeHandler(handler, forURLScheme: FolderURLSchemeHandler.scheme)
         self.folderHandler = handler
+        self.currentDataStoreIsEphemeral = initialEphemeral
+        self.pendingEphemeral = initialEphemeral
 
         webView = HTMLWebView(frame: NSRect(origin: .zero, size: frameRect.size), configuration: configuration)
 
@@ -202,6 +217,7 @@ final class HTMLWallpaperView: NSView {
     // MARK: - Public API
 
     func apply(_ config: HTMLConfig) {
+        pendingEphemeral = config.useEphemeralStorage
         if let previous = lastAppliedConfig, previous == config {
             // 完全相同 — 跳过任何注入操作，避免 WebKit 重新评估脚本包。
             return
@@ -211,6 +227,15 @@ final class HTMLWallpaperView: NSView {
         webView.configuration.defaultWebpagePreferences.allowsContentJavaScript = config.allowJavaScript
         allowMouseInteraction = config.allowMouseInteraction
 
+        if currentDataStoreIsEphemeral != pendingEphemeral {
+            let requested = pendingEphemeral ? "ephemeral" : "persistent"
+            let active = currentDataStoreIsEphemeral ? "ephemeral" : "persistent"
+            Logger.warning(
+                "HTML wallpaper requested \(requested) storage but the live WKWebView still uses the \(active) data store; the change applies on next session rebuild.",
+                category: .screenManager
+            )
+        }
+
         // 任何运行时状态变化都先尝试通过 evaluateJavaScript 热更新 — 不重建 user script。
         applyRuntimeState(previous: previous, current: config)
 
@@ -219,6 +244,7 @@ final class HTMLWallpaperView: NSView {
             || (previous?.allowMouseInteraction != config.allowMouseInteraction)
             || (previous?.muteAudio != config.muteAudio)
             || (previous?.allowJavaScript != config.allowJavaScript)
+            || (previous?.useEphemeralStorage != config.useEphemeralStorage)
 
         if needsScriptRebuild {
             installBaselineUserScripts(for: config)
@@ -271,7 +297,17 @@ final class HTMLWallpaperView: NSView {
     }
 
     func loadSource(_ source: HTMLSource) {
+        loadSource(source, resetFailureCount: true)
+    }
+
+    /// Internal entry point distinguishing user-driven loads (which reset the
+    /// retry budget) from `scheduleRetry` continuations (which keep the
+    /// counter so backoff progresses).
+    private func loadSource(_ source: HTMLSource, resetFailureCount: Bool) {
         lastSource = source
+        if resetFailureCount {
+            resetNavigationFailureState()
+        }
         stopActiveSecurityScope()
         // Cut every non-folder source off from the previous folder's scheme handler
         // (C1): if folderURL stayed live, a remote page could probe livewallpaper://.
@@ -321,7 +357,7 @@ final class HTMLWallpaperView: NSView {
     /// Re-applies the most recent `HTMLSource`. Used by `WallpaperRuntimeSession.retry()`.
     func reloadCurrentSource() {
         guard let lastSource else { return }
-        loadSource(lastSource)
+        loadSource(lastSource, resetFailureCount: false)
     }
 
     private func stopActiveSecurityScope() {
@@ -393,6 +429,34 @@ final class HTMLWallpaperView: NSView {
 
     private func reportError(_ error: WallpaperRuntimeError) {
         onError?(error)
+    }
+
+    /// Returns `true` when a retry was scheduled and the caller should skip
+    /// `reportError`. Increments the consecutive failure counter and arms the
+    /// next backoff slot (1s, 2s, 4s …) bounded by `HTMLConfig.maxRetries`.
+    private func shouldRetryNavigationFailure() -> Bool {
+        let maxRetries = max(0, lastAppliedConfig?.maxRetries ?? 0)
+        guard consecutiveFailureCount < maxRetries else { return false }
+        scheduleRetry()
+        return true
+    }
+
+    private func scheduleRetry() {
+        consecutiveFailureCount += 1
+        let delaySeconds = pow(2.0, Double(consecutiveFailureCount - 1))
+        pendingRetryTask?.cancel()
+        pendingRetryTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(delaySeconds))
+            guard !Task.isCancelled, let self else { return }
+            self.pendingRetryTask = nil
+            self.reloadCurrentSource()
+        }
+    }
+
+    private func resetNavigationFailureState() {
+        consecutiveFailureCount = 0
+        pendingRetryTask?.cancel()
+        pendingRetryTask = nil
     }
 
     private func navigationFailureURL(webView: WKWebView, error: NSError) -> URL {
@@ -525,6 +589,8 @@ final class HTMLWallpaperView: NSView {
 
     func cleanup() {
         trackerBlockingRequested = false
+        pendingRetryTask?.cancel()
+        pendingRetryTask = nil
         webView.stopLoading()
         webView.navigationDelegate = nil
         webView.uiDelegate = nil
@@ -642,6 +708,7 @@ extension HTMLWallpaperView: WKNavigationDelegate {
     /// 导航完成后兜底：autoplay nudge + 静音状态再施加一次（覆盖晚到的元素）。
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         Logger.info("HTML wallpaper finished loading: \(webView.url?.absoluteString ?? "<no url>")", category: .screenManager)
+        resetNavigationFailureState()
         let muted = lastAppliedConfig?.muteAudio == true ? "true" : "false"
         let nudge = """
         (function() {
@@ -669,6 +736,7 @@ extension HTMLWallpaperView: WKNavigationDelegate {
             "HTML wallpaper didFail [domain=\(nsError.domain) code=\(nsError.code)] url=\(webView.url?.absoluteString ?? "<no url>") — \(nsError.localizedDescription); userInfo=\(nsError.userInfo)",
             category: .screenManager
         )
+        if shouldRetryNavigationFailure() { return }
         reportError(.webNavigationFailed(
             navigationFailureURL(webView: webView, error: nsError),
             code: nsError.code,
@@ -683,6 +751,7 @@ extension HTMLWallpaperView: WKNavigationDelegate {
             "HTML wallpaper didFailProvisionalNavigation [domain=\(nsError.domain) code=\(nsError.code)] url=\(webView.url?.absoluteString ?? "<no url>") — \(nsError.localizedDescription); userInfo=\(nsError.userInfo)",
             category: .screenManager
         )
+        if shouldRetryNavigationFailure() { return }
         if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorNotConnectedToInternet {
             reportError(.networkOffline)
         } else {

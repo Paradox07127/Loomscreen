@@ -134,7 +134,6 @@ struct ScreenDetailView: View {
     @AppStorage("Inspector.ScheduleExpanded") private var isScheduleExpanded = false
     @AppStorage("Inspector.EnvironmentExpanded") private var isEnvironmentExpanded = true
     @AppStorage("Inspector.ColorExpanded") private var isColorExpanded = false
-    @AppStorage("Inspector.DisplayExpanded") private var isDisplayExpanded = false
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -319,7 +318,7 @@ struct ScreenDetailView: View {
 
                 Divider()
 
-                videoInspectorPanel
+                inspectorPanel
             }
             .transaction(value: selectedWallpaperType) { $0.animation = nil }
         }
@@ -369,11 +368,21 @@ struct ScreenDetailView: View {
     }
 
     @ViewBuilder
-    private var videoInspectorPanel: some View {
-        if selectedWallpaperType == .video {
+    private var inspectorPanel: some View {
+        if selectedWallpaperType == .video || selectedWallpaperType == .html {
             ScrollView {
                 GlassEffectContainer(spacing: 16) {
                     VStack(spacing: 16) {
+                        CommonPlaybackInspector(
+                            screen: screen,
+                            wallpaperType: selectedWallpaperType,
+                            muted: $videoMuted,
+                            frameRateLimit: $selectedFrameRateLimit,
+                            syncToLockScreen: $setAsLockScreen,
+                            htmlConfig: selectedWallpaperType == .html ? $htmlConfig : nil
+                        )
+
+                        if selectedWallpaperType == .video {
                         HStack(spacing: 0) {
                             ForEach(WallpaperMode.allCases) { mode in
                                 Button {
@@ -513,82 +522,8 @@ struct ScreenDetailView: View {
                                 }
                             }
                             .groupBoxStyle(ContainerGroupBoxStyle())
-
-                            GroupBox {
-                                CollapsibleSection(
-                                    title: "Display",
-                                    systemImage: "display.and.arrow.down",
-                                    isExpanded: $isDisplayExpanded
-                                ) {
-                                    VStack(spacing: 8) {
-                                        SettingRow(icon: "gauge.with.dots.needle.bottom.50percent", iconColor: .blue, title: "Frame Rate") {
-                                            Picker("", selection: $selectedFrameRateLimit) {
-                                                ForEach(FrameRateLimit.allCases) { limit in
-                                                    Text(limit.description).tag(limit)
-                                                }
-                                            }
-                                            .labelsHidden()
-                                            .frame(width: 110)
-                                            .onChange(of: selectedFrameRateLimit) { _, newValue in
-                                                screenManager.updateFrameRateLimit(newValue, for: screen)
-                                            }
-                                            .accessibilityLabel("Frame rate limit")
-                                            .accessibilityValue(selectedFrameRateLimit.description)
-                                        }
-
-                                        Divider()
-
-                                        SettingRow(
-                                            icon: videoMuted ? "speaker.slash" : "speaker.wave.2",
-                                            iconColor: videoMuted ? .secondary : .blue,
-                                            title: "Audio",
-                                            subtitle: videoMuted
-                                                ? "Muted (default)"
-                                                : "Routed through system output"
-                                        ) {
-                                            Toggle("", isOn: Binding(get: { !videoMuted }, set: { videoMuted = !$0 }))
-                                                .labelsHidden()
-                                                .toggleStyle(.switch)
-                                                .onChange(of: videoMuted) { _, newValue in
-                                                    screenManager.updateMuted(newValue, for: screen)
-                                                }
-                                                .accessibilityLabel("Video audio")
-                                                .accessibilityHint("When off, audio tracks are disabled entirely so macOS does not engage the audio engine")
-                                        }
-
-                                        Divider()
-
-                                        SettingRow(icon: "photo.on.rectangle", iconColor: .blue, title: "Desktop Picture") {
-                                            HStack(spacing: 6) {
-                                                if lockScreenExtracted {
-                                                    Image(systemName: "checkmark.circle.fill")
-                                                        .foregroundStyle(.green)
-                                                        .transition(.scale.combined(with: .opacity))
-                                                }
-                                                Toggle("", isOn: $setAsLockScreen)
-                                                    .labelsHidden()
-                                                    .toggleStyle(.switch)
-                                                    .onChange(of: setAsLockScreen) { _, newValue in
-                                                        screenManager.updateSetAsDesktopPicture(newValue, for: screen)
-                                                        if newValue {
-                                                            screenManager.extractLockScreenFrame(for: screen)
-                                                            withAnimation(.snappy(duration: 0.25)) { lockScreenExtracted = true }
-                                                            Task {
-                                                                try? await Task.sleep(for: .seconds(2))
-                                                                withAnimation(.snappy(duration: 0.25)) { lockScreenExtracted = false }
-                                                            }
-                                                        }
-                                                    }
-                                                    .accessibilityLabel("Set current frame as desktop picture")
-                                                    .accessibilityHint("Captures the currently visible video frame and uses it as the macOS desktop picture")
-                                                    .help("Apply the current video frame as the desktop picture")
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            .groupBoxStyle(ContainerGroupBoxStyle())
-                            }
+                        }
+                    }
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 14)
