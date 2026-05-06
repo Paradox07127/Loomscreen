@@ -40,20 +40,24 @@ struct WPETexTexturePayloadTests {
         #expect(extracted.hasAnimationFrames == false)
     }
 
-    @Test("Rejects MP4-backed TEX payloads for Metal texture upload")
-    func rejectsVideoPayload() {
+    @Test("Routes MP4-backed TEX payloads to the videoPayload field")
+    func extractsVideoPayloadFromMP4Tex() throws {
+        let mp4 = mp4HeaderPayload()
         let tex = makeImage(
             width: 1,
             height: 1,
             formatCode: WPETexFormat.rgba8888.rawValue,
-            payload: mp4HeaderPayload()
+            payload: mp4
         )
 
-        let result = WPETexDecoder().extractTexturePayload(data: tex)
+        // Phase 2E: MP4-in-TEX is no longer fail-closed on the Metal payload
+        // path. The renderer hands the bytes to `WPEVideoTextureSource`.
+        let extracted = try WPETexDecoder().extractTexturePayload(data: tex).get()
 
-        #expect(throws: WPETexDecodeError.unsupportedAnimation) {
-            _ = try result.get()
-        }
+        let video = try #require(extracted.videoPayload)
+        #expect(video.bytes == mp4)
+        #expect(extracted.animationTrack == nil)
+        #expect(extracted.mipmaps.isEmpty)
     }
 
     private func makeImage(

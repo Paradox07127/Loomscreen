@@ -48,31 +48,33 @@ struct WPETexDecoder: Sendable {
     func extractTexturePayload(data: Data) -> Result<WPETexTexturePayload, WPETexDecodeError> {
         do {
             let parsed = try parse(data: data)
-            guard !parsed.bitmap.isVideoPayload,
-                  !parsed.bitmap.mipmaps.contains(where: { looksLikeMP4Payload($0.payload) }) else {
-                throw WPETexDecodeError.unsupportedAnimation
+
+            // Phase 2E: video TEX payloads now route to AVFoundation via the
+            // renderer's `WPEVideoTextureSource` instead of failing closed.
+            if let videoPayload = makeVideoPayload(from: parsed) {
+                return .success(WPETexTexturePayload(
+                    info: parsed.info,
+                    mipmaps: [],
+                    hasAnimationFrames: false,
+                    videoPayload: videoPayload
+                ))
             }
+
             guard !parsed.bitmap.usesEncodedImagePayload else {
                 throw WPETexDecodeError.unsupportedFormat(code: parsed.info.textureFormatCode)
             }
 
-            let mipmaps = try parsed.bitmap.mipmaps.map { mipmap in
-                WPETexTextureMipmap(
-                    index: mipmap.index,
-                    width: mipmap.width,
-                    height: mipmap.height,
-                    bytes: try normalizedBytes(
-                        for: mipmap,
-                        format: parsed.info.format,
-                        textureFormatCode: parsed.info.textureFormatCode
-                    )
-                )
-            }
+            let firstFrameMipmaps = try normalizedTextureMipmaps(
+                parsed.bitmap.mipmaps,
+                info: parsed.info
+            )
+            let animationTrack = try makeAnimationTrack(from: parsed)
 
             return .success(WPETexTexturePayload(
                 info: parsed.info,
-                mipmaps: mipmaps,
-                hasAnimationFrames: parsed.hasAnimationFrames
+                mipmaps: firstFrameMipmaps,
+                hasAnimationFrames: parsed.hasAnimationFrames,
+                animationTrack: animationTrack
             ))
         } catch let error as WPETexDecodeError {
             return .failure(error)
@@ -81,12 +83,93 @@ struct WPETexDecoder: Sendable {
         }
     }
 
+    private func normalizedTextureMipmaps(
+        _ mipmaps: [WPETexMipmap],
+        info: WPETexInfo
+    ) throws -> [WPETexTextureMipmap] {
+        try mipmaps.map { mipmap in
+            WPETexTextureMipmap(
+                index: mipmap.index,
+                width: mipmap.width,
+                height: mipmap.height,
+                bytes: try normalizedBytes(
+                    for: mipmap,
+                    format: info.format,
+                    textureFormatCode: info.textureFormatCode
+                )
+            )
+        }
+    }
+
+    private func makeAnimationTrack(from parsed: ParsedTex) throws -> WPETexAnimationTrack? {
+        guard parsed.bitmap.frames.count > 1 else { return nil }
+
+        let frameInfos = parsed.frameInfo?.frames
+        let defaultDuration = 1.0 / WPETexAnimationTrack.defaultFrameRate
+
+        let frames = try parsed.bitmap.frames.enumerated().map { index, _ in
+            let frameInfo = frameInfos?[safe: index]
+            let imageID = frameInfo?.imageID ?? index
+            let duration = (frameInfo?.frameTime ?? 0) > 0 ? frameInfo!.frameTime : defaultDuration
+            let sourceIndex = parsed.bitmap.frames.indices.contains(imageID) ? imageID : index
+            return WPETexAnimationFrame(
+                imageID: sourceIndex,
+                duration: duration,
+                mipmaps: try normalizedTextureMipmaps(parsed.bitmap.frames[sourceIndex], info: parsed.info)
+            )
+        }
+
+        let validDurations = frames.map(\.duration).filter { $0 > 0 }
+        let averageDuration = validDurations.isEmpty
+            ? defaultDuration
+            : validDurations.reduce(0, +) / Double(validDurations.count)
+        let frameRate = averageDuration > 0
+            ? 1.0 / averageDuration
+            : WPETexAnimationTrack.defaultFrameRate
+
+        return WPETexAnimationTrack(
+            frames: frames,
+            frameRate: frameRate,
+            loop: true
+        )
+    }
+
+    private func makeVideoPayload(from parsed: ParsedTex) -> WPETexVideoPayload? {
+        guard let mip = parsed.bitmap.largestMipmap else { return nil }
+        guard parsed.bitmap.isVideoPayload || looksLikeMP4Payload(mip.payload) else {
+            return nil
+        }
+        return WPETexVideoPayload(bytes: mip.payload)
+    }
+
     // MARK: - Parsing
 
     private struct ParsedTex {
         let info: WPETexInfo
         let bitmap: WPETexBitmapBlock
+        let frameInfo: WPETexFrameInfoBlock?
         let hasAnimationFrames: Bool
+    }
+
+    /// Parsed `TEXS` block. Phase 2E only consumes `frameTime` from the
+    /// frame metadata; the UV crop/rotate fields are recorded for a later
+    /// phase (atlas-driven WPE animation).
+    private struct WPETexFrameInfoBlock {
+        let version: Int
+        let gifWidth: Int?
+        let gifHeight: Int?
+        let frames: [WPETexFrameInfo]
+    }
+
+    private struct WPETexFrameInfo {
+        let imageID: Int
+        let frameTime: TimeInterval
+        let x: Float
+        let y: Float
+        let width: Float
+        let widthY: Float
+        let heightX: Float
+        let height: Float
     }
 
     private func parseHeader(data: Data) throws -> WPETexInfo {
@@ -119,7 +202,7 @@ struct WPETexDecoder: Sendable {
 
         var info: WPETexInfo?
         var bitmap: WPETexBitmapBlock?
-        var hasAnimation = false
+        var frameInfo: WPETexFrameInfoBlock?
 
         while !reader.isAtEnd {
             let blockMagic = try reader.readMagic()
@@ -130,6 +213,7 @@ struct WPETexDecoder: Sendable {
                     containerVersion: containerVersion,
                     reader: &reader
                 )
+
             case "TEXB":
                 guard let parsedInfo = info else {
                     throw WPETexDecodeError.missingInfoBlock
@@ -139,25 +223,93 @@ struct WPETexDecoder: Sendable {
                     info: parsedInfo,
                     reader: &reader
                 )
-                // Any bytes after TEXB (e.g. TEXS) we treat as animation.
-                if !reader.isAtEnd { hasAnimation = true }
-                break
+
             case "TEXS":
-                hasAnimation = true
-                // Phase 2.1 returns the still first frame; we don't need
-                // the sequence payload for the image-only render path.
-                break
+                frameInfo = try parseFrameInfoBlock(
+                    versionedMagic: blockMagic,
+                    reader: &reader
+                )
+
             default:
                 throw WPETexDecodeError.unsupportedBlock(magic: blockMagic)
             }
-            // Once we have both info + bitmap we can stop walking — the
-            // remaining frames go through Phase 2.x animation work.
-            if info != nil, bitmap != nil { break }
         }
 
         guard let parsedInfo = info else { throw WPETexDecodeError.missingInfoBlock }
         guard let parsedBitmap = bitmap else { throw WPETexDecodeError.missingBitmapBlock }
-        return ParsedTex(info: parsedInfo, bitmap: parsedBitmap, hasAnimationFrames: hasAnimation)
+
+        let hasAnimation = parsedBitmap.frames.count > 1 || frameInfo != nil
+        return ParsedTex(
+            info: parsedInfo,
+            bitmap: parsedBitmap,
+            frameInfo: frameInfo,
+            hasAnimationFrames: hasAnimation
+        )
+    }
+
+    /// Parses the optional `TEXS` block. Phase 2E uses only `frameTime`; the
+    /// UV crop/rotation fields are read for completeness but currently
+    /// ignored at render time.
+    private func parseFrameInfoBlock(
+        versionedMagic: String,
+        reader: inout WPETexByteReader
+    ) throws -> WPETexFrameInfoBlock {
+        let version = parseTrailingVersion(versionedMagic)
+        let frameCount = Int(try reader.readInt32(blockName: "TEXS.frameCount"))
+        guard frameCount > 0 && frameCount <= 4_096 else {
+            throw WPETexDecodeError.mipmapOutOfBounds(index: frameCount)
+        }
+
+        let gifWidth: Int?
+        let gifHeight: Int?
+        if version == 3 {
+            gifWidth = Int(try reader.readInt32(blockName: "TEXS.gifWidth"))
+            gifHeight = Int(try reader.readInt32(blockName: "TEXS.gifHeight"))
+        } else {
+            gifWidth = nil
+            gifHeight = nil
+        }
+
+        var frames: [WPETexFrameInfo] = []
+        frames.reserveCapacity(frameCount)
+
+        for _ in 0..<frameCount {
+            let imageID = Int(try reader.readInt32(blockName: "TEXS.imageID"))
+            let frameTime = TimeInterval(try reader.readFloat32(blockName: "TEXS.frameTime"))
+
+            if version == 1 {
+                frames.append(WPETexFrameInfo(
+                    imageID: imageID,
+                    frameTime: frameTime,
+                    x: Float(try reader.readInt32(blockName: "TEXS.x")),
+                    y: Float(try reader.readInt32(blockName: "TEXS.y")),
+                    width: Float(try reader.readInt32(blockName: "TEXS.width")),
+                    widthY: Float(try reader.readInt32(blockName: "TEXS.widthY")),
+                    heightX: Float(try reader.readInt32(blockName: "TEXS.heightX")),
+                    height: Float(try reader.readInt32(blockName: "TEXS.height"))
+                ))
+            } else if version == 2 || version == 3 {
+                frames.append(WPETexFrameInfo(
+                    imageID: imageID,
+                    frameTime: frameTime,
+                    x: try reader.readFloat32(blockName: "TEXS.x"),
+                    y: try reader.readFloat32(blockName: "TEXS.y"),
+                    width: try reader.readFloat32(blockName: "TEXS.width"),
+                    widthY: try reader.readFloat32(blockName: "TEXS.widthY"),
+                    heightX: try reader.readFloat32(blockName: "TEXS.heightX"),
+                    height: try reader.readFloat32(blockName: "TEXS.height")
+                ))
+            } else {
+                throw WPETexDecodeError.unsupportedBlock(magic: versionedMagic)
+            }
+        }
+
+        return WPETexFrameInfoBlock(
+            version: version,
+            gifWidth: gifWidth,
+            gifHeight: gifHeight,
+            frames: frames
+        )
     }
 
     // MARK: - TEXI
@@ -241,32 +393,35 @@ struct WPETexDecoder: Sendable {
             throw WPETexDecodeError.unsupportedBlock(magic: versionedMagic)
         }
 
-        var mipmaps: [WPETexMipmap] = []
-        for imageIndex in 0..<imageCount {
+        // Phase 2E: retain every TEXB image group. Older Workshop encoders
+        // concatenate animation frames inside a single TEXB block before any
+        // TEXS metadata, so the multi-frame data must be preserved here for
+        // the renderer-side animation source. Static decode paths still see
+        // only the first frame via `WPETexBitmapBlock.mipmaps`.
+        var frames: [[WPETexMipmap]] = []
+        frames.reserveCapacity(imageCount)
+        for _ in 0..<imageCount {
             let mipmapCount = Int(try reader.readInt32(blockName: "TEXB.mipCount"))
             guard mipmapCount > 0 && mipmapCount <= 32 else {
                 throw WPETexDecodeError.mipmapOutOfBounds(index: mipmapCount)
             }
-            if imageIndex == 0 {
-                mipmaps.reserveCapacity(mipmapCount)
-            }
 
+            var frameMipmaps: [WPETexMipmap] = []
+            frameMipmaps.reserveCapacity(mipmapCount)
             for mipmapIndex in 0..<mipmapCount {
-                let mipmap = try parseMipmap(
+                frameMipmaps.append(try parseMipmap(
                     version: effectiveBitmapVersion,
                     index: mipmapIndex,
                     reader: &reader
-                )
-                if imageIndex == 0 {
-                    mipmaps.append(mipmap)
-                }
+                ))
             }
+            frames.append(frameMipmaps)
         }
         return WPETexBitmapBlock(
             version: bitmapVersion,
             sourceImageFormatCode: sourceImageFormatCode,
             isVideoPayload: isVideoPayload,
-            mipmaps: mipmaps
+            frames: frames
         )
     }
 
@@ -479,5 +634,11 @@ struct WPETexDecoder: Sendable {
     private func parseTrailingVersion(_ magic: String) -> Int {
         let digits = magic.suffix(4)
         return Int(digits) ?? 0
+    }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
     }
 }

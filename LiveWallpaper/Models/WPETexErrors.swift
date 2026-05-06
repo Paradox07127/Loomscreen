@@ -170,7 +170,15 @@ struct WPETexBitmapBlock: Sendable, Equatable {
     let version: Int
     let sourceImageFormatCode: Int?
     let isVideoPayload: Bool
-    let mipmaps: [WPETexMipmap]
+    let frames: [[WPETexMipmap]]
+
+    /// First-frame mipmap chain. Phase 2E preserves every TEXB image group
+    /// (older WPE encoders concatenate animation frames inside a single
+    /// `TEXB` block) but the static decode path still wants the first frame
+    /// only — `mipmaps` keeps that contract for existing call sites.
+    var mipmaps: [WPETexMipmap] {
+        frames.first ?? []
+    }
 
     var largestMipmap: WPETexMipmap? {
         mipmaps.first
@@ -182,10 +190,63 @@ struct WPETexBitmapBlock: Sendable, Equatable {
     }
 }
 
+/// Phase 2E: ordered animation frames with per-frame timing and a frame rate
+/// derived from `TEXS` block timings (or 25 FPS WPE default when timings are
+/// absent or zero).
+struct WPETexAnimationTrack: Sendable, Equatable {
+    static let defaultFrameRate: Double = 25
+
+    let frames: [WPETexAnimationFrame]
+    let frameRate: Double
+    let loop: Bool
+
+    var frameCount: Int { frames.count }
+}
+
+struct WPETexAnimationFrame: Sendable, Equatable {
+    let imageID: Int
+    let duration: TimeInterval
+    let mipmaps: [WPETexTextureMipmap]
+}
+
+/// Phase 2E: MP4 bytes extracted from a TEX container that flagged itself
+/// as `isVideoMP4 == 1`. The renderer hands these to `WPEVideoTextureSource`
+/// which feeds `AVAssetReader` + `CVMetalTextureCache`.
+struct WPETexVideoPayload: Sendable, Equatable {
+    let bytes: Data
+    let fileExtension: String
+
+    init(bytes: Data, fileExtension: String = "mp4") {
+        self.bytes = bytes
+        self.fileExtension = fileExtension
+    }
+}
+
 struct WPETexTexturePayload: Sendable, Equatable {
     let info: WPETexInfo
     let mipmaps: [WPETexTextureMipmap]
-    let hasAnimationFrames: Bool
+    let animationTrack: WPETexAnimationTrack?
+    let videoPayload: WPETexVideoPayload?
+
+    private let explicitAnimationFlag: Bool
+
+    init(
+        info: WPETexInfo,
+        mipmaps: [WPETexTextureMipmap],
+        hasAnimationFrames: Bool,
+        animationTrack: WPETexAnimationTrack? = nil,
+        videoPayload: WPETexVideoPayload? = nil
+    ) {
+        self.info = info
+        self.mipmaps = mipmaps
+        self.explicitAnimationFlag = hasAnimationFrames
+        self.animationTrack = animationTrack
+        self.videoPayload = videoPayload
+    }
+
+    var hasAnimationFrames: Bool {
+        explicitAnimationFlag || animationTrack != nil
+    }
 
     var largestMipmap: WPETexTextureMipmap? {
         mipmaps.first
