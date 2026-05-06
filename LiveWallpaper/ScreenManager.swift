@@ -74,11 +74,20 @@ final class ScreenManager {
     /// initialised by the time the lazy var is touched.
     @ObservationIgnored private lazy var playbackCoordinator = PlaybackCoordinator(
         configurationStore: configurationStore,
+        powerMonitor: powerMonitor,
+        fullScreenDetector: fullScreenDetector,
+        powerPolicy: powerPolicy,
         applyVideoEffects: { [weak self] screen, config in
             self?.applyVideoEffects(for: screen, config: config)
         },
         refreshRateLookup: { [weak self] screenID in
             self?.getScreenRefreshRate(for: screenID) ?? 60
+        },
+        screensProvider: { [weak self] in
+            self?.screens ?? []
+        },
+        markSessionStateChanged: { [weak self] in
+            self?.markWallpaperSessionStateChanged()
         }
     )
     @ObservationIgnored private var transitionRegistry: PlaybackTransitionRegistry {
@@ -626,59 +635,7 @@ final class ScreenManager {
         screen: Screen,
         configuration: ScreenConfiguration
     ) {
-        let screenID = screen.id
-        transitionRegistry.cancelAssetReadiness(for: screenID)
-
-        let apply: @MainActor () -> Void = { [weak self] in
-            guard let self,
-                  let liveScreen = self.screens.first(where: { $0.id == screenID }) else { return }
-            if configuration.particleEffect != .none {
-                player.setParticleEffect(
-                    configuration.particleEffect,
-                    density: configuration.effectConfig.particleDensity
-                )
-            }
-            if configuration.effectConfig.hasActiveEffect {
-                self.applyVideoEffects(for: liveScreen, config: configuration)
-            } else {
-                self.applyFrameRateLimit(configuration.frameRateLimit, to: liveScreen)
-            }
-        }
-
-        if player.videoFrameRate > 0 {
-            apply()
-            return
-        }
-
-        let work = AssetReadinessWork()
-        transitionRegistry.setAssetReadiness(work, for: screenID)
-        var didApply = false
-
-        let finish: @MainActor () -> Void = { [weak self, weak work] in
-            guard let self, !didApply else { return }
-            didApply = true
-            apply()
-            work?.cancel()
-            if let work {
-                self.transitionRegistry.clearAssetReadinessIfMatch(work, for: screenID)
-            }
-        }
-
-        work.frameRateSubscription = player.$videoFrameRate
-            .first(where: { $0 > 0 })
-            .receive(on: DispatchQueue.main)
-            .sink { _ in
-                finish()
-            }
-
-        work.fallbackTask = Task { @MainActor in
-            do {
-                try await Task.sleep(for: .seconds(5))
-            } catch {
-                return
-            }
-            finish()
-        }
+        playbackCoordinator.applyConfigurationWhenAssetReady(player: player, screen: screen, configuration: configuration)
     }
 
     private func setupVideoPlayback(url: URL, screen: Screen) {
@@ -724,63 +681,11 @@ final class ScreenManager {
     }
 
     private func applyStartupPlaybackPolicy(to player: WallpaperVideoPlayer, for screen: Screen) {
-        let globalSettings = SettingsManager.shared.loadGlobalSettings()
-        let powerSource = powerMonitor.currentPowerSource
-        let isHiddenByFullScreen = fullScreenDetector.isDesktopHidden(for: screen.id)
-
-        let pauseForPower = WallpaperPolicyEngine.shouldPauseForPower(
-            globalSettings: globalSettings,
-            powerSource: powerSource
-        )
-        let pauseForFullScreen = WallpaperPolicyEngine.shouldApplyFullScreenPolicy(
-            globalSettings: globalSettings,
-            isHiddenByFullScreen: isHiddenByFullScreen
-        )
-
-        if pauseForPower {
-            powerPolicy.markPausedByPower(screen.id)
-        }
-        if pauseForFullScreen {
-            powerPolicy.markPausedByFullScreen(screen.id)
-        }
-
-        if WallpaperPolicyEngine.shouldStartVideoPaused(
-            globalSettings: globalSettings,
-            powerSource: powerSource,
-            isHiddenByFullScreen: isHiddenByFullScreen
-        ) {
-            player.pause()
-            return
-        }
-
-        schedulePolicyAwarePlaybackStart(to: player, screenID: screen.id)
+        playbackCoordinator.applyStartupPlaybackPolicy(to: player, for: screen)
     }
 
     private func schedulePolicyAwarePlaybackStart(to player: WallpaperVideoPlayer, screenID: CGDirectDisplayID) {
-        Task { @MainActor [weak self, weak player] in
-            do {
-                try await Task.sleep(for: .milliseconds(200))
-            } catch {
-                return
-            }
-
-            guard let self, let player else { return }
-
-            let globalSettings = SettingsManager.shared.loadGlobalSettings()
-            let shouldPause = WallpaperPolicyEngine.shouldStartVideoPaused(
-                globalSettings: globalSettings,
-                powerSource: self.powerMonitor.currentPowerSource,
-                isHiddenByFullScreen: self.fullScreenDetector.isDesktopHidden(for: screenID)
-            )
-
-            guard !shouldPause else {
-                player.pause()
-                return
-            }
-
-            player.play()
-            self.markWallpaperSessionStateChanged()
-        }
+        playbackCoordinator.schedulePolicyAwarePlaybackStart(to: player, screenID: screenID)
     }
 
     
