@@ -259,43 +259,9 @@ struct HTMLSourceSection: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
-            HStack {
-                Label("Mute Audio", systemImage: "speaker.slash")
-                Spacer()
-                Toggle("", isOn: Binding(
-                    get: { config.muteAudio },
-                    set: { newValue in
-                        config.muteAudio = newValue
-                        commitConfig()
-                    }
-                ))
-                .labelsHidden()
-                .accessibilityLabel("Mute Audio")
-                .toggleStyle(.switch)
-                .controlSize(.small)
-            }
-            Text("Silences any <audio> or <video> elements without pausing the visuals.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-
-            HStack {
-                Label("Block Trackers", systemImage: "shield")
-                Spacer()
-                Toggle("", isOn: Binding(
-                    get: { config.blockTrackers },
-                    set: { newValue in
-                        config.blockTrackers = newValue
-                        commitConfig()
-                    }
-                ))
-                .labelsHidden()
-                .accessibilityLabel("Block Trackers")
-                .toggleStyle(.switch)
-                .controlSize(.small)
-            }
-            Text("Filters common analytics and ad scripts from URL wallpapers.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+            // "Mute Audio" / "Block Trackers" moved to CommonPlaybackInspector
+            // (Playback & Privacy section) so the controls share a stable
+            // physical position with the equivalent video toggles.
 
             HStack {
                 Label("Physical-pixel layout", systemImage: "rectangle.split.2x1")
