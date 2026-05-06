@@ -377,7 +377,12 @@ struct HTMLFolderURLSchemeTests {
         let handler = FolderURLSchemeHandler()
         handler.folderURL = fixture.folder
 
-        let task = CapturingURLSchemeTask(url: URL(string: "livewallpaper://wallpaper/%2e%2e/secret.txt")!)
+        // Path traversal must be blocked even when nonce is valid: simulate a
+        // subresource request originating from the active top-level document.
+        let task = CapturingURLSchemeTask(
+            url: URL(string: "livewallpaper://wallpaper/%2e%2e/secret.txt")!,
+            mainDocumentURL: makeTopLevelURL(handler: handler)
+        )
 
         handler.webView(WKWebView(), start: task)
 
@@ -393,7 +398,10 @@ struct HTMLFolderURLSchemeTests {
         let handler = FolderURLSchemeHandler()
         handler.folderURL = fixture.folder
 
-        let task = CapturingURLSchemeTask(url: URL(string: "livewallpaper://wallpaper/linked-secret.txt")!)
+        let task = CapturingURLSchemeTask(
+            url: URL(string: "livewallpaper://wallpaper/linked-secret.txt")!,
+            mainDocumentURL: makeTopLevelURL(handler: handler)
+        )
 
         handler.webView(WKWebView(), start: task)
 
@@ -402,7 +410,7 @@ struct HTMLFolderURLSchemeTests {
     }
 
     @Test("Folder scheme sends large assets in bounded chunks")
-    func sendsLargeAssetsInBoundedChunks() throws {
+    func sendsLargeAssetsInBoundedChunks() async throws {
         let fixture = try makeFolderFixture()
         let largeFile = fixture.folder.appendingPathComponent("large.bin")
         let payload = Data(repeating: 0xA5, count: 200 * 1024)
@@ -410,15 +418,34 @@ struct HTMLFolderURLSchemeTests {
         let handler = FolderURLSchemeHandler()
         handler.folderURL = fixture.folder
 
-        let task = CapturingURLSchemeTask(url: URL(string: "livewallpaper://wallpaper/large.bin")!)
+        // Asset URL pretends to be a subresource of the active top-level
+        // document so it bypasses the nonce gate (real subresources do).
+        let task = CapturingURLSchemeTask(
+            url: URL(string: "livewallpaper://wallpaper/large.bin")!,
+            mainDocumentURL: makeTopLevelURL(handler: handler)
+        )
 
         handler.webView(WKWebView(), start: task)
+
+        // Detached worker; wait until streaming completes.
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while task.didFinishCallCount == 0, task.failure == nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
 
         #expect(task.failure == nil)
         #expect(task.didFinishCallCount == 1)
         #expect(task.receivedData.count > 1)
         #expect(task.receivedData.allSatisfy { $0.count <= 64 * 1024 })
         #expect(task.receivedData.reduce(0) { $0 + $1.count } == payload.count)
+    }
+
+    /// Builds a `livewallpaper://wallpaper/index.html?n=<nonce>` URL using the
+    /// handler's current session nonce — used as a `mainDocumentURL` stand-in
+    /// so subresource requests skip the top-level nonce gate.
+    private func makeTopLevelURL(handler: FolderURLSchemeHandler) -> URL {
+        let nonce = handler.currentSessionNonce ?? ""
+        return URL(string: "livewallpaper://wallpaper/index.html?n=\(nonce)")!
     }
 
     private func makeFolderFixture() throws -> (root: URL, folder: URL, secret: URL) {
@@ -487,15 +514,17 @@ struct HTMLWallpaperMouseInteractionTests {
     }
 }
 
-private final class CapturingURLSchemeTask: NSObject, WKURLSchemeTask {
+private final class CapturingURLSchemeTask: NSObject, WKURLSchemeTask, @unchecked Sendable {
     let request: URLRequest
     private(set) var responses: [URLResponse] = []
     private(set) var receivedData: [Data] = []
     private(set) var didFinishCallCount = 0
     private(set) var failure: Error?
 
-    init(url: URL) {
-        request = URLRequest(url: url)
+    init(url: URL, mainDocumentURL: URL? = nil) {
+        var request = URLRequest(url: url)
+        request.mainDocumentURL = mainDocumentURL
+        self.request = request
     }
 
     func didReceive(_ response: URLResponse) {
