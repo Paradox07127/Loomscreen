@@ -33,6 +33,9 @@ final class WallpaperVideoPlayer {
     private(set) var shouldAutoplayWhenReady = true
     private(set) var requestedFrameRateLimit: Float = 0
     private(set) var runtimeError: WallpaperRuntimeError?
+    /// Populated lazily after `loadingTask` completes by `detectFormatInfoIfNeeded`.
+    /// Drives the EDR / HDR output path on the player layer + window.
+    private(set) var formatInfo: VideoFormatInfo?
     /// Error sink consumed by `VideoWallpaperSession` for UI surfacing. The
     /// sink replays any pre-existing error when assigned so late observers
     /// don't miss failures raised during init.
@@ -149,6 +152,14 @@ final class WallpaperVideoPlayer {
                     timer.checkpoint("Playback configured")
                 }
 
+                do {
+                    try await self.detectFormatInfoIfNeeded(for: url)
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch {
+                    Logger.warning("Unable to detect video format: \(error.localizedDescription)", category: .videoPlayer)
+                }
+
                 Logger.debug("Video loaded: \(url.lastPathComponent)", category: .videoPlayer)
             } catch is CancellationError {
                 Logger.debug("Video loading task was cancelled", category: .videoPlayer)
@@ -193,6 +204,10 @@ final class WallpaperVideoPlayer {
         self.window = videoWindow
         self.videoView = containerView
 
+        if let formatInfo {
+            applyHDRPreferenceIfNeeded(for: formatInfo)
+        }
+
         if let pending = pendingParticleEffect {
             pendingParticleEffect = nil
             containerView.setParticleEffect(pending.0, density: pending.1)
@@ -208,6 +223,24 @@ final class WallpaperVideoPlayer {
             applyRequestedFrameRateLimitIfReady()
         }
         setupPlayerReadyObserver()
+    }
+
+    private func detectFormatInfoIfNeeded(for url: URL) async throws {
+        guard formatInfo == nil else { return }
+        let detected = try await PlayableVideoLoader.detectFormat(at: url)
+        try Task.checkCancellation()
+        formatInfo = detected
+        applyHDRPreferenceIfNeeded(for: detected)
+    }
+
+    private func applyHDRPreferenceIfNeeded(for formatInfo: VideoFormatInfo) {
+        guard formatInfo.isHDR, let videoView else { return }
+        let details = formatInfo.badges.isEmpty
+            ? "transfer function detected"
+            : formatInfo.badges.joined(separator: " ")
+        Logger.info("Video is HDR (\(details)) — enabling EDR output", category: .videoPlayer)
+        videoView.applyHDRPreference(true)
+        window?.setExtendedDynamicRangeEnabled(true)
     }
 
     private func setupPlayerReadyObserver() {
@@ -345,6 +378,15 @@ final class WallpaperVideoPlayer {
 
     func seek(to time: Double) {
         player?.seek(to: CMTime(seconds: time, preferredTimescale: CMTimeScale(NSEC_PER_SEC)))
+    }
+
+    /// Frame-accurate seek for playlist boundaries / lock-screen mirroring
+    /// where the default `seek(to:)` tolerances would drift the transition by
+    /// up to ~1 second on long-GOP H.264.
+    func seekExact(seconds: TimeInterval) async {
+        guard let player else { return }
+        let target = CMTime(seconds: seconds, preferredTimescale: 600)
+        await player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
     }
 
     func setPlaybackSpeed(_ speed: Double) {
@@ -503,13 +545,23 @@ final class WallpaperVideoPlayer {
                 try Task.checkCancellation()
 
                 let naturalSize = try await videoTrack.load(.naturalSize)
+                let transform = try await videoTrack.load(.preferredTransform)
 
                 try Task.checkCancellation()
 
                 let targetFPS = framesPerSecond
                 let duration = try await asset.load(.duration)
 
-                let layerInstrConfig = AVVideoCompositionLayerInstruction.Configuration(assetTrack: videoTrack)
+                // Apply the asset's `preferredTransform` to the layer instruction
+                // so portrait video (e.g. iPhone vertical recordings) renders
+                // upright. The composition `renderSize` must follow the rotated
+                // bounds — using `naturalSize` directly leaves portrait video
+                // letterboxed inside a landscape canvas.
+                let displayed = naturalSize.applying(transform)
+                let renderSize = CGSize(width: abs(displayed.width), height: abs(displayed.height))
+
+                var layerInstrConfig = AVVideoCompositionLayerInstruction.Configuration(assetTrack: videoTrack)
+                layerInstrConfig.setTransform(transform, at: .zero)
 
                 var instrConfig = AVVideoCompositionInstruction.Configuration()
                 instrConfig.timeRange = CMTimeRange(start: .zero, duration: duration)
@@ -517,7 +569,7 @@ final class WallpaperVideoPlayer {
 
                 var compositionConfig = AVVideoComposition.Configuration()
                 compositionConfig.frameDuration = CMTime(value: 1, timescale: CMTimeScale(targetFPS))
-                compositionConfig.renderSize = naturalSize
+                compositionConfig.renderSize = renderSize
                 compositionConfig.instructions = [AVVideoCompositionInstruction(configuration: instrConfig)]
                 compositionConfig.sourceTrackIDForFrameTiming = videoTrack.trackID
 
