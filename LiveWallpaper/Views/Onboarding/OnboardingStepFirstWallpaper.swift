@@ -3,6 +3,7 @@ import AppKit
 import UniformTypeIdentifiers
 
 struct OnboardingStepFirstWallpaper: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let nextStep: () -> Void
     let skip: () -> Void
 
@@ -119,7 +120,7 @@ struct OnboardingStepFirstWallpaper: View {
                 Spacer()
 
                 Button("Continue") {
-                    withAnimation { stage = .sourcePicker }
+                    withAnimation(reduceMotion ? nil : .default) { stage = .sourcePicker }
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
@@ -224,6 +225,7 @@ struct OnboardingStepFirstWallpaper: View {
                         Image(systemName: "globe")
                             .font(.system(size: 64))
                             .foregroundStyle(.tertiary)
+                            .accessibilityHidden(true)
                         Text("Web Preview Not Available")
                             .font(.system(size: 14, weight: .medium))
                             .foregroundStyle(.secondary)
@@ -240,7 +242,7 @@ struct OnboardingStepFirstWallpaper: View {
             HStack(spacing: 12) {
                 Button("Pick Different Source") {
                     previewController.cleanup()
-                    withAnimation { stage = .sourcePicker }
+                    withAnimation(reduceMotion ? nil : .default) { stage = .sourcePicker }
                 }
                 .keyboardShortcut(.cancelAction)
 
@@ -340,12 +342,12 @@ struct OnboardingStepFirstWallpaper: View {
         guard response == .OK, let url = panel.url,
               let bookmark = ResourceUtilities.createBookmark(for: url) else { return }
         SettingsManager.shared.saveLastUsedDirectory(url.deletingLastPathComponent())
-        withAnimation { stage = .livePreview(.video(url, bookmark)) }
+        withAnimation(reduceMotion ? nil : .default) { stage = .livePreview(.video(url, bookmark)) }
     }
 
     private func applyHTML(_ source: HTMLSource) {
         showHTMLSheet = false
-        withAnimation { stage = .livePreview(.html(source)) }
+        withAnimation(reduceMotion ? nil : .default) { stage = .livePreview(.html(source)) }
     }
 
     private func chooseWPEFolder() {
@@ -457,6 +459,7 @@ private struct HTMLPickerSheet: View {
                 HStack {
                     Image(systemName: "doc.richtext")
                         .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
                     Text(pickedFileName.isEmpty ? "No file chosen" : pickedFileName)
                         .font(.system(size: 12, design: .monospaced))
                         .lineLimit(1)
@@ -474,6 +477,7 @@ private struct HTMLPickerSheet: View {
                 HStack {
                     Image(systemName: "folder")
                         .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
                     Text(pickedFolderName.isEmpty ? "No folder chosen" : pickedFolderName)
                         .font(.system(size: 12, design: .monospaced))
                         .lineLimit(1)
