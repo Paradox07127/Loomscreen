@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 struct MenuBarContent: View {
     let openSettings: () -> Void
     let openSettingsForScreen: (CGDirectDisplayID) -> Void
+    let promptAddWallpaper: (String) -> Void
 
     @Environment(ScreenManager.self) private var screenManager
     @Environment(\.dismiss) private var dismiss
@@ -13,6 +14,10 @@ struct MenuBarContent: View {
     @State private var globalPauseOnBattery: Bool = SettingsManager.shared.loadGlobalSettings().globalPauseOnBattery
     @State private var globalPauseOnFullScreen: Bool = SettingsManager.shared.loadGlobalSettings().pauseOnFullScreen
     @AppStorage("Dashboard.RAMScope") private var ramScopeRaw: String = "system"
+    /// Persisted across launches so power users keep the live readout visible
+    /// while casual users see a one-line summary by default. The 280pt status
+    /// bar overlay was the noisiest surface in the audit.
+    @AppStorage("MenuBar.DashboardExpanded") private var dashboardExpanded: Bool = false
 
     @State private var isWebURLEntryExpanded: Bool = false
     @State private var webURLDraft: String = ""
@@ -82,20 +87,49 @@ struct MenuBarContent: View {
     // MARK: - Mini Dashboard
 
     private var miniDashboard: some View {
-        VStack(spacing: 6) {
-            // RAM scope picker — explicit segmented capsule shared with sidebar.
-            HStack(spacing: 0) {
-                ramScopeButton(label: "All", value: "system")
-                ramScopeButton(label: "App", value: "app")
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                withAnimation(.snappy(duration: 0.18)) { dashboardExpanded.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .rotationEffect(.degrees(dashboardExpanded ? 90 : 0))
+                        .foregroundStyle(.secondary)
+                    Text(dashboardSummary)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .contentShape(Rectangle())
             }
-            .padding(2)
-            .background(Capsule().fill(Color.gray.opacity(0.18)))
-            .frame(maxWidth: 180)
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel("RAM scope")
+            .buttonStyle(.plain)
+            .accessibilityLabel("System Monitor")
+            .accessibilityValue(dashboardExpanded ? "Expanded, \(dashboardSummary)" : "Collapsed, \(dashboardSummary)")
+            .accessibilityHint(dashboardExpanded ? "Double tap to collapse" : "Double tap to expand")
 
-            chipRow
+            if dashboardExpanded {
+                // RAM scope picker — explicit segmented capsule shared with sidebar.
+                HStack(spacing: 0) {
+                    ramScopeButton(label: "All", value: "system")
+                    ramScopeButton(label: "App", value: "app")
+                }
+                .padding(2)
+                .background(Capsule().fill(Color.gray.opacity(0.18)))
+                .frame(maxWidth: 180)
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("RAM scope")
+
+                chipRow
+            }
         }
+    }
+
+    private var dashboardSummary: String {
+        let cpu = Int(cpuPercent.rounded())
+        let ram = Int(ramPercent.rounded())
+        let gpu = Int(monitor.gpuUsage.rounded())
+        return "CPU \(cpu)% · GPU \(gpu)% · RAM \(ram)%"
     }
 
     private var chipRow: some View {
@@ -156,10 +190,10 @@ struct MenuBarContent: View {
                     withAnimation(.snappy(duration: 0.18)) { isWebURLEntryExpanded.toggle() }
                 }
                 QuickActionButton(label: "HTML File", systemImage: "doc.richtext") {
-                    pickHTMLFileFromMenuBar()
+                    requestAddWallpaper(kind: "html-file")
                 }
                 QuickActionButton(label: "Folder", systemImage: "folder") {
-                    pickHTMLFolderFromMenuBar()
+                    requestAddWallpaper(kind: "html-folder")
                 }
                 QuickActionButton(label: "Bookmarks", systemImage: "bookmark.fill") {
                     showBookmarksPopover = true
@@ -290,40 +324,14 @@ struct MenuBarContent: View {
         withAnimation(.snappy(duration: 0.18)) { isWebURLEntryExpanded = false }
     }
 
-    private func pickHTMLFileFromMenuBar() {
-        guard let target = screenManager.screens.first else { return }
-        // Activate the app so the modal panel comes to the front instead of
-        // hiding behind the menu bar / other windows.
-        NSApp.activate(ignoringOtherApps: true)
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [UTType.html]
-        panel.prompt = "Use as Wallpaper"
-        guard panel.runModal() == .OK, let url = panel.url,
-              let source = ResourceUtilities.htmlSourceFromPickedFile(url) else { return }
-        screenManager.setHTMLWallpaperPreservingConfig(source: source, for: target)
-    }
-
-    private func pickHTMLFolderFromMenuBar() {
-        guard let target = screenManager.screens.first else { return }
-        NSApp.activate(ignoringOtherApps: true)
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Use as Wallpaper"
-        guard panel.runModal() == .OK, let folderURL = panel.url,
-              let bookmark = ResourceUtilities.createBookmark(for: folderURL) else { return }
-        let didStart = folderURL.startAccessingSecurityScopedResource()
-        defer { if didStart { folderURL.stopAccessingSecurityScopedResource() } }
-        let entries = (try? FileManager.default.contentsOfDirectory(atPath: folderURL.path)) ?? []
-        let indexFileName = ResourceUtilities.inferHTMLIndexFileName(from: entries)
-        screenManager.setHTMLWallpaperPreservingConfig(
-            source: .folder(bookmarkData: bookmark, indexFileName: indexFileName),
-            for: target
-        )
+    /// Hands the picker off to the main window via a synchronous closure
+    /// that calls `AppDelegate.showSettings(initialAddWallpaperPromptKind:)`
+    /// — this guarantees `ContentView` receives the request at init time
+    /// (or via post when the window already exists) instead of racing against
+    /// SwiftUI mounting the new scene.
+    private func requestAddWallpaper(kind: String) {
+        dismiss()
+        promptAddWallpaper(kind)
     }
 
     private func refreshGlobalToggles() {
