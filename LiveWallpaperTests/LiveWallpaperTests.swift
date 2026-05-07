@@ -120,6 +120,18 @@ struct SettingsWindowLayoutTests {
         #expect(!aerialsSource.contains("struct UnauthorizedAerialsCard"))
     }
 
+    @Test("Apple Aerials guide states do not keep the legacy card copy")
+    func appleAerialsGuideStatesDoNotKeepLegacyCardCopy() throws {
+        let source = try sourceText(for: "LiveWallpaper/Views/AppleAerialsLibraryView.swift")
+
+        #expect(source.contains("private func scanErrorView(message: String) -> some View {\n        LibraryGuideCard("))
+        #expect(source.components(separatedBy: "LibraryGuideCard(").count >= 4)
+        #expect(!source.contains("Opens the right folder automatically"))
+        #expect(!source.contains("One click in the system dialog"))
+        #expect(!source.contains("Read-only access to downloaded .mov aerials"))
+        #expect(!source.contains("Read-only, .mov files only"))
+    }
+
     @Test("Workshop gallery exposes root folder recovery controls")
     func workshopGalleryExposesRootFolderRecoveryControls() throws {
         let source = try sourceText(for: "LiveWallpaper/Views/ScreenDetail/WorkshopGalleryView.swift")
