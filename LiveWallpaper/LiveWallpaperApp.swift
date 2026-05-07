@@ -44,6 +44,13 @@ struct AppStartupPlan: Equatable {
     }
 }
 
+enum SettingsWindowMetrics {
+    static let sidebarColumnWidth = DesignTokens.Sidebar.width
+    static let sidebarColumnMaxWidth = DesignTokens.Sidebar.maxWidth
+    static let defaultContentSize = CGSize(width: 1180, height: 720)
+    static let minimumContentSize = CGSize(width: 1080, height: 650)
+}
+
 /// App delegate owns startup and the hand-managed settings/onboarding windows.
 @MainActor
 @Observable
@@ -135,11 +142,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .environment(manager)
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 900, height: 650),
+            contentRect: NSRect(origin: .zero, size: SettingsWindowMetrics.defaultContentSize),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
+        window.contentMinSize = SettingsWindowMetrics.minimumContentSize
         window.title = "LiveWallpaper Settings"
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden

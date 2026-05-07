@@ -38,7 +38,7 @@ struct PlaylistSection: View {
                         Text("Prev").lineLimit(1)
                     }
                 }
-                .buttonStyle(GlassCapsuleButtonStyle(fontSize: 11, horizontalPadding: 8))
+                .buttonStyle(GlassCapsuleButtonStyle(fontSize: 11, horizontalPadding: 6))
                 .disabled(entries.count < 2)
                 .accessibilityLabel("Skip to previous video")
 
@@ -48,7 +48,7 @@ struct PlaylistSection: View {
                         Text("Add").lineLimit(1)
                     }
                 }
-                .buttonStyle(GlassCapsuleButtonStyle(fontSize: 11, horizontalPadding: 8))
+                .buttonStyle(GlassCapsuleButtonStyle(fontSize: 11, horizontalPadding: 6))
                 .accessibilityLabel("Add videos to playlist")
 
                 Button(action: { screenManager.advancePlaylist(for: screen) }) {
@@ -58,7 +58,7 @@ struct PlaylistSection: View {
                             .contentTransition(.symbolEffect(.replace))
                     }
                 }
-                .buttonStyle(GlassCapsuleButtonStyle(fontSize: 11, horizontalPadding: 8))
+                .buttonStyle(GlassCapsuleButtonStyle(fontSize: 11, horizontalPadding: 6))
                 .disabled(entries.count < 2)
                 .accessibilityLabel("Skip to next video")
             }
@@ -333,16 +333,18 @@ private struct PlaylistRow: View {
                 .font(.system(size: 12, weight: entry.isPlaying ? .semibold : .regular))
                 .lineLimit(1)
                 .truncationMode(.middle)
+                .layoutPriority(1)
+                .help(entry.name)
 
             Spacer(minLength: 4)
 
             if entry.isPrimary {
-                Text("Primary")
+                Image(systemName: "star.fill")
                     .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
+                    .foregroundStyle(.yellow)
+                    .frame(width: 18, height: 18)
                     .background(Capsule().fill(Color.yellow.opacity(0.15)))
+                    .help("Primary video")
             }
 
             Menu {
@@ -363,15 +365,6 @@ private struct PlaylistRow: View {
             .menuIndicator(.hidden)
             .frame(width: 18)
             .opacity(isHovering ? 1 : 0.6)
-
-            Button(action: onRemove) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .opacity(isHovering ? 1 : 0)
-            .accessibilityLabel("Remove \(entry.name)")
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)

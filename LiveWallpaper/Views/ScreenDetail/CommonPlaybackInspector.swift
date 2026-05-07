@@ -106,7 +106,7 @@ struct CommonPlaybackInspector: View {
                 }
             }
             .labelsHidden()
-            .frame(width: 110)
+            .frame(width: 86)
             .onChange(of: frameRateLimit) { _, newValue in
                 screenManager.updateFrameRateLimit(newValue, for: screen)
             }

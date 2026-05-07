@@ -42,7 +42,10 @@ struct ContentView: View {
                 }
         }
         .navigationSplitViewStyle(.balanced)
-        .frame(minWidth: 1000, minHeight: 650)
+        .frame(
+            minWidth: SettingsWindowMetrics.minimumContentSize.width,
+            minHeight: SettingsWindowMetrics.minimumContentSize.height
+        )
         .onAppear { consumeInitialAddWallpaperPromptIfNeeded() }
     }
 
@@ -153,7 +156,6 @@ struct Sidebar: View {
     @Environment(ScreenManager.self) private var screenManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isReloading = false
-    @State private var workshopLibraryAvailable = false
 
     var body: some View {
         List(selection: $selection) {
@@ -195,20 +197,16 @@ struct Sidebar: View {
                 Divider()
                 Text("Library").font(.caption).bold().foregroundStyle(.secondary)
             }) {
-                // "My Wallpapers" first so its position stays stable for users
-                // who never connect the conditional Workshop entry.
                 NavigationLink(value: Navigation.bookmarks) {
                     Label("My Wallpapers", systemImage: "bookmark.fill")
                 }
                 NavigationLink(value: Navigation.appleAerials) {
                     Label("Apple Aerials", systemImage: "sparkles.tv")
                 }
-                if workshopLibraryAvailable {
-                    NavigationLink(value: Navigation.workshop) {
-                        Label("Steam Workshop", systemImage: "cube.transparent")
-                    }
-                    .accessibilityHint("Browse Wallpaper Engine workshop projects")
+                NavigationLink(value: Navigation.workshop) {
+                    Label("Workshop Library", systemImage: "cube.transparent")
                 }
+                .accessibilityHint("Browse Wallpaper Engine workshop projects")
             }
 
             Section(header: VStack(alignment: .leading, spacing: 6) {
@@ -224,30 +222,11 @@ struct Sidebar: View {
             }
         }
         .listStyle(.sidebar)
-        // 220 lets "Built-in Retina Display" + dimensions + status fit on one
-        // row at minimum width; previous 200 caused tail truncation that
-        // looked like content overflow on tight layouts.
-        .navigationSplitViewColumnWidth(min: 220, ideal: 220, max: 300)
-        .onAppear { refreshWorkshopAvailability() }
-        .onReceive(NotificationCenter.default.publisher(for: .wallpaperConfigurationDidChange)) { _ in
-            refreshWorkshopAvailability()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .wpeHistoryDidChange)) { _ in
-            refreshWorkshopAvailability()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .workshopLibraryRootBookmarkDidChange)) { _ in
-            refreshWorkshopAvailability()
-        }
-    }
-
-    /// Workshop entry is shown only when the user has either bookmarked their
-    /// Steam library or already imported at least one Workshop project. Keeps
-    /// the sidebar tidy for users who never touch Wallpaper Engine.
-    private func refreshWorkshopAvailability() {
-        let settings = SettingsManager.shared.loadGlobalSettings()
-        let hasBookmark = SettingsManager.shared.loadWorkshopLibraryRootBookmark() != nil
-        let hasImports = !settings.recentWPEImports.isEmpty
-        workshopLibraryAvailable = hasBookmark || hasImports
+        .navigationSplitViewColumnWidth(
+            min: SettingsWindowMetrics.sidebarColumnWidth,
+            ideal: SettingsWindowMetrics.sidebarColumnWidth,
+            max: SettingsWindowMetrics.sidebarColumnMaxWidth
+        )
     }
 
     private func reloadWallpapers() {
@@ -295,6 +274,8 @@ struct ScreenRow: View {
                 Text(screen.name)
                     .fontWeight(.medium)
                     .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(screen.name)
 
                 HStack(spacing: 6) {
                     Text("\(Int(screen.frame.width))×\(Int(screen.frame.height))")

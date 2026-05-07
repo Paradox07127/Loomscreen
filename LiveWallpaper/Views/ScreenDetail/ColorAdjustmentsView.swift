@@ -78,31 +78,20 @@ struct ColorAdjustmentsView: View {
         in range: ClosedRange<Double>,
         format: String
     ) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 8) {
             Text(title)
                 .font(.system(size: 13))
-                .frame(width: 70, alignment: .leading)
+                .frame(width: 62, alignment: .leading)
 
             Slider(value: value, in: range)
                 .controlSize(.small)
                 .accessibilityLabel(title)
                 .accessibilityValue(String(format: format, value.wrappedValue))
 
-            TextField(
-                "",
-                value: Binding(
-                    get: { value.wrappedValue },
-                    set: { newValue in
-                        value.wrappedValue = min(max(newValue, range.lowerBound), range.upperBound)
-                    }
-                ),
-                format: .number
-            )
+            Text(String(format: format, value.wrappedValue))
             .font(.system(size: 12, design: .monospaced))
             .foregroundStyle(.secondary)
-            .frame(width: 35, alignment: .trailing)
-            .multilineTextAlignment(.trailing)
-            .textFieldStyle(.plain)
+            .frame(width: 36, alignment: .trailing)
         }
     }
 }

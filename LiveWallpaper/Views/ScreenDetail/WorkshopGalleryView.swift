@@ -13,23 +13,31 @@ struct WorkshopGalleryView: View {
     @State private var bulkImportInProgress: Bool = false
     @State private var bulkImportProgress: (current: Int, total: Int) = (0, 0)
     @State private var errorMessage: String?
+    @State private var hasLibraryRoot: Bool = false
+    @State private var rootPathSummary: String?
 
     private let scanner = WallpaperEngineLibraryScanner()
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-            Divider()
+            if hasLibraryRoot {
+                header
+                Divider()
+            }
             content
         }
         .frame(minWidth: 760, minHeight: 540)
         .background(Color(NSColor.windowBackgroundColor))
         .onAppear {
-            if SettingsManager.shared.loadWorkshopLibraryRootBookmark() != nil {
+            updateRootAccessState()
+            if hasLibraryRoot {
                 Task { await refreshScan() }
             } else {
                 state = .needsRoot
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .workshopLibraryRootBookmarkDidChange)) { _ in
+            updateRootAccessState()
         }
         .alert("Library Error", isPresented: Binding(
             get: { errorMessage != nil },
@@ -44,27 +52,60 @@ struct WorkshopGalleryView: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Workshop Library")
-                    .font(.title3.bold())
-                Text(headerSubtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        HStack(spacing: 8) {
+            Text("Workshop Library")
+                .font(.system(size: 14, weight: .semibold))
+
+            if state == .scanning {
+                ProgressView()
+                    .controlSize(.small)
             }
+
+            if !headerSubtitle.isEmpty {
+                Text(headerSubtitle)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(headerSubtitle)
+            }
+
             Spacer()
 
-            if case .results = state {
+            if hasLibraryRoot {
                 Button {
                     Task { await refreshScan() }
                 } label: {
                     Label("Rescan", systemImage: "arrow.clockwise")
                 }
-                .buttonStyle(.glass)
-                .controlSize(.regular)
+                .buttonStyle(GlassCapsuleButtonStyle(tint: .secondary, fontSize: 12, horizontalPadding: 14, verticalPadding: 6))
                 .accessibilityHint("Re-scan the workshop folder for new projects")
                 .disabled(bulkImportInProgress)
 
+                Button {
+                    presentFolderGrant()
+                } label: {
+                    Label("Change Folder", systemImage: "folder.badge.gearshape")
+                }
+                .buttonStyle(GlassCapsuleButtonStyle(tint: .secondary, fontSize: 12, horizontalPadding: 14, verticalPadding: 6))
+                .accessibilityHint("Choose a different Steam Workshop folder")
+                .disabled(bulkImportInProgress)
+
+                Button {
+                    disconnectLibraryRoot()
+                } label: {
+                    Image(systemName: "xmark.circle")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .help("Disconnect Workshop library")
+                .accessibilityLabel("Disconnect Workshop library")
+                .accessibilityHint("Forgets the selected Steam Workshop folder so you can choose again")
+                .disabled(bulkImportInProgress)
+            }
+
+            if case .results = state, !projects.isEmpty {
                 Button {
                     Task { await bulkImportCompatible() }
                 } label: {
@@ -74,8 +115,7 @@ struct WorkshopGalleryView: View {
                         Label("Import All Compatible", systemImage: "square.and.arrow.down")
                     }
                 }
-                .buttonStyle(.glassProminent)
-                .controlSize(.regular)
+                .buttonStyle(GlassCapsuleButtonStyle(fontSize: 12, horizontalPadding: 14, verticalPadding: 6))
                 .disabled(bulkImportInProgress || compatibleCount == 0)
                 .accessibilityHint("Imports every Video and Web project not already in your library")
             }
@@ -85,21 +125,27 @@ struct WorkshopGalleryView: View {
             } label: {
                 Text("Done")
             }
-            .buttonStyle(.glass)
-            .controlSize(.regular)
+            .buttonStyle(GlassCapsuleButtonStyle(tint: .secondary, fontSize: 12, horizontalPadding: 14, verticalPadding: 6))
             .keyboardShortcut(.cancelAction)
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 14)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.regularMaterial)
     }
 
     private var headerSubtitle: String {
         switch state {
         case .needsRoot:
-            return "Choose your Steam Wallpaper Engine folder to discover projects"
+            return ""
         case .scanning:
-            return "Scanning…"
+            if let rootPathSummary {
+                return "Scanning \(rootPathSummary)"
+            }
+            return "Scanning..."
         case .results:
+            if projects.isEmpty, let rootPathSummary {
+                return "No projects found in \(rootPathSummary)"
+            }
             return "\(projects.count) projects · \(compatibleCount) compatible · \(unsupportedCount) preview-only"
         }
     }
@@ -119,31 +165,20 @@ struct WorkshopGalleryView: View {
     }
 
     private var needsRootView: some View {
-        VStack(spacing: 18) {
-            Image(systemName: "folder.badge.questionmark")
-                .font(.system(size: 56, weight: .light))
-                .foregroundStyle(.secondary)
-                .symbolRenderingMode(.hierarchical)
-            VStack(spacing: 6) {
-                Text("Grant access to your Steam library")
-                    .font(.title3.bold())
-                Text("Pick the Wallpaper Engine projects folder once — usually `~/Documents/Live Wallpapers/<appid>/`")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            Button {
-                presentFolderGrant()
-            } label: {
-                Label("Choose Folder…", systemImage: "folder.badge.plus")
-            }
-            .buttonStyle(.glassProminent)
-            .controlSize(.large)
-            .padding(.top, 4)
-            .accessibilityHint("Opens a folder chooser to grant scanning access")
-        }
+        LibraryGuideCard(
+            icon: "books.vertical",
+            title: "Connect Steam Workshop",
+            message: "Choose the Wallpaper Engine folder that contains your subscribed project folders.",
+            features: [
+                LibraryGuideFeature(icon: "folder.badge.gearshape", text: "Pick the folder that contains numbered Workshop project folders"),
+                LibraryGuideFeature(icon: "arrow.triangle.2.circlepath", text: "Rescan after Steam downloads or removes subscriptions"),
+                LibraryGuideFeature(icon: "checkmark.shield", text: "Read-only access; imported copies stay managed by LiveWallpaper")
+            ],
+            actionTitle: "Choose Folder...",
+            actionSystemImage: "folder.badge.plus",
+            action: presentFolderGrant
+        )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(40)
     }
 
     private var scanningView: some View {
@@ -157,25 +192,50 @@ struct WorkshopGalleryView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    @ViewBuilder
     private var resultsView: some View {
-        ScrollView {
-            LazyVGrid(
-                // Fixed-width columns so the 1:1 square preview area is
-                // identical across cards regardless of window width.
-                columns: Array(repeating: GridItem(.fixed(160), spacing: 16), count: 4),
-                alignment: .leading,
-                spacing: 16
-            ) {
-                ForEach(projects) { project in
-                    WorkshopGalleryCard(
-                        project: project,
-                        isImporting: bulkImportInProgress,
-                        onImport: { Task { await importOne(project) } }
-                    )
+        if projects.isEmpty {
+            emptyResultsView
+        } else {
+            ScrollView {
+                LazyVGrid(
+                    // Fixed-width columns so the 1:1 square preview area is
+                    // identical across cards regardless of window width.
+                    columns: Array(repeating: GridItem(.fixed(160), spacing: 16), count: 4),
+                    alignment: .leading,
+                    spacing: 16
+                ) {
+                    ForEach(projects) { project in
+                        WorkshopGalleryCard(
+                            project: project,
+                            isImporting: bulkImportInProgress,
+                            onImport: { Task { await importOne(project) } }
+                        )
+                    }
                 }
+                .padding(20)
             }
-            .padding(20)
         }
+    }
+
+    private var emptyResultsView: some View {
+        LibraryGuideCard(
+            icon: "folder.badge.questionmark",
+            title: "No Workshop projects found",
+            message: "The selected folder did not contain Wallpaper Engine project folders. Pick the folder that contains numeric Workshop IDs, then scan again.",
+            features: [
+                LibraryGuideFeature(icon: "folder.badge.gearshape", text: "Choose the folder that contains numbered Workshop project folders"),
+                LibraryGuideFeature(icon: "arrow.triangle.2.circlepath", text: "Rescan after Steam finishes downloading subscriptions"),
+                LibraryGuideFeature(icon: "checkmark.shield", text: "Only compatible Video and Web projects are imported")
+            ],
+            actionTitle: "Change Folder...",
+            actionSystemImage: "folder.badge.gearshape",
+            secondaryTitle: "Rescan",
+            secondarySystemImage: "arrow.clockwise",
+            action: presentFolderGrant,
+            secondaryAction: { Task { await refreshScan() } }
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Actions
@@ -186,10 +246,12 @@ struct WorkshopGalleryView: View {
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
-        panel.prompt = "Grant Library Access"
+        panel.prompt = hasLibraryRoot ? "Change Folder" : "Grant Library Access"
         panel.message = "Select your Wallpaper Engine projects folder"
 
-        if let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+        if let currentRoot = resolveWorkshopRootURL() {
+            panel.directoryURL = currentRoot
+        } else if let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
             let lwDir = docs.appendingPathComponent("Live Wallpapers")
             if FileManager.default.fileExists(atPath: lwDir.path) {
                 panel.directoryURL = lwDir
@@ -202,16 +264,29 @@ struct WorkshopGalleryView: View {
             return
         }
         SettingsManager.shared.saveWorkshopLibraryRootBookmark(bookmark)
+        updateRootAccessState()
         Task { await refreshScan() }
     }
 
+    private func disconnectLibraryRoot() {
+        SettingsManager.shared.clearWorkshopLibraryRootBookmark()
+        projects = []
+        bulkImportInProgress = false
+        bulkImportProgress = (0, 0)
+        hasLibraryRoot = false
+        rootPathSummary = nil
+        state = .needsRoot
+    }
+
     private func refreshScan() async {
+        updateRootAccessState()
         state = .scanning
 
         // Resolve persisted state on the main actor before crossing onto the
         // detached scan task. SettingsManager is @MainActor isolated and the
         // scanner itself runs off main.
         guard let bookmark = SettingsManager.shared.loadWorkshopLibraryRootBookmark() else {
+            projects = []
             state = .needsRoot
             return
         }
@@ -229,10 +304,13 @@ struct WorkshopGalleryView: View {
         } catch WallpaperEngineLibraryScanner.ScanError.rootInaccessible(let detail) {
             errorMessage = "Workshop folder is unreachable: \(detail). Try re-granting access."
             SettingsManager.shared.clearWorkshopLibraryRootBookmark()
+            updateRootAccessState()
+            projects = []
             state = .needsRoot
         } catch {
             errorMessage = error.localizedDescription
-            state = .needsRoot
+            projects = []
+            state = hasLibraryRoot ? .results : .needsRoot
         }
     }
 
@@ -308,6 +386,30 @@ struct WorkshopGalleryView: View {
         case .video, .web: return true
         case .scene, .application, .unknown: return false
         }
+    }
+
+    private func updateRootAccessState() {
+        guard SettingsManager.shared.loadWorkshopLibraryRootBookmark() != nil else {
+            hasLibraryRoot = false
+            rootPathSummary = nil
+            return
+        }
+
+        hasLibraryRoot = true
+        rootPathSummary = resolveWorkshopRootURL()?.path
+    }
+
+    private func resolveWorkshopRootURL() -> URL? {
+        guard let bookmark = SettingsManager.shared.loadWorkshopLibraryRootBookmark() else {
+            return nil
+        }
+        var isStale = false
+        return try? URL(
+            resolvingBookmarkData: bookmark,
+            options: .withSecurityScope,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        )
     }
 
     private enum PaneState: Equatable {
