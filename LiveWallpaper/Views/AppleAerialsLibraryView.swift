@@ -33,34 +33,26 @@ struct AppleAerialsLibraryView: View {
     }
 
     private func scanErrorView(message: String) -> some View {
-        VStack(spacing: 14) {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 40, weight: .light))
-                .foregroundStyle(.orange)
-
-            Text("Couldn't scan Aerials")
-                .font(.system(size: 16, weight: .semibold))
-                .accessibilityAddTraits(.isHeader)
-
-            Text(message)
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-
-            HStack(spacing: 8) {
-                Button("Retry") {
-                    Task { await library.refresh() }
-                }
-                .buttonStyle(GlassCapsuleButtonStyle(fontSize: 12, horizontalPadding: 16, verticalPadding: 6))
-
-                Button("Reconnect") {
-                    library.clearAccess()
-                }
-                .buttonStyle(GlassCapsuleButtonStyle(tint: .secondary, fontSize: 12, horizontalPadding: 16, verticalPadding: 6))
+        LibraryGuideCard(
+            icon: "exclamationmark.triangle",
+            title: "Couldn't scan Aerials",
+            message: message,
+            features: [
+                LibraryGuideFeature(icon: "folder.badge.gearshape", text: "Reconnect the Apple Aerials library location"),
+                LibraryGuideFeature(icon: "arrow.triangle.2.circlepath", text: "Retry after macOS finishes updating the folder"),
+                LibraryGuideFeature(icon: "checkmark.shield", text: "Read-only access; no files are modified")
+            ],
+            actionTitle: "Reconnect",
+            actionSystemImage: "folder.badge.gearshape",
+            secondaryTitle: "Retry",
+            secondarySystemImage: "arrow.clockwise",
+            action: {
+                library.clearAccess()
+            },
+            secondaryAction: {
+                Task { await library.refresh() }
             }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        )
     }
 
     private var inlineHeader: some View {
@@ -103,14 +95,14 @@ struct AppleAerialsLibraryView: View {
         LibraryGuideCard(
             icon: "sparkles.tv",
             title: "Connect Apple Aerials",
-            message: "Play Apple's aerial wallpapers right from the Mac.",
+            message: "Connect the local Apple Aerials library that contains downloaded aerial videos.",
             features: [
-                LibraryGuideFeature(icon: "folder.badge.gearshape", text: "Opens the right folder automatically"),
-                LibraryGuideFeature(icon: "checkmark.shield", text: "One click in the system dialog; no file to pick"),
-                LibraryGuideFeature(icon: "lock", text: "Read-only access to downloaded .mov aerials")
+                LibraryGuideFeature(icon: "folder.badge.gearshape", text: "Open the local Aerials folder automatically"),
+                LibraryGuideFeature(icon: "arrow.triangle.2.circlepath", text: "Refresh after macOS downloads or removes aerial videos"),
+                LibraryGuideFeature(icon: "checkmark.shield", text: "Read-only access; applied videos stay managed by LiveWallpaper")
             ],
-            actionTitle: library.isScanning ? "Connecting..." : "Connect",
-            actionSystemImage: "sparkles",
+            actionTitle: library.isScanning ? "Connecting..." : "Connect Library",
+            actionSystemImage: "folder.badge.plus",
             isActionInProgress: library.isScanning,
             errorMessage: library.lastScanError,
             action: {
@@ -126,7 +118,7 @@ struct AppleAerialsLibraryView: View {
             message: "Apple downloads aerial wallpapers on demand. Pick one from System Settings → Wallpaper, then refresh.",
             features: [
                 LibraryGuideFeature(icon: "gearshape", text: "Open Wallpaper settings and select an Apple aerial"),
-                LibraryGuideFeature(icon: "arrow.clockwise", text: "Refresh after macOS finishes downloading the video"),
+                LibraryGuideFeature(icon: "arrow.triangle.2.circlepath", text: "Refresh after macOS finishes downloading the video"),
                 LibraryGuideFeature(icon: "checkmark.shield", text: "Only downloaded .mov aerials are listed here")
             ],
             actionTitle: "Open System Settings",
