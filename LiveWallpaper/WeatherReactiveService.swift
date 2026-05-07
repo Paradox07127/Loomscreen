@@ -3,13 +3,16 @@ import CoreLocation
 import Observation
 
 @MainActor @Observable
-final class WeatherReactiveService: NSObject, CLLocationManagerDelegate {
+final class WeatherReactiveService {
 
     private(set) var currentCondition: WeatherDescription?
     private(set) var currentParticleEffect: ParticleEffect = .none
     private(set) var currentEffectAdjustments: WeatherEffectAdjustments = .neutral
     private(set) var locationStatus: LocationStatus = .notDetermined
     private(set) var lastError: String?
+    /// Human-readable description of the active source (e.g. "Manual: Tokyo").
+    /// `nil` until at least one resolve completes. Drives the status badge.
+    private(set) var activeLocationLabel: String?
 
     // MARK: - Types
 
@@ -48,9 +51,16 @@ final class WeatherReactiveService: NSObject, CLLocationManagerDelegate {
         )
     }
 
-    @ObservationIgnored private let locationManager = CLLocationManager()
-    @ObservationIgnored private var currentLocation: CLLocation?
-    @ObservationIgnored private var updateTask: Task<Void, Never>?
+    @ObservationIgnored private let locationProvider: WeatherLocationProviding
+    @ObservationIgnored nonisolated(unsafe) private var updateTask: Task<Void, Never>?
+    /// Separate from `updateTask` so an explicit `refresh()` can supersede
+    /// the in-flight fetch without tearing down the 15-min poll cycle.
+    @ObservationIgnored nonisolated(unsafe) private var fetchTask: Task<Void, Never>?
+    /// `nonisolated(unsafe)` because Swift 6 cannot prove the deinit (which
+    /// runs on whichever queue performs the final release) accesses this
+    /// property safely. We only mutate it from MainActor code, so there's
+    /// no actual race — the unsafe escape hatch is the canonical pattern.
+    @ObservationIgnored nonisolated(unsafe) private var preferenceObserver: NSObjectProtocol?
 
     // MARK: - Open-Meteo Response Model
 
@@ -65,35 +75,36 @@ final class WeatherReactiveService: NSObject, CLLocationManagerDelegate {
 
     // MARK: - Initialization
 
-    override init() {
-        super.init()
-        locationManager.delegate = self
-        locationManager.desiredAccuracy = kCLLocationAccuracyKilometer
+    init(locationProvider: WeatherLocationProviding = WeatherLocationProvider()) {
+        self.locationProvider = locationProvider
+        observePreferenceChanges()
+    }
+
+    deinit {
+        updateTask?.cancel()
+        fetchTask?.cancel()
+        if let observer = preferenceObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     // MARK: - Public API
 
     func startMonitoring() {
-        let status = locationManager.authorizationStatus
-        switch status {
-        case .notDetermined:
-            locationManager.requestWhenInUseAuthorization()
-        case .authorizedAlways, .authorizedWhenInUse:
-            locationManager.requestLocation()
-        default:
-            break
-        }
+        locationProvider.requestCoreLocationAuthorizationIfNeeded()
 
         updateTask?.cancel()
+        startFetch(invalidateIPCache: false)
         updateTask = Task { [weak self] in
-            await self?.fetchWeatherIfPossible()
             while !Task.isCancelled {
                 do {
                     try await Task.sleep(for: .seconds(900))
                 } catch {
                     return
                 }
-                await self?.fetchWeatherIfPossible()
+                await MainActor.run {
+                    self?.startFetch(invalidateIPCache: false)
+                }
             }
         }
     }
@@ -101,25 +112,59 @@ final class WeatherReactiveService: NSObject, CLLocationManagerDelegate {
     func stopMonitoring() {
         updateTask?.cancel()
         updateTask = nil
-        locationManager.stopUpdatingLocation()
+        fetchTask?.cancel()
+        fetchTask = nil
     }
 
     func refresh() {
-        Task { await fetchWeatherIfPossible() }
+        // Bypass the IP cache so an explicit refresh always hits the network
+        // when IP-geo is the active source.
+        startFetch(invalidateIPCache: true)
+    }
+
+    /// Single-flight fetch — supersedes any in-flight fetch so refresh
+    /// taps don't pile up overlapping requests.
+    private func startFetch(invalidateIPCache: Bool) {
+        if invalidateIPCache {
+            locationProvider.invalidateIPGeolocationCache()
+        }
+        fetchTask?.cancel()
+        fetchTask = Task { [weak self] in
+            await self?.fetchWeatherIfPossible()
+        }
+    }
+
+    // MARK: - Preference Observer
+
+    private func observePreferenceChanges() {
+        guard preferenceObserver == nil else { return }
+        preferenceObserver = NotificationCenter.default.addObserver(
+            forName: .weatherLocationPreferenceDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.refresh()
+            }
+        }
     }
 
     // MARK: - Weather Fetch (Open-Meteo)
 
     private func fetchWeatherIfPossible() async {
-        guard let location = currentLocation else {
-            locationManager.requestLocation()
+        locationStatus = .fetching
+
+        let resolution = await locationProvider.resolveCoordinate()
+        activeLocationLabel = resolution.displayName
+
+        guard let coordinate = resolution.coordinate else {
+            lastError = resolution.error
+            locationStatus = resolution.error == nil ? .notDetermined : .denied
             return
         }
 
-        locationStatus = .fetching
-
-        let lat = location.coordinate.latitude
-        let lon = location.coordinate.longitude
+        let lat = coordinate.latitude
+        let lon = coordinate.longitude
         let urlString = "https://api.open-meteo.com/v1/forecast?latitude=\(lat)&longitude=\(lon)&current=weather_code,temperature_2m,cloud_cover&timezone=auto"
 
         guard let url = URL(string: urlString) else {
@@ -144,7 +189,7 @@ final class WeatherReactiveService: NSObject, CLLocationManagerDelegate {
             locationStatus = .available
             lastError = nil
 
-            Logger.info("Weather updated: \(description.rawValue), code=\(weatherCode), particle=\(currentParticleEffect.rawValue)", category: .screenManager)
+            Logger.info("Weather updated: \(description.rawValue), code=\(weatherCode), particle=\(currentParticleEffect.rawValue), source=\(resolution.resolvedSource?.rawValue ?? "none")", category: .screenManager)
         } catch is CancellationError {
             return
         } catch {
@@ -249,46 +294,6 @@ final class WeatherReactiveService: NSObject, CLLocationManagerDelegate {
             )
         case .unknown:
             return .neutral
-        }
-    }
-
-    // MARK: - CLLocationManagerDelegate
-
-    nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        let location = locations.last
-        Task { @MainActor [weak self] in
-            guard let self, let location = location else { return }
-            self.currentLocation = location
-            self.locationStatus = .authorized
-            self.locationManager.stopUpdatingLocation()
-            await self.fetchWeatherIfPossible()
-        }
-    }
-
-    nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        let errorDesc = error.localizedDescription
-        Task { @MainActor [weak self] in
-            self?.lastError = errorDesc
-            self?.locationStatus = .error
-            Logger.warning("Location failed: \(errorDesc)", category: .screenManager)
-        }
-    }
-
-    nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        let status = manager.authorizationStatus
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            switch status {
-            case .authorizedAlways, .authorizedWhenInUse:
-                self.locationStatus = .authorized
-                self.locationManager.requestLocation()
-            case .denied, .restricted:
-                self.locationStatus = .denied
-            case .notDetermined:
-                self.locationStatus = .notDetermined
-            @unknown default:
-                break
-            }
         }
     }
 }

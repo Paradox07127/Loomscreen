@@ -44,4 +44,16 @@ extension Notification.Name {
     /// onboarding watch this so their conditional Workshop entry refreshes
     /// without needing a manual reopen.
     static let workshopLibraryRootBookmarkDidChange = Notification.Name("WorkshopLibraryRootBookmarkDidChange")
+
+    /// `GlobalSettings.showInDock` changed. The app delegate listens so the
+    /// activation policy switch happens immediately without a relaunch.
+    static let dockVisibilityDidChange = Notification.Name("DockVisibilityDidChange")
+
+    /// User-configurable global shortcut bindings changed. The
+    /// `GlobalShortcutManager` re-registers all hot keys on this signal.
+    static let globalShortcutsDidChange = Notification.Name("GlobalShortcutsDidChange")
+
+    /// User changed the weather location preference (source / manual coord).
+    /// `WeatherReactiveService` reacts by re-resolving its provider chain.
+    static let weatherLocationPreferenceDidChange = Notification.Name("WeatherLocationPreferenceDidChange")
 }
