@@ -27,7 +27,7 @@ struct WorkshopGalleryView: View {
             content
         }
         .frame(minWidth: 760, minHeight: 540)
-        .background(Color(NSColor.windowBackgroundColor))
+        .background(Color(NSColor.underPageBackgroundColor))
         .onAppear {
             updateRootAccessState()
             if hasLibraryRoot {
