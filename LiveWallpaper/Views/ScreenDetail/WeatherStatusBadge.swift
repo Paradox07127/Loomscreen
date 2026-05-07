@@ -32,6 +32,14 @@ struct WeatherStatusBadge: View {
                         .foregroundStyle(.secondary)
                 }
 
+                if let label = weatherService.activeLocationLabel, weatherService.lastError == nil {
+                    Text(label)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
                 if let error = weatherService.lastError {
                     Text(error)
                         .font(.system(size: 9))

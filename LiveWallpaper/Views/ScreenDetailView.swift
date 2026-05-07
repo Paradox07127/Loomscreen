@@ -231,7 +231,15 @@ struct ScreenDetailView: View {
                 ZStack {
                     Color(NSColor.underPageBackgroundColor)
 
-                    if selectedWallpaperType == .video {
+                    if shouldShowGuideEmptyState {
+                        EmptyStateGuideView(
+                            onUseAerials: triggerAerialsGuideAction,
+                            onPickVideo: triggerVideoGuideAction,
+                            onAddWebURL: triggerWebURLGuideAction,
+                            onImportWallpaperEngine: triggerWPEGuideAction,
+                            supportsWallpaperEngineImport: hasWallpaperEngineLibrary
+                        )
+                    } else if selectedWallpaperType == .video {
                         if isLoading {
                             ScreenDetailLoadingView()
                         } else if hasPreviewSource || previewController.hasPreviewContent {
@@ -835,6 +843,67 @@ struct ScreenDetailView: View {
 
     private func getScreenRefreshRate() -> Int {
         screenManager.getScreenRefreshRate(for: screen.id)
+    }
+
+    // MARK: - Empty State Guide
+
+    /// True when this screen has no persisted configuration AND no live
+    /// runtime session AND the user is currently looking at the default
+    /// `.video` tab. Switching the toolbar segmented control to .html /
+    /// .scene / .metalShader exits the guide so those tabs can show their
+    /// own configuration UI — without that escape hatch, clicking the
+    /// "Wallpaper Engine" guide card (which sets type to .scene) wouldn't
+    /// reveal the scene section.
+    private var shouldShowGuideEmptyState: Bool {
+        if isLoading { return false }
+        if selectedWallpaperType != .video { return false }
+        if screenManager.getConfiguration(for: screen) != nil { return false }
+        if screen.runtimeSession != nil { return false }
+        if hasPreviewSource || previewController.hasPreviewContent { return false }
+        return true
+    }
+
+    /// Cheap probe — used by both the guide visibility flag and the WPE
+    /// card. Accepts either a manually-rooted Workshop bookmark (set via
+    /// the in-app picker) or the default `~/Documents/Live Wallpapers`
+    /// folder that `OnboardingStepFirstWallpaper` keys on. Either signal
+    /// means the WPE flow has somewhere meaningful to land.
+    private var hasWallpaperEngineLibrary: Bool {
+        if SettingsManager.shared.loadWorkshopLibraryRootBookmark() != nil {
+            return true
+        }
+        guard let docs = FileManager.default.urls(
+            for: .documentDirectory,
+            in: .userDomainMask
+        ).first else { return false }
+        let lwDir = docs.appendingPathComponent("Live Wallpapers")
+        return FileManager.default.fileExists(atPath: lwDir.path)
+    }
+
+    private func triggerAerialsGuideAction() {
+        Task {
+            let granted = await AppleAerialsLibrary.shared.requestAccess()
+            guard granted else { return }
+            await MainActor.run {
+                NotificationCenter.default.post(name: .openAppleAerials, object: nil)
+            }
+        }
+    }
+
+    private func triggerVideoGuideAction() {
+        selectedWallpaperType = .video
+        showFilePicker()
+    }
+
+    private func triggerWebURLGuideAction() {
+        selectedWallpaperType = .html
+        showHTMLSourcePicker()
+    }
+
+    private func triggerWPEGuideAction() {
+        // Same shape as the toolbar — flipping the type lights up the WPE
+        // section, which contains the Workshop import / browse controls.
+        selectedWallpaperType = .scene
     }
 }
 

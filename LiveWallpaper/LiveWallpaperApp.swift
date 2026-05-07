@@ -60,6 +60,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @ObservationIgnored private let runtimeOptions = AppRuntimeOptions()
     @ObservationIgnored private var settingsWindowController: NSWindowController?
     @ObservationIgnored private var onboardingWindowController: NSWindowController?
+    /// See `WeatherReactiveService.preferenceObserver` — same pattern.
+    @ObservationIgnored nonisolated(unsafe) private var dockVisibilityObserver: NSObjectProtocol?
+    @ObservationIgnored private var globalShortcutManager: GlobalShortcutManager?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Logger.notice("Application starting", category: .startup)
@@ -88,12 +91,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        NSApp.setActivationPolicy(.accessory)
+        applyDockVisibility()
+        observeDockVisibilityChanges()
+
+        if !runtimeOptions.isTesting {
+            globalShortcutManager = GlobalShortcutManager(screenManager: manager)
+            globalShortcutManager?.start()
+        }
+
         Logger.notice("Application startup complete", category: .startup)
 
         if startupPlan.showOnboarding {
             DispatchQueue.main.async { [weak self] in
                 self?.showOnboarding()
+            }
+        }
+    }
+
+    deinit {
+        if let observer = dockVisibilityObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
+    // MARK: - Dock Visibility
+
+    /// Reads the persisted preference and applies the matching activation
+    /// policy. `.regular` shows the app in Dock + Cmd-Tab; `.accessory`
+    /// hides it back into the menu bar (current default).
+    private func applyDockVisibility() {
+        let showInDock = SettingsManager.shared.loadGlobalSettings().showInDock
+        let policy: NSApplication.ActivationPolicy = showInDock ? .regular : .accessory
+        NSApp.setActivationPolicy(policy)
+    }
+
+    private func observeDockVisibilityChanges() {
+        dockVisibilityObserver = NotificationCenter.default.addObserver(
+            forName: .dockVisibilityDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.applyDockVisibility()
             }
         }
     }
