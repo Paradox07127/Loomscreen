@@ -8,6 +8,7 @@ struct GeneralSettingsView: View {
     @State private var minimumBatteryLevel: Double?
     @State private var useBatteryThreshold: Bool
     @State private var pauseOnFullScreen: Bool
+    @State private var showInDock: Bool
 
     @State private var showingResetAlert = false
     @State private var showingValidationResults = false
@@ -21,6 +22,7 @@ struct GeneralSettingsView: View {
         _minimumBatteryLevel = State(initialValue: settings.minimumBatteryLevel)
         _useBatteryThreshold = State(initialValue: settings.minimumBatteryLevel != nil)
         _pauseOnFullScreen = State(initialValue: settings.pauseOnFullScreen)
+        _showInDock = State(initialValue: settings.showInDock)
     }
 
     var body: some View {
@@ -30,6 +32,12 @@ struct GeneralSettingsView: View {
 
             powerTab
                 .tabItem { Label("Power", systemImage: "bolt.batteryblock") }
+
+            ShortcutsSettingsView()
+                .tabItem { Label("Shortcuts", systemImage: "command") }
+
+            WeatherLocationSettingsView()
+                .tabItem { Label("Weather", systemImage: "cloud.sun") }
 
             WPECacheManagementView()
                 .tabItem { Label("Cache", systemImage: "internaldrive") }
@@ -87,6 +95,15 @@ struct GeneralSettingsView: View {
                         .onChange(of: pauseOnFullScreen) { _, _ in updateGlobalSettings() }
                         .accessibilityLabel("Pause on full-screen apps")
                         .accessibilityHint("Automatically pause wallpapers when a full-screen app is active")
+                }
+
+                SettingRow(icon: "dock.rectangle", iconColor: .indigo, title: "Show in Dock", subtitle: "Make the app visible in the Dock and Cmd-Tab switcher") {
+                    Toggle("", isOn: $showInDock)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .onChange(of: showInDock) { _, _ in updateGlobalSettings() }
+                        .accessibilityLabel("Show in Dock")
+                        .accessibilityHint("Toggles whether the app appears in the Dock and the Cmd-Tab switcher")
                 }
             } header: {
                 Text("Behavior")
@@ -279,13 +296,18 @@ struct GeneralSettingsView: View {
         // wipe Wallpaper Engine import history (or any other field added
         // outside this form). Only override what this view actually owns.
         var settings = SettingsManager.shared.loadGlobalSettings()
+        let dockChanged = settings.showInDock != showInDock
         settings.globalPauseOnBattery = globalPauseOnBattery
         settings.preservePlaybackOnLock = preservePlaybackOnLock
         settings.startOnLogin = startOnLogin
         settings.minimumBatteryLevel = useBatteryThreshold ? minimumBatteryLevel : nil
         settings.pauseOnFullScreen = pauseOnFullScreen
+        settings.showInDock = showInDock
         SettingsManager.shared.saveGlobalSettings(settings)
         screenManager.handleGlobalSettingsChanged()
+        if dockChanged {
+            NotificationCenter.default.post(name: .dockVisibilityDidChange, object: nil)
+        }
     }
 
     private func resetAllSettings() {
@@ -297,7 +319,15 @@ struct GeneralSettingsView: View {
         minimumBatteryLevel = nil
         useBatteryThreshold = false
         pauseOnFullScreen = true
+        showInDock = false
 
+        // Reset wipes Dock visibility, weather location preference, and
+        // shortcut bindings. Broadcast all three so the AppDelegate, weather
+        // service, and global shortcut manager re-sync without a relaunch.
+        NotificationCenter.default.post(name: .dockVisibilityDidChange, object: nil)
+        NotificationCenter.default.post(name: .globalShortcutsDidChange, object: nil)
+        NotificationCenter.default.post(name: .weatherLocationPreferenceDidChange, object: nil)
+        screenManager.handleGlobalSettingsChanged()
         screenManager.resetAllWallpaperSessions()
         screenManager.refreshScreens(preserveRuntimeSessions: false)
     }
