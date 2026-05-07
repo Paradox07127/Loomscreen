@@ -53,28 +53,12 @@ struct SystemMonitorView: View {
             .accessibilityElement(children: .contain)
             .accessibilityLabel("RAM scope")
 
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
-                MiniGaugeCard(title: "CPU", value: cpuPercent, color: colorForPercent(cpuPercent), icon: "cpu")
-                    .accessibilityLabel("CPU usage")
-                    .accessibilityValue("\(Int(cpuPercent)) percent")
-
-                MiniGaugeCard(title: "GPU", value: monitor.gpuUsage, color: colorForPercent(monitor.gpuUsage), icon: "square.stack.3d.up.fill")
-                    .accessibilityLabel("GPU usage")
-                    .accessibilityValue("\(Int(monitor.gpuUsage)) percent")
-
-                MiniGaugeCard(title: ramTitle, value: ramPercent, color: colorForPercent(ramPercent), icon: "memorychip")
-                    .accessibilityLabel("\(ramTitle) usage")
-                    .accessibilityValue("\(Int(ramPercent)) percent")
-
-                PowerStatusCard(powerSource: powerSource)
-                    .accessibilityLabel("Power source")
-                    .accessibilityValue(powerSource.accessibilitySummary)
-            }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 8)
-            .background(Color(NSColor.windowBackgroundColor).opacity(0.8))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .shadow(color: Color.black.opacity(0.06), radius: 3, x: 0, y: 1)
+            gaugeGrid
+                .padding(.horizontal, 6)
+                .padding(.vertical, 8)
+                .background(Color(NSColor.windowBackgroundColor).opacity(0.8))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .shadow(color: Color.black.opacity(0.06), radius: 3, x: 0, y: 1)
 
             VStack(spacing: 6) {
                 HStack(spacing: 12) {
@@ -151,6 +135,31 @@ struct SystemMonitorView: View {
         @unknown default: return .gray
         }
     }
+
+    private var gaugeGrid: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                MiniGaugeCard(title: "CPU", value: cpuPercent, color: colorForPercent(cpuPercent), icon: "cpu")
+                    .accessibilityLabel("CPU usage")
+                    .accessibilityValue("\(Int(cpuPercent)) percent")
+
+                MiniGaugeCard(title: "GPU", value: monitor.gpuUsage, color: colorForPercent(monitor.gpuUsage), icon: "square.stack.3d.up.fill")
+                    .accessibilityLabel("GPU usage")
+                    .accessibilityValue("\(Int(monitor.gpuUsage)) percent")
+            }
+
+            HStack(spacing: 8) {
+                MiniGaugeCard(title: ramTitle, value: ramPercent, color: colorForPercent(ramPercent), icon: "memorychip")
+                    .accessibilityLabel("\(ramTitle) usage")
+                    .accessibilityValue("\(Int(ramPercent)) percent")
+
+                PowerStatusCard(powerSource: powerSource)
+                    .accessibilityLabel("Power source")
+                    .accessibilityValue(powerSource.accessibilitySummary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
 }
 
 // MARK: - MiniGaugeCard
@@ -162,6 +171,8 @@ struct MiniGaugeCard: View {
     let color: Color
     let icon: String
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         ZStack {
             Circle()
@@ -170,10 +181,10 @@ struct MiniGaugeCard: View {
                 .rotationEffect(.degrees(135))
 
             Circle()
-                .trim(from: 0.0, to: CGFloat(min(value / 100.0, 1.0)) * 0.75)
+                .trim(from: 0.0, to: CGFloat(displayedPercent) / 100 * 0.75)
                 .stroke(color, style: StrokeStyle(lineWidth: 6, lineCap: .round))
                 .rotationEffect(.degrees(135))
-                .animation(.spring(response: 0.5, dampingFraction: 0.8), value: value)
+                .animation(DesignTokens.motion(reduceMotion, .spring(response: 0.5, dampingFraction: 0.8)), value: displayedPercent)
 
             Image(systemName: icon)
                 .font(.system(size: 14, weight: .bold))
@@ -183,13 +194,17 @@ struct MiniGaugeCard: View {
                 Text(title)
                     .font(.system(size: 8, weight: .semibold, design: .rounded))
                     .foregroundStyle(.secondary)
-                Text("\(Int(value))%")
+                Text("\(displayedPercent)%")
                     .font(.system(size: 9, weight: .bold, design: .rounded))
             }
             .offset(y: 18)
         }
         .frame(width: 54, height: 54)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity)
+    }
+
+    private var displayedPercent: Int {
+        Int(min(max(value, 0), 100).rounded())
     }
 }
 
@@ -232,7 +247,7 @@ struct PowerStatusCard: View {
             .offset(y: 18)
         }
         .frame(width: 54, height: 54)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity)
     }
 
     private var iconName: String {

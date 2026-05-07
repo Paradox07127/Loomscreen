@@ -627,6 +627,14 @@ struct MonitoringCadencePolicyTests {
     }
 }
 
+@Suite("Monitoring start policy")
+struct MonitoringStartPolicyTests {
+    @Test("Initial resource sample is deferred past sidebar expansion animation")
+    func initialResourceSampleIsDeferredPastSidebarExpansionAnimation() {
+        #expect(MonitoringStartPolicy.initialSampleDelay == .milliseconds(350))
+    }
+}
+
 @Suite("Wallpaper runtime readiness")
 @MainActor
 struct WallpaperRuntimeReadinessTests {

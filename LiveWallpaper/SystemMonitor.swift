@@ -34,6 +34,10 @@ enum MonitoringCadencePolicy {
     }
 }
 
+enum MonitoringStartPolicy {
+    static let initialSampleDelay: Duration = .milliseconds(350)
+}
+
 @MainActor @Observable
 final class SystemMonitor {
     static let shared = SystemMonitor()
@@ -69,8 +73,16 @@ final class SystemMonitor {
     func startMonitoring() {
         guard references.start() else { return }
         let interval = updateInterval
+        let initialSampleDelay = MonitoringStartPolicy.initialSampleDelay
         resourceUpdateCount = 0
         updateTask = Task {
+            do {
+                try await Task.sleep(for: initialSampleDelay)
+            } catch {
+                return
+            }
+            self.updateResourceUsage()
+
             while !Task.isCancelled {
                 do {
                     try await Task.sleep(for: .seconds(interval))
@@ -80,7 +92,6 @@ final class SystemMonitor {
                 self.updateResourceUsage()
             }
         }
-        updateResourceUsage()
     }
 
     func stopMonitoring() {

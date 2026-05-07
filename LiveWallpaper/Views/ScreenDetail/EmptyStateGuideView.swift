@@ -1,22 +1,19 @@
 import SwiftUI
 
-/// First-impression card grid shown when a display has no saved
-/// configuration. Replaces the old per-type empty states (which only made
-/// sense after the user had picked a wallpaper type) with a clear menu of
-/// the four primary content sources.
+/// First-impression card grid shown on a display that has no saved
+/// configuration. Mirrors the toolbar's segmented control 1:1 — exactly
+/// four cards (Video / HTML / Shader / Scene) so users build a single
+/// mental model for "wallpaper type" instead of competing
+/// type-vs-source vocabularies.
 ///
-/// Each card is a fully tabbable button — keyboard navigation cycles
-/// through them, and each carries an explicit accessibility label so
-/// VoiceOver reads "Apple Aerials, downloads-curated landscapes" etc.
+/// Once any card is clicked the screen leaves this guide:
+/// the Video card opens the file picker; the other three flip the
+/// `selectedWallpaperType` and let the per-type empty state take over.
 struct EmptyStateGuideView: View {
-    let onUseAerials: () -> Void
-    let onPickVideo: () -> Void
-    let onAddWebURL: () -> Void
-    let onImportWallpaperEngine: () -> Void
-    /// Drives the optional 4th card. Hidden when the user has neither a
-    /// detected Steam library nor a manually-rooted Workshop folder, so we
-    /// don't dangle a dead-end CTA in front of new users.
-    let supportsWallpaperEngineImport: Bool
+    let onChooseVideo: () -> Void
+    let onChooseHTML: () -> Void
+    let onChooseShader: () -> Void
+    let onChooseScene: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -30,46 +27,44 @@ struct EmptyStateGuideView: View {
                     spacing: 16
                 ) {
                     GuideCard(
-                        icon: "sparkles.tv",
-                        iconTint: .orange,
-                        title: "Apple Aerials",
-                        subtitle: "Curated nature landscapes already on your Mac.",
-                        actionTitle: "Try Now",
-                        actionSystemImage: "play.fill",
-                        action: onUseAerials
-                    )
-
-                    GuideCard(
                         icon: "film",
                         iconTint: .blue,
-                        title: "Pick Video",
-                        subtitle: "Use any MP4 / MOV file from your library.",
-                        actionTitle: "Browse…",
+                        title: "Video",
+                        subtitle: "MP4 / MOV files. Supports playlists and time-of-day schedules.",
+                        actionTitle: "Pick Video…",
                         actionSystemImage: "folder",
-                        action: onPickVideo
+                        action: onChooseVideo
                     )
 
                     GuideCard(
                         icon: "globe",
                         iconTint: .green,
-                        title: "Web URL",
-                        subtitle: "Show any web page or local HTML as a live wallpaper.",
-                        actionTitle: "Add URL…",
-                        actionSystemImage: "link",
-                        action: onAddWebURL
+                        title: "HTML",
+                        subtitle: "Any web page or local HTML file. Particles and weather still apply.",
+                        actionTitle: "Use HTML",
+                        actionSystemImage: "arrow.right",
+                        action: onChooseHTML
                     )
 
-                    if supportsWallpaperEngineImport {
-                        GuideCard(
-                            icon: "cube.transparent",
-                            iconTint: .purple,
-                            title: "Wallpaper Engine",
-                            subtitle: "Import a Steam Workshop scene from your library.",
-                            actionTitle: "Import…",
-                            actionSystemImage: "tray.and.arrow.down",
-                            action: onImportWallpaperEngine
-                        )
-                    }
+                    GuideCard(
+                        icon: "wand.and.stars",
+                        iconTint: .orange,
+                        title: "Shader",
+                        subtitle: "Built-in animated GPU shaders. Lightweight on the battery.",
+                        actionTitle: "Use Shader",
+                        actionSystemImage: "arrow.right",
+                        action: onChooseShader
+                    )
+
+                    GuideCard(
+                        icon: "cube.transparent",
+                        iconTint: .purple,
+                        title: "Scene",
+                        subtitle: "Steam Workshop scenes imported from Wallpaper Engine.",
+                        actionTitle: "Use Scene",
+                        actionSystemImage: "arrow.right",
+                        action: onChooseScene
+                    )
                 }
                 .padding(.horizontal, 4)
 
@@ -91,11 +86,11 @@ struct EmptyStateGuideView: View {
                 .symbolRenderingMode(.hierarchical)
                 .accessibilityHidden(true)
 
-            Text("Pick a wallpaper to get started")
+            Text("Choose a wallpaper type")
                 .font(.system(size: 22, weight: .semibold, design: .rounded))
                 .accessibilityAddTraits(.isHeader)
 
-            Text("Each display can use a different content source. You can change this later from this same screen.")
+            Text("Each display can run a different type. You can switch from the toolbar after picking one.")
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -198,7 +193,7 @@ private struct GuideCard: View {
         .animation(DesignTokens.motion(reduceMotion, .spring(response: 0.32, dampingFraction: 0.86)), value: isHovering)
         .animation(DesignTokens.motion(reduceMotion, .spring(response: 0.32, dampingFraction: 0.86)), value: isFocused)
         .onHover { isHovering = $0 }
-        .accessibilityLabel(title)
+        .accessibilityLabel("\(title) wallpaper type")
         .accessibilityHint(subtitle)
     }
 }

@@ -25,7 +25,6 @@ struct CollapsibleSection<Content: View>: View {
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.secondary)
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                        .animation(reduceMotion ? nil : .snappy(duration: 0.28), value: isExpanded)
                 }
                 .contentShape(Rectangle())
             }

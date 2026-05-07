@@ -90,11 +90,89 @@ struct SettingsWindowLayoutTests {
     func sidebarAlwaysExposesWorkshopLibraryEntry() throws {
         let source = try sourceText(for: "LiveWallpaper/Views/ContentView.swift")
 
-        #expect(source.contains("NavigationLink(value: Navigation.workshop)"))
         #expect(source.contains("Label(\"Workshop Library\", systemImage: \"cube.transparent\")"))
+        #expect(source.contains("NavigationLink(value: Navigation.workshop)"))
         #expect(!source.contains("Label(\"Steam Workshop\", systemImage: \"cube.transparent\")"))
         #expect(!source.contains("workshopLibraryAvailable"))
         #expect(!source.contains("refreshWorkshopAvailability"))
+    }
+
+    @Test("Sidebar dashboard keeps fixed layout animation with original visual spacing")
+    func sidebarDashboardKeepsFixedLayoutAnimationWithOriginalVisualSpacing() throws {
+        let source = try sourceText(for: "LiveWallpaper/Views/SystemMonitorView.swift")
+
+        #expect(!source.contains("LazyVGrid(columns: [GridItem(.flexible()"))
+        #expect(source.contains("private var gaugeGrid: some View"))
+        #expect(source.contains("HStack(spacing: 8)"))
+        #expect(source.contains(".padding(.horizontal, 6)"))
+        #expect(source.contains(".padding(.vertical, 8)"))
+        #expect(source.contains(".font(.system(size: 10"))
+        #expect(source.contains(".padding(.vertical, 3)"))
+        #expect(source.contains("lineWidth: 6"))
+        #expect(source.contains(".font(.system(size: 14, weight: .bold))"))
+        #expect(source.contains(".frame(width: 54, height: 54)"))
+        #expect(!source.contains(".frame(width: 48, height: 48)"))
+        #expect(source.contains("private var displayedPercent: Int"))
+        #expect(source.contains("value: displayedPercent"))
+    }
+
+    @Test("Settings window uses native split-view chrome")
+    func settingsWindowUsesNativeSplitViewChrome() throws {
+        let source = try sourceText(for: "LiveWallpaper/Views/ContentView.swift")
+
+        #expect(source.contains("NavigationSplitView"))
+        #expect(source.contains(".navigationSplitViewStyle(.balanced)"))
+        #expect(source.contains(".navigationSplitViewColumnWidth("))
+        #expect(!source.contains("@State private var isSidebarVisible = true"))
+        #expect(!source.contains("transaction.disablesAnimations = true"))
+        #expect(!source.contains(".ignoresSafeArea(.container, edges: .top)"))
+        #expect(!source.contains("SettingsTopChrome("))
+    }
+
+    @Test("Settings toolbar keeps the original native preferences button")
+    func settingsToolbarKeepsOriginalNativePreferencesButton() throws {
+        let source = try sourceText(for: "LiveWallpaper/Views/ContentView.swift")
+
+        #expect(source.contains("ToolbarItem(placement: .navigation)"))
+        #expect(source.contains("Image(systemName: \"gearshape\")"))
+        #expect(!source.contains("struct SettingsTopChrome"))
+        #expect(!source.contains("struct SettingsChromeButton"))
+        #expect(!source.contains("private let sidebarContentTopInset"))
+        #expect(!source.contains(".frame(height: 68)"))
+    }
+
+    @Test("Detail navigation keeps the original transition format")
+    func detailNavigationKeepsOriginalTransitionFormat() throws {
+        let source = try sourceText(for: "LiveWallpaper/Views/ContentView.swift")
+        let start = try #require(source.range(of: "struct DetailContent: View"))
+        let end = try #require(source.range(of: "// MARK: - Empty State View"))
+        let detailSource = String(source[start.lowerBound..<end.lowerBound])
+
+        #expect(detailSource.contains(".transition(.opacity)"))
+        #expect(detailSource.contains(".animation(.snappy(duration: 0.3), value: selection)"))
+    }
+
+    @Test("Collapsible sections rely on one explicit expansion animation")
+    func collapsibleSectionsRelyOnOneExplicitExpansionAnimation() throws {
+        let source = try sourceText(for: "LiveWallpaper/Views/CollapsibleSection.swift")
+
+        #expect(source.contains("withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.28)))"))
+        #expect(!source.contains(".animation(reduceMotion ? nil : .snappy(duration: 0.28), value: isExpanded)"))
+    }
+
+    @Test("System monitor first sample is not synchronous during sidebar appearance")
+    func systemMonitorFirstSampleIsNotSynchronousDuringSidebarAppearance() throws {
+        let source = try sourceText(for: "LiveWallpaper/SystemMonitor.swift")
+        let start = try #require(source.range(of: "func startMonitoring()"))
+        let end = try #require(source.range(of: "func stopMonitoring()"))
+        let startMonitoring = String(source[start.lowerBound..<end.lowerBound])
+        let sleep = try #require(startMonitoring.range(of: "try await Task.sleep(for: initialSampleDelay)"))
+        let sample = try #require(startMonitoring.range(of: "self.updateResourceUsage()"))
+
+        #expect(startMonitoring.contains("let initialSampleDelay = MonitoringStartPolicy.initialSampleDelay"))
+        #expect(startMonitoring.contains("try await Task.sleep(for: initialSampleDelay)"))
+        #expect(sleep.lowerBound < sample.lowerBound)
+        #expect(!startMonitoring.hasSuffix("updateResourceUsage()\n    }\n\n    "))
     }
 
     @Test("Workshop and Aerials initial states omit inline headers")
