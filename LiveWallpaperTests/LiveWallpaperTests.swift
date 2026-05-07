@@ -120,6 +120,16 @@ struct SettingsWindowLayoutTests {
         #expect(!aerialsSource.contains("struct UnauthorizedAerialsCard"))
     }
 
+    @Test("Library pages share the detail canvas background")
+    func libraryPagesShareTheDetailCanvasBackground() throws {
+        let contentSource = try sourceText(for: "LiveWallpaper/Views/ContentView.swift")
+        let workshopSource = try sourceText(for: "LiveWallpaper/Views/ScreenDetail/WorkshopGalleryView.swift")
+
+        #expect(contentSource.contains(".background(Color(NSColor.underPageBackgroundColor))"))
+        #expect(workshopSource.contains(".background(Color(NSColor.underPageBackgroundColor))"))
+        #expect(!workshopSource.contains(".background(Color(NSColor.windowBackgroundColor))"))
+    }
+
     @Test("Apple Aerials guide states do not keep the legacy card copy")
     func appleAerialsGuideStatesDoNotKeepLegacyCardCopy() throws {
         let source = try sourceText(for: "LiveWallpaper/Views/AppleAerialsLibraryView.swift")
