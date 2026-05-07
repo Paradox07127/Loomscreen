@@ -4,6 +4,183 @@ import CoreGraphics
 import SwiftUI
 @testable import LiveWallpaper
 
+@Suite("Settings window layout")
+struct SettingsWindowLayoutTests {
+    @Test("Settings window defaults fit the minimum composed layout")
+    func settingsWindowDefaultsFitMinimumComposedLayout() {
+        #expect(SettingsWindowMetrics.defaultContentSize.width >= SettingsWindowMetrics.minimumContentSize.width)
+        #expect(SettingsWindowMetrics.defaultContentSize.height >= SettingsWindowMetrics.minimumContentSize.height)
+        #expect(SettingsWindowMetrics.sidebarColumnWidth == 210)
+        #expect(SettingsWindowMetrics.sidebarColumnMaxWidth == SettingsWindowMetrics.sidebarColumnWidth * 1.15)
+        #expect(SettingsWindowMetrics.minimumContentSize.width >= 1080)
+        #expect(SettingsWindowMetrics.minimumContentSize.height >= 650)
+        #expect(DesignTokens.Inspector.minWidth == 268)
+        #expect(DesignTokens.Inspector.idealWidth == 292)
+        #expect(DesignTokens.Inspector.maxWidth == 340)
+    }
+
+    @Test("Video inspector stacks mode controls above detail sections")
+    func videoInspectorStacksModeControlsAboveDetailSections() throws {
+        let source = try sourceText(for: "LiveWallpaper/Views/ScreenDetailView.swift")
+        let inspectorRange = try #require(
+            source.range(of: "private var inspectorPanel"),
+            "ScreenDetailView inspectorPanel not found"
+        )
+        let inspector = String(source[inspectorRange.lowerBound...])
+        let videoBranchRange = try #require(
+            inspector.range(of: "if selectedWallpaperType == .video {"),
+            "Video inspector branch not found"
+        )
+
+        let branchBody = inspector[videoBranchRange.upperBound...]
+            .drop(while: { $0.isWhitespace || $0.isNewline })
+        #expect(
+            branchBody.hasPrefix("VStack(spacing:"),
+            "Video inspector detail sections must flow vertically; a horizontal root makes the settings window overflow."
+        )
+    }
+
+    @Test("Screen detail gives horizontal growth to preview, not inspector")
+    func screenDetailGivesHorizontalGrowthToPreviewNotInspector() throws {
+        let source = try sourceText(for: "LiveWallpaper/Views/ScreenDetailView.swift")
+
+        #expect(!source.contains("HSplitView"), "HSplitView persists user-resized column widths and lets the inspector stretch.")
+        #expect(source.contains("HStack(spacing: 0)"), "The preview and inspector should be composed with an explicit horizontal stack.")
+        #expect(source.contains(".layoutPriority(1)"), "The preview column should be the only horizontal expansion target.")
+        #expect(source.contains("@AppStorage(\"Inspector.Width\")"), "The inspector should remember an explicit user width instead of stretching with the window.")
+        #expect(
+            source.contains(".frame(width: inspectorPanelWidth)"),
+            "The inspector should use a clamped stored width so wide windows enlarge only the preview area."
+        )
+        #expect(source.contains("InspectorResizeHandle"), "The inspector should be user-resizable without reintroducing HSplitView.")
+    }
+
+    @Test("Inspector resize handle previews width locally and exposes a drag affordance")
+    func inspectorResizeHandlePreviewsWidthLocallyAndExposesDragAffordance() throws {
+        let source = try sourceText(for: "LiveWallpaper/Views/ScreenDetailView.swift")
+
+        #expect(
+            source.contains("@State private var liveInspectorWidth"),
+            "Drag updates should live in transient view state instead of writing AppStorage every frame."
+        )
+        #expect(
+            source.contains("DragGesture(minimumDistance: 2, coordinateSpace: .global)"),
+            "The resize drag should use global coordinates so moving the handle does not change the drag coordinate space."
+        )
+        #expect(source.contains("onPreviewWidthChange"), "The handle should preview width during drag without committing it.")
+        #expect(source.contains("onCommitWidth"), "The handle should persist the clamped width only when dragging ends.")
+        #expect(source.contains("liveInspectorWidth = nil"), "The transient drag width should be cleared after commit.")
+        #expect(
+            source.contains("Image(systemName: \"arrow.left.and.right\")"),
+            "The divider needs a visible centered affordance that communicates horizontal resizing."
+        )
+    }
+
+    @Test("Playlist rows prioritize filename over secondary controls")
+    func playlistRowsPrioritizeFilenameOverSecondaryControls() throws {
+        let source = try sourceText(for: "LiveWallpaper/Views/PlaylistSection.swift")
+
+        #expect(source.contains(".layoutPriority(1)"), "Playlist filenames need first claim on row width.")
+        #expect(source.contains(".help(entry.name)"), "Truncated filenames should still be discoverable via tooltip.")
+        #expect(!source.contains("Button(action: onRemove)"), "A hidden remove button still consumes row width; removal belongs in the menu.")
+        #expect(source.contains("Image(systemName: \"star.fill\")"), "Primary state should use a compact icon badge in narrow inspectors.")
+    }
+
+    @Test("Sidebar always exposes Workshop library entry")
+    func sidebarAlwaysExposesWorkshopLibraryEntry() throws {
+        let source = try sourceText(for: "LiveWallpaper/Views/ContentView.swift")
+
+        #expect(source.contains("NavigationLink(value: Navigation.workshop)"))
+        #expect(source.contains("Label(\"Workshop Library\", systemImage: \"cube.transparent\")"))
+        #expect(!source.contains("Label(\"Steam Workshop\", systemImage: \"cube.transparent\")"))
+        #expect(!source.contains("workshopLibraryAvailable"))
+        #expect(!source.contains("refreshWorkshopAvailability"))
+    }
+
+    @Test("Workshop and Aerials initial states omit inline headers")
+    func workshopAndAerialsInitialStatesOmitInlineHeaders() throws {
+        let workshopSource = try sourceText(for: "LiveWallpaper/Views/ScreenDetail/WorkshopGalleryView.swift")
+        let aerialsSource = try sourceText(for: "LiveWallpaper/Views/AppleAerialsLibraryView.swift")
+
+        #expect(workshopSource.contains("if hasLibraryRoot {\n                header\n                Divider()\n            }"))
+        #expect(!workshopSource.contains("case .needsRoot:\n            return \"Choose your Steam Wallpaper Engine folder to discover projects\""))
+        #expect(aerialsSource.contains("if library.isAuthorized {\n                inlineHeader\n            }"))
+    }
+
+    @Test("Workshop and Aerials share the guide card layout")
+    func workshopAndAerialsShareGuideCardLayout() throws {
+        let workshopSource = try sourceText(for: "LiveWallpaper/Views/ScreenDetail/WorkshopGalleryView.swift")
+        let aerialsSource = try sourceText(for: "LiveWallpaper/Views/AppleAerialsLibraryView.swift")
+        let sharedSource = try? sourceText(for: "LiveWallpaper/Views/LibraryGuideCard.swift")
+
+        #expect(sharedSource?.contains("struct LibraryGuideCard") == true)
+        #expect(workshopSource.contains("LibraryGuideCard("))
+        #expect(aerialsSource.contains("LibraryGuideCard("))
+        #expect(!workshopSource.contains("struct WorkshopGuideCard"))
+        #expect(!aerialsSource.contains("struct UnauthorizedAerialsCard"))
+    }
+
+    @Test("Workshop gallery exposes root folder recovery controls")
+    func workshopGalleryExposesRootFolderRecoveryControls() throws {
+        let source = try sourceText(for: "LiveWallpaper/Views/ScreenDetail/WorkshopGalleryView.swift")
+
+        #expect(source.contains("Change Folder"))
+        #expect(source.contains("Disconnect Workshop library"))
+        #expect(source.contains("clearWorkshopLibraryRootBookmark()"))
+        #expect(source.contains("updateRootAccessState()"))
+    }
+
+    @Test("Workshop gallery has guided empty states")
+    func workshopGalleryHasGuidedEmptyStates() throws {
+        let source = try sourceText(for: "LiveWallpaper/Views/ScreenDetail/WorkshopGalleryView.swift")
+
+        #expect(source.contains("LibraryGuideCard"))
+        #expect(source.contains("No Workshop projects found"))
+        #expect(source.contains("LibraryGuideFeature(icon: \"folder.badge.gearshape\""))
+        #expect(source.contains("LibraryGuideFeature(icon: \"arrow.triangle.2.circlepath\""))
+    }
+
+    @Test("Expanded color inspector does not mount text input controls")
+    func expandedColorInspectorDoesNotMountTextInputControls() throws {
+        let source = try sourceText(for: "LiveWallpaper/Views/ScreenDetail/ColorAdjustmentsView.swift")
+
+        #expect(
+            !source.contains("TextField("),
+            "The expanded color inspector should not mount text inputs; numeric labels avoid activating InputMethodKit during normal settings runs."
+        )
+    }
+
+    private func sourceText(for relativePath: String) throws -> String {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let projectRoot = testsDirectory.deletingLastPathComponent()
+        let url = projectRoot.appendingPathComponent(relativePath)
+        return try String(contentsOf: url, encoding: .utf8)
+    }
+}
+
+@Suite("Video playback runtime hygiene")
+struct VideoPlaybackRuntimeHygieneTests {
+    @Test("Muted looper playback reapplies audio policy before autoplay")
+    func mutedLooperPlaybackReappliesAudioPolicyBeforeAutoplay() throws {
+        let source = try sourceText(for: "LiveWallpaper/VideoPlayback/WallpaperVideoPlayer.swift")
+
+        #expect(source.contains("applyAudioPolicyToQueueItems()"), "Muted playback should disable audio tracks across looper clones.")
+        #expect(source.contains("installQueueItemMaintenanceObserver()"), "New AVPlayerLooper items should receive the same muted audio policy.")
+        #expect(source.contains("publisher(for: \\.currentItem)"), "The queue player current item should be observed as looper clones rotate.")
+        #expect(
+            source.contains("self.applyAudioPolicyToQueueItems()\n                self.play()"),
+            "Audio tracks should be disabled again immediately before ready-time autoplay."
+        )
+    }
+
+    private func sourceText(for relativePath: String) throws -> String {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let projectRoot = testsDirectory.deletingLastPathComponent()
+        let url = projectRoot.appendingPathComponent(relativePath)
+        return try String(contentsOf: url, encoding: .utf8)
+    }
+}
+
 // MARK: - ResourceUtilities Tests
 
 @Suite("ResourceUtilities") @MainActor

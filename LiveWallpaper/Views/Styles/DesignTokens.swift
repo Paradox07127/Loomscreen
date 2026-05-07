@@ -22,15 +22,21 @@ enum DesignTokens {
     }
 
     enum Inspector {
-        static let minWidth: CGFloat = 280
-        static let idealWidth: CGFloat = 320
-        static let maxWidth: CGFloat = 480
+        static let minWidth: CGFloat = 268
+        static let idealWidth: CGFloat = 292
+        static let maxWidth: CGFloat = 340
+        static let defaultWidth: CGFloat = idealWidth
         static let horizontalPadding: CGFloat = Spacing.md
         static let verticalPadding: CGFloat = Spacing.lg
     }
 
     enum PreviewArea {
         static let minWidth: CGFloat = 480
+    }
+
+    enum Sidebar {
+        static let width: CGFloat = 210
+        static let maxWidth: CGFloat = width * 1.15
     }
 
     enum Card {

@@ -102,6 +102,9 @@ struct ScreenDetailView: View {
             return .secondary
         }
     }
+    private var showsInspector: Bool {
+        selectedWallpaperType == .video || selectedWallpaperType == .html
+    }
     @State private var showErrorAlert = false
     @State private var errorMessage = ""
     @State private var showClearConfirm = false
@@ -134,6 +137,8 @@ struct ScreenDetailView: View {
     @AppStorage("Inspector.ScheduleExpanded") private var isScheduleExpanded = false
     @AppStorage("Inspector.EnvironmentExpanded") private var isEnvironmentExpanded = true
     @AppStorage("Inspector.ColorExpanded") private var isColorExpanded = false
+    @AppStorage("Inspector.Width") private var inspectorWidth = Double(DesignTokens.Inspector.defaultWidth)
+    @State private var liveInspectorWidth: Double?
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -222,7 +227,7 @@ struct ScreenDetailView: View {
 
             Divider()
 
-            HSplitView {
+            HStack(spacing: 0) {
                 ZStack {
                     Color(NSColor.underPageBackgroundColor)
 
@@ -243,7 +248,7 @@ struct ScreenDetailView: View {
                                     startPreview: setupPreviewPlayer
                                 )
                                 .aspectRatio(16/9, contentMode: .fit)
-                                .frame(maxWidth: 720, maxHeight: 405)
+                                .frame(maxWidth: .infinity)
                                 .shadow(color: Color.black.opacity(0.18), radius: 12, x: 0, y: 4)
 
                                 VStack(spacing: 10) {
@@ -311,14 +316,26 @@ struct ScreenDetailView: View {
                     }
                 }
                 .frame(minWidth: DesignTokens.PreviewArea.minWidth, maxWidth: .infinity, maxHeight: .infinity)
+                .layoutPriority(1)
                 .overlay {
                     dragHintOverlay
                         .animation(.smooth(duration: 0.2), value: isDraggingOver)
                 }
 
-                inspectorPanel
+                if showsInspector {
+                    InspectorResizeHandle(
+                        width: inspectorPanelWidth,
+                        minWidth: DesignTokens.Inspector.minWidth,
+                        maxWidth: DesignTokens.Inspector.maxWidth,
+                        onPreviewWidthChange: previewInspectorWidth,
+                        onCommitWidth: commitInspectorWidth
+                    )
+                    inspectorPanel
+                        .layoutPriority(0)
+                }
             }
             .transaction(value: selectedWallpaperType) { $0.animation = nil }
+            .transaction(value: liveInspectorWidth) { $0.animation = nil }
         }
         .toolbar { screenDetailToolbar }
         .confirmationDialog(
@@ -381,168 +398,194 @@ struct ScreenDetailView: View {
                         )
 
                         if selectedWallpaperType == .video {
-                        HStack(spacing: 0) {
-                            ForEach(WallpaperMode.allCases) { mode in
-                                Button {
-                                    withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.18))) {
-                                            selectedWallpaperMode = mode
+                            VStack(spacing: 16) {
+                                HStack(spacing: 0) {
+                                    ForEach(WallpaperMode.allCases) { mode in
+                                        Button {
+                                            withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.18))) {
+                                                selectedWallpaperMode = mode
+                                            }
+                                            screenManager.updateWallpaperMode(mode, for: screen)
+                                        } label: {
+                                            Text(mode.label)
+                                                .font(.system(size: 12, weight: selectedWallpaperMode == mode ? .semibold : .regular))
+                                                .frame(maxWidth: .infinity)
+                                                .padding(.vertical, 5)
+                                                .background(
+                                                    Capsule()
+                                                        .fill(selectedWallpaperMode == mode ? Color.accentColor.opacity(0.35) : Color.clear)
+                                                )
+                                                .contentShape(Capsule())
                                         }
-                                        screenManager.updateWallpaperMode(mode, for: screen)
-                                    } label: {
-                                        Text(mode.label)
-                                            .font(.system(size: 12, weight: selectedWallpaperMode == mode ? .semibold : .regular))
-                                            .frame(maxWidth: .infinity)
-                                            .padding(.vertical, 5)
-                                            .background(
-                                                Capsule()
-                                                    .fill(selectedWallpaperMode == mode ? Color.accentColor.opacity(0.35) : Color.clear)
-                                            )
-                                            .contentShape(Capsule())
+                                        .buttonStyle(.plain)
+                                        .accessibilityLabel("\(mode.label) mode")
                                     }
-                                    .buttonStyle(.plain)
-                                    .accessibilityLabel("\(mode.label) mode")
                                 }
-                            }
-                            .padding(2)
-                            .glassEffect(.regular.interactive(), in: .capsule)
+                                .padding(2)
+                                .glassEffect(.regular.interactive(), in: .capsule)
 
-                            if selectedWallpaperMode == .playlist {
-                            GroupBox {
-                                CollapsibleSection(
-                                    title: "Playlist",
-                                    systemImage: "list.bullet",
-                                    isExpanded: $isPlaylistExpanded
-                                ) {
-                                    PlaylistSection(
-                                        playlistBookmarks: $playlistBookmarks,
-                                        shufflePlaylist: $shufflePlaylist,
-                                        rotationMinutes: $playlistRotationMinutes,
-                                        screen: screen,
-                                        screenManager: screenManager
-                                    )
-                                }
-                            }
-                            .groupBoxStyle(ContainerGroupBoxStyle())
-                            .transition(reduceMotion ? .opacity : .asymmetric(
-                                insertion: .opacity.combined(with: .scale(scale: 0.96, anchor: .top)),
-                                removal: .opacity
-                            ))
-                            }
-
-                            if selectedWallpaperMode == .schedule {
-                            GroupBox {
-                                CollapsibleSection(
-                                    title: "Schedule",
-                                    systemImage: "clock",
-                                    isExpanded: $isScheduleExpanded
-                                ) {
-                                    ScheduleSection(
-                                        scheduleSlots: $scheduleSlots,
-                                        screen: screen,
-                                        screenManager: screenManager
-                                    )
-                                }
-                            }
-                            .groupBoxStyle(ContainerGroupBoxStyle())
-                            .transition(reduceMotion ? .opacity : .asymmetric(
-                                insertion: .opacity.combined(with: .scale(scale: 0.96, anchor: .top)),
-                                removal: .opacity
-                            ))
-                            }
-
-                            GroupBox {
-                                CollapsibleSection(
-                                    title: "Environment",
-                                    systemImage: "cloud.sun.rain",
-                                    isExpanded: $isEnvironmentExpanded
-                                ) {
-                                    VStack(spacing: 8) {
-                                        SettingRow(icon: "sparkles", iconColor: .purple, title: "Particles") {
-                                            Picker("", selection: $selectedParticleEffect) {
-                                                ForEach(ParticleEffect.allCases) { effect in
-                                                    Text(effect.rawValue).tag(effect)
-                                                }
-                                            }
-                                            .labelsHidden()
-                                            .frame(width: 110)
-                                            .onChange(of: selectedParticleEffect) { _, newValue in
-                                                screenManager.updateParticleEffect(newValue, for: screen)
-                                            }
-                                            .accessibilityLabel("Particle effect")
-                                            .accessibilityValue(selectedParticleEffect.rawValue)
-                                            .accessibilityHint("Choose a particle overlay effect")
-                                            .help("Overlay particle effects on the wallpaper")
+                                if selectedWallpaperMode == .playlist {
+                                    GroupBox {
+                                        CollapsibleSection(
+                                            title: "Playlist",
+                                            systemImage: "list.bullet",
+                                            isExpanded: $isPlaylistExpanded
+                                        ) {
+                                            PlaylistSection(
+                                                playlistBookmarks: $playlistBookmarks,
+                                                shufflePlaylist: $shufflePlaylist,
+                                                rotationMinutes: $playlistRotationMinutes,
+                                                screen: screen,
+                                                screenManager: screenManager
+                                            )
                                         }
+                                    }
+                                    .groupBoxStyle(ContainerGroupBoxStyle())
+                                    .transition(reduceMotion ? .opacity : .asymmetric(
+                                        insertion: .opacity.combined(with: .scale(scale: 0.96, anchor: .top)),
+                                        removal: .opacity
+                                    ))
+                                }
 
-                                        if selectedParticleEffect != .none {
-                                            SettingRow(icon: "circle.hexagongrid", iconColor: .purple, title: "Density") {
-                                                HStack(spacing: 8) {
-                                                    Slider(value: $particleDensity, in: 0.2...3.0)
-                                                        .controlSize(.small)
-                                                        .frame(width: 80)
-                                                        .onChange(of: particleDensity) { _, newValue in
-                                                            screenManager.updateParticleDensity(newValue, for: screen)
-                                                        }
-                                                        .accessibilityLabel("Particle density")
-                                                        .accessibilityValue(String(format: "%.1f×", particleDensity))
-                                                    Text(String(format: "%.1f", particleDensity))
-                                                        .font(.system(size: 12, design: .monospaced))
-                                                        .foregroundStyle(.secondary)
-                                                        .frame(width: 28, alignment: .trailing)
-                                                }
-                                            }
+                                if selectedWallpaperMode == .schedule {
+                                    GroupBox {
+                                        CollapsibleSection(
+                                            title: "Schedule",
+                                            systemImage: "clock",
+                                            isExpanded: $isScheduleExpanded
+                                        ) {
+                                            ScheduleSection(
+                                                scheduleSlots: $scheduleSlots,
+                                                screen: screen,
+                                                screenManager: screenManager
+                                            )
                                         }
+                                    }
+                                    .groupBoxStyle(ContainerGroupBoxStyle())
+                                    .transition(reduceMotion ? .opacity : .asymmetric(
+                                        insertion: .opacity.combined(with: .scale(scale: 0.96, anchor: .top)),
+                                        removal: .opacity
+                                    ))
+                                }
 
-                                        Divider()
-
-                                        SettingRow(icon: "cloud.sun", iconColor: .cyan, title: "Weather") {
-                                            Toggle("", isOn: $effectConfig.weatherReactive)
+                                GroupBox {
+                                    CollapsibleSection(
+                                        title: "Environment",
+                                        systemImage: "cloud.sun.rain",
+                                        isExpanded: $isEnvironmentExpanded
+                                    ) {
+                                        VStack(spacing: 8) {
+                                            SettingRow(icon: "sparkles", iconColor: .purple, title: "Particles") {
+                                                Picker("", selection: $selectedParticleEffect) {
+                                                    ForEach(ParticleEffect.allCases) { effect in
+                                                        Text(effect.rawValue).tag(effect)
+                                                    }
+                                                }
                                                 .labelsHidden()
-                                                .toggleStyle(.switch)
-                                                .onChange(of: effectConfig.weatherReactive) { _, newValue in
-                                                    screenManager.setWeatherReactive(newValue, for: screen)
+                                                .frame(width: 86)
+                                                .onChange(of: selectedParticleEffect) { _, newValue in
+                                                    screenManager.updateParticleEffect(newValue, for: screen)
                                                 }
-                                                .help("Adjust effects based on real-time weather conditions")
-                                                .accessibilityLabel("Weather-reactive effects")
-                                                .accessibilityHint("Automatically adjust particles and color based on real-time weather")
-                                        }
+                                                .accessibilityLabel("Particle effect")
+                                                .accessibilityValue(selectedParticleEffect.rawValue)
+                                                .accessibilityHint("Choose a particle overlay effect")
+                                                .help("Overlay particle effects on the wallpaper")
+                                            }
 
-                                        if effectConfig.weatherReactive {
-                                            WeatherStatusBadge(
-                                                weatherService: screenManager.weatherService,
-                                                refresh: screenManager.weatherService.refresh
-                                            )
+                                            if selectedParticleEffect != .none {
+                                                SettingRow(icon: "circle.hexagongrid", iconColor: .purple, title: "Density") {
+                                                    HStack(spacing: 8) {
+                                                        Slider(value: $particleDensity, in: 0.2...3.0)
+                                                            .controlSize(.small)
+                                                            .frame(width: 80)
+                                                            .onChange(of: particleDensity) { _, newValue in
+                                                                screenManager.updateParticleDensity(newValue, for: screen)
+                                                            }
+                                                            .accessibilityLabel("Particle density")
+                                                            .accessibilityValue(String(format: "%.1f×", particleDensity))
+                                                        Text(String(format: "%.1f", particleDensity))
+                                                            .font(.system(size: 12, design: .monospaced))
+                                                            .foregroundStyle(.secondary)
+                                                            .frame(width: 28, alignment: .trailing)
+                                                    }
+                                                }
+                                            }
+
+                                            Divider()
+
+                                            SettingRow(icon: "cloud.sun", iconColor: .cyan, title: "Weather") {
+                                                Toggle("", isOn: $effectConfig.weatherReactive)
+                                                    .labelsHidden()
+                                                    .toggleStyle(.switch)
+                                                    .onChange(of: effectConfig.weatherReactive) { _, newValue in
+                                                        screenManager.setWeatherReactive(newValue, for: screen)
+                                                    }
+                                                    .help("Adjust effects based on real-time weather conditions")
+                                                    .accessibilityLabel("Weather-reactive effects")
+                                                    .accessibilityHint("Automatically adjust particles and color based on real-time weather")
+                                            }
+
+                                            if effectConfig.weatherReactive {
+                                                WeatherStatusBadge(
+                                                    weatherService: screenManager.weatherService,
+                                                    refresh: screenManager.weatherService.refresh
+                                                )
+                                            }
                                         }
                                     }
                                 }
-                            }
-                            .groupBoxStyle(ContainerGroupBoxStyle())
+                                .groupBoxStyle(ContainerGroupBoxStyle())
 
-                            GroupBox {
-                                CollapsibleSection(
-                                    title: "Color & Filters",
-                                    systemImage: "slider.horizontal.3",
-                                    isExpanded: $isColorExpanded
-                                ) {
-                                    ColorAdjustmentsView(effectConfig: $effectConfig, screen: screen, screenManager: screenManager)
+                                GroupBox {
+                                    CollapsibleSection(
+                                        title: "Color & Filters",
+                                        systemImage: "slider.horizontal.3",
+                                        isExpanded: $isColorExpanded
+                                    ) {
+                                        ColorAdjustmentsView(effectConfig: $effectConfig, screen: screen, screenManager: screenManager)
+                                    }
                                 }
+                                .groupBoxStyle(ContainerGroupBoxStyle())
                             }
-                            .groupBoxStyle(ContainerGroupBoxStyle())
                         }
                     }
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 14)
-                    }
-                    .frame(
-                        minWidth: DesignTokens.Inspector.minWidth,
-                        idealWidth: DesignTokens.Inspector.idealWidth,
-                        maxWidth: DesignTokens.Inspector.maxWidth
-                    )
-                    .background(Color(NSColor.windowBackgroundColor))
-                    .clipped()
-                    .accessibilityLabel("Wallpaper Properties")
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 14)
+                }
+            }
+            .frame(width: inspectorPanelWidth)
+            .fixedSize(horizontal: true, vertical: false)
+            .background(Color(NSColor.windowBackgroundColor))
+            .clipped()
+            .accessibilityLabel("Wallpaper Properties")
         }
+    }
+
+    private var inspectorPanelWidth: CGFloat {
+        clampedInspectorWidth(CGFloat(liveInspectorWidth ?? inspectorWidth))
+    }
+
+    private func clampedInspectorWidth(_ width: CGFloat) -> CGFloat {
+        min(max(width, DesignTokens.Inspector.minWidth), DesignTokens.Inspector.maxWidth)
+    }
+
+    private func previewInspectorWidth(_ width: CGFloat) {
+        withoutResizeAnimation {
+            liveInspectorWidth = Double(clampedInspectorWidth(width))
+        }
+    }
+
+    private func commitInspectorWidth(_ width: CGFloat) {
+        withoutResizeAnimation {
+            inspectorWidth = Double(clampedInspectorWidth(width))
+            liveInspectorWidth = nil
+        }
+    }
+
+    private func withoutResizeAnimation(_ update: () -> Void) {
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction, update)
     }
 
     // MARK: - Drag Hint Overlay
@@ -792,5 +835,73 @@ struct ScreenDetailView: View {
 
     private func getScreenRefreshRate() -> Int {
         screenManager.getScreenRefreshRate(for: screen.id)
+    }
+}
+
+private struct InspectorResizeHandle: View {
+    let width: CGFloat
+    let minWidth: CGFloat
+    let maxWidth: CGFloat
+    let onPreviewWidthChange: (CGFloat) -> Void
+    let onCommitWidth: (CGFloat) -> Void
+
+    @State private var dragStartWidth: CGFloat?
+    @State private var isHovering = false
+    @State private var isDragging = false
+
+    var body: some View {
+        ZStack {
+            Color.clear
+                .contentShape(Rectangle())
+
+            Rectangle()
+                .fill(Color(NSColor.separatorColor).opacity(isActive ? 0.9 : 0.45))
+                .frame(width: isActive ? 2 : 1)
+
+            Image(systemName: "arrow.left.and.right")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
+                .frame(width: 24, height: 34)
+                .background(.regularMaterial, in: Capsule())
+                .overlay(
+                    Capsule()
+                        .strokeBorder(
+                            isActive ? Color.accentColor.opacity(0.45) : Color.primary.opacity(0.10),
+                            lineWidth: 0.75
+                        )
+                )
+                .shadow(color: Color.black.opacity(isActive ? 0.16 : 0.08), radius: 5, x: 0, y: 2)
+                .accessibilityHidden(true)
+        }
+        .frame(width: 18)
+        .gesture(
+            DragGesture(minimumDistance: 2, coordinateSpace: .global)
+                .onChanged { value in
+                    let start = dragStartWidth ?? width
+                    if dragStartWidth == nil {
+                        dragStartWidth = start
+                    }
+                    isDragging = true
+                    onPreviewWidthChange(clamped(start - value.translation.width))
+                }
+                .onEnded { value in
+                    let start = dragStartWidth ?? width
+                    onCommitWidth(clamped(start - value.translation.width))
+                    dragStartWidth = nil
+                    isDragging = false
+                }
+        )
+        .onHover { isHovering = $0 }
+        .help("Drag to resize properties panel")
+        .accessibilityLabel("Resize properties panel")
+        .accessibilityHint("Drag horizontally to change the properties panel width")
+    }
+
+    private var isActive: Bool {
+        isHovering || isDragging
+    }
+
+    private func clamped(_ candidate: CGFloat) -> CGFloat {
+        min(max(candidate, minWidth), maxWidth)
     }
 }

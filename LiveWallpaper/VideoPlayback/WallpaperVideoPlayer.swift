@@ -191,6 +191,7 @@ final class WallpaperVideoPlayer {
         self.player = queuePlayer
         self.templatePlayerItem = playerItem
         self.playerLooper = AVPlayerLooper(player: queuePlayer, templateItem: playerItem)
+        applyAudioPolicyToQueueItems()
         
         let videoWindow = VideoWallpaperWindow(frame: initialFrame)
         let containerView = VideoContainerView(frame: initialFrame)
@@ -216,6 +217,7 @@ final class WallpaperVideoPlayer {
         setupPlaybackObservers()
         setupFrameObserver()
         setupFPSTracking()
+        installQueueItemMaintenanceObserver()
 
         if queuePlayer.currentItem == nil {
             observeInitialCurrentItemForDeferredFrameRateLimit()
@@ -252,6 +254,7 @@ final class WallpaperVideoPlayer {
             .sink { [weak self] _ in
                 guard let self, self.shouldAutoplayWhenReady else { return }
                 Logger.debug("Player is ready to play", category: .videoPlayer)
+                self.applyAudioPolicyToQueueItems()
                 self.play()
                 Logger.debug("Auto-starting video playback", category: .videoPlayer)
             }
@@ -403,6 +406,13 @@ final class WallpaperVideoPlayer {
         isMuted = muted
 
         guard let player else { return }
+        applyAudioPolicyToQueueItems()
+        player.isMuted = muted
+        player.volume = muted ? 0 : 1
+    }
+
+    private func applyAudioPolicyToQueueItems() {
+        guard let player else { return }
         if let templatePlayerItem {
             applyAudioPolicy(to: templatePlayerItem)
         }
@@ -412,8 +422,8 @@ final class WallpaperVideoPlayer {
         for item in player.items() where item !== player.currentItem {
             applyAudioPolicy(to: item)
         }
-        player.isMuted = muted
-        player.volume = muted ? 0 : 1
+        player.isMuted = isMuted
+        player.volume = isMuted ? 0 : 1
     }
 
     private func applyAudioPolicy(to playerItem: AVPlayerItem) {
@@ -421,6 +431,19 @@ final class WallpaperVideoPlayer {
         for track in playerItem.tracks where track.assetTrack?.mediaType == .audio {
             track.isEnabled = enable
         }
+    }
+
+    private func installQueueItemMaintenanceObserver() {
+        guard currentItemSubscription == nil, let queuePlayer = player else { return }
+        currentItemSubscription = queuePlayer.publisher(for: \.currentItem)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] item in
+                guard let self else { return }
+                if let item {
+                    self.applyAudioPolicy(to: item)
+                }
+                self.applyCurrentCompositionToQueueItems()
+            }
     }
 
     func setVideoFitMode(_ mode: VideoFitMode) {
@@ -506,12 +529,7 @@ final class WallpaperVideoPlayer {
     }
 
     private func installCurrentItemRebindIfNeeded() {
-        guard currentItemSubscription == nil, let queuePlayer = player else { return }
-        currentItemSubscription = queuePlayer.publisher(for: \.currentItem)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.applyCurrentCompositionToQueueItems()
-            }
+        installQueueItemMaintenanceObserver()
     }
 
     // MARK: - Frame Rate Limiting
