@@ -38,24 +38,31 @@ struct ScreenDetailView: View {
 
     @ToolbarContentBuilder
     private var screenDetailToolbar: some ToolbarContent {
-        ToolbarItem(placement: .principal) {
-            Picker("Wallpaper Type", selection: $selectedWallpaperType) {
-                ForEach(WallpaperType.allCases) { type in
-                    Text(type.rawValue).tag(type)
+        // Hide the type segmented control while the empty-state guide is
+        // visible — the guide IS the type picker for unconfigured screens.
+        // Showing both at once produced two parallel paths to do the same
+        // thing (toolbar `.html` segment vs. guide "HTML" card) which was
+        // confusing for first-time users on a fresh display.
+        if !shouldShowGuideEmptyState {
+            ToolbarItem(placement: .principal) {
+                Picker("Wallpaper Type", selection: $selectedWallpaperType) {
+                    ForEach(WallpaperType.allCases) { type in
+                        Text(type.rawValue).tag(type)
+                    }
                 }
-            }
-            .pickerStyle(.segmented)
-            .fixedSize(horizontal: true, vertical: false)
-            .accessibilityLabel("Wallpaper type")
-            .accessibilityHint("Choose between video, HTML, or Metal shader wallpaper")
-            .onChange(of: selectedWallpaperType) { _, newType in
-                switch newType {
-                case .video:
-                    screenManager.switchToVideoWallpaper(for: screen)
-                case .html:
-                    screenManager.switchToHTMLWallpaper(for: screen)
-                case .metalShader, .scene:
-                    break // pickers drive activation themselves
+                .pickerStyle(.segmented)
+                .fixedSize(horizontal: true, vertical: false)
+                .accessibilityLabel("Wallpaper type")
+                .accessibilityHint("Choose between video, HTML, or Metal shader wallpaper")
+                .onChange(of: selectedWallpaperType) { _, newType in
+                    switch newType {
+                    case .video:
+                        screenManager.switchToVideoWallpaper(for: screen)
+                    case .html:
+                        screenManager.switchToHTMLWallpaper(for: screen)
+                    case .metalShader, .scene:
+                        break // pickers drive activation themselves
+                    }
                 }
             }
         }
@@ -233,11 +240,10 @@ struct ScreenDetailView: View {
 
                     if shouldShowGuideEmptyState {
                         EmptyStateGuideView(
-                            onUseAerials: triggerAerialsGuideAction,
-                            onPickVideo: triggerVideoGuideAction,
-                            onAddWebURL: triggerWebURLGuideAction,
-                            onImportWallpaperEngine: triggerWPEGuideAction,
-                            supportsWallpaperEngineImport: hasWallpaperEngineLibrary
+                            onChooseVideo: triggerVideoGuideAction,
+                            onChooseHTML: triggerHTMLGuideAction,
+                            onChooseShader: triggerShaderGuideAction,
+                            onChooseScene: triggerSceneGuideAction
                         )
                     } else if selectedWallpaperType == .video {
                         if isLoading {
@@ -851,9 +857,8 @@ struct ScreenDetailView: View {
     /// runtime session AND the user is currently looking at the default
     /// `.video` tab. Switching the toolbar segmented control to .html /
     /// .scene / .metalShader exits the guide so those tabs can show their
-    /// own configuration UI — without that escape hatch, clicking the
-    /// "Wallpaper Engine" guide card (which sets type to .scene) wouldn't
-    /// reveal the scene section.
+    /// own configuration UI — clicking any non-Video guide card does the
+    /// same flip and lands on that type's existing empty state.
     private var shouldShowGuideEmptyState: Bool {
         if isLoading { return false }
         if selectedWallpaperType != .video { return false }
@@ -863,46 +868,25 @@ struct ScreenDetailView: View {
         return true
     }
 
-    /// Cheap probe — used by both the guide visibility flag and the WPE
-    /// card. Accepts either a manually-rooted Workshop bookmark (set via
-    /// the in-app picker) or the default `~/Documents/Live Wallpapers`
-    /// folder that `OnboardingStepFirstWallpaper` keys on. Either signal
-    /// means the WPE flow has somewhere meaningful to land.
-    private var hasWallpaperEngineLibrary: Bool {
-        if SettingsManager.shared.loadWorkshopLibraryRootBookmark() != nil {
-            return true
-        }
-        guard let docs = FileManager.default.urls(
-            for: .documentDirectory,
-            in: .userDomainMask
-        ).first else { return false }
-        let lwDir = docs.appendingPathComponent("Live Wallpapers")
-        return FileManager.default.fileExists(atPath: lwDir.path)
-    }
-
-    private func triggerAerialsGuideAction() {
-        Task {
-            let granted = await AppleAerialsLibrary.shared.requestAccess()
-            guard granted else { return }
-            await MainActor.run {
-                NotificationCenter.default.post(name: .openAppleAerials, object: nil)
-            }
-        }
-    }
-
+    /// Video card → already on `.video`, so just open the existing file
+    /// picker. Cancellation returns the user to the guide unchanged.
     private func triggerVideoGuideAction() {
-        selectedWallpaperType = .video
         showFilePicker()
     }
 
-    private func triggerWebURLGuideAction() {
+    /// HTML / Shader / Scene cards → flip the toolbar's selected type so
+    /// `shouldShowGuideEmptyState` returns false and that type's existing
+    /// empty state takes over (URL/file/folder picker, shader presets,
+    /// Workshop browser respectively).
+    private func triggerHTMLGuideAction() {
         selectedWallpaperType = .html
-        showHTMLSourcePicker()
     }
 
-    private func triggerWPEGuideAction() {
-        // Same shape as the toolbar — flipping the type lights up the WPE
-        // section, which contains the Workshop import / browse controls.
+    private func triggerShaderGuideAction() {
+        selectedWallpaperType = .metalShader
+    }
+
+    private func triggerSceneGuideAction() {
         selectedWallpaperType = .scene
     }
 }
