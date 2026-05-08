@@ -36,8 +36,173 @@ struct ScreenDetailView: View {
         }
     }
 
+    /// Body-level header — identity (avatar + name + reload + badges +
+    /// status pill) on the left, per-display action buttons on the right.
+    /// Toolbar items (type picker, Apply-to-All, Back) live separately in
+    /// `screenDetailToolbar` so they get the toolbar's natural width
+    /// without competing with these inline controls.
+    @ViewBuilder
+    private var inlineBodyHeader: some View {
+        HStack(alignment: .center, spacing: 14) {
+            ZStack {
+                Circle().fill(Color.accentColor.opacity(0.15)).frame(width: 44, height: 44)
+                Image(systemName: "display").font(.system(size: 18)).foregroundStyle(Color.accentColor)
+            }
+            .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 8) {
+                    Text(screen.name).font(.system(size: 18, weight: .semibold)).lineLimit(1)
+
+                    if isConfigured {
+                        Button(action: { screenManager.reloadWallpaperForScreen(screen) }) {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help(Text("Reload display content"))
+                        .accessibilityLabel(Text("Reload display"))
+                        .accessibilityHint(Text("Reloads the wallpaper content for this screen"))
+                    }
+                }
+                HStack(spacing: 8) {
+                    InfoBadge(icon: "arrow.up.left.and.arrow.down.right", text: "\(Int(screen.frame.width))×\(Int(screen.frame.height))")
+                    InfoBadge(icon: "gauge.medium", text: "\(getScreenRefreshRate()) Hz")
+                    if isConfigured, wallpaperSessionSummary.isConfigured {
+                        sessionStatusPill
+                    }
+                }
+            }
+            Spacer()
+
+            if isConfigured {
+                Button {
+                    showBookmarks = true
+                } label: {
+                    Label("Bookmarks", systemImage: "bookmark.fill")
+                }
+                .buttonStyle(.glass)
+                .controlSize(.regular)
+                .help(Text("Saved video / HTML / shader shortcuts"))
+                .accessibilityLabel(Text("Bookmarks"))
+                .popover(isPresented: $showBookmarks, arrowEdge: .bottom) {
+                    BookmarksPopover(screen: screen)
+                        .environment(screenManager)
+                }
+
+                if selectedWallpaperType == .video {
+                    HStack(spacing: 8) {
+                        Button(action: showFilePicker) {
+                            Label("Select Video", systemImage: "folder.badge.plus")
+                        }
+                        .buttonStyle(.glassProminent)
+                        .controlSize(.regular)
+                        .help(Text("Choose a video file for this display"))
+                        .accessibilityLabel(Text("Select video"))
+                        .accessibilityHint(Text("Opens a file picker to choose a wallpaper video"))
+
+                        Button(role: .destructive, action: clearVideo) {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.glass)
+                        .controlSize(.regular)
+                        .help(Text("Remove wallpaper video"))
+                        .accessibilityLabel(Text("Clear video"))
+                        .accessibilityHint(Text("Removes the current wallpaper video from this screen"))
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 14)
+    }
+
+    private var sessionStatusPill: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "circle.fill")
+                .font(.system(size: 6))
+                .foregroundStyle(sessionStatusColor)
+                .symbolEffect(.pulse, options: .repeat(.continuous), isActive: wallpaperSessionSummary.activity == .active)
+            Text(sessionStatusText).font(.caption).foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text("Status: \(sessionStatusText)"))
+    }
+
+    private var sessionStatusText: String {
+        switch wallpaperSessionSummary.wallpaperType {
+        case .html:        return "HTML Active"
+        case .metalShader: return "Shader Active"
+        case .video:       return wallpaperSessionSummary.activity == .active ? "Playing" : "Paused"
+        case .scene:       return "Scene"
+        case nil:          return "Not configured"
+        }
+    }
+
+    private var sessionStatusColor: Color {
+        switch wallpaperSessionSummary.activity {
+        case .active:   return .green
+        case .paused:   return .orange
+        case .inactive: return .secondary
+        }
+    }
+
+    /// Toolbar items — stage-gated. Type picker + Apply-to-All belong here
+    /// (not in the body header) so they get the toolbar's natural width
+    /// without crowding the inline action buttons.
+    @ToolbarContentBuilder
+    private var screenDetailToolbar: some ToolbarContent {
+        if case .pickContent = stage {
+            ToolbarItem(placement: .navigation) {
+                Button(action: backToChooseType) {
+                    Label("Back", systemImage: "chevron.left")
+                }
+                .help(Text("Return to wallpaper type selection"))
+                .accessibilityLabel(Text("Back to wallpaper type selection"))
+            }
+        }
+        if case .configured = stage {
+            ToolbarItem(placement: .automatic) {
+                Picker("Wallpaper Type", selection: $selectedWallpaperType) {
+                    ForEach(WallpaperType.allCases) { type in
+                        Text(type.rawValue).tag(type)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .fixedSize(horizontal: true, vertical: false)
+                .accessibilityLabel(Text("Wallpaper type"))
+                .accessibilityHint(Text("Switch between video, HTML, shader, or scene wallpaper"))
+                .onChange(of: selectedWallpaperType) { _, newType in
+                    guard case .configured(let activeType) = stage,
+                          newType != activeType else { return }
+                    switch newType {
+                    case .video:
+                        screenManager.switchToVideoWallpaper(for: screen)
+                    case .html:
+                        screenManager.switchToHTMLWallpaper(for: screen)
+                    case .metalShader, .scene:
+                        break
+                    }
+                }
+            }
+            if screenManager.screens.count > 1 {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        showApplyToAllConfirm = true
+                    } label: {
+                        Label("Apply to All", systemImage: "square.on.square")
+                    }
+                    .help(Text("Copy this display's wallpaper and settings to every other display"))
+                    .accessibilityLabel(Text("Apply to all displays"))
+                    .accessibilityHint(Text("Copies the current wallpaper and settings to every other connected display"))
+                    .disabled(runtimeError != nil)
+                }
+            }
+        }
+    }
+
     /// Resets `pickContent` back to the 4-card guide. Wired to the
-    /// header's Back button. Does NOT touch `selectedWallpaperType` —
+    /// toolbar's Back button. Does NOT touch `selectedWallpaperType` —
     /// that remains a configured-screen toolbar control, decoupled from
     /// the empty-state journey.
     private func backToChooseType() {
@@ -150,32 +315,9 @@ struct ScreenDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Single-owner header for the entire top zone. Always rendered
-            // so the page structure stays identical across stages — only
-            // the right-side actions vary. The body's `.padding(.top, 8)`
-            // below keeps the header's avatar circle clear of the parent
-            // `ContentView`'s `.navigation`-placement gear icon, which
-            // lives in the transparent-titlebar zone.
-            ScreenDetailHeader(
-                screen: screen,
-                stage: stage,
-                wallpaperSessionSummary: wallpaperSessionSummary,
-                isMultipleScreens: screenManager.screens.count > 1,
-                hasRuntimeError: runtimeError != nil,
-                selectedWallpaperType: $selectedWallpaperType,
-                showBookmarks: $showBookmarks,
-                refreshRateHz: getScreenRefreshRate(),
-                onReload: { screenManager.reloadWallpaperForScreen(screen) },
-                onPickVideo: showFilePicker,
-                onClearVideo: clearVideo,
-                onBack: backToChooseType,
-                onApplyToAll: { showApplyToAllConfirm = true }
-            )
-
-            if isConfigured {
-                runtimeErrorBannerView
-                Divider()
-            }
+            inlineBodyHeader
+            runtimeErrorBannerView
+            Divider()
 
             HStack(spacing: 0) {
                 ZStack {
@@ -289,31 +431,7 @@ struct ScreenDetailView: View {
             .transaction(value: selectedWallpaperType) { $0.animation = nil }
             .transaction(value: liveInspectorWidth) { $0.animation = nil }
         }
-        // The header's type Picker fires this onChange. Gated by both
-        // `.configured` AND `newType != activeType` because
-        // `loadScreenConfiguration()` programmatically syncs
-        // `selectedWallpaperType = config.wallpaperType` after a config
-        // load, which would otherwise re-fire `switchToVideoWallpaper`
-        // and trigger redundant runtime restore + visible flicker.
-        .onChange(of: selectedWallpaperType) { _, newType in
-            guard case .configured(let activeType) = stage,
-                  newType != activeType else { return }
-            switch newType {
-            case .video:
-                screenManager.switchToVideoWallpaper(for: screen)
-            case .html:
-                screenManager.switchToHTMLWallpaper(for: screen)
-            case .metalShader, .scene:
-                break // pickers drive activation themselves
-            }
-        }
-        // Top padding clears the parent toolbar zone. macOS
-        // `.fullSizeContentView` lets body content render under the
-        // transparent titlebar, so we must reserve the standard ~28pt
-        // toolbar height to keep the header's avatar from colliding with
-        // ContentView's `.navigation`-placement gear icon and the
-        // window's traffic-light controls.
-        .padding(.top, 28)
+        .toolbar { screenDetailToolbar }
         .confirmationDialog(
             "Apply this wallpaper to every other display?",
             isPresented: $showApplyToAllConfirm

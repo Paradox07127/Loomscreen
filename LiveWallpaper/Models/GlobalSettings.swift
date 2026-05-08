@@ -21,11 +21,6 @@ struct GlobalSettings: Codable {
     /// `SettingsManager.recordWPEImport(_:)`). Most recent at index 0.
     var recentWPEImports: [WPEHistoryEntry] = []
 
-    /// When set to a future date, all wallpapers stay paused until the deadline
-    /// passes. Triggered by the "Pause All for 1h / 2h / Until tomorrow" menu
-    /// in the menu-bar control center; cleared by passing `nil`.
-    var snoozeUntil: Date?
-
     init(
         // Default `false` so a freshly-installed or reset app plays its
         // wallpaper out of the box even when running on battery — power
@@ -39,8 +34,7 @@ struct GlobalSettings: Codable {
         showInDock: Bool = false,
         weatherLocation: WeatherLocationPreference = .default,
         globalShortcuts: [GlobalShortcutAction.RawAction: GlobalShortcutBinding?] = [:],
-        recentWPEImports: [WPEHistoryEntry] = [],
-        snoozeUntil: Date? = nil
+        recentWPEImports: [WPEHistoryEntry] = []
     ) {
         self.globalPauseOnBattery = globalPauseOnBattery
         self.preservePlaybackOnLock = preservePlaybackOnLock
@@ -52,7 +46,6 @@ struct GlobalSettings: Codable {
         self.weatherLocation = weatherLocation
         self.globalShortcuts = globalShortcuts
         self.recentWPEImports = recentWPEImports
-        self.snoozeUntil = snoozeUntil
     }
 
     init(from decoder: Decoder) throws {
@@ -69,7 +62,6 @@ struct GlobalSettings: Codable {
         // Lossy decode: a malformed WPE history entry should not invalidate the
         // entire settings blob. Falls back to empty array if any entry breaks.
         recentWPEImports = (try? c.decodeIfPresent([WPEHistoryEntry].self, forKey: .recentWPEImports)) ?? []
-        snoozeUntil = try c.decodeIfPresent(Date.self, forKey: .snoozeUntil)
         // Legacy `batteryResolutionCap` key is silently ignored on decode — superseded
         // by the "pause on battery = static wallpaper" model; no frame-rate or resolution
         // degradation is applied anymore.
