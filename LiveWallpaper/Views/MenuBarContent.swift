@@ -345,16 +345,15 @@ struct MenuBarContent: View {
         globalPauseOnFullScreen = s.pauseOnFullScreen
     }
 
+    /// Mutate-then-save preserves any GlobalSettings field this surface
+    /// doesn't bind. The previous full-constructor approach silently reset
+    /// every field outside the two booleans (defaultFrameRateLimit, showInDock,
+    /// weatherLocation, globalShortcuts, recentWPEImports) on every toggle.
     private func commitGlobalToggles() {
-        let current = SettingsManager.shared.loadGlobalSettings()
-        let updated = GlobalSettings(
-            globalPauseOnBattery: globalPauseOnBattery,
-            preservePlaybackOnLock: current.preservePlaybackOnLock,
-            startOnLogin: current.startOnLogin,
-            minimumBatteryLevel: current.minimumBatteryLevel,
-            pauseOnFullScreen: globalPauseOnFullScreen
-        )
-        SettingsManager.shared.saveGlobalSettings(updated)
+        var settings = SettingsManager.shared.loadGlobalSettings()
+        settings.globalPauseOnBattery = globalPauseOnBattery
+        settings.pauseOnFullScreen = globalPauseOnFullScreen
+        SettingsManager.shared.saveGlobalSettings(settings)
         screenManager.handleGlobalSettingsChanged()
     }
 
