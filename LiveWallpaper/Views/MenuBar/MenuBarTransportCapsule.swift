@@ -44,7 +44,7 @@ struct MenuBarTransportCapsule: View {
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Wallpaper transport")
+        .accessibilityLabel(Text("Wallpaper transport"))
     }
 
     // MARK: - Buttons
@@ -81,8 +81,12 @@ struct MenuBarTransportCapsule: View {
             .regular.tint(Color.accentColor.opacity(0.35)).interactive(),
             in: .circle
         )
-        .help(isPlaying ? "Pause" : "Play")
-        .accessibilityLabel(isPlaying ? "Pause" : "Play")
+        .help(isPlaying
+            ? Text("Pause", comment: "Tooltip for the playback toggle when video is playing.")
+            : Text("Play", comment: "Tooltip for the playback toggle when video is paused."))
+        .accessibilityLabel(isPlaying
+            ? Text("Pause", comment: "A11y label for playback toggle when playing.")
+            : Text("Play", comment: "A11y label for playback toggle when paused."))
     }
 
     @ViewBuilder
@@ -108,8 +112,8 @@ struct MenuBarTransportCapsule: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .glassEffect(.regular.interactive(), in: .capsule)
-        .help("Playback speed")
-        .accessibilityLabel("Playback speed \(formatSpeed(currentSpeed))")
+        .help(Text("Playback speed"))
+        .accessibilityLabel(Text("Playback speed \(formatSpeed(currentSpeed))"))
     }
 
     // MARK: - State

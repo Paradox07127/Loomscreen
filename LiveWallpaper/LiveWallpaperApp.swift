@@ -187,7 +187,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             defer: false
         )
         window.contentMinSize = SettingsWindowMetrics.minimumContentSize
-        window.title = "LiveWallpaper Settings"
+        window.title = L10n.Window.settingsTitle
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.toolbar = nil

@@ -60,8 +60,8 @@ struct ScreenDetailHeader: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("Return to wallpaper type selection")
-        .accessibilityLabel("Back to wallpaper type selection")
+        .help(Text("Return to wallpaper type selection"))
+        .accessibilityLabel(Text("Back to wallpaper type selection"))
     }
 
     // MARK: - Identity (left of Spacer, always visible)
@@ -87,9 +87,9 @@ struct ScreenDetailHeader: View {
                                 .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
-                        .help("Reload display content")
-                        .accessibilityLabel("Reload display")
-                        .accessibilityHint("Reloads the wallpaper content for this screen")
+                        .help(Text("Reload display content"))
+                        .accessibilityLabel(Text("Reload display"))
+                        .accessibilityHint(Text("Reloads the wallpaper content for this screen"))
                     }
                 }
                 HStack(spacing: DesignTokens.Spacing.sm) {
@@ -123,7 +123,7 @@ struct ScreenDetailHeader: View {
         // Treat the dot + text as one cohesive a11y element so VoiceOver
         // doesn't read "circle, image" before the actual status text.
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Status: \(sessionStatusText)")
+        .accessibilityLabel(Text("Status: \(sessionStatusText)"))
     }
 
     // MARK: - Stage-aware right-side actions
@@ -150,8 +150,8 @@ struct ScreenDetailHeader: View {
             }
             .pickerStyle(.segmented)
             .fixedSize(horizontal: true, vertical: false)
-            .accessibilityLabel("Wallpaper type")
-            .accessibilityHint("Switch between video, HTML, shader, or scene wallpaper")
+            .accessibilityLabel(Text("Wallpaper type"))
+            .accessibilityHint(Text("Switch between video, HTML, shader, or scene wallpaper"))
 
             Button {
                 showBookmarks = true
@@ -160,8 +160,8 @@ struct ScreenDetailHeader: View {
             }
             .buttonStyle(.glass)
             .controlSize(.regular)
-            .help("Saved video / HTML / shader shortcuts")
-            .accessibilityLabel("Bookmarks")
+            .help(Text("Saved video / HTML / shader shortcuts"))
+            .accessibilityLabel(Text("Bookmarks"))
             .popover(isPresented: $showBookmarks, arrowEdge: .bottom) {
                 BookmarksPopover(screen: screen)
                     .environment(screenManager)
@@ -174,18 +174,18 @@ struct ScreenDetailHeader: View {
                     }
                     .buttonStyle(.glassProminent)
                     .controlSize(.regular)
-                    .help("Choose a video file for this display")
-                    .accessibilityLabel("Select video")
-                    .accessibilityHint("Opens a file picker to choose a wallpaper video")
+                    .help(Text("Choose a video file for this display"))
+                    .accessibilityLabel(Text("Select video"))
+                    .accessibilityHint(Text("Opens a file picker to choose a wallpaper video"))
 
                     Button(role: .destructive, action: onClearVideo) {
                         Image(systemName: "trash")
                     }
                     .buttonStyle(.glass)
                     .controlSize(.regular)
-                    .help("Remove wallpaper video")
-                    .accessibilityLabel("Clear video")
-                    .accessibilityHint("Removes the current wallpaper video from this screen")
+                    .help(Text("Remove wallpaper video"))
+                    .accessibilityLabel(Text("Clear video"))
+                    .accessibilityHint(Text("Removes the current wallpaper video from this screen"))
                 }
             }
 
@@ -195,9 +195,9 @@ struct ScreenDetailHeader: View {
                 }
                 .buttonStyle(.glass)
                 .controlSize(.regular)
-                .help("Copy this display's wallpaper and settings to every other display")
-                .accessibilityLabel("Apply to all displays")
-                .accessibilityHint("Copies the current wallpaper and settings to every other connected display")
+                .help(Text("Copy this display's wallpaper and settings to every other display"))
+                .accessibilityLabel(Text("Apply to all displays"))
+                .accessibilityHint(Text("Copies the current wallpaper and settings to every other connected display"))
                 .disabled(hasRuntimeError)
             }
         }

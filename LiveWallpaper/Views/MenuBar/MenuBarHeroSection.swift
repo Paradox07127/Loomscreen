@@ -85,8 +85,8 @@ struct MenuBarHeroSection: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
-            .help("Configure this display")
-            .accessibilityLabel("Open settings for \(screen.name)")
+            .help(Text("Configure this display"))
+            .accessibilityLabel(Text("Open settings for \(screen.name)"))
         }
     }
 
@@ -118,7 +118,7 @@ struct MenuBarHeroSection: View {
                 in: .rect(cornerRadius: DesignTokens.Corner.md)
             )
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("JavaScript disabled for \(host). Tap Trust to allow.")
+            .accessibilityLabel(Text("JavaScript disabled for \(host). Tap Trust to allow."))
         }
     }
 

@@ -70,7 +70,9 @@ struct MenuBarDiagnosticsPopover: View {
                 : .clear.interactive(),
             in: .capsule
         )
-        .accessibilityLabel(value == "system" ? "Show whole-system memory usage" : "Show this app's memory usage")
+        .accessibilityLabel(value == "system"
+            ? Text("Show whole-system memory usage", comment: "RAM scope toggle a11y label when scope is the whole system.")
+            : Text("Show this app's memory usage", comment: "RAM scope toggle a11y label when scope is the LiveWallpaper app only."))
     }
 
     private var ramPercent: Double {
@@ -127,6 +129,6 @@ struct DashboardChip: View {
         .padding(.vertical, 5)
         .glassEffect(.regular, in: .rect(cornerRadius: DesignTokens.Corner.sm))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(label): \(displayValue ?? "\(Int(value))%")")
+        .accessibilityLabel(Text("\(label): \(displayValue ?? "\(Int(value))%")", comment: "Dashboard chip a11y label: metric label and current value."))
     }
 }

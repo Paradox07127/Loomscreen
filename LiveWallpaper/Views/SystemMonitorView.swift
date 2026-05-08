@@ -30,7 +30,9 @@ struct SystemMonitorView: View {
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(value == "system" ? "Show whole-system memory usage" : "Show this app's memory usage")
+        .accessibilityLabel(value == "system"
+            ? Text("Show whole-system memory usage", comment: "RAM scope toggle a11y label when scope is the whole system.")
+            : Text("Show this app's memory usage", comment: "RAM scope toggle a11y label when scope is the LiveWallpaper app only."))
     }
 
     private var ramDetailText: String {
@@ -51,7 +53,7 @@ struct SystemMonitorView: View {
             .padding(2)
             .background(Capsule().fill(Color.gray.opacity(0.18)))
             .accessibilityElement(children: .contain)
-            .accessibilityLabel("RAM scope")
+            .accessibilityLabel(Text("RAM scope"))
 
             gaugeGrid
                 .padding(.horizontal, 6)
@@ -140,21 +142,21 @@ struct SystemMonitorView: View {
         VStack(spacing: 8) {
             HStack(spacing: 8) {
                 MiniGaugeCard(title: "CPU", value: cpuPercent, color: colorForPercent(cpuPercent), icon: "cpu")
-                    .accessibilityLabel("CPU usage")
-                    .accessibilityValue("\(Int(cpuPercent)) percent")
+                    .accessibilityLabel(Text("CPU usage"))
+                    .accessibilityValue(Text("\(Int(cpuPercent)) percent"))
 
                 MiniGaugeCard(title: "GPU", value: monitor.gpuUsage, color: colorForPercent(monitor.gpuUsage), icon: "square.stack.3d.up.fill")
-                    .accessibilityLabel("GPU usage")
-                    .accessibilityValue("\(Int(monitor.gpuUsage)) percent")
+                    .accessibilityLabel(Text("GPU usage"))
+                    .accessibilityValue(Text("\(Int(monitor.gpuUsage)) percent"))
             }
 
             HStack(spacing: 8) {
                 MiniGaugeCard(title: ramTitle, value: ramPercent, color: colorForPercent(ramPercent), icon: "memorychip")
-                    .accessibilityLabel("\(ramTitle) usage")
-                    .accessibilityValue("\(Int(ramPercent)) percent")
+                    .accessibilityLabel(Text("\(ramTitle) usage"))
+                    .accessibilityValue(Text("\(Int(ramPercent)) percent"))
 
                 PowerStatusCard(powerSource: powerSource)
-                    .accessibilityLabel("Power source")
+                    .accessibilityLabel(Text("Power source"))
                     .accessibilityValue(powerSource.accessibilitySummary)
             }
         }

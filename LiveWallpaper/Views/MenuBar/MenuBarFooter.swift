@@ -23,7 +23,7 @@ struct MenuBarFooter: View {
             .buttonStyle(.glass)
             .controlSize(.small)
             .keyboardShortcut(",", modifiers: .command)
-            .help("Open settings")
+            .help(Text("Open settings"))
 
             Button(action: onReload) {
                 Label("Reload", systemImage: "arrow.clockwise")
@@ -32,7 +32,7 @@ struct MenuBarFooter: View {
             .buttonStyle(.glass)
             .controlSize(.small)
             .keyboardShortcut("r", modifiers: .command)
-            .help("Reload all wallpapers")
+            .help(Text("Reload all wallpapers"))
 
             Button(role: .destructive, action: { NSApp.terminate(nil) }) {
                 Label("Quit", systemImage: "power")
@@ -41,7 +41,7 @@ struct MenuBarFooter: View {
             .buttonStyle(.glass)
             .controlSize(.small)
             .keyboardShortcut("q", modifiers: .command)
-            .help("Quit LiveWallpaper")
+            .help(Text("Quit LiveWallpaper"))
 
             Spacer(minLength: 4)
 
@@ -76,8 +76,8 @@ struct MenuBarFooter: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .glassEffect(.regular.interactive(), in: .circle)
-        .help("Customise menu bar")
-        .accessibilityLabel("Customise menu bar")
+        .help(Text("Customise menu bar"))
+        .accessibilityLabel(Text("Customise menu bar"))
     }
 }
 
@@ -103,7 +103,7 @@ private struct MonitorDot: View {
             in: .circle
         )
         .help(stateLabel)
-        .accessibilityLabel("System pressure: \(stateLabel)")
+        .accessibilityLabel(Text("System pressure: \(stateLabel)"))
         .popover(isPresented: $showDetails, arrowEdge: .top) {
             MenuBarDiagnosticsPopover()
         }

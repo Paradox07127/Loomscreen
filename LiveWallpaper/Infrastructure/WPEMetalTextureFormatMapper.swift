@@ -36,13 +36,29 @@ enum WPEMetalTextureLoaderError: Error, Equatable, LocalizedError, Sendable {
     var errorDescription: String? {
         switch self {
         case .unsupportedFormat(let format):
-            return "WPE Metal texture format is unsupported: \(format.debugLabel)"
+            return String(
+                localized: "error.texture.format.unsupported_format",
+                defaultValue: "WPE Metal texture format is unsupported: \(format.debugLabel)",
+                comment: "Error shown when a Wallpaper Engine texture format cannot be mapped to Metal."
+            )
         case .unsupportedCompressedFormat(let format):
-            return "This Metal device cannot sample \(format.debugLabel) textures."
+            return String(
+                localized: "error.texture.format.unsupported_compressed_format",
+                defaultValue: "This Metal device cannot sample \(format.debugLabel) textures.",
+                comment: "Error shown when the current Metal device cannot sample a compressed texture format."
+            )
         case .malformedPayload(let reason):
-            return "WPE Metal texture payload is malformed: \(reason)"
+            return String(
+                localized: "error.texture.format.malformed_payload",
+                defaultValue: "WPE Metal texture payload is malformed: \(reason)",
+                comment: "Error shown when a Wallpaper Engine texture payload is malformed."
+            )
         case .textureAllocationFailed:
-            return "Metal texture allocation failed."
+            return String(
+                localized: "error.texture.format.texture_allocation_failed",
+                defaultValue: "Metal texture allocation failed.",
+                comment: "Error shown when Metal texture allocation fails."
+            )
         }
     }
 }

@@ -86,8 +86,10 @@ struct WPEHistoryRow: View {
         )
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isHovering)
         .onHover { isHovering = $0 }
-        .accessibilityLabel("Wallpaper Engine project: \(entry.origin.title)")
-        .accessibilityHint(isActive ? "Currently in use. Tap to reactivate." : "Tap to apply")
+        .accessibilityLabel(Text("Wallpaper Engine project: \(entry.origin.title)"))
+        .accessibilityHint(isActive
+            ? Text("Currently in use. Tap to reactivate.", comment: "A11y hint for a WPE history row that is the active wallpaper.")
+            : Text("Tap to apply", comment: "A11y hint for a WPE history row that can be applied."))
         .contextMenu {
             Button("Show in Finder") { showInFinder() }
             Button("Remove", role: .destructive, action: onRemove)

@@ -42,7 +42,7 @@ struct MenuBarScreenTabs: View {
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Display selector")
+        .accessibilityLabel(Text("Display selector"))
     }
 
     private func select(_ screen: Screen) {

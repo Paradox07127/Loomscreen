@@ -64,8 +64,12 @@ private struct OtherDisplayRow: View {
                 }
                 .buttonStyle(.plain)
                 .glassEffect(.regular.interactive(), in: .circle)
-                .help(summary.activity == .active ? "Pause" : "Play")
-                .accessibilityLabel(summary.activity == .active ? "Pause \(screen.name)" : "Play \(screen.name)")
+                .help(summary.activity == .active
+                    ? Text("Pause", comment: "Tooltip for pausing wallpaper on a secondary display.")
+                    : Text("Play", comment: "Tooltip for resuming wallpaper on a secondary display."))
+                .accessibilityLabel(summary.activity == .active
+                    ? Text("Pause \(screen.name)", comment: "A11y label to pause wallpaper on a specific display; %@ is display name.")
+                    : Text("Play \(screen.name)", comment: "A11y label to resume wallpaper on a specific display; %@ is display name."))
             }
 
             Button {
@@ -78,8 +82,8 @@ private struct OtherDisplayRow: View {
                     .frame(width: 22, height: 22)
             }
             .buttonStyle(.plain)
-            .help("Configure \(screen.name)")
-            .accessibilityLabel("Open settings for \(screen.name)")
+            .help(Text("Configure \(screen.name)"))
+            .accessibilityLabel(Text("Open settings for \(screen.name)"))
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)

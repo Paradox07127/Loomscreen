@@ -1,0 +1,94 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "CFBundleDisplayName" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "LiveWallpaper"
+          }
+        }
+      }
+    },
+    "NSDesktopFolderUsageDescription" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Access to Desktop is needed to play wallpaper files stored there."
+          }
+        }
+      }
+    },
+    "NSDocumentsFolderUsageDescription" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Access to Documents is needed to play wallpaper files stored there."
+          }
+        }
+      }
+    },
+    "NSDownloadsFolderUsageDescription" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Access to Downloads is needed to play wallpaper files stored there."
+          }
+        }
+      }
+    },
+    "NSLocationWhenInUseUsageDescription" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Location is used to fetch local weather for weather-reactive effects."
+          }
+        }
+      }
+    },
+    "NSPowerMonitorUsageDescription" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Power status is used to pause wallpapers on battery."
+          }
+        }
+      }
+    },
+    "NSSecurityScopedBookmarksUsageDescription" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Bookmarks keep access to selected wallpaper files across launches."
+          }
+        }
+      }
+    },
+    "NSSystemPreferencesUsageDescription" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "System Settings access is used to help configure related permissions."
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

@@ -117,8 +117,8 @@ private struct BookmarkTile: View {
         }
         .buttonStyle(.plain)
         .glassEffect(.regular.interactive(), in: .rect(cornerRadius: DesignTokens.Corner.sm))
-        .help("Apply \(bookmark.label)")
-        .accessibilityLabel("Apply bookmark \(bookmark.label)")
+        .help(Text("Apply \(bookmark.label)"))
+        .accessibilityLabel(Text("Apply bookmark \(bookmark.label)"))
     }
 
     private var iconColor: Color {

@@ -55,7 +55,9 @@ struct BookmarksPopover: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(store.contains(content))
-                    .help(store.contains(content) ? "Already bookmarked" : "Save as bookmark")
+                    .help(store.contains(content)
+                        ? Text("Already bookmarked", comment: "Tooltip when the current wallpaper is already saved as a bookmark.")
+                        : Text("Save as bookmark", comment: "Tooltip for the button that saves the current wallpaper as a bookmark."))
                 }
             }
         } else {
@@ -214,21 +216,21 @@ private struct BookmarkRow: View {
                     .font(.system(size: 10))
             }
             .buttonStyle(.borderless)
-            .help("Apply to this display")
+            .help(Text("Apply to this display"))
 
             Button(action: onStartRename) {
                 Image(systemName: "pencil")
                     .font(.system(size: 11))
             }
             .buttonStyle(.borderless)
-            .help("Rename")
+            .help(Text("Rename"))
 
             Button(role: .destructive, action: onDelete) {
                 Image(systemName: "trash")
                     .font(.system(size: 11))
             }
             .buttonStyle(.borderless)
-            .help("Delete bookmark")
+            .help(Text("Delete bookmark"))
         }
     }
 

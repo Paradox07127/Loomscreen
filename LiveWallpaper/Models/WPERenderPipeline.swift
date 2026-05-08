@@ -84,13 +84,29 @@ enum WPERenderPipelineError: Error, Equatable, LocalizedError, Sendable {
     var errorDescription: String? {
         switch self {
         case .shaderMissing(let name, let stage, let path):
-            return "WPE shader \(name) is missing \(stage) source at \(path)"
+            return String(
+                localized: "error.render.pipeline.shader_missing",
+                defaultValue: "WPE shader \(name) is missing \(stage) source at \(path)",
+                comment: "Error shown when a Wallpaper Engine shader source file is missing."
+            )
         case .includeMissing(let path, let requestedBy):
-            return "WPE shader include \(path) requested by \(requestedBy) is missing"
+            return String(
+                localized: "error.render.pipeline.include_missing",
+                defaultValue: "WPE shader include \(path) requested by \(requestedBy) is missing",
+                comment: "Error shown when a Wallpaper Engine shader include file is missing."
+            )
         case .includeCycle(let path):
-            return "WPE shader include cycle detected at \(path)"
+            return String(
+                localized: "error.render.pipeline.include_cycle",
+                defaultValue: "WPE shader include cycle detected at \(path)",
+                comment: "Error shown when a Wallpaper Engine shader include cycle is detected."
+            )
         case .invalidSourceEncoding(let path):
-            return "WPE shader source is not UTF-8: \(path)"
+            return String(
+                localized: "error.render.pipeline.invalid_source_encoding",
+                defaultValue: "WPE shader source is not UTF-8: \(path)",
+                comment: "Error shown when a Wallpaper Engine shader source file is not UTF-8."
+            )
         }
     }
 }

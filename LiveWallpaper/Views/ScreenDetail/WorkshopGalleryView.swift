@@ -79,7 +79,7 @@ struct WorkshopGalleryView: View {
                     Label("Rescan", systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(GlassCapsuleButtonStyle(tint: .secondary, fontSize: 12, horizontalPadding: 14, verticalPadding: 6))
-                .accessibilityHint("Re-scan the workshop folder for new projects")
+                .accessibilityHint(Text("Re-scan the workshop folder for new projects"))
                 .disabled(bulkImportInProgress)
 
                 Button {
@@ -88,7 +88,7 @@ struct WorkshopGalleryView: View {
                     Label("Change Folder", systemImage: "folder.badge.gearshape")
                 }
                 .buttonStyle(GlassCapsuleButtonStyle(tint: .secondary, fontSize: 12, horizontalPadding: 14, verticalPadding: 6))
-                .accessibilityHint("Choose a different Steam Workshop folder")
+                .accessibilityHint(Text("Choose a different Steam Workshop folder"))
                 .disabled(bulkImportInProgress)
 
                 Button {
@@ -99,9 +99,9 @@ struct WorkshopGalleryView: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.borderless)
-                .help("Disconnect Workshop library")
-                .accessibilityLabel("Disconnect Workshop library")
-                .accessibilityHint("Forgets the selected Steam Workshop folder so you can choose again")
+                .help(Text("Disconnect Workshop library"))
+                .accessibilityLabel(Text("Disconnect Workshop library"))
+                .accessibilityHint(Text("Forgets the selected Steam Workshop folder so you can choose again"))
                 .disabled(bulkImportInProgress)
             }
 
@@ -117,7 +117,7 @@ struct WorkshopGalleryView: View {
                 }
                 .buttonStyle(GlassCapsuleButtonStyle(fontSize: 12, horizontalPadding: 14, verticalPadding: 6))
                 .disabled(bulkImportInProgress || compatibleCount == 0)
-                .accessibilityHint("Imports every Video and Web project not already in your library")
+                .accessibilityHint(Text("Imports every Video and Web project not already in your library"))
             }
 
             Button {
@@ -246,8 +246,8 @@ struct WorkshopGalleryView: View {
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
-        panel.prompt = hasLibraryRoot ? "Change Folder" : "Grant Library Access"
-        panel.message = "Select your Wallpaper Engine projects folder"
+        panel.prompt = L10n.Panel.workshopLibraryPrompt(hasLibraryRoot: hasLibraryRoot)
+        panel.message = L10n.Panel.workshopProjectsFolderMessage
 
         if let currentRoot = resolveWorkshopRootURL() {
             panel.directoryURL = currentRoot
@@ -474,7 +474,7 @@ private struct WorkshopGalleryCard: View {
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityLabel("\(project.title), \(project.type.rawValue) wallpaper\(project.importedAlready ? ", already in library" : "")")
+                    .accessibilityLabel(Text("\(project.title), \(project.type.rawValue) wallpaper\(project.importedAlready ? ", already in library" : "")", comment: "Workshop gallery card a11y label: project title, type, and optional 'already in library' marker."))
 
                 actionButton
             }

@@ -75,7 +75,7 @@ struct MenuBarEffectsSection: View {
                 in: 0.2...3.0
             )
             .controlSize(.mini)
-            .accessibilityLabel("Particle density")
+            .accessibilityLabel(Text("Particle density"))
         }
     }
 
@@ -123,7 +123,7 @@ private struct EffectChip: View {
                 : .regular.interactive(),
             in: .capsule
         )
-        .accessibilityLabel("\(preset.title) effect")
+        .accessibilityLabel(Text("\(preset.title) effect"))
         .accessibilityAddTraits(isActive ? .isSelected : [])
     }
 }

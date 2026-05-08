@@ -63,9 +63,9 @@ struct VideoPreviewSection: View {
             )
             .padding(.horizontal, 24)
             .controlSize(.small)
-            .accessibilityLabel("Video position")
-            .accessibilityValue("\(FormatUtils.formatDuration(previewController.currentPosition)) of \(FormatUtils.formatDuration(previewController.duration))")
-            .accessibilityHint("Scrub through the video timeline")
+            .accessibilityLabel(Text("Video position"))
+            .accessibilityValue(Text("\(FormatUtils.formatDuration(previewController.currentPosition)) of \(FormatUtils.formatDuration(previewController.duration))"))
+            .accessibilityHint(Text("Scrub through the video timeline"))
 
             HStack {
                 Text(FormatUtils.formatDuration(previewController.currentPosition))
@@ -113,8 +113,8 @@ struct VideoPreviewSection: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .accessibilityLabel("Play preview")
-            .accessibilityHint("Starts a temporary video preview for this settings panel")
+            .accessibilityLabel(Text("Play preview"))
+            .accessibilityHint(Text("Starts a temporary video preview for this settings panel"))
         }
     }
 
@@ -129,8 +129,8 @@ struct VideoPreviewSection: View {
             Button("Load Preview", action: startPreview)
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
-                .accessibilityLabel("Load preview")
-                .accessibilityHint("Starts a temporary video preview for this settings panel")
+                .accessibilityLabel(Text("Load preview"))
+                .accessibilityHint(Text("Starts a temporary video preview for this settings panel"))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(NSColor.windowBackgroundColor))
