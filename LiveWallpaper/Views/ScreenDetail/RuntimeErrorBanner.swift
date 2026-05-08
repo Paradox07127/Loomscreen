@@ -46,13 +46,13 @@ struct RuntimeErrorBanner: View {
                 Button("Retry", action: onRetry)
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
-                    .accessibilityHint("Retry loading the current wallpaper source")
+                    .accessibilityHint(Text("Retry loading the current wallpaper source"))
             }
             if canRePick {
                 Button("Re-pick", action: onRePick)
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .accessibilityHint("Pick a different wallpaper source")
+                    .accessibilityHint(Text("Pick a different wallpaper source"))
             }
         }
         .padding(12)

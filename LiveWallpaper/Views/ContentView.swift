@@ -35,9 +35,9 @@ struct ContentView: View {
                         }) {
                             Image(systemName: "gearshape")
                         }
-                        .help("Preferences")
-                        .accessibilityLabel("Preferences")
-                        .accessibilityHint("Open application preferences")
+                        .help(Text("Preferences"))
+                        .accessibilityLabel(Text("Preferences"))
+                        .accessibilityHint(Text("Open application preferences"))
                     }
                 }
         }
@@ -100,7 +100,7 @@ struct ContentView: View {
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = [.movie, .video, .quickTimeMovie, .mpeg4Movie, .avi]
         panel.directoryURL = SettingsManager.shared.getLastUsedDirectory()
-        panel.prompt = "Use as Wallpaper"
+        panel.prompt = L10n.Panel.useAsWallpaper
         guard panel.runModal() == .OK, let url = panel.url,
               let bookmark = ResourceUtilities.createBookmark(for: url) else { return }
         SettingsManager.shared.saveLastUsedDirectory(url.deletingLastPathComponent())
@@ -114,7 +114,7 @@ struct ContentView: View {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = [UTType.html]
-        panel.prompt = "Use as Wallpaper"
+        panel.prompt = L10n.Panel.useAsWallpaper
         guard panel.runModal() == .OK, let url = panel.url,
               let source = ResourceUtilities.htmlSourceFromPickedFile(url) else { return }
         screenManager.setHTMLWallpaperPreservingConfig(source: source, for: screen)
@@ -126,7 +126,7 @@ struct ContentView: View {
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
-        panel.prompt = "Use as Wallpaper"
+        panel.prompt = L10n.Panel.useAsWallpaper
         guard panel.runModal() == .OK, let folderURL = panel.url,
               let bookmark = ResourceUtilities.createBookmark(for: folderURL) else { return }
         let didStart = folderURL.startAccessingSecurityScopedResource()
@@ -168,9 +168,9 @@ struct Sidebar: View {
                         .symbolEffect(.rotate, options: .repeat(.continuous), isActive: isReloading)
                 }
                 .buttonStyle(.plain)
-                .help("Reload all wallpapers")
-                .accessibilityLabel("Reload all wallpapers")
-                .accessibilityHint("Reapplies the active wallpaper on every display")
+                .help(Text("Reload all wallpapers"))
+                .accessibilityLabel(Text("Reload all wallpapers"))
+                .accessibilityHint(Text("Reapplies the active wallpaper on every display"))
             }) {
                 if screenManager.screens.isEmpty {
                     HStack {
@@ -206,7 +206,7 @@ struct Sidebar: View {
                 NavigationLink(value: Navigation.workshop) {
                     Label("Workshop Library", systemImage: "cube.transparent")
                 }
-                .accessibilityHint("Browse Wallpaper Engine workshop projects")
+                .accessibilityHint(Text("Browse Wallpaper Engine workshop projects"))
             }
 
             Section(header: VStack(alignment: .leading, spacing: 6) {
@@ -314,9 +314,9 @@ struct ScreenRow: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(screen.name), \(Int(screen.frame.width)) by \(Int(screen.frame.height)) pixels")
+        .accessibilityLabel(Text("\(screen.name), \(Int(screen.frame.width)) by \(Int(screen.frame.height)) pixels"))
         .accessibilityValue(accessibilityValue(for: summary))
-        .accessibilityHint("Double-tap to configure this display")
+        .accessibilityHint(Text("Double-tap to configure this display"))
     }
 
     private func refreshEffectBadge() {

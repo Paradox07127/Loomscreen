@@ -29,7 +29,7 @@ struct ShortcutsSettingsView: View {
                     Text(rejectionMessage)
                         .font(.caption)
                         .foregroundStyle(.red)
-                        .accessibilityLabel("Shortcut rejected: \(rejectionMessage)")
+                        .accessibilityLabel(Text("Shortcut rejected: \(rejectionMessage)"))
                 }
             } header: {
                 Text("Global Shortcuts")
@@ -136,7 +136,7 @@ private struct ShortcutRow: View {
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
-                .accessibilityLabel("More options for \(action.displayName)")
+                .accessibilityLabel(Text("More options for \(action.displayName)"))
             }
         }
         .padding(.vertical, 4)

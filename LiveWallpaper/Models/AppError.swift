@@ -14,34 +14,154 @@ enum AppError: LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
-        case .fileAccessDenied(let name): return "Cannot access \"\(name)\""
-        case .videoNotPlayable(let name): return "\"\(name)\" is not playable"
-        case .configurationSaveFailed: return "Failed to save configuration"
-        case .effectsPipelineFailed(let detail): return "Effects error: \(detail)"
-        case .shaderLoadFailed: return "Failed to load shader wallpaper"
-        case .htmlLoadFailed(let url): return "Failed to load web content: \(url)"
-        case .wpePackageInvalid(let detail): return "Invalid Wallpaper Engine package: \(detail)"
-        case .wpeUnsupportedType(let kind): return "Wallpaper Engine \"\(kind)\" type is not supported"
-        case .wpeImportFailed(let detail): return "Wallpaper Engine import failed: \(detail)"
+        case .fileAccessDenied(let name):
+            return String(
+                localized: "error.app.file_access_denied",
+                defaultValue: "Cannot access \"\(name)\"",
+                comment: "Error shown when the app cannot access a selected wallpaper file."
+            )
+        case .videoNotPlayable(let name):
+            return String(
+                localized: "error.app.video_not_playable",
+                defaultValue: "\"\(name)\" is not playable",
+                comment: "Error shown when a selected video cannot be played."
+            )
+        case .configurationSaveFailed:
+            return String(
+                localized: "error.app.configuration_save_failed",
+                defaultValue: "Failed to save configuration",
+                comment: "Error shown when app settings cannot be saved."
+            )
+        case .effectsPipelineFailed(let detail):
+            return String(
+                localized: "error.app.effects_pipeline_failed",
+                defaultValue: "Effects error: \(detail)",
+                comment: "Error shown when the video effects pipeline fails."
+            )
+        case .shaderLoadFailed:
+            return String(
+                localized: "error.app.shader_load_failed",
+                defaultValue: "Failed to load shader wallpaper",
+                comment: "Error shown when a shader wallpaper cannot be loaded."
+            )
+        case .htmlLoadFailed(let url):
+            return String(
+                localized: "error.app.html_load_failed",
+                defaultValue: "Failed to load web content: \(url)",
+                comment: "Error shown when an HTML wallpaper cannot be loaded."
+            )
+        case .wpePackageInvalid(let detail):
+            return String(
+                localized: "error.app.wpe_package_invalid",
+                defaultValue: "Invalid Wallpaper Engine package: \(detail)",
+                comment: "Error shown when a Wallpaper Engine package is invalid."
+            )
+        case .wpeUnsupportedType(let kind):
+            return String(
+                localized: "error.app.wpe_unsupported_type",
+                defaultValue: "Wallpaper Engine \"\(kind)\" type is not supported",
+                comment: "Error shown when a Wallpaper Engine package type is unsupported."
+            )
+        case .wpeImportFailed(let detail):
+            return String(
+                localized: "error.app.wpe_import_failed",
+                defaultValue: "Wallpaper Engine import failed: \(detail)",
+                comment: "Error shown when importing a Wallpaper Engine package fails."
+            )
         }
     }
 
     var recoverySuggestion: String? {
         switch self {
-        case .fileAccessDenied: return "Try selecting the file again"
-        case .videoNotPlayable: return "The file format may not be supported"
-        case .configurationSaveFailed: return "Try restarting the app"
-        case .effectsPipelineFailed: return "Try disabling effects"
-        case .shaderLoadFailed: return "Your GPU may not support this shader"
-        case .htmlLoadFailed: return "Check the URL and try again"
-        case .wpePackageInvalid: return "Try re-downloading from Steam Workshop"
-        case .wpeUnsupportedType: return "Look for a video version of this wallpaper"
-        case .wpeImportFailed: return "Re-select the workshop folder and try again"
+        case .fileAccessDenied:
+            return String(
+                localized: "error.app.file_access_denied.recovery",
+                defaultValue: "Try selecting the file again",
+                comment: "Recovery suggestion for file access errors."
+            )
+        case .videoNotPlayable:
+            return String(
+                localized: "error.app.video_not_playable.recovery",
+                defaultValue: "The file format may not be supported",
+                comment: "Recovery suggestion for unsupported video files."
+            )
+        case .configurationSaveFailed:
+            return String(
+                localized: "error.app.configuration_save_failed.recovery",
+                defaultValue: "Try restarting the app",
+                comment: "Recovery suggestion for configuration save failures."
+            )
+        case .effectsPipelineFailed:
+            return String(
+                localized: "error.app.effects_pipeline_failed.recovery",
+                defaultValue: "Try disabling effects",
+                comment: "Recovery suggestion for video effects failures."
+            )
+        case .shaderLoadFailed:
+            return String(
+                localized: "error.app.shader_load_failed.recovery",
+                defaultValue: "Your GPU may not support this shader",
+                comment: "Recovery suggestion for shader wallpaper load failures."
+            )
+        case .htmlLoadFailed:
+            return String(
+                localized: "error.app.html_load_failed.recovery",
+                defaultValue: "Check the URL and try again",
+                comment: "Recovery suggestion for HTML wallpaper load failures."
+            )
+        case .wpePackageInvalid:
+            return String(
+                localized: "error.app.wpe_package_invalid.recovery",
+                defaultValue: "Try re-downloading from Steam Workshop",
+                comment: "Recovery suggestion for invalid Wallpaper Engine packages."
+            )
+        case .wpeUnsupportedType:
+            return String(
+                localized: "error.app.wpe_unsupported_type.recovery",
+                defaultValue: "Look for a video version of this wallpaper",
+                comment: "Recovery suggestion for unsupported Wallpaper Engine package types."
+            )
+        case .wpeImportFailed:
+            return String(
+                localized: "error.app.wpe_import_failed.recovery",
+                defaultValue: "Re-select the workshop folder and try again",
+                comment: "Recovery suggestion for Wallpaper Engine import failures."
+            )
         }
     }
 
-    // Equatable conformance for @Observable change detection
+    // Equatable: compare by case + payload (not localized text), so locale changes
+    // don't break @Observable change detection.
+    //
+    // We delegate to an exhaustive `comparisonKey` switch so adding a new case
+    // forces a compile-time update here (no `default` fallthrough hiding gaps).
+    private var comparisonKey: ComparisonKey {
+        switch self {
+        case .fileAccessDenied(let s):       return .fileAccessDenied(s)
+        case .videoNotPlayable(let s):       return .videoNotPlayable(s)
+        case .configurationSaveFailed:       return .configurationSaveFailed
+        case .effectsPipelineFailed(let s):  return .effectsPipelineFailed(s)
+        case .shaderLoadFailed:              return .shaderLoadFailed
+        case .htmlLoadFailed(let s):         return .htmlLoadFailed(s)
+        case .wpePackageInvalid(let s):      return .wpePackageInvalid(s)
+        case .wpeUnsupportedType(let s):     return .wpeUnsupportedType(s)
+        case .wpeImportFailed(let s):        return .wpeImportFailed(s)
+        }
+    }
+
+    private enum ComparisonKey: Equatable {
+        case fileAccessDenied(String)
+        case videoNotPlayable(String)
+        case configurationSaveFailed
+        case effectsPipelineFailed(String)
+        case shaderLoadFailed
+        case htmlLoadFailed(String)
+        case wpePackageInvalid(String)
+        case wpeUnsupportedType(String)
+        case wpeImportFailed(String)
+    }
+
     static func == (lhs: AppError, rhs: AppError) -> Bool {
-        lhs.errorDescription == rhs.errorDescription
+        lhs.comparisonKey == rhs.comparisonKey
     }
 }

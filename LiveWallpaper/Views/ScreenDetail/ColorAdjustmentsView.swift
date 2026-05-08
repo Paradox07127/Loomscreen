@@ -24,9 +24,9 @@ struct ColorAdjustmentsView: View {
                     Toggle("", isOn: $effectConfig.autoTimeTint)
                         .labelsHidden()
                         .toggleStyle(.switch)
-                        .help("Automatically adjust color temperature by time of day")
-                        .accessibilityLabel("Auto warm tint")
-                        .accessibilityHint("Automatically adjusts color warmth based on time of day")
+                        .help(Text("Automatically adjust color temperature by time of day"))
+                        .accessibilityLabel(Text("Auto warm tint"))
+                        .accessibilityHint(Text("Automatically adjusts color warmth based on time of day"))
                 }
 
                 Divider()
@@ -39,9 +39,9 @@ struct ColorAdjustmentsView: View {
                     Toggle("", isOn: $effectConfig.glassRainEffect)
                         .labelsHidden()
                         .toggleStyle(.switch)
-                        .help("Simulate rain drops hitting glass and refracting video (High GPU usage)")
-                        .accessibilityLabel("Glass rain drops")
-                        .accessibilityHint("Adds refractive rain drops over the video")
+                        .help(Text("Simulate rain drops hitting glass and refracting video (High GPU usage)"))
+                        .accessibilityLabel(Text("Glass rain drops"))
+                        .accessibilityHint(Text("Adds refractive rain drops over the video"))
                 }
 
                 Divider()
@@ -57,7 +57,7 @@ struct ColorAdjustmentsView: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(Color.accentColor)
                     .glassEffect(.regular.tint(Color.accentColor.opacity(0.15)).interactive(), in: .capsule)
-                    .help("Reset all color adjustments to default values")
+                    .help(Text("Reset all color adjustments to default values"))
                     Spacer()
                 }
             }

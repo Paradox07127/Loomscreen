@@ -40,7 +40,7 @@ struct PlaylistSection: View {
                 }
                 .buttonStyle(GlassCapsuleButtonStyle(fontSize: 11, horizontalPadding: 6))
                 .disabled(entries.count < 2)
-                .accessibilityLabel("Skip to previous video")
+                .accessibilityLabel(Text("Skip to previous video"))
 
                 Button(action: addVideos) {
                     HStack(spacing: 3) {
@@ -49,7 +49,7 @@ struct PlaylistSection: View {
                     }
                 }
                 .buttonStyle(GlassCapsuleButtonStyle(fontSize: 11, horizontalPadding: 6))
-                .accessibilityLabel("Add videos to playlist")
+                .accessibilityLabel(Text("Add videos to playlist"))
 
                 Button(action: { screenManager.advancePlaylist(for: screen) }) {
                     HStack(spacing: 3) {
@@ -60,7 +60,7 @@ struct PlaylistSection: View {
                 }
                 .buttonStyle(GlassCapsuleButtonStyle(fontSize: 11, horizontalPadding: 6))
                 .disabled(entries.count < 2)
-                .accessibilityLabel("Skip to next video")
+                .accessibilityLabel(Text("Skip to next video"))
             }
             .frame(maxWidth: .infinity, alignment: .center)
 
@@ -81,7 +81,7 @@ struct PlaylistSection: View {
                     }
                     .labelsHidden()
                     .frame(width: 90)
-                    .accessibilityLabel("Rotation interval")
+                    .accessibilityLabel(Text("Rotation interval"))
                 }
 
                 SettingRow(icon: "shuffle", iconColor: .purple, title: "Shuffle") {
@@ -91,7 +91,7 @@ struct PlaylistSection: View {
                         .onChange(of: shufflePlaylist) { _, newValue in
                             screenManager.updateShufflePlaylist(newValue, for: screen)
                         }
-                        .accessibilityLabel("Shuffle playlist")
+                        .accessibilityLabel(Text("Shuffle playlist"))
                 }
             }
         }
@@ -205,6 +205,7 @@ struct PlaylistSection: View {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = true
         panel.allowedContentTypes = [.movie, .video, .quickTimeMovie, .mpeg4Movie, .avi]
+        panel.prompt = L10n.Panel.addVideos
         let completion: ([URL]) -> Void = { urls in
             guard !urls.isEmpty else { return }
             SettingsManager.shared.saveLastUsedDirectory(urls[0].deletingLastPathComponent())
@@ -344,7 +345,7 @@ private struct PlaylistRow: View {
                     .foregroundStyle(.yellow)
                     .frame(width: 18, height: 18)
                     .background(Capsule().fill(Color.yellow.opacity(0.15)))
-                    .help("Primary video")
+                    .help(Text("Primary video"))
             }
 
             Menu {
@@ -380,7 +381,7 @@ private struct PlaylistRow: View {
         .opacity(isDragging ? 0.4 : 1.0)
         .onHover { isHovering = $0 }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(entry.isPrimary ? "Primary " : "")\(entry.isPlaying ? "Now playing " : "")\(entry.name)")
+        .accessibilityLabel(Text("\(entry.isPrimary ? "Primary " : "")\(entry.isPlaying ? "Now playing " : "")\(entry.name)", comment: "Playlist row a11y label: optional 'Primary' / 'Now playing' prefixes plus video name."))
     }
 
     private var rowBackground: Color {

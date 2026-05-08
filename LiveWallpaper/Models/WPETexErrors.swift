@@ -102,29 +102,77 @@ enum WPETexDecodeError: Error, Equatable, Sendable, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unsupportedContainer(let magic):
-            return ".tex container '\(magic)' is unrecognised."
+            return String(
+                localized: "error.texture.decode.unsupported_container",
+                defaultValue: ".tex container '\(magic)' is unrecognised.",
+                comment: "Error shown when a Wallpaper Engine .tex container magic is unsupported."
+            )
         case .unsupportedBlock(let magic):
-            return ".tex block '\(magic)' is unrecognised."
+            return String(
+                localized: "error.texture.decode.unsupported_block",
+                defaultValue: ".tex block '\(magic)' is unrecognised.",
+                comment: "Error shown when a Wallpaper Engine .tex block magic is unsupported."
+            )
         case .missingInfoBlock:
-            return ".tex file is missing the TEXI info block."
+            return String(
+                localized: "error.texture.decode.missing_info_block",
+                defaultValue: ".tex file is missing the TEXI info block.",
+                comment: "Error shown when a Wallpaper Engine .tex file is missing the TEXI block."
+            )
         case .missingBitmapBlock:
-            return ".tex file is missing the TEXB bitmap block."
+            return String(
+                localized: "error.texture.decode.missing_bitmap_block",
+                defaultValue: ".tex file is missing the TEXB bitmap block.",
+                comment: "Error shown when a Wallpaper Engine .tex file is missing the TEXB block."
+            )
         case .unsupportedFormat(let code):
-            return ".tex format code \(code) is not yet supported."
+            return String(
+                localized: "error.texture.decode.unsupported_format",
+                defaultValue: ".tex format code \(code) is not yet supported.",
+                comment: "Error shown when a Wallpaper Engine .tex file uses an unsupported format code."
+            )
         case .unsupportedAnimation:
-            return ".tex animation/sequence frames are not supported."
+            return String(
+                localized: "error.texture.decode.unsupported_animation",
+                defaultValue: ".tex animation/sequence frames are not supported.",
+                comment: "Error shown when a Wallpaper Engine .tex file contains unsupported animation frames."
+            )
         case .invalidDimensions(let w, let h):
-            return ".tex declares invalid dimensions \(w)×\(h)."
+            return String(
+                localized: "error.texture.decode.invalid_dimensions",
+                defaultValue: ".tex declares invalid dimensions \(w)×\(h).",
+                comment: "Error shown when a Wallpaper Engine .tex file declares invalid pixel dimensions."
+            )
         case .truncatedBlock(let block, let offset):
-            return ".tex block '\(block)' truncated at offset \(offset)."
+            return String(
+                localized: "error.texture.decode.truncated_block",
+                defaultValue: ".tex block '\(block)' truncated at offset \(offset).",
+                comment: "Error shown when a Wallpaper Engine .tex block ends before its declared payload."
+            )
         case .mipmapOutOfBounds(let index):
-            return ".tex mipmap index \(index) is out of bounds."
+            return String(
+                localized: "error.texture.decode.mipmap_out_of_bounds",
+                defaultValue: ".tex mipmap index \(index) is out of bounds.",
+                comment: "Error shown when a Wallpaper Engine .tex mipmap index is invalid."
+            )
         case .decompressionFailed(let mipmap):
-            return ".tex mipmap \(mipmap) decompression failed."
+            return String(
+                localized: "error.texture.decode.decompression_failed",
+                defaultValue: ".tex mipmap \(mipmap) decompression failed.",
+                comment: "Error shown when a Wallpaper Engine .tex mipmap cannot be decompressed."
+            )
         case .decodeFailed(let mipmap, let detail):
-            return ".tex mipmap \(mipmap) decode failed: \(detail)"
+            return String(
+                localized: "error.texture.decode.decode_failed",
+                defaultValue: ".tex mipmap \(mipmap) decode failed: \(detail)",
+                comment: "Error shown when a Wallpaper Engine .tex mipmap cannot be decoded."
+            )
         case .metalUnavailable(let format):
-            return "Cannot decode \(format.debugLabel) without Metal support on this machine."
+            return String(
+                localized: "error.texture.decode.metal_unavailable",
+                defaultValue: "Cannot decode \(format.debugLabel) without Metal support on this machine.",
+                comment: "Error shown when a texture format requires Metal support that is unavailable."
+            )
         }
     }
 }

@@ -69,8 +69,10 @@ struct ShaderWallpaperSection: View {
                                 .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(.plain)
-                            .accessibilityLabel("\(preset.rawValue) shader")
-                            .accessibilityHint(selectedShaderPreset == preset ? "Currently selected" : "Switch to \(preset.rawValue) shader")
+                            .accessibilityLabel(Text("\(preset.rawValue) shader"))
+                            .accessibilityHint(selectedShaderPreset == preset
+                                ? Text("Currently selected", comment: "A11y hint for the active shader preset button.")
+                                : Text("Switch to \(preset.rawValue) shader", comment: "A11y hint to switch to a shader preset; %@ is the preset name."))
                         }
                     }
                 }

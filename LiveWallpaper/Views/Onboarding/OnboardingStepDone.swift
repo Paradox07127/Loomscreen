@@ -25,7 +25,7 @@ struct OnboardingStepDone: View {
                 .fill(Color.accentColor.opacity(0.08))
         )
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Tip: save favorites with Bookmarks in the sidebar")
+        .accessibilityLabel(Text("Tip: save favorites with Bookmarks in the sidebar"))
     }
 
     var body: some View {
@@ -69,7 +69,7 @@ struct OnboardingStepDone: View {
             }
             .buttonStyle(GlassCapsuleButtonStyle(fontSize: 14, horizontalPadding: 24, verticalPadding: 10))
             .keyboardShortcut(.defaultAction)
-            .accessibilityHint("Close onboarding and open LiveWallpaper")
+            .accessibilityHint(Text("Close onboarding and open LiveWallpaper"))
 
             Spacer().frame(height: 28)
         }

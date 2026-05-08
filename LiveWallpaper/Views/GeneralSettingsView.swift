@@ -75,8 +75,8 @@ struct GeneralSettingsView: View {
                         .labelsHidden()
                         .toggleStyle(.switch)
                         .onChange(of: startOnLogin) { _, _ in updateGlobalSettings() }
-                        .accessibilityLabel("Start at login")
-                        .accessibilityHint("Automatically launch LiveWallpaper when you log in")
+                        .accessibilityLabel(Text("Start at login"))
+                        .accessibilityHint(Text("Automatically launch LiveWallpaper when you log in"))
                 }
 
                 SettingRow(icon: "lock.display", iconColor: .blue, title: "Refresh desktop picture on lock", subtitle: "When your Mac locks, capture the current frame for screens with Desktop Picture enabled") {
@@ -84,8 +84,8 @@ struct GeneralSettingsView: View {
                         .labelsHidden()
                         .toggleStyle(.switch)
                         .onChange(of: preservePlaybackOnLock) { _, _ in updateGlobalSettings() }
-                        .accessibilityLabel("Refresh desktop picture on lock")
-                        .accessibilityHint("When your Mac locks, capture the current frame for screens with Desktop Picture enabled")
+                        .accessibilityLabel(Text("Refresh desktop picture on lock"))
+                        .accessibilityHint(Text("When your Mac locks, capture the current frame for screens with Desktop Picture enabled"))
                 }
 
                 SettingRow(icon: "macwindow.badge.plus", iconColor: .purple, title: "Pause on full-screen apps", subtitle: "Automatically pause wallpapers when a full-screen app is active") {
@@ -93,8 +93,8 @@ struct GeneralSettingsView: View {
                         .labelsHidden()
                         .toggleStyle(.switch)
                         .onChange(of: pauseOnFullScreen) { _, _ in updateGlobalSettings() }
-                        .accessibilityLabel("Pause on full-screen apps")
-                        .accessibilityHint("Automatically pause wallpapers when a full-screen app is active")
+                        .accessibilityLabel(Text("Pause on full-screen apps"))
+                        .accessibilityHint(Text("Automatically pause wallpapers when a full-screen app is active"))
                 }
 
                 SettingRow(icon: "dock.rectangle", iconColor: .indigo, title: "Show in Dock", subtitle: "Make the app visible in the Dock and Cmd-Tab switcher") {
@@ -102,8 +102,8 @@ struct GeneralSettingsView: View {
                         .labelsHidden()
                         .toggleStyle(.switch)
                         .onChange(of: showInDock) { _, _ in updateGlobalSettings() }
-                        .accessibilityLabel("Show in Dock")
-                        .accessibilityHint("Toggles whether the app appears in the Dock and the Cmd-Tab switcher")
+                        .accessibilityLabel(Text("Show in Dock"))
+                        .accessibilityHint(Text("Toggles whether the app appears in the Dock and the Cmd-Tab switcher"))
                 }
             } header: {
                 Text("Behavior")
@@ -115,15 +115,15 @@ struct GeneralSettingsView: View {
                         Label("Validate Settings", systemImage: "doc.text.magnifyingglass")
                             .frame(maxWidth: .infinity)
                     }
-                    .accessibilityLabel("Validate settings")
-                    .accessibilityHint("Checks all screen configurations for errors")
+                    .accessibilityLabel(Text("Validate settings"))
+                    .accessibilityHint(Text("Checks all screen configurations for errors"))
 
                     Button(action: { screenManager.reloadAllScreens() }) {
                         Label("Reload All Screens", systemImage: "arrow.triangle.2.circlepath")
                             .frame(maxWidth: .infinity)
                     }
-                    .accessibilityLabel("Reload all screens")
-                    .accessibilityHint("Refreshes wallpaper playback on all connected screens")
+                    .accessibilityLabel(Text("Reload all screens"))
+                    .accessibilityHint(Text("Refreshes wallpaper playback on all connected screens"))
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.large)
@@ -138,8 +138,8 @@ struct GeneralSettingsView: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(Color.accentColor)
-                    .accessibilityLabel("Show welcome tour")
-                    .accessibilityHint("Replays the initial onboarding flow")
+                    .accessibilityLabel(Text("Show welcome tour"))
+                    .accessibilityHint(Text("Replays the initial onboarding flow"))
                     Spacer()
                 }
                 .padding(.vertical, 4)
@@ -154,8 +154,8 @@ struct GeneralSettingsView: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.red)
-                    .accessibilityLabel("Reset all settings to default")
-                    .accessibilityHint("Erases all configurations and restores factory defaults")
+                    .accessibilityLabel(Text("Reset all settings to default"))
+                    .accessibilityHint(Text("Erases all configurations and restores factory defaults"))
                     Spacer()
                 }
                 .padding(.vertical, 4)
@@ -177,8 +177,8 @@ struct GeneralSettingsView: View {
                         .labelsHidden()
                         .toggleStyle(.switch)
                         .onChange(of: globalPauseOnBattery) { _, _ in updateGlobalSettings() }
-                        .accessibilityLabel("Pause on battery")
-                        .accessibilityHint("Switch wallpapers to a static frame when your Mac is unplugged")
+                        .accessibilityLabel(Text("Pause on battery"))
+                        .accessibilityHint(Text("Switch wallpapers to a static frame when your Mac is unplugged"))
                 }
             } header: {
                 Text("Power Saving")
@@ -197,8 +197,8 @@ struct GeneralSettingsView: View {
                             }
                             updateGlobalSettings()
                         }
-                        .accessibilityLabel("Use battery threshold")
-                        .accessibilityHint("Pause videos when battery drops below a specific level")
+                        .accessibilityLabel(Text("Use battery threshold"))
+                        .accessibilityHint(Text("Pause videos when battery drops below a specific level"))
                 }
 
                 if useBatteryThreshold {
@@ -230,9 +230,9 @@ struct GeneralSettingsView: View {
                                 updateGlobalSettings()
                             }
                         ), in: 0.05...0.5, step: 0.05)
-                        .accessibilityLabel("Minimum battery level")
-                        .accessibilityValue("\(Int((minimumBatteryLevel ?? 0.2) * 100)) percent")
-                        .accessibilityHint("Set the battery level below which wallpapers will pause")
+                        .accessibilityLabel(Text("Minimum battery level"))
+                        .accessibilityValue(Text("\(Int((minimumBatteryLevel ?? 0.2) * 100)) percent"))
+                        .accessibilityHint(Text("Set the battery level below which wallpapers will pause"))
                     }
                     .padding(.leading, 52)
                     .padding(.bottom, 8)

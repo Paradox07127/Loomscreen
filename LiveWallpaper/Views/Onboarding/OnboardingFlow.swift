@@ -72,7 +72,7 @@ struct OnboardingFlow: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Step \(currentStep + 1) of 3")
+        .accessibilityLabel(Text("Step \(currentStep + 1) of 3"))
     }
 
     private func nextStep() {

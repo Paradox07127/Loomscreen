@@ -75,7 +75,7 @@ struct WPEPreviewView: View {
             }
             .buttonStyle(.glass)
             .controlSize(.small)
-            .accessibilityHint("Re-attempt to load this preview")
+            .accessibilityHint(Text("Re-attempt to load this preview"))
         }
         .padding(12)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))

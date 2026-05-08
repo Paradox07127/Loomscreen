@@ -62,8 +62,8 @@ struct WeatherStatusBadge: View {
                         .font(.system(size: 10, weight: .semibold))
                 }
                 .buttonStyle(GlassCapsuleButtonStyle(fontSize: 10, horizontalPadding: 7, verticalPadding: 3))
-                .help("Open System Settings → Privacy & Security → Location Services")
-                .accessibilityLabel("Open Location Services settings")
+                .help(Text("Open System Settings → Privacy & Security → Location Services"))
+                .accessibilityLabel(Text("Open Location Services settings"))
             }
 
             Button(action: refresh) {
@@ -71,12 +71,12 @@ struct WeatherStatusBadge: View {
                     .font(.system(size: 10, weight: .semibold))
             }
             .buttonStyle(.plain)
-            .help("Refresh weather now")
-            .accessibilityLabel("Refresh weather")
+            .help(Text("Refresh weather now"))
+            .accessibilityLabel(Text("Refresh weather"))
         }
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Weather status: \(weatherService.currentCondition?.rawValue ?? "loading")")
+        .accessibilityLabel(Text("Weather status: \(weatherService.currentCondition?.rawValue ?? "loading")", comment: "Weather badge a11y label. %@ is the condition string or 'loading'."))
     }
 
     private func openLocationSettings() {

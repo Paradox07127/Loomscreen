@@ -231,13 +231,13 @@ private struct BookmarkCard: View {
                     Image(systemName: "pencil")
                 }
                 .buttonStyle(.borderless)
-                .help("Rename")
+                .help(Text("Rename"))
 
                 Button(role: .destructive, action: onDelete) {
                     Image(systemName: "trash")
                 }
                 .buttonStyle(.borderless)
-                .help("Delete bookmark")
+                .help(Text("Delete bookmark"))
             }
         }
     }

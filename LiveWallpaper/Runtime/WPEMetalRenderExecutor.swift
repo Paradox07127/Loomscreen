@@ -16,21 +16,55 @@ enum WPEMetalRenderExecutorError: Error, Equatable, LocalizedError, Sendable {
     var errorDescription: String? {
         switch self {
         case .commandQueueUnavailable:
-            return "Metal command queue is unavailable."
+            return String(
+                localized: "error.render.executor.command_queue_unavailable",
+                defaultValue: "Metal command queue is unavailable.",
+                comment: "Error shown when the Metal renderer cannot create or access a command queue."
+            )
         case .libraryUnavailable:
-            return "WPE Metal built-in shader library is unavailable."
+            return String(
+                localized: "error.render.executor.library_unavailable",
+                defaultValue: "WPE Metal built-in shader library is unavailable.",
+                comment: "Error shown when the built-in Metal shader library is unavailable."
+            )
         case .pipelineUnavailable(let name):
-            return "WPE Metal pipeline is unavailable for \(name)."
+            return String(
+                localized: "error.render.executor.pipeline_unavailable",
+                defaultValue: "WPE Metal pipeline is unavailable for \(name).",
+                comment: "Error shown when the Metal renderer cannot create a render pipeline."
+            )
         case .unsupportedShader(let name):
-            return "WPE Metal executor does not support shader \(name)."
+            return String(
+                localized: "error.render.executor.unsupported_shader",
+                defaultValue: "WPE Metal executor does not support shader \(name).",
+                comment: "Error shown when the Metal renderer does not support a shader."
+            )
         case .unsupportedTarget(let target):
-            return "WPE Metal executor does not support target \(target)."
+            let targetDescription = String(describing: target)
+            return String(
+                localized: "error.render.executor.unsupported_target",
+                defaultValue: "WPE Metal executor does not support target \(targetDescription).",
+                comment: "Error shown when the Metal renderer does not support a render target."
+            )
         case .missingTexture(let reference):
-            return "WPE Metal executor is missing texture \(reference)."
+            let referenceDescription = String(describing: reference)
+            return String(
+                localized: "error.render.executor.missing_texture",
+                defaultValue: "WPE Metal executor is missing texture \(referenceDescription).",
+                comment: "Error shown when the Metal renderer cannot find a required texture."
+            )
         case .noRenderablePasses:
-            return "WPE Metal pipeline has no renderable passes."
+            return String(
+                localized: "error.render.executor.no_renderable_passes",
+                defaultValue: "WPE Metal pipeline has no renderable passes.",
+                comment: "Error shown when the Metal render pipeline has no renderable passes."
+            )
         case .commandBufferFailed:
-            return "WPE Metal command buffer failed."
+            return String(
+                localized: "error.render.executor.command_buffer_failed",
+                defaultValue: "WPE Metal command buffer failed.",
+                comment: "Error shown when a Metal command buffer reports failure."
+            )
         }
     }
 }

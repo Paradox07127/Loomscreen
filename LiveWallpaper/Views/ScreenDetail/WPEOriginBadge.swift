@@ -25,7 +25,7 @@ struct WPEOriginBadge: View {
             .glassEffect(.regular.interactive(), in: .capsule)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Wallpaper from Wallpaper Engine: \(origin.title)")
-        .accessibilityHint("Tap to manage in the Scene tab")
+        .accessibilityLabel(Text("Wallpaper from Wallpaper Engine: \(origin.title)"))
+        .accessibilityHint(Text("Tap to manage in the Scene tab"))
     }
 }
