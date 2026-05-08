@@ -665,56 +665,6 @@ final class ScreenManager {
         updateFullScreenFallbackPolling()
         handleFullScreenChange(fullScreenDetector.hiddenScreens)
         handlePowerStateChange(powerMonitor.currentPowerSource)
-        scheduleSnoozeExpiration()
-    }
-
-    // MARK: - Global Snooze
-
-    @ObservationIgnored private var snoozeExpirationTask: Task<Void, Never>?
-
-    /// True while the user-driven snooze deadline lies in the future.
-    var isSnoozing: Bool {
-        WallpaperPolicyEngine.isSnoozeActive(
-            globalSettings: SettingsManager.shared.loadGlobalSettings()
-        )
-    }
-
-    /// Active snooze deadline, or `nil` when no snooze is in effect.
-    var snoozeUntil: Date? {
-        let until = SettingsManager.shared.loadGlobalSettings().snoozeUntil
-        guard let until, until > Date() else { return nil }
-        return until
-    }
-
-    /// Pause every wallpaper until `date`, or clear the snooze when `nil`.
-    /// The decision chain treats snooze as the highest-priority pause reason.
-    func snoozeAll(until date: Date?) {
-        var settings = SettingsManager.shared.loadGlobalSettings()
-        let normalized = (date.map { $0 > Date() ? $0 : nil }) ?? nil
-        guard settings.snoozeUntil != normalized else { return }
-        settings.snoozeUntil = normalized
-        SettingsManager.shared.saveGlobalSettings(settings)
-        Logger.info(
-            normalized.map { "Snoozing wallpapers until \($0)" } ?? "Cleared snooze",
-            category: .screenManager
-        )
-        handleGlobalSettingsChanged()
-    }
-
-    /// Re-arm a one-shot timer that resumes playback automatically when the
-    /// active snooze deadline elapses.
-    private func scheduleSnoozeExpiration() {
-        snoozeExpirationTask?.cancel()
-        snoozeExpirationTask = nil
-        guard let until = SettingsManager.shared.loadGlobalSettings().snoozeUntil else { return }
-        let delay = until.timeIntervalSinceNow
-        guard delay > 0 else { return }
-
-        snoozeExpirationTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-            guard !Task.isCancelled, let self else { return }
-            self.snoozeAll(until: nil)
-        }
     }
     
     // MARK: - Memory Management
