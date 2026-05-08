@@ -190,20 +190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.title = L10n.Window.settingsTitle
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
-        // Empty NSToolbar (rather than `nil`) lets macOS reserve the
-        // traffic-light + titlebar safe area for both the sidebar and the
-        // detail body automatically; SwiftUI `.toolbar` modifiers in
-        // `ContentView` / `ScreenDetailView` are then bridged into items
-        // on this NSToolbar by the hosting view. `unifiedCompact` keeps
-        // the chrome thin and pairs cleanly with `titlebarAppearsTransparent`
-        // so the Liquid Glass background still flows through.
-        // `titlebarSeparatorStyle = .none` replaces the deprecated
-        // `NSToolbar.showsBaselineSeparator` for hiding the hairline
-        // between toolbar and content.
-        let toolbar = NSToolbar(identifier: "LiveWallpaperSettingsWindowToolbar")
-        window.toolbar = toolbar
-        window.toolbarStyle = .unifiedCompact
-        window.titlebarSeparatorStyle = .none
+        window.toolbar = nil
         window.center()
         window.contentView = NSHostingView(rootView: contentView)
         window.delegate = self
