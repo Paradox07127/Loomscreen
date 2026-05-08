@@ -157,7 +157,7 @@ struct HTMLSourceSection: View {
                         .lineLimit(2)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .help("Also active on: \(names)")
+                .help(Text("Also active on: \(names)"))
             }
             .padding(.vertical, 4)
             .padding(.horizontal, 8)
@@ -182,7 +182,7 @@ struct HTMLSourceSection: View {
                 Button("Revoke") { trustStore.revoke(host) }
                     .buttonStyle(.bordered)
                     .controlSize(.mini)
-                    .help("Remove \(host) from trusted hosts")
+                    .help(Text("Remove \(host) from trusted hosts"))
                     .fixedSize()
             }
             .padding(.vertical, 4)
@@ -210,7 +210,7 @@ struct HTMLSourceSection: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.mini)
-                .help("Allow \(host) to run JavaScript")
+                .help(Text("Allow \(host) to run JavaScript"))
                 .fixedSize()
             }
             .padding(.vertical, 4)
@@ -234,7 +234,7 @@ struct HTMLSourceSection: View {
                     }
                 ))
                 .labelsHidden()
-                .accessibilityLabel("JavaScript")
+                .accessibilityLabel(Text("JavaScript"))
                 .toggleStyle(.switch)
                 .controlSize(.small)
             }
@@ -249,7 +249,7 @@ struct HTMLSourceSection: View {
                     }
                 ))
                 .labelsHidden()
-                .accessibilityLabel("Mouse Interaction")
+                .accessibilityLabel(Text("Mouse Interaction"))
                 .toggleStyle(.switch)
                 .controlSize(.small)
             }
@@ -274,7 +274,7 @@ struct HTMLSourceSection: View {
                     }
                 ))
                 .labelsHidden()
-                .accessibilityLabel("Physical-pixel layout")
+                .accessibilityLabel(Text("Physical-pixel layout"))
                 .toggleStyle(.switch)
                 .controlSize(.small)
             }
@@ -329,7 +329,7 @@ struct HTMLSourceSection: View {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = [UTType.html]
-        panel.prompt = "Use as Wallpaper"
+        panel.prompt = L10n.Panel.useAsWallpaper
         guard panel.runModal() == .OK, let url = panel.url else { return }
         // Prefer a folder bookmark so siblings (CSS/JS/images) keep working
         // across launches; falls back to a file-only bookmark when the
@@ -343,7 +343,7 @@ struct HTMLSourceSection: View {
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
-        panel.prompt = "Use as Wallpaper"
+        panel.prompt = L10n.Panel.useAsWallpaper
         guard panel.runModal() == .OK, let folderURL = panel.url else { return }
         guard let bookmark = ResourceUtilities.createBookmark(for: folderURL) else { return }
         let indexFileName = inferIndexFileName(in: folderURL)

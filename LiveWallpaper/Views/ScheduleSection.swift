@@ -61,7 +61,7 @@ struct ScheduleSection: View {
                         }
                     }
                     .buttonStyle(GlassCapsuleButtonStyle())
-                    .accessibilityLabel("Add schedule slot")
+                    .accessibilityLabel(Text("Add schedule slot"))
 
                     Spacer()
 
@@ -72,8 +72,8 @@ struct ScheduleSection: View {
                         }
                     }
                     .buttonStyle(GlassCapsuleButtonStyle(tint: .red))
-                    .accessibilityLabel("Disable schedule")
-                    .accessibilityHint("Removes all schedule slots and returns to normal playback")
+                    .accessibilityLabel(Text("Disable schedule"))
+                    .accessibilityHint(Text("Removes all schedule slots and returns to normal playback"))
                 }
             }
         }
@@ -104,8 +104,8 @@ struct ScheduleSection: View {
                 }
             }
             .buttonStyle(GlassCapsuleButtonStyle())
-            .accessibilityLabel("Enable schedule")
-            .accessibilityHint("Creates time-of-day wallpaper slots")
+            .accessibilityLabel(Text("Enable schedule"))
+            .accessibilityHint(Text("Creates time-of-day wallpaper slots"))
             Spacer()
         }
         .padding(.vertical, 4)
@@ -130,6 +130,7 @@ struct ScheduleSection: View {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = [.movie, .video, .quickTimeMovie, .mpeg4Movie, .avi]
+        panel.prompt = L10n.Panel.setVideo
         // Attach to current key window so the panel appears on the user's active display.
         if let parent = NSApp.keyWindow ?? NSApp.mainWindow {
             panel.beginSheetModal(for: parent) { response in
@@ -287,8 +288,8 @@ struct ScheduleSlotRow: View {
                 }
                 .frame(width: 90, alignment: .leading)
                 .onTapGesture { withAnimation { isEditingTime.toggle() } }
-                .accessibilityLabel("\(slot.label), \(formatHour(slot.startHour)) to \(formatHour(slot.endHour))")
-                .accessibilityHint("Tap to edit time range")
+                .accessibilityLabel(Text("\(slot.label), \(formatHour(slot.startHour)) to \(formatHour(slot.endHour))"))
+                .accessibilityHint(Text("Tap to edit time range"))
 
                 Spacer()
 
@@ -309,8 +310,8 @@ struct ScheduleSlotRow: View {
                                 .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("Clear video for \(slot.label)")
-                        .accessibilityHint("Removes the assigned video from this schedule slot")
+                        .accessibilityLabel(Text("Clear video for \(slot.label)"))
+                        .accessibilityHint(Text("Removes the assigned video from this schedule slot"))
                     }
                 } else {
                     Button(action: onVideoSelect) {
@@ -323,8 +324,8 @@ struct ScheduleSlotRow: View {
                         .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Set video for \(slot.label)")
-                    .accessibilityHint("Choose a video for this schedule slot")
+                    .accessibilityLabel(Text("Set video for \(slot.label)"))
+                    .accessibilityHint(Text("Choose a video for this schedule slot"))
                 }
 
                 Button(action: onRemove) {
@@ -334,7 +335,7 @@ struct ScheduleSlotRow: View {
                 }
                 .buttonStyle(.plain)
                 .opacity(isHovering ? 1 : 0)
-                .accessibilityLabel("Remove \(slot.label) slot")
+                .accessibilityLabel(Text("Remove \(slot.label) slot"))
             }
 
             // Time range editor (toggled by tapping the time label)
@@ -354,9 +355,9 @@ struct ScheduleSlotRow: View {
                         )
                         .font(.system(size: 11))
                         .frame(width: 100)
-                        .accessibilityLabel("Start hour for \(slot.label)")
+                        .accessibilityLabel(Text("Start hour for \(slot.label)"))
                         .accessibilityValue(formatHour(slot.startHour))
-                        .accessibilityHint("Adjust the start time of this schedule slot")
+                        .accessibilityHint(Text("Adjust the start time of this schedule slot"))
                     }
                     HStack(spacing: 4) {
                         Text("To")
@@ -372,9 +373,9 @@ struct ScheduleSlotRow: View {
                         )
                         .font(.system(size: 11))
                         .frame(width: 100)
-                        .accessibilityLabel("End hour for \(slot.label)")
+                        .accessibilityLabel(Text("End hour for \(slot.label)"))
                         .accessibilityValue(formatHour(slot.endHour))
-                        .accessibilityHint("Adjust the end time of this schedule slot")
+                        .accessibilityHint(Text("Adjust the end time of this schedule slot"))
                     }
                 }
                 .padding(.leading, 16)
@@ -482,6 +483,6 @@ struct ScheduleTimelineBar: View {
         .frame(height: 20)
         .clipShape(RoundedRectangle(cornerRadius: 4))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Schedule timeline, \(slots.count) slots, currently \(currentHour):00, active slot: \(activeSlotLabel)")
+        .accessibilityLabel(Text("Schedule timeline, \(slots.count) slots, currently \(currentHour):00, active slot: \(activeSlotLabel)"))
     }
 }

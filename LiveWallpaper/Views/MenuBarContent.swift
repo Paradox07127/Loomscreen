@@ -48,7 +48,9 @@ struct MenuBarContent: View {
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(value == "system" ? "Show whole-system memory usage" : "Show this app's memory usage")
+        .accessibilityLabel(value == "system"
+            ? Text("Show whole-system memory usage", comment: "RAM scope toggle a11y label when scope is the whole system.")
+            : Text("Show this app's memory usage", comment: "RAM scope toggle a11y label when scope is the LiveWallpaper app only."))
     }
 
     var body: some View {
@@ -83,7 +85,7 @@ struct MenuBarContent: View {
             Text(versionString)
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(.secondary)
-                .accessibilityLabel("Version \(versionString)")
+                .accessibilityLabel(Text("Version \(versionString)"))
         }
     }
 
@@ -107,9 +109,13 @@ struct MenuBarContent: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("System Monitor")
-            .accessibilityValue(dashboardExpanded ? "Expanded, \(dashboardSummary)" : "Collapsed, \(dashboardSummary)")
-            .accessibilityHint(dashboardExpanded ? "Double tap to collapse" : "Double tap to expand")
+            .accessibilityLabel(Text("System Monitor"))
+            .accessibilityValue(dashboardExpanded
+                ? Text("Expanded, \(dashboardSummary)", comment: "A11y value when system monitor dashboard is expanded; %@ is the metrics summary.")
+                : Text("Collapsed, \(dashboardSummary)", comment: "A11y value when system monitor dashboard is collapsed; %@ is the metrics summary."))
+            .accessibilityHint(dashboardExpanded
+                ? Text("Double tap to collapse", comment: "A11y hint when the dashboard is expanded.")
+                : Text("Double tap to expand", comment: "A11y hint when the dashboard is collapsed."))
 
             if dashboardExpanded {
                 // RAM scope picker — explicit segmented capsule shared with sidebar.
@@ -121,7 +127,7 @@ struct MenuBarContent: View {
                 .background(Capsule().fill(Color.gray.opacity(0.18)))
                 .frame(maxWidth: 180)
                 .accessibilityElement(children: .contain)
-                .accessibilityLabel("RAM scope")
+                .accessibilityLabel(Text("RAM scope"))
 
                 chipRow
             }
@@ -233,9 +239,9 @@ struct MenuBarContent: View {
             }
             .buttonStyle(.plain)
             .disabled(webURLDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            .help("Use as wallpaper for the first display")
-            .accessibilityLabel("Apply web URL")
-            .accessibilityHint("Use the URL above as wallpaper for the first display")
+            .help(Text("Use as wallpaper for the first display"))
+            .accessibilityLabel(Text("Apply web URL"))
+            .accessibilityHint(Text("Use the URL above as wallpaper for the first display"))
         }
     }
 
@@ -421,7 +427,7 @@ private struct DashboardChip: View {
         .padding(.vertical, 5)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 7))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(label): \(displayValue ?? "\(Int(value))%")")
+        .accessibilityLabel(Text("\(label): \(displayValue ?? "\(Int(value))%")", comment: "Dashboard chip a11y label: metric label and current value."))
     }
 }
 
@@ -478,7 +484,7 @@ private struct MenuBarScreenCard: View {
                 }
                 .buttonStyle(.plain)
                 .opacity(isHovering ? 1 : 0.5)
-                .help("Configure this display")
+                .help(Text("Configure this display"))
             }
 
             if summary.supportsPlaybackControl {
@@ -488,7 +494,7 @@ private struct MenuBarScreenCard: View {
                             .font(.system(size: 11))
                     }
                     .buttonStyle(.plain)
-                    .help("Previous video")
+                    .help(Text("Previous video"))
 
                     Button(action: onPlayPause) {
                         Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
@@ -497,14 +503,16 @@ private struct MenuBarScreenCard: View {
                     }
                     .buttonStyle(.plain)
                     .contentTransition(.symbolEffect(.replace))
-                    .help(isPlaying ? "Pause" : "Play")
+                    .help(isPlaying
+                        ? Text("Pause", comment: "Tooltip for the playback toggle when video is playing.")
+                        : Text("Play", comment: "Tooltip for the playback toggle when video is paused."))
 
                     Button(action: onNext) {
                         Image(systemName: "forward.fill")
                             .font(.system(size: 11))
                     }
                     .buttonStyle(.plain)
-                    .help("Next video")
+                    .help(Text("Next video"))
 
                     Spacer()
                 }

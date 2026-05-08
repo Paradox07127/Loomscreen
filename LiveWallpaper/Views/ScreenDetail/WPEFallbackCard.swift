@@ -112,7 +112,7 @@ struct WPEFallbackCard: View {
             // every interactive control into the same element and hide them
             // from assistive tech.
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("\(origin.title). \(warningTitle). \(warningBody)")
+            .accessibilityLabel(Text("\(origin.title). \(warningTitle). \(warningBody)"))
 
             primaryAction
         }
@@ -145,8 +145,8 @@ struct WPEFallbackCard: View {
                                 .labelStyle(.iconOnly)
                         }
                         .buttonStyle(.borderless)
-                        .help("Open workshop \(id) in browser")
-                        .accessibilityLabel("Open workshop \(id) in browser")
+                        .help(Text("Open workshop \(id) in browser"))
+                        .accessibilityLabel(Text("Open workshop \(id) in browser"))
                         Button {
                             copyToPasteboard(id)
                         } label: {
@@ -154,8 +154,8 @@ struct WPEFallbackCard: View {
                                 .labelStyle(.iconOnly)
                         }
                         .buttonStyle(.borderless)
-                        .help("Copy workshop ID to clipboard")
-                        .accessibilityLabel("Copy workshop ID \(id)")
+                        .help(Text("Copy workshop ID to clipboard"))
+                        .accessibilityLabel(Text("Copy workshop ID \(id)"))
                     }
                 }
             }
@@ -175,7 +175,7 @@ struct WPEFallbackCard: View {
                 }
                 .buttonStyle(.glass)
                 .controlSize(.regular)
-                .accessibilityHint("Copies every missing workshop ID to your clipboard so you can subscribe in Steam")
+                .accessibilityHint(Text("Copies every missing workshop ID to your clipboard so you can subscribe in Steam"))
 
                 Button {
                     openWorkshop()
@@ -194,7 +194,7 @@ struct WPEFallbackCard: View {
             }
             .buttonStyle(.glass)
             .controlSize(.regular)
-            .accessibilityHint("Opens this wallpaper's Steam Workshop page in your browser")
+            .accessibilityHint(Text("Opens this wallpaper's Steam Workshop page in your browser"))
         }
     }
 

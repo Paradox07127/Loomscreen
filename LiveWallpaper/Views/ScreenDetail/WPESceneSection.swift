@@ -85,7 +85,7 @@ struct WPESceneSection: View {
                 }
                 .buttonStyle(.glassProminent)
                 .controlSize(.large)
-                .accessibilityHint("Opens a folder chooser to import a Wallpaper Engine project")
+                .accessibilityHint(Text("Opens a folder chooser to import a Wallpaper Engine project"))
 
                 Button {
                     showWorkshopGallery = true
@@ -94,7 +94,7 @@ struct WPESceneSection: View {
                 }
                 .buttonStyle(.glass)
                 .controlSize(.regular)
-                .accessibilityHint("Discover every project under your Steam library and import in bulk")
+                .accessibilityHint(Text("Discover every project under your Steam library and import in bulk"))
             }
             .padding(.top, 4)
 
@@ -120,7 +120,7 @@ struct WPESceneSection: View {
                     }
                     .buttonStyle(.glass)
                     .controlSize(.regular)
-                    .accessibilityHint("Bulk-discover and import projects from your Steam Workshop folder")
+                    .accessibilityHint(Text("Bulk-discover and import projects from your Steam Workshop folder"))
 
                     Button {
                         presentFolderPicker()
@@ -161,7 +161,7 @@ struct WPESceneSection: View {
                 }
                 .buttonStyle(.glass)
                 .controlSize(.regular)
-                .accessibilityHint("Return to the recent imports grid")
+                .accessibilityHint(Text("Return to the recent imports grid"))
                 Spacer()
             }
             WPEFallbackCard(
@@ -288,7 +288,7 @@ struct WPESceneSection: View {
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
-        panel.prompt = "Import Project"
+        panel.prompt = L10n.Panel.importProject
 
         if let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
             let lwDir = docs.appendingPathComponent("Live Wallpapers")

@@ -158,8 +158,8 @@ struct WPECacheManagementView: View {
                 Image(systemName: "trash")
             }
             .buttonStyle(.borderless)
-            .help("Remove cached files for \(entry.workshopID)")
-            .accessibilityLabel("Remove cache for \(entry.workshopID)")
+            .help(Text("Remove cached files for \(entry.workshopID)"))
+            .accessibilityLabel(Text("Remove cache for \(entry.workshopID)"))
         }
         .padding(.vertical, 2)
     }

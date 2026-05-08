@@ -52,8 +52,8 @@ struct ScreenDetailView: View {
                 }
                 .pickerStyle(.segmented)
                 .fixedSize(horizontal: true, vertical: false)
-                .accessibilityLabel("Wallpaper type")
-                .accessibilityHint("Choose between video, HTML, or Metal shader wallpaper")
+                .accessibilityLabel(Text("Wallpaper type"))
+                .accessibilityHint(Text("Choose between video, HTML, or Metal shader wallpaper"))
                 .onChange(of: selectedWallpaperType) { _, newType in
                     switch newType {
                     case .video:
@@ -72,9 +72,9 @@ struct ScreenDetailView: View {
             } label: {
                 Label("Apply to All", systemImage: "square.on.square")
             }
-            .help("Copy this display's wallpaper and settings to every other display")
-            .accessibilityLabel("Apply to all displays")
-            .accessibilityHint("Copies the current wallpaper and settings to every other connected display")
+            .help(Text("Copy this display's wallpaper and settings to every other display"))
+            .accessibilityLabel(Text("Apply to all displays"))
+            .accessibilityHint(Text("Copies the current wallpaper and settings to every other connected display"))
             .disabled(screenManager.screens.count <= 1 || screenManager.getConfiguration(for: screen) == nil)
         }
     }
@@ -167,9 +167,9 @@ struct ScreenDetailView: View {
                                 .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
-                        .help("Reload display content")
-                        .accessibilityLabel("Reload display")
-                        .accessibilityHint("Reloads the wallpaper content for this screen")
+                        .help(Text("Reload display content"))
+                        .accessibilityLabel(Text("Reload display"))
+                        .accessibilityHint(Text("Reloads the wallpaper content for this screen"))
                     }
                     HStack(spacing: 8) {
                         InfoBadge(icon: "arrow.up.left.and.arrow.down.right", text: "\(Int(screen.frame.width))×\(Int(screen.frame.height))")
@@ -194,8 +194,8 @@ struct ScreenDetailView: View {
                 }
                 .buttonStyle(.glass)
                 .controlSize(.regular)
-                .help("Saved video / HTML / shader shortcuts")
-                .accessibilityLabel("Bookmarks")
+                .help(Text("Saved video / HTML / shader shortcuts"))
+                .accessibilityLabel(Text("Bookmarks"))
                 .popover(isPresented: $showBookmarks, arrowEdge: .bottom) {
                     BookmarksPopover(screen: screen)
                         .environment(screenManager)
@@ -210,9 +210,9 @@ struct ScreenDetailView: View {
                         }
                         .buttonStyle(.glassProminent)
                         .controlSize(.regular)
-                        .help("Choose a video file for this display")
-                        .accessibilityLabel("Select video")
-                        .accessibilityHint("Opens a file picker to choose a wallpaper video")
+                        .help(Text("Choose a video file for this display"))
+                        .accessibilityLabel(Text("Select video"))
+                        .accessibilityHint(Text("Opens a file picker to choose a wallpaper video"))
 
                         Button(role: .destructive) {
                             clearVideo()
@@ -221,9 +221,9 @@ struct ScreenDetailView: View {
                         }
                         .buttonStyle(.glass)
                         .controlSize(.regular)
-                        .help("Remove wallpaper video")
-                        .accessibilityLabel("Clear video")
-                        .accessibilityHint("Removes the current wallpaper video from this screen")
+                        .help(Text("Remove wallpaper video"))
+                        .accessibilityLabel(Text("Clear video"))
+                        .accessibilityHint(Text("Removes the current wallpaper video from this screen"))
                     }
                 }
             }
@@ -432,7 +432,7 @@ struct ScreenDetailView: View {
                                                 .contentShape(Capsule())
                                         }
                                         .buttonStyle(.plain)
-                                        .accessibilityLabel("\(mode.label) mode")
+                                        .accessibilityLabel(Text("\(mode.label) mode"))
                                     }
                                 }
                                 .padding(2)
@@ -500,10 +500,10 @@ struct ScreenDetailView: View {
                                                 .onChange(of: selectedParticleEffect) { _, newValue in
                                                     screenManager.updateParticleEffect(newValue, for: screen)
                                                 }
-                                                .accessibilityLabel("Particle effect")
+                                                .accessibilityLabel(Text("Particle effect"))
                                                 .accessibilityValue(selectedParticleEffect.rawValue)
-                                                .accessibilityHint("Choose a particle overlay effect")
-                                                .help("Overlay particle effects on the wallpaper")
+                                                .accessibilityHint(Text("Choose a particle overlay effect"))
+                                                .help(Text("Overlay particle effects on the wallpaper"))
                                             }
 
                                             if selectedParticleEffect != .none {
@@ -515,7 +515,7 @@ struct ScreenDetailView: View {
                                                             .onChange(of: particleDensity) { _, newValue in
                                                                 screenManager.updateParticleDensity(newValue, for: screen)
                                                             }
-                                                            .accessibilityLabel("Particle density")
+                                                            .accessibilityLabel(Text("Particle density"))
                                                             .accessibilityValue(String(format: "%.1f×", particleDensity))
                                                         Text(String(format: "%.1f", particleDensity))
                                                             .font(.system(size: 12, design: .monospaced))
@@ -534,9 +534,9 @@ struct ScreenDetailView: View {
                                                     .onChange(of: effectConfig.weatherReactive) { _, newValue in
                                                         screenManager.setWeatherReactive(newValue, for: screen)
                                                     }
-                                                    .help("Adjust effects based on real-time weather conditions")
-                                                    .accessibilityLabel("Weather-reactive effects")
-                                                    .accessibilityHint("Automatically adjust particles and color based on real-time weather")
+                                                    .help(Text("Adjust effects based on real-time weather conditions"))
+                                                    .accessibilityLabel(Text("Weather-reactive effects"))
+                                                    .accessibilityHint(Text("Automatically adjust particles and color based on real-time weather"))
                                             }
 
                                             if effectConfig.weatherReactive {
@@ -571,7 +571,7 @@ struct ScreenDetailView: View {
             .fixedSize(horizontal: true, vertical: false)
             .background(Color(NSColor.windowBackgroundColor))
             .clipped()
-            .accessibilityLabel("Wallpaper Properties")
+            .accessibilityLabel(Text("Wallpaper Properties"))
         }
     }
 
@@ -755,7 +755,7 @@ struct ScreenDetailView: View {
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = [.movie, .video, .quickTimeMovie, .mpeg4Movie, .avi]
         panel.directoryURL = SettingsManager.shared.getLastUsedDirectory()
-        panel.prompt = "Use as Wallpaper"
+        panel.prompt = L10n.Panel.useAsWallpaper
         guard panel.runModal() == .OK, let url = panel.url else { return }
         SettingsManager.shared.saveLastUsedDirectory(url.deletingLastPathComponent())
         handleSelectedFile(url: url)
@@ -782,7 +782,7 @@ struct ScreenDetailView: View {
         panel.canChooseFiles = true
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
-        panel.prompt = "Use as Wallpaper"
+        panel.prompt = L10n.Panel.useAsWallpaper
         guard panel.runModal() == .OK, let url = panel.url else { return }
         guard isHTMLDrop(url) else {
             errorMessage = "Choose an HTML file or folder."
@@ -945,9 +945,9 @@ private struct InspectorResizeHandle: View {
                 }
         )
         .onHover { isHovering = $0 }
-        .help("Drag to resize properties panel")
-        .accessibilityLabel("Resize properties panel")
-        .accessibilityHint("Drag horizontally to change the properties panel width")
+        .help(Text("Drag to resize properties panel"))
+        .accessibilityLabel(Text("Resize properties panel"))
+        .accessibilityHint(Text("Drag horizontally to change the properties panel width"))
     }
 
     private var isActive: Bool {

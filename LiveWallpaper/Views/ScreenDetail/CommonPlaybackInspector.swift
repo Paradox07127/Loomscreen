@@ -89,8 +89,8 @@ struct CommonPlaybackInspector: View {
             ))
                 .labelsHidden()
                 .toggleStyle(.switch)
-                .accessibilityLabel("Audio")
-                .accessibilityHint("When off, audio tracks are disabled entirely so macOS does not engage the audio engine")
+                .accessibilityLabel(Text("Audio"))
+                .accessibilityHint(Text("When off, audio tracks are disabled entirely so macOS does not engage the audio engine"))
         }
     }
 
@@ -110,7 +110,7 @@ struct CommonPlaybackInspector: View {
             .onChange(of: frameRateLimit) { _, newValue in
                 screenManager.updateFrameRateLimit(newValue, for: screen)
             }
-            .accessibilityLabel("Frame rate limit")
+            .accessibilityLabel(Text("Frame rate limit"))
             .accessibilityValue(frameRateLimit.description)
         }
     }
@@ -136,9 +136,9 @@ struct CommonPlaybackInspector: View {
                             withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.25))) { lockScreenExtracted = false }
                         }
                     }
-                    .accessibilityLabel("Set current frame as desktop picture")
-                    .accessibilityHint("Captures the currently visible video frame and uses it as the macOS desktop picture")
-                    .help("Apply the current video frame as the desktop picture")
+                    .accessibilityLabel(Text("Set current frame as desktop picture"))
+                    .accessibilityHint(Text("Captures the currently visible video frame and uses it as the macOS desktop picture"))
+                    .help(Text("Apply the current video frame as the desktop picture"))
             }
         }
     }
@@ -156,8 +156,8 @@ struct CommonPlaybackInspector: View {
             Toggle("", isOn: htmlConfigBinding(htmlConfig, keyPath: \.useEphemeralStorage))
                 .labelsHidden()
                 .toggleStyle(.switch)
-                .accessibilityLabel("Ephemeral browsing data")
-                .accessibilityHint("When on, the wallpaper's WKWebView starts fresh each session — cookies, localStorage, and cache are not persisted")
+                .accessibilityLabel(Text("Ephemeral browsing data"))
+                .accessibilityHint(Text("When on, the wallpaper's WKWebView starts fresh each session — cookies, localStorage, and cache are not persisted"))
         }
     }
 
@@ -171,8 +171,8 @@ struct CommonPlaybackInspector: View {
             Toggle("", isOn: htmlConfigBinding(htmlConfig, keyPath: \.blockTrackers))
                 .labelsHidden()
                 .toggleStyle(.switch)
-                .accessibilityLabel("Block trackers")
-                .accessibilityHint("Filters analytics and ad scripts before they reach the wallpaper renderer")
+                .accessibilityLabel(Text("Block trackers"))
+                .accessibilityHint(Text("Filters analytics and ad scripts before they reach the wallpaper renderer"))
         }
     }
 

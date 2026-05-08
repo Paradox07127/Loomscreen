@@ -41,8 +41,8 @@ struct ScreenDetailEmptyStateView: View {
                 .buttonStyle(.glassProminent)
                 .controlSize(.large)
                 .padding(.top, 10)
-                .accessibilityLabel("Select video file")
-                .accessibilityHint("Opens a file picker to choose a wallpaper video")
+                .accessibilityLabel(Text("Select video file"))
+                .accessibilityHint(Text("Opens a file picker to choose a wallpaper video"))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

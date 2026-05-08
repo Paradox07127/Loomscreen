@@ -30,7 +30,9 @@ struct CollapsibleSection<Content: View>: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(title)
-            .accessibilityHint(isExpanded ? "Tap to collapse" : "Tap to expand")
+            .accessibilityHint(isExpanded
+                ? Text("Tap to collapse", comment: "A11y hint for an expanded collapsible section header.")
+                : Text("Tap to expand", comment: "A11y hint for a collapsed section header."))
             .accessibilityAddTraits(isExpanded ? [.isHeader, .isSelected] : .isHeader)
 
             if isExpanded {
