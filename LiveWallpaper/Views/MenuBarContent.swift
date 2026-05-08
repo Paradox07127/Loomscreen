@@ -1,11 +1,11 @@
 import SwiftUI
 import AppKit
 
-/// Top-level container for the menu-bar control center. Delegates each region
-/// (header, hero, effects, bookmarks, other displays, automation, footer) to
-/// dedicated child views under `Views/MenuBar/`. Persists the user's choice
-/// of selected screen, popover mode, and section visibility via @AppStorage
-/// so the surface restores its state across launches.
+/// Menu-bar window content. Intentionally minimal: one row per display showing
+/// the current wallpaper plus the two actions a user actually needs from the
+/// menu bar (toggle playback, jump into Settings). Anything richer — effects,
+/// bookmarks, snooze, system monitor — lives inside the main Settings window
+/// where there's room for it.
 struct MenuBarContent: View {
     let openSettings: () -> Void
     let openSettingsForScreen: (CGDirectDisplayID) -> Void
@@ -13,81 +13,17 @@ struct MenuBarContent: View {
 
     @Environment(ScreenManager.self) private var screenManager
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    @AppStorage(MenuBarPreferenceKey.selectedScreenID) private var selectedScreenIDRaw: String = ""
-    @AppStorage(MenuBarPreferenceKey.popoverMode) private var popoverModeRaw: String = MenuBarPopoverMode.standard.rawValue
-    @AppStorage(MenuBarPreferenceKey.diagnosticsVisible) private var diagnosticsVisible: Bool = false
-    @AppStorage(MenuBarPreferenceKey.effectsVisible) private var effectsVisible: Bool = true
-    @AppStorage(MenuBarPreferenceKey.bookmarksVisible) private var bookmarksVisible: Bool = true
-    @AppStorage(MenuBarPreferenceKey.automationVisible) private var automationVisible: Bool = true
-    @AppStorage(MenuBarPreferenceKey.otherDisplaysVisible) private var otherDisplaysVisible: Bool = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.md) {
             header
-
-            if let screen = selectedScreen {
-                MenuBarScreenTabs(
-                    screens: screenManager.screens,
-                    selectedScreenIDRaw: $selectedScreenIDRaw
-                )
-
-                MenuBarHeroSection(
-                    screen: screen,
-                    openSettingsForScreen: invokeOpenSettingsForScreen
-                )
-
-                if mode != .compact {
-                    if effectsVisible {
-                        MenuBarEffectsSection(screen: screen)
-                    }
-                    if bookmarksVisible {
-                        MenuBarBookmarksShelf(screen: screen)
-                    }
-                    if otherDisplaysVisible && screenManager.screens.count >= 3 {
-                        MenuBarOtherDisplaysList(
-                            screens: screenManager.screens,
-                            selectedScreenID: screen.id,
-                            openSettingsForScreen: invokeOpenSettingsForScreen
-                        )
-                    }
-                    if automationVisible {
-                        MenuBarAutomationDrawer()
-                    }
-                }
-
-                if diagnosticsVisible {
-                    MenuBarDiagnosticsPopover()
-                        .padding(.top, 2)
-                }
-            } else {
-                Text("No displays detected")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-            }
-
-            MenuBarFooter(
-                openSettings: invokeOpenSettings,
-                onReload: { screenManager.reloadAllScreens() },
-                diagnosticsVisible: $diagnosticsVisible,
-                effectsVisible: $effectsVisible,
-                bookmarksVisible: $bookmarksVisible,
-                automationVisible: $automationVisible,
-                otherDisplaysVisible: $otherDisplaysVisible,
-                popoverModeRaw: $popoverModeRaw
-            )
+            Divider()
+            screenList
+            Divider()
+            footer
         }
         .padding(DesignTokens.Spacing.md)
-        .frame(width: mode.width)
-        .glassEffect(.regular, in: .rect(cornerRadius: DesignTokens.Corner.xl))
-        .animation(DesignTokens.motion(reduceMotion, .smooth(duration: 0.40)), value: mode)
-        .animation(
-            DesignTokens.motion(reduceMotion, .snappy(duration: 0.20)),
-            value: selectedScreenIDRaw
-        )
-        .onAppear { ensureValidSelection() }
-        .onChange(of: screenManager.screens.map(\.id)) { _, _ in ensureValidSelection() }
+        .frame(width: 300)
     }
 
     // MARK: - Header
@@ -102,56 +38,96 @@ struct MenuBarContent: View {
 
             Text("LiveWallpaper")
                 .font(.system(size: 13, weight: .semibold))
-                .help(versionString)
 
             Spacer()
 
-            Button(action: togglePauseAll) {
-                Image(systemName: isAnyPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 11, weight: .semibold))
-                    .symbolRenderingMode(.hierarchical)
-                    .frame(width: 24, height: 24)
-                    .contentTransition(.symbolEffect(.replace))
+            Text(versionString)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+        }
+    }
+
+    // MARK: - Screen list
+
+    @ViewBuilder
+    private var screenList: some View {
+        if screenManager.screens.isEmpty {
+            emptyDisplaysState
+        } else {
+            VStack(spacing: DesignTokens.Spacing.sm) {
+                ForEach(screenManager.screens, id: \.id) { screen in
+                    MenuBarScreenRow(
+                        screen: screen,
+                        onConfigure: { invokeOpenSettingsForScreen(screen.id) }
+                    )
+                }
             }
-            .buttonStyle(.plain)
-            .glassEffect(.regular.interactive(), in: .circle)
-            .help(isAnyPlaying
-                ? Text("Pause all", comment: "Tooltip when at least one wallpaper is playing.")
-                : Text("Resume all", comment: "Tooltip when all wallpapers are paused."))
-            .accessibilityLabel(isAnyPlaying
-                ? Text("Pause all displays", comment: "A11y label to pause all displays.")
-                : Text("Resume all displays", comment: "A11y label to resume all displays."))
         }
     }
 
-    // MARK: - Derived state
-
-    private var mode: MenuBarPopoverMode {
-        MenuBarPopoverMode(rawValue: popoverModeRaw) ?? .standard
-    }
-
-    private var selectedScreen: Screen? {
-        if let target = screenManager.screens.first(where: { String($0.id) == selectedScreenIDRaw }) {
-            return target
+    private var emptyDisplaysState: some View {
+        VStack(spacing: 6) {
+            Image(systemName: "display.trianglebadge.exclamationmark")
+                .font(.system(size: 18))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.secondary)
+            Text("No displays detected")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
         }
-        return screenManager.screens.first
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 18)
     }
 
-    private var isAnyPlaying: Bool {
-        screenManager.screens.contains { $0.playbackController?.isPlaying ?? false }
+    // MARK: - Footer
+
+    private var footer: some View {
+        HStack(spacing: DesignTokens.Spacing.sm) {
+            Button(action: invokeOpenSettings) {
+                Label {
+                    Text("Settings")
+                } icon: {
+                    Image(systemName: "gearshape")
+                        .symbolRenderingMode(.hierarchical)
+                }
+            }
+            .buttonStyle(.glass)
+            .controlSize(.small)
+            .keyboardShortcut(",", modifiers: .command)
+            .help(Text("Open settings"))
+
+            Button(action: { screenManager.reloadAllScreens() }) {
+                Label {
+                    Text("Reload")
+                } icon: {
+                    Image(systemName: "arrow.clockwise")
+                        .symbolRenderingMode(.hierarchical)
+                }
+            }
+            .buttonStyle(.glass)
+            .controlSize(.small)
+            .keyboardShortcut("r", modifiers: .command)
+            .help(Text("Reload all wallpapers"))
+
+            Spacer(minLength: 0)
+
+            Button(role: .destructive, action: { NSApp.terminate(nil) }) {
+                Label {
+                    Text("Quit")
+                } icon: {
+                    Image(systemName: "power")
+                        .symbolRenderingMode(.hierarchical)
+                }
+            }
+            .buttonStyle(.glass)
+            .controlSize(.small)
+            .keyboardShortcut("q", modifiers: .command)
+            .help(Text("Quit LiveWallpaper"))
+        }
     }
 
-    private var versionString: String {
-        let info = Bundle.main.infoDictionary
-        let version = info?["CFBundleShortVersionString"] as? String ?? "—"
-        return "Version \(version)"
-    }
-
-    // MARK: - Actions
-
-    private func togglePauseAll() {
-        screenManager.togglePlayback()
-    }
+    // MARK: - Helpers
 
     private func invokeOpenSettings() {
         dismiss()
@@ -163,14 +139,176 @@ struct MenuBarContent: View {
         openSettingsForScreen(id)
     }
 
-    private func ensureValidSelection() {
-        let ids = screenManager.screens.map { String($0.id) }
-        guard !ids.isEmpty else { return }
-        if !ids.contains(selectedScreenIDRaw) {
-            selectedScreenIDRaw = ids.first ?? ""
+    private var versionString: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "—"
+        return "v\(version)"
+    }
+}
+
+// MARK: - Per-screen row
+
+/// One row per display. Configured screens show the wallpaper name + state
+/// plus play/pause + configure buttons. Unconfigured screens show a single
+/// prominent CTA so the user always knows where to start.
+private struct MenuBarScreenRow: View {
+    let screen: Screen
+    let onConfigure: () -> Void
+
+    @Environment(ScreenManager.self) private var screenManager
+
+    var body: some View {
+        let summary = screenManager.wallpaperSummary(for: screen)
+        VStack(alignment: .leading, spacing: 6) {
+            titleRow(summary: summary)
+            actionRow(summary: summary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: DesignTokens.Corner.md))
+    }
+
+    // MARK: Title + status
+
+    private func titleRow(summary: WallpaperSessionSummary) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: deviceIcon)
+                .font(.system(size: 13))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(statusColor(summary: summary))
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(screen.name)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Text(subtitle(summary: summary))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    // MARK: Actions
+
+    @ViewBuilder
+    private func actionRow(summary: WallpaperSessionSummary) -> some View {
+        if summary.isConfigured {
+            HStack(spacing: 6) {
+                if summary.supportsPlaybackControl {
+                    Button(action: togglePlayback) {
+                        Label {
+                            Text(summary.activity == .active ? "Pause" : "Play")
+                        } icon: {
+                            Image(systemName: summary.activity == .active ? "pause.fill" : "play.fill")
+                                .symbolRenderingMode(.hierarchical)
+                                .contentTransition(.symbolEffect(.replace))
+                        }
+                    }
+                    .buttonStyle(.glass)
+                    .controlSize(.small)
+                    .help(summary.activity == .active
+                          ? Text("Pause this display")
+                          : Text("Play this display"))
+                }
+
+                Spacer(minLength: 0)
+
+                Button(action: onConfigure) {
+                    Label {
+                        Text("Configure")
+                    } icon: {
+                        Image(systemName: "slider.horizontal.3")
+                            .symbolRenderingMode(.hierarchical)
+                    }
+                }
+                .buttonStyle(.glass)
+                .controlSize(.small)
+                .help(Text("Open settings for this display"))
+            }
+        } else {
+            Button(action: onConfigure) {
+                Label {
+                    Text("Choose a wallpaper…")
+                } icon: {
+                    Image(systemName: "plus.rectangle.on.rectangle")
+                        .symbolRenderingMode(.hierarchical)
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.glassProminent)
+            .controlSize(.small)
+            .help(Text("Open settings to set a wallpaper for this display"))
+        }
+    }
+
+    // MARK: Helpers
+
+    private func togglePlayback() {
+        guard let playback = screen.playbackController else { return }
+        PlaybackToggle.toggle(playback)
+    }
+
+    private var deviceIcon: String {
+        CGDisplayIsBuiltin(screen.id) != 0 ? "laptopcomputer" : "display"
+    }
+
+    private func subtitle(summary: WallpaperSessionSummary) -> String {
+        switch (summary.wallpaperType, summary.activity) {
+        case (nil, _):
+            return String(localized: "No wallpaper yet")
+        case (.video, .active):
+            return wallpaperName() ?? String(localized: "Playing video")
+        case (.video, .paused):
+            return wallpaperName().map { String(localized: "Paused — \($0)") } ?? String(localized: "Paused")
+        case (.video, .inactive):
+            return String(localized: "Not playing")
+        case (.html, .active):
+            return wallpaperName() ?? String(localized: "Web page")
+        case (.html, .paused), (.html, .inactive):
+            return wallpaperName() ?? String(localized: "Web page")
+        case (.metalShader, _):
+            return wallpaperName() ?? String(localized: "Shader")
+        case (.scene, _):
+            return wallpaperName() ?? String(localized: "Scene")
+        }
+    }
+
+    private func wallpaperName() -> String? {
+        guard let cfg = screenManager.getConfiguration(for: screen) else { return nil }
+        switch cfg.activeWallpaper {
+        case .video:
+            let cursor = cfg.playlistCursorIndex ?? 0
+            let combined = [cfg.savedVideoBookmarkData].compactMap { $0 } + (cfg.playlistBookmarks ?? [])
+            if cursor < combined.count {
+                return ResourceUtilities.resolveBookmarkName(combined[cursor])
+            }
+            return cfg.savedVideoBookmarkData.flatMap { ResourceUtilities.resolveBookmarkName($0) }
+        case .html(let source, _):
+            return source.displayName
+        case .metalShader(let preset):
+            return preset.rawValue
+        case .scene(let descriptor):
+            return "Scene \(descriptor.workshopID)"
+        }
+    }
+
+    private func statusColor(summary: WallpaperSessionSummary) -> Color {
+        switch summary.activity {
+        case .active: return .accentColor
+        case .paused: return .orange
+        case .inactive: return .secondary
         }
     }
 }
+
+// MARK: - Shared playback toggle
 
 @MainActor
 enum PlaybackToggle {
