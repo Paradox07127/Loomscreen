@@ -36,133 +36,15 @@ struct ScreenDetailView: View {
         }
     }
 
-    /// Body-level header — identity (avatar + name + reload + badges +
-    /// status pill) on the left, per-display action buttons on the right.
-    /// Toolbar items (type picker, Apply-to-All, Back) live separately in
-    /// `screenDetailToolbar` so they get the toolbar's natural width
-    /// without competing with these inline controls.
-    @ViewBuilder
-    private var inlineBodyHeader: some View {
-        HStack(alignment: .center, spacing: 14) {
-            ZStack {
-                Circle().fill(Color.accentColor.opacity(0.15)).frame(width: 44, height: 44)
-                Image(systemName: "display").font(.system(size: 18)).foregroundStyle(Color.accentColor)
-            }
-            .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 8) {
-                    Text(screen.name).font(.system(size: 18, weight: .semibold)).lineLimit(1)
-
-                    if isConfigured {
-                        Button(action: { screenManager.reloadWallpaperForScreen(screen) }) {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .help(Text("Reload display content"))
-                        .accessibilityLabel(Text("Reload display"))
-                        .accessibilityHint(Text("Reloads the wallpaper content for this screen"))
-                    }
-                }
-                HStack(spacing: 8) {
-                    InfoBadge(icon: "arrow.up.left.and.arrow.down.right", text: "\(Int(screen.frame.width))×\(Int(screen.frame.height))")
-                    InfoBadge(icon: "gauge.medium", text: "\(getScreenRefreshRate()) Hz")
-                    if isConfigured, wallpaperSessionSummary.isConfigured {
-                        sessionStatusPill
-                    }
-                }
-            }
-            Spacer()
-
-            if isConfigured {
-                Button {
-                    showBookmarks = true
-                } label: {
-                    Label("Bookmarks", systemImage: "bookmark.fill")
-                }
-                .buttonStyle(.glass)
-                .controlSize(.regular)
-                .help(Text("Saved video / HTML / shader shortcuts"))
-                .accessibilityLabel(Text("Bookmarks"))
-                .popover(isPresented: $showBookmarks, arrowEdge: .bottom) {
-                    BookmarksPopover(screen: screen)
-                        .environment(screenManager)
-                }
-
-                if selectedWallpaperType == .video {
-                    HStack(spacing: 8) {
-                        Button(action: showFilePicker) {
-                            Label("Select Video", systemImage: "folder.badge.plus")
-                        }
-                        .buttonStyle(.glassProminent)
-                        .controlSize(.regular)
-                        .help(Text("Choose a video file for this display"))
-                        .accessibilityLabel(Text("Select video"))
-                        .accessibilityHint(Text("Opens a file picker to choose a wallpaper video"))
-
-                        Button(role: .destructive, action: clearVideo) {
-                            Image(systemName: "trash")
-                        }
-                        .buttonStyle(.glass)
-                        .controlSize(.regular)
-                        .help(Text("Remove wallpaper video"))
-                        .accessibilityLabel(Text("Clear video"))
-                        .accessibilityHint(Text("Removes the current wallpaper video from this screen"))
-                    }
-                }
-            }
-        }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 14)
-    }
-
-    private var sessionStatusPill: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "circle.fill")
-                .font(.system(size: 6))
-                .foregroundStyle(sessionStatusColor)
-                .symbolEffect(.pulse, options: .repeat(.continuous), isActive: wallpaperSessionSummary.activity == .active)
-            Text(sessionStatusText).font(.caption).foregroundStyle(.secondary)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text("Status: \(sessionStatusText)"))
-    }
-
-    private var sessionStatusText: String {
-        switch wallpaperSessionSummary.wallpaperType {
-        case .html:        return "HTML Active"
-        case .metalShader: return "Shader Active"
-        case .video:       return wallpaperSessionSummary.activity == .active ? "Playing" : "Paused"
-        case .scene:       return "Scene"
-        case nil:          return "Not configured"
-        }
-    }
-
-    private var sessionStatusColor: Color {
-        switch wallpaperSessionSummary.activity {
-        case .active:   return .green
-        case .paused:   return .orange
-        case .inactive: return .secondary
-        }
-    }
-
-    /// Toolbar items — stage-gated. Type picker + Apply-to-All belong here
-    /// (not in the body header) so they get the toolbar's natural width
-    /// without crowding the inline action buttons.
     @ToolbarContentBuilder
     private var screenDetailToolbar: some ToolbarContent {
-        if case .pickContent = stage {
-            ToolbarItem(placement: .navigation) {
-                Button(action: backToChooseType) {
-                    Label("Back", systemImage: "chevron.left")
-                }
-                .help(Text("Return to wallpaper type selection"))
-                .accessibilityLabel(Text("Back to wallpaper type selection"))
-            }
-        }
-        if case .configured = stage {
-            ToolbarItem(placement: .automatic) {
+        // Hide the type segmented control while the empty-state guide is
+        // visible — the guide IS the type picker for unconfigured screens.
+        // Showing both at once produced two parallel paths to do the same
+        // thing (toolbar `.html` segment vs. guide "HTML" card) which was
+        // confusing for first-time users on a fresh display.
+        if !shouldShowGuideEmptyState {
+            ToolbarItem(placement: .principal) {
                 Picker("Wallpaper Type", selection: $selectedWallpaperType) {
                     ForEach(WallpaperType.allCases) { type in
                         Text(type.rawValue).tag(type)
@@ -170,43 +52,31 @@ struct ScreenDetailView: View {
                 }
                 .pickerStyle(.segmented)
                 .fixedSize(horizontal: true, vertical: false)
-                .accessibilityLabel(Text("Wallpaper type"))
-                .accessibilityHint(Text("Switch between video, HTML, shader, or scene wallpaper"))
+                .accessibilityLabel("Wallpaper type")
+                .accessibilityHint("Choose between video, HTML, or Metal shader wallpaper")
                 .onChange(of: selectedWallpaperType) { _, newType in
-                    guard case .configured(let activeType) = stage,
-                          newType != activeType else { return }
                     switch newType {
                     case .video:
                         screenManager.switchToVideoWallpaper(for: screen)
                     case .html:
                         screenManager.switchToHTMLWallpaper(for: screen)
                     case .metalShader, .scene:
-                        break
+                        break // pickers drive activation themselves
                     }
-                }
-            }
-            if screenManager.screens.count > 1 {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        showApplyToAllConfirm = true
-                    } label: {
-                        Label("Apply to All", systemImage: "square.on.square")
-                    }
-                    .help(Text("Copy this display's wallpaper and settings to every other display"))
-                    .accessibilityLabel(Text("Apply to all displays"))
-                    .accessibilityHint(Text("Copies the current wallpaper and settings to every other connected display"))
-                    .disabled(runtimeError != nil)
                 }
             }
         }
-    }
-
-    /// Resets `pickContent` back to the 4-card guide. Wired to the
-    /// toolbar's Back button. Does NOT touch `selectedWallpaperType` —
-    /// that remains a configured-screen toolbar control, decoupled from
-    /// the empty-state journey.
-    private func backToChooseType() {
-        draftWallpaperType = nil
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                showApplyToAllConfirm = true
+            } label: {
+                Label("Apply to All", systemImage: "square.on.square")
+            }
+            .help("Copy this display's wallpaper and settings to every other display")
+            .accessibilityLabel("Apply to all displays")
+            .accessibilityHint("Copies the current wallpaper and settings to every other connected display")
+            .disabled(screenManager.screens.count <= 1 || screenManager.getConfiguration(for: screen) == nil)
+        }
     }
     /// Resolved Wallpaper Engine origin metadata for the active wallpaper, or
     /// nil when the user picked content directly. Recomputed on every body
@@ -215,55 +85,32 @@ struct ScreenDetailView: View {
         screenManager.getConfiguration(for: screen)?.wpeOrigin
     }
 
-    /// Stages of the unconfigured-to-configured journey.
-    /// `runtimeError` is orthogonal — surfaced as a banner overlay without
-    /// changing the underlying stage.
-    enum Stage: Equatable {
-        case chooseType
-        case pickContent(WallpaperType)
-        case configured(WallpaperType)
+    private var sessionStatusText: String {
+        switch wallpaperSessionSummary.wallpaperType {
+        case .html:
+            return "HTML Active"
+        case .metalShader:
+            return "Shader Active"
+        case .video:
+            return wallpaperSessionSummary.activity == .active ? "Playing" : "Paused"
+        case .scene:
+            return "Scene"
+        case nil:
+            return "Not configured"
+        }
     }
-
-    private var stage: Stage {
-        // Configuration is the authoritative signal. A live runtime session
-        // (rare without a config, but possible during transitions) also
-        // counts. Crucially, an in-flight preview is NOT configured —
-        // `setVideo` validation can fail and leave `hasPreviewSource` true
-        // without ever committing a configuration. Treating that as
-        // configured would expose Bookmarks / Apply-to-All / inspector
-        // before the user had any saved state to act on.
-        if let config = screenManager.getConfiguration(for: screen) {
-            return .configured(config.wallpaperType)
+    private var sessionStatusColor: Color {
+        switch wallpaperSessionSummary.activity {
+        case .active:
+            return .green
+        case .paused:
+            return .orange
+        case .inactive:
+            return .secondary
         }
-        if let runtime = screen.runtimeSession {
-            return .configured(runtime.wallpaperType)
-        }
-        if let draft = draftWallpaperType {
-            return .pickContent(draft)
-        }
-        // Preview without a config implies the user picked a file that's
-        // still being validated. Render as pickContent so the in-flight
-        // path doesn't briefly flash configured affordances.
-        if hasPreviewSource || previewController.hasPreviewContent {
-            return .pickContent(selectedWallpaperType)
-        }
-        return .chooseType
     }
-
-    private var isConfigured: Bool {
-        if case .configured = stage { return true }
-        return false
-    }
-
-    /// True when the right-side inspector panel should appear. Hidden in
-    /// chooseType / pickContent. For now, only Video and HTML have a
-    /// fully-realised inspector; Shader and Scene get just `Common
-    /// PlaybackInspector` once the broader capability-filter refactor
-    /// lands. Until then, gating on configured-AND-(video|html) prevents
-    /// an orphan resize handle from appearing for Shader / Scene.
     private var showsInspector: Bool {
-        guard isConfigured else { return false }
-        return selectedWallpaperType == .video || selectedWallpaperType == .html
+        selectedWallpaperType == .video || selectedWallpaperType == .html
     }
     @State private var showErrorAlert = false
     @State private var errorMessage = ""
@@ -273,12 +120,6 @@ struct ScreenDetailView: View {
     @State private var hasPreviewSource = false
 
     @State private var selectedWallpaperType: WallpaperType = .video
-    /// Pre-commit selection — set when the user clicks an HTML / Shader /
-    /// Scene card on the empty-state guide. Drives the `pickContent` stage
-    /// (Video uses a modal NSOpenPanel and skips this state). Cleared when
-    /// the user goes Back, when a configuration commits, or when the
-    /// wallpaper is cleared.
-    @State private var draftWallpaperType: WallpaperType? = nil
     @State private var selectedWallpaperMode: WallpaperMode = .single
     @State private var selectedParticleEffect: ParticleEffect = .none
     @State private var effectConfig = VideoEffectConfig.default
@@ -301,11 +142,7 @@ struct ScreenDetailView: View {
 
     @AppStorage("Inspector.PlaylistExpanded") private var isPlaylistExpanded = false
     @AppStorage("Inspector.ScheduleExpanded") private var isScheduleExpanded = false
-    // Default `false` so a freshly-configured display shows a tight inspector;
-    // power users can pin it expanded once they discover it. Changed from
-    // `true` during the IA redesign — Environment is type-specific
-    // (particles / weather) and shouldn't dominate vertical space by default.
-    @AppStorage("Inspector.EnvironmentExpanded") private var isEnvironmentExpanded = false
+    @AppStorage("Inspector.EnvironmentExpanded") private var isEnvironmentExpanded = true
     @AppStorage("Inspector.ColorExpanded") private var isColorExpanded = false
     @AppStorage("Inspector.Width") private var inspectorWidth = Double(DesignTokens.Inspector.defaultWidth)
     @State private var liveInspectorWidth: Double?
@@ -315,16 +152,99 @@ struct ScreenDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            inlineBodyHeader
+            HStack(alignment: .center, spacing: 14) {
+                ZStack {
+                    Circle().fill(Color.accentColor.opacity(0.15)).frame(width: 44, height: 44)
+                    Image(systemName: "display").font(.system(size: 18)).foregroundStyle(Color.accentColor)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 8) {
+                        Text(screen.name).font(.system(size: 18, weight: .semibold)).lineLimit(1)
+
+                        Button(action: { screenManager.reloadWallpaperForScreen(screen) }) {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Reload display content")
+                        .accessibilityLabel("Reload display")
+                        .accessibilityHint("Reloads the wallpaper content for this screen")
+                    }
+                    HStack(spacing: 8) {
+                        InfoBadge(icon: "arrow.up.left.and.arrow.down.right", text: "\(Int(screen.frame.width))×\(Int(screen.frame.height))")
+                        InfoBadge(icon: "gauge.medium", text: "\(getScreenRefreshRate()) Hz")
+                        if wallpaperSessionSummary.isConfigured {
+                            HStack(spacing: 4) {
+                                Image(systemName: "circle.fill")
+                                    .font(.system(size: 6))
+                                    .foregroundStyle(sessionStatusColor)
+                                    .symbolEffect(.pulse, options: .repeat(.continuous), isActive: wallpaperSessionSummary.activity == .active)
+                                Text(sessionStatusText).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                Spacer()
+
+                Button {
+                    showBookmarks = true
+                } label: {
+                    Label("Bookmarks", systemImage: "bookmark.fill")
+                }
+                .buttonStyle(.glass)
+                .controlSize(.regular)
+                .help("Saved video / HTML / shader shortcuts")
+                .accessibilityLabel("Bookmarks")
+                .popover(isPresented: $showBookmarks, arrowEdge: .bottom) {
+                    BookmarksPopover(screen: screen)
+                        .environment(screenManager)
+                }
+
+                if selectedWallpaperType == .video {
+                    HStack(spacing: 8) {
+                        Button {
+                            showFilePicker()
+                        } label: {
+                            Label("Select Video", systemImage: "folder.badge.plus")
+                        }
+                        .buttonStyle(.glassProminent)
+                        .controlSize(.regular)
+                        .help("Choose a video file for this display")
+                        .accessibilityLabel("Select video")
+                        .accessibilityHint("Opens a file picker to choose a wallpaper video")
+
+                        Button(role: .destructive) {
+                            clearVideo()
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.glass)
+                        .controlSize(.regular)
+                        .help("Remove wallpaper video")
+                        .accessibilityLabel("Clear video")
+                        .accessibilityHint("Removes the current wallpaper video from this screen")
+                    }
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 14)
+
             runtimeErrorBannerView
+
             Divider()
 
             HStack(spacing: 0) {
                 ZStack {
                     Color(NSColor.underPageBackgroundColor)
 
-                    if case .chooseType = stage {
-                        EmptyStateGuideView(onChoose: handleGuideCardTap)
+                    if shouldShowGuideEmptyState {
+                        EmptyStateGuideView(
+                            onChooseVideo: triggerVideoGuideAction,
+                            onChooseHTML: triggerHTMLGuideAction,
+                            onChooseShader: triggerShaderGuideAction,
+                            onChooseScene: triggerSceneGuideAction
+                        )
                     } else if selectedWallpaperType == .video {
                         if isLoading {
                             ScreenDetailLoadingView()
@@ -478,11 +398,7 @@ struct ScreenDetailView: View {
 
     @ViewBuilder
     private var inspectorPanel: some View {
-        // Stage-aligned: defer to `showsInspector` instead of re-checking
-        // the type here. Without this, the inspector would render during
-        // pickContent (e.g. user clicked HTML card → selectedWallpaperType
-        // == .html → inspector appeared before content was committed).
-        if showsInspector {
+        if selectedWallpaperType == .video || selectedWallpaperType == .html {
             ScrollView {
                 GlassEffectContainer(spacing: 16) {
                     VStack(spacing: 16) {
@@ -516,7 +432,7 @@ struct ScreenDetailView: View {
                                                 .contentShape(Capsule())
                                         }
                                         .buttonStyle(.plain)
-                                        .accessibilityLabel(Text("\(mode.label) mode"))
+                                        .accessibilityLabel("\(mode.label) mode")
                                     }
                                 }
                                 .padding(2)
@@ -584,10 +500,10 @@ struct ScreenDetailView: View {
                                                 .onChange(of: selectedParticleEffect) { _, newValue in
                                                     screenManager.updateParticleEffect(newValue, for: screen)
                                                 }
-                                                .accessibilityLabel(Text("Particle effect"))
+                                                .accessibilityLabel("Particle effect")
                                                 .accessibilityValue(selectedParticleEffect.rawValue)
-                                                .accessibilityHint(Text("Choose a particle overlay effect"))
-                                                .help(Text("Overlay particle effects on the wallpaper"))
+                                                .accessibilityHint("Choose a particle overlay effect")
+                                                .help("Overlay particle effects on the wallpaper")
                                             }
 
                                             if selectedParticleEffect != .none {
@@ -599,7 +515,7 @@ struct ScreenDetailView: View {
                                                             .onChange(of: particleDensity) { _, newValue in
                                                                 screenManager.updateParticleDensity(newValue, for: screen)
                                                             }
-                                                            .accessibilityLabel(Text("Particle density"))
+                                                            .accessibilityLabel("Particle density")
                                                             .accessibilityValue(String(format: "%.1f×", particleDensity))
                                                         Text(String(format: "%.1f", particleDensity))
                                                             .font(.system(size: 12, design: .monospaced))
@@ -618,9 +534,9 @@ struct ScreenDetailView: View {
                                                     .onChange(of: effectConfig.weatherReactive) { _, newValue in
                                                         screenManager.setWeatherReactive(newValue, for: screen)
                                                     }
-                                                    .help(Text("Adjust effects based on real-time weather conditions"))
-                                                    .accessibilityLabel(Text("Weather-reactive effects"))
-                                                    .accessibilityHint(Text("Automatically adjust particles and color based on real-time weather"))
+                                                    .help("Adjust effects based on real-time weather conditions")
+                                                    .accessibilityLabel("Weather-reactive effects")
+                                                    .accessibilityHint("Automatically adjust particles and color based on real-time weather")
                                             }
 
                                             if effectConfig.weatherReactive {
@@ -655,7 +571,7 @@ struct ScreenDetailView: View {
             .fixedSize(horizontal: true, vertical: false)
             .background(Color(NSColor.windowBackgroundColor))
             .clipped()
-            .accessibilityLabel(Text("Wallpaper Properties"))
+            .accessibilityLabel("Wallpaper Properties")
         }
     }
 
@@ -786,9 +702,6 @@ struct ScreenDetailView: View {
         lockScreenExtracted = false
 
         if let config = screenManager.getConfiguration(for: screen) {
-            // Configuration committed → clear any in-flight draft so the
-            // stage transitions to `.configured` cleanly.
-            draftWallpaperType = nil
             if playbackSpeed != config.playbackSpeed { playbackSpeed = config.playbackSpeed }
             if selectedFitMode != config.fitMode { selectedFitMode = config.fitMode }
 
@@ -821,19 +734,12 @@ struct ScreenDetailView: View {
             shufflePlaylist = false
             playlistRotationMinutes = nil
             scheduleSlots = []
-            // Reset selected type to default — the user will re-pick via
-            // the empty-state guide. Don't carry over the prior config's
-            // type as the "default": the IA decision is that clearing
-            // returns to chooseType, not the last-known type.
             selectedWallpaperType = .video
             selectedWallpaperMode = .single
             htmlSource = nil
             htmlConfig = .default
             hasPreviewSource = screen.videoPlayer?.videoURL != nil
             loadPreviewPosterIfNeeded()
-            // Wallpaper went away (cleared, deleted, never set) — drop any
-            // stale draft so the screen re-enters chooseType cleanly.
-            draftWallpaperType = nil
         }
     }
 
@@ -849,7 +755,7 @@ struct ScreenDetailView: View {
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = [.movie, .video, .quickTimeMovie, .mpeg4Movie, .avi]
         panel.directoryURL = SettingsManager.shared.getLastUsedDirectory()
-        panel.prompt = L10n.Panel.useAsWallpaper
+        panel.prompt = "Use as Wallpaper"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         SettingsManager.shared.saveLastUsedDirectory(url.deletingLastPathComponent())
         handleSelectedFile(url: url)
@@ -876,7 +782,7 @@ struct ScreenDetailView: View {
         panel.canChooseFiles = true
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
-        panel.prompt = L10n.Panel.useAsWallpaper
+        panel.prompt = "Use as Wallpaper"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         guard isHTMLDrop(url) else {
             errorMessage = "Choose an HTML file or folder."
@@ -947,24 +853,41 @@ struct ScreenDetailView: View {
 
     // MARK: - Empty State Guide
 
-    /// Routes a card tap from `EmptyStateGuideView` to the correct flow.
-    /// Video uses a modal NSOpenPanel — no draft state needed; modal cancel
-    /// returns the user to chooseType automatically. Other types stage a
-    /// `draftWallpaperType` so the per-type section view (HTMLSourceSection
-    /// / ShaderWallpaperSection / WPESceneSection) takes over until the
-    /// user either picks something (commits config → `configured`) or hits
-    /// the toolbar Back button (clears draft → `chooseType`).
-    private func handleGuideCardTap(_ type: WallpaperType) {
-        switch type {
-        case .video:
-            showFilePicker()
-        case .html, .metalShader, .scene:
-            // Set both: draft drives stage; selectedWallpaperType drives
-            // the existing main-content if/else cascade and the inspector
-            // capability filters once configured.
-            draftWallpaperType = type
-            selectedWallpaperType = type
-        }
+    /// True when this screen has no persisted configuration AND no live
+    /// runtime session AND the user is currently looking at the default
+    /// `.video` tab. Switching the toolbar segmented control to .html /
+    /// .scene / .metalShader exits the guide so those tabs can show their
+    /// own configuration UI — clicking any non-Video guide card does the
+    /// same flip and lands on that type's existing empty state.
+    private var shouldShowGuideEmptyState: Bool {
+        if isLoading { return false }
+        if selectedWallpaperType != .video { return false }
+        if screenManager.getConfiguration(for: screen) != nil { return false }
+        if screen.runtimeSession != nil { return false }
+        if hasPreviewSource || previewController.hasPreviewContent { return false }
+        return true
+    }
+
+    /// Video card → already on `.video`, so just open the existing file
+    /// picker. Cancellation returns the user to the guide unchanged.
+    private func triggerVideoGuideAction() {
+        showFilePicker()
+    }
+
+    /// HTML / Shader / Scene cards → flip the toolbar's selected type so
+    /// `shouldShowGuideEmptyState` returns false and that type's existing
+    /// empty state takes over (URL/file/folder picker, shader presets,
+    /// Workshop browser respectively).
+    private func triggerHTMLGuideAction() {
+        selectedWallpaperType = .html
+    }
+
+    private func triggerShaderGuideAction() {
+        selectedWallpaperType = .metalShader
+    }
+
+    private func triggerSceneGuideAction() {
+        selectedWallpaperType = .scene
     }
 }
 
@@ -1022,9 +945,9 @@ private struct InspectorResizeHandle: View {
                 }
         )
         .onHover { isHovering = $0 }
-        .help(Text("Drag to resize properties panel"))
-        .accessibilityLabel(Text("Resize properties panel"))
-        .accessibilityHint(Text("Drag horizontally to change the properties panel width"))
+        .help("Drag to resize properties panel")
+        .accessibilityLabel("Resize properties panel")
+        .accessibilityHint("Drag horizontally to change the properties panel width")
     }
 
     private var isActive: Bool {
