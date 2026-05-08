@@ -1,5 +1,2585 @@
 {
   "sourceLanguage" : "en",
-  "strings" : {},
+  "strings" : {
+    "" : {
+
+    },
+    "%@ – %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ – %2$@"
+          }
+        }
+      }
+    },
+    "%@ can run scripts only after you trust it." : {
+
+    },
+    "%@ fit mode" : {
+
+    },
+    "%@ mode" : {
+
+    },
+    "%@ of %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ of %2$@"
+          }
+        }
+      }
+    },
+    "%@ shader" : {
+
+    },
+    "%@ usage" : {
+
+    },
+    "%@ wallpaper type" : {
+
+    },
+    "%@, %@ to %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@, %2$@ to %3$@"
+          }
+        }
+      }
+    },
+    "%@, %@ wallpaper%@" : {
+      "comment" : "Workshop gallery card a11y label: project title, type, and optional 'already in library' marker.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@, %2$@ wallpaper%3$@"
+          }
+        }
+      }
+    },
+    "%@, %lld by %lld pixels" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@, %2$lld by %3$lld pixels"
+          }
+        }
+      }
+    },
+    "%@: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@: %2$@"
+          }
+        }
+      }
+    },
+    "%@. %@. %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@. %2$@. %3$@"
+          }
+        }
+      }
+    },
+    "%@. Scene wallpaper. %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@. Scene wallpaper. %2$@"
+          }
+        }
+      }
+    },
+    "%@%@%@" : {
+      "comment" : "Playlist row a11y label: optional 'Primary' / 'Now playing' prefixes plus video name.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@%2$@%3$@"
+          }
+        }
+      }
+    },
+    "%@x" : {
+
+    },
+    "%lld" : {
+
+    },
+    "%lld × %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld × %2$lld"
+          }
+        }
+      }
+    },
+    "%lld FPS" : {
+
+    },
+    "%lld percent" : {
+
+    },
+    "%lld%%" : {
+
+    },
+    "%lld×%lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld×%2$lld"
+          }
+        }
+      }
+    },
+    "1.0" : {
+
+    },
+    "About" : {
+
+    },
+    "Across %lld project%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Across %1$lld project%2$@"
+          }
+        }
+      }
+    },
+    "Add" : {
+
+    },
+    "Add a Web Page" : {
+
+    },
+    "Add schedule slot" : {
+
+    },
+    "Add Slot" : {
+
+    },
+    "Add videos to playlist" : {
+
+    },
+    "ADD WALLPAPER" : {
+
+    },
+    "Adds refractive rain drops over the video" : {
+
+    },
+    "Adjust effects based on real-time weather conditions" : {
+
+    },
+    "Adjust the end time of this schedule slot" : {
+
+    },
+    "Adjust the start time of this schedule slot" : {
+
+    },
+    "Allow %@ to run JavaScript" : {
+
+    },
+    "Already bookmarked" : {
+      "comment" : "Tooltip when the current wallpaper is already saved as a bookmark."
+    },
+    "Also active on: %@" : {
+
+    },
+    "Apple Aerials" : {
+
+    },
+    "Apple downloads aerial wallpapers on demand. Pick one from System Settings → Wallpaper, then refresh." : {
+
+    },
+    "Apply" : {
+
+    },
+    "Apply CSS" : {
+
+    },
+    "Apply the current video frame as the desktop picture" : {
+
+    },
+    "Apply this wallpaper to every other display?" : {
+
+    },
+    "Apply to %@" : {
+
+    },
+    "Apply to All" : {
+
+    },
+    "Apply to all displays" : {
+
+    },
+    "Apply to All Displays" : {
+
+    },
+    "Apply to this display" : {
+
+    },
+    "Apply web URL" : {
+
+    },
+    "Are you sure you want to remove this video? This will delete all configuration for this screen." : {
+
+    },
+    "Audio" : {
+
+    },
+    "Audio is locked to the first screen. GPU cost scales with screen count — consider a different source per display." : {
+
+    },
+    "Auto warm tint" : {
+
+    },
+    "Auto warm tint by time of day" : {
+
+    },
+    "Automatically adjust color temperature by time of day" : {
+
+    },
+    "Automatically adjust particles and color based on real-time weather" : {
+
+    },
+    "Automatically adjusts color warmth based on time of day" : {
+
+    },
+    "Automatically launch LiveWallpaper when you log in" : {
+
+    },
+    "Automatically pause wallpapers when a full-screen app is active" : {
+
+    },
+    "Back" : {
+
+    },
+    "Back to library" : {
+
+    },
+    "Back to wallpaper type selection" : {
+
+    },
+    "Battery Threshold" : {
+
+    },
+    "Behavior" : {
+
+    },
+    "Block trackers" : {
+
+    },
+    "Bookmarks" : {
+
+    },
+    "Bring your desktop to life with stunning dynamic wallpapers across every display." : {
+
+    },
+    "Browse Apple's downloaded aerial wallpapers." : {
+
+    },
+    "Browse Library…" : {
+
+    },
+    "Browse Wallpaper Engine workshop projects" : {
+
+    },
+    "Browse Workshop Library" : {
+
+    },
+    "Browse Workshop Library…" : {
+
+    },
+    "Built with SwiftUI, Metal, and Liquid Glass" : {
+
+    },
+    "Built-in" : {
+
+    },
+    "Bulk-discover and import projects from your Steam Workshop folder" : {
+
+    },
+    "Cache" : {
+
+    },
+    "Cache Error" : {
+
+    },
+    "Cache is using more than 1 GB. Consider clearing unused projects." : {
+
+    },
+    "Cached Projects (%lld)" : {
+
+    },
+    "Calculating cache size…" : {
+
+    },
+    "Cancel" : {
+
+    },
+    "Capability: %@ · Phase 2.1" : {
+
+    },
+    "Captures the currently visible video frame and uses it as the macOS desktop picture" : {
+
+    },
+    "Change Folder" : {
+
+    },
+    "Change Folder..." : {
+
+    },
+    "Checks all screen configurations for errors" : {
+
+    },
+    "Choose a different Steam Workshop folder" : {
+
+    },
+    "Choose a particle overlay effect" : {
+
+    },
+    "Choose a video file for this display" : {
+
+    },
+    "Choose a video for this schedule slot" : {
+
+    },
+    "Choose Folder..." : {
+
+    },
+    "Choose Folder…" : {
+
+    },
+    "Choose the folder that contains numbered Workshop project folders" : {
+
+    },
+    "Choose the Wallpaper Engine folder that contains your subscribed project folders." : {
+
+    },
+    "Choose Your Video" : {
+
+    },
+    "Choose…" : {
+
+    },
+    "Clear" : {
+
+    },
+    "Clear All" : {
+
+    },
+    "Clear all cached Wallpaper Engine projects?" : {
+
+    },
+    "Clear Scene" : {
+
+    },
+    "Clear Unused > 30 days" : {
+
+    },
+    "Clear video" : {
+
+    },
+    "Clear Video" : {
+
+    },
+    "Clear video for %@" : {
+
+    },
+    "Clear Wallpaper Video" : {
+
+    },
+    "Click to record a new keyboard shortcut" : {
+
+    },
+    "Clicks and scrolls reach the wallpaper. Desktop icons are hidden behind the page while this is on." : {
+
+    },
+    "Clicks fall through to the desktop, so Finder icons and the Dock stay usable." : {
+
+    },
+    "Close onboarding and open LiveWallpaper" : {
+
+    },
+    "Collapsed, %@" : {
+
+    },
+    "Configuration Validation" : {
+
+    },
+    "Configure a wallpaper first to bookmark it." : {
+
+    },
+    "Configure this display" : {
+
+    },
+    "Connect Apple Aerials" : {
+
+    },
+    "Connect Library" : {
+
+    },
+    "Connect Steam Workshop" : {
+
+    },
+    "Connect the local Apple Aerials library that contains downloaded aerial videos." : {
+
+    },
+    "Connecting..." : {
+
+    },
+    "Continue" : {
+
+    },
+    "Copies every missing workshop ID to your clipboard so you can subscribe in Steam" : {
+
+    },
+    "Copies the current wallpaper and settings to every other connected display" : {
+
+    },
+    "Copy" : {
+
+    },
+    "Copy all IDs" : {
+
+    },
+    "Copy this display's wallpaper and settings to every other display" : {
+
+    },
+    "Copy workshop ID %@" : {
+
+    },
+    "Copy workshop ID to clipboard" : {
+
+    },
+    "Couldn't scan Aerials" : {
+
+    },
+    "CPU usage" : {
+
+    },
+    "Creates time-of-day wallpaper slots" : {
+
+    },
+    "Currently in use. Tap to reactivate." : {
+      "comment" : "A11y hint for a WPE history row that is the active wallpaper."
+    },
+    "Currently selected" : {
+      "comment" : "A11y hint for the active fit mode button.\nA11y hint for the active shader preset button.\nA11y hint when the playback speed button is the active one."
+    },
+    "Custom CSS" : {
+
+    },
+    "Dashboard" : {
+
+    },
+    "Delete" : {
+
+    },
+    "Delete bookmark" : {
+
+    },
+    "Disable schedule" : {
+
+    },
+    "Disable Schedule" : {
+
+    },
+    "Disconnect Aerials library" : {
+
+    },
+    "Disconnect Workshop library" : {
+
+    },
+    "Discover every project under your Steam library and import in bulk" : {
+
+    },
+    "Displays" : {
+
+    },
+    "DISPLAYS" : {
+
+    },
+    "Done" : {
+
+    },
+    "Double tap to collapse" : {
+
+    },
+    "Double tap to expand" : {
+
+    },
+    "Double-tap to configure this display" : {
+
+    },
+    "Drag horizontally to change the properties panel width" : {
+
+    },
+    "Drag to resize properties panel" : {
+
+    },
+    "Drop a video on this screen, or use Add Videos below." : {
+
+    },
+    "Drop to use as wallpaper" : {
+
+    },
+    "Drop Video Here" : {
+
+    },
+    "Effective:" : {
+
+    },
+    "Enable schedule" : {
+
+    },
+    "Enable Schedule" : {
+
+    },
+    "End hour for %@" : {
+
+    },
+    "Ephemeral browsing data" : {
+
+    },
+    "Erases all configurations and restores factory defaults" : {
+
+    },
+    "Error" : {
+
+    },
+    "error.app.configuration_save_failed" : {
+      "comment" : "Error shown when app settings cannot be saved.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Failed to save configuration"
+          }
+        }
+      }
+    },
+    "error.app.configuration_save_failed.recovery" : {
+      "comment" : "Recovery suggestion for configuration save failures.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Try restarting the app"
+          }
+        }
+      }
+    },
+    "error.app.effects_pipeline_failed" : {
+      "comment" : "Error shown when the video effects pipeline fails.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Effects error: %@"
+          }
+        }
+      }
+    },
+    "error.app.effects_pipeline_failed.recovery" : {
+      "comment" : "Recovery suggestion for video effects failures.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Try disabling effects"
+          }
+        }
+      }
+    },
+    "error.app.file_access_denied" : {
+      "comment" : "Error shown when the app cannot access a selected wallpaper file.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Cannot access \"%@\""
+          }
+        }
+      }
+    },
+    "error.app.file_access_denied.recovery" : {
+      "comment" : "Recovery suggestion for file access errors.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Try selecting the file again"
+          }
+        }
+      }
+    },
+    "error.app.html_load_failed" : {
+      "comment" : "Error shown when an HTML wallpaper cannot be loaded.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Failed to load web content: %@"
+          }
+        }
+      }
+    },
+    "error.app.html_load_failed.recovery" : {
+      "comment" : "Recovery suggestion for HTML wallpaper load failures.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Check the URL and try again"
+          }
+        }
+      }
+    },
+    "error.app.shader_load_failed" : {
+      "comment" : "Error shown when a shader wallpaper cannot be loaded.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Failed to load shader wallpaper"
+          }
+        }
+      }
+    },
+    "error.app.shader_load_failed.recovery" : {
+      "comment" : "Recovery suggestion for shader wallpaper load failures.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Your GPU may not support this shader"
+          }
+        }
+      }
+    },
+    "error.app.video_not_playable" : {
+      "comment" : "Error shown when a selected video cannot be played.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "\"%@\" is not playable"
+          }
+        }
+      }
+    },
+    "error.app.video_not_playable.recovery" : {
+      "comment" : "Recovery suggestion for unsupported video files.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "The file format may not be supported"
+          }
+        }
+      }
+    },
+    "error.app.wpe_import_failed" : {
+      "comment" : "Error shown when importing a Wallpaper Engine package fails.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Wallpaper Engine import failed: %@"
+          }
+        }
+      }
+    },
+    "error.app.wpe_import_failed.recovery" : {
+      "comment" : "Recovery suggestion for Wallpaper Engine import failures.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Re-select the workshop folder and try again"
+          }
+        }
+      }
+    },
+    "error.app.wpe_package_invalid" : {
+      "comment" : "Error shown when a Wallpaper Engine package is invalid.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Invalid Wallpaper Engine package: %@"
+          }
+        }
+      }
+    },
+    "error.app.wpe_package_invalid.recovery" : {
+      "comment" : "Recovery suggestion for invalid Wallpaper Engine packages.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Try re-downloading from Steam Workshop"
+          }
+        }
+      }
+    },
+    "error.app.wpe_unsupported_type" : {
+      "comment" : "Error shown when a Wallpaper Engine package type is unsupported.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Wallpaper Engine \"%@\" type is not supported"
+          }
+        }
+      }
+    },
+    "error.app.wpe_unsupported_type.recovery" : {
+      "comment" : "Recovery suggestion for unsupported Wallpaper Engine package types.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Look for a video version of this wallpaper"
+          }
+        }
+      }
+    },
+    "error.render.executor.command_buffer_failed" : {
+      "comment" : "Error shown when a Metal command buffer reports failure.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "WPE Metal command buffer failed."
+          }
+        }
+      }
+    },
+    "error.render.executor.command_queue_unavailable" : {
+      "comment" : "Error shown when the Metal renderer cannot create or access a command queue.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Metal command queue is unavailable."
+          }
+        }
+      }
+    },
+    "error.render.executor.library_unavailable" : {
+      "comment" : "Error shown when the built-in Metal shader library is unavailable.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "WPE Metal built-in shader library is unavailable."
+          }
+        }
+      }
+    },
+    "error.render.executor.missing_texture" : {
+      "comment" : "Error shown when the Metal renderer cannot find a required texture.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "WPE Metal executor is missing texture %@."
+          }
+        }
+      }
+    },
+    "error.render.executor.no_renderable_passes" : {
+      "comment" : "Error shown when the Metal render pipeline has no renderable passes.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "WPE Metal pipeline has no renderable passes."
+          }
+        }
+      }
+    },
+    "error.render.executor.pipeline_unavailable" : {
+      "comment" : "Error shown when the Metal renderer cannot create a render pipeline.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "WPE Metal pipeline is unavailable for %@."
+          }
+        }
+      }
+    },
+    "error.render.executor.unsupported_shader" : {
+      "comment" : "Error shown when the Metal renderer does not support a shader.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "WPE Metal executor does not support shader %@."
+          }
+        }
+      }
+    },
+    "error.render.executor.unsupported_target" : {
+      "comment" : "Error shown when the Metal renderer does not support a render target.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "WPE Metal executor does not support target %@."
+          }
+        }
+      }
+    },
+    "error.render.graph.file_missing" : {
+      "comment" : "Error shown when a Wallpaper Engine render graph asset is missing.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "WPE graph asset missing: %@"
+          }
+        }
+      }
+    },
+    "error.render.graph.invalid_json" : {
+      "comment" : "Error shown when a Wallpaper Engine render graph asset is invalid JSON.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "WPE graph asset is not valid JSON: %@"
+          }
+        }
+      }
+    },
+    "error.render.graph.malformed_effect" : {
+      "comment" : "Error shown when a Wallpaper Engine effect has no renderable passes.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "WPE effect has no renderable passes: %@"
+          }
+        }
+      }
+    },
+    "error.render.graph.malformed_material" : {
+      "comment" : "Error shown when a Wallpaper Engine material has no renderable passes.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "WPE material has no renderable passes: %@"
+          }
+        }
+      }
+    },
+    "error.render.graph.material_unresolved" : {
+      "comment" : "Error shown when a Wallpaper Engine material cannot be resolved for an image reference.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Could not resolve WPE material for image reference: %@"
+          }
+        }
+      }
+    },
+    "error.render.pipeline.include_cycle" : {
+      "comment" : "Error shown when a Wallpaper Engine shader include cycle is detected.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "WPE shader include cycle detected at %@"
+          }
+        }
+      }
+    },
+    "error.render.pipeline.include_missing" : {
+      "comment" : "Error shown when a Wallpaper Engine shader include file is missing.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "WPE shader include %1$@ requested by %2$@ is missing"
+          }
+        }
+      }
+    },
+    "error.render.pipeline.invalid_source_encoding" : {
+      "comment" : "Error shown when a Wallpaper Engine shader source file is not UTF-8.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "WPE shader source is not UTF-8: %@"
+          }
+        }
+      }
+    },
+    "error.render.pipeline.shader_missing" : {
+      "comment" : "Error shown when a Wallpaper Engine shader source file is missing.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "WPE shader %1$@ is missing %2$@ source at %3$@"
+          }
+        }
+      }
+    },
+    "error.scene.document.invalid_utf8" : {
+      "comment" : "Error shown when a Wallpaper Engine scene.json file is not valid UTF-8.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "scene.json is not valid UTF-8."
+          }
+        }
+      }
+    },
+    "error.scene.document.malformed_field" : {
+      "comment" : "Error shown when a Wallpaper Engine scene.json field is malformed.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "scene.json field %@ is malformed."
+          }
+        }
+      }
+    },
+    "error.scene.document.missing_camera" : {
+      "comment" : "Error shown when a Wallpaper Engine scene.json file has no camera block.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "scene.json is missing the required camera block."
+          }
+        }
+      }
+    },
+    "error.scene.document.missing_general" : {
+      "comment" : "Error shown when a Wallpaper Engine scene.json file has no general block.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "scene.json is missing the required general block."
+          }
+        }
+      }
+    },
+    "error.scene.document.root_not_object" : {
+      "comment" : "Error shown when a Wallpaper Engine scene.json root value is not an object.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "scene.json must be a JSON object at the root."
+          }
+        }
+      }
+    },
+    "error.scene.load_diagnostic.cross_package_reference" : {
+      "comment" : "Diagnostic shown when a scene layer references files from another Wallpaper Engine package.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "The layer '%@' requires files from an external package, which is not supported."
+          }
+        }
+      }
+    },
+    "error.scene.load_diagnostic.file_missing" : {
+      "comment" : "Diagnostic shown when a scene layer references a missing file.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "A file required by the '%@' layer is missing."
+          }
+        }
+      }
+    },
+    "error.scene.load_diagnostic.legacy_unsupported_texture" : {
+      "comment" : "Diagnostic shown when a scene image layer uses a legacy unsupported texture format.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "The image format used by '%@' is no longer supported."
+          }
+        }
+      }
+    },
+    "error.scene.load_diagnostic.material_unresolved" : {
+      "comment" : "Diagnostic shown when a scene layer uses an unresolved material or rendering feature.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "A rendering feature needed by '%@' is not supported yet."
+          }
+        }
+      }
+    },
+    "error.scene.load_diagnostic.other" : {
+      "comment" : "Diagnostic shown when a scene layer fails for an uncategorized reason.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "The layer '%1$@' encountered an issue: %2$@."
+          }
+        }
+      }
+    },
+    "error.scene.load_diagnostic.texture" : {
+      "comment" : "Diagnostic shown when a scene image layer texture cannot be loaded.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "The image for '%@' couldn't be loaded."
+          }
+        }
+      }
+    },
+    "error.scene.rendering.cache_root_missing" : {
+      "comment" : "Error shown when the extracted scene cache directory cannot be found.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Scene cache directory is missing."
+          }
+        }
+      }
+    },
+    "error.scene.rendering.entry_file_missing" : {
+      "comment" : "Error shown when a Wallpaper Engine scene entry file is missing from cache.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Scene entry file %@ was not found in the cache."
+          }
+        }
+      }
+    },
+    "error.scene.rendering.no_renderable_objects" : {
+      "comment" : "Error shown when a scene has no image layers the renderer can display.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Scene has no renderable image layers."
+          }
+        }
+      }
+    },
+    "error.scene.rendering.parse_failed" : {
+      "comment" : "Error shown when a Wallpaper Engine scene.json file cannot be parsed.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Failed to parse scene.json: %@"
+          }
+        }
+      }
+    },
+    "error.scene.rendering.unsupported_shader" : {
+      "comment" : "Error shown when a scene requires unsupported shader features.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Scene uses unsupported shader features."
+          }
+        }
+      }
+    },
+    "error.texture.decode.decode_failed" : {
+      "comment" : "Error shown when a Wallpaper Engine .tex mipmap cannot be decoded.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : ".tex mipmap %1$lld decode failed: %2$@"
+          }
+        }
+      }
+    },
+    "error.texture.decode.decompression_failed" : {
+      "comment" : "Error shown when a Wallpaper Engine .tex mipmap cannot be decompressed.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : ".tex mipmap %lld decompression failed."
+          }
+        }
+      }
+    },
+    "error.texture.decode.invalid_dimensions" : {
+      "comment" : "Error shown when a Wallpaper Engine .tex file declares invalid pixel dimensions.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : ".tex declares invalid dimensions %1$lld×%2$lld."
+          }
+        }
+      }
+    },
+    "error.texture.decode.metal_unavailable" : {
+      "comment" : "Error shown when a texture format requires Metal support that is unavailable.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Cannot decode %@ without Metal support on this machine."
+          }
+        }
+      }
+    },
+    "error.texture.decode.mipmap_out_of_bounds" : {
+      "comment" : "Error shown when a Wallpaper Engine .tex mipmap index is invalid.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : ".tex mipmap index %lld is out of bounds."
+          }
+        }
+      }
+    },
+    "error.texture.decode.missing_bitmap_block" : {
+      "comment" : "Error shown when a Wallpaper Engine .tex file is missing the TEXB block.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : ".tex file is missing the TEXB bitmap block."
+          }
+        }
+      }
+    },
+    "error.texture.decode.missing_info_block" : {
+      "comment" : "Error shown when a Wallpaper Engine .tex file is missing the TEXI block.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : ".tex file is missing the TEXI info block."
+          }
+        }
+      }
+    },
+    "error.texture.decode.truncated_block" : {
+      "comment" : "Error shown when a Wallpaper Engine .tex block ends before its declared payload.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : ".tex block '%1$@' truncated at offset %2$lld."
+          }
+        }
+      }
+    },
+    "error.texture.decode.unsupported_animation" : {
+      "comment" : "Error shown when a Wallpaper Engine .tex file contains unsupported animation frames.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : ".tex animation/sequence frames are not supported."
+          }
+        }
+      }
+    },
+    "error.texture.decode.unsupported_block" : {
+      "comment" : "Error shown when a Wallpaper Engine .tex block magic is unsupported.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : ".tex block '%@' is unrecognised."
+          }
+        }
+      }
+    },
+    "error.texture.decode.unsupported_container" : {
+      "comment" : "Error shown when a Wallpaper Engine .tex container magic is unsupported.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : ".tex container '%@' is unrecognised."
+          }
+        }
+      }
+    },
+    "error.texture.decode.unsupported_format" : {
+      "comment" : "Error shown when a Wallpaper Engine .tex file uses an unsupported format code.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : ".tex format code %lld is not yet supported."
+          }
+        }
+      }
+    },
+    "error.texture.format.malformed_payload" : {
+      "comment" : "Error shown when a Wallpaper Engine texture payload is malformed.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "WPE Metal texture payload is malformed: %@"
+          }
+        }
+      }
+    },
+    "error.texture.format.texture_allocation_failed" : {
+      "comment" : "Error shown when Metal texture allocation fails.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Metal texture allocation failed."
+          }
+        }
+      }
+    },
+    "error.texture.format.unsupported_compressed_format" : {
+      "comment" : "Error shown when the current Metal device cannot sample a compressed texture format.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "This Metal device cannot sample %@ textures."
+          }
+        }
+      }
+    },
+    "error.texture.format.unsupported_format" : {
+      "comment" : "Error shown when a Wallpaper Engine texture format cannot be mapped to Metal.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "WPE Metal texture format is unsupported: %@"
+          }
+        }
+      }
+    },
+    "Est %lld FPS" : {
+
+    },
+    "example.com or https://…" : {
+
+    },
+    "Executable · skipped" : {
+
+    },
+    "Expanded, %@" : {
+
+    },
+    "Filters analytics and ad scripts before they reach the wallpaper renderer" : {
+
+    },
+    "Forgets the selected Steam Workshop folder so you can choose again" : {
+
+    },
+    "Frame Rate" : {
+
+    },
+    "Frame rate limit" : {
+
+    },
+    "Freed %@." : {
+
+    },
+    "From" : {
+
+    },
+    "From Steam" : {
+
+    },
+    "From your Mac" : {
+
+    },
+    "General" : {
+
+    },
+    "Get Started" : {
+
+    },
+    "Glass rain drops" : {
+
+    },
+    "Glass rain drops (Heavy GPU)" : {
+
+    },
+    "Global Shortcuts" : {
+
+    },
+    "GPU usage" : {
+
+    },
+    "GPU-rendered procedural animations" : {
+
+    },
+    "HTTPS is added automatically when no scheme is given." : {
+
+    },
+    "https://example.com or example.com" : {
+
+    },
+    "I'll set this up later from the settings." : {
+
+    },
+    "If your preferred source is unavailable (e.g. Location Services denied), the app will automatically fall back to IP geolocation so weather effects keep working." : {
+
+    },
+    "Import" : {
+
+    },
+    "Import All Compatible" : {
+
+    },
+    "Import Failed" : {
+
+    },
+    "Import from Wallpaper Engine" : {
+
+    },
+    "Import New…" : {
+
+    },
+    "Import Wallpaper Engine project" : {
+
+    },
+    "Importing %lld/%lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Importing %1$lld/%2$lld"
+          }
+        }
+      }
+    },
+    "Imports every Video and Web project not already in your library" : {
+
+    },
+    "In Library" : {
+
+    },
+    "In use" : {
+
+    },
+    "Initializing…" : {
+
+    },
+    "IP Geolocation" : {
+
+    },
+    "JavaScript" : {
+
+    },
+    "JavaScript disabled for untrusted source." : {
+
+    },
+    "Library" : {
+
+    },
+    "Library Error" : {
+
+    },
+    "Listening for the next key combination" : {
+
+    },
+    "LiveWallpaper" : {
+
+    },
+    "Load preview" : {
+
+    },
+    "Load Preview" : {
+
+    },
+    "Loading preview..." : {
+
+    },
+    "Loading video..." : {
+
+    },
+    "Locate your Wallpaper Engine project folder" : {
+
+    },
+    "Location Source" : {
+
+    },
+    "Manual City" : {
+
+    },
+    "Manual Location" : {
+
+    },
+    "Maps window.innerWidth to physical pixels (Wallpaper Engine compatibility). Auto-enabled for folders containing project.json." : {
+
+    },
+    "menu.apply_to_all_displays" : {
+      "comment" : "Apply Aerial wallpaper to all connected displays.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Apply to All Displays"
+          }
+        }
+      }
+    },
+    "menu.apply_to_screen" : {
+      "comment" : "Apply Aerial wallpaper menu item; %@ is the display name.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Apply to %@"
+          }
+        }
+      }
+    },
+    "Minimum battery level" : {
+
+    },
+    "More options for %@" : {
+
+    },
+    "Mouse Interaction" : {
+
+    },
+    "My Wallpapers" : {
+
+    },
+    "Name" : {
+
+    },
+    "Next" : {
+
+    },
+    "Next video" : {
+
+    },
+    "No aerials downloaded yet" : {
+
+    },
+    "No bookmarks yet" : {
+
+    },
+    "No cache entries yet." : {
+
+    },
+    "No display" : {
+
+    },
+    "No display detected" : {
+
+    },
+    "No displays detected" : {
+
+    },
+    "No matches for \"%@\"" : {
+
+    },
+    "No Video Selected" : {
+
+    },
+    "No videos yet" : {
+
+    },
+    "No Workshop projects found" : {
+
+    },
+    "None" : {
+
+    },
+    "Not selected" : {
+      "comment" : "A11y value for screen thumbnail when the screen is not selected."
+    },
+    "OK" : {
+
+    },
+    "onboarding.header.live_preview.subtitle" : {
+      "comment" : "Onboarding subtitle in preview stage; %lld is selected display count. Translators: please use a plural-aware phrase for your locale.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Confirm to apply to %1$lld display%2$@."
+          }
+        }
+      }
+    },
+    "onboarding.header.live_preview.title" : {
+      "comment" : "Onboarding header shown while confirming the live preview.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Looks Good?"
+          }
+        }
+      }
+    },
+    "onboarding.header.screen_selection.subtitle" : {
+      "comment" : "Onboarding subtitle on display selection screen; %lld is the detected display count.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "You can always tweak each display individually later. (%lld displays detected)"
+          }
+        }
+      }
+    },
+    "onboarding.header.screen_selection.title" : {
+      "comment" : "Onboarding header shown while choosing target displays.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Apply To Which Displays?"
+          }
+        }
+      }
+    },
+    "onboarding.header.source_picker.subtitle" : {
+      "comment" : "Onboarding subtitle on source picker screen.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "You can always add more later from the menu bar."
+          }
+        }
+      }
+    },
+    "onboarding.header.source_picker.title" : {
+      "comment" : "Onboarding header shown while choosing the wallpaper source.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Pick Your First Wallpaper"
+          }
+        }
+      }
+    },
+    "Only compatible Video and Web projects are imported" : {
+
+    },
+    "Only downloaded .mov aerials are listed here" : {
+
+    },
+    "Open" : {
+
+    },
+    "Open any display, configure a video / website / shader, then click the bookmark icon in the inspector header to save it here." : {
+
+    },
+    "Open application preferences" : {
+
+    },
+    "Open Location Services settings" : {
+
+    },
+    "Open Settings" : {
+
+    },
+    "Open System Settings" : {
+
+    },
+    "Open System Settings → Privacy & Security → Location Services" : {
+
+    },
+    "Open the LiveWallpaper menu bar icon any time to control playback, switch wallpapers, or change settings." : {
+
+    },
+    "Open the local Aerials folder automatically" : {
+
+    },
+    "Open this project" : {
+
+    },
+    "Open Wallpaper settings and select an Apple aerial" : {
+
+    },
+    "Open workshop %@ in browser" : {
+
+    },
+    "Opens a file picker to choose a wallpaper video" : {
+
+    },
+    "Opens a folder chooser to import a Wallpaper Engine project" : {
+
+    },
+    "Opens this wallpaper's Steam Workshop page in your browser" : {
+
+    },
+    "Option-click for renderer diagnostics" : {
+
+    },
+    "Or drag a video, HTML file, or folder onto this window." : {
+
+    },
+    "Over 1 GB" : {
+
+    },
+    "Overlay particle effects on the wallpaper" : {
+
+    },
+    "panel.message.apple_aerials_access" : {
+      "comment" : "Message shown in the folder picker for granting access to Apple's wallpaper folder.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "macOS requires one-time approval to read Apple's wallpaper folder. Just click \"Grant Access\" — you do not need to pick any specific file."
+          }
+        }
+      }
+    },
+    "panel.message.workshop_projects_folder" : {
+      "comment" : "Message shown in the folder picker for choosing a Wallpaper Engine projects folder.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Select your Wallpaper Engine projects folder"
+          }
+        }
+      }
+    },
+    "panel.prompt.add_videos" : {
+      "comment" : "Confirmation button for adding selected videos to a playlist.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Add Videos"
+          }
+        }
+      }
+    },
+    "panel.prompt.change_folder" : {
+      "comment" : "Confirmation button for changing the selected library folder.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Change Folder"
+          }
+        }
+      }
+    },
+    "panel.prompt.grant_access" : {
+      "comment" : "Confirmation button for granting one-time folder access.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Grant Access"
+          }
+        }
+      }
+    },
+    "panel.prompt.grant_library_access" : {
+      "comment" : "Confirmation button for granting access to the Wallpaper Engine library folder.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Grant Library Access"
+          }
+        }
+      }
+    },
+    "panel.prompt.import_project" : {
+      "comment" : "Confirmation button for choosing a Wallpaper Engine project folder.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Import Project"
+          }
+        }
+      }
+    },
+    "panel.prompt.preview" : {
+      "comment" : "Confirmation button for previewing a selected wallpaper video.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Preview"
+          }
+        }
+      }
+    },
+    "panel.prompt.set_video" : {
+      "comment" : "Confirmation button for assigning a selected video to a schedule slot.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Set Video"
+          }
+        }
+      }
+    },
+    "panel.prompt.use_as_wallpaper" : {
+      "comment" : "Confirmation button in file pickers for applying a selected file as wallpaper.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Use as Wallpaper"
+          }
+        }
+      }
+    },
+    "panel.prompt.use_wallpaper" : {
+      "comment" : "Confirmation button in onboarding file and folder pickers.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Use Wallpaper"
+          }
+        }
+      }
+    },
+    "Particle density" : {
+
+    },
+    "Particle effect" : {
+
+    },
+    "Pause" : {
+      "comment" : "A11y label for playback toggle when playing.\nTooltip for the playback toggle when video is playing."
+    },
+    "Pause on battery" : {
+
+    },
+    "Pause on Battery" : {
+
+    },
+    "Pause on full-screen apps" : {
+
+    },
+    "Pause on Full-Screen Apps" : {
+
+    },
+    "Pause videos when battery drops below a specific level" : {
+
+    },
+    "Pause when battery below:" : {
+
+    },
+    "Paused" : {
+
+    },
+    "Pauses video playback" : {
+      "comment" : "A11y hint for playback toggle when playing."
+    },
+    "Physical-pixel layout" : {
+
+    },
+    "Pick a different wallpaper source" : {
+
+    },
+    "Pick a folder containing index.html plus any JS, CSS, or images it loads." : {
+
+    },
+    "Pick a single .html file or drag and drop one onto this view. Sibling assets next to the file are accessible." : {
+
+    },
+    "Pick a single .html file. Sibling assets next to the file are accessible." : {
+
+    },
+    "Pick an MP4 or MOV from your Mac." : {
+
+    },
+    "Pick Different Source" : {
+
+    },
+    "Pick or drop a folder containing index.html plus any JS, CSS, or images it loads." : {
+
+    },
+    "Pick the folder that contains numbered Workshop project folders" : {
+
+    },
+    "Play" : {
+      "comment" : "A11y label for playback toggle when paused.\nTooltip for the playback toggle when video is paused."
+    },
+    "Play Now" : {
+
+    },
+    "Play preview" : {
+
+    },
+    "Play Preview" : {
+
+    },
+    "Playback speed: %@x" : {
+      "comment" : "Tooltip for a playback speed button. %@ is the multiplier."
+    },
+    "Power" : {
+
+    },
+    "Power Saving" : {
+
+    },
+    "Power source" : {
+
+    },
+    "Preferences" : {
+
+    },
+    "Press keys…" : {
+
+    },
+    "Prev" : {
+
+    },
+    "Preview paused" : {
+
+    },
+    "Preview unavailable" : {
+
+    },
+    "Previous video" : {
+
+    },
+    "Primary video" : {
+
+    },
+    "Proceed to choose your first wallpaper" : {
+
+    },
+    "QUICK TOGGLES" : {
+
+    },
+    "Quit" : {
+
+    },
+    "RAM scope" : {
+
+    },
+    "Re-attempt to load this preview" : {
+
+    },
+    "Re-decodes the scene with the current cache state" : {
+
+    },
+    "Re-pick" : {
+
+    },
+    "Re-scan the workshop folder for new projects" : {
+
+    },
+    "Read-only access; applied videos stay managed by LiveWallpaper" : {
+
+    },
+    "Read-only access; imported copies stay managed by LiveWallpaper" : {
+
+    },
+    "Read-only access; no files are modified" : {
+
+    },
+    "Reapplies the active wallpaper on every display" : {
+
+    },
+    "Recently Imported" : {
+
+    },
+    "Recommended" : {
+
+    },
+    "Recommended: %@" : {
+      "comment" : "Onboarding option a11y label when the option is recommended; %@ is the option title."
+    },
+    "Reconnect" : {
+
+    },
+    "Reconnect the Apple Aerials library location" : {
+
+    },
+    "Refresh" : {
+
+    },
+    "Refresh after macOS downloads or removes aerial videos" : {
+
+    },
+    "Refresh after macOS finishes downloading the video" : {
+
+    },
+    "Refresh desktop picture on lock" : {
+
+    },
+    "Refresh weather" : {
+
+    },
+    "Refresh weather now" : {
+
+    },
+    "Refreshes wallpaper playback on all connected screens" : {
+
+    },
+    "Reload" : {
+
+    },
+    "Reload all screens" : {
+
+    },
+    "Reload All Screens" : {
+
+    },
+    "Reload all wallpapers" : {
+
+    },
+    "Reload display" : {
+
+    },
+    "Reload display content" : {
+
+    },
+    "Reloads the wallpaper content for this screen" : {
+
+    },
+    "Remove" : {
+
+    },
+    "Remove %@ from trusted hosts" : {
+
+    },
+    "Remove %@ slot" : {
+
+    },
+    "Remove cache for %@" : {
+
+    },
+    "Remove cached files for %@" : {
+
+    },
+    "Remove this cache entry?" : {
+
+    },
+    "Remove wallpaper video" : {
+
+    },
+    "Removes all schedule slots and returns to normal playback" : {
+
+    },
+    "Removes the assigned video from this schedule slot" : {
+
+    },
+    "Removes the current wallpaper video from this screen" : {
+
+    },
+    "Removes the scene wallpaper from this display" : {
+
+    },
+    "Rename" : {
+
+    },
+    "Renderer Diagnostics" : {
+
+    },
+    "Renderer diagnostics: capability %@. %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Renderer diagnostics: capability %1$@. %2$@"
+          }
+        }
+      }
+    },
+    "Replays the initial onboarding flow" : {
+
+    },
+    "Rescan" : {
+
+    },
+    "Rescan after Steam downloads or removes subscriptions" : {
+
+    },
+    "Rescan after Steam finishes downloading subscriptions" : {
+
+    },
+    "Reset All" : {
+
+    },
+    "Reset all color adjustments to default values" : {
+
+    },
+    "Reset all settings to default" : {
+
+    },
+    "Reset All Settings to Default" : {
+
+    },
+    "Reset Settings" : {
+
+    },
+    "Reset to Default" : {
+
+    },
+    "Resize properties panel" : {
+
+    },
+    "Resumes video playback" : {
+      "comment" : "A11y hint for playback toggle when paused."
+    },
+    "Retry" : {
+
+    },
+    "Retry after macOS finishes updating the folder" : {
+
+    },
+    "Retry loading the current wallpaper source" : {
+
+    },
+    "Return to the recent imports grid" : {
+
+    },
+    "Return to wallpaper type selection" : {
+
+    },
+    "Revoke" : {
+
+    },
+    "Rotation interval" : {
+
+    },
+    "Same wallpaper is running on %lld other screen%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Same wallpaper is running on %1$lld other screen%2$@"
+          }
+        }
+      }
+    },
+    "Save" : {
+
+    },
+    "Save as bookmark" : {
+      "comment" : "Tooltip for the button that saves the current wallpaper as a bookmark."
+    },
+    "Save current wallpaper" : {
+
+    },
+    "Save favorites with Bookmarks" : {
+
+    },
+    "Saved video / HTML / shader shortcuts" : {
+
+    },
+    "Scanning library…" : {
+
+    },
+    "Scanning workshop folder…" : {
+
+    },
+    "Scene · preview only" : {
+
+    },
+    "Scene preview snapshot" : {
+
+    },
+    "Schedule timeline, %lld slots, currently %lld:00, active slot: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Schedule timeline, %1$lld slots, currently %2$lld:00, active slot: %3$@"
+          }
+        }
+      }
+    },
+    "Screen: %lld Hz" : {
+
+    },
+    "Scrub through the video timeline" : {
+
+    },
+    "Search city or place" : {
+
+    },
+    "Search…" : {
+
+    },
+    "Select All" : {
+
+    },
+    "Select video" : {
+
+    },
+    "Select Video" : {
+
+    },
+    "Select video file" : {
+
+    },
+    "Select Video File" : {
+
+    },
+    "Selected" : {
+      "comment" : "A11y value for screen thumbnail when the screen is currently selected."
+    },
+    "Set as Primary" : {
+
+    },
+    "Set as Wallpaper" : {
+
+    },
+    "Set current frame as desktop picture" : {
+
+    },
+    "Set playback speed to %@x" : {
+      "comment" : "A11y hint to set playback speed. %@ is the multiplier."
+    },
+    "Set the battery level below which wallpapers will pause" : {
+
+    },
+    "Set Video" : {
+
+    },
+    "Set video for %@" : {
+
+    },
+    "Settings" : {
+
+    },
+    "Shader Wallpaper" : {
+
+    },
+    "Shortcut rejected: %@" : {
+
+    },
+    "Shortcuts" : {
+
+    },
+    "Show in Dock" : {
+
+    },
+    "Show in Finder" : {
+
+    },
+    "Show this app's memory usage" : {
+      "comment" : "RAM scope toggle a11y label when scope is the LiveWallpaper app only."
+    },
+    "Show welcome tour" : {
+
+    },
+    "Show Welcome Tour" : {
+
+    },
+    "Show whole-system memory usage" : {
+      "comment" : "RAM scope toggle a11y label when scope is the whole system."
+    },
+    "Shuffle playlist" : {
+
+    },
+    "Sidebar → Library → Bookmarks. Save any video, web page, or shader once and re-apply it later in one click." : {
+
+    },
+    "Simulate rain drops hitting glass and refracting video (High GPU usage)" : {
+
+    },
+    "Skip for Now" : {
+
+    },
+    "Skip to next video" : {
+
+    },
+    "Skip to previous video" : {
+
+    },
+    "Source" : {
+
+    },
+    "Speed" : {
+
+    },
+    "Speed %@x" : {
+      "comment" : "A11y label for playback speed button. %@ is the multiplier."
+    },
+    "Start at login" : {
+
+    },
+    "Start hour for %@" : {
+
+    },
+    "Starts a temporary video preview for this settings panel" : {
+
+    },
+    "Status: %@" : {
+
+    },
+    "Step %lld of 3" : {
+
+    },
+    "Supports Video / Web · Scene preview only" : {
+
+    },
+    "Switch between video, HTML, shader, or scene wallpaper" : {
+
+    },
+    "Switch to %@ shader" : {
+      "comment" : "A11y hint to switch to a shader preset; %@ is the preset name."
+    },
+    "Switch wallpapers to a static frame when your Mac is unplugged" : {
+
+    },
+    "System Location" : {
+
+    },
+    "System Monitor" : {
+
+    },
+    "Tap to apply" : {
+      "comment" : "A11y hint for a WPE history row that can be applied."
+    },
+    "Tap to collapse" : {
+      "comment" : "A11y hint for an expanded collapsible section header."
+    },
+    "Tap to edit time range" : {
+
+    },
+    "Tap to expand" : {
+      "comment" : "A11y hint for a collapsed section header."
+    },
+    "Tap to manage in the Scene tab" : {
+
+    },
+    "Tap to switch to %@ fit mode" : {
+      "comment" : "A11y hint to switch fit mode; %@ is the mode name."
+    },
+    "The history entry stays — only extracted files for this project are removed." : {
+
+    },
+    "The selected folder did not contain Wallpaper Engine project folders. Pick the folder that contains numeric Workshop IDs, then scan again." : {
+
+    },
+    "The web wallpaper renders after you confirm." : {
+
+    },
+    "These shortcuts work even when LiveWallpaper is in the background. Bare keys without a modifier are rejected (they would steal regular typing), and two actions can't share the same combination. Conflicts with system or other-app shortcuts will silently take whichever app registers first — pick a different combination if a shortcut doesn't trigger." : {
+
+    },
+    "This URL uses HTTP. Content cannot be verified — prefer HTTPS when possible." : {
+
+    },
+    "This will reset all settings including screen configurations. This action cannot be undone." : {
+
+    },
+    "Tip: many creators publish a video version of the same wallpaper." : {
+
+    },
+    "Tip: save favorites with Bookmarks in the sidebar" : {
+
+    },
+    "To" : {
+
+    },
+    "Toggle Sidebar" : {
+
+    },
+    "Toggles whether the app appears in the Dock and the Cmd-Tab switcher" : {
+
+    },
+    "Toggles whether the first wallpaper applies to this display" : {
+
+    },
+    "Troubleshooting" : {
+
+    },
+    "Trust this site" : {
+
+    },
+    "Trusted — JavaScript runs as configured." : {
+
+    },
+    "Unknown type" : {
+
+    },
+    "Use" : {
+
+    },
+    "Use a website or local HTML as a live wallpaper." : {
+
+    },
+    "Use a website, a single .html file, or a full folder of assets." : {
+
+    },
+    "Use Apple Aerials" : {
+
+    },
+    "Use as Wallpaper" : {
+
+    },
+    "Use as wallpaper for the first display" : {
+
+    },
+    "Use battery threshold" : {
+
+    },
+    "Use the URL above as wallpaper for the first display" : {
+
+    },
+    "Use your Steam Workshop wallpapers. Scene types are preview-only." : {
+
+    },
+    "Validate settings" : {
+
+    },
+    "Validate Settings" : {
+
+    },
+    "Version %@" : {
+
+    },
+    "Video position" : {
+
+    },
+    "Video: %lld FPS" : {
+
+    },
+    "View in Workshop" : {
+
+    },
+    "Wallpaper Engine Cache" : {
+
+    },
+    "Wallpaper Engine project: %@" : {
+
+    },
+    "Wallpaper Engine: %@" : {
+
+    },
+    "Wallpaper from Wallpaper Engine: %@" : {
+
+    },
+    "Wallpaper Properties" : {
+
+    },
+    "Wallpaper type" : {
+
+    },
+    "Wallpaper Type" : {
+
+    },
+    "We found your Steam folder. Browse Video / Web projects instantly." : {
+
+    },
+    "We hit a problem while scanning the Apple Aerials library." : {
+
+    },
+    "Weather" : {
+
+    },
+    "Weather status: %@" : {
+      "comment" : "Weather badge a11y label. %@ is the condition string or 'loading'."
+    },
+    "Weather-reactive effects" : {
+
+    },
+    "Web / HTML Wallpaper" : {
+
+    },
+    "Web pages, Shadertoy, CodePen demos, or any URL." : {
+
+    },
+    "Web Preview Not Available" : {
+
+    },
+    "Welcome to LiveWallpaper" : {
+
+    },
+    "When off, audio tracks are disabled entirely so macOS does not engage the audio engine" : {
+
+    },
+    "When on, the wallpaper's WKWebView starts fresh each session — cookies, localStorage, and cache are not persisted" : {
+
+    },
+    "When your Mac locks, capture the current frame for screens with Desktop Picture enabled" : {
+
+    },
+    "window.title.settings" : {
+      "comment" : "Title of the LiveWallpaper settings window.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "LiveWallpaper Settings"
+          }
+        }
+      }
+    },
+    "Workshop folders on disk are untouched; only LiveWallpaper's extracted copies are removed. Re-applying a wallpaper will re-extract on demand." : {
+
+    },
+    "Workshop ID %@ · %@ type" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Workshop ID %1$@ · %2$@ type"
+          }
+        }
+      }
+    },
+    "Workshop ID %@ · capability: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Workshop ID %1$@ · capability: %2$@"
+          }
+        }
+      }
+    },
+    "Workshop Library" : {
+
+    },
+    "You're All Set" : {
+
+    }
+  },
   "version" : "1.0"
 }
