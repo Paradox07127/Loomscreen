@@ -36,47 +36,12 @@ struct ScreenDetailView: View {
         }
     }
 
-    @ToolbarContentBuilder
-    private var screenDetailToolbar: some ToolbarContent {
-        // Hide the type segmented control while the empty-state guide is
-        // visible — the guide IS the type picker for unconfigured screens.
-        // Showing both at once produced two parallel paths to do the same
-        // thing (toolbar `.html` segment vs. guide "HTML" card) which was
-        // confusing for first-time users on a fresh display.
-        if !shouldShowGuideEmptyState {
-            ToolbarItem(placement: .principal) {
-                Picker("Wallpaper Type", selection: $selectedWallpaperType) {
-                    ForEach(WallpaperType.allCases) { type in
-                        Text(type.rawValue).tag(type)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .fixedSize(horizontal: true, vertical: false)
-                .accessibilityLabel(Text("Wallpaper type"))
-                .accessibilityHint(Text("Choose between video, HTML, or Metal shader wallpaper"))
-                .onChange(of: selectedWallpaperType) { _, newType in
-                    switch newType {
-                    case .video:
-                        screenManager.switchToVideoWallpaper(for: screen)
-                    case .html:
-                        screenManager.switchToHTMLWallpaper(for: screen)
-                    case .metalShader, .scene:
-                        break // pickers drive activation themselves
-                    }
-                }
-            }
-        }
-        ToolbarItem(placement: .primaryAction) {
-            Button {
-                showApplyToAllConfirm = true
-            } label: {
-                Label("Apply to All", systemImage: "square.on.square")
-            }
-            .help(Text("Copy this display's wallpaper and settings to every other display"))
-            .accessibilityLabel(Text("Apply to all displays"))
-            .accessibilityHint(Text("Copies the current wallpaper and settings to every other connected display"))
-            .disabled(screenManager.screens.count <= 1 || screenManager.getConfiguration(for: screen) == nil)
-        }
+    /// Resets `pickContent` back to the 4-card guide. Wired to the
+    /// header's Back button. Does NOT touch `selectedWallpaperType` —
+    /// that remains a configured-screen toolbar control, decoupled from
+    /// the empty-state journey.
+    private func backToChooseType() {
+        draftWallpaperType = nil
     }
     /// Resolved Wallpaper Engine origin metadata for the active wallpaper, or
     /// nil when the user picked content directly. Recomputed on every body
@@ -85,32 +50,55 @@ struct ScreenDetailView: View {
         screenManager.getConfiguration(for: screen)?.wpeOrigin
     }
 
-    private var sessionStatusText: String {
-        switch wallpaperSessionSummary.wallpaperType {
-        case .html:
-            return "HTML Active"
-        case .metalShader:
-            return "Shader Active"
-        case .video:
-            return wallpaperSessionSummary.activity == .active ? "Playing" : "Paused"
-        case .scene:
-            return "Scene"
-        case nil:
-            return "Not configured"
-        }
+    /// Stages of the unconfigured-to-configured journey.
+    /// `runtimeError` is orthogonal — surfaced as a banner overlay without
+    /// changing the underlying stage.
+    enum Stage: Equatable {
+        case chooseType
+        case pickContent(WallpaperType)
+        case configured(WallpaperType)
     }
-    private var sessionStatusColor: Color {
-        switch wallpaperSessionSummary.activity {
-        case .active:
-            return .green
-        case .paused:
-            return .orange
-        case .inactive:
-            return .secondary
+
+    private var stage: Stage {
+        // Configuration is the authoritative signal. A live runtime session
+        // (rare without a config, but possible during transitions) also
+        // counts. Crucially, an in-flight preview is NOT configured —
+        // `setVideo` validation can fail and leave `hasPreviewSource` true
+        // without ever committing a configuration. Treating that as
+        // configured would expose Bookmarks / Apply-to-All / inspector
+        // before the user had any saved state to act on.
+        if let config = screenManager.getConfiguration(for: screen) {
+            return .configured(config.wallpaperType)
         }
+        if let runtime = screen.runtimeSession {
+            return .configured(runtime.wallpaperType)
+        }
+        if let draft = draftWallpaperType {
+            return .pickContent(draft)
+        }
+        // Preview without a config implies the user picked a file that's
+        // still being validated. Render as pickContent so the in-flight
+        // path doesn't briefly flash configured affordances.
+        if hasPreviewSource || previewController.hasPreviewContent {
+            return .pickContent(selectedWallpaperType)
+        }
+        return .chooseType
     }
+
+    private var isConfigured: Bool {
+        if case .configured = stage { return true }
+        return false
+    }
+
+    /// True when the right-side inspector panel should appear. Hidden in
+    /// chooseType / pickContent. For now, only Video and HTML have a
+    /// fully-realised inspector; Shader and Scene get just `Common
+    /// PlaybackInspector` once the broader capability-filter refactor
+    /// lands. Until then, gating on configured-AND-(video|html) prevents
+    /// an orphan resize handle from appearing for Shader / Scene.
     private var showsInspector: Bool {
-        selectedWallpaperType == .video || selectedWallpaperType == .html
+        guard isConfigured else { return false }
+        return selectedWallpaperType == .video || selectedWallpaperType == .html
     }
     @State private var showErrorAlert = false
     @State private var errorMessage = ""
@@ -120,6 +108,12 @@ struct ScreenDetailView: View {
     @State private var hasPreviewSource = false
 
     @State private var selectedWallpaperType: WallpaperType = .video
+    /// Pre-commit selection — set when the user clicks an HTML / Shader /
+    /// Scene card on the empty-state guide. Drives the `pickContent` stage
+    /// (Video uses a modal NSOpenPanel and skips this state). Cleared when
+    /// the user goes Back, when a configuration commits, or when the
+    /// wallpaper is cleared.
+    @State private var draftWallpaperType: WallpaperType? = nil
     @State private var selectedWallpaperMode: WallpaperMode = .single
     @State private var selectedParticleEffect: ParticleEffect = .none
     @State private var effectConfig = VideoEffectConfig.default
@@ -142,7 +136,11 @@ struct ScreenDetailView: View {
 
     @AppStorage("Inspector.PlaylistExpanded") private var isPlaylistExpanded = false
     @AppStorage("Inspector.ScheduleExpanded") private var isScheduleExpanded = false
-    @AppStorage("Inspector.EnvironmentExpanded") private var isEnvironmentExpanded = true
+    // Default `false` so a freshly-configured display shows a tight inspector;
+    // power users can pin it expanded once they discover it. Changed from
+    // `true` during the IA redesign — Environment is type-specific
+    // (particles / weather) and shouldn't dominate vertical space by default.
+    @AppStorage("Inspector.EnvironmentExpanded") private var isEnvironmentExpanded = false
     @AppStorage("Inspector.ColorExpanded") private var isColorExpanded = false
     @AppStorage("Inspector.Width") private var inspectorWidth = Double(DesignTokens.Inspector.defaultWidth)
     @State private var liveInspectorWidth: Double?
@@ -152,99 +150,39 @@ struct ScreenDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(alignment: .center, spacing: 14) {
-                ZStack {
-                    Circle().fill(Color.accentColor.opacity(0.15)).frame(width: 44, height: 44)
-                    Image(systemName: "display").font(.system(size: 18)).foregroundStyle(Color.accentColor)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 8) {
-                        Text(screen.name).font(.system(size: 18, weight: .semibold)).lineLimit(1)
+            // Single-owner header for the entire top zone. Always rendered
+            // so the page structure stays identical across stages — only
+            // the right-side actions vary. The body's `.padding(.top, 8)`
+            // below keeps the header's avatar circle clear of the parent
+            // `ContentView`'s `.navigation`-placement gear icon, which
+            // lives in the transparent-titlebar zone.
+            ScreenDetailHeader(
+                screen: screen,
+                stage: stage,
+                wallpaperSessionSummary: wallpaperSessionSummary,
+                isMultipleScreens: screenManager.screens.count > 1,
+                hasRuntimeError: runtimeError != nil,
+                selectedWallpaperType: $selectedWallpaperType,
+                showBookmarks: $showBookmarks,
+                refreshRateHz: getScreenRefreshRate(),
+                onReload: { screenManager.reloadWallpaperForScreen(screen) },
+                onPickVideo: showFilePicker,
+                onClearVideo: clearVideo,
+                onBack: backToChooseType,
+                onApplyToAll: { showApplyToAllConfirm = true }
+            )
 
-                        Button(action: { screenManager.reloadWallpaperForScreen(screen) }) {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .help(Text("Reload display content"))
-                        .accessibilityLabel(Text("Reload display"))
-                        .accessibilityHint(Text("Reloads the wallpaper content for this screen"))
-                    }
-                    HStack(spacing: 8) {
-                        InfoBadge(icon: "arrow.up.left.and.arrow.down.right", text: "\(Int(screen.frame.width))×\(Int(screen.frame.height))")
-                        InfoBadge(icon: "gauge.medium", text: "\(getScreenRefreshRate()) Hz")
-                        if wallpaperSessionSummary.isConfigured {
-                            HStack(spacing: 4) {
-                                Image(systemName: "circle.fill")
-                                    .font(.system(size: 6))
-                                    .foregroundStyle(sessionStatusColor)
-                                    .symbolEffect(.pulse, options: .repeat(.continuous), isActive: wallpaperSessionSummary.activity == .active)
-                                Text(sessionStatusText).font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
-                Spacer()
-
-                Button {
-                    showBookmarks = true
-                } label: {
-                    Label("Bookmarks", systemImage: "bookmark.fill")
-                }
-                .buttonStyle(.glass)
-                .controlSize(.regular)
-                .help(Text("Saved video / HTML / shader shortcuts"))
-                .accessibilityLabel(Text("Bookmarks"))
-                .popover(isPresented: $showBookmarks, arrowEdge: .bottom) {
-                    BookmarksPopover(screen: screen)
-                        .environment(screenManager)
-                }
-
-                if selectedWallpaperType == .video {
-                    HStack(spacing: 8) {
-                        Button {
-                            showFilePicker()
-                        } label: {
-                            Label("Select Video", systemImage: "folder.badge.plus")
-                        }
-                        .buttonStyle(.glassProminent)
-                        .controlSize(.regular)
-                        .help(Text("Choose a video file for this display"))
-                        .accessibilityLabel(Text("Select video"))
-                        .accessibilityHint(Text("Opens a file picker to choose a wallpaper video"))
-
-                        Button(role: .destructive) {
-                            clearVideo()
-                        } label: {
-                            Image(systemName: "trash")
-                        }
-                        .buttonStyle(.glass)
-                        .controlSize(.regular)
-                        .help(Text("Remove wallpaper video"))
-                        .accessibilityLabel(Text("Clear video"))
-                        .accessibilityHint(Text("Removes the current wallpaper video from this screen"))
-                    }
-                }
+            if isConfigured {
+                runtimeErrorBannerView
+                Divider()
             }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 14)
-
-            runtimeErrorBannerView
-
-            Divider()
 
             HStack(spacing: 0) {
                 ZStack {
                     Color(NSColor.underPageBackgroundColor)
 
-                    if shouldShowGuideEmptyState {
-                        EmptyStateGuideView(
-                            onChooseVideo: triggerVideoGuideAction,
-                            onChooseHTML: triggerHTMLGuideAction,
-                            onChooseShader: triggerShaderGuideAction,
-                            onChooseScene: triggerSceneGuideAction
-                        )
+                    if case .chooseType = stage {
+                        EmptyStateGuideView(onChoose: handleGuideCardTap)
                     } else if selectedWallpaperType == .video {
                         if isLoading {
                             ScreenDetailLoadingView()
@@ -351,7 +289,31 @@ struct ScreenDetailView: View {
             .transaction(value: selectedWallpaperType) { $0.animation = nil }
             .transaction(value: liveInspectorWidth) { $0.animation = nil }
         }
-        .toolbar { screenDetailToolbar }
+        // The header's type Picker fires this onChange. Gated by both
+        // `.configured` AND `newType != activeType` because
+        // `loadScreenConfiguration()` programmatically syncs
+        // `selectedWallpaperType = config.wallpaperType` after a config
+        // load, which would otherwise re-fire `switchToVideoWallpaper`
+        // and trigger redundant runtime restore + visible flicker.
+        .onChange(of: selectedWallpaperType) { _, newType in
+            guard case .configured(let activeType) = stage,
+                  newType != activeType else { return }
+            switch newType {
+            case .video:
+                screenManager.switchToVideoWallpaper(for: screen)
+            case .html:
+                screenManager.switchToHTMLWallpaper(for: screen)
+            case .metalShader, .scene:
+                break // pickers drive activation themselves
+            }
+        }
+        // Top padding clears the parent toolbar zone. macOS
+        // `.fullSizeContentView` lets body content render under the
+        // transparent titlebar, so we must reserve the standard ~28pt
+        // toolbar height to keep the header's avatar from colliding with
+        // ContentView's `.navigation`-placement gear icon and the
+        // window's traffic-light controls.
+        .padding(.top, 28)
         .confirmationDialog(
             "Apply this wallpaper to every other display?",
             isPresented: $showApplyToAllConfirm
@@ -398,7 +360,11 @@ struct ScreenDetailView: View {
 
     @ViewBuilder
     private var inspectorPanel: some View {
-        if selectedWallpaperType == .video || selectedWallpaperType == .html {
+        // Stage-aligned: defer to `showsInspector` instead of re-checking
+        // the type here. Without this, the inspector would render during
+        // pickContent (e.g. user clicked HTML card → selectedWallpaperType
+        // == .html → inspector appeared before content was committed).
+        if showsInspector {
             ScrollView {
                 GlassEffectContainer(spacing: 16) {
                     VStack(spacing: 16) {
@@ -702,6 +668,9 @@ struct ScreenDetailView: View {
         lockScreenExtracted = false
 
         if let config = screenManager.getConfiguration(for: screen) {
+            // Configuration committed → clear any in-flight draft so the
+            // stage transitions to `.configured` cleanly.
+            draftWallpaperType = nil
             if playbackSpeed != config.playbackSpeed { playbackSpeed = config.playbackSpeed }
             if selectedFitMode != config.fitMode { selectedFitMode = config.fitMode }
 
@@ -734,12 +703,19 @@ struct ScreenDetailView: View {
             shufflePlaylist = false
             playlistRotationMinutes = nil
             scheduleSlots = []
+            // Reset selected type to default — the user will re-pick via
+            // the empty-state guide. Don't carry over the prior config's
+            // type as the "default": the IA decision is that clearing
+            // returns to chooseType, not the last-known type.
             selectedWallpaperType = .video
             selectedWallpaperMode = .single
             htmlSource = nil
             htmlConfig = .default
             hasPreviewSource = screen.videoPlayer?.videoURL != nil
             loadPreviewPosterIfNeeded()
+            // Wallpaper went away (cleared, deleted, never set) — drop any
+            // stale draft so the screen re-enters chooseType cleanly.
+            draftWallpaperType = nil
         }
     }
 
@@ -853,41 +829,24 @@ struct ScreenDetailView: View {
 
     // MARK: - Empty State Guide
 
-    /// True when this screen has no persisted configuration AND no live
-    /// runtime session AND the user is currently looking at the default
-    /// `.video` tab. Switching the toolbar segmented control to .html /
-    /// .scene / .metalShader exits the guide so those tabs can show their
-    /// own configuration UI — clicking any non-Video guide card does the
-    /// same flip and lands on that type's existing empty state.
-    private var shouldShowGuideEmptyState: Bool {
-        if isLoading { return false }
-        if selectedWallpaperType != .video { return false }
-        if screenManager.getConfiguration(for: screen) != nil { return false }
-        if screen.runtimeSession != nil { return false }
-        if hasPreviewSource || previewController.hasPreviewContent { return false }
-        return true
-    }
-
-    /// Video card → already on `.video`, so just open the existing file
-    /// picker. Cancellation returns the user to the guide unchanged.
-    private func triggerVideoGuideAction() {
-        showFilePicker()
-    }
-
-    /// HTML / Shader / Scene cards → flip the toolbar's selected type so
-    /// `shouldShowGuideEmptyState` returns false and that type's existing
-    /// empty state takes over (URL/file/folder picker, shader presets,
-    /// Workshop browser respectively).
-    private func triggerHTMLGuideAction() {
-        selectedWallpaperType = .html
-    }
-
-    private func triggerShaderGuideAction() {
-        selectedWallpaperType = .metalShader
-    }
-
-    private func triggerSceneGuideAction() {
-        selectedWallpaperType = .scene
+    /// Routes a card tap from `EmptyStateGuideView` to the correct flow.
+    /// Video uses a modal NSOpenPanel — no draft state needed; modal cancel
+    /// returns the user to chooseType automatically. Other types stage a
+    /// `draftWallpaperType` so the per-type section view (HTMLSourceSection
+    /// / ShaderWallpaperSection / WPESceneSection) takes over until the
+    /// user either picks something (commits config → `configured`) or hits
+    /// the toolbar Back button (clears draft → `chooseType`).
+    private func handleGuideCardTap(_ type: WallpaperType) {
+        switch type {
+        case .video:
+            showFilePicker()
+        case .html, .metalShader, .scene:
+            // Set both: draft drives stage; selectedWallpaperType drives
+            // the existing main-content if/else cascade and the inspector
+            // capability filters once configured.
+            draftWallpaperType = type
+            selectedWallpaperType = type
+        }
     }
 }
 

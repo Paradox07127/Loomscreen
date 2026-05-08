@@ -1,124 +1,94 @@
 import SwiftUI
 
-/// First-impression card grid shown on a display that has no saved
-/// configuration. Mirrors the toolbar's segmented control 1:1 — exactly
-/// four cards (Video / HTML / Shader / Scene) so users build a single
-/// mental model for "wallpaper type" instead of competing
-/// type-vs-source vocabularies.
+/// Focal 2×2 card grid shown on a fresh display that has no saved
+/// configuration. Mirrors `WallpaperType` 1:1 so users build a single
+/// mental model — pick ONE of four types, the rest of the UI follows.
 ///
-/// Once any card is clicked the screen leaves this guide:
-/// the Video card opens the file picker; the other three flip the
-/// `selectedWallpaperType` and let the per-type empty state take over.
+/// Compact by design: the layout fits inside the minimum window content
+/// height (650pt) without scrolling, so first-time users on small windows
+/// see the entire palette at a glance.
 struct EmptyStateGuideView: View {
-    let onChooseVideo: () -> Void
-    let onChooseHTML: () -> Void
-    let onChooseShader: () -> Void
-    let onChooseScene: () -> Void
+    let onChoose: (WallpaperType) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private static let cards: [GuideCardModel] = [
+        GuideCardModel(
+            type: .video,
+            iconTint: .blue,
+            subtitle: "MP4 / MOV with playlists and schedules.",
+            actionLabel: "Pick Video…",
+            actionIcon: "folder"
+        ),
+        GuideCardModel(
+            type: .html,
+            iconTint: .green,
+            subtitle: "Web page or local HTML file.",
+            actionLabel: "Use HTML",
+            actionIcon: "arrow.right"
+        ),
+        GuideCardModel(
+            type: .metalShader,
+            iconTint: .orange,
+            subtitle: "Built-in animated GPU shaders.",
+            actionLabel: "Use Shader",
+            actionIcon: "arrow.right"
+        ),
+        GuideCardModel(
+            type: .scene,
+            iconTint: .purple,
+            subtitle: "Imported Steam Workshop scenes.",
+            actionLabel: "Use Scene",
+            actionIcon: "arrow.right"
+        )
+    ]
+
     var body: some View {
-        ScrollView {
-            VStack(spacing: 24) {
-                header
-
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 240, maximum: 320), spacing: 16)],
-                    spacing: 16
-                ) {
-                    GuideCard(
-                        icon: "film",
-                        iconTint: .blue,
-                        title: "Video",
-                        subtitle: "MP4 / MOV files. Supports playlists and time-of-day schedules.",
-                        actionTitle: "Pick Video…",
-                        actionSystemImage: "folder",
-                        action: onChooseVideo
-                    )
-
-                    GuideCard(
-                        icon: "globe",
-                        iconTint: .green,
-                        title: "HTML",
-                        subtitle: "Any web page or local HTML file. Particles and weather still apply.",
-                        actionTitle: "Use HTML",
-                        actionSystemImage: "arrow.right",
-                        action: onChooseHTML
-                    )
-
-                    GuideCard(
-                        icon: "wand.and.stars",
-                        iconTint: .orange,
-                        title: "Shader",
-                        subtitle: "Built-in animated GPU shaders. Lightweight on the battery.",
-                        actionTitle: "Use Shader",
-                        actionSystemImage: "arrow.right",
-                        action: onChooseShader
-                    )
-
-                    GuideCard(
-                        icon: "cube.transparent",
-                        iconTint: .purple,
-                        title: "Scene",
-                        subtitle: "Steam Workshop scenes imported from Wallpaper Engine.",
-                        actionTitle: "Use Scene",
-                        actionSystemImage: "arrow.right",
-                        action: onChooseScene
-                    )
+        VStack(spacing: 14) {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 240, maximum: 320), spacing: 12)],
+                spacing: 12
+            ) {
+                ForEach(Self.cards, id: \.type) { card in
+                    GuideCard(model: card) { onChoose(card.type) }
                 }
-                .padding(.horizontal, 4)
-
-                hint
             }
-            .padding(.horizontal, 28)
-            .padding(.vertical, 32)
-            .frame(maxWidth: 760)
-            .frame(maxWidth: .infinity)
+
+            hint
         }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 20)
+        .frame(maxWidth: 720)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var header: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 36, weight: .light))
-                .foregroundStyle(Color.accentColor)
-                .symbolRenderingMode(.hierarchical)
-                .accessibilityHidden(true)
-
-            Text("Choose a wallpaper type")
-                .font(.system(size: 22, weight: .semibold, design: .rounded))
-                .accessibilityAddTraits(.isHeader)
-
-            Text("Each display can run a different type. You can switch from the toolbar after picking one.")
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 540)
-        }
-    }
-
     private var hint: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             Image(systemName: "arrow.down.doc")
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.tertiary)
                 .accessibilityHidden(true)
-            Text("Or drag a video, HTML file, or folder anywhere on this window.")
-                .font(.system(size: 11))
+            Text("Or drag a video, HTML file, or folder onto this window.")
+                .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
         }
-        .padding(.top, 8)
     }
 }
 
-private struct GuideCard: View {
-    let icon: String
+// MARK: - Card model
+
+private struct GuideCardModel {
+    let type: WallpaperType
     let iconTint: Color
-    let title: String
     let subtitle: String
-    let actionTitle: String
-    let actionSystemImage: String
+    let actionLabel: String
+    let actionIcon: String
+}
+
+// MARK: - Card view
+
+private struct GuideCard: View {
+    let model: GuideCardModel
     let action: () -> Void
 
     @State private var isHovering = false
@@ -129,42 +99,41 @@ private struct GuideCard: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
                 ZStack {
                     Circle()
-                        .fill(iconTint.opacity(0.15))
-                        .frame(width: 44, height: 44)
-                    Image(systemName: icon)
-                        .font(.system(size: 20, weight: .medium))
-                        .foregroundStyle(iconTint)
+                        .fill(model.iconTint.opacity(0.15))
+                        .frame(width: 36, height: 36)
+                    Image(systemName: model.type.iconName)
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(model.iconTint)
                         .symbolRenderingMode(.hierarchical)
                 }
                 .accessibilityHidden(true)
 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(.system(size: 15, weight: .semibold))
-                    Text(subtitle)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                Text(model.type.rawValue)
+                    .font(.system(size: 14, weight: .semibold))
 
-                Spacer(minLength: 6)
+                Text(model.subtitle)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
 
-                Label(actionTitle, systemImage: actionSystemImage)
-                    .font(.system(size: 12, weight: .semibold))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
+                Spacer(minLength: 4)
+
+                Label(model.actionLabel, systemImage: model.actionIcon)
+                    .font(.system(size: 11, weight: .semibold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
                     .background(
                         Capsule()
                             .fill(Color.accentColor.opacity(isActive ? 0.30 : 0.18))
                     )
                     .foregroundStyle(Color.accentColor)
             }
-            .padding(DesignTokens.Spacing.lg)
-            .frame(minHeight: 168, alignment: .topLeading)
+            .padding(DesignTokens.Spacing.md)
+            .frame(minHeight: 124, alignment: .topLeading)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(RoundedRectangle(cornerRadius: DesignTokens.Corner.lg, style: .continuous))
             .background(
@@ -193,7 +162,8 @@ private struct GuideCard: View {
         .animation(DesignTokens.motion(reduceMotion, .spring(response: 0.32, dampingFraction: 0.86)), value: isHovering)
         .animation(DesignTokens.motion(reduceMotion, .spring(response: 0.32, dampingFraction: 0.86)), value: isFocused)
         .onHover { isHovering = $0 }
-        .accessibilityLabel(Text("\(title) wallpaper type"))
-        .accessibilityHint(subtitle)
+        .accessibilityLabel(Text("\(model.type.rawValue) wallpaper type"))
+        .accessibilityHint(model.subtitle)
+        .accessibilityAddTraits(.isButton)
     }
 }
