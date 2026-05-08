@@ -94,6 +94,46 @@ struct MenuBarBehaviorTests {
         }
     }
 
+    // MARK: - Toggle commit preserves unrelated GlobalSettings fields
+
+    /// Regression for the menu-bar toggle commit path. The old version of
+    /// `MenuBarContent.commitGlobalToggles` rebuilt `GlobalSettings(...)`
+    /// with only a handful of named arguments, silently dropping every
+    /// other field on each toggle press (defaultFrameRateLimit, showInDock,
+    /// weatherLocation, globalShortcuts, recentWPEImports, etc.). The fix
+    /// is mutate-then-save; this test enforces it stays that way.
+    @Test("Mutating only the menu-bar toggles preserves the rest of GlobalSettings")
+    func togglesPreserveOtherGlobalSettingsFields() throws {
+        try withIsolatedGlobalSettings {
+            let manager = SettingsManager.shared
+            var seed = manager.loadGlobalSettings()
+            seed.preservePlaybackOnLock = true
+            seed.defaultFrameRateLimit = .fps30
+            seed.showInDock = true
+            seed.minimumBatteryLevel = 0.42
+            manager.saveGlobalSettings(seed)
+            manager.recordWPEImport(makeEntry("survives"))
+
+            // Mimic MenuBarContent.commitGlobalToggles using mutate-then-save.
+            var settings = manager.loadGlobalSettings()
+            settings.globalPauseOnBattery = !settings.globalPauseOnBattery
+            settings.pauseOnFullScreen = !settings.pauseOnFullScreen
+            manager.saveGlobalSettings(settings)
+
+            let after = manager.loadGlobalSettings()
+            #expect(after.preservePlaybackOnLock == true,
+                    "preservePlaybackOnLock must survive a toggle commit")
+            #expect(after.defaultFrameRateLimit == .fps30,
+                    "defaultFrameRateLimit must survive a toggle commit")
+            #expect(after.showInDock == true,
+                    "showInDock must survive a toggle commit")
+            #expect(after.minimumBatteryLevel == 0.42,
+                    "minimumBatteryLevel must survive a toggle commit")
+            #expect(after.recentWPEImports.map(\.origin.workshopID) == ["survives"],
+                    "WPE history must survive a toggle commit")
+        }
+    }
+
     // MARK: - Helpers
 
     private func withIsolatedGlobalSettings(_ body: () throws -> Void) rethrows {
