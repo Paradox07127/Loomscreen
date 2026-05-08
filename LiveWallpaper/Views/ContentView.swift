@@ -222,6 +222,13 @@ struct Sidebar: View {
             }
         }
         .listStyle(.sidebar)
+        // Reserve the standard ~28pt titlebar height as a top safe area so
+        // the first sidebar row never renders under the window's
+        // traffic-light controls. `.fullSizeContentView` lets content
+        // bleed under the transparent titlebar otherwise.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            Color.clear.frame(height: 28)
+        }
         .navigationSplitViewColumnWidth(
             min: SettingsWindowMetrics.sidebarColumnWidth,
             ideal: SettingsWindowMetrics.sidebarColumnWidth,
