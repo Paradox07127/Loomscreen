@@ -6,8 +6,12 @@ enum WallpaperPolicyEngine {
     static func performanceProfile(
         globalSettings: GlobalSettings,
         powerSource: PowerMonitor.PowerSource,
-        isHiddenByFullScreen: Bool
+        isHiddenByFullScreen: Bool,
+        now: Date = Date()
     ) -> WallpaperPerformanceProfile {
+        if isSnoozeActive(globalSettings: globalSettings, now: now) {
+            return .suspended
+        }
         if globalSettings.pauseOnFullScreen && isHiddenByFullScreen {
             return .suspended
         }
@@ -16,10 +20,22 @@ enum WallpaperPolicyEngine {
         return .quality
     }
 
+    /// True iff the user-driven snooze deadline is in the future. Decision
+    /// chain order: snooze > battery > fullscreen > schedule > playlist.
+    static func isSnoozeActive(globalSettings: GlobalSettings, now: Date = Date()) -> Bool {
+        guard let until = globalSettings.snoozeUntil else { return false }
+        return until > now
+    }
+
     static func shouldPauseForPower(
         globalSettings: GlobalSettings,
-        powerSource: PowerMonitor.PowerSource
+        powerSource: PowerMonitor.PowerSource,
+        now: Date = Date()
     ) -> Bool {
+        if isSnoozeActive(globalSettings: globalSettings, now: now) {
+            return true
+        }
+
         guard powerSource.isOnBattery else { return false }
 
         if globalSettings.globalPauseOnBattery {
