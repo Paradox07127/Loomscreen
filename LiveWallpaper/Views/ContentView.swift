@@ -222,10 +222,37 @@ struct Sidebar: View {
             }
         }
         .listStyle(.sidebar)
+        // Standard macOS sidebar toggle in the leading toolbar slot — same
+        // pattern Xcode / Mail / System Settings use. Two roles:
+        //   1. Lets users collapse the navigator (matches macOS muscle
+        //      memory: ⌘⌃S, View → Hide Sidebar).
+        //   2. Forces the sidebar column to contribute at least one item
+        //      to the global NSToolbar; without it, macOS shrinks the
+        //      sidebar's toolbar zone to zero height and the first List
+        //      row renders directly underneath the traffic-light controls.
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button(action: toggleSidebar) {
+                    Image(systemName: "sidebar.leading")
+                }
+                .help(Text("Toggle Sidebar"))
+                .accessibilityLabel(Text("Toggle Sidebar"))
+            }
+        }
         .navigationSplitViewColumnWidth(
             min: SettingsWindowMetrics.sidebarColumnWidth,
             ideal: SettingsWindowMetrics.sidebarColumnWidth,
             max: SettingsWindowMetrics.sidebarColumnMaxWidth
+        )
+    }
+
+    /// Standard AppKit responder-chain sidebar toggle. Routes through
+    /// `NSSplitViewController.toggleSidebar(_:)` which the SwiftUI
+    /// `NavigationSplitView` host implements.
+    private func toggleSidebar() {
+        NSApp.keyWindow?.firstResponder?.tryToPerform(
+            #selector(NSSplitViewController.toggleSidebar(_:)),
+            with: nil
         )
     }
 
