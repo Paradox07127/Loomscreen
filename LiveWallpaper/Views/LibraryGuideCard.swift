@@ -2,17 +2,17 @@ import SwiftUI
 
 struct LibraryGuideFeature: Equatable {
     let icon: String
-    let text: String
+    let text: LocalizedStringKey
 }
 
 struct LibraryGuideCard: View {
     let icon: String
-    let title: String
-    let message: String
+    let title: LocalizedStringKey
+    let message: LocalizedStringKey
     let features: [LibraryGuideFeature]
-    let actionTitle: String
+    let actionTitle: LocalizedStringKey
     let actionSystemImage: String
-    let secondaryTitle: String?
+    let secondaryTitle: LocalizedStringKey?
     let secondarySystemImage: String?
     let isActionInProgress: Bool
     let errorMessage: String?
@@ -21,12 +21,12 @@ struct LibraryGuideCard: View {
 
     init(
         icon: String,
-        title: String,
-        message: String,
+        title: LocalizedStringKey,
+        message: LocalizedStringKey,
         features: [LibraryGuideFeature],
-        actionTitle: String,
+        actionTitle: LocalizedStringKey,
         actionSystemImage: String,
-        secondaryTitle: String? = nil,
+        secondaryTitle: LocalizedStringKey? = nil,
         secondarySystemImage: String? = nil,
         isActionInProgress: Bool = false,
         errorMessage: String? = nil,
@@ -69,7 +69,7 @@ struct LibraryGuideCard: View {
             }
 
             VStack(alignment: .leading, spacing: 12) {
-                ForEach(features, id: \.text) { feature in
+                ForEach(Array(features.enumerated()), id: \.offset) { _, feature in
                     featureRow(feature)
                 }
             }
@@ -116,10 +116,12 @@ struct LibraryGuideCard: View {
             }
 
             if let errorMessage, !errorMessage.isEmpty {
-                Text(errorMessage)
+                // Dynamic source (Error.localizedDescription) — bypass localization lookup.
+                Text(verbatim: errorMessage)
                     .font(.system(size: 11))
                     .foregroundStyle(.red)
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: 380)
             }
 

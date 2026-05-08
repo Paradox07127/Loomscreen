@@ -45,9 +45,11 @@ struct SegmentedSpeedPicker: View {
                             : .regular.interactive(),
                         in: .rect(cornerRadius: 6)
                     )
-                    .help("Playback speed: \(String(format: "%.1f", speed))x")
-                    .accessibilityLabel("Speed \(String(format: "%.1f", speed))x")
-                    .accessibilityHint(selectedSpeed == speed ? "Currently selected" : "Set playback speed to \(String(format: "%.1f", speed))x")
+                    .help(Text("Playback speed: \(String(format: "%.1f", speed))x", comment: "Tooltip for a playback speed button. %@ is the multiplier."))
+                    .accessibilityLabel(Text("Speed \(String(format: "%.1f", speed))x", comment: "A11y label for playback speed button. %@ is the multiplier."))
+                    .accessibilityHint(selectedSpeed == speed
+                        ? Text("Currently selected", comment: "A11y hint when the playback speed button is the active one.")
+                        : Text("Set playback speed to \(String(format: "%.1f", speed))x", comment: "A11y hint to set playback speed. %@ is the multiplier."))
                 }
             }
         }
@@ -66,9 +68,15 @@ struct PlaybackToggleButton: View {
                 .contentTransition(.symbolEffect(.replace))
         }
         .buttonStyle(.plain)
-        .help(isPlaying ? "Pause" : "Play")
-        .accessibilityLabel(isPlaying ? "Pause" : "Play")
-        .accessibilityHint(isPlaying ? "Pauses video playback" : "Resumes video playback")
+        .help(isPlaying
+            ? Text("Pause", comment: "Tooltip for the playback toggle when video is playing.")
+            : Text("Play", comment: "Tooltip for the playback toggle when video is paused."))
+        .accessibilityLabel(isPlaying
+            ? Text("Pause", comment: "A11y label for playback toggle when playing.")
+            : Text("Play", comment: "A11y label for playback toggle when paused."))
+        .accessibilityHint(isPlaying
+            ? Text("Pauses video playback", comment: "A11y hint for playback toggle when playing.")
+            : Text("Resumes video playback", comment: "A11y hint for playback toggle when paused."))
     }
 }
 
@@ -98,8 +106,10 @@ struct FitModeButton: View {
         }
         .buttonStyle(.plain)
         .help(fitModeTooltip)
-        .accessibilityLabel("\(mode.rawValue) fit mode")
-        .accessibilityHint(isSelected ? "Currently selected" : "Tap to switch to \(mode.rawValue) fit mode")
+        .accessibilityLabel(Text("\(mode.rawValue) fit mode"))
+        .accessibilityHint(isSelected
+            ? Text("Currently selected", comment: "A11y hint for the active fit mode button.")
+            : Text("Tap to switch to \(mode.rawValue) fit mode", comment: "A11y hint to switch fit mode; %@ is the mode name."))
     }
 
     private var fitModeTooltip: String {

@@ -162,7 +162,7 @@ private struct GuideCard: View {
         .animation(DesignTokens.motion(reduceMotion, .spring(response: 0.32, dampingFraction: 0.86)), value: isHovering)
         .animation(DesignTokens.motion(reduceMotion, .spring(response: 0.32, dampingFraction: 0.86)), value: isFocused)
         .onHover { isHovering = $0 }
-        .accessibilityLabel("\(model.type.rawValue) wallpaper type")
+        .accessibilityLabel(Text("\(model.type.rawValue) wallpaper type"))
         .accessibilityHint(model.subtitle)
         .accessibilityAddTraits(.isButton)
     }

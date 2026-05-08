@@ -33,7 +33,7 @@ struct OnboardingStepWelcome: View {
             }
             .buttonStyle(GlassCapsuleButtonStyle(fontSize: 14, horizontalPadding: 24, verticalPadding: 10))
             .keyboardShortcut(.defaultAction)
-            .accessibilityHint("Proceed to choose your first wallpaper")
+            .accessibilityHint(Text("Proceed to choose your first wallpaper"))
 
             Spacer().frame(height: 28)
         }

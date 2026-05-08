@@ -32,7 +32,7 @@ struct WPESceneDetailView: View {
         .glassEffect(.regular, in: .rect(cornerRadius: 24))
         .shadow(color: .black.opacity(0.18), radius: 8, y: 4)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(origin.title). Scene wallpaper. \(stateAccessibilityText)")
+        .accessibilityLabel(Text("\(origin.title). Scene wallpaper. \(stateAccessibilityText)"))
         .task(id: descriptor.workshopID) {
             await refreshState()
         }
@@ -213,7 +213,7 @@ struct WPESceneDetailView: View {
                 Image(systemName: "info.circle")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-                    .help("Option-click for renderer diagnostics")
+                    .help(Text("Option-click for renderer diagnostics"))
                     .accessibilityHidden(true)
             }
         }
@@ -257,7 +257,7 @@ struct WPESceneDetailView: View {
         .padding(12)
         .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Renderer diagnostics: capability \(descriptor.capabilityTier.rawValue). \(diagnosticText)")
+        .accessibilityLabel(Text("Renderer diagnostics: capability \(descriptor.capabilityTier.rawValue). \(diagnosticText)"))
     }
 
     private var statusPill: some View {
@@ -288,7 +288,7 @@ struct WPESceneDetailView: View {
             }
             .buttonStyle(.glass)
             .controlSize(.regular)
-            .accessibilityHint("Removes the scene wallpaper from this display")
+            .accessibilityHint(Text("Removes the scene wallpaper from this display"))
 
             Spacer()
 
@@ -304,7 +304,7 @@ struct WPESceneDetailView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
-                .accessibilityHint("Re-decodes the scene with the current cache state")
+                .accessibilityHint(Text("Re-decodes the scene with the current cache state"))
             }
         }
     }
@@ -539,7 +539,7 @@ private struct MetalSnapshotPreview: View {
             .interpolation(.medium)
             .aspectRatio(contentMode: .fit)
             .background(Color(nsColor: .controlBackgroundColor))
-            .accessibilityLabel("Scene preview snapshot")
+            .accessibilityLabel(Text("Scene preview snapshot"))
             .transition(.opacity)
     }
 }

@@ -61,9 +61,24 @@ struct OnboardingStepFirstWallpaper: View {
 
     private var headerTitle: String {
         switch stage {
-        case .screenSelection: return "Apply To Which Displays?"
-        case .sourcePicker:    return "Pick Your First Wallpaper"
-        case .livePreview:     return "Looks Good?"
+        case .screenSelection:
+            return String(
+                localized: "onboarding.header.screen_selection.title",
+                defaultValue: "Apply To Which Displays?",
+                comment: "Onboarding header shown while choosing target displays."
+            )
+        case .sourcePicker:
+            return String(
+                localized: "onboarding.header.source_picker.title",
+                defaultValue: "Pick Your First Wallpaper",
+                comment: "Onboarding header shown while choosing the wallpaper source."
+            )
+        case .livePreview:
+            return String(
+                localized: "onboarding.header.live_preview.title",
+                defaultValue: "Looks Good?",
+                comment: "Onboarding header shown while confirming the live preview."
+            )
         }
     }
 
@@ -71,11 +86,24 @@ struct OnboardingStepFirstWallpaper: View {
         switch stage {
         case .screenSelection:
             let count = screenManager.screens.count
-            return "You can always tweak each display individually later. (\(count) displays detected)"
+            return String(
+                localized: "onboarding.header.screen_selection.subtitle",
+                defaultValue: "You can always tweak each display individually later. (\(count) displays detected)",
+                comment: "Onboarding subtitle on display selection screen; %lld is the detected display count."
+            )
         case .sourcePicker:
-            return "You can always add more later from the menu bar."
+            return String(
+                localized: "onboarding.header.source_picker.subtitle",
+                defaultValue: "You can always add more later from the menu bar.",
+                comment: "Onboarding subtitle on source picker screen."
+            )
         case .livePreview:
-            return "Confirm to apply to \(selectedScreenIDs.count) display\(selectedScreenIDs.count == 1 ? "" : "s")."
+            let count = selectedScreenIDs.count
+            return String(
+                localized: "onboarding.header.live_preview.subtitle",
+                defaultValue: "Confirm to apply to \(count) display\(count == 1 ? "" : "s").",
+                comment: "Onboarding subtitle in preview stage; %lld is selected display count. Translators: please use a plural-aware phrase for your locale."
+            )
         }
     }
 
@@ -300,7 +328,7 @@ struct OnboardingStepFirstWallpaper: View {
     }
 
     @ViewBuilder
-    private func sectionHeader(_ title: String) -> some View {
+    private func sectionHeader(_ title: LocalizedStringKey) -> some View {
         Text(title)
             .font(.caption.weight(.semibold))
             .foregroundStyle(.tertiary)
@@ -336,7 +364,7 @@ struct OnboardingStepFirstWallpaper: View {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = [.movie, .video, .quickTimeMovie, .mpeg4Movie, .avi]
-        panel.prompt = "Preview"
+        panel.prompt = L10n.Panel.preview
 
         let response = panel.runModal()
         guard response == .OK, let url = panel.url,
@@ -356,7 +384,7 @@ struct OnboardingStepFirstWallpaper: View {
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
-        panel.prompt = "Import Project"
+        panel.prompt = L10n.Panel.importProject
 
         if let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
             let lwDir = docs.appendingPathComponent("Live Wallpapers")
@@ -526,7 +554,7 @@ private struct HTMLPickerSheet: View {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = [UTType.html]
-        panel.prompt = "Use Wallpaper"
+        panel.prompt = L10n.Panel.useWallpaper
         guard panel.runModal() == .OK, let url = panel.url,
               let source = ResourceUtilities.htmlSourceFromPickedFile(url) else { return }
         pickedFileSource = source
@@ -539,7 +567,7 @@ private struct HTMLPickerSheet: View {
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
-        panel.prompt = "Use Wallpaper"
+        panel.prompt = L10n.Panel.useWallpaper
         guard panel.runModal() == .OK, let folderURL = panel.url,
               let bookmark = ResourceUtilities.createBookmark(for: folderURL) else { return }
         let didStart = folderURL.startAccessingSecurityScopedResource()
@@ -574,8 +602,8 @@ private enum PickerKind: String, CaseIterable, Identifiable {
 private struct OnboardingOptionCard: View {
     let icon: String
     let iconTint: Color
-    let title: String
-    let subtitle: String
+    let title: LocalizedStringKey
+    let subtitle: LocalizedStringKey
     let isFeatured: Bool
     let isLoading: Bool
     let action: () -> Void
@@ -646,8 +674,12 @@ private struct OnboardingOptionCard: View {
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: isHovering)
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: isFocused)
         .onHover { isHovering = $0 }
-        .accessibilityLabel(isFeatured ? "Recommended: \(title)" : title)
-        .accessibilityHint(subtitle)
+        .accessibilityLabel(
+            isFeatured
+                ? Text("Recommended: \(Text(title))", comment: "Onboarding option a11y label when the option is recommended; %@ is the option title.")
+                : Text(title)
+        )
+        .accessibilityHint(Text(subtitle))
     }
 }
 
@@ -693,7 +725,8 @@ private struct ScreenThumbnailCard: View {
                     .symbolRenderingMode(.hierarchical)
 
                 VStack(spacing: 2) {
-                    Text(screen.name)
+                    // Display name comes from CGDisplay; not a localizable key.
+                    Text(verbatim: screen.name)
                         .font(.system(size: 13, weight: .medium))
                         .lineLimit(1)
                     Text("\(Int(screen.frame.width)) × \(Int(screen.frame.height))")
@@ -716,9 +749,11 @@ private struct ScreenThumbnailCard: View {
         }
         .buttonStyle(.plain)
         .focused($isFocused)
-        .accessibilityLabel("\(screen.name), \(Int(screen.frame.width)) by \(Int(screen.frame.height)) pixels")
-        .accessibilityValue(isSelected ? "Selected" : "Not selected")
+        .accessibilityLabel(Text("\(screen.name), \(Int(screen.frame.width)) by \(Int(screen.frame.height)) pixels"))
+        .accessibilityValue(isSelected
+            ? Text("Selected", comment: "A11y value for screen thumbnail when the screen is currently selected.")
+            : Text("Not selected", comment: "A11y value for screen thumbnail when the screen is not selected."))
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
-        .accessibilityHint("Toggles whether the first wallpaper applies to this display")
+        .accessibilityHint(Text("Toggles whether the first wallpaper applies to this display"))
     }
 }

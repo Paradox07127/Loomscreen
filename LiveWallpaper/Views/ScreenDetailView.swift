@@ -398,7 +398,7 @@ struct ScreenDetailView: View {
                                                 .contentShape(Capsule())
                                         }
                                         .buttonStyle(.plain)
-                                        .accessibilityLabel("\(mode.label) mode")
+                                        .accessibilityLabel(Text("\(mode.label) mode"))
                                     }
                                 }
                                 .padding(2)
@@ -466,10 +466,10 @@ struct ScreenDetailView: View {
                                                 .onChange(of: selectedParticleEffect) { _, newValue in
                                                     screenManager.updateParticleEffect(newValue, for: screen)
                                                 }
-                                                .accessibilityLabel("Particle effect")
+                                                .accessibilityLabel(Text("Particle effect"))
                                                 .accessibilityValue(selectedParticleEffect.rawValue)
-                                                .accessibilityHint("Choose a particle overlay effect")
-                                                .help("Overlay particle effects on the wallpaper")
+                                                .accessibilityHint(Text("Choose a particle overlay effect"))
+                                                .help(Text("Overlay particle effects on the wallpaper"))
                                             }
 
                                             if selectedParticleEffect != .none {
@@ -481,7 +481,7 @@ struct ScreenDetailView: View {
                                                             .onChange(of: particleDensity) { _, newValue in
                                                                 screenManager.updateParticleDensity(newValue, for: screen)
                                                             }
-                                                            .accessibilityLabel("Particle density")
+                                                            .accessibilityLabel(Text("Particle density"))
                                                             .accessibilityValue(String(format: "%.1f×", particleDensity))
                                                         Text(String(format: "%.1f", particleDensity))
                                                             .font(.system(size: 12, design: .monospaced))
@@ -500,9 +500,9 @@ struct ScreenDetailView: View {
                                                     .onChange(of: effectConfig.weatherReactive) { _, newValue in
                                                         screenManager.setWeatherReactive(newValue, for: screen)
                                                     }
-                                                    .help("Adjust effects based on real-time weather conditions")
-                                                    .accessibilityLabel("Weather-reactive effects")
-                                                    .accessibilityHint("Automatically adjust particles and color based on real-time weather")
+                                                    .help(Text("Adjust effects based on real-time weather conditions"))
+                                                    .accessibilityLabel(Text("Weather-reactive effects"))
+                                                    .accessibilityHint(Text("Automatically adjust particles and color based on real-time weather"))
                                             }
 
                                             if effectConfig.weatherReactive {
@@ -537,7 +537,7 @@ struct ScreenDetailView: View {
             .fixedSize(horizontal: true, vertical: false)
             .background(Color(NSColor.windowBackgroundColor))
             .clipped()
-            .accessibilityLabel("Wallpaper Properties")
+            .accessibilityLabel(Text("Wallpaper Properties"))
         }
     }
 
@@ -731,7 +731,7 @@ struct ScreenDetailView: View {
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = [.movie, .video, .quickTimeMovie, .mpeg4Movie, .avi]
         panel.directoryURL = SettingsManager.shared.getLastUsedDirectory()
-        panel.prompt = "Use as Wallpaper"
+        panel.prompt = L10n.Panel.useAsWallpaper
         guard panel.runModal() == .OK, let url = panel.url else { return }
         SettingsManager.shared.saveLastUsedDirectory(url.deletingLastPathComponent())
         handleSelectedFile(url: url)
@@ -758,7 +758,7 @@ struct ScreenDetailView: View {
         panel.canChooseFiles = true
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
-        panel.prompt = "Use as Wallpaper"
+        panel.prompt = L10n.Panel.useAsWallpaper
         guard panel.runModal() == .OK, let url = panel.url else { return }
         guard isHTMLDrop(url) else {
             errorMessage = "Choose an HTML file or folder."
@@ -904,9 +904,9 @@ private struct InspectorResizeHandle: View {
                 }
         )
         .onHover { isHovering = $0 }
-        .help("Drag to resize properties panel")
-        .accessibilityLabel("Resize properties panel")
-        .accessibilityHint("Drag horizontally to change the properties panel width")
+        .help(Text("Drag to resize properties panel"))
+        .accessibilityLabel(Text("Resize properties panel"))
+        .accessibilityHint(Text("Drag horizontally to change the properties panel width"))
     }
 
     private var isActive: Bool {

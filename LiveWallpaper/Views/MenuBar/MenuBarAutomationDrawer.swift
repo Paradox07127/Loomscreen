@@ -94,7 +94,7 @@ private struct SnoozeRow: View {
             .menuIndicator(.hidden)
             .fixedSize()
             .glassEffect(.regular.interactive(), in: .capsule)
-            .accessibilityLabel("Snooze")
+            .accessibilityLabel(Text("Snooze"))
         }
     }
 

@@ -144,15 +144,35 @@ enum WPERenderGraphError: Error, Equatable, LocalizedError, Sendable {
     var errorDescription: String? {
         switch self {
         case .fileMissing(let path):
-            return "WPE graph asset missing: \(path)"
+            return String(
+                localized: "error.render.graph.file_missing",
+                defaultValue: "WPE graph asset missing: \(path)",
+                comment: "Error shown when a Wallpaper Engine render graph asset is missing."
+            )
         case .invalidJSON(let path):
-            return "WPE graph asset is not valid JSON: \(path)"
+            return String(
+                localized: "error.render.graph.invalid_json",
+                defaultValue: "WPE graph asset is not valid JSON: \(path)",
+                comment: "Error shown when a Wallpaper Engine render graph asset is invalid JSON."
+            )
         case .malformedMaterial(let path):
-            return "WPE material has no renderable passes: \(path)"
+            return String(
+                localized: "error.render.graph.malformed_material",
+                defaultValue: "WPE material has no renderable passes: \(path)",
+                comment: "Error shown when a Wallpaper Engine material has no renderable passes."
+            )
         case .malformedEffect(let path):
-            return "WPE effect has no renderable passes: \(path)"
+            return String(
+                localized: "error.render.graph.malformed_effect",
+                defaultValue: "WPE effect has no renderable passes: \(path)",
+                comment: "Error shown when a Wallpaper Engine effect has no renderable passes."
+            )
         case .materialUnresolved(let imagePath):
-            return "Could not resolve WPE material for image reference: \(imagePath)"
+            return String(
+                localized: "error.render.graph.material_unresolved",
+                defaultValue: "Could not resolve WPE material for image reference: \(imagePath)",
+                comment: "Error shown when a Wallpaper Engine material cannot be resolved for an image reference."
+            )
         }
     }
 }

@@ -36,7 +36,7 @@ struct AppleAerialsLibraryView: View {
         LibraryGuideCard(
             icon: "exclamationmark.triangle",
             title: "Couldn't scan Aerials",
-            message: message,
+            message: "We hit a problem while scanning the Apple Aerials library.",
             features: [
                 LibraryGuideFeature(icon: "folder.badge.gearshape", text: "Reconnect the Apple Aerials library location"),
                 LibraryGuideFeature(icon: "arrow.triangle.2.circlepath", text: "Retry after macOS finishes updating the folder"),
@@ -46,6 +46,7 @@ struct AppleAerialsLibraryView: View {
             actionSystemImage: "folder.badge.gearshape",
             secondaryTitle: "Retry",
             secondarySystemImage: "arrow.clockwise",
+            errorMessage: message,
             action: {
                 library.clearAccess()
             },
@@ -70,7 +71,7 @@ struct AppleAerialsLibraryView: View {
                     .font(.system(size: 12, weight: .medium))
             }
             .buttonStyle(.borderless)
-            .help("Refresh")
+            .help(Text("Refresh"))
             .disabled(library.isScanning)
 
             Button {
@@ -81,7 +82,7 @@ struct AppleAerialsLibraryView: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.borderless)
-            .help("Disconnect Aerials library")
+            .help(Text("Disconnect Aerials library"))
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -178,7 +179,11 @@ struct AppleAerialsLibraryView: View {
 
         for screen in displays {
             let item = NSMenuItem(
-                title: "Apply to \(screen.name)",
+                title: String(
+                    localized: "menu.apply_to_screen",
+                    defaultValue: "Apply to \(screen.name)",
+                    comment: "Apply Aerial wallpaper menu item; %@ is the display name."
+                ),
                 action: #selector(ApplyMenuRouter.applyFromMenu(_:)),
                 keyEquivalent: ""
             )
@@ -189,7 +194,11 @@ struct AppleAerialsLibraryView: View {
 
         menu.addItem(NSMenuItem.separator())
         let allItem = NSMenuItem(
-            title: "Apply to All Displays",
+            title: String(
+                localized: "menu.apply_to_all_displays",
+                defaultValue: "Apply to All Displays",
+                comment: "Apply Aerial wallpaper to all connected displays."
+            ),
             action: #selector(ApplyMenuRouter.applyToAllFromMenu(_:)),
             keyEquivalent: ""
         )

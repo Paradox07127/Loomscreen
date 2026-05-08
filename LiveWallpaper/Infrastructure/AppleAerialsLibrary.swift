@@ -41,8 +41,8 @@ final class AppleAerialsLibrary {
         panel.canCreateDirectories = false
         panel.showsHiddenFiles = true
         panel.directoryURL = Self.suggestedDirectoryToGrant()
-        panel.prompt = "Grant Access"
-        panel.message = "macOS requires one-time approval to read Apple's wallpaper folder. Just click \"Grant Access\" — you do not need to pick any specific file."
+        panel.prompt = L10n.Panel.grantAccess
+        panel.message = L10n.Panel.appleAerialsAccessMessage
 
         guard panel.runModal() == .OK, let directoryURL = panel.url else {
             return false

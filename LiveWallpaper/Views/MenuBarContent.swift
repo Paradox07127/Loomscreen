@@ -115,8 +115,12 @@ struct MenuBarContent: View {
             }
             .buttonStyle(.plain)
             .glassEffect(.regular.interactive(), in: .circle)
-            .help(isAnyPlaying ? "Pause all" : "Resume all")
-            .accessibilityLabel(isAnyPlaying ? "Pause all displays" : "Resume all displays")
+            .help(isAnyPlaying
+                ? Text("Pause all", comment: "Tooltip when at least one wallpaper is playing.")
+                : Text("Resume all", comment: "Tooltip when all wallpapers are paused."))
+            .accessibilityLabel(isAnyPlaying
+                ? Text("Pause all displays", comment: "A11y label to pause all displays.")
+                : Text("Resume all displays", comment: "A11y label to resume all displays."))
         }
     }
 
