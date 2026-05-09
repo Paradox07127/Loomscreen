@@ -6,11 +6,11 @@ import SwiftUI
 struct SettingRow<Content: View>: View {
     let icon: String
     let iconColor: Color
-    let title: String
-    let subtitle: String?
+    let title: LocalizedStringKey
+    let subtitle: LocalizedStringKey?
     let content: Content
 
-    init(icon: String, iconColor: Color = .accentColor, title: String, subtitle: String? = nil, @ViewBuilder content: () -> Content) {
+    init(icon: String, iconColor: Color = .accentColor, title: LocalizedStringKey, subtitle: LocalizedStringKey? = nil, @ViewBuilder content: () -> Content) {
         self.icon = icon
         self.iconColor = iconColor
         self.title = title

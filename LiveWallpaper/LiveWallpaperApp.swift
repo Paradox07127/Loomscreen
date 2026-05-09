@@ -179,6 +179,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             initialAddWallpaperPromptKind: initialAddWallpaperPromptKind
         )
             .environment(manager)
+            .appLanguageScoped()
 
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: SettingsWindowMetrics.defaultContentSize),
@@ -235,9 +236,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         })
 
         if let manager = screenManager {
-            window.contentView = NSHostingView(rootView: flow.environment(manager))
+            window.contentView = NSHostingView(rootView: flow.environment(manager).appLanguageScoped())
         } else {
-            window.contentView = NSHostingView(rootView: flow)
+            window.contentView = NSHostingView(rootView: flow.appLanguageScoped())
         }
 
         window.delegate = self
@@ -292,8 +293,10 @@ struct LiveWallpaperApp: App {
                 }
             )
             .environment(screenManager)
+            .appLanguageScoped()
         } else {
             Text("Initializing…")
+                .appLanguageScoped()
         }
     }
 
