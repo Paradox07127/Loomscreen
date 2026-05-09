@@ -21,6 +21,7 @@ final class SettingsManager {
         static let bookmarks = "WallpaperBookmarks.v1"
         static let trustedHosts = "TrustedHTMLHosts.v1"
         static let workshopLibraryRootBookmark = "WPELibrary.RootBookmark.v1"
+        static let appLanguage = AppLanguagePreference.storageKey
     }
 
     // MARK: - Screen Configurations
@@ -182,6 +183,7 @@ final class SettingsManager {
         UserDefaults.standard.removeObject(forKey: Keys.bookmarks)
         UserDefaults.standard.removeObject(forKey: Keys.trustedHosts)
         UserDefaults.standard.removeObject(forKey: Keys.workshopLibraryRootBookmark)
+        UserDefaults.standard.removeObject(forKey: Keys.appLanguage)
         BookmarkStore.shared.resetAfterSettingsCleared()
         TrustedHostStore.shared.resetAfterSettingsCleared()
         if applyLoginSetting {

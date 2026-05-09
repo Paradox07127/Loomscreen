@@ -9,6 +9,12 @@
             "state" : "new",
             "value" : "LiveWallpaper"
           }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LiveWallpaper"
+          }
         }
       }
     },
@@ -19,6 +25,12 @@
         "en" : {
           "stringUnit" : {
             "state" : "new",
+            "value" : "LiveWallpaper"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
             "value" : "LiveWallpaper"
           }
         }
@@ -32,6 +44,12 @@
             "state" : "new",
             "value" : "Access to Desktop is needed to play wallpaper files stored there."
           }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要访问桌面以播放存储在其中的壁纸文件。"
+          }
         }
       }
     },
@@ -42,6 +60,12 @@
           "stringUnit" : {
             "state" : "new",
             "value" : "Access to Documents is needed to play wallpaper files stored there."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要访问文稿以播放存储在其中的壁纸文件。"
           }
         }
       }
@@ -54,6 +78,12 @@
             "state" : "new",
             "value" : "Access to Downloads is needed to play wallpaper files stored there."
           }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要访问下载以播放存储在其中的壁纸文件。"
+          }
         }
       }
     },
@@ -64,6 +94,12 @@
           "stringUnit" : {
             "state" : "new",
             "value" : "Location is used to fetch local weather for weather-reactive effects."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "定位用于获取本地天气，以驱动随天气变化的效果。"
           }
         }
       }
@@ -76,6 +112,12 @@
             "state" : "new",
             "value" : "Power status is used to pause wallpapers on battery."
           }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "电源状态用于在使用电池供电时暂停壁纸。"
+          }
         }
       }
     },
@@ -87,6 +129,12 @@
             "state" : "new",
             "value" : "Bookmarks keep access to selected wallpaper files across launches."
           }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "书签用于在多次启动之间保留对所选壁纸文件的访问权限。"
+          }
         }
       }
     },
@@ -97,6 +145,12 @@
           "stringUnit" : {
             "state" : "new",
             "value" : "System Settings access is used to help configure related permissions."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "系统设置访问权限用于帮助配置相关权限。"
           }
         }
       }

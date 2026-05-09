@@ -2,6 +2,7 @@ import SwiftUI
 
 struct GeneralSettingsView: View {
     @Environment(ScreenManager.self) private var screenManager
+    @AppStorage(AppLanguagePreference.storageKey) private var appLanguageRawValue = AppLanguagePreference.system.rawValue
     @State private var globalPauseOnBattery: Bool
     @State private var startOnLogin: Bool
     @State private var preservePlaybackOnLock: Bool
@@ -70,6 +71,18 @@ struct GeneralSettingsView: View {
     private var generalTab: some View {
         Form {
             Section {
+                SettingRow(icon: "globe", iconColor: .teal, title: "Language", subtitle: "Choose the display language used by LiveWallpaper") {
+                    Picker("", selection: appLanguageSelection) {
+                        ForEach(AppLanguagePreference.allCases) { language in
+                            Text(language.titleKey).tag(language)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 180)
+                    .accessibilityLabel(Text("Language"))
+                    .accessibilityHint(Text("Choose the display language used by LiveWallpaper"))
+                }
+
                 SettingRow(icon: "power.circle.fill", iconColor: .green, title: "Start at login", subtitle: "Automatically launch LiveWallpaper when you log in") {
                     Toggle("", isOn: $startOnLogin)
                         .labelsHidden()
@@ -287,6 +300,13 @@ struct GeneralSettingsView: View {
         let version = info?["CFBundleShortVersionString"] as? String ?? "–"
         let build = info?["CFBundleVersion"] as? String ?? "–"
         return "Version \(version) (\(build))"
+    }
+
+    private var appLanguageSelection: Binding<AppLanguagePreference> {
+        Binding(
+            get: { AppLanguagePreference(rawValue: appLanguageRawValue) ?? .system },
+            set: { appLanguageRawValue = $0.rawValue }
+        )
     }
 
     // MARK: - Settings Persistence
