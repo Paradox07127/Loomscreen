@@ -73,7 +73,7 @@ struct ColorAdjustmentsView: View {
     }
 
     private func effectSlider(
-        title: String,
+        title: LocalizedStringKey,
         value: Binding<Double>,
         in range: ClosedRange<Double>,
         format: String
@@ -85,10 +85,10 @@ struct ColorAdjustmentsView: View {
 
             Slider(value: value, in: range)
                 .controlSize(.small)
-                .accessibilityLabel(title)
-                .accessibilityValue(String(format: format, value.wrappedValue))
+                .accessibilityLabel(Text(title))
+                .accessibilityValue(Text(verbatim: String(format: format, value.wrappedValue)))
 
-            Text(String(format: format, value.wrappedValue))
+            Text(verbatim: String(format: format, value.wrappedValue))
             .font(.system(size: 12, design: .monospaced))
             .foregroundStyle(.secondary)
             .frame(width: 36, alignment: .trailing)

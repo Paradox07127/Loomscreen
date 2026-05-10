@@ -1,4 +1,5 @@
 import AVFoundation
+import SwiftUI
 
 enum VideoFitMode: String, Codable, CaseIterable, Identifiable {
     case aspectFill = "Fill"
@@ -7,11 +8,35 @@ enum VideoFitMode: String, Codable, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    var titleKey: LocalizedStringKey {
+        switch self {
+        case .aspectFill: return "Fill"
+        case .aspectFit: return "Fit"
+        case .stretch: return "Stretch"
+        }
+    }
+
     var description: String {
         switch self {
         case .aspectFill: return "Fill screen (may crop video)"
         case .aspectFit: return "Fit entire video (may show borders)"
         case .stretch: return "Stretch to fill screen (may distort)"
+        }
+    }
+
+    var descriptionKey: LocalizedStringKey {
+        switch self {
+        case .aspectFill: return "Fill screen (may crop video)"
+        case .aspectFit: return "Fit entire video (may show borders)"
+        case .stretch: return "Stretch to fill screen (may distort)"
+        }
+    }
+
+    var tooltipKey: LocalizedStringKey {
+        switch self {
+        case .aspectFill: return "Fill: crop to fill screen"
+        case .aspectFit: return "Fit: show entire video"
+        case .stretch: return "Stretch: distort to fill"
         }
     }
 

@@ -66,10 +66,10 @@ struct WPEFallbackCard: View {
                 .shadow(color: Color.black.opacity(0.18), radius: 8, y: 4)
 
             VStack(spacing: 8) {
-                Text(origin.title)
+                Text(verbatim: origin.title)
                     .font(.system(size: 22, weight: .bold))
                     .multilineTextAlignment(.center)
-                Text("Workshop ID \(origin.workshopID) · \(origin.displayTypeName) type")
+                Text("Workshop ID \(origin.workshopID) · \(origin.localizedDisplayTypeName) type", comment: "Wallpaper Engine metadata line. Placeholders are Workshop ID and project type.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -83,11 +83,11 @@ struct WPEFallbackCard: View {
                         // We keep the orange accent strictly for hard
                         // permanent blockers (`.requiresWindowsPlugin`).
                         .foregroundStyle(reason.severityTint)
-                    Text(warningTitle)
+                    Text(verbatim: warningTitle)
                         .font(.headline)
                 }
 
-                Text(warningBody)
+                Text(verbatim: warningBody)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -134,7 +134,7 @@ struct WPEFallbackCard: View {
                         Image(systemName: "link")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        Text(id)
+                        Text(verbatim: id)
                             .font(.system(.caption, design: .monospaced))
                             .textSelection(.enabled)
                         Spacer()
@@ -202,26 +202,32 @@ struct WPEFallbackCard: View {
         switch reason {
         case .unsupportedType:
             switch origin.originalType {
-            case .scene:       return "Scene format coming later"
-            case .application: return "Executable wallpapers can't be imported"
-            default:           return "This wallpaper type is not supported"
+            case .scene:
+                return String(localized: "Scene format coming later", defaultValue: "Scene format coming later", comment: "Wallpaper Engine fallback warning title.")
+            case .application:
+                return String(localized: "Executable wallpapers can't be imported", defaultValue: "Executable wallpapers can't be imported", comment: "Wallpaper Engine fallback warning title.")
+            default:
+                return String(localized: "This wallpaper type is not supported", defaultValue: "This wallpaper type is not supported", comment: "Wallpaper Engine fallback warning title.")
             }
         case .sceneParseFailed:
-            return "Couldn't read scene.json"
+            return String(localized: "Couldn't read scene.json", defaultValue: "Couldn't read scene.json", comment: "Wallpaper Engine fallback warning title.")
         case .sceneShaderUnsupported:
-            return "Scene uses unsupported shaders"
+            return String(localized: "Scene uses unsupported shaders", defaultValue: "Scene uses unsupported shaders", comment: "Wallpaper Engine fallback warning title.")
         case .sceneResourceMissing:
-            return "Some scene assets are missing"
+            return String(localized: "Some scene assets are missing", defaultValue: "Some scene assets are missing", comment: "Wallpaper Engine fallback warning title.")
         case .missingDependency(let ids):
-            return "Missing \(ids.count) Workshop \(ids.count == 1 ? "dependency" : "dependencies")"
+            if ids.count == 1 {
+                return String(localized: "Missing 1 Workshop dependency", defaultValue: "Missing 1 Workshop dependency", comment: "Wallpaper Engine fallback warning title.")
+            }
+            return String(localized: "Missing \(ids.count) Workshop dependencies", comment: "Wallpaper Engine fallback warning title. The placeholder is the missing dependency count.")
         case .requiresWindowsPlugin:
-            return "Windows plugin required"
+            return String(localized: "Windows plugin required", defaultValue: "Windows plugin required", comment: "Wallpaper Engine fallback warning title.")
         case .texContainerUnsupported:
-            return "Texture container not supported yet"
+            return String(localized: "Texture container not supported yet", defaultValue: "Texture container not supported yet", comment: "Wallpaper Engine fallback warning title.")
         case .texUnsupportedFormat:
-            return "Image format not supported yet"
+            return String(localized: "Image format not supported yet", defaultValue: "Image format not supported yet", comment: "Wallpaper Engine fallback warning title.")
         case .texDecodeFailed:
-            return "Couldn't read texture file"
+            return String(localized: "Couldn't read texture file", defaultValue: "Couldn't read texture file", comment: "Wallpaper Engine fallback warning title.")
         }
     }
 
@@ -230,35 +236,35 @@ struct WPEFallbackCard: View {
         case .unsupportedType:
             switch origin.originalType {
             case .scene:
-                return "This wallpaper needs Wallpaper Engine's own 3D rendering engine to play. We're working on broader Phase 2 support — your other wallpapers continue to play unaffected."
+                return String(localized: "This wallpaper needs Wallpaper Engine's own 3D rendering engine to play. We're working on broader Phase 2 support — your other wallpapers continue to play unaffected.", defaultValue: "This wallpaper needs Wallpaper Engine's own 3D rendering engine to play. We're working on broader Phase 2 support — your other wallpapers continue to play unaffected.", comment: "Wallpaper Engine fallback warning body.")
             case .application:
-                return "For your security, LiveWallpaper does not run executable workshop projects."
+                return String(localized: "For your security, LiveWallpaper does not run executable workshop projects.", defaultValue: "For your security, LiveWallpaper does not run executable workshop projects.", comment: "Wallpaper Engine fallback warning body.")
             default:
-                return "We couldn't recognize this Wallpaper Engine project type."
+                return String(localized: "We couldn't recognize this Wallpaper Engine project type.", defaultValue: "We couldn't recognize this Wallpaper Engine project type.", comment: "Wallpaper Engine fallback warning body.")
             }
         case .sceneParseFailed(let detail):
-            return "Phase 2.0 ships an image-only renderer. The author's scene.json couldn't be parsed: \(detail)"
+            return String(localized: "Phase 2.0 ships an image-only renderer. The author's scene.json couldn't be parsed: \(detail)", comment: "Wallpaper Engine fallback warning body. The placeholder is parser detail.")
         case .sceneShaderUnsupported:
-            return "This scene relies on custom shaders that the image-only Phase 2.0 renderer can't compile yet."
+            return String(localized: "This scene relies on custom shaders that the image-only Phase 2.0 renderer can't compile yet.", defaultValue: "This scene relies on custom shaders that the image-only Phase 2.0 renderer can't compile yet.", comment: "Wallpaper Engine fallback warning body.")
         case .sceneResourceMissing:
-            return "Some image layers couldn't be located inside the cache. The wallpaper may have been published partially or your cache is corrupted."
+            return String(localized: "Some image layers couldn't be located inside the cache. The wallpaper may have been published partially or your cache is corrupted.", defaultValue: "Some image layers couldn't be located inside the cache. The wallpaper may have been published partially or your cache is corrupted.", comment: "Wallpaper Engine fallback warning body.")
         case .missingDependency:
-            return "This wallpaper relies on other Workshop projects we don't have on disk yet. Subscribe to them in Steam, then re-import this folder."
+            return String(localized: "This wallpaper relies on other Workshop projects we don't have on disk yet. Subscribe to them in Steam, then re-import this folder.", defaultValue: "This wallpaper relies on other Workshop projects we don't have on disk yet. Subscribe to them in Steam, then re-import this folder.", comment: "Wallpaper Engine fallback warning body.")
         case .requiresWindowsPlugin:
-            return "This wallpaper bundles a Windows `.dll` plugin (e.g. an audio visualizer or screensaver runtime). macOS can't load Windows native code, so the project is permanently unsupported here."
+            return String(localized: "This wallpaper bundles a Windows `.dll` plugin (e.g. an audio visualizer or screensaver runtime). macOS can't load Windows native code, so the project is permanently unsupported here.", defaultValue: "This wallpaper bundles a Windows `.dll` plugin (e.g. an audio visualizer or screensaver runtime). macOS can't load Windows native code, so the project is permanently unsupported here.", comment: "Wallpaper Engine fallback warning body.")
         case .texContainerUnsupported(let magic):
-            return "This wallpaper uses a `.tex` container we don't decode yet (\(magic)). Phase 2.x will keep widening coverage as new versions appear."
+            return String(localized: "This wallpaper uses a `.tex` container we don't decode yet (\(magic)). Phase 2.x will keep widening coverage as new versions appear.", comment: "Wallpaper Engine fallback warning body. The placeholder is a texture container magic value.")
         case .texUnsupportedFormat(let code):
             switch code {
             case 8:
-                return "WPE format 8 (RGBA1010102) is rare and pending decoder support. Most other layers in this scene should still render."
+                return String(localized: "WPE format 8 (RGBA1010102) is rare and pending decoder support. Most other layers in this scene should still render.", defaultValue: "WPE format 8 (RGBA1010102) is rare and pending decoder support. Most other layers in this scene should still render.", comment: "Wallpaper Engine fallback warning body.")
             case -1:
-                return "This format requires Metal-backed GPU decoding that this Mac doesn't support. Try rendering on a newer GPU."
+                return String(localized: "This format requires Metal-backed GPU decoding that this Mac doesn't support. Try rendering on a newer GPU.", defaultValue: "This format requires Metal-backed GPU decoding that this Mac doesn't support. Try rendering on a newer GPU.", comment: "Wallpaper Engine fallback warning body.")
             default:
-                return "Wallpaper Engine format \(code) is not in the Phase 2.1 decoder. The renderer skips just this layer; the rest of the scene continues."
+                return String(localized: "Wallpaper Engine format \(code) is not in the Phase 2.1 decoder. The renderer skips just this layer; the rest of the scene continues.", comment: "Wallpaper Engine fallback warning body. The placeholder is a texture format code.")
             }
         case .texDecodeFailed(let detail):
-            return "A texture failed to decode (\(detail)). Re-downloading the wallpaper in Steam usually fixes it."
+            return String(localized: "A texture failed to decode (\(detail)). Re-downloading the wallpaper in Steam usually fixes it.", comment: "Wallpaper Engine fallback warning body. The placeholder is decode detail.")
         }
     }
 

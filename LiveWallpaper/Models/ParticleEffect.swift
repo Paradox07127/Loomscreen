@@ -1,3 +1,5 @@
+import SwiftUI
+
 enum ParticleEffect: String, Codable, CaseIterable, Identifiable {
     case none = "None"
     case snow = "Snow"
@@ -8,6 +10,18 @@ enum ParticleEffect: String, Codable, CaseIterable, Identifiable {
     case sakura = "Sakura"
 
     var id: String { rawValue }
+
+    var titleKey: LocalizedStringKey {
+        switch self {
+        case .none: return "None"
+        case .snow: return "Snow"
+        case .rain: return "Rain"
+        case .bokeh: return "Bokeh"
+        case .fireflies: return "Fireflies"
+        case .fallingLeaves: return "Leaves"
+        case .sakura: return "Sakura"
+        }
+    }
 
     var iconName: String {
         switch self {

@@ -278,14 +278,14 @@ struct ScreenRow: View {
                 .frame(width: 22, height: 22)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(screen.name)
+                Text(verbatim: screen.name)
                     .fontWeight(.medium)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .help(screen.name)
+                    .help(Text(verbatim: screen.name))
 
                 HStack(spacing: 6) {
-                    Text("\(Int(screen.frame.width))×\(Int(screen.frame.height))")
+                    Text(verbatim: "\(Int(screen.frame.width))×\(Int(screen.frame.height))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -364,7 +364,7 @@ struct ScreenRow: View {
         }
     }
 
-    private func statusText(for summary: WallpaperSessionSummary) -> String {
+    private func statusText(for summary: WallpaperSessionSummary) -> LocalizedStringKey {
         switch summary.wallpaperType {
         case .html:
             return "HTML"
@@ -379,18 +379,18 @@ struct ScreenRow: View {
         }
     }
 
-    private func accessibilityValue(for summary: WallpaperSessionSummary) -> String {
+    private func accessibilityValue(for summary: WallpaperSessionSummary) -> Text {
         switch summary.wallpaperType {
         case .html:
-            return "HTML wallpaper active"
+            return Text("HTML wallpaper active")
         case .metalShader:
-            return "Shader wallpaper active"
+            return Text("Shader wallpaper active")
         case .video:
-            return summary.activity == .active ? "Playing video" : "Video paused"
+            return summary.activity == .active ? Text("Playing video") : Text("Video paused")
         case .scene:
-            return "Scene wallpaper"
+            return Text("Scene wallpaper")
         case nil:
-            return "No wallpaper configured"
+            return Text("No wallpaper configured")
         }
     }
 }
@@ -448,8 +448,8 @@ struct DetailContent: View {
 // MARK: - Empty State View
 struct EmptyStateView: View {
     let icon: String
-    let title: String
-    let message: String
+    let title: LocalizedStringKey
+    let message: LocalizedStringKey
 
     var body: some View {
         GlassEffectContainer(spacing: 12) {

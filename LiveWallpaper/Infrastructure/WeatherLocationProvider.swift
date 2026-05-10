@@ -183,7 +183,7 @@ final class WeatherLocationProvider: NSObject, WeatherLocationProviding, CLLocat
         return WeatherLocationResolution(
             coordinate: location.coordinate,
             resolvedSource: .coreLocation,
-            displayName: "System location",
+            displayName: String(localized: "System location", defaultValue: "System location", comment: "Weather source label for macOS Core Location."),
             error: nil
         )
     }
@@ -239,8 +239,8 @@ final class WeatherLocationProvider: NSObject, WeatherLocationProviding, CLLocat
                 coordinate: cache.coordinate,
                 resolvedSource: .ipGeolocation,
                 displayName: noteCoreLocationFallback
-                    ? "Using IP location (Core Location unavailable)"
-                    : "IP location: \(cache.label)",
+                    ? String(localized: "Using IP location (Core Location unavailable)", defaultValue: "Using IP location (Core Location unavailable)", comment: "Weather source label when Core Location is unavailable.")
+                    : String(localized: "IP location: \(cache.label)", comment: "Weather source label. The placeholder is the inferred city or region."),
                 error: nil
             )
         }
@@ -275,8 +275,8 @@ final class WeatherLocationProvider: NSObject, WeatherLocationProviding, CLLocat
                 coordinate: coord,
                 resolvedSource: .ipGeolocation,
                 displayName: noteCoreLocationFallback
-                    ? "Using IP location (Core Location unavailable)"
-                    : "IP location: \(label)",
+                    ? String(localized: "Using IP location (Core Location unavailable)", defaultValue: "Using IP location (Core Location unavailable)", comment: "Weather source label when Core Location is unavailable.")
+                    : String(localized: "IP location: \(label)", comment: "Weather source label. The placeholder is the inferred city or region."),
                 error: nil
             )
         } catch {
@@ -292,7 +292,7 @@ final class WeatherLocationProvider: NSObject, WeatherLocationProviding, CLLocat
         return WeatherLocationResolution(
             coordinate: manual.coordinate,
             resolvedSource: .manual,
-            displayName: "Manual: \(manual.name)",
+            displayName: String(localized: "Manual: \(manual.name)", comment: "Weather source label. The placeholder is the user-selected location name."),
             error: nil
         )
     }

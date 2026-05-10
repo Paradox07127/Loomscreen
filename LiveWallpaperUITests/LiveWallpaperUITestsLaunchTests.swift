@@ -21,6 +21,7 @@ final class LiveWallpaperUITestsLaunchTests: XCTestCase {
     func testLaunch() throws {
         let app = XCUIApplication()
         app.launchArguments.append("--ui-testing")
+        app.launchArguments.append("--open-settings-for-ui-testing")
         app.launchEnvironment["LIVEWALLPAPER_UI_TESTING"] = "1"
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 5))

@@ -2,7 +2,7 @@ import SwiftUI
 
 /// macOS-style collapsible section with a whole-row tappable header.
 struct CollapsibleSection<Content: View>: View {
-    let title: String
+    let title: LocalizedStringKey
     let systemImage: String
     @Binding var isExpanded: Bool
     @ViewBuilder var content: () -> Content
@@ -29,7 +29,7 @@ struct CollapsibleSection<Content: View>: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(title)
+            .accessibilityLabel(Text(title))
             .accessibilityHint(isExpanded
                 ? Text("Tap to collapse", comment: "A11y hint for an expanded collapsible section header.")
                 : Text("Tap to expand", comment: "A11y hint for a collapsed section header."))

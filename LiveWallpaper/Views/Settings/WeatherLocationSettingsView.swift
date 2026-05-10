@@ -32,7 +32,7 @@ struct WeatherLocationSettingsView: View {
                 }
                 .pickerStyle(.segmented)
 
-                Text(sourceExplanation)
+                Text(verbatim: sourceExplanation)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } header: {
@@ -66,11 +66,11 @@ struct WeatherLocationSettingsView: View {
     private var sourceExplanation: String {
         switch preference.source {
         case .coreLocation:
-            return "Uses macOS Location Services. You'll be asked to allow access the first time. Most accurate."
+            return String(localized: "Uses macOS Location Services. You'll be asked to allow access the first time. Most accurate.", defaultValue: "Uses macOS Location Services. You'll be asked to allow access the first time. Most accurate.", comment: "Weather location source explanation.")
         case .manual:
-            return "Type a city below. No network or location permission needed."
+            return String(localized: "Type a city below. No network or location permission needed.", defaultValue: "Type a city below. No network or location permission needed.", comment: "Weather location source explanation.")
         case .ipGeolocation:
-            return "Looks up an approximate location from your IP address. Coarse — typically city-level."
+            return String(localized: "Looks up an approximate location from your IP address. Coarse — typically city-level.", defaultValue: "Looks up an approximate location from your IP address. Coarse — typically city-level.", comment: "Weather location source explanation.")
         }
     }
 
@@ -97,7 +97,7 @@ private struct ManualLocationPicker: View {
                 HStack {
                     Image(systemName: "mappin.and.ellipse")
                         .foregroundStyle(.green)
-                    Text(current.name)
+                    Text(verbatim: current.name)
                         .font(.system(size: 13, weight: .medium))
                     Spacer()
                     Button("Clear") {
@@ -122,10 +122,10 @@ private struct ManualLocationPicker: View {
                         } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(result.title)
+                                    Text(verbatim: result.title)
                                         .font(.system(size: 12, weight: .medium))
                                     if !result.subtitle.isEmpty {
-                                        Text(result.subtitle)
+                                        Text(verbatim: result.subtitle)
                                             .font(.system(size: 10))
                                             .foregroundStyle(.secondary)
                                     }
@@ -153,7 +153,7 @@ private struct ManualLocationPicker: View {
             }
 
             if let error = resolutionError {
-                Text(error)
+                Text(verbatim: error)
                     .font(.caption)
                     .foregroundStyle(.red)
             }
@@ -183,9 +183,9 @@ private struct ManualLocationPicker: View {
                     query = ""
                     completer.update(query: "")
                 } else if let error {
-                    resolutionError = "Could not find that location: \(error.localizedDescription)"
+                    resolutionError = String(localized: "Could not find that location: \(error.localizedDescription)", comment: "Manual weather location lookup error. The placeholder is the system error.")
                 } else {
-                    resolutionError = "Could not find that location."
+                    resolutionError = String(localized: "Could not find that location.", defaultValue: "Could not find that location.", comment: "Manual weather location lookup error.")
                 }
             }
         }

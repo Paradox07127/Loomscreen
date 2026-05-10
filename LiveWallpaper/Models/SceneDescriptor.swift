@@ -67,4 +67,15 @@ enum SceneCapabilityTier: String, Codable, Equatable, Sendable {
     case degraded
     /// No object can render — UI must fall back to the placeholder card.
     case unsupported
+
+    var localizedLabel: String {
+        switch self {
+        case .imageOnly:
+            return String(localized: "Image-only", defaultValue: "Image-only", comment: "Wallpaper Engine scene capability tier.")
+        case .degraded:
+            return String(localized: "Degraded", defaultValue: "Degraded", comment: "Wallpaper Engine scene capability tier.")
+        case .unsupported:
+            return String(localized: "Unsupported", defaultValue: "Unsupported", comment: "Wallpaper Engine scene capability tier.")
+        }
+    }
 }

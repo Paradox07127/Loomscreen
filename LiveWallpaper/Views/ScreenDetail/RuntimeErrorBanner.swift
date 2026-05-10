@@ -14,13 +14,13 @@ struct RuntimeErrorBanner: View {
     private var subtitleText: String {
         switch (error.canRetry, canRePick) {
         case (true, true):
-            return "Tap Retry to try again or Re-pick to choose another source."
+            return String(localized: "Tap Retry to try again or Re-pick to choose another source.", defaultValue: "Tap Retry to try again or Re-pick to choose another source.", comment: "Runtime error banner guidance.")
         case (true, false):
-            return "Tap Retry to try again."
+            return String(localized: "Tap Retry to try again.", defaultValue: "Tap Retry to try again.", comment: "Runtime error banner guidance.")
         case (false, true):
-            return "Tap Re-pick to choose another source."
+            return String(localized: "Tap Re-pick to choose another source.", defaultValue: "Tap Re-pick to choose another source.", comment: "Runtime error banner guidance.")
         case (false, false):
-            return "Switch to a different wallpaper type to recover."
+            return String(localized: "Switch to a different wallpaper type to recover.", defaultValue: "Switch to a different wallpaper type to recover.", comment: "Runtime error banner guidance.")
         }
     }
 
@@ -32,10 +32,10 @@ struct RuntimeErrorBanner: View {
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(error.userMessage)
+                Text(verbatim: error.userMessage)
                     .font(.callout.weight(.medium))
                     .lineLimit(2)
-                Text(subtitleText)
+                Text(verbatim: subtitleText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

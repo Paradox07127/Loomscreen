@@ -20,17 +20,23 @@ enum GlobalShortcutAction: String, CaseIterable, Codable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .togglePlayback: return "Play / Pause All Wallpapers"
-        case .nextWallpaper:  return "Next Wallpaper (Active Display)"
-        case .toggleMute:     return "Toggle Mute"
+        case .togglePlayback:
+            return String(localized: "Play / Pause All Wallpapers", defaultValue: "Play / Pause All Wallpapers", comment: "Global shortcut action name.")
+        case .nextWallpaper:
+            return String(localized: "Next Wallpaper (Active Display)", defaultValue: "Next Wallpaper (Active Display)", comment: "Global shortcut action name.")
+        case .toggleMute:
+            return String(localized: "Toggle Mute", defaultValue: "Toggle Mute", comment: "Global shortcut action name.")
         }
     }
 
     var displayDescription: String {
         switch self {
-        case .togglePlayback: return "Pause every active wallpaper, or resume them all."
-        case .nextWallpaper:  return "Advance the playlist on the display under the cursor."
-        case .toggleMute:     return "Mute or unmute every video wallpaper."
+        case .togglePlayback:
+            return String(localized: "Pause every active wallpaper, or resume them all.", defaultValue: "Pause every active wallpaper, or resume them all.", comment: "Global shortcut action description.")
+        case .nextWallpaper:
+            return String(localized: "Advance the playlist on the display under the cursor.", defaultValue: "Advance the playlist on the display under the cursor.", comment: "Global shortcut action description.")
+        case .toggleMute:
+            return String(localized: "Mute or unmute every video wallpaper.", defaultValue: "Mute or unmute every video wallpaper.", comment: "Global shortcut action description.")
         }
     }
 
@@ -106,7 +112,7 @@ struct GlobalShortcutBinding: Codable, Equatable, Hashable {
             if let scalar = printableCharacter(for: keyCode) {
                 return String(scalar).uppercased()
             }
-            return "Key \(keyCode)"
+            return String(localized: "Key \(keyCode)", comment: "Fallback keyboard key name. The placeholder is a hardware key code.")
         }
     }
 

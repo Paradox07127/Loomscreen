@@ -274,9 +274,9 @@ struct ScheduleSlotRow: View {
                 // Slot label + time (tap to edit)
                 HStack(spacing: 4) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(slot.label)
+                        Text(verbatim: slot.localizedLabel)
                             .font(.system(size: 12, weight: isActive ? .semibold : .regular))
-                        Text("\(formatHour(slot.startHour)) – \(formatHour(slot.endHour))")
+                        Text(verbatim: "\(formatHour(slot.startHour)) – \(formatHour(slot.endHour))")
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundStyle(.secondary)
                     }
@@ -288,7 +288,7 @@ struct ScheduleSlotRow: View {
                 }
                 .frame(width: 90, alignment: .leading)
                 .onTapGesture { withAnimation { isEditingTime.toggle() } }
-                .accessibilityLabel(Text("\(slot.label), \(formatHour(slot.startHour)) to \(formatHour(slot.endHour))"))
+                .accessibilityLabel(Text("\(slot.localizedLabel), \(formatHour(slot.startHour)) to \(formatHour(slot.endHour))", comment: "A11y label for a schedule slot. Placeholders are slot label, start time, and end time."))
                 .accessibilityHint(Text("Tap to edit time range"))
 
                 Spacer()
@@ -299,7 +299,7 @@ struct ScheduleSlotRow: View {
                         Image(systemName: "film.fill")
                             .font(.system(size: 10))
                             .foregroundStyle(Color.accentColor)
-                        Text(name)
+                        Text(verbatim: name)
                             .font(.system(size: 11))
                             .lineLimit(1)
                             .truncationMode(.middle)
@@ -310,7 +310,7 @@ struct ScheduleSlotRow: View {
                                 .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel(Text("Clear video for \(slot.label)"))
+                        .accessibilityLabel(Text("Clear video for \(slot.localizedLabel)", comment: "A11y label for clearing a video from a schedule slot. The placeholder is the slot label."))
                         .accessibilityHint(Text("Removes the assigned video from this schedule slot"))
                     }
                 } else {
@@ -324,7 +324,7 @@ struct ScheduleSlotRow: View {
                         .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel(Text("Set video for \(slot.label)"))
+                    .accessibilityLabel(Text("Set video for \(slot.localizedLabel)", comment: "A11y label for setting a video on a schedule slot. The placeholder is the slot label."))
                     .accessibilityHint(Text("Choose a video for this schedule slot"))
                 }
 
@@ -335,7 +335,7 @@ struct ScheduleSlotRow: View {
                 }
                 .buttonStyle(.plain)
                 .opacity(isHovering ? 1 : 0)
-                .accessibilityLabel(Text("Remove \(slot.label) slot"))
+                .accessibilityLabel(Text("Remove \(slot.localizedLabel) slot", comment: "A11y label for removing a schedule slot. The placeholder is the slot label."))
             }
 
             // Time range editor (toggled by tapping the time label)
@@ -355,8 +355,8 @@ struct ScheduleSlotRow: View {
                         )
                         .font(.system(size: 11))
                         .frame(width: 100)
-                        .accessibilityLabel(Text("Start hour for \(slot.label)"))
-                        .accessibilityValue(formatHour(slot.startHour))
+                        .accessibilityLabel(Text("Start hour for \(slot.localizedLabel)", comment: "A11y label for a schedule slot start-hour stepper. The placeholder is the slot label."))
+                        .accessibilityValue(Text(verbatim: formatHour(slot.startHour)))
                         .accessibilityHint(Text("Adjust the start time of this schedule slot"))
                     }
                     HStack(spacing: 4) {
@@ -373,8 +373,8 @@ struct ScheduleSlotRow: View {
                         )
                         .font(.system(size: 11))
                         .frame(width: 100)
-                        .accessibilityLabel(Text("End hour for \(slot.label)"))
-                        .accessibilityValue(formatHour(slot.endHour))
+                        .accessibilityLabel(Text("End hour for \(slot.localizedLabel)", comment: "A11y label for a schedule slot end-hour stepper. The placeholder is the slot label."))
+                        .accessibilityValue(Text(verbatim: formatHour(slot.endHour)))
                         .accessibilityHint(Text("Adjust the end time of this schedule slot"))
                     }
                 }

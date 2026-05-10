@@ -14,7 +14,7 @@ struct PlaylistSection: View {
     @State private var entries: [PlaylistEntry] = []
     @State private var draggingID: PlaylistEntry.ID?
 
-    private let rotationOptions: [(String, Int?)] = [
+    private let rotationOptions: [(LocalizedStringKey, Int?)] = [
         ("Off", nil),
         ("15 min", 15),
         ("30 min", 30),
@@ -186,13 +186,15 @@ struct PlaylistSection: View {
             bookmark: primary,
             isPrimary: true,
             isPlaying: primary == activeBookmark,
-            name: ResourceUtilities.resolveBookmarkName(primary) ?? "Primary"
+            name: ResourceUtilities.resolveBookmarkName(primary)
+                ?? String(localized: "Primary", defaultValue: "Primary", comment: "Fallback playlist entry name for the primary video.")
         )] + extras.map {
             PlaylistEntry(
                 bookmark: $0,
                 isPrimary: false,
                 isPlaying: $0 == activeBookmark,
-                name: ResourceUtilities.resolveBookmarkName($0) ?? "Unknown"
+                name: ResourceUtilities.resolveBookmarkName($0)
+                    ?? String(localized: "Unknown", defaultValue: "Unknown", comment: "Fallback playlist entry name.")
             )
         }
     }
@@ -330,12 +332,12 @@ private struct PlaylistRow: View {
             }
             .frame(width: 14)
 
-            Text(entry.name)
+            Text(verbatim: entry.name)
                 .font(.system(size: 12, weight: entry.isPlaying ? .semibold : .regular))
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .layoutPriority(1)
-                .help(entry.name)
+                .help(Text(verbatim: entry.name))
 
             Spacer(minLength: 4)
 
@@ -381,7 +383,20 @@ private struct PlaylistRow: View {
         .opacity(isDragging ? 0.4 : 1.0)
         .onHover { isHovering = $0 }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(Text("\(entry.isPrimary ? "Primary " : "")\(entry.isPlaying ? "Now playing " : "")\(entry.name)", comment: "Playlist row a11y label: optional 'Primary' / 'Now playing' prefixes plus video name."))
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var accessibilityLabel: Text {
+        switch (entry.isPrimary, entry.isPlaying) {
+        case (true, true):
+            return Text("Primary now playing \(entry.name)", comment: "Playlist row a11y label. The placeholder is the video name.")
+        case (true, false):
+            return Text("Primary \(entry.name)", comment: "Playlist row a11y label. The placeholder is the video name.")
+        case (false, true):
+            return Text("Now playing \(entry.name)", comment: "Playlist row a11y label. The placeholder is the video name.")
+        case (false, false):
+            return Text(verbatim: entry.name)
+        }
     }
 
     private var rowBackground: Color {

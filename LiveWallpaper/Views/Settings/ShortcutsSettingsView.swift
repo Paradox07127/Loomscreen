@@ -26,7 +26,7 @@ struct ShortcutsSettingsView: View {
                     )
                 }
                 if let rejectionMessage {
-                    Text(rejectionMessage)
+                    Text(verbatim: rejectionMessage)
                         .font(.caption)
                         .foregroundStyle(.red)
                         .accessibilityLabel(Text("Shortcut rejected: \(rejectionMessage)"))
@@ -56,11 +56,11 @@ struct ShortcutsSettingsView: View {
             case .valid:
                 rejectionMessage = nil
             case .missingModifier:
-                rejectionMessage = "Add at least one modifier (⌃ ⌥ ⇧ ⌘) — bare keys would intercept normal typing."
+                rejectionMessage = String(localized: "Add at least one modifier (⌃ ⌥ ⇧ ⌘) — bare keys would intercept normal typing.", defaultValue: "Add at least one modifier (⌃ ⌥ ⇧ ⌘) — bare keys would intercept normal typing.", comment: "Shortcut validation rejection message.")
                 NSSound.beep()
                 return
             case .duplicate(let other):
-                rejectionMessage = "\(newBinding.displayString) is already used by \(other.displayName)."
+                rejectionMessage = String(localized: "\(newBinding.displayString) is already used by \(other.displayName).", comment: "Shortcut duplicate rejection message. Placeholders are shortcut and action name.")
                 NSSound.beep()
                 return
             }
@@ -112,9 +112,9 @@ private struct ShortcutRow: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(action.displayName)
+                    Text(verbatim: action.displayName)
                         .font(.system(size: 13, weight: .medium))
-                    Text(action.displayDescription)
+                    Text(verbatim: action.displayDescription)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
@@ -136,7 +136,7 @@ private struct ShortcutRow: View {
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
-                .accessibilityLabel(Text("More options for \(action.displayName)"))
+                .accessibilityLabel(Text("More options for \(action.displayName)", comment: "Shortcut row menu a11y label. The placeholder is the shortcut action name."))
             }
         }
         .padding(.vertical, 4)
@@ -159,7 +159,7 @@ private struct ShortcutCaptureField: View {
                         .foregroundStyle(.secondary)
                         .italic()
                 } else if let binding {
-                    Text(binding.displayString)
+                    Text(verbatim: binding.displayString)
                         .font(.system(size: 12, design: .monospaced))
                 } else {
                     Text("None")
@@ -187,11 +187,18 @@ private struct ShortcutCaptureField: View {
             onCapture(binding)
         })
         .accessibilityLabel(isCapturing
-            ? "Press keys to set shortcut"
-            : (binding?.displayString ?? "No shortcut set"))
+            ? Text("Press keys to set shortcut")
+            : shortcutAccessibilityLabel)
         .accessibilityHint(isCapturing
-            ? "Listening for the next key combination"
-            : "Click to record a new keyboard shortcut")
+            ? Text("Listening for the next key combination")
+            : Text("Click to record a new keyboard shortcut"))
+    }
+
+    private var shortcutAccessibilityLabel: Text {
+        if let binding {
+            return Text(verbatim: binding.displayString)
+        }
+        return Text("No shortcut set")
     }
 }
 

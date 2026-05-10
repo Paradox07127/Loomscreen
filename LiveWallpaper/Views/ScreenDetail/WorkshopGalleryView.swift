@@ -45,7 +45,7 @@ struct WorkshopGalleryView: View {
         )) {
             Button("OK", role: .cancel) { errorMessage = nil }
         } message: {
-            Text(errorMessage ?? "")
+            Text(verbatim: errorMessage ?? "")
         }
     }
 
@@ -62,12 +62,12 @@ struct WorkshopGalleryView: View {
             }
 
             if !headerSubtitle.isEmpty {
-                Text(headerSubtitle)
+                Text(verbatim: headerSubtitle)
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .help(headerSubtitle)
+                    .help(Text(verbatim: headerSubtitle))
             }
 
             Spacer()
@@ -139,14 +139,14 @@ struct WorkshopGalleryView: View {
             return ""
         case .scanning:
             if let rootPathSummary {
-                return "Scanning \(rootPathSummary)"
+                return String(localized: "Scanning \(rootPathSummary)", comment: "Workshop library scan status. The placeholder is a folder path.")
             }
-            return "Scanning..."
+            return String(localized: "Scanning...", defaultValue: "Scanning...", comment: "Workshop library scan status.")
         case .results:
             if projects.isEmpty, let rootPathSummary {
-                return "No projects found in \(rootPathSummary)"
+                return String(localized: "No projects found in \(rootPathSummary)", comment: "Workshop library empty status. The placeholder is a folder path.")
             }
-            return "\(projects.count) projects · \(compatibleCount) compatible · \(unsupportedCount) preview-only"
+            return String(localized: "\(projects.count) projects · \(compatibleCount) compatible · \(unsupportedCount) preview-only", comment: "Workshop library summary. Placeholders are total project count, compatible count, and preview-only count.")
         }
     }
 
@@ -260,7 +260,7 @@ struct WorkshopGalleryView: View {
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
         guard let bookmark = ResourceUtilities.createBookmark(for: url) else {
-            errorMessage = "Couldn't create a security-scoped bookmark for that folder."
+            errorMessage = String(localized: "Couldn't create a security-scoped bookmark for that folder.", defaultValue: "Couldn't create a security-scoped bookmark for that folder.", comment: "Workshop library folder grant error.")
             return
         }
         SettingsManager.shared.saveWorkshopLibraryRootBookmark(bookmark)
@@ -302,7 +302,7 @@ struct WorkshopGalleryView: View {
             projects = discovered
             state = .results
         } catch WallpaperEngineLibraryScanner.ScanError.rootInaccessible(let detail) {
-            errorMessage = "Workshop folder is unreachable: \(detail). Try re-granting access."
+            errorMessage = String(localized: "Workshop folder is unreachable: \(detail). Try re-granting access.", comment: "Workshop library folder access error. The placeholder is the system detail.")
             SettingsManager.shared.clearWorkshopLibraryRootBookmark()
             updateRootAccessState()
             projects = []
@@ -428,12 +428,13 @@ struct WPEBulkImportFailureSummary {
     static func message(for rejections: [Rejection]) -> String? {
         guard !rejections.isEmpty else { return nil }
         let header = rejections.count == 1
-            ? "1 import failed"
-            : "\(rejections.count) imports failed"
+            ? String(localized: "1 import failed", defaultValue: "1 import failed", comment: "Workshop bulk import failure summary.")
+            : String(localized: "\(rejections.count) imports failed", comment: "Workshop bulk import failure summary. The placeholder is the failure count.")
         let visible = rejections.prefix(5).map { "\($0.title): \($0.reason)" }
         let remaining = rejections.count - visible.count
         if remaining > 0 {
-            return ([header] + visible + ["+\(remaining) more"]).joined(separator: "\n")
+            let more = String(localized: "+\(remaining) more", comment: "Workshop bulk import failure summary. The placeholder is additional failure count.")
+            return ([header] + visible + [more]).joined(separator: "\n")
         }
         return ([header] + visible).joined(separator: "\n")
     }
@@ -470,11 +471,11 @@ private struct WorkshopGalleryCard: View {
                 }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text(project.title)
+                Text(verbatim: project.title)
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityLabel(Text("\(project.title), \(project.type.rawValue) wallpaper\(project.importedAlready ? ", already in library" : "")", comment: "Workshop gallery card a11y label: project title, type, and optional 'already in library' marker."))
+                    .accessibilityLabel(cardAccessibilityLabel)
 
                 actionButton
             }
@@ -500,7 +501,7 @@ private struct WorkshopGalleryCard: View {
     private var typeBadge: some View {
         HStack(spacing: 4) {
             Circle().fill(typeColor).frame(width: 6, height: 6)
-            Text(typeLabel)
+            Text(verbatim: typeLabel)
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.primary)
         }
@@ -551,13 +552,14 @@ private struct WorkshopGalleryCard: View {
     }
 
     private var typeLabel: String {
-        switch project.type {
-        case .video:        return "Video"
-        case .web:          return "Web"
-        case .scene:        return "Scene"
-        case .application:  return "App"
-        case .unknown:      return "?"
+        project.type == .unknown ? "?" : project.type.localizedDisplayName
+    }
+
+    private var cardAccessibilityLabel: Text {
+        if project.importedAlready {
+            return Text("\(project.title), \(typeLabel) wallpaper, already in library", comment: "Workshop gallery card a11y label for an already-imported project. Placeholders are project title and project type.")
         }
+        return Text("\(project.title), \(typeLabel) wallpaper", comment: "Workshop gallery card a11y label. Placeholders are project title and project type.")
     }
 
     private var typeColor: Color {

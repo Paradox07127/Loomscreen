@@ -81,7 +81,7 @@ struct SettingsWindowLayoutTests {
         let source = try sourceText(for: "LiveWallpaper/Views/PlaylistSection.swift")
 
         #expect(source.contains(".layoutPriority(1)"), "Playlist filenames need first claim on row width.")
-        #expect(source.contains(".help(entry.name)"), "Truncated filenames should still be discoverable via tooltip.")
+        #expect(source.contains(".help(Text(verbatim: entry.name))"), "Truncated filenames should still be discoverable via tooltip.")
         #expect(!source.contains("Button(action: onRemove)"), "A hidden remove button still consumes row width; removal belongs in the menu.")
         #expect(source.contains("Image(systemName: \"star.fill\")"), "Primary state should use a compact icon badge in narrow inspectors.")
     }

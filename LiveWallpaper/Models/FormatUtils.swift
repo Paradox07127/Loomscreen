@@ -15,6 +15,15 @@ enum FormatUtils {
         byteFormatter.string(fromByteCount: max(0, bytes))
     }
 
+    static func formatPercent(_ percent: Double) -> String {
+        formatFractionAsPercent(percent / 100)
+    }
+
+    static func formatFractionAsPercent(_ fraction: Double) -> String {
+        let clamped = min(max(fraction, 0), 1)
+        return clamped.formatted(.percent.precision(.fractionLength(0)))
+    }
+
     static func formatDuration(_ seconds: Double) -> String {
         guard seconds.isFinite, !seconds.isNaN else { return "Unknown" }
         let total = max(0, Int(seconds))

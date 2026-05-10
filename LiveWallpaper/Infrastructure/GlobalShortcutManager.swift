@@ -57,7 +57,7 @@ final class GlobalShortcutManager {
     }
 
     private func register(action: GlobalShortcutAction, binding: GlobalShortcutBinding) {
-        var hotKeyID = EventHotKeyID(signature: Self.fourCharCode("LWLP"), id: UInt32(action.signatureID))
+        let hotKeyID = EventHotKeyID(signature: Self.fourCharCode("LWLP"), id: UInt32(action.signatureID))
         var hotKeyRef: EventHotKeyRef?
 
         let modMask = carbonModifiers(for: binding.modifiers)

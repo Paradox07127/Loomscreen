@@ -21,4 +21,19 @@ struct ScheduleSlot: Codable, Equatable, Identifiable {
             return hour >= startHour || hour < endHour
         }
     }
+
+    var localizedLabel: String {
+        switch label {
+        case "Morning":
+            return String(localized: "Morning", defaultValue: "Morning", comment: "Default schedule slot name.")
+        case "Afternoon":
+            return String(localized: "Afternoon", defaultValue: "Afternoon", comment: "Default schedule slot name.")
+        case "Evening":
+            return String(localized: "Evening", defaultValue: "Evening", comment: "Default schedule slot name.")
+        case "Night":
+            return String(localized: "Night", defaultValue: "Night", comment: "Default schedule slot name.")
+        default:
+            return label
+        }
+    }
 }

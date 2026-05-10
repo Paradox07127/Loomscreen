@@ -14,7 +14,7 @@ struct VideoInformationOverlay: View {
             if !formatBadges.isEmpty {
                 HStack(spacing: 4) {
                     ForEach(formatBadges, id: \.self) { badge in
-                        Text(badge)
+                        Text(verbatim: badge)
                             .font(.system(size: 10, weight: .bold, design: .rounded))
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
@@ -25,19 +25,19 @@ struct VideoInformationOverlay: View {
             if let res = videoResolution {
                 HStack(spacing: 4) {
                     Image(systemName: "rectangle.3.group")
-                    Text("\(res.width)×\(res.height)")
+                    Text(verbatim: "\(res.width)×\(res.height)")
                 }
             }
             if videoFrameRate > 0 {
                 HStack(spacing: 4) {
                     Image(systemName: "speedometer")
-                    Text("\(Int(videoFrameRate)) FPS")
+                    Text(verbatim: "\(Int(videoFrameRate)) FPS")
                 }
             }
             if !fileSize.isEmpty {
                 HStack(spacing: 4) {
                     Image(systemName: "doc")
-                    Text(fileSize)
+                    Text(verbatim: fileSize)
                 }
             }
         }

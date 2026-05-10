@@ -76,13 +76,13 @@ struct AerialThumbnailCard: View {
                     }
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(asset.displayName)
+                    Text(verbatim: asset.displayName)
                         .font(.system(size: 12, weight: .semibold))
                         .lineLimit(1)
                         .foregroundStyle(.primary)
 
                     if let category = asset.category, !category.isEmpty {
-                        Text(category)
+                        Text(verbatim: category)
                             .font(.system(size: 10))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -120,11 +120,11 @@ struct AerialThumbnailCard: View {
         .accessibilityLabel(accessibilityText)
     }
 
-    private var accessibilityText: String {
+    private var accessibilityText: Text {
         if let category = asset.category, !category.isEmpty {
-            return "Aerial: \(asset.displayName), \(category)"
+            return Text("Aerial: \(asset.displayName), \(category)", comment: "Aerial thumbnail a11y label. Placeholders are aerial display name and category.")
         }
-        return "Aerial: \(asset.displayName)"
+        return Text("Aerial: \(asset.displayName)", comment: "Aerial thumbnail a11y label. The placeholder is the aerial display name.")
     }
 
     @ViewBuilder
@@ -132,7 +132,7 @@ struct AerialThumbnailCard: View {
         if let badges = formatInfo?.badges, !badges.isEmpty {
             HStack(spacing: 4) {
                 ForEach(badges, id: \.self) { label in
-                    Text(label)
+                    Text(verbatim: label)
                         .font(.system(size: 9, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 5)
@@ -141,7 +141,7 @@ struct AerialThumbnailCard: View {
                 }
             }
             .accessibilityElement(children: .combine)
-            .accessibilityLabel(badges.joined(separator: ", "))
+            .accessibilityLabel(Text(verbatim: badges.joined(separator: ", ")))
         }
     }
 

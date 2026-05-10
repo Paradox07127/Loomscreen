@@ -168,7 +168,7 @@ final class WeatherReactiveService {
         let urlString = "https://api.open-meteo.com/v1/forecast?latitude=\(lat)&longitude=\(lon)&current=weather_code,temperature_2m,cloud_cover&timezone=auto"
 
         guard let url = URL(string: urlString) else {
-            lastError = "Invalid URL"
+            lastError = String(localized: "Invalid URL", defaultValue: "Invalid URL", comment: "Weather fetch error.")
             locationStatus = .error
             return
         }

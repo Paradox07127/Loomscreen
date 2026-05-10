@@ -15,7 +15,7 @@ struct SystemMonitorView: View {
     private var ramTitle: String { "RAM" }
 
     @ViewBuilder
-    private func ramScopeButton(label: String, value: String) -> some View {
+    private func ramScopeButton(label: LocalizedStringKey, value: String) -> some View {
         Button {
             withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.18))) { ramScopeRaw = value }
         } label: {
@@ -35,13 +35,13 @@ struct SystemMonitorView: View {
             : Text("Show this app's memory usage", comment: "RAM scope toggle a11y label when scope is the LiveWallpaper app only."))
     }
 
-    private var ramDetailText: String {
+    private var ramDetailText: Text {
         if ramScopeRaw == "app" {
-            return "App: \(monitor.formattedMemoryUsage()) / \(monitor.formattedTotalMemory())"
+            return Text("App: \(monitor.formattedMemoryUsage()) / \(monitor.formattedTotalMemory())", comment: "Dashboard memory detail. Placeholders are used and total memory.")
         }
         let totalBytes = ProcessInfo.processInfo.physicalMemory
         let usedBytes = UInt64(Double(totalBytes) * monitor.systemMemoryUsage)
-        return "Sys: \(FormatUtils.formatBytes(usedBytes)) / \(monitor.formattedTotalMemory())"
+        return Text("Sys: \(FormatUtils.formatBytes(usedBytes)) / \(monitor.formattedTotalMemory())", comment: "Dashboard system memory detail. Placeholders are used and total memory.")
     }
 
     var body: some View {
@@ -85,7 +85,7 @@ struct SystemMonitorView: View {
                         Image(systemName: "thermometer.medium")
                             .font(.caption2)
                             .foregroundStyle(thermalColor)
-                        Text(monitor.thermalStateDescription)
+                        Text(verbatim: monitor.thermalStateDescription)
                             .font(.caption)
                             .foregroundStyle(thermalColor)
                     }
@@ -95,7 +95,7 @@ struct SystemMonitorView: View {
                     Image(systemName: "memorychip")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                    Text(ramDetailText)
+                    ramDetailText
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -143,17 +143,17 @@ struct SystemMonitorView: View {
             HStack(spacing: 8) {
                 MiniGaugeCard(title: "CPU", value: cpuPercent, color: colorForPercent(cpuPercent), icon: "cpu")
                     .accessibilityLabel(Text("CPU usage"))
-                    .accessibilityValue(Text("\(Int(cpuPercent)) percent"))
+                    .accessibilityValue(Text(verbatim: FormatUtils.formatPercent(cpuPercent)))
 
                 MiniGaugeCard(title: "GPU", value: monitor.gpuUsage, color: colorForPercent(monitor.gpuUsage), icon: "square.stack.3d.up.fill")
                     .accessibilityLabel(Text("GPU usage"))
-                    .accessibilityValue(Text("\(Int(monitor.gpuUsage)) percent"))
+                    .accessibilityValue(Text(verbatim: FormatUtils.formatPercent(monitor.gpuUsage)))
             }
 
             HStack(spacing: 8) {
                 MiniGaugeCard(title: ramTitle, value: ramPercent, color: colorForPercent(ramPercent), icon: "memorychip")
                     .accessibilityLabel(Text("\(ramTitle) usage"))
-                    .accessibilityValue(Text("\(Int(ramPercent)) percent"))
+                    .accessibilityValue(Text(verbatim: FormatUtils.formatPercent(ramPercent)))
 
                 PowerStatusCard(powerSource: powerSource)
                     .accessibilityLabel(Text("Power source"))
@@ -193,10 +193,10 @@ struct MiniGaugeCard: View {
                 .foregroundStyle(color)
 
             VStack(spacing: 0) {
-                Text(title)
+                Text(verbatim: title)
                     .font(.system(size: 8, weight: .semibold, design: .rounded))
                     .foregroundStyle(.secondary)
-                Text("\(displayedPercent)%")
+                Text(verbatim: FormatUtils.formatPercent(Double(displayedPercent)))
                     .font(.system(size: 9, weight: .bold, design: .rounded))
             }
             .offset(y: 18)
@@ -240,10 +240,10 @@ struct PowerStatusCard: View {
                 .foregroundStyle(statusColor)
 
             VStack(spacing: 0) {
-                Text(powerSource.shortLabel)
+                Text(verbatim: powerSource.shortLabel)
                     .font(.system(size: 8, weight: .semibold, design: .rounded))
                     .foregroundStyle(.secondary)
-                Text(powerSource.valueLabel)
+                Text(verbatim: powerSource.valueLabel)
                     .font(.system(size: 9, weight: .bold, design: .rounded))
             }
             .offset(y: 18)
@@ -287,15 +287,17 @@ private extension PowerMonitor.PowerSource {
 
     var valueLabel: String {
         switch self {
-        case .battery(let level): return "\(Int(level * 100))%"
+        case .battery(let level): return FormatUtils.formatFractionAsPercent(level)
         case .external: return "AC"
         }
     }
 
-    var accessibilitySummary: String {
+    var accessibilitySummary: Text {
         switch self {
-        case .battery(let level): return "Battery at \(Int(level * 100)) percent"
-        case .external: return "AC power"
+        case .battery(let level):
+            return Text("Battery at \(FormatUtils.formatFractionAsPercent(level))", comment: "Power source accessibility summary. The placeholder is the formatted battery percent.")
+        case .external:
+            return Text("AC power", comment: "Power source accessibility summary.")
         }
     }
 }
