@@ -283,21 +283,7 @@ struct WPESceneSection: View {
     }
 
     private func presentFolderPicker() {
-        NSApp.activate(ignoringOtherApps: true)
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.prompt = L10n.Panel.importProject
-
-        if let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
-            let lwDir = docs.appendingPathComponent("Live Wallpapers")
-            if FileManager.default.fileExists(atPath: lwDir.path) {
-                panel.directoryURL = lwDir
-            }
-        }
-
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let url = WPEFolderPicker.chooseImportFolder() else { return }
         Task { @MainActor in
             await screenManager.importWallpaperEngineProject(at: url, for: screen)
             reloadHistory()

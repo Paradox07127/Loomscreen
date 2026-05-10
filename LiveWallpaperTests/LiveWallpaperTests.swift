@@ -219,6 +219,85 @@ struct SettingsWindowLayoutTests {
         #expect(!resourceUtilitiesSource.contains("bookmarkNameCacheTTL"))
     }
 
+    @Test("Bookmark last-path-component resolution is centralized")
+    func bookmarkLastPathComponentResolutionIsCentralized() throws {
+        let htmlSource = try sourceText(for: "LiveWallpaper/Models/HTMLSource.swift")
+        let resourceUtilities = try sourceText(for: "LiveWallpaper/ResourceUtilities.swift")
+        let resolver = try sourceText(for: "LiveWallpaper/Infrastructure/BookmarkNameResolver.swift")
+
+        #expect(htmlSource.contains("BookmarkNameResolver.lastPathComponent"))
+        #expect(resourceUtilities.contains("BookmarkNameResolver.lastPathComponent"))
+        #expect(!htmlSource.contains("resolvingBookmarkData"))
+        #expect(resolver.contains("resolvingBookmarkData"))
+    }
+
+    @Test("RAM scope segmented control is shared")
+    func ramScopeSegmentedControlIsShared() throws {
+        let systemMonitor = try sourceText(for: "LiveWallpaper/Views/SystemMonitorView.swift")
+        let menuBarContent = try sourceText(for: "LiveWallpaper/Views/MenuBarContent.swift")
+        let sharedControl = try sourceText(for: "LiveWallpaper/Views/RAMScopePicker.swift")
+
+        #expect(!systemMonitor.contains("private func ramScopeButton"))
+        #expect(!menuBarContent.contains("private func ramScopeButton"))
+        #expect(systemMonitor.contains("RAMScopePicker("))
+        #expect(menuBarContent.contains("RAMScopePicker("))
+        #expect(sharedControl.contains("private func scopeButton"))
+    }
+
+    @Test("Settings forms use shared chrome")
+    func settingsFormsUseSharedChrome() throws {
+        let weather = try sourceText(for: "LiveWallpaper/Views/Settings/WeatherLocationSettingsView.swift")
+        let shortcuts = try sourceText(for: "LiveWallpaper/Views/Settings/ShortcutsSettingsView.swift")
+        let cache = try sourceText(for: "LiveWallpaper/Views/WPECacheManagementView.swift")
+        let sharedChrome = try sourceText(for: "LiveWallpaper/Views/SettingsFormChrome.swift")
+
+        #expect(weather.contains(".settingsFormChrome("))
+        #expect(shortcuts.contains(".settingsFormChrome("))
+        #expect(cache.contains(".settingsFormChrome("))
+        #expect(!weather.contains(".contentMargins(.horizontal, DesignTokens.Settings.formHorizontalMargin"))
+        #expect(!shortcuts.contains(".contentMargins(.horizontal, DesignTokens.Settings.formHorizontalMargin"))
+        #expect(sharedChrome.contains("DesignTokens.Settings.formHorizontalMargin"))
+    }
+
+    @Test("Wallpaper Engine folder import panel is shared")
+    func wallpaperEngineFolderImportPanelIsShared() throws {
+        let sceneSection = try sourceText(for: "LiveWallpaper/Views/ScreenDetail/WPESceneSection.swift")
+        let onboarding = try sourceText(for: "LiveWallpaper/Views/Onboarding/OnboardingStepFirstWallpaper.swift")
+        let picker = try sourceText(for: "LiveWallpaper/Infrastructure/WPEFolderPicker.swift")
+
+        #expect(sceneSection.contains("WPEFolderPicker.chooseImportFolder()"))
+        #expect(onboarding.contains("WPEFolderPicker.chooseImportFolder()"))
+        #expect(picker.contains("panel.canChooseDirectories = true"))
+        #expect(picker.contains("Live Wallpapers"))
+        #expect(picker.contains("L10n.Panel.importProject"))
+    }
+
+    @Test("HTML source kind picker is shared")
+    func htmlSourceKindPickerIsShared() throws {
+        let screenDetail = try sourceText(for: "LiveWallpaper/Views/ScreenDetail/HTMLSourceSection.swift")
+        let onboarding = try sourceText(for: "LiveWallpaper/Views/Onboarding/OnboardingStepFirstWallpaper.swift")
+        let picker = try sourceText(for: "LiveWallpaper/Views/HTMLSourceKindPicker.swift")
+
+        #expect(screenDetail.contains("HTMLSourceKindPicker(selection: $selectedKind)"))
+        #expect(onboarding.contains("HTMLSourceKindPicker(selection: $selectedKind)"))
+        #expect(picker.contains("Picker(\"Source\", selection: $selection)"))
+        #expect(picker.contains("HTMLSourceKind.allCases"))
+    }
+
+    @Test("Wallpaper Engine cards share preview and hover chrome")
+    func wallpaperEngineCardsSharePreviewAndHoverChrome() throws {
+        let historyRow = try sourceText(for: "LiveWallpaper/Views/ScreenDetail/WPEHistoryRow.swift")
+        let workshop = try sourceText(for: "LiveWallpaper/Views/ScreenDetail/WorkshopGalleryView.swift")
+        let chrome = try sourceText(for: "LiveWallpaper/Views/ScreenDetail/WPEProjectCardChrome.swift")
+
+        #expect(historyRow.contains(".wpeCardPreviewClip()"))
+        #expect(workshop.contains(".wpeCardPreviewClip()"))
+        #expect(historyRow.contains(".wpeProjectCardChrome(isHovering: isHovering)"))
+        #expect(workshop.contains(".wpeProjectCardChrome(isHovering: isHovering)"))
+        #expect(chrome.contains("UnevenRoundedRectangle("))
+        #expect(chrome.contains(".glassEffect(.regular.interactive()"))
+    }
+
     @Test("Content view auto-selects a single connected display")
     func contentViewAutoSelectsSingleDisplay() throws {
         let source = try sourceText(for: "LiveWallpaper/Views/ContentView.swift")
@@ -274,14 +353,16 @@ struct SettingsWindowLayoutTests {
     @Test("Sidebar dashboard keeps fixed layout animation with original visual spacing")
     func sidebarDashboardKeepsFixedLayoutAnimationWithOriginalVisualSpacing() throws {
         let source = try sourceText(for: "LiveWallpaper/Views/SystemMonitorView.swift")
+        let scopePickerSource = try sourceText(for: "LiveWallpaper/Views/RAMScopePicker.swift")
+        let composedSource = source + "\n" + scopePickerSource
 
         #expect(!source.contains("LazyVGrid(columns: [GridItem(.flexible()"))
         #expect(source.contains("private var gaugeGrid: some View"))
         #expect(source.contains("HStack(spacing: 8)"))
         #expect(source.contains(".padding(.horizontal, 6)"))
         #expect(source.contains(".padding(.vertical, 8)"))
-        #expect(source.contains(".font(.system(size: 10"))
-        #expect(source.contains(".padding(.vertical, 3)"))
+        #expect(composedSource.contains(".font(.system(size: 10"))
+        #expect(composedSource.contains(".padding(.vertical, 3)"))
         #expect(source.contains("lineWidth: 6"))
         #expect(source.contains(".font(.system(size: 14, weight: .bold))"))
         #expect(source.contains(".frame(width: 54, height: 54)"))
@@ -434,13 +515,15 @@ struct SettingsWindowLayoutTests {
     @Test("General settings keeps native forms while using compact page chrome")
     func generalSettingsKeepsNativeFormsWhileUsingCompactPageChrome() throws {
         let source = try sourceText(for: "LiveWallpaper/Views/GeneralSettingsView.swift")
+        let chromeSource = try sourceText(for: "LiveWallpaper/Views/SettingsFormChrome.swift")
+        let composedSource = source + "\n" + chromeSource
 
         #expect(source.contains("TabView {"))
         #expect(source.contains("Form {"))
         #expect(source.contains("private func settingsForm"))
-        #expect(source.contains(".formStyle(.grouped)"))
-        #expect(source.contains(".scrollContentBackground(.hidden)"))
-        #expect(source.contains("Color(NSColor.underPageBackgroundColor)"))
+        #expect(composedSource.contains(".formStyle(.grouped)"))
+        #expect(composedSource.contains(".scrollContentBackground(.hidden)"))
+        #expect(composedSource.contains("Color(NSColor.underPageBackgroundColor)"))
         #expect(source.contains("private var troubleshootingActions"))
         #expect(source.contains("private func settingsActionButton"))
         #expect(source.contains("HStack(spacing: DesignTokens.Settings.actionGridSpacing)"))
@@ -530,6 +613,20 @@ struct ResourceUtilitiesTests {
 
         #expect(options.contains(.withSecurityScope))
         #expect(options.contains(.securityScopeAllowOnlyReadAccess))
+    }
+
+    @Test("Sandbox entitlements allow read-only user-selected bookmarks")
+    func sandboxEntitlementsAllowReadOnlyUserSelectedBookmarks() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let projectRoot = testsDirectory.deletingLastPathComponent()
+        let url = projectRoot.appendingPathComponent("LiveWallpaper/LiveWallpaper.entitlements")
+        let data = try Data(contentsOf: url)
+        let plist = try #require(
+            PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        )
+
+        #expect(plist["com.apple.security.files.bookmarks.app-scope"] as? Bool == true)
+        #expect(plist["com.apple.security.files.user-selected.read-only"] as? Bool == true)
     }
 
     @Test("HTML folder index inference prefers standard names")

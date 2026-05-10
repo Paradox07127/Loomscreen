@@ -32,27 +32,6 @@ struct MenuBarContent: View {
         ramScopeRaw == "app" ? monitor.cpuUsage : monitor.systemCpuUsage
     }
 
-    @ViewBuilder
-    private func ramScopeButton(label: LocalizedStringKey, value: String) -> some View {
-        Button {
-            withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.18))) { ramScopeRaw = value }
-        } label: {
-            Text(label)
-                .font(.system(size: 10, weight: ramScopeRaw == value ? .semibold : .regular))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 3)
-                .background(
-                    Capsule()
-                        .fill(ramScopeRaw == value ? Color.accentColor.opacity(0.35) : Color.clear)
-                )
-                .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(value == "system"
-            ? Text("Show whole-system memory usage")
-            : Text("Show this app's memory usage"))
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
@@ -117,15 +96,7 @@ struct MenuBarContent: View {
 
             if dashboardExpanded {
                 // RAM scope picker — explicit segmented capsule shared with sidebar.
-                HStack(spacing: 0) {
-                    ramScopeButton(label: "All", value: "system")
-                    ramScopeButton(label: "App", value: "app")
-                }
-                .padding(2)
-                .background(Capsule().fill(Color.gray.opacity(0.18)))
-                .frame(maxWidth: 180)
-                .accessibilityElement(children: .contain)
-                .accessibilityLabel(Text("RAM scope"))
+                RAMScopePicker(selection: $ramScopeRaw, maxWidth: 180)
 
                 chipRow
             }

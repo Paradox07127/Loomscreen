@@ -72,11 +72,7 @@ struct WPECacheManagementView: View {
                 }
             }
         }
-        .formStyle(.grouped)
-        .scrollContentBackground(.hidden)
-        .contentMargins(.horizontal, DesignTokens.Settings.formHorizontalMargin, for: .scrollContent)
-        .contentMargins(.vertical, DesignTokens.Settings.formVerticalMargin, for: .scrollContent)
-        .background(Color(NSColor.underPageBackgroundColor))
+        .settingsFormChrome()
         .onAppear { Task { await refreshStats() } }
         .onReceive(NotificationCenter.default.publisher(for: .wpeHistoryDidChange)) { _ in
             Task { await refreshStats() }

@@ -22,13 +22,7 @@ struct HTMLSourceSection: View {
                 Label("Web / HTML Wallpaper", systemImage: "globe")
                     .font(.headline)
 
-                Picker("Source", selection: $selectedKind) {
-                    ForEach(HTMLSourceKind.allCases) { kind in
-                        Label(kind.labelKey, systemImage: kind.icon).tag(kind)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
+                HTMLSourceKindPicker(selection: $selectedKind)
 
                 sourcePane
                     .animation(.snappy(duration: 0.18), value: selectedKind)

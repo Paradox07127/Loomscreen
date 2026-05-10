@@ -4,7 +4,6 @@ struct SystemMonitorView: View {
     private var monitor = SystemMonitor.shared
     @State private var powerSource: PowerMonitor.PowerSource = PowerMonitor.shared.currentPowerSource
     @AppStorage("Dashboard.RAMScope") private var ramScopeRaw: String = "system"
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var ramPercent: Double {
         ramScopeRaw == "app" ? monitor.memoryPercentage() : monitor.systemMemoryUsage * 100
@@ -13,27 +12,6 @@ struct SystemMonitorView: View {
         ramScopeRaw == "app" ? monitor.cpuUsage : monitor.systemCpuUsage
     }
     private var ramTitle: String { "RAM" }
-
-    @ViewBuilder
-    private func ramScopeButton(label: LocalizedStringKey, value: String) -> some View {
-        Button {
-            withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.18))) { ramScopeRaw = value }
-        } label: {
-            Text(label)
-                .font(.system(size: 10, weight: ramScopeRaw == value ? .semibold : .regular))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 3)
-                .background(
-                    Capsule()
-                        .fill(ramScopeRaw == value ? Color.accentColor.opacity(0.35) : Color.clear)
-                )
-                .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(value == "system"
-            ? Text("Show whole-system memory usage", comment: "RAM scope toggle a11y label when scope is the whole system.")
-            : Text("Show this app's memory usage", comment: "RAM scope toggle a11y label when scope is the LiveWallpaper app only."))
-    }
 
     private var ramDetailText: Text {
         if ramScopeRaw == "app" {
@@ -46,14 +24,7 @@ struct SystemMonitorView: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            HStack(spacing: 0) {
-                ramScopeButton(label: "All", value: "system")
-                ramScopeButton(label: "App", value: "app")
-            }
-            .padding(2)
-            .background(Capsule().fill(Color.gray.opacity(0.18)))
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel(Text("RAM scope"))
+            RAMScopePicker(selection: $ramScopeRaw)
 
             gaugeGrid
                 .padding(.horizontal, 6)

@@ -57,28 +57,15 @@ enum HTMLSource: Codable, Equatable, Sendable {
     var displayName: String {
         switch self {
         case .file(let bookmark):
-            return Self.resolveBookmarkLastPathComponent(bookmark) ?? "Local file"
+            return BookmarkNameResolver.lastPathComponent(from: bookmark) ?? "Local file"
         case .folder(let bookmark, let index):
-            let folderName = Self.resolveBookmarkLastPathComponent(bookmark) ?? "Folder"
+            let folderName = BookmarkNameResolver.lastPathComponent(from: bookmark) ?? "Folder"
             return "\(folderName)/\(index)"
         case .url(let url):
             return url.host ?? url.absoluteString
         case .inline:
             return "Inline HTML"
         }
-    }
-
-    /// Pure-Foundation bookmark resolution kept on `HTMLSource` itself so the
-    /// type stays nonisolated and `displayName` can be read from any actor.
-    private static func resolveBookmarkLastPathComponent(_ data: Data) -> String? {
-        var isStale = false
-        guard let url = try? URL(
-            resolvingBookmarkData: data,
-            options: .withSecurityScope,
-            relativeTo: nil,
-            bookmarkDataIsStale: &isStale
-        ) else { return nil }
-        return url.lastPathComponent
     }
 
     /// SF Symbol used to represent this source in inspector and menu bar.

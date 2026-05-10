@@ -20,15 +20,7 @@ struct WPEHistoryRow: View {
                     imageURL: previewURL,
                     securityScopedBookmarkData: entry.origin.sourceFolderBookmark
                 )
-                    .clipShape(
-                        UnevenRoundedRectangle(
-                            topLeadingRadius: 16,
-                            bottomLeadingRadius: 0,
-                            bottomTrailingRadius: 0,
-                            topTrailingRadius: 16,
-                            style: .continuous
-                        )
-                    )
+                    .wpeCardPreviewClip()
                     .overlay(alignment: .topTrailing) {
                         if let badge = compatibilityBadge {
                             Text(badge.titleKey)
@@ -76,15 +68,7 @@ struct WPEHistoryRow: View {
             }
         }
         .buttonStyle(.plain)
-        .frame(width: 160, height: 240)
-        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 16))
-        .scaleEffect(isHovering ? 1.02 : 1.0)
-        .shadow(
-            color: Color.black.opacity(isHovering ? 0.18 : 0.06),
-            radius: isHovering ? 8 : 4,
-            y: isHovering ? 4 : 2
-        )
-        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isHovering)
+        .wpeProjectCardChrome(isHovering: isHovering)
         .onHover { isHovering = $0 }
         .accessibilityLabel(Text("Wallpaper Engine project: \(entry.origin.title)"))
         .accessibilityHint(isActive
