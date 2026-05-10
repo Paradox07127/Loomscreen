@@ -86,4 +86,12 @@ enum L10n {
             comment: "Title of the LiveWallpaper settings window."
         )
     }
+
+    enum Toolbar {
+        static let preferences = String(
+            localized: "toolbar.preferences",
+            defaultValue: "Preferences",
+            comment: "Settings window toolbar button for opening general preferences."
+        )
+    }
 }

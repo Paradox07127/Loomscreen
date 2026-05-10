@@ -13,6 +13,9 @@ extension Notification.Name {
     /// Request the settings UI to navigate to a specific screen.
     static let selectScreenInSettings = Notification.Name("SelectScreenInSettings")
 
+    /// Request the settings UI to navigate to the app preferences page.
+    static let openGeneralSettings = Notification.Name("OpenGeneralSettings")
+
     /// A video player completed one full loop of its current video.
     static let videoDidCompleteLoop = Notification.Name("VideoDidCompleteLoop")
 

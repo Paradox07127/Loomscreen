@@ -38,37 +38,43 @@ struct ScreenDetailView: View {
         }
     }
 
-    @ToolbarContentBuilder
-    private var screenDetailToolbar: some ToolbarContent {
+    private var canApplyToAllDisplays: Bool {
+        screenManager.screens.count > 1 && screenManager.getConfiguration(for: screen) != nil
+    }
+
+    @ViewBuilder
+    private var wallpaperTypePicker: some View {
         // Hide the type segmented control while the empty-state guide is
         // visible — the guide IS the type picker for unconfigured screens.
         // Showing both at once produced two parallel paths to do the same
         // thing (toolbar `.html` segment vs. guide "HTML" card) which was
         // confusing for first-time users on a fresh display.
         if !shouldShowGuideEmptyState {
-            ToolbarItem(placement: .principal) {
-                Picker("Wallpaper Type", selection: $selectedWallpaperType) {
-                    ForEach(WallpaperType.allCases) { type in
-                        Text(type.titleKey).tag(type)
-                    }
+            Picker("Wallpaper Type", selection: $selectedWallpaperType) {
+                ForEach(WallpaperType.allCases) { type in
+                    Text(type.titleKey).tag(type)
                 }
-                .pickerStyle(.segmented)
-                .fixedSize(horizontal: true, vertical: false)
-                .accessibilityLabel(Text("Wallpaper type"))
-                .accessibilityHint(Text("Choose between video, HTML, Shader, or Scene wallpaper"))
-                .onChange(of: selectedWallpaperType) { _, newType in
-                    switch newType {
-                    case .video:
-                        screenManager.switchToVideoWallpaper(for: screen)
-                    case .html:
-                        screenManager.switchToHTMLWallpaper(for: screen)
-                    case .metalShader, .scene:
-                        break // pickers drive activation themselves
-                    }
+            }
+            .pickerStyle(.segmented)
+            .fixedSize(horizontal: true, vertical: false)
+            .accessibilityLabel(Text("Wallpaper type"))
+            .accessibilityHint(Text("Choose between video, HTML, Shader, or Scene wallpaper"))
+            .onChange(of: selectedWallpaperType) { _, newType in
+                switch newType {
+                case .video:
+                    screenManager.switchToVideoWallpaper(for: screen)
+                case .html:
+                    screenManager.switchToHTMLWallpaper(for: screen)
+                case .metalShader, .scene:
+                    break // pickers drive activation themselves
                 }
             }
         }
-        ToolbarItem(placement: .primaryAction) {
+    }
+
+    @ViewBuilder
+    private var applyToAllButton: some View {
+        if canApplyToAllDisplays {
             Button {
                 showApplyToAllConfirm = true
             } label: {
@@ -77,7 +83,8 @@ struct ScreenDetailView: View {
             .help(Text("Copy this display's wallpaper and settings to every other display"))
             .accessibilityLabel(Text("Apply to all displays"))
             .accessibilityHint(Text("Copies the current wallpaper and settings to every other connected display"))
-            .disabled(screenManager.screens.count <= 1 || screenManager.getConfiguration(for: screen) == nil)
+            .buttonStyle(.glass)
+            .controlSize(.regular)
         }
     }
     /// Resolved Wallpaper Engine origin metadata for the active wallpaper, or
@@ -188,6 +195,11 @@ struct ScreenDetailView: View {
                     }
                 }
                 Spacer()
+
+                wallpaperTypePicker
+                    .layoutPriority(1)
+
+                applyToAllButton
 
                 Button {
                     showBookmarks = true
@@ -353,7 +365,6 @@ struct ScreenDetailView: View {
             .transaction(value: selectedWallpaperType) { $0.animation = nil }
             .transaction(value: liveInspectorWidth) { $0.animation = nil }
         }
-        .toolbar { screenDetailToolbar }
         .confirmationDialog(
             "Apply this wallpaper to every other display?",
             isPresented: $showApplyToAllConfirm

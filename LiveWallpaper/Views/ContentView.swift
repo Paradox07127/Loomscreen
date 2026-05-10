@@ -28,24 +28,27 @@ struct ContentView: View {
                 }
         } detail: {
             DetailContent(selection: $selectedNavigation)
-                .toolbar {
-                    ToolbarItem(placement: .navigation) {
-                        Button(action: {
-                            selectedNavigation = .general
-                        }) {
-                            Image(systemName: "gearshape")
-                        }
-                        .help(Text("Preferences"))
-                        .accessibilityLabel(Text("Preferences"))
-                        .accessibilityHint(Text("Open application preferences"))
-                    }
-                }
         }
         .navigationSplitViewStyle(.balanced)
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    selectedNavigation = .general
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .help(Text(L10n.Toolbar.preferences))
+                .accessibilityLabel(Text(L10n.Toolbar.preferences))
+                .accessibilityHint(Text("Open application preferences"))
+            }
+        }
         .frame(
             minWidth: SettingsWindowMetrics.minimumContentSize.width,
             minHeight: SettingsWindowMetrics.minimumContentSize.height
         )
+        .onReceive(NotificationCenter.default.publisher(for: .openGeneralSettings)) { _ in
+            selectedNavigation = .general
+        }
         .onAppear { consumeInitialAddWallpaperPromptIfNeeded() }
     }
 
@@ -192,7 +195,7 @@ struct Sidebar: View {
                     }
                 }
             }
-            
+
             Section(header: VStack(alignment: .leading, spacing: 6) {
                 Divider()
                 Text("Library").font(.caption).bold().foregroundStyle(.secondary)
@@ -222,13 +225,6 @@ struct Sidebar: View {
             }
         }
         .listStyle(.sidebar)
-        // Reserve the standard ~28pt titlebar height as a top safe area so
-        // the first sidebar row never renders under the window's
-        // traffic-light controls. `.fullSizeContentView` lets content
-        // bleed under the transparent titlebar otherwise.
-        .safeAreaInset(edge: .top, spacing: 0) {
-            Color.clear.frame(height: 28)
-        }
         .navigationSplitViewColumnWidth(
             min: SettingsWindowMetrics.sidebarColumnWidth,
             ideal: SettingsWindowMetrics.sidebarColumnWidth,
