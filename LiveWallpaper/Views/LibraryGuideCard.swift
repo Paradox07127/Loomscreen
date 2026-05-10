@@ -49,23 +49,23 @@ struct LibraryGuideCard: View {
 
     var body: some View {
         VStack(spacing: 22) {
-            Spacer().frame(height: 24)
+            Spacer().frame(height: DesignTokens.GuidedLibrary.topSpacerHeight)
 
             Image(systemName: icon)
-                .font(.system(size: 48, weight: .light))
+                .font(.system(size: DesignTokens.GuidedLibrary.iconSize, weight: .light))
                 .foregroundStyle(Color.accentColor)
                 .symbolRenderingMode(.hierarchical)
 
             VStack(spacing: 6) {
                 Text(title)
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.system(size: DesignTokens.GuidedLibrary.titleSize, weight: .semibold))
                     .accessibilityAddTraits(.isHeader)
 
                 Text(message)
-                    .font(.system(size: 13))
+                    .font(.system(size: DesignTokens.GuidedLibrary.messageSize))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                    .frame(maxWidth: 360)
+                    .frame(maxWidth: DesignTokens.GuidedLibrary.messageWidth)
             }
 
             VStack(alignment: .leading, spacing: 12) {
@@ -84,7 +84,7 @@ struct LibraryGuideCard: View {
                     .strokeBorder(.white.opacity(0.06), lineWidth: 1)
                     .blendMode(.overlay)
             )
-            .frame(maxWidth: 380)
+            .frame(maxWidth: DesignTokens.GuidedLibrary.featureWidth)
 
             HStack(spacing: 10) {
                 Button(action: action) {
@@ -128,7 +128,7 @@ struct LibraryGuideCard: View {
             Spacer(minLength: 12)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(40)
+        .padding(DesignTokens.GuidedLibrary.outerPadding)
     }
 
     private func featureRow(_ feature: LibraryGuideFeature) -> some View {

@@ -181,8 +181,10 @@ struct Sidebar: View {
 
     var body: some View {
         List(selection: $selection) {
-            Section(header: HStack(spacing: 4) {
-                Text("Displays").font(.caption).bold().foregroundStyle(.secondary)
+            Section(header: SidebarSectionHeader(
+                title: "Displays",
+                bottomPadding: DesignTokens.Sidebar.displayHeaderBottomPadding
+            ) {
                 Button(action: reloadWallpapers) {
                     Image(systemName: "arrow.triangle.2.circlepath")
                         .font(.system(size: 10, weight: .bold))
@@ -215,9 +217,8 @@ struct Sidebar: View {
                 }
             }
 
-            Section(header: VStack(alignment: .leading, spacing: 6) {
-                Divider()
-                Text("Library").font(.caption).bold().foregroundStyle(.secondary)
+            Section(header: SidebarSectionHeader(title: "Library", showsDivider: true) {
+                EmptyView()
             }) {
                 NavigationLink(value: Navigation.bookmarks) {
                     Label("My Wallpapers", systemImage: "bookmark.fill")
@@ -231,9 +232,8 @@ struct Sidebar: View {
                 .accessibilityHint(Text("Browse Wallpaper Engine workshop projects"))
             }
 
-            Section(header: VStack(alignment: .leading, spacing: 6) {
-                Divider()
-                Text("Dashboard").font(.caption).bold().foregroundStyle(.secondary)
+            Section(header: SidebarSectionHeader(title: "Dashboard", showsDivider: true) {
+                EmptyView()
             }) {
                 SystemMonitorView()
                     .padding(.vertical, 2)
@@ -273,6 +273,42 @@ struct Sidebar: View {
         }
         screenManager.setVideo(url: videoURL, bookmarkData: bookmarkData, for: screen)
         return true
+    }
+}
+
+private struct SidebarSectionHeader<Trailing: View>: View {
+    let title: LocalizedStringKey
+    let showsDivider: Bool
+    let bottomPadding: CGFloat
+    let trailing: Trailing
+
+    init(
+        title: LocalizedStringKey,
+        showsDivider: Bool = false,
+        bottomPadding: CGFloat = DesignTokens.Sidebar.sectionHeaderBottomPadding,
+        @ViewBuilder trailing: () -> Trailing
+    ) {
+        self.title = title
+        self.showsDivider = showsDivider
+        self.bottomPadding = bottomPadding
+        self.trailing = trailing()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DesignTokens.Sidebar.sectionHeaderSpacing) {
+            if showsDivider {
+                Divider()
+            }
+
+            HStack(spacing: 4) {
+                Text(title)
+                    .font(.caption)
+                    .bold()
+                    .foregroundStyle(.secondary)
+                trailing
+            }
+        }
+        .padding(.bottom, bottomPadding)
     }
 }
 

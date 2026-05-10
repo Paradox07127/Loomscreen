@@ -1,5 +1,6 @@
 import SwiftUI
 import MapKit
+import AppKit
 
 /// Settings tab that lets users pick how the weather pipeline gets a
 /// location. Three sources, in order of decreasing privacy intrusion:
@@ -60,6 +61,10 @@ struct WeatherLocationSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .contentMargins(.horizontal, DesignTokens.Settings.formHorizontalMargin, for: .scrollContent)
+        .contentMargins(.vertical, DesignTokens.Settings.formVerticalMargin, for: .scrollContent)
+        .background(Color(NSColor.underPageBackgroundColor))
         .frame(minWidth: 500, minHeight: 400)
     }
 

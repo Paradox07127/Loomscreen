@@ -181,6 +181,17 @@ struct SettingsWindowLayoutTests {
         #expect(source.contains("value: displayedPercent"))
     }
 
+    @Test("Sidebar section headers use shared spacing tokens")
+    func sidebarSectionHeadersUseSharedSpacingTokens() throws {
+        let contentSource = try sourceText(for: "LiveWallpaper/Views/ContentView.swift")
+        let tokenSource = try sourceText(for: "LiveWallpaper/Views/Styles/DesignTokens.swift")
+
+        #expect(contentSource.contains("SidebarSectionHeader("))
+        #expect(contentSource.contains("bottomPadding: DesignTokens.Sidebar.displayHeaderBottomPadding"))
+        #expect(tokenSource.contains("static let displayHeaderBottomPadding"))
+        #expect(tokenSource.contains("static let sectionHeaderSpacing"))
+    }
+
     @Test("Settings window uses native split-view chrome")
     func settingsWindowUsesNativeSplitViewChrome() throws {
         let source = try sourceText(for: "LiveWallpaper/Views/ContentView.swift")
@@ -261,9 +272,9 @@ struct SettingsWindowLayoutTests {
         let workshopSource = try sourceText(for: "LiveWallpaper/Views/ScreenDetail/WorkshopGalleryView.swift")
         let aerialsSource = try sourceText(for: "LiveWallpaper/Views/AppleAerialsLibraryView.swift")
 
-        #expect(workshopSource.contains("if hasLibraryRoot {\n                header\n                Divider()\n            }"))
+        #expect(workshopSource.contains("DetailPageScaffold(\n            showsHeader: hasLibraryRoot"))
         #expect(!workshopSource.contains("case .needsRoot:\n            return \"Choose your Steam Wallpaper Engine folder to discover projects\""))
-        #expect(aerialsSource.contains("if library.isAuthorized {\n                inlineHeader\n            }"))
+        #expect(aerialsSource.contains("DetailPageScaffold(\n            showsHeader: library.isAuthorized"))
     }
 
     @Test("Workshop and Aerials share the guide card layout")
@@ -279,21 +290,58 @@ struct SettingsWindowLayoutTests {
         #expect(!aerialsSource.contains("struct UnauthorizedAerialsCard"))
     }
 
+    @Test("Detail pages share header and scaffold primitives")
+    func detailPagesShareHeaderAndScaffoldPrimitives() throws {
+        let headerSource = try sourceText(for: "LiveWallpaper/Views/DetailPageScaffold.swift")
+        let screenSource = try sourceText(for: "LiveWallpaper/Views/ScreenDetailView.swift")
+        let bookmarksSource = try sourceText(for: "LiveWallpaper/Views/BookmarksLibraryView.swift")
+        let aerialsSource = try sourceText(for: "LiveWallpaper/Views/AppleAerialsLibraryView.swift")
+        let workshopSource = try sourceText(for: "LiveWallpaper/Views/ScreenDetail/WorkshopGalleryView.swift")
+
+        #expect(headerSource.contains("struct DetailPageScaffold"))
+        #expect(headerSource.contains("struct DetailHeaderBar"))
+        #expect(headerSource.contains("struct GuidedLibrarySurface"))
+        #expect(screenSource.contains("DetailHeaderBar("))
+        #expect(bookmarksSource.contains("DetailPageScaffold("))
+        #expect(bookmarksSource.contains("DetailHeaderBar("))
+        #expect(aerialsSource.contains("DetailPageScaffold("))
+        #expect(aerialsSource.contains("GuidedLibrarySurface"))
+        #expect(workshopSource.contains("DetailPageScaffold("))
+        #expect(workshopSource.contains("GuidedLibrarySurface"))
+    }
+
     @Test("Library pages share the detail canvas background")
     func libraryPagesShareTheDetailCanvasBackground() throws {
         let contentSource = try sourceText(for: "LiveWallpaper/Views/ContentView.swift")
         let workshopSource = try sourceText(for: "LiveWallpaper/Views/ScreenDetail/WorkshopGalleryView.swift")
+        let scaffoldSource = try sourceText(for: "LiveWallpaper/Views/DetailPageScaffold.swift")
 
         #expect(contentSource.contains(".background(Color(NSColor.underPageBackgroundColor))"))
-        #expect(workshopSource.contains(".background(Color(NSColor.underPageBackgroundColor))"))
+        #expect(workshopSource.contains("DetailPageScaffold("))
+        #expect(scaffoldSource.contains(".background(Color(NSColor.underPageBackgroundColor))"))
         #expect(!workshopSource.contains(".background(Color(NSColor.windowBackgroundColor))"))
+    }
+
+    @Test("General settings keeps native forms while using compact page chrome")
+    func generalSettingsKeepsNativeFormsWhileUsingCompactPageChrome() throws {
+        let source = try sourceText(for: "LiveWallpaper/Views/GeneralSettingsView.swift")
+
+        #expect(source.contains("TabView {"))
+        #expect(source.contains("Form {"))
+        #expect(source.contains("private func settingsForm"))
+        #expect(source.contains(".formStyle(.grouped)"))
+        #expect(source.contains(".scrollContentBackground(.hidden)"))
+        #expect(source.contains("Color(NSColor.underPageBackgroundColor)"))
+        #expect(source.contains("private var troubleshootingActions"))
+        #expect(source.contains("private func settingsActionButton"))
+        #expect(source.contains("HStack(spacing: DesignTokens.Settings.actionGridSpacing)"))
     }
 
     @Test("Apple Aerials guide states do not keep the legacy card copy")
     func appleAerialsGuideStatesDoNotKeepLegacyCardCopy() throws {
         let source = try sourceText(for: "LiveWallpaper/Views/AppleAerialsLibraryView.swift")
 
-        #expect(source.contains("private func scanErrorView(message: String) -> some View {\n        LibraryGuideCard("))
+        #expect(source.contains("private func scanErrorView(message: String) -> some View {\n        GuidedLibrarySurface"))
         #expect(source.components(separatedBy: "LibraryGuideCard(").count >= 4)
         #expect(!source.contains("Opens the right folder automatically"))
         #expect(!source.contains("One click in the system dialog"))

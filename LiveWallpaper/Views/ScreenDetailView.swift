@@ -177,89 +177,7 @@ struct ScreenDetailView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(alignment: .center, spacing: 14) {
-                ZStack {
-                    Circle().fill(Color.accentColor.opacity(0.15)).frame(width: 44, height: 44)
-                    Image(systemName: "display").font(.system(size: 18)).foregroundStyle(Color.accentColor)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 8) {
-                        Text(verbatim: screen.name).font(.system(size: 18, weight: .semibold)).lineLimit(1)
-
-                        Button(action: { screenManager.reloadWallpaperForScreen(screen) }) {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .help(Text("Reload display content"))
-                        .accessibilityLabel(Text("Reload display"))
-                        .accessibilityHint(Text("Reloads the wallpaper content for this screen"))
-                    }
-                    HStack(spacing: 8) {
-                        InfoBadge(icon: "arrow.up.left.and.arrow.down.right", text: "\(Int(screen.frame.width))×\(Int(screen.frame.height))")
-                        InfoBadge(icon: "gauge.medium", text: "\(getScreenRefreshRate()) Hz")
-                        if wallpaperSessionSummary.isConfigured {
-                            HStack(spacing: 4) {
-                                Image(systemName: "circle.fill")
-                                    .font(.system(size: 6))
-                                    .foregroundStyle(sessionStatusColor)
-                                    .symbolEffect(.pulse, options: .repeat(.continuous), isActive: wallpaperSessionSummary.activity == .active)
-                                Text(sessionStatusText).font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
-                Spacer()
-
-                wallpaperTypePicker
-                    .layoutPriority(1)
-
-                applyToAllButton
-
-                Button {
-                    showBookmarks = true
-                } label: {
-                    Label("Bookmarks", systemImage: "bookmark.fill")
-                }
-                .buttonStyle(.glass)
-                .controlSize(.regular)
-                .help(Text("Saved video / HTML / shader shortcuts"))
-                .accessibilityLabel(Text("Bookmarks"))
-                .popover(isPresented: $showBookmarks, arrowEdge: .bottom) {
-                    BookmarksPopover(screen: screen)
-                        .environment(screenManager)
-                }
-
-                if showsHeaderVideoActions {
-                    HStack(spacing: 8) {
-                        Button {
-                            showFilePicker()
-                        } label: {
-                            Label("Select Video", systemImage: "folder.badge.plus")
-                        }
-                        .buttonStyle(.glassProminent)
-                        .controlSize(.regular)
-                        .help(Text("Choose a video file for this display"))
-                        .accessibilityLabel(Text("Select video"))
-                        .accessibilityHint(Text("Opens a file picker to choose a wallpaper video"))
-
-                        Button(role: .destructive) {
-                            clearVideo()
-                        } label: {
-                            Image(systemName: "trash")
-                        }
-                        .buttonStyle(.glass)
-                        .destructiveControlTint()
-                        .controlSize(.regular)
-                        .help(Text("Remove wallpaper video"))
-                        .accessibilityLabel(Text("Clear video"))
-                        .accessibilityHint(Text("Removes the current wallpaper video from this screen"))
-                    }
-                }
-            }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 14)
+            screenHeader
 
             runtimeErrorBannerView
 
@@ -382,6 +300,7 @@ struct ScreenDetailView: View {
             .transaction(value: selectedWallpaperType) { $0.animation = nil }
             .transaction(value: liveInspectorWidth) { $0.animation = nil }
         }
+        .background(Color(NSColor.underPageBackgroundColor))
         .confirmationDialog(
             "Apply this wallpaper to every other display?",
             isPresented: $showApplyToAllConfirm
@@ -424,6 +343,93 @@ struct ScreenDetailView: View {
         } isTargeted: { targeted in
             isDraggingOver = targeted
         }
+    }
+
+    private var screenHeader: some View {
+        DetailHeaderBar(
+            systemImage: "display",
+            title: {
+                HStack(spacing: 8) {
+                    Text(verbatim: screen.name)
+
+                    Button(action: { screenManager.reloadWallpaperForScreen(screen) }) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help(Text("Reload display content"))
+                    .accessibilityLabel(Text("Reload display"))
+                    .accessibilityHint(Text("Reloads the wallpaper content for this screen"))
+                }
+            },
+            metadata: {
+                HStack(spacing: DesignTokens.DetailHeader.metadataSpacing) {
+                    InfoBadge(icon: "arrow.up.left.and.arrow.down.right", text: "\(Int(screen.frame.width))×\(Int(screen.frame.height))")
+                    InfoBadge(icon: "gauge.medium", text: "\(getScreenRefreshRate()) Hz")
+                    if wallpaperSessionSummary.isConfigured {
+                        HStack(spacing: 4) {
+                            Image(systemName: "circle.fill")
+                                .font(.system(size: 6))
+                                .foregroundStyle(sessionStatusColor)
+                                .symbolEffect(.pulse, options: .repeat(.continuous), isActive: wallpaperSessionSummary.activity == .active)
+                            Text(sessionStatusText)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            },
+            actions: {
+                HStack(spacing: 8) {
+                    wallpaperTypePicker
+                        .layoutPriority(1)
+
+                    applyToAllButton
+
+                    Button {
+                        showBookmarks = true
+                    } label: {
+                        Label("Bookmarks", systemImage: "bookmark.fill")
+                    }
+                    .buttonStyle(.glass)
+                    .controlSize(.regular)
+                    .help(Text("Saved video / HTML / shader shortcuts"))
+                    .accessibilityLabel(Text("Bookmarks"))
+                    .popover(isPresented: $showBookmarks, arrowEdge: .bottom) {
+                        BookmarksPopover(screen: screen)
+                            .environment(screenManager)
+                    }
+
+                    if showsHeaderVideoActions {
+                        HStack(spacing: 8) {
+                            Button {
+                                showFilePicker()
+                            } label: {
+                                Label("Select Video", systemImage: "folder.badge.plus")
+                            }
+                            .buttonStyle(.glassProminent)
+                            .controlSize(.regular)
+                            .help(Text("Choose a video file for this display"))
+                            .accessibilityLabel(Text("Select video"))
+                            .accessibilityHint(Text("Opens a file picker to choose a wallpaper video"))
+
+                            Button(role: .destructive) {
+                                clearVideo()
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                            .buttonStyle(.glass)
+                            .destructiveControlTint()
+                            .controlSize(.regular)
+                            .help(Text("Remove wallpaper video"))
+                            .accessibilityLabel(Text("Clear video"))
+                            .accessibilityHint(Text("Removes the current wallpaper video from this screen"))
+                        }
+                    }
+                }
+            }
+        )
     }
 
     @ViewBuilder

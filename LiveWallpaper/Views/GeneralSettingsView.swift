@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct GeneralSettingsView: View {
     @Environment(ScreenManager.self) private var screenManager
@@ -50,6 +51,7 @@ struct GeneralSettingsView: View {
         // Grouped Form whitespace is absorbed inside Sections (inline Reset button +
         // compact card layout) rather than by constraining overall width.
         .frame(minWidth: 500, minHeight: 400)
+        .background(Color(NSColor.underPageBackgroundColor))
         .alert("Reset Settings", isPresented: $showingResetAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Reset All", role: .destructive) {
@@ -69,7 +71,7 @@ struct GeneralSettingsView: View {
 
     @ViewBuilder
     private var generalTab: some View {
-        Form {
+        settingsForm {
             Section {
                 SettingRow(icon: "globe", iconColor: .teal, title: "Language", subtitle: "Choose the display language used by LiveWallpaper") {
                     Picker("", selection: appLanguageSelection) {
@@ -123,67 +125,18 @@ struct GeneralSettingsView: View {
             }
 
             Section {
-                HStack(spacing: 16) {
-                    Button(action: validateConfigurations) {
-                        Label("Validate Settings", systemImage: "doc.text.magnifyingglass")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .accessibilityLabel(Text("Validate settings"))
-                    .accessibilityHint(Text("Checks all screen configurations for errors"))
-
-                    Button(action: { screenManager.reloadAllScreens() }) {
-                        Label("Reload All Screens", systemImage: "arrow.triangle.2.circlepath")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .accessibilityLabel(Text("Reload all screens"))
-                    .accessibilityHint(Text("Refreshes wallpaper playback on all connected screens"))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-                .padding(.vertical, 4)
-
-                HStack {
-                    Spacer()
-                    Button("Show Welcome Tour") {
-                        if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
-                            appDelegate.showOnboarding()
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(Color.accentColor)
-                    .accessibilityLabel(Text("Show welcome tour"))
-                    .accessibilityHint(Text("Replays the initial onboarding flow"))
-                    Spacer()
-                }
-                .padding(.vertical, 4)
-
-                // Reset embedded in Section body alongside Validate/Reload (replacing
-                // the old footer placement) so it sits tight under the troubleshooting
-                // tools without Section.footer's large vertical inset.
-                HStack {
-                    Spacer()
-                    Button("Reset All Settings to Default") {
-                        showingResetAlert = true
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.red)
-                    .accessibilityLabel(Text("Reset all settings to default"))
-                    .accessibilityHint(Text("Erases all configurations and restores factory defaults"))
-                    Spacer()
-                }
-                .padding(.vertical, 4)
+                troubleshootingActions
             } header: {
                 Text("Troubleshooting")
             }
         }
-        .formStyle(.grouped)
     }
 
     // MARK: - Power Tab
 
     @ViewBuilder
     private var powerTab: some View {
-        Form {
+        settingsForm {
             Section {
                 SettingRow(icon: "bolt.circle.fill", iconColor: .yellow, title: "Pause on battery", subtitle: "Switch wallpapers to a static frame when your Mac is unplugged") {
                     Toggle("", isOn: $globalPauseOnBattery)
@@ -256,7 +209,6 @@ struct GeneralSettingsView: View {
                 Text("Battery Threshold")
             }
         }
-        .formStyle(.grouped)
     }
 
     // MARK: - About Tab
@@ -293,6 +245,88 @@ struct GeneralSettingsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(32)
+        .background(Color(NSColor.underPageBackgroundColor))
+    }
+
+    private func settingsForm<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        Form {
+            content()
+        }
+        .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .contentMargins(.horizontal, DesignTokens.Settings.formHorizontalMargin, for: .scrollContent)
+        .contentMargins(.vertical, DesignTokens.Settings.formVerticalMargin, for: .scrollContent)
+        .background(Color(NSColor.underPageBackgroundColor))
+    }
+
+    private var troubleshootingActions: some View {
+        VStack(spacing: DesignTokens.Settings.actionGridSpacing) {
+            HStack(spacing: DesignTokens.Settings.actionGridSpacing) {
+                settingsActionButton(
+                    title: "Validate Settings",
+                    accessibilityLabel: "Validate settings",
+                    accessibilityHint: "Checks all screen configurations for errors",
+                    systemImage: "doc.text.magnifyingglass",
+                    action: validateConfigurations
+                )
+
+                settingsActionButton(
+                    title: "Reload All Screens",
+                    accessibilityLabel: "Reload all screens",
+                    accessibilityHint: "Refreshes wallpaper playback on all connected screens",
+                    systemImage: "arrow.triangle.2.circlepath",
+                    action: { screenManager.reloadAllScreens() }
+                )
+            }
+
+            HStack(spacing: DesignTokens.Settings.actionGridSpacing) {
+                settingsActionButton(
+                    title: "Welcome Tour",
+                    accessibilityLabel: "Show welcome tour",
+                    accessibilityHint: "Replays the initial onboarding flow",
+                    systemImage: "sparkles",
+                    action: {
+                        if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
+                            appDelegate.showOnboarding()
+                        }
+                    }
+                )
+
+                settingsActionButton(
+                    title: "Reset Defaults",
+                    accessibilityLabel: "Reset all settings to default",
+                    accessibilityHint: "Erases all configurations and restores factory defaults",
+                    systemImage: "arrow.counterclockwise",
+                    tint: .red,
+                    isDestructive: true,
+                    action: { showingResetAlert = true }
+                )
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func settingsActionButton(
+        title: LocalizedStringKey,
+        accessibilityLabel: LocalizedStringKey,
+        accessibilityHint: LocalizedStringKey,
+        systemImage: String,
+        tint: Color = .accentColor,
+        isDestructive: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            SettingsActionTileLabel(
+                title: title,
+                systemImage: systemImage,
+                tint: tint,
+                isDestructive: isDestructive
+            )
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
+        .accessibilityLabel(Text(accessibilityLabel))
+        .accessibilityHint(Text(accessibilityHint))
     }
 
     private var versionString: String {
@@ -380,6 +414,38 @@ struct GeneralSettingsView: View {
         }
 
         showingValidationResults = true
+    }
+}
+
+private struct SettingsActionTileLabel: View {
+    let title: LocalizedStringKey
+    let systemImage: String
+    var tint: Color = .accentColor
+    var isDestructive: Bool = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(tint)
+                .frame(width: 16)
+
+            Text(title)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(isDestructive ? Color.red : Color.primary)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, minHeight: 28)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: DesignTokens.Corner.sm, style: .continuous)
+                .fill(Color(NSColor.controlBackgroundColor).opacity(0.7))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: DesignTokens.Corner.sm, style: .continuous)
+                .strokeBorder(tint.opacity(isDestructive ? 0.35 : 0.12), lineWidth: 0.5)
+        )
     }
 }
 
