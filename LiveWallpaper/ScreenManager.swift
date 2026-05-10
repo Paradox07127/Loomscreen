@@ -50,6 +50,7 @@ final class ScreenManager {
     /// Per-screen WPE import error state. Keying on `CGDirectDisplayID` keeps
     /// concurrent multi-screen imports from overwriting each other's alerts.
     private(set) var lastWPEImportErrors: [CGDirectDisplayID: AppError] = [:]
+    private(set) var bookmarkDisplayNames: [Data: String] = [:]
 
     @ObservationIgnored private var cleanupTasks: Set<AnyCancellable> = []
     @ObservationIgnored private let displayRegistry: any DisplayRegistering
@@ -67,6 +68,7 @@ final class ScreenManager {
     @ObservationIgnored private let restoresSavedWallpapersOnScreenRefresh: Bool
     @ObservationIgnored private let exclusiveRenderingCoordinator = ExclusiveRenderingCoordinator()
     @ObservationIgnored private var exclusiveRenderingObservation: NSObjectProtocol?
+    @ObservationIgnored private var unresolvedBookmarkDisplayNames: Set<Data> = []
     /// Coordinates per-screen playback configuration mutations + transition
     /// tokens. Lazy because it captures `self` for the effect-application and
     /// refresh-rate-lookup callbacks; the stored properties used by those
@@ -408,6 +410,7 @@ final class ScreenManager {
         // If screen already has a video player, just update settings
         if screen.videoPlayer != nil {
             if let cachedConfig = configurationStore.get(for: screen.id) {
+                primeBookmarkDisplayNames(from: cachedConfig)
                 // Apply configuration without recreating the player
                 applyConfiguration(cachedConfig, to: screen, preservingState: true)
             }
@@ -415,6 +418,7 @@ final class ScreenManager {
         }
 
         guard let config = configurationStore.get(for: screen.id) else { return }
+        primeBookmarkDisplayNames(from: config)
         restoreWallpaperSession(for: screen, configuration: config, preservingState: false)
     }
 
@@ -445,6 +449,7 @@ final class ScreenManager {
 
     /// Replaces the primary video while preserving per-screen settings.
     func setVideo(url: URL, bookmarkData: Data, for screen: Screen) {
+        recordBookmarkDisplayName(bookmarkData, name: url.lastPathComponent)
         playbackCoordinator.setVideo(url: url, bookmarkData: bookmarkData, for: screen)
     }
 
@@ -523,7 +528,71 @@ final class ScreenManager {
         guard let configuration = configurationStore.get(for: screen.id),
               let definition = WallpaperSessionDefinition(configuration: configuration) else { return nil }
 
-        return definition.displayName(using: ResourceUtilities.resolveBookmarkName)
+        return definition.displayName(using: { bookmarkDisplayName(for: $0) })
+    }
+
+    func bookmarkDisplayName(for bookmarkData: Data) -> String? {
+        bookmarkDisplayNames[bookmarkData]
+    }
+
+    func currentVideoDisplayName(for screen: Screen) -> String? {
+        guard let config = configurationStore.get(for: screen.id) else { return nil }
+        let cursor = config.playlistCursorIndex ?? 0
+        let combined = [config.savedVideoBookmarkData].compactMap { $0 } + (config.playlistBookmarks ?? [])
+        guard cursor < combined.count else {
+            return config.savedVideoBookmarkData.flatMap { bookmarkDisplayName(for: $0) }
+        }
+        return bookmarkDisplayName(for: combined[cursor])
+    }
+
+    func recordBookmarkDisplayName(_ bookmarkData: Data, name: String?) {
+        guard !bookmarkData.isEmpty else { return }
+        guard let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else {
+            bookmarkDisplayNames.removeValue(forKey: bookmarkData)
+            unresolvedBookmarkDisplayNames.insert(bookmarkData)
+            return
+        }
+
+        bookmarkDisplayNames[bookmarkData] = trimmed
+        unresolvedBookmarkDisplayNames.remove(bookmarkData)
+    }
+
+    private func primeBookmarkDisplayNames(from configuration: ScreenConfiguration) {
+        for bookmarkData in videoBookmarks(in: configuration) {
+            resolveBookmarkDisplayNameIfNeeded(bookmarkData)
+        }
+    }
+
+    private func resolveBookmarkDisplayNameIfNeeded(_ bookmarkData: Data) {
+        guard !bookmarkData.isEmpty,
+              bookmarkDisplayNames[bookmarkData] == nil,
+              !unresolvedBookmarkDisplayNames.contains(bookmarkData) else { return }
+        recordBookmarkDisplayName(
+            bookmarkData,
+            name: ResourceUtilities.resolveBookmarkName(bookmarkData)
+        )
+    }
+
+    private func videoBookmarks(in configuration: ScreenConfiguration) -> [Data] {
+        var result: [Data] = []
+        var seen: Set<Data> = []
+
+        func append(_ bookmarkData: Data?) {
+            guard let bookmarkData,
+                  !bookmarkData.isEmpty,
+                  seen.insert(bookmarkData).inserted else { return }
+            result.append(bookmarkData)
+        }
+
+        if case .video(let bookmarkData) = configuration.activeWallpaper {
+            append(bookmarkData)
+        }
+        append(configuration.savedVideoBookmarkData)
+        configuration.playlistBookmarks?.forEach { append($0) }
+        configuration.scheduleSlots?.forEach { append($0.videoBookmarkData) }
+
+        return result
     }
 
     private func updatePlaybackState() {
@@ -724,6 +793,7 @@ final class ScreenManager {
             return
         }
 
+        primeBookmarkDisplayNames(from: configuration)
         releaseRuntimeSession(screen)
         restoreWallpaperSession(for: screen, configuration: configuration, preservingState: false)
     }
@@ -937,6 +1007,7 @@ final class ScreenManager {
     // MARK: - Configuration Update Helpers
 
     private func saveConfiguration(_ configuration: ScreenConfiguration) {
+        primeBookmarkDisplayNames(from: configuration)
         configurationStore.save(configuration)
         postConfigurationDidChange(for: configuration.screenID)
     }
@@ -1039,7 +1110,8 @@ final class ScreenManager {
             }
         }
 
-        _ = configurationStore.loadAll()
+        let configurations = configurationStore.loadAll()
+        configurations.forEach { primeBookmarkDisplayNames(from: $0) }
 
         for screen in screens {
             guard let configuration = configurationStore.get(for: screen.id) else {
@@ -1538,6 +1610,7 @@ final class ScreenManager {
             relativeTo: nil,
             bookmarkDataIsStale: &isStale
         ) else { return }
+        recordBookmarkDisplayName(targetBookmark, name: url.lastPathComponent)
 
         let screenID = screen.id
         let generation = bumpTransition(for: screenID)
@@ -1618,6 +1691,7 @@ final class ScreenManager {
             relativeTo: nil,
             bookmarkDataIsStale: &isStale
         ) else { return }
+        recordBookmarkDisplayName(bookmark, name: url.lastPathComponent)
 
         let screenID = screen.id
         let generation = bumpTransition(for: screenID)

@@ -67,6 +67,7 @@ final class WallpaperVideoPlayer {
     private var lastObservedLoopCount: Int = 0
     private let initialFrame: CGRect
     private var fitMode: VideoFitMode = .aspectFill
+    private var hasRequestedPlaybackStart = false
     
     // MARK: - Initialization
     init(url: URL, frame: CGRect, fitMode: VideoFitMode = .aspectFill, loadImmediately: Bool = true) {
@@ -365,7 +366,9 @@ final class WallpaperVideoPlayer {
 
     func play() {
         shouldAutoplayWhenReady = true
-        guard let player = player, player.timeControlStatus != .playing else { return }
+        guard let player = player else { return }
+        guard !hasRequestedPlaybackStart, player.timeControlStatus != .playing else { return }
+        hasRequestedPlaybackStart = true
         player.play()
         isPlaying = true
         Logger.debug("Video playback started", category: .videoPlayer)
@@ -373,6 +376,7 @@ final class WallpaperVideoPlayer {
 
     func pause() {
         shouldAutoplayWhenReady = false
+        hasRequestedPlaybackStart = false
         guard let player = player, player.timeControlStatus == .playing else { return }
         player.pause()
         isPlaying = false
@@ -664,6 +668,7 @@ final class WallpaperVideoPlayer {
         loadingTask = nil
         frameRateLimitTask?.cancel()
         frameRateLimitTask = nil
+        hasRequestedPlaybackStart = false
 
         pause()
 

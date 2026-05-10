@@ -86,6 +86,62 @@ struct SettingsWindowLayoutTests {
         )
     }
 
+    @Test("Screen detail keeps wallpaper type picker in the centered titlebar toolbar")
+    func screenDetailKeepsWallpaperTypePickerInCenteredToolbar() throws {
+        let source = try sourceText(for: "LiveWallpaper/Views/ScreenDetailView.swift")
+
+        #expect(source.contains("ToolbarItem(placement: .principal)"))
+        #expect(source.contains("wallpaperTypeToolbar"))
+        #expect(
+            !source.contains("wallpaperTypePicker\n                        .layoutPriority(1)"),
+            "Wallpaper type should not live in the display-info header actions where it competes with screen metadata."
+        )
+    }
+
+    @Test("Runtime status labels describe motion state, not wallpaper type")
+    func runtimeStatusLabelsDescribeMotionStateOnly() throws {
+        let screenDetailSource = try sourceText(for: "LiveWallpaper/Views/ScreenDetailView.swift")
+        let contentSource = try sourceText(for: "LiveWallpaper/Views/ContentView.swift")
+
+        #expect(
+            screenDetailSource.contains("\"Playing\"") && screenDetailSource.contains("\"Paused\""),
+            "The detail header status beside the display should describe whether the wallpaper is moving."
+        )
+        #expect(
+            contentSource.contains("\"Playing\"") && contentSource.contains("\"Paused\""),
+            "The sidebar display status should stay wallpaper-type agnostic."
+        )
+        #expect(
+            !screenDetailSource.contains("Video Playing") && !contentSource.contains("Video Playing"),
+            "Running-state labels should not include the wallpaper type."
+        )
+        #expect(
+            !screenDetailSource.contains("HTML Active") && !screenDetailSource.contains("Shader Active"),
+            "The detail header status should describe activity, not wallpaper type."
+        )
+        #expect(
+            !contentSource.contains("return \"HTML\"") && !contentSource.contains("return \"Shader\""),
+            "The sidebar display status should describe activity, not wallpaper type."
+        )
+    }
+
+    @Test("Playback speed segments expose the full segment as the hit target")
+    func playbackSpeedSegmentsExposeFullHitTarget() throws {
+        let source = try sourceText(for: "LiveWallpaper/Views/ScreenDetail/ScreenDetailControls.swift")
+
+        #expect(source.contains(".contentShape(RoundedRectangle(cornerRadius:"))
+        #expect(source.contains(".frame(minWidth:"))
+    }
+
+    @Test("Shared destructive tint also applies an interactive liquid glass surface")
+    func destructiveTintAppliesInteractiveLiquidGlass() throws {
+        let source = try sourceText(for: "LiveWallpaper/Views/Styles/DestructiveControlTint.swift")
+
+        #expect(source.contains(".glassEffect("))
+        #expect(source.contains(".interactive()"))
+        #expect(source.contains("Color.red.opacity"))
+    }
+
     @Test("Destructive and reset controls use red tint outside confirmation dialogs")
     func destructiveControlsUseSharedRedTint() throws {
         let destructiveControlFiles = [
@@ -108,6 +164,59 @@ struct SettingsWindowLayoutTests {
         let shortcuts = try sourceText(for: "LiveWallpaper/Views/Settings/ShortcutsSettingsView.swift")
         #expect(shortcuts.contains("Button(\"Clear\", role: .destructive)"))
         #expect(shortcuts.contains("Button(\"Reset to Default\", role: .destructive)"))
+    }
+
+    @Test("Manual weather search uses non-deprecated MapKit location API")
+    func manualWeatherSearchUsesMapItemLocation() throws {
+        let source = try sourceText(for: "LiveWallpaper/Views/Settings/WeatherLocationSettingsView.swift")
+
+        #expect(source.contains("item.location.coordinate"))
+        #expect(!source.contains("item.placemark.coordinate"))
+    }
+
+    @Test("Preview poster loads are keyed by video bookmark so settings changes do not rebuild media")
+    func previewPosterLoadsAreKeyedByBookmark() throws {
+        let source = try sourceText(for: "LiveWallpaper/Views/ScreenDetailView.swift")
+
+        #expect(source.contains("@State private var lastPreviewPosterBookmarkData"))
+        #expect(source.contains("lastPreviewPosterBookmarkData == bookmarkData"))
+        #expect(source.contains("previewController.posterImage != nil || previewController.isLoading"))
+    }
+
+    @Test("Views read prepared bookmark display names instead of resolving bookmarks while rendering")
+    func viewsReadPreparedBookmarkDisplayNames() throws {
+        let projectRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let viewsRoot = projectRoot.appendingPathComponent("LiveWallpaper/Views")
+        let files = FileManager.default.enumerator(
+            at: viewsRoot,
+            includingPropertiesForKeys: nil
+        )?
+            .compactMap { $0 as? URL }
+            .filter { $0.pathExtension == "swift" } ?? []
+
+        let offenders = try files.compactMap { url -> String? in
+            let source = try String(contentsOf: url, encoding: .utf8)
+            guard source.contains("ResourceUtilities.resolveBookmarkName") else { return nil }
+            return url.path.replacingOccurrences(of: projectRoot.path + "/", with: "")
+        }
+
+        #expect(
+            offenders.isEmpty,
+            "Bookmark names should be resolved on import/config changes, not from SwiftUI render paths: \(offenders.joined(separator: ", "))"
+        )
+    }
+
+    @Test("Bookmark display name ownership lives in ScreenManager instead of a TTL resolver cache")
+    func bookmarkDisplayNameOwnershipLivesInScreenManager() throws {
+        let screenManagerSource = try sourceText(for: "LiveWallpaper/ScreenManager.swift")
+        let resourceUtilitiesSource = try sourceText(for: "LiveWallpaper/ResourceUtilities.swift")
+
+        #expect(screenManagerSource.contains("bookmarkDisplayNames"))
+        #expect(screenManagerSource.contains("recordBookmarkDisplayName"))
+        #expect(screenManagerSource.contains("primeBookmarkDisplayNames"))
+        #expect(!resourceUtilitiesSource.contains("bookmarkNameCacheTTL"))
     }
 
     @Test("Content view auto-selects a single connected display")

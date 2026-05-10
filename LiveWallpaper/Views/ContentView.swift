@@ -416,18 +416,11 @@ struct ScreenRow: View {
     }
 
     private func statusText(for summary: WallpaperSessionSummary) -> LocalizedStringKey {
-        switch summary.wallpaperType {
-        case .html:
-            return "HTML"
-        case .metalShader:
-            return "Shader"
-        case .video:
-            return summary.activity == .active ? "Playing" : "Paused"
-        case .scene:
-            return "Scene"
-        case nil:
+        guard summary.isConfigured else {
             return "Not configured"
         }
+
+        return summary.activity == .active ? "Playing" : "Paused"
     }
 
     private func accessibilityValue(for summary: WallpaperSessionSummary) -> Text {
@@ -437,7 +430,7 @@ struct ScreenRow: View {
         case .metalShader:
             return Text("Shader wallpaper active")
         case .video:
-            return summary.activity == .active ? Text("Playing video") : Text("Video paused")
+            return summary.activity == .active ? Text("Wallpaper playing") : Text("Wallpaper paused")
         case .scene:
             return Text("Scene wallpaper")
         case nil:

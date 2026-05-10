@@ -32,26 +32,46 @@ struct SegmentedSpeedPicker: View {
                         }
                         onChange(speed)
                     }) {
-                        Text(speed == 1.0 ? "1.0" : "\(String(format: "%.1f", speed))x")
-                            .font(.system(size: 12))
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 4)
-                            .frame(maxWidth: .infinity)
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(Color.clear)
+                            Text(label(for: speed))
+                                .font(.system(size: 12, weight: selectedSpeed == speed ? .semibold : .regular))
+                        }
+                        .frame(minWidth: 44, maxWidth: .infinity)
+                        .frame(height: 28)
+                        .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     }
                     .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity)
+                    .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     .glassEffect(
                         selectedSpeed == speed
                             ? .regular.tint(Color.accentColor.opacity(0.35)).interactive()
                             : .regular.interactive(),
                         in: .rect(cornerRadius: 6)
                     )
-                    .help(Text("Playback speed: \(String(format: "%.1f", speed))x", comment: "Tooltip for a playback speed button. %@ is the multiplier."))
-                    .accessibilityLabel(Text("Speed \(String(format: "%.1f", speed))x", comment: "A11y label for playback speed button. %@ is the multiplier."))
+                    .help(Text("Playback speed: \(label(for: speed))", comment: "Tooltip for a playback speed button. %@ is the multiplier."))
+                    .accessibilityLabel(Text("Speed \(label(for: speed))", comment: "A11y label for playback speed button. %@ is the multiplier."))
                     .accessibilityHint(selectedSpeed == speed
                         ? Text("Currently selected", comment: "A11y hint when the playback speed button is the active one.")
-                        : Text("Set playback speed to \(String(format: "%.1f", speed))x", comment: "A11y hint to set playback speed. %@ is the multiplier."))
+                        : Text("Set playback speed to \(label(for: speed))", comment: "A11y hint to set playback speed. %@ is the multiplier."))
                 }
             }
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private func label(for speed: Double) -> String {
+        switch speed {
+        case 0.75:
+            return "0.75x"
+        case 1.0:
+            return "1x"
+        case 2.0:
+            return "2x"
+        default:
+            return "\(String(format: "%.1f", speed))x"
         }
     }
 }

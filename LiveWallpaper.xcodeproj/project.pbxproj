@@ -6,6 +6,12 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		0C9A00022D7350000033C48B /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0C9A00012D7350000033C48B /* AppIntents.framework */; };
+		0C9A00042D7350000033C48B /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0C9A00012D7350000033C48B /* AppIntents.framework */; };
+		0C9A00052D7350000033C48B /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0C9A00012D7350000033C48B /* AppIntents.framework */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		0C322C012D6950490033C48B /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -27,6 +33,7 @@
 		0C322BEF2D6950480033C48B /* LiveWallpaper.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LiveWallpaper.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		0C322C002D6950490033C48B /* LiveWallpaperTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LiveWallpaperTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		0C322C0A2D6950490033C48B /* LiveWallpaperUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LiveWallpaperUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		0C9A00012D7350000033C48B /* AppIntents.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppIntents.framework; path = System/Library/Frameworks/AppIntents.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -52,6 +59,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0C9A00022D7350000033C48B /* AppIntents.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -59,6 +67,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0C9A00042D7350000033C48B /* AppIntents.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -66,6 +75,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0C9A00052D7350000033C48B /* AppIntents.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -78,8 +88,17 @@
 				0C322BF12D6950480033C48B /* LiveWallpaper */,
 				0C322C032D6950490033C48B /* LiveWallpaperTests */,
 				0C322C0D2D6950490033C48B /* LiveWallpaperUITests */,
+				0C9A00032D7350000033C48B /* Frameworks */,
 				0C322BF02D6950480033C48B /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		0C9A00032D7350000033C48B /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				0C9A00012D7350000033C48B /* AppIntents.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 		0C322BF02D6950480033C48B /* Products */ = {

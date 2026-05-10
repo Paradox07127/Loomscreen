@@ -176,7 +176,7 @@ private struct ManualLocationPicker: View {
             DispatchQueue.main.async {
                 resolvingTitle = nil
                 if let item = response?.mapItems.first {
-                    let coord = item.placemark.coordinate
+                    let coord = item.location.coordinate
                     let displayName = [completion.title, completion.subtitle]
                         .filter { !$0.isEmpty }
                         .joined(separator: ", ")

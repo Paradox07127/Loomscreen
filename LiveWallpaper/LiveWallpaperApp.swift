@@ -16,6 +16,7 @@ struct AppRuntimeOptions: Equatable {
         isXCTestLoaded: Bool = AppRuntimeOptions.isXCTestLoaded()
     ) {
         opensSettingsForUITesting = arguments.contains("--open-settings-for-ui-testing")
+            || environment["LIVEWALLPAPER_OPEN_SETTINGS"] == "1"
         isTesting = arguments.contains("--ui-testing")
             || environment["LIVEWALLPAPER_TESTING"] == "1"
             || environment["LIVEWALLPAPER_UI_TESTING"] == "1"
@@ -107,7 +108,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Logger.notice("Application startup complete", category: .startup)
 
         if startupPlan.showSettingsOnLaunch {
-            DispatchQueue.main.async { [weak self] in
+            Logger.info("Scheduling settings window on launch", category: .startup)
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(150))
                 self?.showSettings()
             }
         } else if startupPlan.showOnboarding {
@@ -159,12 +162,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// bar previously used to hand off picker requests.
     func showSettings(initialScreenID: CGDirectDisplayID? = nil, initialAddWallpaperPromptKind: String? = nil) {
         guard let manager = screenManager else { return }
+        Logger.info("Settings window requested", category: .ui)
 
         if let controller = settingsWindowController {
             controller.showWindow(nil)
             NSApp.activate(ignoringOtherApps: true)
             controller.window?.makeKeyAndOrderFront(nil)
             controller.window?.orderFrontRegardless()
+            Logger.info("Settings window reused", category: .ui)
             if let id = initialScreenID {
                 NotificationCenter.default.post(
                     name: .selectScreenInSettings,
@@ -198,6 +203,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         window.contentMinSize = SettingsWindowMetrics.minimumContentSize
         window.title = L10n.Window.settingsTitle
+        window.setAccessibilityTitle(L10n.Window.settingsTitle)
+        window.setAccessibilityIdentifier("LiveWallpaperSettingsWindow")
+        window.sharingType = .readOnly
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.isMovableByWindowBackground = true
@@ -212,6 +220,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
+        Logger.info("Settings window shown", category: .ui)
     }
 
     // MARK: - Onboarding Window
