@@ -118,9 +118,25 @@ struct ScreenDetailView: View {
             return .secondary
         }
     }
-    private var showsInspector: Bool {
-        selectedWallpaperType == .video || selectedWallpaperType == .html
+
+    private var hasConfigurableWallpaperSurface: Bool {
+        if shouldShowGuideEmptyState { return false }
+        if screenManager.getConfiguration(for: screen) != nil { return true }
+        if screen.runtimeSession != nil { return true }
+        if hasPreviewSource || previewController.hasPreviewContent { return true }
+        return false
     }
+
+    private var showsInspector: Bool {
+        !shouldShowGuideEmptyState
+            && hasConfigurableWallpaperSurface
+            && [WallpaperType.video, .html].contains(selectedWallpaperType)
+    }
+
+    private var showsHeaderVideoActions: Bool {
+        selectedWallpaperType == .video && !shouldShowGuideEmptyState
+    }
+
     @State private var showErrorAlert = false
     @State private var errorMessage: LocalizedStringKey = ""
     @State private var showClearConfirm = false
@@ -215,7 +231,7 @@ struct ScreenDetailView: View {
                         .environment(screenManager)
                 }
 
-                if selectedWallpaperType == .video {
+                if showsHeaderVideoActions {
                     HStack(spacing: 8) {
                         Button {
                             showFilePicker()
@@ -234,6 +250,7 @@ struct ScreenDetailView: View {
                             Image(systemName: "trash")
                         }
                         .buttonStyle(.glass)
+                        .destructiveControlTint()
                         .controlSize(.regular)
                         .help(Text("Remove wallpaper video"))
                         .accessibilityLabel(Text("Clear video"))
@@ -411,7 +428,7 @@ struct ScreenDetailView: View {
 
     @ViewBuilder
     private var inspectorPanel: some View {
-        if selectedWallpaperType == .video || selectedWallpaperType == .html {
+        if showsInspector {
             ScrollView {
                 GlassEffectContainer(spacing: 16) {
                     VStack(spacing: 16) {

@@ -230,6 +230,7 @@ private struct BookmarkRow: View {
                     .font(.system(size: 11))
             }
             .buttonStyle(.borderless)
+            .destructiveControlTint()
             .help(Text("Delete bookmark"))
         }
     }

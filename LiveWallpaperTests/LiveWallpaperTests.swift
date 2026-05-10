@@ -55,6 +55,71 @@ struct SettingsWindowLayoutTests {
         #expect(source.contains("InspectorResizeHandle"), "The inspector should be user-resizable without reintroducing HSplitView.")
     }
 
+    @Test("Screen detail hides playback inspector while the selected display has no configurable surface")
+    func screenDetailHidesInspectorForGuideOnlyEmptyState() throws {
+        let source = try sourceText(for: "LiveWallpaper/Views/ScreenDetailView.swift")
+
+        #expect(
+            !source.contains("selectedWallpaperType == .video || selectedWallpaperType == .html"),
+            "The inspector should not appear just because the segmented picker is on Video or HTML; a guide-only empty state has no controls to apply."
+        )
+        #expect(
+            source.contains("hasConfigurableWallpaperSurface"),
+            "ScreenDetailView should gate the inspector on an existing configuration, runtime session, or preview source."
+        )
+        #expect(
+            source.contains("shouldShowGuideEmptyState") && source.contains("!shouldShowGuideEmptyState"),
+            "The guide empty state should explicitly suppress the right inspector column."
+        )
+    }
+
+    @Test("Screen detail guide-only state hides video toolbar actions")
+    func screenDetailGuideHidesVideoToolbarActions() throws {
+        let source = try sourceText(for: "LiveWallpaper/Views/ScreenDetailView.swift")
+
+        #expect(source.contains("private var showsHeaderVideoActions"))
+        #expect(source.contains("selectedWallpaperType == .video && !shouldShowGuideEmptyState"))
+        #expect(source.contains("if showsHeaderVideoActions {"))
+        #expect(
+            !source.contains("if selectedWallpaperType == .video {\n                    HStack(spacing: 8)"),
+            "The header video actions must not be keyed only off selectedWallpaperType; the guide already owns first-pick actions."
+        )
+    }
+
+    @Test("Destructive and reset controls use red tint outside confirmation dialogs")
+    func destructiveControlsUseSharedRedTint() throws {
+        let destructiveControlFiles = [
+            "LiveWallpaper/Views/ScreenDetailView.swift",
+            "LiveWallpaper/Views/BookmarksLibraryView.swift",
+            "LiveWallpaper/Views/BookmarksPopover.swift",
+            "LiveWallpaper/Views/ScheduleSection.swift",
+            "LiveWallpaper/Views/WPECacheManagementView.swift",
+            "LiveWallpaper/Views/ScreenDetail/WPESceneDetailView.swift",
+            "LiveWallpaper/Views/ScreenDetail/ColorAdjustmentsView.swift",
+            "LiveWallpaper/Views/AppleAerialsLibraryView.swift",
+            "LiveWallpaper/Views/Settings/WeatherLocationSettingsView.swift",
+        ]
+
+        for path in destructiveControlFiles {
+            let source = try sourceText(for: path)
+            #expect(source.contains(".destructiveControlTint()"), "\(path) should use the shared destructive tint modifier.")
+        }
+
+        let shortcuts = try sourceText(for: "LiveWallpaper/Views/Settings/ShortcutsSettingsView.swift")
+        #expect(shortcuts.contains("Button(\"Clear\", role: .destructive)"))
+        #expect(shortcuts.contains("Button(\"Reset to Default\", role: .destructive)"))
+    }
+
+    @Test("Content view auto-selects a single connected display")
+    func contentViewAutoSelectsSingleDisplay() throws {
+        let source = try sourceText(for: "LiveWallpaper/Views/ContentView.swift")
+
+        #expect(source.contains("selectDefaultDisplayIfNeeded()"))
+        #expect(source.contains("screenManager.screens.count == 1"))
+        #expect(source.contains("selectedNavigation = .screen(screen.id)"))
+        #expect(source.contains(".onReceive(NotificationCenter.default.publisher(for: .screensRefreshed))"))
+    }
+
     @Test("Inspector resize handle previews width locally and exposes a drag affordance")
     func inspectorResizeHandlePreviewsWidthLocallyAndExposesDragAffordance() throws {
         let source = try sourceText(for: "LiveWallpaper/Views/ScreenDetailView.swift")

@@ -129,8 +129,8 @@ private struct ShortcutRow: View {
                 .frame(width: 140)
 
                 Menu {
-                    Button("Clear") { onClear() }
-                    Button("Reset to Default") { onReset() }
+                    Button("Clear", role: .destructive) { onClear() }
+                    Button("Reset to Default", role: .destructive) { onReset() }
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }

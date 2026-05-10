@@ -167,11 +167,11 @@ struct HTMLSourceSection: View {
 
     @ViewBuilder
     private func trustBanner(for source: HTMLSource) -> some View {
-        let trust = HTMLTrust.evaluate(source: source, trustedHosts: trustStore.hostSet)
+        let trust = HTMLTrust.evaluate(source: source, trustedOrigins: trustStore.originSet)
         switch trust {
         case .localContent:
             EmptyView()
-        case .trustedRemote(let host):
+        case .trustedRemote(let origin):
             HStack(spacing: 8) {
                 Image(systemName: "checkmark.shield.fill")
                     .foregroundStyle(.green)
@@ -179,16 +179,16 @@ struct HTMLSourceSection: View {
                     .font(.caption)
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Button("Revoke") { trustStore.revoke(host) }
+                Button("Revoke") { trustStore.revoke(origin) }
                     .buttonStyle(.bordered)
                     .controlSize(.mini)
-                    .help(Text("Remove \(host) from trusted hosts"))
+                    .help(Text("Remove \(origin.displayName) from trusted origins"))
                     .fixedSize()
             }
             .padding(.vertical, 4)
             .padding(.horizontal, 8)
             .background(Color.green.opacity(0.10), in: RoundedRectangle(cornerRadius: 6))
-        case .untrustedRemote(let host):
+        case .untrustedRemote(let origin):
             HStack(spacing: 8) {
                 Image(systemName: "exclamationmark.shield")
                     .foregroundStyle(.orange)
@@ -196,27 +196,36 @@ struct HTMLSourceSection: View {
                     Text("JavaScript disabled for untrusted source.")
                         .font(.caption)
                         .lineLimit(2)
-                    Text("\(host) can run scripts only after you trust it.")
+                    Text(trustMessage(for: origin))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                Button("Trust this site") {
-                    trustStore.trust(host)
-                    // Re-apply with the now-trusted host so JS turns on.
-                    screenManager.setHTMLWallpaper(source: source, config: config, for: screen)
+                if origin.isSecure {
+                    Button("Trust this origin") {
+                        trustStore.trust(origin)
+                        // Re-apply with the now-trusted origin so JS turns on.
+                        screenManager.setHTMLWallpaper(source: source, config: config, for: screen)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.mini)
+                    .help(Text("Allow \(origin.displayName) to run JavaScript"))
+                    .fixedSize()
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.mini)
-                .help(Text("Allow \(host) to run JavaScript"))
-                .fixedSize()
             }
             .padding(.vertical, 4)
             .padding(.horizontal, 8)
             .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
         }
+    }
+
+    private func trustMessage(for origin: TrustedHTMLOrigin) -> String {
+        if origin.isSecure {
+            return "\(origin.displayName) can run scripts only after you trust this exact origin."
+        }
+        return "HTTP origins cannot be trusted for JavaScript. Use HTTPS when possible."
     }
 
     // MARK: - Toggles

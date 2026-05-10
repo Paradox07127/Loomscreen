@@ -307,9 +307,9 @@ struct ScheduleSlotRow: View {
                         Button(action: onClearVideo) {
                             Image(systemName: "xmark.circle.fill")
                                 .font(.system(size: 10))
-                                .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
+                        .destructiveControlTint()
                         .accessibilityLabel(Text("Clear video for \(slot.localizedLabel)", comment: "A11y label for clearing a video from a schedule slot. The placeholder is the slot label."))
                         .accessibilityHint(Text("Removes the assigned video from this schedule slot"))
                     }
@@ -331,9 +331,9 @@ struct ScheduleSlotRow: View {
                 Button(action: onRemove) {
                     Image(systemName: "trash.circle.fill")
                         .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
+                .destructiveControlTint()
                 .opacity(isHovering ? 1 : 0)
                 .accessibilityLabel(Text("Remove \(slot.localizedLabel) slot", comment: "A11y label for removing a schedule slot. The placeholder is the slot label."))
             }

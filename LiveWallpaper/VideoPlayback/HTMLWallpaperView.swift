@@ -30,7 +30,7 @@ final class HTMLWebView: WKWebView {
 
 /// WKWebView-backed HTML wallpaper host.
 @MainActor
-final class HTMLWallpaperView: NSView {
+final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
 
     // MARK: - Properties
     private let webView: HTMLWebView
@@ -265,6 +265,17 @@ final class HTMLWallpaperView: NSView {
         }
 
         lastAppliedConfig = config
+    }
+
+    func applyHTMLConfig(_ config: HTMLConfig) -> Bool {
+        if currentDataStoreIsEphemeral != config.useEphemeralStorage {
+            return false
+        }
+        if let previous = lastAppliedConfig, previous.useEphemeralStorage != config.useEphemeralStorage {
+            return false
+        }
+        apply(config)
+        return true
     }
 
     /// 当前页面已经渲染时的热更新路径：直接改 DOM，不动 user script。

@@ -62,6 +62,13 @@ protocol WallpaperResourceCleanable: AnyObject {
 }
 
 @MainActor
+protocol HTMLWallpaperConfigApplying: AnyObject {
+    /// Applies a config to a live HTML renderer without replacing the window.
+    /// Returns `false` when a WebKit-level choice requires a session rebuild.
+    func applyHTMLConfig(_ config: HTMLConfig) -> Bool
+}
+
+@MainActor
 protocol WallpaperPlaybackControllable: WallpaperRuntimeSession {
     var isPlaying: Bool { get }
 
@@ -190,7 +197,7 @@ final class VideoWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackCon
 }
 
 @MainActor
-final class AmbientWallpaperSession: WallpaperRuntimeSession {
+final class AmbientWallpaperSession: WallpaperRuntimeSession, HTMLWallpaperConfigApplying {
     private var window: NSWindow?
     private weak var performanceTarget: (any WallpaperPerformanceConfigurable)?
     private var currentProfile: WallpaperPerformanceProfile = .quality
@@ -271,6 +278,12 @@ final class AmbientWallpaperSession: WallpaperRuntimeSession {
     func retry() async {
         runtimeError = nil
         (performanceTarget as? HTMLWallpaperView)?.reloadCurrentSource()
+    }
+
+    func applyHTMLConfig(_ config: HTMLConfig) -> Bool {
+        guard wallpaperType == .html else { return false }
+        guard let target = performanceTarget as? any HTMLWallpaperConfigApplying else { return false }
+        return target.applyHTMLConfig(config)
     }
 
     /// Bridged from `HTMLWallpaperView.onError` so the session keeps the user-visible error.

@@ -8,11 +8,11 @@ final class AmbientWallpaperSessionBuilder {
         let window = VideoWallpaperWindow(frame: frame)
 
         // Untrusted remote URLs run with JS off no matter what config says.
-        let trust = HTMLTrust.evaluate(source: source, trustedHosts: TrustedHostStore.shared.hostSet)
+        let trust = HTMLTrust.evaluate(source: source, trustedOrigins: TrustedHostStore.shared.originSet)
         var effective = config
         effective.allowJavaScript = trust.effectiveAllowJavaScript(requested: config.allowJavaScript)
-        if case .untrustedRemote(let host) = trust, config.allowJavaScript {
-            Logger.warning("HTML wallpaper: dropping JS for untrusted host \(host)", category: .screenManager)
+        if case .untrustedRemote(let origin) = trust, config.allowJavaScript {
+            Logger.warning("HTML wallpaper: dropping JS for untrusted origin \(origin.rawValue)", category: .screenManager)
         }
 
         // Auto-enable physical-pixel layout for Wallpaper Engine folders

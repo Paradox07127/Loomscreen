@@ -55,8 +55,8 @@ struct ColorAdjustmentsView: View {
                             .padding(.vertical, 5)
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(Color.accentColor)
-                    .glassEffect(.regular.tint(Color.accentColor.opacity(0.15)).interactive(), in: .capsule)
+                    .destructiveControlTint()
+                    .glassEffect(.regular.tint(Color.red.opacity(0.15)).interactive(), in: .capsule)
                     .help(Text("Reset all color adjustments to default values"))
                     Spacer()
                 }

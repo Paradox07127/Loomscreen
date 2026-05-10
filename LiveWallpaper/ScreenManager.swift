@@ -1194,8 +1194,6 @@ final class ScreenManager {
     // MARK: - Wallpaper Type Switching
 
     func switchToVideoWallpaper(for screen: Screen) {
-        releaseRuntimeSession(screen)
-
         guard var config = configurationStore.get(for: screen.id),
               config.activateSavedVideoWallpaper() else { return }
         saveConfiguration(config)
@@ -1229,11 +1227,7 @@ final class ScreenManager {
             // visual remains identical so users still get N×GPU — they're
             // warned via the Inspector banner.
             let isLeader = isAudioLeaderForHTML(source: source, excluding: screen.id)
-            var effectiveConfig = htmlConfig
-            if !isLeader, !effectiveConfig.muteAudio {
-                effectiveConfig.muteAudio = true
-                Logger.info("Multi-instance HTML wallpaper: muting screen \(screen.id) (audio leader is another screen running same source)", category: .screenManager)
-            }
+            let effectiveConfig = runtimeHTMLConfig(source: source, config: htmlConfig, for: screen)
             session = ambientSessionBuilder.makeHTMLSession(source: source, config: effectiveConfig, frame: screen.frame)
             Logger.info("Set HTML wallpaper for screen \(screen.id) — \(source.displayName) [leader=\(isLeader)]", category: .screenManager)
         case .metalShader(let preset):
@@ -1321,6 +1315,19 @@ final class ScreenManager {
         screensRunningSameHTMLSource(as: source, excluding: screenID).isEmpty
     }
 
+    private func runtimeHTMLConfig(source: HTMLSource, config: HTMLConfig, for screen: Screen) -> HTMLConfig {
+        var effectiveConfig = config
+
+        if !isAudioLeaderForHTML(source: source, excluding: screen.id), !effectiveConfig.muteAudio {
+            effectiveConfig.muteAudio = true
+            Logger.info("Multi-instance HTML wallpaper: muting screen \(screen.id) (audio leader is another screen running same source)", category: .screenManager)
+        }
+
+        let trust = HTMLTrust.evaluate(source: source, trustedOrigins: TrustedHostStore.shared.originSet)
+        effectiveConfig.allowJavaScript = trust.effectiveAllowJavaScript(requested: config.allowJavaScript)
+        return effectiveConfig
+    }
+
     // MARK: - HTML Wallpaper
 
     func setHTMLWallpaper(source: HTMLSource, config: HTMLConfig = .default, for screen: Screen) {
@@ -1348,10 +1355,26 @@ final class ScreenManager {
 
     func updateHTMLConfig(_ config: HTMLConfig, for screen: Screen) {
         guard var existing = configurationStore.get(for: screen.id),
-              case .html(let source, _) = existing.activeWallpaper else { return }
+              case .html(let source, let previousConfig) = existing.activeWallpaper else { return }
         existing.activeWallpaper = .html(source: source, config: config)
         saveConfiguration(existing)
+
+        let runtimeConfig = runtimeHTMLConfig(source: source, config: config, for: screen)
+        if !requiresHTMLSessionRebuild(previous: previousConfig, current: config),
+           let applier = screen.runtimeSession as? any HTMLWallpaperConfigApplying,
+           applier.applyHTMLConfig(runtimeConfig) {
+            if let window = screen.activeWallpaperWindow as? VideoWallpaperWindow {
+                window.setWallpaperMouseInteractionEnabled(config.allowMouseInteraction)
+            }
+            notifyWallpaperSessionChanged()
+            return
+        }
+
         restoreWallpaperSession(for: screen, configuration: existing, preservingState: false)
+    }
+
+    private func requiresHTMLSessionRebuild(previous: HTMLConfig, current: HTMLConfig) -> Bool {
+        previous.useEphemeralStorage != current.useEphemeralStorage
     }
 
     // MARK: - Metal Shader Wallpaper

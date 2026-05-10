@@ -104,6 +104,7 @@ private struct ManualLocationPicker: View {
                         onCommit(nil)
                     }
                     .buttonStyle(.borderless)
+                    .destructiveControlTint()
                 }
                 .padding(.bottom, 4)
             }

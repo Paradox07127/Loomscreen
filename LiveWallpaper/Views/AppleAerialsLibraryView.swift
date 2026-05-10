@@ -79,9 +79,9 @@ struct AppleAerialsLibraryView: View {
             } label: {
                 Image(systemName: "xmark.circle")
                     .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
             }
             .buttonStyle(.borderless)
+            .destructiveControlTint()
             .help(Text("Disconnect Aerials library"))
         }
         .padding(.horizontal, 16)
