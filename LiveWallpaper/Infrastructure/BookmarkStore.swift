@@ -26,23 +26,48 @@ final class BookmarkStore {
 
     init(persistence: any BookmarkPersisting = SettingsManagerBookmarkPersistence()) {
         self.persistence = persistence
-        self.bookmarks = persistence.load()
+        var loaded = persistence.load()
+        var didMigrate = false
+        for index in loaded.indices where loaded[index].sourceDisplayName == nil {
+            loaded[index].sourceDisplayName = Self.defaultSourceDisplayName(for: loaded[index].content) ?? ""
+            didMigrate = true
+        }
+        self.bookmarks = loaded
+        if didMigrate {
+            persistence.save(loaded)
+        }
     }
 
     /// Append a new bookmark and persist immediately.
     @discardableResult
-    func add(label: String, content: WallpaperContent) -> WallpaperBookmark {
+    func add(
+        label: String,
+        content: WallpaperContent,
+        sourceDisplayName: String? = nil
+    ) -> WallpaperBookmark {
         let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolved = trimmed.isEmpty ? Self.defaultLabel(for: content) : trimmed
-        let bookmark = WallpaperBookmark(label: resolved, content: content)
+        let resolvedSourceDisplayName = sourceDisplayName
+            ?? Self.nonResolvingSourceDisplayName(for: content)
+            ?? ""
+        let resolved = trimmed.isEmpty
+            ? Self.defaultLabel(for: content, sourceDisplayName: resolvedSourceDisplayName)
+            : trimmed
+        let bookmark = WallpaperBookmark(
+            label: resolved,
+            content: content,
+            sourceDisplayName: resolvedSourceDisplayName
+        )
         bookmarks.append(bookmark)
         persist()
+        Logger.info("Bookmark added: type \(content.wallpaperType.rawValue), total \(bookmarks.count)", category: .ui)
         return bookmark
     }
 
     func remove(_ id: UUID) {
+        let removedType = bookmarks.first(where: { $0.id == id })?.wallpaperType.rawValue ?? "Unknown"
         bookmarks.removeAll { $0.id == id }
         persist()
+        Logger.info("Bookmark removed: type \(removedType), total \(bookmarks.count)", category: .ui)
     }
 
     func resetAfterSettingsCleared() {
@@ -55,6 +80,7 @@ final class BookmarkStore {
               let index = bookmarks.firstIndex(where: { $0.id == id }) else { return }
         bookmarks[index].label = trimmed
         persist()
+        Logger.info("Bookmark renamed: type \(bookmarks[index].wallpaperType.rawValue)", category: .ui)
     }
 
     /// True when an equivalent content is already saved (so UI can disable
@@ -68,16 +94,46 @@ final class BookmarkStore {
     }
 
     /// Friendly fallback label derived from the content itself.
-    static func defaultLabel(for content: WallpaperContent) -> String {
+    static func defaultLabel(for content: WallpaperContent, sourceDisplayName: String? = nil) -> String {
         switch content {
-        case .video(let bookmarkData):
-            return ResourceUtilities.resolveBookmarkName(bookmarkData) ?? "Video"
+        case .video:
+            if let trimmed = sourceDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !trimmed.isEmpty {
+                return trimmed
+            }
+            return "Video"
         case .html(let source, _):
             return source.displayName
         case .metalShader(let preset):
             return preset.localizedTitle
         case .scene(let descriptor):
             return String(localized: "Scene \(descriptor.workshopID)", comment: "Default bookmark label for a Wallpaper Engine scene. The placeholder is the Workshop ID.")
+        }
+    }
+
+    static func nonResolvingSourceDisplayName(for content: WallpaperContent) -> String? {
+        switch content {
+        case .video:
+            return nil
+        case .html(let source, _):
+            return source.displayName
+        case .metalShader(let preset):
+            return preset.localizedTitle
+        case .scene(let descriptor):
+            return String(localized: "Scene \(descriptor.workshopID)", comment: "Default source label for a Wallpaper Engine scene. The placeholder is the Workshop ID.")
+        }
+    }
+
+    static func defaultSourceDisplayName(for content: WallpaperContent) -> String? {
+        switch content {
+        case .video(let bookmarkData):
+            return ResourceUtilities.resolveBookmarkName(bookmarkData)
+        case .html(let source, _):
+            return source.displayName
+        case .metalShader(let preset):
+            return preset.localizedTitle
+        case .scene(let descriptor):
+            return String(localized: "Scene \(descriptor.workshopID)", comment: "Default source label for a Wallpaper Engine scene. The placeholder is the Workshop ID.")
         }
     }
 }

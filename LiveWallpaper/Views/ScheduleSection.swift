@@ -30,6 +30,7 @@ struct ScheduleSection: View {
                         slot: $slot,
                         isActive: slot.containsHour(currentHour),
                         isHighlightedConflict: conflictHighlight.contains(slot.id),
+                        videoNameProvider: { screenManager.bookmarkDisplayName(for: $0) },
                         onVideoSelect: { selectVideo(for: slot.id) },
                         onClearVideo: { clearVideo(for: slot.id) },
                         onRemove: { removeSlot(slot.id) },
@@ -157,6 +158,7 @@ struct ScheduleSection: View {
             SettingsManager.shared.saveLastUsedDirectory(url.deletingLastPathComponent())
             guard let bookmark = ResourceUtilities.createBookmark(for: url),
                   let index = scheduleSlots.firstIndex(where: { $0.id == slotID }) else { return }
+            screenManager.recordBookmarkDisplayName(bookmark, name: url.lastPathComponent)
             scheduleSlots[index].videoBookmarkData = bookmark
             screenManager.updateScheduleSlots(scheduleSlots, for: screen)
         case .failure(let error):
@@ -250,6 +252,7 @@ struct ScheduleSlotRow: View {
     @Binding var slot: ScheduleSlot
     let isActive: Bool
     let isHighlightedConflict: Bool
+    let videoNameProvider: (Data) -> String?
     let onVideoSelect: () -> Void
     let onClearVideo: () -> Void
     let onRemove: () -> Void
@@ -409,7 +412,7 @@ struct ScheduleSlotRow: View {
             videoName = nil
             return
         }
-        videoName = ResourceUtilities.resolveBookmarkName(data) ?? "Invalid"
+        videoName = videoNameProvider(data) ?? "Invalid"
     }
 
     private func formatHour(_ hour: Int) -> String {

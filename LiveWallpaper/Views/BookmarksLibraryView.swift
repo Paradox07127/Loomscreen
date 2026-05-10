@@ -116,6 +116,7 @@ struct BookmarksLibraryView: View {
     // MARK: - Apply
 
     private func apply(_ bookmark: WallpaperBookmark, to screen: Screen) {
+        Logger.info("Applying bookmark to screen \(screen.id): \(bookmark.wallpaperType.rawValue)", category: .ui)
         switch bookmark.content {
         case .video(let bookmarkData):
             var isStale = false
@@ -141,6 +142,7 @@ struct BookmarksLibraryView: View {
     }
 
     private func applyToAll(_ bookmark: WallpaperBookmark) {
+        Logger.info("Applying bookmark to all displays: \(bookmark.wallpaperType.rawValue)", category: .ui)
         for screen in screenManager.screens {
             apply(bookmark, to: screen)
         }
@@ -299,8 +301,9 @@ private struct BookmarkCard: View {
 
     private var subtitle: Text {
         switch bookmark.content {
-        case .video(let data):
-            if let name = ResourceUtilities.resolveBookmarkName(data) {
+        case .video:
+            if let name = bookmark.sourceDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !name.isEmpty {
                 return Text(verbatim: name)
             }
             return Text("Source missing")

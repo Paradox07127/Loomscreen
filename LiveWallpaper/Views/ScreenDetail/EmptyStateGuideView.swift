@@ -30,7 +30,7 @@ struct EmptyStateGuideView: View {
                         icon: "film",
                         iconTint: .blue,
                         title: "Video",
-                        subtitle: "MP4 / MOV files. Supports playlists and time-of-day schedules.",
+                        subtitle: "MP4 / MOV, playlists, and schedules.",
                         accessibilityLabel: "Video wallpaper type",
                         actionTitle: "Pick Video…",
                         actionSystemImage: "folder",
@@ -41,7 +41,7 @@ struct EmptyStateGuideView: View {
                         icon: "globe",
                         iconTint: .green,
                         title: "HTML",
-                        subtitle: "Any web page or local HTML file. Particles and weather still apply.",
+                        subtitle: "Web pages, local HTML, and folders.",
                         accessibilityLabel: "HTML wallpaper type",
                         actionTitle: "Use HTML",
                         actionSystemImage: "arrow.right",
@@ -52,7 +52,7 @@ struct EmptyStateGuideView: View {
                         icon: "wand.and.stars",
                         iconTint: .orange,
                         title: "Shader",
-                        subtitle: "Built-in animated GPU shaders. Lightweight on the battery.",
+                        subtitle: "Built-in animated GPU shaders.",
                         accessibilityLabel: "Shader wallpaper type",
                         actionTitle: "Use Shader",
                         actionSystemImage: "arrow.right",
@@ -63,7 +63,7 @@ struct EmptyStateGuideView: View {
                         icon: "cube.transparent",
                         iconTint: .purple,
                         title: "Scene",
-                        subtitle: "Steam Workshop scenes imported from Wallpaper Engine.",
+                        subtitle: "Wallpaper Engine scene imports.",
                         accessibilityLabel: "Scene wallpaper type",
                         actionTitle: "Use Scene",
                         actionSystemImage: "arrow.right",
@@ -94,7 +94,7 @@ struct EmptyStateGuideView: View {
                 .font(.system(size: 22, weight: .semibold, design: .rounded))
                 .accessibilityAddTraits(.isHeader)
 
-            Text("Each display can run a different type. You can switch types after picking one.")
+            Text("Pick a type for this display. You can switch later.")
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -108,7 +108,7 @@ struct EmptyStateGuideView: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.tertiary)
                 .accessibilityHidden(true)
-            Text("Or drag a video, HTML file, or folder anywhere on this window.")
+            Text("Or drag a video, HTML file, or folder here.")
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
         }

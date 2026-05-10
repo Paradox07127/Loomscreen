@@ -74,9 +74,11 @@ final class PlaybackCoordinator {
         guard var configuration = configurationStore.get(for: screen.id),
               speed != configuration.playbackSpeed else { return }
 
+        let previous = configuration.playbackSpeed
         configuration.playbackSpeed = speed
         save(configuration)
         screen.videoPlayer?.setPlaybackSpeed(speed)
+        Logger.info("Playback speed updated for screen \(screen.id): \(previous) -> \(speed)", category: .settings)
     }
 
     func updateMuted(_ muted: Bool, for screen: Screen) {
@@ -92,9 +94,11 @@ final class PlaybackCoordinator {
         guard var configuration = configurationStore.get(for: screen.id),
               fitMode != configuration.fitMode else { return }
 
+        let previous = configuration.fitMode
         configuration.fitMode = fitMode
         save(configuration)
         screen.videoPlayer?.setVideoFitMode(fitMode)
+        Logger.info("Fit mode updated for screen \(screen.id): \(previous.rawValue) -> \(fitMode.rawValue)", category: .settings)
     }
 
     func updateFrameRateLimit(_ frameRateLimit: FrameRateLimit, for screen: Screen) {

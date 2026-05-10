@@ -173,6 +173,18 @@ struct AppRuntimeOptionsTests {
         #expect(plan.showSettingsOnLaunch == true)
     }
 
+    @Test("UI launch tests can request settings on launch through environment")
+    func uiLaunchTestingCanOpenSettingsOnLaunchThroughEnvironment() {
+        let options = AppRuntimeOptions(
+            arguments: ["LiveWallpaper", "--ui-testing"],
+            environment: ["LIVEWALLPAPER_OPEN_SETTINGS": "1"],
+            isXCTestLoaded: false
+        )
+        let plan = AppStartupPlan(runtimeOptions: options, onboardingCompleted: true)
+
+        #expect(plan.showSettingsOnLaunch == true)
+    }
+
     @Test("XCTest host environment disables live wallpaper startup")
     func xctestEnvironmentDisablesLiveWallpaperStartup() {
         let options = AppRuntimeOptions(
@@ -610,6 +622,15 @@ struct WallpaperVideoPlayerStartupPolicyTests {
         #expect(player.shouldAutoplayWhenReady)
     }
 
+    @Test("Play command guards against duplicate startup requests before AVPlayer reports playing")
+    func playCommandGuardsDuplicateStartupRequests() throws {
+        let source = try sourceText(for: "LiveWallpaper/VideoPlayback/WallpaperVideoPlayer.swift")
+
+        #expect(source.contains("hasRequestedPlaybackStart"))
+        #expect(source.contains("guard !hasRequestedPlaybackStart"))
+        #expect(source.contains("hasRequestedPlaybackStart = false"))
+    }
+
     @Test("Frame-rate limit requested before AVPlayer item exists is retained")
     func frameRateLimitBeforeItemReadinessIsRetained() {
         let player = WallpaperVideoPlayer(
@@ -621,6 +642,13 @@ struct WallpaperVideoPlayerStartupPolicyTests {
         player.setFrameRateLimit(30)
 
         #expect(player.requestedFrameRateLimit == 30)
+    }
+
+    private func sourceText(for relativePath: String) throws -> String {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let projectRoot = testsDirectory.deletingLastPathComponent()
+        let url = projectRoot.appendingPathComponent(relativePath)
+        return try String(contentsOf: url, encoding: .utf8)
     }
 }
 

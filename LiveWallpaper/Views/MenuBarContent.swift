@@ -177,7 +177,7 @@ struct MenuBarContent: View {
                 ForEach(screenManager.screens, id: \.id) { screen in
                     MenuBarScreenCard(
                         screen: screen,
-                        videoName: resolveCurrentVideoName(for: screen),
+                        videoName: screenManager.currentVideoDisplayName(for: screen),
                         htmlName: resolveCurrentHTMLName(for: screen),
                         onOpen: { openSettingsForScreen(screen.id) },
                         onPlayPause: { togglePlayback(for: screen) },
@@ -311,16 +311,6 @@ struct MenuBarContent: View {
     private func togglePlayback(for screen: Screen) {
         guard let playback = screen.playbackController else { return }
         PlaybackToggle.toggle(playback)
-    }
-
-    private func resolveCurrentVideoName(for screen: Screen) -> String? {
-        guard let config = screenManager.getConfiguration(for: screen) else { return nil }
-        let cursor = config.playlistCursorIndex ?? 0
-        let combined = [config.savedVideoBookmarkData].compactMap { $0 } + (config.playlistBookmarks ?? [])
-        guard cursor < combined.count else {
-            return config.savedVideoBookmarkData.flatMap { ResourceUtilities.resolveBookmarkName($0) }
-        }
-        return ResourceUtilities.resolveBookmarkName(combined[cursor])
     }
 
     private func resolveCurrentHTMLName(for screen: Screen) -> String? {

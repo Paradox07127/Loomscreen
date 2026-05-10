@@ -186,14 +186,14 @@ struct PlaylistSection: View {
             bookmark: primary,
             isPrimary: true,
             isPlaying: primary == activeBookmark,
-            name: ResourceUtilities.resolveBookmarkName(primary)
+            name: screenManager.bookmarkDisplayName(for: primary)
                 ?? String(localized: "Primary", defaultValue: "Primary", comment: "Fallback playlist entry name for the primary video.")
         )] + extras.map {
             PlaylistEntry(
                 bookmark: $0,
                 isPrimary: false,
                 isPlaying: $0 == activeBookmark,
-                name: ResourceUtilities.resolveBookmarkName($0)
+                name: screenManager.bookmarkDisplayName(for: $0)
                     ?? String(localized: "Unknown", defaultValue: "Unknown", comment: "Fallback playlist entry name.")
             )
         }
@@ -213,6 +213,7 @@ struct PlaylistSection: View {
             SettingsManager.shared.saveLastUsedDirectory(urls[0].deletingLastPathComponent())
             for url in urls {
                 if let bookmark = ResourceUtilities.createBookmark(for: url) {
+                    screenManager.recordBookmarkDisplayName(bookmark, name: url.lastPathComponent)
                     playlistBookmarks.append(bookmark)
                 }
             }

@@ -44,32 +44,30 @@ struct ScreenDetailView: View {
 
     @ViewBuilder
     private var wallpaperTypePicker: some View {
-        // Hide the type segmented control while the empty-state guide is
-        // visible — the guide IS the type picker for unconfigured screens.
-        // Showing both at once produced two parallel paths to do the same
-        // thing (toolbar `.html` segment vs. guide "HTML" card) which was
-        // confusing for first-time users on a fresh display.
-        if !shouldShowGuideEmptyState {
-            Picker("Wallpaper Type", selection: $selectedWallpaperType) {
-                ForEach(WallpaperType.allCases) { type in
-                    Text(type.titleKey).tag(type)
-                }
-            }
-            .pickerStyle(.segmented)
-            .fixedSize(horizontal: true, vertical: false)
-            .accessibilityLabel(Text("Wallpaper type"))
-            .accessibilityHint(Text("Choose between video, HTML, Shader, or Scene wallpaper"))
-            .onChange(of: selectedWallpaperType) { _, newType in
-                switch newType {
-                case .video:
-                    screenManager.switchToVideoWallpaper(for: screen)
-                case .html:
-                    screenManager.switchToHTMLWallpaper(for: screen)
-                case .metalShader, .scene:
-                    break // pickers drive activation themselves
-                }
+        Picker("Wallpaper Type", selection: $selectedWallpaperType) {
+            ForEach(WallpaperType.allCases) { type in
+                Text(type.titleKey).tag(type)
             }
         }
+        .pickerStyle(.segmented)
+        .fixedSize(horizontal: true, vertical: false)
+        .accessibilityLabel(Text("Wallpaper type"))
+        .accessibilityHint(Text("Choose wallpaper type"))
+        .onChange(of: selectedWallpaperType) { _, newType in
+            Logger.info("Wallpaper type selected for screen \(screen.id): \(newType.rawValue)", category: .ui)
+            switch newType {
+            case .video:
+                screenManager.switchToVideoWallpaper(for: screen)
+            case .html:
+                screenManager.switchToHTMLWallpaper(for: screen)
+            case .metalShader, .scene:
+                break
+            }
+        }
+    }
+
+    private var wallpaperTypeToolbar: some View {
+        wallpaperTypePicker
     }
 
     @ViewBuilder
@@ -95,18 +93,11 @@ struct ScreenDetailView: View {
     }
 
     private var sessionStatusText: LocalizedStringKey {
-        switch wallpaperSessionSummary.wallpaperType {
-        case .html:
-            return "HTML Active"
-        case .metalShader:
-            return "Shader Active"
-        case .video:
-            return wallpaperSessionSummary.activity == .active ? "Playing" : "Paused"
-        case .scene:
-            return "Scene"
-        case nil:
+        guard wallpaperSessionSummary.isConfigured else {
             return "Not configured"
         }
+
+        return wallpaperSessionSummary.activity == .active ? "Playing" : "Paused"
     }
     private var sessionStatusColor: Color {
         switch wallpaperSessionSummary.activity {
@@ -143,6 +134,7 @@ struct ScreenDetailView: View {
     @State private var showApplyToAllConfirm = false
     @State private var previewController = InspectorPreviewController()
     @State private var hasPreviewSource = false
+    @State private var lastPreviewPosterBookmarkData: Data?
 
     @State private var selectedWallpaperType: WallpaperType = .video
     @State private var selectedWallpaperMode: WallpaperMode = .single
@@ -301,6 +293,11 @@ struct ScreenDetailView: View {
             .transaction(value: liveInspectorWidth) { $0.animation = nil }
         }
         .background(Color(NSColor.underPageBackgroundColor))
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                wallpaperTypeToolbar
+            }
+        }
         .confirmationDialog(
             "Apply this wallpaper to every other display?",
             isPresented: $showApplyToAllConfirm
@@ -336,7 +333,7 @@ struct ScreenDetailView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Are you sure you want to remove this video? This will delete all configuration for this screen.")
+            Text("Remove this video and its settings for this display.")
         }
         .dropDestination(for: URL.self) { urls, _ in
             handleDrop(urls: urls)
@@ -382,9 +379,6 @@ struct ScreenDetailView: View {
             },
             actions: {
                 HStack(spacing: 8) {
-                    wallpaperTypePicker
-                        .layoutPriority(1)
-
                     applyToAllButton
 
                     Button {
@@ -757,6 +751,9 @@ struct ScreenDetailView: View {
             htmlSource = config.htmlSource
             htmlConfig = config.htmlConfig ?? .default
             hasPreviewSource = config.wallpaperType == .video && config.videoBookmarkData != nil
+            if config.wallpaperType != .video {
+                lastPreviewPosterBookmarkData = nil
+            }
             loadPreviewPosterIfNeeded()
         } else {
             playbackSpeed = 1.0
@@ -775,11 +772,13 @@ struct ScreenDetailView: View {
             htmlSource = nil
             htmlConfig = .default
             hasPreviewSource = screen.videoPlayer?.videoURL != nil
+            lastPreviewPosterBookmarkData = nil
             loadPreviewPosterIfNeeded()
         }
     }
 
     private func cleanupPreviewPlayer() {
+        lastPreviewPosterBookmarkData = nil
         previewController.cleanup()
     }
 
@@ -835,6 +834,7 @@ struct ScreenDetailView: View {
 
         if let bookmarkData = ResourceUtilities.createBookmark(for: url) {
             hasPreviewSource = true
+            lastPreviewPosterBookmarkData = bookmarkData
             previewController.startPlaybackPreview(from: url, syncTo: nil)
             screenManager.setVideo(url: url, bookmarkData: bookmarkData, for: screen)
         } else {
@@ -858,8 +858,23 @@ struct ScreenDetailView: View {
     }
 
     private func loadPreviewPosterIfNeeded() {
-        guard previewController.player == nil,
-              let url = resolvePreviewVideoURL() else { return }
+        guard previewController.player == nil else { return }
+
+        if let config = screenManager.getConfiguration(for: screen),
+           config.wallpaperType == .video,
+           let bookmarkData = config.videoBookmarkData {
+            if lastPreviewPosterBookmarkData == bookmarkData,
+               previewController.posterImage != nil || previewController.isLoading {
+                return
+            }
+            guard let url = resolvePreviewVideoURL() else { return }
+            lastPreviewPosterBookmarkData = bookmarkData
+            previewController.loadPoster(from: url, syncTime: screen.videoPlayer?.player?.currentTime())
+            return
+        }
+
+        lastPreviewPosterBookmarkData = nil
+        guard let url = screen.videoPlayer?.videoURL else { return }
         previewController.loadPoster(from: url, syncTime: screen.videoPlayer?.player?.currentTime())
     }
 
@@ -900,12 +915,9 @@ struct ScreenDetailView: View {
 
     // MARK: - Empty State Guide
 
-    /// True when this screen has no persisted configuration AND no live
-    /// runtime session AND the user is currently looking at the default
-    /// `.video` tab. Switching the toolbar segmented control to .html /
-    /// .scene / .metalShader exits the guide so those tabs can show their
-    /// own configuration UI — clicking any non-Video guide card does the
-    /// same flip and lands on that type's existing empty state.
+    /// True when this screen has no persisted configuration, no live runtime
+    /// session, and the user is still on the default Video type. Picking any
+    /// other toolbar segment or guide card exits the first-run guide.
     private var shouldShowGuideEmptyState: Bool {
         if isLoading { return false }
         if selectedWallpaperType != .video { return false }
@@ -915,16 +927,14 @@ struct ScreenDetailView: View {
         return true
     }
 
-    /// Video card → already on `.video`, so just open the existing file
-    /// picker. Cancellation returns the user to the guide unchanged.
+    /// Video card opens the existing file picker. Cancellation returns the
+    /// user to the guide unchanged.
     private func triggerVideoGuideAction() {
         showFilePicker()
     }
 
-    /// HTML / Shader / Scene cards → flip the toolbar's selected type so
-    /// `shouldShowGuideEmptyState` returns false and that type's existing
-    /// empty state takes over (URL/file/folder picker, shader presets,
-    /// Workshop browser respectively).
+    /// HTML / Shader / Scene cards flip the selected type so that type's
+    /// empty state takes over.
     private func triggerHTMLGuideAction() {
         selectedWallpaperType = .html
     }

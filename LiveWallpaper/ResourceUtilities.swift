@@ -64,6 +64,8 @@ class ResourceUtilities {
 
     /// Resolves a bookmark to a display name.
     static func resolveBookmarkName(_ data: Data) -> String? {
+        guard !data.isEmpty else { return nil }
+
         var isStale = false
         guard let url = try? URL(
             resolvingBookmarkData: data,

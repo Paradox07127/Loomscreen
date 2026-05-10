@@ -43,11 +43,15 @@ struct BookmarksPopover: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 HStack(spacing: 6) {
-                    TextField(BookmarkStore.defaultLabel(for: content), text: $addLabel)
+                    TextField(defaultLabel(for: content), text: $addLabel)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: 12))
                     Button {
-                        store.add(label: addLabel, content: content)
+                        store.add(
+                            label: addLabel,
+                            content: content,
+                            sourceDisplayName: sourceDisplayName(for: content)
+                        )
                         addLabel = ""
                     } label: {
                         Image(systemName: "plus.circle.fill")
@@ -119,7 +123,28 @@ struct BookmarksPopover: View {
         screenManager.getConfiguration(for: screen)?.activeWallpaper
     }
 
+    private func defaultLabel(for content: WallpaperContent) -> String {
+        BookmarkStore.defaultLabel(
+            for: content,
+            sourceDisplayName: sourceDisplayName(for: content)
+        )
+    }
+
+    private func sourceDisplayName(for content: WallpaperContent) -> String? {
+        switch content {
+        case .video(let bookmarkData):
+            return screenManager.bookmarkDisplayName(for: bookmarkData)
+        case .html(let source, _):
+            return source.displayName
+        case .metalShader(let preset):
+            return preset.localizedTitle
+        case .scene(let descriptor):
+            return String(localized: "Scene \(descriptor.workshopID)", comment: "Bookmark source label for a Wallpaper Engine scene. The placeholder is the Workshop ID.")
+        }
+    }
+
     private func apply(_ bookmark: WallpaperBookmark) {
+        Logger.info("Applying bookmark to screen \(screen.id): \(bookmark.wallpaperType.rawValue)", category: .ui)
         switch bookmark.content {
         case .video(let bookmarkData):
             var isStale = false
@@ -246,8 +271,9 @@ private struct BookmarkRow: View {
 
     private var subtitle: Text {
         switch bookmark.content {
-        case .video(let data):
-            if let name = ResourceUtilities.resolveBookmarkName(data) {
+        case .video:
+            if let name = bookmark.sourceDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !name.isEmpty {
                 return Text(verbatim: name)
             }
             return Text("Source missing")

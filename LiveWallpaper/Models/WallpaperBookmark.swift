@@ -7,17 +7,20 @@ struct WallpaperBookmark: Identifiable, Codable, Equatable {
     var label: String
     let createdAt: Date
     var content: WallpaperContent
+    var sourceDisplayName: String?
 
     init(
         label: String,
         content: WallpaperContent,
         id: UUID = UUID(),
-        createdAt: Date = Date()
+        createdAt: Date = Date(),
+        sourceDisplayName: String? = nil
     ) {
         self.id = id
         self.label = label
         self.content = content
         self.createdAt = createdAt
+        self.sourceDisplayName = sourceDisplayName
     }
 
     var wallpaperType: WallpaperType { content.wallpaperType }
