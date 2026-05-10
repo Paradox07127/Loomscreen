@@ -379,21 +379,7 @@ struct OnboardingStepFirstWallpaper: View {
     }
 
     private func chooseWPEFolder() {
-        NSApp.activate(ignoringOtherApps: true)
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.prompt = L10n.Panel.importProject
-
-        if let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
-            let lwDir = docs.appendingPathComponent("Live Wallpapers")
-            if FileManager.default.fileExists(atPath: lwDir.path) {
-                panel.directoryURL = lwDir
-            }
-        }
-
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let url = WPEFolderPicker.chooseImportFolder() else { return }
 
         // WPE import is async + multi-step (validation → cache extraction); the
         // live-preview path doesn't apply. Apply directly to every selected
@@ -444,13 +430,7 @@ private struct HTMLPickerSheet: View {
                     .foregroundStyle(.secondary)
             }
 
-            Picker("Source", selection: $selectedKind) {
-                ForEach(HTMLSourceKind.allCases) { kind in
-                    Label(kind.labelKey, systemImage: kind.icon).tag(kind)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            HTMLSourceKindPicker(selection: $selectedKind)
 
             sourcePane
                 .animation(.snappy(duration: 0.18), value: selectedKind)

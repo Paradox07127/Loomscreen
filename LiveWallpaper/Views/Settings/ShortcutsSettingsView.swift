@@ -39,12 +39,7 @@ struct ShortcutsSettingsView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .formStyle(.grouped)
-        .scrollContentBackground(.hidden)
-        .contentMargins(.horizontal, DesignTokens.Settings.formHorizontalMargin, for: .scrollContent)
-        .contentMargins(.vertical, DesignTokens.Settings.formVerticalMargin, for: .scrollContent)
-        .background(Color(NSColor.underPageBackgroundColor))
-        .frame(minWidth: 500, minHeight: 400)
+        .settingsFormChrome(minWidth: 500, minHeight: 400)
     }
 
     private func bindingFor(_ action: GlobalShortcutAction) -> GlobalShortcutBinding? {

@@ -460,15 +460,7 @@ private struct WorkshopGalleryCard: View {
                 imageURL: project.previewURL,
                 securityScopedBookmarkData: project.libraryRootBookmarkData
             )
-                .clipShape(
-                    UnevenRoundedRectangle(
-                        topLeadingRadius: 16,
-                        bottomLeadingRadius: 0,
-                        bottomTrailingRadius: 0,
-                        topTrailingRadius: 16,
-                        style: .continuous
-                    )
-                )
+                .wpeCardPreviewClip()
                 .overlay(alignment: .topTrailing) {
                     typeBadge
                         .padding(8)
@@ -486,15 +478,7 @@ private struct WorkshopGalleryCard: View {
             .padding(12)
             .frame(maxHeight: .infinity, alignment: .top)
         }
-        .frame(width: 160, height: 240)
-        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 16))
-        .scaleEffect(isHovering ? 1.02 : 1.0)
-        .shadow(
-            color: Color.black.opacity(isHovering ? 0.18 : 0.06),
-            radius: isHovering ? 8 : 4,
-            y: isHovering ? 4 : 2
-        )
-        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isHovering)
+        .wpeProjectCardChrome(isHovering: isHovering)
         .onHover { isHovering = $0 }
         // Deliberately NOT .accessibilityElement(children: .combine) — that
         // would swallow the inner Import button. Letting SwiftUI infer the
