@@ -200,7 +200,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.title = L10n.Window.settingsTitle
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
-        window.toolbar = nil
+        window.isMovableByWindowBackground = true
         window.center()
         window.contentView = NSHostingView(rootView: contentView)
         window.delegate = self

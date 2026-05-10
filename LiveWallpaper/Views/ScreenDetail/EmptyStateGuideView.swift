@@ -94,7 +94,7 @@ struct EmptyStateGuideView: View {
                 .font(.system(size: 22, weight: .semibold, design: .rounded))
                 .accessibilityAddTraits(.isHeader)
 
-            Text("Each display can run a different type. You can switch from the toolbar after picking one.")
+            Text("Each display can run a different type. You can switch types after picking one.")
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
