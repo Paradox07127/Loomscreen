@@ -11,38 +11,38 @@ struct BookmarksLibraryView: View {
     private let columns = [GridItem(.adaptive(minimum: 260), spacing: 12)]
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            content
-        }
+        DetailPageScaffold(
+            header: { header },
+            content: { content }
+        )
     }
 
     // MARK: - Header
 
     private var header: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "bookmark.fill")
-                .font(.system(size: 14))
-                .foregroundStyle(Color.accentColor)
-            Text("Bookmarks")
-                .font(.system(size: 14, weight: .semibold))
-            Text("\(store.bookmarks.count)")
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 1)
-                .background(Capsule().fill(Color.secondary.opacity(0.15)))
-
-            Spacer()
-
-            TextField("Search…", text: $searchText)
-                .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: 200)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.regularMaterial)
+        DetailHeaderBar(
+            systemImage: "bookmark.fill",
+            title: {
+                Text("Bookmarks")
+            },
+            metadata: {
+                HStack(spacing: 6) {
+                    Text("\(store.bookmarks.count)")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Color.secondary.opacity(0.15)))
+                    Text("saved wallpapers")
+                }
+            },
+            actions: {
+                TextField("Search…", text: $searchText)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 220)
+                    .accessibilityLabel(Text("Search bookmarks"))
+            }
+        )
     }
 
     // MARK: - Content

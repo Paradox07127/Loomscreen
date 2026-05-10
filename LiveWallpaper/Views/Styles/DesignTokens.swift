@@ -37,6 +37,36 @@ enum DesignTokens {
     enum Sidebar {
         static let width: CGFloat = 210
         static let maxWidth: CGFloat = width * 1.15
+        static let sectionHeaderSpacing: CGFloat = 6
+        static let sectionHeaderBottomPadding: CGFloat = 2
+        static let displayHeaderBottomPadding: CGFloat = 6
+    }
+
+    enum DetailHeader {
+        static let horizontalPadding: CGFloat = Spacing.xl
+        static let verticalPadding: CGFloat = 14
+        static let contentSpacing: CGFloat = 14
+        static let iconSize: CGFloat = 44
+        static let iconSymbolSize: CGFloat = 18
+        static let titleSize: CGFloat = 18
+        static let textSpacing: CGFloat = 2
+        static let metadataSpacing: CGFloat = 8
+    }
+
+    enum GuidedLibrary {
+        static let outerPadding: CGFloat = 40
+        static let topSpacerHeight: CGFloat = 24
+        static let iconSize: CGFloat = 48
+        static let titleSize: CGFloat = 18
+        static let messageSize: CGFloat = 13
+        static let featureWidth: CGFloat = 380
+        static let messageWidth: CGFloat = 360
+    }
+
+    enum Settings {
+        static let formHorizontalMargin: CGFloat = 18
+        static let formVerticalMargin: CGFloat = 12
+        static let actionGridSpacing: CGFloat = 10
     }
 
     enum Card {

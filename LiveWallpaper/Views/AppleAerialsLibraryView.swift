@@ -8,12 +8,10 @@ struct AppleAerialsLibraryView: View {
     private let columns = [GridItem(.adaptive(minimum: 220), spacing: 14)]
 
     var body: some View {
-        VStack(spacing: 0) {
-            if library.isAuthorized {
-                inlineHeader
-            }
-
-            Group {
+        DetailPageScaffold(
+            showsHeader: library.isAuthorized,
+            header: { inlineHeader },
+            content: {
                 if !library.isAuthorized {
                     unauthorizedState
                 } else if let err = library.lastScanError, !err.isEmpty, library.assets.isEmpty {
@@ -24,7 +22,7 @@ struct AppleAerialsLibraryView: View {
                     galleryGrid
                 }
             }
-        }
+        )
         .task {
             if library.isAuthorized && library.assets.isEmpty {
                 await library.refresh()
@@ -33,104 +31,114 @@ struct AppleAerialsLibraryView: View {
     }
 
     private func scanErrorView(message: String) -> some View {
-        LibraryGuideCard(
-            icon: "exclamationmark.triangle",
-            title: "Couldn't scan Aerials",
-            message: "We hit a problem while scanning the Apple Aerials library.",
-            features: [
-                LibraryGuideFeature(icon: "folder.badge.gearshape", text: "Reconnect the Apple Aerials library location"),
-                LibraryGuideFeature(icon: "arrow.triangle.2.circlepath", text: "Retry after macOS finishes updating the folder"),
-                LibraryGuideFeature(icon: "checkmark.shield", text: "Read-only access; no files are modified")
-            ],
-            actionTitle: "Reconnect",
-            actionSystemImage: "folder.badge.gearshape",
-            secondaryTitle: "Retry",
-            secondarySystemImage: "arrow.clockwise",
-            errorMessage: message,
-            action: {
-                library.clearAccess()
-            },
-            secondaryAction: {
-                Task { await library.refresh() }
-            }
-        )
+        GuidedLibrarySurface {
+            LibraryGuideCard(
+                icon: "exclamationmark.triangle",
+                title: "Couldn't scan Aerials",
+                message: "We hit a problem while scanning the Apple Aerials library.",
+                features: [
+                    LibraryGuideFeature(icon: "folder.badge.gearshape", text: "Reconnect the Apple Aerials library location"),
+                    LibraryGuideFeature(icon: "arrow.triangle.2.circlepath", text: "Retry after macOS finishes updating the folder"),
+                    LibraryGuideFeature(icon: "checkmark.shield", text: "Read-only access; no files are modified")
+                ],
+                actionTitle: "Reconnect",
+                actionSystemImage: "folder.badge.gearshape",
+                secondaryTitle: "Retry",
+                secondarySystemImage: "arrow.clockwise",
+                errorMessage: message,
+                action: {
+                    library.clearAccess()
+                },
+                secondaryAction: {
+                    Task { await library.refresh() }
+                }
+            )
+        }
     }
 
     private var inlineHeader: some View {
-        HStack(spacing: 8) {
-            Text("Apple Aerials")
-                .font(.system(size: 14, weight: .semibold))
-            if library.isScanning {
-                ProgressView().controlSize(.small)
-            }
-            Spacer()
-            Button {
-                Task { await library.refresh() }
-            } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 12, weight: .medium))
-            }
-            .buttonStyle(.borderless)
-            .help(Text("Refresh"))
-            .disabled(library.isScanning)
+        DetailHeaderBar(
+            systemImage: "sparkles.tv",
+            title: {
+                Text("Apple Aerials")
+            },
+            metadata: {
+                HStack(spacing: DesignTokens.DetailHeader.metadataSpacing) {
+                    Text("\(library.assets.count) downloaded videos")
+                    if library.isScanning {
+                        ProgressView().controlSize(.small)
+                    }
+                }
+            },
+            actions: {
+                HStack(spacing: 8) {
+                    Button {
+                        Task { await library.refresh() }
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(.glass)
+                    .controlSize(.regular)
+                    .help(Text("Refresh"))
+                    .disabled(library.isScanning)
 
-            Button {
-                library.clearAccess()
-            } label: {
-                Image(systemName: "xmark.circle")
-                    .font(.system(size: 12, weight: .medium))
+                    Button {
+                        library.clearAccess()
+                    } label: {
+                        Image(systemName: "xmark.circle")
+                    }
+                    .buttonStyle(.glass)
+                    .destructiveControlTint()
+                    .controlSize(.regular)
+                    .help(Text("Disconnect Aerials library"))
+                }
             }
-            .buttonStyle(.borderless)
-            .destructiveControlTint()
-            .help(Text("Disconnect Aerials library"))
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.regularMaterial)
-        .overlay(alignment: .bottom) {
-            Divider()
-        }
+        )
     }
 
     private var unauthorizedState: some View {
-        LibraryGuideCard(
-            icon: "sparkles.tv",
-            title: "Connect Apple Aerials",
-            message: "Connect the local Apple Aerials library that contains downloaded aerial videos.",
-            features: [
-                LibraryGuideFeature(icon: "folder.badge.gearshape", text: "Open the local Aerials folder automatically"),
-                LibraryGuideFeature(icon: "arrow.triangle.2.circlepath", text: "Refresh after macOS downloads or removes aerial videos"),
-                LibraryGuideFeature(icon: "checkmark.shield", text: "Read-only access; applied videos stay managed by LiveWallpaper")
-            ],
-            actionTitle: library.isScanning ? "Connecting..." : "Connect Library",
-            actionSystemImage: "folder.badge.plus",
-            isActionInProgress: library.isScanning,
-            errorMessage: library.lastScanError,
-            action: {
-                Task { _ = await library.requestAccess() }
-            }
-        )
+        GuidedLibrarySurface {
+            LibraryGuideCard(
+                icon: "sparkles.tv",
+                title: "Connect Apple Aerials",
+                message: "Connect the local Apple Aerials library that contains downloaded aerial videos.",
+                features: [
+                    LibraryGuideFeature(icon: "folder.badge.gearshape", text: "Open the local Aerials folder automatically"),
+                    LibraryGuideFeature(icon: "arrow.triangle.2.circlepath", text: "Refresh after macOS downloads or removes aerial videos"),
+                    LibraryGuideFeature(icon: "checkmark.shield", text: "Read-only access; applied videos stay managed by LiveWallpaper")
+                ],
+                actionTitle: library.isScanning ? "Connecting..." : "Connect Library",
+                actionSystemImage: "folder.badge.plus",
+                isActionInProgress: library.isScanning,
+                errorMessage: library.lastScanError,
+                action: {
+                    Task { _ = await library.requestAccess() }
+                }
+            )
+        }
     }
 
     private var emptyState: some View {
-        LibraryGuideCard(
-            icon: "sparkles.tv",
-            title: "No aerials downloaded yet",
-            message: "Apple downloads aerial wallpapers on demand. Pick one from System Settings → Wallpaper, then refresh.",
-            features: [
-                LibraryGuideFeature(icon: "gearshape", text: "Open Wallpaper settings and select an Apple aerial"),
-                LibraryGuideFeature(icon: "arrow.triangle.2.circlepath", text: "Refresh after macOS finishes downloading the video"),
-                LibraryGuideFeature(icon: "checkmark.shield", text: "Only downloaded .mov aerials are listed here")
-            ],
-            actionTitle: "Open System Settings",
-            actionSystemImage: "gearshape",
-            secondaryTitle: "Refresh",
-            secondarySystemImage: "arrow.clockwise",
-            action: openWallpaperSettings,
-            secondaryAction: {
-                Task { await library.refresh() }
-            }
-        )
+        GuidedLibrarySurface {
+            LibraryGuideCard(
+                icon: "sparkles.tv",
+                title: "No aerials downloaded yet",
+                message: "Apple downloads aerial wallpapers on demand. Pick one from System Settings → Wallpaper, then refresh.",
+                features: [
+                    LibraryGuideFeature(icon: "gearshape", text: "Open Wallpaper settings and select an Apple aerial"),
+                    LibraryGuideFeature(icon: "arrow.triangle.2.circlepath", text: "Refresh after macOS finishes downloading the video"),
+                    LibraryGuideFeature(icon: "checkmark.shield", text: "Only downloaded .mov aerials are listed here")
+                ],
+                actionTitle: "Open System Settings",
+                actionSystemImage: "gearshape",
+                secondaryTitle: "Refresh",
+                secondarySystemImage: "arrow.clockwise",
+                action: openWallpaperSettings,
+                secondaryAction: {
+                    Task { await library.refresh() }
+                }
+            )
+        }
     }
 
     private var galleryGrid: some View {

@@ -19,15 +19,12 @@ struct WorkshopGalleryView: View {
     private let scanner = WallpaperEngineLibraryScanner()
 
     var body: some View {
-        VStack(spacing: 0) {
-            if hasLibraryRoot {
-                header
-                Divider()
-            }
-            content
-        }
+        DetailPageScaffold(
+            showsHeader: hasLibraryRoot,
+            header: { header },
+            content: { content }
+        )
         .frame(minWidth: 760, minHeight: 540)
-        .background(Color(NSColor.underPageBackgroundColor))
         .onAppear {
             updateRootAccessState()
             if hasLibraryRoot {
@@ -52,85 +49,90 @@ struct WorkshopGalleryView: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack(spacing: 8) {
-            Text("Workshop Library")
-                .font(.system(size: 14, weight: .semibold))
+        DetailHeaderBar(
+            systemImage: "cube.transparent",
+            title: {
+                Text("Workshop Library")
+            },
+            metadata: {
+                HStack(spacing: DesignTokens.DetailHeader.metadataSpacing) {
+                    if state == .scanning {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
 
-            if state == .scanning {
-                ProgressView()
-                    .controlSize(.small)
-            }
-
-            if !headerSubtitle.isEmpty {
-                Text(verbatim: headerSubtitle)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .help(Text(verbatim: headerSubtitle))
-            }
-
-            Spacer()
-
-            if hasLibraryRoot {
-                Button {
-                    Task { await refreshScan() }
-                } label: {
-                    Label("Rescan", systemImage: "arrow.clockwise")
-                }
-                .buttonStyle(GlassCapsuleButtonStyle(tint: .secondary, fontSize: 12, horizontalPadding: 14, verticalPadding: 6))
-                .accessibilityHint(Text("Re-scan the workshop folder for new projects"))
-                .disabled(bulkImportInProgress)
-
-                Button {
-                    presentFolderGrant()
-                } label: {
-                    Label("Change Folder", systemImage: "folder.badge.gearshape")
-                }
-                .buttonStyle(GlassCapsuleButtonStyle(tint: .secondary, fontSize: 12, horizontalPadding: 14, verticalPadding: 6))
-                .accessibilityHint(Text("Choose a different Steam Workshop folder"))
-                .disabled(bulkImportInProgress)
-
-                Button {
-                    disconnectLibraryRoot()
-                } label: {
-                    Image(systemName: "xmark.circle")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.borderless)
-                .help(Text("Disconnect Workshop library"))
-                .accessibilityLabel(Text("Disconnect Workshop library"))
-                .accessibilityHint(Text("Forgets the selected Steam Workshop folder so you can choose again"))
-                .disabled(bulkImportInProgress)
-            }
-
-            if case .results = state, !projects.isEmpty {
-                Button {
-                    Task { await bulkImportCompatible() }
-                } label: {
-                    if bulkImportInProgress {
-                        Label("Importing \(bulkImportProgress.current)/\(bulkImportProgress.total)", systemImage: "square.and.arrow.down.fill")
-                    } else {
-                        Label("Import All Compatible", systemImage: "square.and.arrow.down")
+                    if !headerSubtitle.isEmpty {
+                        Text(verbatim: headerSubtitle)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .help(Text(verbatim: headerSubtitle))
                     }
                 }
-                .buttonStyle(GlassCapsuleButtonStyle(fontSize: 12, horizontalPadding: 14, verticalPadding: 6))
-                .disabled(bulkImportInProgress || compatibleCount == 0)
-                .accessibilityHint(Text("Imports every Video and Web project not already in your library"))
-            }
+            },
+            actions: {
+                HStack(spacing: 8) {
+                    if hasLibraryRoot {
+                        Button {
+                            Task { await refreshScan() }
+                        } label: {
+                            Label("Rescan", systemImage: "arrow.clockwise")
+                        }
+                        .buttonStyle(.glass)
+                        .controlSize(.regular)
+                        .accessibilityHint(Text("Re-scan the workshop folder for new projects"))
+                        .disabled(bulkImportInProgress)
 
-            Button {
-                dismiss()
-            } label: {
-                Text("Done")
+                        Button {
+                            presentFolderGrant()
+                        } label: {
+                            Label("Change Folder", systemImage: "folder.badge.gearshape")
+                        }
+                        .buttonStyle(.glass)
+                        .controlSize(.regular)
+                        .accessibilityHint(Text("Choose a different Steam Workshop folder"))
+                        .disabled(bulkImportInProgress)
+
+                        Button {
+                            disconnectLibraryRoot()
+                        } label: {
+                            Image(systemName: "xmark.circle")
+                        }
+                        .buttonStyle(.glass)
+                        .destructiveControlTint()
+                        .controlSize(.regular)
+                        .help(Text("Disconnect Workshop library"))
+                        .accessibilityLabel(Text("Disconnect Workshop library"))
+                        .accessibilityHint(Text("Forgets the selected Steam Workshop folder so you can choose again"))
+                        .disabled(bulkImportInProgress)
+                    }
+
+                    if case .results = state, !projects.isEmpty {
+                        Button {
+                            Task { await bulkImportCompatible() }
+                        } label: {
+                            if bulkImportInProgress {
+                                Label("Importing \(bulkImportProgress.current)/\(bulkImportProgress.total)", systemImage: "square.and.arrow.down.fill")
+                            } else {
+                                Label("Import All Compatible", systemImage: "square.and.arrow.down")
+                            }
+                        }
+                        .buttonStyle(.glassProminent)
+                        .controlSize(.regular)
+                        .disabled(bulkImportInProgress || compatibleCount == 0)
+                        .accessibilityHint(Text("Imports every Video and Web project not already in your library"))
+                    }
+
+                    Button {
+                        dismiss()
+                    } label: {
+                        Text("Done")
+                    }
+                    .buttonStyle(.glass)
+                    .controlSize(.regular)
+                    .keyboardShortcut(.cancelAction)
+                }
             }
-            .buttonStyle(GlassCapsuleButtonStyle(tint: .secondary, fontSize: 12, horizontalPadding: 14, verticalPadding: 6))
-            .keyboardShortcut(.cancelAction)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.regularMaterial)
+        )
     }
 
     private var headerSubtitle: String {
@@ -165,20 +167,21 @@ struct WorkshopGalleryView: View {
     }
 
     private var needsRootView: some View {
-        LibraryGuideCard(
-            icon: "books.vertical",
-            title: "Connect Steam Workshop",
-            message: "Choose the Wallpaper Engine folder that contains your subscribed project folders.",
-            features: [
-                LibraryGuideFeature(icon: "folder.badge.gearshape", text: "Pick the folder that contains numbered Workshop project folders"),
-                LibraryGuideFeature(icon: "arrow.triangle.2.circlepath", text: "Rescan after Steam downloads or removes subscriptions"),
-                LibraryGuideFeature(icon: "checkmark.shield", text: "Read-only access; imported copies stay managed by LiveWallpaper")
-            ],
-            actionTitle: "Choose Folder...",
-            actionSystemImage: "folder.badge.plus",
-            action: presentFolderGrant
-        )
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        GuidedLibrarySurface {
+            LibraryGuideCard(
+                icon: "books.vertical",
+                title: "Connect Steam Workshop",
+                message: "Choose the Wallpaper Engine folder that contains your subscribed project folders.",
+                features: [
+                    LibraryGuideFeature(icon: "folder.badge.gearshape", text: "Pick the folder that contains numbered Workshop project folders"),
+                    LibraryGuideFeature(icon: "arrow.triangle.2.circlepath", text: "Rescan after Steam downloads or removes subscriptions"),
+                    LibraryGuideFeature(icon: "checkmark.shield", text: "Read-only access; imported copies stay managed by LiveWallpaper")
+                ],
+                actionTitle: "Choose Folder...",
+                actionSystemImage: "folder.badge.plus",
+                action: presentFolderGrant
+            )
+        }
     }
 
     private var scanningView: some View {
@@ -219,23 +222,24 @@ struct WorkshopGalleryView: View {
     }
 
     private var emptyResultsView: some View {
-        LibraryGuideCard(
-            icon: "folder.badge.questionmark",
-            title: "No Workshop projects found",
-            message: "The selected folder did not contain Wallpaper Engine project folders. Pick the folder that contains numeric Workshop IDs, then scan again.",
-            features: [
-                LibraryGuideFeature(icon: "folder.badge.gearshape", text: "Choose the folder that contains numbered Workshop project folders"),
-                LibraryGuideFeature(icon: "arrow.triangle.2.circlepath", text: "Rescan after Steam finishes downloading subscriptions"),
-                LibraryGuideFeature(icon: "checkmark.shield", text: "Only compatible Video and Web projects are imported")
-            ],
-            actionTitle: "Change Folder...",
-            actionSystemImage: "folder.badge.gearshape",
-            secondaryTitle: "Rescan",
-            secondarySystemImage: "arrow.clockwise",
-            action: presentFolderGrant,
-            secondaryAction: { Task { await refreshScan() } }
-        )
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        GuidedLibrarySurface {
+            LibraryGuideCard(
+                icon: "folder.badge.questionmark",
+                title: "No Workshop projects found",
+                message: "The selected folder did not contain Wallpaper Engine project folders. Pick the folder that contains numeric Workshop IDs, then scan again.",
+                features: [
+                    LibraryGuideFeature(icon: "folder.badge.gearshape", text: "Choose the folder that contains numbered Workshop project folders"),
+                    LibraryGuideFeature(icon: "arrow.triangle.2.circlepath", text: "Rescan after Steam finishes downloading subscriptions"),
+                    LibraryGuideFeature(icon: "checkmark.shield", text: "Only compatible Video and Web projects are imported")
+                ],
+                actionTitle: "Change Folder...",
+                actionSystemImage: "folder.badge.gearshape",
+                secondaryTitle: "Rescan",
+                secondarySystemImage: "arrow.clockwise",
+                action: presentFolderGrant,
+                secondaryAction: { Task { await refreshScan() } }
+            )
+        }
     }
 
     // MARK: - Actions
