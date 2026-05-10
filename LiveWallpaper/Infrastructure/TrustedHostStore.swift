@@ -1,60 +1,89 @@
 import Foundation
 import Observation
 
-/// Persistence seam for the trusted-host allowlist.
+/// Persistence seam for the trusted-origin allowlist.
 @MainActor
 protocol TrustedHostPersisting {
     func load() -> [String]
-    func save(_ hosts: [String])
+    func save(_ origins: [String])
 }
 
 @MainActor
 struct SettingsManagerTrustedHostPersistence: TrustedHostPersisting {
     func load() -> [String] { SettingsManager.shared.loadTrustedHosts() }
-    func save(_ hosts: [String]) { SettingsManager.shared.saveTrustedHosts(hosts) }
+    func save(_ origins: [String]) { SettingsManager.shared.saveTrustedHosts(origins) }
 }
 
-/// Allowlist of remote HTML wallpaper hosts that may run JavaScript.
+/// Allowlist of remote HTML wallpaper origins that may run JavaScript.
 @MainActor
 @Observable
 final class TrustedHostStore {
     static let shared = TrustedHostStore()
 
-    /// Lowercased, sorted, de-duped.
-    private(set) var hosts: [String]
+    /// Sorted, de-duped, HTTPS-only browser origins.
+    private(set) var origins: [TrustedHTMLOrigin]
     @ObservationIgnored private let persistence: any TrustedHostPersisting
 
     init(persistence: any TrustedHostPersisting = SettingsManagerTrustedHostPersistence()) {
         self.persistence = persistence
-        self.hosts = Self.normalize(persistence.load())
+        let loaded = persistence.load()
+        self.origins = Self.normalizeOrigins(loaded)
+        if loaded != hosts {
+            persistence.save(hosts)
+        }
     }
 
+    /// Raw persisted values. Kept under the old name for compatibility with
+    /// settings cleanup and older tests; values are now origin strings.
+    var hosts: [String] { origins.map(\.rawValue) }
+
+    var originSet: Set<TrustedHTMLOrigin> { Set(origins) }
     var hostSet: Set<String> { Set(hosts) }
 
     func contains(_ host: String) -> Bool {
-        hostSet.contains(host.lowercased())
+        guard let origin = TrustedHTMLOrigin(persistedValue: host) else { return false }
+        return contains(origin)
+    }
+
+    func contains(_ origin: TrustedHTMLOrigin) -> Bool {
+        originSet.contains(origin)
+    }
+
+    func contains(url: URL) -> Bool {
+        guard let origin = TrustedHTMLOrigin(url: url) else { return false }
+        return contains(origin)
     }
 
     @discardableResult
     func trust(_ host: String) -> Bool {
-        let normalized = host.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty, !hostSet.contains(normalized) else { return false }
-        hosts = Self.normalize(hosts + [normalized])
+        guard let origin = TrustedHTMLOrigin(persistedValue: host) else { return false }
+        return trust(origin)
+    }
+
+    @discardableResult
+    func trust(_ origin: TrustedHTMLOrigin) -> Bool {
+        guard origin.isSecure, !originSet.contains(origin) else { return false }
+        origins = Self.normalizeOrigins(hosts + [origin.rawValue])
         persist()
         return true
     }
 
     @discardableResult
     func revoke(_ host: String) -> Bool {
-        let normalized = host.lowercased()
-        guard hostSet.contains(normalized) else { return false }
-        hosts.removeAll { $0 == normalized }
+        guard let origin = TrustedHTMLOrigin(persistedValue: host) else { return false }
+        return revoke(origin)
+    }
+
+    @discardableResult
+    func revoke(_ origin: TrustedHTMLOrigin) -> Bool {
+        guard originSet.contains(origin) else { return false }
+        origins.removeAll { $0 == origin }
         persist()
         return true
     }
 
     func resetAfterSettingsCleared() {
-        hosts.removeAll()
+        origins.removeAll()
     }
 
     private func persist() {
@@ -62,8 +91,12 @@ final class TrustedHostStore {
     }
 
     static func normalize(_ raw: [String]) -> [String] {
-        Array(Set(raw.map { $0.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) }
-                       .filter { !$0.isEmpty }))
+        normalizeOrigins(raw).map(\.rawValue)
+    }
+
+    static func normalizeOrigins(_ raw: [String]) -> [TrustedHTMLOrigin] {
+        Array(Set(raw.compactMap(TrustedHTMLOrigin.init(persistedValue:))
+            .filter(\.isSecure)))
             .sorted()
     }
 }

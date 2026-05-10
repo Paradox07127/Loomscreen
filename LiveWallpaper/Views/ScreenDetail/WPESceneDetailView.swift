@@ -290,6 +290,7 @@ struct WPESceneDetailView: View {
                 Label("Clear Scene", systemImage: "xmark.circle")
             }
             .buttonStyle(.glass)
+            .destructiveControlTint()
             .controlSize(.regular)
             .accessibilityHint(Text("Removes the scene wallpaper from this display"))
 

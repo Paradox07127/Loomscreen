@@ -49,7 +49,26 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .openGeneralSettings)) { _ in
             selectedNavigation = .general
         }
-        .onAppear { consumeInitialAddWallpaperPromptIfNeeded() }
+        .onReceive(NotificationCenter.default.publisher(for: .screensRefreshed)) { _ in
+            selectDefaultDisplayIfNeeded()
+        }
+        .onAppear {
+            selectDefaultDisplayIfNeeded()
+            consumeInitialAddWallpaperPromptIfNeeded()
+        }
+    }
+
+    private func selectDefaultDisplayIfNeeded() {
+        guard screenManager.screens.count == 1, let screen = screenManager.screens.first else { return }
+
+        switch selectedNavigation {
+        case nil:
+            selectedNavigation = .screen(screen.id)
+        case .screen(let selectedID) where selectedID != screen.id:
+            selectedNavigation = .screen(screen.id)
+        default:
+            break
+        }
     }
 
     /// Receives `.promptAddWallpaper` notifications from a re-used settings

@@ -237,6 +237,7 @@ private struct BookmarkCard: View {
                     Image(systemName: "trash")
                 }
                 .buttonStyle(.borderless)
+                .destructiveControlTint()
                 .help(Text("Delete bookmark"))
             }
         }

@@ -49,6 +49,7 @@ struct WPECacheManagementView: View {
                         } label: {
                             Label("Clear All", systemImage: "trash")
                         }
+                        .destructiveControlTint()
                         .controlSize(.regular)
 
                         Button {
@@ -56,6 +57,7 @@ struct WPECacheManagementView: View {
                         } label: {
                             Label("Clear Unused > 30 days", systemImage: "calendar.badge.minus")
                         }
+                        .destructiveControlTint()
                         .controlSize(.regular)
                         .disabled(stats.entries.allSatisfy { ($0.lastUsed ?? .distantPast) > Date().addingTimeInterval(-30 * 86_400) })
 
@@ -158,6 +160,7 @@ struct WPECacheManagementView: View {
                 Image(systemName: "trash")
             }
             .buttonStyle(.borderless)
+            .destructiveControlTint()
             .help(Text("Remove cached files for \(entry.workshopID)"))
             .accessibilityLabel(Text("Remove cache for \(entry.workshopID)"))
         }

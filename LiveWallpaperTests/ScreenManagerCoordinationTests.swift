@@ -217,6 +217,49 @@ struct ScreenManagerCoordinationTests {
         }
     }
 
+    // MARK: - Wallpaper type lifecycle regressions
+
+    @Test("Switching to video without a saved video leaves the active HTML session intact")
+    func switchToVideoWithoutSavedVideoIsNonDestructive() async throws {
+        try await Self.runWithHTMLConfiguration { manager, screen in
+            let session = TestRuntimeSession(wallpaperType: .html)
+            screen.installRuntimeSession(session)
+
+            let capture = Self.attachConfigurationObserver()
+            defer { capture.detach() }
+
+            manager.switchToVideoWallpaper(for: screen)
+            await Self.drainMainQueue()
+
+            #expect(session.cleanupCount == 0)
+            #expect(Self.isSameSession(screen.runtimeSession, session))
+            #expect(manager.getConfiguration(for: screen)?.wallpaperType == .html)
+            #expect(capture.notifications.isEmpty)
+        }
+    }
+
+    @Test("Updating live HTML config hot-applies ordinary toggles without rebuilding the session")
+    func updateHTMLConfigHotAppliesWithoutRebuild() async throws {
+        try await Self.runWithHTMLConfiguration { manager, screen in
+            let session = TestRuntimeSession(wallpaperType: .html)
+            screen.installRuntimeSession(session)
+
+            var updated = HTMLConfig.default
+            updated.allowJavaScript = false
+            updated.allowMouseInteraction = true
+            updated.customCSS = "html { background: black; }"
+
+            try await Self.expectChange(notificationFor: screen) {
+                manager.updateHTMLConfig(updated, for: screen)
+            }
+
+            #expect(session.cleanupCount == 0)
+            #expect(Self.isSameSession(screen.runtimeSession, session))
+            #expect(session.appliedHTMLConfigs == [updated])
+            #expect(manager.getConfiguration(for: screen)?.htmlConfig == updated)
+        }
+    }
+
     // MARK: - Helpers
 
     private static func makeSuspendedTask() -> Task<Void, Never> {
@@ -278,6 +321,44 @@ struct ScreenManagerCoordinationTests {
         }
 
         try await body(manager, screen)
+    }
+
+    private static func runWithHTMLConfiguration(
+        _ body: (ScreenManager, Screen) async throws -> Void
+    ) async throws {
+        guard let screen = NSScreen.screens.first.map(Screen.init(nsScreen:)) else {
+            Issue.record("No NSScreen available for ScreenManager coordination test")
+            return
+        }
+        let originalConfigurations = SettingsManager.shared.loadConfigurations()
+        defer { SettingsManager.shared.replaceAllConfigurations(originalConfigurations) }
+
+        SettingsManager.shared.replaceAllConfigurations([
+            ScreenConfiguration(
+                screenID: screen.id,
+                wallpaper: .html(source: .inline("<html><body></body></html>"), config: .default),
+                savedVideoBookmarkData: nil
+            )
+        ])
+
+        let manager = ScreenManager(startupOptions: ScreenManagerStartupOptions(
+            restoreSavedWallpapers: false,
+            startAutomation: false,
+            powerMonitor: FakePowerMonitor(),
+            fullScreenDetector: FakeFullScreenDetector(),
+            playableVideoLoader: FakePlayableVideoLoader(),
+            displayRegistry: FakeDisplayRegistry(screens: [screen])
+        ))
+
+        try await body(manager, screen)
+    }
+
+    private static func isSameSession(
+        _ lhs: (any WallpaperRuntimeSession)?,
+        _ rhs: TestRuntimeSession
+    ) -> Bool {
+        guard let lhs else { return false }
+        return ObjectIdentifier(lhs as AnyObject) == ObjectIdentifier(rhs)
     }
 
     /// Snapshots notifications observed during `mutation`, asserting exactly
@@ -373,4 +454,38 @@ private final class ConfigurationNotificationCapture: @unchecked Sendable {
 
 private struct ScreenChangeRecord: Sendable {
     let screenID: CGDirectDisplayID?
+}
+
+@MainActor
+private final class TestRuntimeSession: WallpaperRuntimeSession, HTMLWallpaperConfigApplying {
+    let wallpaperType: WallpaperType
+    private(set) var cleanupCount = 0
+    private(set) var appliedHTMLConfigs: [HTMLConfig] = []
+
+    init(wallpaperType: WallpaperType) {
+        self.wallpaperType = wallpaperType
+    }
+
+    var summary: WallpaperSessionSummary {
+        WallpaperSessionSummary(
+            wallpaperType: wallpaperType,
+            activity: .active,
+            supportsPlaybackControl: false,
+            subtitle: nil
+        )
+    }
+
+    var videoPlayer: WallpaperVideoPlayer? { nil }
+    var wallpaperWindow: NSWindow? { nil }
+
+    func show() {}
+    func hide() {}
+    func applyPerformanceProfile(_ profile: WallpaperPerformanceProfile) {}
+    func updateFrame(to frame: CGRect) {}
+    func cleanup() { cleanupCount += 1 }
+
+    func applyHTMLConfig(_ config: HTMLConfig) -> Bool {
+        appliedHTMLConfigs.append(config)
+        return true
+    }
 }
