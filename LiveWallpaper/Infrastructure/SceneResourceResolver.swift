@@ -303,26 +303,7 @@ struct SceneResourceResolver: Sendable {
     /// Standardize the candidate URL and verify it falls under cache root.
     /// Mirrors `FolderURLSchemeHandler` and `WPECachedContentResolver`.
     private func resolveURL(for relativePath: String) throws -> URL {
-        // Component-level guard so a tampered relativePath cannot smuggle
-        // `..` or absolute segments past the textual check that misses
-        // mid-path components.
-        let components = relativePath.split(separator: "/", omittingEmptySubsequences: false)
-        if relativePath.hasPrefix("/")
-            || relativePath.contains("\\")
-            || components.contains("..")
-            || components.contains(".")
-            || components.contains("") {
-            throw ResolveError.pathEscape
-        }
-
-        let resolved = cacheRootURL
-            .appendingPathComponent(relativePath)
-            .standardizedFileURL
-            .resolvingSymlinksInPath()
-
-        let rootPath = cacheRootURL.path
-        let resolvedPath = resolved.path
-        guard resolvedPath == rootPath || resolvedPath.hasPrefix(rootPath + "/") else {
+        guard let resolved = WPEPathSafety.strictResourceURL(root: cacheRootURL, relativePath: relativePath) else {
             throw ResolveError.pathEscape
         }
         return resolved

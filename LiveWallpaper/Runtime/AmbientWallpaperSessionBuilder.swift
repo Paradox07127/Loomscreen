@@ -101,7 +101,7 @@ final class AmbientWallpaperSessionBuilder {
 
         // Re-validate cache path before joining — a tampered descriptor
         // with `..` segments must never escape application support.
-        guard isSafeCacheRelativePath(descriptor.cacheRelativePath) else {
+        guard WPEPathSafety.isSafeCacheRelativePath(descriptor.cacheRelativePath) else {
             Logger.warning("Scene descriptor cache path failed safety check: \(descriptor.cacheRelativePath)", category: .screenManager)
             return nil
         }
@@ -114,8 +114,7 @@ final class AmbientWallpaperSessionBuilder {
             .appendingPathComponent(descriptor.cacheRelativePath, isDirectory: true)
             .standardizedFileURL
             .resolvingSymlinksInPath()
-        let rootPath = safeSupportRoot.path
-        guard cacheURL.path == rootPath || cacheURL.path.hasPrefix(rootPath + "/") else {
+        guard WPEPathSafety.contains(cacheURL, in: safeSupportRoot) else {
             Logger.warning("Scene descriptor cache escapes app support: \(descriptor.cacheRelativePath)", category: .screenManager)
             return nil
         }
@@ -169,10 +168,4 @@ final class AmbientWallpaperSessionBuilder {
         return session
     }
 
-    private func isSafeCacheRelativePath(_ path: String) -> Bool {
-        path.hasPrefix("wpe-cache/")
-            && !path.contains("\\")
-            && !path.contains("..")
-            && !path.contains("//")
-    }
 }

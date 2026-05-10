@@ -114,6 +114,127 @@ struct WPEReconciliationTests {
         #expect(!WPEOrigin.matchesBookmark(Data([0xDE, 0xAD, 0xBE, 0xEF]), origin: origin))
     }
 
+    @Test("sourcePreviewURL rejects preview paths that escape the source folder")
+    func sourcePreviewURLRejectsTraversalPreviewName() throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("wpe-preview-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+
+        let bookmark = try folder.bookmarkData(
+            options: [.withSecurityScope],
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
+        let origin = WPEOrigin(
+            workshopID: "preview-traversal",
+            title: "Preview Traversal",
+            originalType: .scene,
+            sourceFolderBookmark: bookmark,
+            cacheRelativePath: nil,
+            previewFileName: "../secret.gif"
+        )
+
+        #expect(origin.sourcePreviewURL == nil)
+    }
+
+    @Test("sourcePreviewURL resolves valid previews under the source folder")
+    func sourcePreviewURLAcceptsNestedPreviewName() throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("wpe-preview-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let images = folder.appendingPathComponent("images", isDirectory: true)
+        try FileManager.default.createDirectory(at: images, withIntermediateDirectories: true)
+        let preview = images.appendingPathComponent("preview.gif")
+        try Data([0x47, 0x49, 0x46]).write(to: preview)
+
+        let bookmark = try folder.bookmarkData(
+            options: [.withSecurityScope],
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
+        let origin = WPEOrigin(
+            workshopID: "preview-valid",
+            title: "Preview Valid",
+            originalType: .scene,
+            sourceFolderBookmark: bookmark,
+            cacheRelativePath: nil,
+            previewFileName: "images/preview.gif"
+        )
+
+        let expectedPath = preview.standardizedFileURL.resolvingSymlinksInPath().path
+        #expect(origin.sourcePreviewURL?.path == expectedPath)
+    }
+
+    @Test("matchesBookmark rejects source-folder video entry paths that escape")
+    func matchesBookmarkRejectsSourceFolderVideoTraversalEntryFile() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("wpe-source-video-\(UUID().uuidString)", isDirectory: true)
+        let folder = root.appendingPathComponent("source", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let externalVideo = root.appendingPathComponent("secret.mp4")
+        try Data([0x00]).write(to: externalVideo)
+
+        let folderBookmark = try folder.bookmarkData(
+            options: [.withSecurityScope],
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
+        let videoBookmark = try externalVideo.bookmarkData(
+            options: [.withSecurityScope],
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
+        let origin = WPEOrigin(
+            workshopID: "source-video-traversal",
+            title: "Source Video Traversal",
+            originalType: .video,
+            sourceFolderBookmark: folderBookmark,
+            cacheRelativePath: nil,
+            previewFileName: nil,
+            entryFile: "../secret.mp4",
+            resourceLocation: .sourceFolder
+        )
+
+        #expect(!WPEOrigin.matchesBookmark(videoBookmark, origin: origin))
+    }
+
+    @Test("matchesBookmark accepts source-folder video entry paths inside the source folder")
+    func matchesBookmarkAcceptsSourceFolderVideoEntryFile() throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("wpe-source-video-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let video = folder.appendingPathComponent("media", isDirectory: true)
+            .appendingPathComponent("clip.mp4")
+        try FileManager.default.createDirectory(at: video.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data([0x00]).write(to: video)
+
+        let folderBookmark = try folder.bookmarkData(
+            options: [.withSecurityScope],
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
+        let videoBookmark = try video.bookmarkData(
+            options: [.withSecurityScope],
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
+        let origin = WPEOrigin(
+            workshopID: "source-video-valid",
+            title: "Source Video Valid",
+            originalType: .video,
+            sourceFolderBookmark: folderBookmark,
+            cacheRelativePath: nil,
+            previewFileName: nil,
+            entryFile: "media/clip.mp4",
+            resourceLocation: .sourceFolder
+        )
+
+        #expect(WPEOrigin.matchesBookmark(videoBookmark, origin: origin))
+    }
+
     @Test("matchesBookmark returns true for a real security-scoped bookmark inside the cache")
     func matchesBookmarkAcceptsRealBookmarkInsideCache() throws {
         // Build a temp directory that mimics ApplicationSupport/LiveWallpaper/wpe-cache/<id>/payload.mp4

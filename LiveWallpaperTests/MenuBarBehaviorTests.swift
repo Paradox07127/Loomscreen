@@ -15,7 +15,7 @@ struct MenuBarBehaviorTests {
 
     @Test("Removing a known WPE import drops it from the recents list")
     func removingKnownImportDropsIt() throws {
-        try withIsolatedGlobalSettings {
+        withIsolatedGlobalSettings {
             let manager = SettingsManager.shared
             manager.recordWPEImport(makeEntry("alpha"))
             manager.recordWPEImport(makeEntry("beta"))
@@ -29,7 +29,7 @@ struct MenuBarBehaviorTests {
 
     @Test("Removing an unknown WPE import is a no-op (no notification posted)")
     func removingUnknownImportIsNoOp() throws {
-        try withIsolatedGlobalSettings {
+        withIsolatedGlobalSettings {
             let manager = SettingsManager.shared
             manager.recordWPEImport(makeEntry("alpha"))
 
@@ -46,7 +46,7 @@ struct MenuBarBehaviorTests {
 
     @Test("Removing every entry leaves the recents list empty")
     func removingAllEntriesEmptiesList() throws {
-        try withIsolatedGlobalSettings {
+        withIsolatedGlobalSettings {
             let manager = SettingsManager.shared
             manager.recordWPEImport(makeEntry("one"))
             manager.recordWPEImport(makeEntry("two"))
@@ -59,7 +59,7 @@ struct MenuBarBehaviorTests {
 
     @Test("Recording an import posts a wpeHistoryDidChange notification")
     func recordingImportPostsNotification() throws {
-        try withIsolatedGlobalSettings {
+        withIsolatedGlobalSettings {
             let observer = NotificationObserver(name: .wpeHistoryDidChange)
             defer { observer.detach() }
 
@@ -104,7 +104,7 @@ struct MenuBarBehaviorTests {
     /// is mutate-then-save; this test enforces it stays that way.
     @Test("Mutating only the menu-bar toggles preserves the rest of GlobalSettings")
     func togglesPreserveOtherGlobalSettingsFields() throws {
-        try withIsolatedGlobalSettings {
+        withIsolatedGlobalSettings {
             let manager = SettingsManager.shared
             var seed = manager.loadGlobalSettings()
             seed.preservePlaybackOnLock = true

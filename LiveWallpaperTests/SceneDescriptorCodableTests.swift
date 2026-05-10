@@ -144,6 +144,45 @@ struct SceneDescriptorCodableTests {
         #expect(descriptor.dependencyWorkshopIDs == [])
     }
 
+    @Test("Legacy scene backfill rejects unsafe persisted origin paths")
+    func legacySceneBackfillRejectsUnsafeOriginPaths() throws {
+        let origin = WPEOrigin(
+            workshopID: "legacy-unsafe",
+            title: "Legacy Unsafe",
+            originalType: .scene,
+            sourceFolderBookmark: Data([0x01]),
+            cacheRelativePath: "wpe-cache/legacy-unsafe",
+            previewFileName: nil,
+            entryFile: "../scene.json",
+            resourceLocation: .cache
+        )
+
+        let payload: [String: Any] = [
+            "screenID": 17,
+            "wallpaperType": "Scene",
+            "videoBookmarkData": Data().base64EncodedString(),
+            "playbackSpeed": 1.0,
+            "fitMode": VideoFitMode.aspectFill.rawValue,
+            "frameRateLimit": FrameRateLimit.fps60.rawValue,
+            "particleEffect": ParticleEffect.none.rawValue,
+            "effectConfig": try JSONSerialization.jsonObject(with: JSONEncoder().encode(VideoEffectConfig.default)),
+            "shufflePlaylist": false,
+            "setAsLockScreen": false,
+            "wallpaperMode": "single",
+            "muted": true,
+            "wpeOrigin": try JSONSerialization.jsonObject(with: JSONEncoder().encode(origin))
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: .sortedKeys)
+
+        let decoded = try JSONDecoder().decode(ScreenConfiguration.self, from: data)
+
+        guard case .video(let bookmarkData) = decoded.activeWallpaper else {
+            Issue.record("Expected unsafe legacy scene backfill to fall back to empty video")
+            return
+        }
+        #expect(bookmarkData.isEmpty)
+    }
+
     @Test("Legacy ScreenConfiguration with wallpaperType=scene but no wpeOrigin falls back to empty video")
     func legacySceneWithoutOriginFallsBackToEmptyVideo() throws {
         let payload: [String: Any] = [

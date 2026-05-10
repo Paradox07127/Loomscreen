@@ -83,7 +83,7 @@ actor WallpaperEngineCache {
         var ids: Set<String> = []
         for child in children {
             let id = child.lastPathComponent
-            guard Self.isSafeWorkshopID(id) else { continue }
+            guard WPEPathSafety.isSafeWorkshopID(id) else { continue }
             guard (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
             if cacheHasPayload(child) {
                 ids.insert(id)
@@ -117,7 +117,7 @@ actor WallpaperEngineCache {
 
         for child in children {
             let workshopID = child.lastPathComponent
-            guard Self.isSafeWorkshopID(workshopID) else { continue }
+            guard WPEPathSafety.isSafeWorkshopID(workshopID) else { continue }
             guard (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
 
             let bytes = directoryByteCount(at: child)
@@ -147,7 +147,7 @@ actor WallpaperEngineCache {
         var freed: UInt64 = 0
         for child in children {
             let workshopID = child.lastPathComponent
-            guard Self.isSafeWorkshopID(workshopID) else { continue }
+            guard WPEPathSafety.isSafeWorkshopID(workshopID) else { continue }
             let bytes = directoryByteCount(at: child)
             do {
                 try fileManager.removeItem(at: child)
@@ -203,26 +203,19 @@ actor WallpaperEngineCache {
     }
 
     private func cacheDirectory(for workshopID: String) throws -> URL {
-        guard Self.isSafeWorkshopID(workshopID) else {
+        guard WPEPathSafety.isSafeWorkshopID(workshopID) else {
             throw WPECacheError.invalidWorkshopID(workshopID)
         }
         let root = rootURL.standardizedFileURL
         let candidate = root
             .appendingPathComponent(workshopID, isDirectory: true)
             .standardizedFileURL
-        guard candidate.path.hasPrefix(root.path + "/") else {
+        let canonicalRoot = root.resolvingSymlinksInPath()
+        let canonicalCandidate = candidate.resolvingSymlinksInPath()
+        guard WPEPathSafety.contains(canonicalCandidate, in: canonicalRoot) else {
             throw WPECacheError.invalidWorkshopID(workshopID)
         }
         return candidate
-    }
-
-    private static func isSafeWorkshopID(_ value: String) -> Bool {
-        !value.isEmpty
-            && value != "."
-            && value != ".."
-            && !value.contains("/")
-            && !value.contains("\\")
-            && !value.contains("..")
     }
 
     private func cacheHasPayload(_ cacheURL: URL) -> Bool {

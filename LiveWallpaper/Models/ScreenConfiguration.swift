@@ -329,9 +329,9 @@ struct ScreenConfiguration: Codable, Equatable {
               origin.originalType == .scene,
               origin.resourceLocation == .cache,
               let cacheRelativePath = origin.cacheRelativePath,
-              !cacheRelativePath.isEmpty,
+              WPEPathSafety.isSafeCacheRelativePath(cacheRelativePath),
               let entryFile = origin.entryFile,
-              !entryFile.isEmpty else {
+              WPEPathSafety.isSafeRelativePath(entryFile) else {
             return nil
         }
         return SceneDescriptor(

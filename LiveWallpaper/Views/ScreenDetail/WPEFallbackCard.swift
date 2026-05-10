@@ -269,15 +269,7 @@ struct WPEFallbackCard: View {
     }
 
     private var previewURL: URL? {
-        guard let previewName = origin.previewFileName else { return nil }
-        var isStale = false
-        guard let folder = try? URL(
-            resolvingBookmarkData: origin.sourceFolderBookmark,
-            options: .withSecurityScope,
-            relativeTo: nil,
-            bookmarkDataIsStale: &isStale
-        ) else { return nil }
-        return folder.appendingPathComponent(previewName)
+        origin.sourcePreviewURL
     }
 
     private func openWorkshop() {

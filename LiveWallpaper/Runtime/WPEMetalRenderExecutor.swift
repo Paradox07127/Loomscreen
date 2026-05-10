@@ -576,9 +576,12 @@ final class WPEMetalRenderExecutor {
         let descriptor = MTLRenderPipelineDescriptor()
         descriptor.vertexFunction = vertex
         descriptor.fragmentFunction = fragment
-        descriptor.colorAttachments[0].pixelFormat = colorPixelFormat
+        guard let colorAttachment = descriptor.colorAttachments[0] else {
+            throw WPEMetalRenderExecutorError.pipelineUnavailable(fragmentName)
+        }
+        colorAttachment.pixelFormat = colorPixelFormat
         descriptor.depthAttachmentPixelFormat = depthPixelFormat
-        applyBlendMode(normalizedBlend, to: descriptor.colorAttachments[0]!)
+        applyBlendMode(normalizedBlend, to: colorAttachment)
 
         let state = try device.makeRenderPipelineState(descriptor: descriptor)
         pipelines[key] = state
@@ -850,53 +853,7 @@ final class WPEMetalRenderExecutor {
     /// `unsupportedShader` until the full GLSL translator (Phase 2D-A/B)
     /// lands.
     fileprivate func normalizedBuiltinShaderName(_ shaderName: String) -> String {
-        let lower = shaderName.lowercased()
-        let withoutJSON = lower.hasSuffix(".json") ? String(lower.dropLast(5)) : lower
-        let stripped = withoutJSON.hasPrefix("materials/")
-            ? String(withoutJSON.dropFirst("materials/".count))
-            : withoutJSON
-
-        switch stripped {
-        case "solidcolor":
-            return "solidcolor"
-        case "solidlayer", "util/solidlayer", "models/util/solidlayer":
-            return "solidlayer"
-        case "copy", "commands/copy", "util/copy":
-            return "copy"
-        case "compose", "util/compose":
-            return "compose"
-        default:
-            if Self.isEffectAlias(stripped, family: "colorbalance") {
-                return "effect_colorbalance"
-            }
-            if Self.isEffectAlias(stripped, family: "blur") {
-                return "effect_blur"
-            }
-            if Self.isEffectAlias(stripped, family: "vignette") {
-                return "effect_vignette"
-            }
-            if Self.isEffectAlias(stripped, family: "water")
-                || Self.isEffectAlias(stripped, family: "distort") {
-                return "effect_water"
-            }
-            if Self.isEffectAlias(stripped, family: "shake") {
-                return "effect_shake"
-            }
-            if stripped.hasPrefix("genericimage") {
-                return "copy"
-            }
-            return stripped
-        }
-    }
-
-    /// Phase 2D-C: matches `<family>`, `effects/<family>`, and
-    /// `effects/<family>/<family>` so a Workshop effect-pass shader name
-    /// like `effects/water/water` (or its `materials/effects/...` form,
-    /// already pre-stripped above) resolves to the same builtin.
-    private static func isEffectAlias(_ shaderName: String, family: String) -> Bool {
-        shaderName == family
-            || shaderName == "effects/\(family)"
-            || shaderName == "effects/\(family)/\(family)"
+        WPEBuiltinShaderName.normalized(shaderName, genericImageAsCopy: true)
     }
 
     /// Phase 2D-C: scalar-uniform lookup that walks `pass.uniformValues`

@@ -108,6 +108,22 @@ struct WPEOrigin: Codable, Equatable, Sendable {
         originalType.localizedDisplayName
     }
 
+    var sourcePreviewURL: URL? {
+        guard let previewFileName,
+              let sourceFolder = WPEPathSafety.resolveSecurityScopedBookmark(sourceFolderBookmark) else {
+            return nil
+        }
+        return WPEPathSafety.resourceURL(root: sourceFolder, relativePath: previewFileName)
+    }
+
+    var sourceEntryURL: URL? {
+        guard let entryFile,
+              let sourceFolder = WPEPathSafety.resolveSecurityScopedBookmark(sourceFolderBookmark) else {
+            return nil
+        }
+        return WPEPathSafety.resourceURL(root: sourceFolder, relativePath: entryFile)
+    }
+
     /// Best-effort check that a security-scoped video/folder bookmark still
     /// points at this origin's WPE backing location. Used by ScreenManager
     /// to clear `wpeOrigin` when the user replaces the wallpaper with
@@ -125,10 +141,10 @@ struct WPEOrigin: Codable, Equatable, Sendable {
 
     private static func matchesCacheBookmark(_ bookmarkData: Data, origin: WPEOrigin) -> Bool {
         guard let cacheRel = origin.cacheRelativePath,
-              isSafeCacheRelativePath(cacheRel) else {
+              WPEPathSafety.isSafeCacheRelativePath(cacheRel) else {
             return false
         }
-        guard let resolved = resolveBookmark(bookmarkData) else { return false }
+        guard let resolved = WPEPathSafety.resolveSecurityScopedBookmark(bookmarkData) else { return false }
 
         guard let appSupport = try? FileManager.default.url(
             for: .applicationSupportDirectory,
@@ -145,8 +161,7 @@ struct WPEOrigin: Codable, Equatable, Sendable {
             .standardizedFileURL
         // Defense-in-depth: reject persisted paths that escape root after
         // standardization, even if they passed the textual safety check.
-        guard expectedURL.path == rootURL.path
-                || expectedURL.path.hasPrefix(rootURL.path + "/") else {
+        guard WPEPathSafety.contains(expectedURL, in: rootURL) else {
             return false
         }
         let resolvedPath = resolved.standardizedFileURL.path
@@ -154,16 +169,9 @@ struct WPEOrigin: Codable, Equatable, Sendable {
         return resolvedPath == expectedPath || resolvedPath.hasPrefix(expectedPath + "/")
     }
 
-    private static func isSafeCacheRelativePath(_ path: String) -> Bool {
-        path.hasPrefix("wpe-cache/")
-            && !path.contains("\\")
-            && !path.contains("..")
-            && !path.contains("//")
-    }
-
     private static func matchesSourceFolderBookmark(_ bookmarkData: Data, origin: WPEOrigin) -> Bool {
-        guard let resolved = resolveBookmark(bookmarkData),
-              let source = resolveBookmark(origin.sourceFolderBookmark) else {
+        guard let resolved = WPEPathSafety.resolveSecurityScopedBookmark(bookmarkData),
+              let source = WPEPathSafety.resolveSecurityScopedBookmark(origin.sourceFolderBookmark) else {
             return false
         }
         let resolvedPath = resolved.standardizedFileURL.resolvingSymlinksInPath().path
@@ -175,28 +183,13 @@ struct WPEOrigin: Codable, Equatable, Sendable {
         // video must match its declared `entryFile` exactly.
         switch origin.originalType {
         case .video:
-            guard let entryFile = origin.entryFile, !entryFile.isEmpty else { return false }
-            let expected = sourceURL
-                .appendingPathComponent(entryFile)
-                .standardizedFileURL
-                .resolvingSymlinksInPath()
-                .path
-            return resolvedPath == expected
+            guard let expected = origin.sourceEntryURL else { return false }
+            return resolvedPath == expected.path
         case .web:
             return resolvedPath == sourcePath
         case .scene, .application, .unknown:
             return false
         }
-    }
-
-    private static func resolveBookmark(_ data: Data) -> URL? {
-        var isStale = false
-        return try? URL(
-            resolvingBookmarkData: data,
-            options: .withSecurityScope,
-            relativeTo: nil,
-            bookmarkDataIsStale: &isStale
-        )
     }
 
     private static func defaultResourceLocation(

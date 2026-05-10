@@ -12,7 +12,7 @@ import Foundation
 struct SceneDescriptor: Codable, Equatable, Sendable {
     let workshopID: String
     /// Path beneath `Application Support/LiveWallpaper/` — must satisfy
-    /// `WPECachedContentResolver.isSafeCacheRelativePath`.
+    /// `WPEPathSafety.isSafeCacheRelativePath`.
     let cacheRelativePath: String
     /// Entry filename inside the cache root, e.g. `scene.json`.
     let entryFile: String

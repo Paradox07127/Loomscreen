@@ -82,6 +82,38 @@ struct WallpaperEnginePackageTests {
         }
     }
 
+    @Test("Rejects duplicate entries after path normalization")
+    func rejectsDuplicateCanonicalEntryPaths() {
+        let data = makePackage(entries: [
+            EntrySpec("models/./same.bin", [0x01]),
+            EntrySpec("models/same.bin", [0x02])
+        ])
+
+        #expect(throws: WPEPackageError.self) {
+            try WallpaperEnginePackage.parseIndex(of: data)
+        }
+    }
+
+    @Test("Streaming parser rejects duplicate entries after path normalization")
+    func streamingParserRejectsDuplicateCanonicalEntryPaths() throws {
+        let fileManager = FileManager.default
+        let root = temporaryRoot()
+        defer { try? fileManager.removeItem(at: root) }
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+        let url = root.appendingPathComponent("scene.pkg")
+        let data = makePackage(entries: [
+            EntrySpec("models//same.bin", [0x01]),
+            EntrySpec("models/same.bin", [0x02])
+        ])
+        try data.write(to: url)
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+
+        #expect(throws: WPEPackageError.self) {
+            try WallpaperEnginePackage.parseIndex(streamingFrom: handle)
+        }
+    }
+
     @Test("Parses UTF-8 names")
     func parsesUTF8Names() throws {
         let name = "材质/妃咲 60帧 .json"

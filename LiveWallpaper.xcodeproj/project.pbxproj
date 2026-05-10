@@ -93,14 +93,6 @@
 			);
 			sourceTree = "<group>";
 		};
-		0C9A00032D7350000033C48B /* Frameworks */ = {
-			isa = PBXGroup;
-			children = (
-				0C9A00012D7350000033C48B /* AppIntents.framework */,
-			);
-			name = Frameworks;
-			sourceTree = "<group>";
-		};
 		0C322BF02D6950480033C48B /* Products */ = {
 			isa = PBXGroup;
 			children = (
@@ -109,6 +101,14 @@
 				0C322C0A2D6950490033C48B /* LiveWallpaperUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		0C9A00032D7350000033C48B /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				0C9A00012D7350000033C48B /* AppIntents.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */

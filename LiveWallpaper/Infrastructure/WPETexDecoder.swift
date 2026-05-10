@@ -110,7 +110,8 @@ struct WPETexDecoder: Sendable {
         let frames = try parsed.bitmap.frames.enumerated().map { index, _ in
             let frameInfo = frameInfos?[safe: index]
             let imageID = frameInfo?.imageID ?? index
-            let duration = (frameInfo?.frameTime ?? 0) > 0 ? frameInfo!.frameTime : defaultDuration
+            let frameTime = frameInfo?.frameTime ?? 0
+            let duration = frameTime > 0 ? frameTime : defaultDuration
             let sourceIndex = parsed.bitmap.frames.indices.contains(imageID) ? imageID : index
             return WPETexAnimationFrame(
                 imageID: sourceIndex,
