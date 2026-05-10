@@ -201,11 +201,11 @@ private struct BookmarkCard: View {
                         .font(.system(size: 13))
                         .onSubmit(onCommitRename)
                 } else {
-                    Text(bookmark.label)
+                    Text(verbatim: bookmark.label)
                         .font(.system(size: 13, weight: .semibold))
                         .lineLimit(1)
                 }
-                Text(subtitle)
+                subtitle
                     .font(.system(size: 10))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -296,16 +296,19 @@ private struct BookmarkCard: View {
         }
     }
 
-    private var subtitle: String {
+    private var subtitle: Text {
         switch bookmark.content {
         case .video(let data):
-            return ResourceUtilities.resolveBookmarkName(data) ?? "Source missing"
+            if let name = ResourceUtilities.resolveBookmarkName(data) {
+                return Text(verbatim: name)
+            }
+            return Text("Source missing")
         case .html(let source, _):
-            return source.displayName
+            return Text(verbatim: source.displayName)
         case .metalShader(let preset):
-            return preset.rawValue
+            return Text(verbatim: preset.localizedTitle)
         case .scene(let descriptor):
-            return "Workshop \(descriptor.workshopID)"
+            return Text("Workshop \(descriptor.workshopID)", comment: "Bookmark subtitle for a Workshop scene. The placeholder is the Workshop ID.")
         }
     }
 }

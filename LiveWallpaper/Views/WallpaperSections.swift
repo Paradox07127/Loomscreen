@@ -10,7 +10,7 @@ struct WallpaperTypePicker: View {
     var body: some View {
         Picker("Wallpaper Type", selection: $selectedWallpaperType) {
             ForEach(WallpaperType.allCases) { type in
-                Label(type.rawValue, systemImage: type.iconName).tag(type)
+                Label(type.titleKey, systemImage: type.iconName).tag(type)
             }
         }
         .pickerStyle(.segmented)
@@ -62,17 +62,17 @@ struct ShaderWallpaperSection: View {
                                                 : .regular.interactive(),
                                             in: .circle
                                         )
-                                    Text(preset.rawValue)
+                                    Text(preset.titleKey)
                                         .font(.caption2)
                                         .foregroundStyle(selectedShaderPreset == preset ? .primary : .secondary)
                                 }
                                 .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(.plain)
-                            .accessibilityLabel(Text("\(preset.rawValue) shader"))
+                            .accessibilityLabel(shaderPresetAccessibilityLabel(preset))
                             .accessibilityHint(selectedShaderPreset == preset
                                 ? Text("Currently selected", comment: "A11y hint for the active shader preset button.")
-                                : Text("Switch to \(preset.rawValue) shader", comment: "A11y hint to switch to a shader preset; %@ is the preset name."))
+                                : shaderPresetSwitchHint(preset))
                         }
                     }
                 }
@@ -80,5 +80,35 @@ struct ShaderWallpaperSection: View {
             .padding(14)
         }
         .groupBoxStyle(ContainerGroupBoxStyle())
+    }
+
+    private func shaderPresetAccessibilityLabel(_ preset: MetalShaderPreset) -> Text {
+        switch preset {
+        case .waves:
+            return Text("Waves shader", comment: "A11y label for the Waves shader preset button.")
+        case .plasma:
+            return Text("Plasma shader", comment: "A11y label for the Plasma shader preset button.")
+        case .gradient:
+            return Text("Gradient shader", comment: "A11y label for the Gradient shader preset button.")
+        case .noise:
+            return Text("Noise shader", comment: "A11y label for the Noise shader preset button.")
+        case .aurora:
+            return Text("Aurora shader", comment: "A11y label for the Aurora shader preset button.")
+        }
+    }
+
+    private func shaderPresetSwitchHint(_ preset: MetalShaderPreset) -> Text {
+        switch preset {
+        case .waves:
+            return Text("Switch to Waves shader", comment: "A11y hint for the Waves shader preset button.")
+        case .plasma:
+            return Text("Switch to Plasma shader", comment: "A11y hint for the Plasma shader preset button.")
+        case .gradient:
+            return Text("Switch to Gradient shader", comment: "A11y hint for the Gradient shader preset button.")
+        case .noise:
+            return Text("Switch to Noise shader", comment: "A11y hint for the Noise shader preset button.")
+        case .aurora:
+            return Text("Switch to Aurora shader", comment: "A11y hint for the Aurora shader preset button.")
+        }
     }
 }

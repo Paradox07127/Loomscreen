@@ -24,7 +24,7 @@ struct HTMLSourceSection: View {
 
                 Picker("Source", selection: $selectedKind) {
                     ForEach(HTMLSourceKind.allCases) { kind in
-                        Label(kind.label, systemImage: kind.icon).tag(kind)
+                        Label(kind.labelKey, systemImage: kind.icon).tag(kind)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -90,7 +90,7 @@ struct HTMLSourceSection: View {
             HStack {
                 summaryLine(
                     icon: "doc.richtext",
-                    text: source.flatMap(fileSummary) ?? "No file chosen"
+                    text: source.flatMap(fileSummary).map { Text(verbatim: $0) } ?? Text("No file chosen")
                 )
                 Spacer()
                 Button("Choose…") { pickFile() }
@@ -107,7 +107,7 @@ struct HTMLSourceSection: View {
             HStack {
                 summaryLine(
                     icon: "folder",
-                    text: source.flatMap(folderSummary) ?? "No folder chosen"
+                    text: source.flatMap(folderSummary).map { Text(verbatim: $0) } ?? Text("No folder chosen")
                 )
                 Spacer()
                 Button("Choose…") { pickFolder() }
@@ -120,11 +120,11 @@ struct HTMLSourceSection: View {
     }
 
     @ViewBuilder
-    private func summaryLine(icon: String, text: String) -> some View {
+    private func summaryLine(icon: String, text: Text) -> some View {
         HStack(spacing: 6) {
             Image(systemName: icon)
                 .foregroundStyle(.secondary)
-            Text(text)
+            text
                 .font(.system(size: 12, design: .monospaced))
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -409,6 +409,7 @@ struct HTMLSourceSection: View {
 enum HTMLSourceKind: String, CaseIterable, Identifiable {
     case url, file, folder
     var id: String { rawValue }
+
     var label: String {
         switch self {
         case .url: return "URL"
@@ -416,6 +417,15 @@ enum HTMLSourceKind: String, CaseIterable, Identifiable {
         case .folder: return "Folder"
         }
     }
+
+    var labelKey: LocalizedStringKey {
+        switch self {
+        case .url: return "URL"
+        case .file: return "File"
+        case .folder: return "Folder"
+        }
+    }
+
     var icon: String {
         switch self {
         case .url: return "globe"

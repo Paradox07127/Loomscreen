@@ -28,6 +28,19 @@ struct LocalizationCoverageTests {
             )
         }
     }
+
+    @Test("String catalogs do not localize literal percent signs")
+    func stringCatalogsDoNotLocalizeLiteralPercentSigns() throws {
+        for catalogName in ["Localizable.xcstrings", "InfoPlist.xcstrings"] {
+            let catalog = try StringCatalog.load(named: catalogName)
+            let issues = catalog.literalPercentIssues()
+
+            #expect(
+                issues.isEmpty,
+                "\(catalogName) contains literal percent signs that should be formatted in code: \(issues.prefix(20).joined(separator: "; "))"
+            )
+        }
+    }
 }
 
 private struct StringCatalog: Decodable {
@@ -68,8 +81,21 @@ private struct StringCatalog: Decodable {
         }
     }
 
+    func literalPercentIssues() -> [String] {
+        strings.keys.sorted().flatMap { key in
+            let localizations = strings[key]?.localizations ?? [:]
+            return localizations.keys.sorted().compactMap { locale -> String? in
+                guard let value = localizations[locale]?.stringUnit?.value,
+                      Self.containsLiteralPercent(in: value) else {
+                    return nil
+                }
+                return "\(key) [\(locale)]"
+            }
+        }
+    }
+
     private static func placeholders(in value: String) -> [String] {
-        let pattern = #"%(?:(\d+)\$)?[+\- #0]*(?:\d+|\*)?(?:\.(?:\d+|\*))?[hlLzjtq]?[diuoxXfFeEgGaAcCsSp@]"#
+        let pattern = #"%(?:(\d+)\$)?[+\- #0]*(?:\d+|\*)?(?:\.(?:\d+|\*))?(?:hh|ll|[hlLzjtq])?[diuoxXfFeEgGaAcCsSp@]"#
         let expression = try? NSRegularExpression(pattern: pattern)
         let range = NSRange(value.startIndex..<value.endIndex, in: value)
         return expression?.matches(in: value, range: range).compactMap { match in
@@ -82,6 +108,16 @@ private struct StringCatalog: Decodable {
             $0.range(of: #"%\d+\$"#, options: .regularExpression) != nil
         }
         return usesExplicitPositions ? source.sorted() == localized.sorted() : source == localized
+    }
+
+    private static func containsLiteralPercent(in value: String) -> Bool {
+        let placeholderPattern = #"%(?:(\d+)\$)?[+\- #0]*(?:\d+|\*)?(?:\.(?:\d+|\*))?(?:hh|ll|[hlLzjtq])?[diuoxXfFeEgGaAcCsSp@]"#
+        guard let expression = try? NSRegularExpression(pattern: placeholderPattern) else {
+            return value.contains("%")
+        }
+        let range = NSRange(value.startIndex..<value.endIndex, in: value)
+        let stripped = expression.stringByReplacingMatches(in: value, range: range, withTemplate: "")
+        return stripped.contains("%")
     }
 
     struct Entry: Decodable {

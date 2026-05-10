@@ -1,3 +1,5 @@
+import SwiftUI
+
 enum FrameRateLimit: Int, CaseIterable, Identifiable, Codable {
     case fps30 = 30
     case fps60 = 60
@@ -12,6 +14,14 @@ enum FrameRateLimit: Int, CaseIterable, Identifiable, Codable {
     }
 
     var description: String {
+        switch self {
+        case .fps30: return "30 FPS"
+        case .fps60: return "60 FPS"
+        case .unlimited: return "Unlimited"
+        }
+    }
+
+    var titleKey: LocalizedStringKey {
         switch self {
         case .fps30: return "30 FPS"
         case .fps60: return "60 FPS"

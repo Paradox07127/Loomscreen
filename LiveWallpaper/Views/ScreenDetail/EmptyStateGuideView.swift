@@ -31,6 +31,7 @@ struct EmptyStateGuideView: View {
                         iconTint: .blue,
                         title: "Video",
                         subtitle: "MP4 / MOV files. Supports playlists and time-of-day schedules.",
+                        accessibilityLabel: "Video wallpaper type",
                         actionTitle: "Pick Video…",
                         actionSystemImage: "folder",
                         action: onChooseVideo
@@ -41,6 +42,7 @@ struct EmptyStateGuideView: View {
                         iconTint: .green,
                         title: "HTML",
                         subtitle: "Any web page or local HTML file. Particles and weather still apply.",
+                        accessibilityLabel: "HTML wallpaper type",
                         actionTitle: "Use HTML",
                         actionSystemImage: "arrow.right",
                         action: onChooseHTML
@@ -51,6 +53,7 @@ struct EmptyStateGuideView: View {
                         iconTint: .orange,
                         title: "Shader",
                         subtitle: "Built-in animated GPU shaders. Lightweight on the battery.",
+                        accessibilityLabel: "Shader wallpaper type",
                         actionTitle: "Use Shader",
                         actionSystemImage: "arrow.right",
                         action: onChooseShader
@@ -61,6 +64,7 @@ struct EmptyStateGuideView: View {
                         iconTint: .purple,
                         title: "Scene",
                         subtitle: "Steam Workshop scenes imported from Wallpaper Engine.",
+                        accessibilityLabel: "Scene wallpaper type",
                         actionTitle: "Use Scene",
                         actionSystemImage: "arrow.right",
                         action: onChooseScene
@@ -115,9 +119,10 @@ struct EmptyStateGuideView: View {
 private struct GuideCard: View {
     let icon: String
     let iconTint: Color
-    let title: String
-    let subtitle: String
-    let actionTitle: String
+    let title: LocalizedStringKey
+    let subtitle: LocalizedStringKey
+    let accessibilityLabel: LocalizedStringKey
+    let actionTitle: LocalizedStringKey
     let actionSystemImage: String
     let action: () -> Void
 
@@ -193,7 +198,7 @@ private struct GuideCard: View {
         .animation(DesignTokens.motion(reduceMotion, .spring(response: 0.32, dampingFraction: 0.86)), value: isHovering)
         .animation(DesignTokens.motion(reduceMotion, .spring(response: 0.32, dampingFraction: 0.86)), value: isFocused)
         .onHover { isHovering = $0 }
-        .accessibilityLabel("\(title) wallpaper type")
-        .accessibilityHint(subtitle)
+        .accessibilityLabel(Text(accessibilityLabel))
+        .accessibilityHint(Text(subtitle))
     }
 }

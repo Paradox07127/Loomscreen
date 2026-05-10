@@ -75,9 +75,9 @@ final class BookmarkStore {
         case .html(let source, _):
             return source.displayName
         case .metalShader(let preset):
-            return preset.rawValue
+            return preset.localizedTitle
         case .scene(let descriptor):
-            return "Scene \(descriptor.workshopID)"
+            return String(localized: "Scene \(descriptor.workshopID)", comment: "Default bookmark label for a Wallpaper Engine scene. The placeholder is the Workshop ID.")
         }
     }
 }

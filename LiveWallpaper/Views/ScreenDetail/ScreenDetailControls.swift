@@ -9,7 +9,7 @@ struct InfoBadge: View {
             Image(systemName: icon)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-            Text(text)
+            Text(verbatim: text)
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -98,25 +98,21 @@ struct FitModeButton: View {
                             : .regular.interactive(),
                         in: .circle
                     )
-                Text(mode.rawValue)
-                    .font(.system(size: 12, weight: isSelected ? .medium : .regular))
-                    .foregroundStyle(isSelected ? .primary : .secondary)
+                            Text(mode.titleKey)
+                                .font(.system(size: 12, weight: isSelected ? .medium : .regular))
+                                .foregroundStyle(isSelected ? .primary : .secondary)
             }
             .frame(maxWidth: .infinity)
         }
         .buttonStyle(.plain)
         .help(fitModeTooltip)
-        .accessibilityLabel(Text("\(mode.rawValue) fit mode"))
+        .accessibilityLabel(Text("\(Text(mode.titleKey)) fit mode", comment: "A11y label for a video fit mode button. The placeholder is the mode name."))
         .accessibilityHint(isSelected
             ? Text("Currently selected", comment: "A11y hint for the active fit mode button.")
-            : Text("Tap to switch to \(mode.rawValue) fit mode", comment: "A11y hint to switch fit mode; %@ is the mode name."))
+            : Text("Tap to switch to \(Text(mode.titleKey)) fit mode", comment: "A11y hint to switch fit mode. The placeholder is the mode name."))
     }
 
-    private var fitModeTooltip: String {
-        switch mode {
-        case .aspectFill: return "Fill: crop to fill screen"
-        case .aspectFit: return "Fit: show entire video"
-        case .stretch: return "Stretch: distort to fill"
-        }
+    private var fitModeTooltip: Text {
+        Text(mode.tooltipKey)
     }
 }

@@ -184,7 +184,12 @@ final class SceneRenderingController: WPESceneRenderer {
 
         for object in visibleLayers {
             processed += 1
-            onProgress?("Decoding \(processed)/\(totalLayers) textures…")
+            onProgress?(
+                String(
+                    localized: "Decoding \(processed)/\(totalLayers) textures…",
+                    comment: "Scene loading progress. Placeholders are decoded layer count and total layer count."
+                )
+            )
             do {
                 let cgImage = try imageResolver.resolveImage(relativePath: object.imageRelativePath)
                 let texture = SKTexture(cgImage: cgImage)

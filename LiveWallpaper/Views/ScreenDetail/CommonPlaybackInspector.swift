@@ -81,7 +81,9 @@ struct CommonPlaybackInspector: View {
             icon: isMuted ? "speaker.slash" : "speaker.wave.2",
             iconColor: isMuted ? .secondary : .blue,
             title: "Audio",
-            subtitle: isMuted ? "Muted (default)" : "Routed through system output"
+            subtitle: isMuted
+                ? LocalizedStringKey("Muted (default)")
+                : LocalizedStringKey("Routed through system output")
         ) {
             Toggle("", isOn: Binding(
                 get: { !mutedBinding.wrappedValue },
@@ -102,7 +104,7 @@ struct CommonPlaybackInspector: View {
         ) {
             Picker("", selection: $frameRateLimit) {
                 ForEach(FrameRateLimit.allCases) { limit in
-                    Text(limit.description).tag(limit)
+                    Text(limit.titleKey).tag(limit)
                 }
             }
             .labelsHidden()
@@ -111,7 +113,7 @@ struct CommonPlaybackInspector: View {
                 screenManager.updateFrameRateLimit(newValue, for: screen)
             }
             .accessibilityLabel(Text("Frame rate limit"))
-            .accessibilityValue(frameRateLimit.description)
+            .accessibilityValue(Text(frameRateLimit.titleKey))
         }
     }
 
@@ -150,8 +152,8 @@ struct CommonPlaybackInspector: View {
             iconColor: .purple,
             title: "Clear Data on Exit",
             subtitle: htmlConfig.wrappedValue.useEphemeralStorage
-                ? "Browsing data is cleared on each session"
-                : "Browsing data is saved across sessions"
+                ? LocalizedStringKey("Browsing data is cleared on each session")
+                : LocalizedStringKey("Browsing data is saved across sessions")
         ) {
             Toggle("", isOn: htmlConfigBinding(htmlConfig, keyPath: \.useEphemeralStorage))
                 .labelsHidden()

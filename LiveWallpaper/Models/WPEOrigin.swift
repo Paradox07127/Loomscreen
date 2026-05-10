@@ -104,6 +104,10 @@ struct WPEOrigin: Codable, Equatable, Sendable {
         }
     }
 
+    var localizedDisplayTypeName: String {
+        originalType.localizedDisplayName
+    }
+
     /// Best-effort check that a security-scoped video/folder bookmark still
     /// points at this origin's WPE backing location. Used by ScreenManager
     /// to clear `wpeOrigin` when the user replaces the wallpaper with
@@ -231,6 +235,21 @@ enum WPEType: String, Codable, Equatable, Sendable {
         case "scene":       self = .scene
         case "application": self = .application
         default:            self = .unknown
+        }
+    }
+
+    var localizedDisplayName: String {
+        switch self {
+        case .video:
+            return String(localized: "Video", defaultValue: "Video", comment: "Wallpaper Engine project type.")
+        case .web:
+            return String(localized: "Web", defaultValue: "Web", comment: "Wallpaper Engine project type.")
+        case .scene:
+            return String(localized: "Scene", defaultValue: "Scene", comment: "Wallpaper Engine project type.")
+        case .application:
+            return String(localized: "App", defaultValue: "App", comment: "Wallpaper Engine project type.")
+        case .unknown:
+            return String(localized: "Unknown", defaultValue: "Unknown", comment: "Wallpaper Engine project type.")
         }
     }
 }

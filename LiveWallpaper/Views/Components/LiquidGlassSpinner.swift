@@ -44,7 +44,7 @@ struct LiquidGlassSpinner: View {
             .frame(width: size, height: size)
 
             if let progressText {
-                Text(progressText)
+                Text(verbatim: progressText)
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.white.opacity(0.92))
                     .multilineTextAlignment(.center)
@@ -55,7 +55,7 @@ struct LiquidGlassSpinner: View {
                     // floating as plain white text on the blurred
                     // wallpaper background.
                     .background(.ultraThinMaterial, in: Capsule())
-                    .accessibilityLabel(progressText)
+                    .accessibilityLabel(Text(verbatim: progressText))
             }
         }
         .onAppear { animate = true }

@@ -3,16 +3,19 @@ import AppKit
 
 struct AppRuntimeOptions: Equatable {
     let isTesting: Bool
+    let opensSettingsForUITesting: Bool
 
     var shouldRestoreSavedWallpapers: Bool { !isTesting }
     var shouldStartAutomation: Bool { !isTesting }
     var shouldShowOnboarding: Bool { !isTesting }
+    var shouldOpenSettingsOnLaunch: Bool { opensSettingsForUITesting }
 
     init(
         arguments: [String] = ProcessInfo.processInfo.arguments,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         isXCTestLoaded: Bool = AppRuntimeOptions.isXCTestLoaded()
     ) {
+        opensSettingsForUITesting = arguments.contains("--open-settings-for-ui-testing")
         isTesting = arguments.contains("--ui-testing")
             || environment["LIVEWALLPAPER_TESTING"] == "1"
             || environment["LIVEWALLPAPER_UI_TESTING"] == "1"
@@ -32,6 +35,7 @@ struct AppStartupPlan: Equatable {
     let refreshScreensAfterManagerCreation: Bool
     let reloadWallpapersAfterLaunch: Bool
     let showOnboarding: Bool
+    let showSettingsOnLaunch: Bool
 
     init(runtimeOptions: AppRuntimeOptions, onboardingCompleted: Bool) {
         screenManagerOptions = ScreenManagerStartupOptions(
@@ -41,6 +45,7 @@ struct AppStartupPlan: Equatable {
         refreshScreensAfterManagerCreation = false
         reloadWallpapersAfterLaunch = false
         showOnboarding = runtimeOptions.shouldShowOnboarding && !onboardingCompleted
+        showSettingsOnLaunch = runtimeOptions.shouldOpenSettingsOnLaunch
     }
 }
 
@@ -101,7 +106,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         Logger.notice("Application startup complete", category: .startup)
 
-        if startupPlan.showOnboarding {
+        if startupPlan.showSettingsOnLaunch {
+            DispatchQueue.main.async { [weak self] in
+                self?.showSettings()
+            }
+        } else if startupPlan.showOnboarding {
             DispatchQueue.main.async { [weak self] in
                 self?.showOnboarding()
             }

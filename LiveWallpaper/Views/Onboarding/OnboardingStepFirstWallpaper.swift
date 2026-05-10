@@ -27,11 +27,11 @@ struct OnboardingStepFirstWallpaper: View {
             Spacer().frame(height: 32)
 
             VStack(spacing: 8) {
-                Text(headerTitle)
+                Text(verbatim: headerTitle)
                     .font(.system(size: 24, weight: .bold, design: .rounded))
                     .accessibilityAddTraits(.isHeader)
 
-                Text(headerSubtitle)
+                Text(verbatim: headerSubtitle)
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -446,7 +446,7 @@ private struct HTMLPickerSheet: View {
 
             Picker("Source", selection: $selectedKind) {
                 ForEach(PickerKind.allCases) { kind in
-                    Label(kind.label, systemImage: kind.icon).tag(kind)
+                    Label(kind.labelKey, systemImage: kind.icon).tag(kind)
                 }
             }
             .pickerStyle(.segmented)
@@ -583,6 +583,7 @@ private struct HTMLPickerSheet: View {
 private enum PickerKind: String, CaseIterable, Identifiable {
     case url, file, folder
     var id: String { rawValue }
+
     var label: String {
         switch self {
         case .url: return "URL"
@@ -590,6 +591,15 @@ private enum PickerKind: String, CaseIterable, Identifiable {
         case .folder: return "Folder"
         }
     }
+
+    var labelKey: LocalizedStringKey {
+        switch self {
+        case .url: return "URL"
+        case .file: return "File"
+        case .folder: return "Folder"
+        }
+    }
+
     var icon: String {
         switch self {
         case .url: return "globe"
@@ -729,7 +739,7 @@ private struct ScreenThumbnailCard: View {
                     Text(verbatim: screen.name)
                         .font(.system(size: 13, weight: .medium))
                         .lineLimit(1)
-                    Text("\(Int(screen.frame.width)) × \(Int(screen.frame.height))")
+                    Text(verbatim: "\(Int(screen.frame.width)) × \(Int(screen.frame.height))")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }

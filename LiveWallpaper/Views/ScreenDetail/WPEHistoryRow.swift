@@ -31,7 +31,7 @@ struct WPEHistoryRow: View {
                     )
                     .overlay(alignment: .topTrailing) {
                         if let badge = compatibilityBadge {
-                            Text(badge.label)
+                            Text(badge.titleKey)
                                 .font(.system(size: 9, weight: .semibold))
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
@@ -43,7 +43,7 @@ struct WPEHistoryRow: View {
                     }
 
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(entry.origin.title)
+                    Text(verbatim: entry.origin.title)
                         .font(.system(size: 13, weight: .medium))
                         .lineLimit(2)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -52,7 +52,7 @@ struct WPEHistoryRow: View {
                         Circle()
                             .fill(typeColor)
                             .frame(width: 6, height: 6)
-                        Text(entry.origin.displayTypeName)
+                        Text(verbatim: entry.origin.localizedDisplayTypeName)
                             .font(.system(size: 11))
                             .foregroundStyle(.secondary)
 
@@ -134,25 +134,25 @@ struct WPEHistoryRow: View {
     /// (likely degraded), and Won't Run (Windows plugin / unknown).
     /// We deliberately keep this conservative: PNG/JPG video and web
     /// imports get no badge; scene + application + unknown carry one.
-    private var compatibilityBadge: (label: String, tint: Color, accessibility: String)? {
+    private var compatibilityBadge: (titleKey: LocalizedStringKey, tint: Color, accessibility: Text)? {
         switch entry.origin.originalType {
         case .video, .web:
             return nil
         case .application:
-            return ("Won't run", .orange, "Wallpaper requires a Windows executable; cannot run on macOS")
+            return ("Won't run", .orange, Text("Wallpaper requires a Windows executable; cannot run on macOS"))
         case .scene:
             if entry.origin.requiresWindowsPlugin {
-                return ("Won't run", .orange, "Wallpaper bundles a Windows DLL plugin; cannot run on macOS")
+                return ("Won't run", .orange, Text("Wallpaper bundles a Windows DLL plugin; cannot run on macOS"))
             }
             if !entry.origin.missingDependencyIDs.isEmpty {
-                return ("Needs deps", .yellow, "Wallpaper depends on Workshop projects you haven't subscribed to")
+                return ("Needs deps", .yellow, Text("Wallpaper depends on Workshop projects you haven't subscribed to"))
             }
             // Phase 2.1: scenes are renderable when image-only; default
             // tier is best-effort, so we tag them Experimental until the
             // import service can persist a richer capability summary.
-            return ("Experimental", .yellow, "Scene wallpapers are rendered with the Phase 2.1 image-only engine")
+            return ("Experimental", .yellow, Text("Scene wallpapers are rendered with the Phase 2.1 image-only engine"))
         case .unknown:
-            return ("Untested", .gray, "Wallpaper Engine project type is unknown")
+            return ("Untested", .gray, Text("Wallpaper Engine project type is unknown"))
         }
     }
 }

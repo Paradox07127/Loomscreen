@@ -61,7 +61,7 @@ struct GeneralSettingsView: View {
         .alert("Configuration Validation", isPresented: $showingValidationResults) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text(validationMessage)
+            Text(verbatim: validationMessage)
         }
     }
 
@@ -227,7 +227,7 @@ struct GeneralSettingsView: View {
                                 .font(.subheadline)
                                 .foregroundStyle(.primary)
                             Spacer()
-                            Text("\(Int((minimumBatteryLevel ?? 0.2) * 100))%")
+                            Text(verbatim: FormatUtils.formatFractionAsPercent(minimumBatteryLevel ?? 0.2))
                                 .font(.headline)
                                 .foregroundStyle(
                                     (minimumBatteryLevel ?? 0.2) < 0.2 ? .red :
@@ -244,7 +244,7 @@ struct GeneralSettingsView: View {
                             }
                         ), in: 0.05...0.5, step: 0.05)
                         .accessibilityLabel(Text("Minimum battery level"))
-                        .accessibilityValue(Text("\(Int((minimumBatteryLevel ?? 0.2) * 100)) percent"))
+                        .accessibilityValue(Text(verbatim: FormatUtils.formatFractionAsPercent(minimumBatteryLevel ?? 0.2)))
                         .accessibilityHint(Text("Set the battery level below which wallpapers will pause"))
                     }
                     .padding(.leading, 52)
@@ -278,7 +278,7 @@ struct GeneralSettingsView: View {
                     .font(.title2)
                     .fontWeight(.semibold)
 
-                Text(versionString)
+                Text(verbatim: versionString)
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
@@ -365,17 +365,17 @@ struct GeneralSettingsView: View {
         let connectedInvalid = invalid - disconnectedInvalid
 
         if invalid == 0 {
-            validationMessage = "✅ All \(valid) configurations are valid."
+            validationMessage = String(localized: "✅ All \(valid) configurations are valid.", comment: "Validation success message. The placeholder is the valid configuration count.")
         } else {
-            validationMessage = "Validation complete: \(valid) of \(valid + invalid) configurations are valid.\n\n"
+            validationMessage = String(localized: "Validation complete: \(valid) of \(valid + invalid) configurations are valid.\n\n", comment: "Validation summary. Placeholders are valid count and total count.")
 
             if disconnectedInvalid > 0 {
-                validationMessage += "• \(disconnectedInvalid) invalid configurations are for disconnected screens.\n"
+                validationMessage += String(localized: "• \(disconnectedInvalid) invalid configurations are for disconnected screens.\n", comment: "Validation detail. The placeholder is the invalid disconnected-screen count.")
             }
 
             if connectedInvalid > 0 {
-                validationMessage += "• \(connectedInvalid) invalid configurations are for connected screens.\n"
-                validationMessage += "\nYou may need to reconfigure these screens."
+                validationMessage += String(localized: "• \(connectedInvalid) invalid configurations are for connected screens.\n", comment: "Validation detail. The placeholder is the invalid connected-screen count.")
+                validationMessage += String(localized: "\nYou may need to reconfigure these screens.", defaultValue: "\nYou may need to reconfigure these screens.", comment: "Validation follow-up guidance.")
             }
         }
 

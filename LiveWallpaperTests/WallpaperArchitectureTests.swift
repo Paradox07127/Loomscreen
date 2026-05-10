@@ -158,6 +158,21 @@ struct AppRuntimeOptionsTests {
         #expect(options.shouldShowOnboarding == false)
     }
 
+    @Test("UI launch tests can request settings on launch without restoring wallpapers")
+    func uiLaunchTestingCanOpenSettingsOnLaunch() {
+        let options = AppRuntimeOptions(
+            arguments: ["LiveWallpaper", "--ui-testing", "--open-settings-for-ui-testing"],
+            environment: [:],
+            isXCTestLoaded: false
+        )
+        let plan = AppStartupPlan(runtimeOptions: options, onboardingCompleted: true)
+
+        #expect(plan.screenManagerOptions.restoreSavedWallpapers == false)
+        #expect(plan.screenManagerOptions.startAutomation == false)
+        #expect(plan.showOnboarding == false)
+        #expect(plan.showSettingsOnLaunch == true)
+    }
+
     @Test("XCTest host environment disables live wallpaper startup")
     func xctestEnvironmentDisablesLiveWallpaperStartup() {
         let options = AppRuntimeOptions(

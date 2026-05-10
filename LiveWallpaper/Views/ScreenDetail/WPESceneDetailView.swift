@@ -32,7 +32,7 @@ struct WPESceneDetailView: View {
         .glassEffect(.regular, in: .rect(cornerRadius: 24))
         .shadow(color: .black.opacity(0.18), radius: 8, y: 4)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(Text("\(origin.title). Scene wallpaper. \(stateAccessibilityText)"))
+        .accessibilityLabel(Text("\(origin.title). Scene wallpaper. \(stateAccessibilityText)", comment: "A11y label for a Wallpaper Engine scene detail card. Placeholders are scene title and state."))
         .task(id: descriptor.workshopID) {
             await refreshState()
         }
@@ -110,7 +110,7 @@ struct WPESceneDetailView: View {
                 Image(systemName: "pause.circle.fill")
                     .font(.largeTitle)
                     .foregroundStyle(.white.opacity(0.85))
-                Text(reason.label)
+                Text(reason.labelKey)
                     .font(.headline)
                     .foregroundStyle(.white)
             }
@@ -125,10 +125,10 @@ struct WPESceneDetailView: View {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.largeTitle)
                     .foregroundStyle(.yellow)
-                Text(errorTitle(for: reason))
+                errorTitle(for: reason)
                     .font(.headline)
                     .foregroundStyle(.white)
-                Text(errorBody(for: reason))
+                errorBody(for: reason)
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.85))
                     .multilineTextAlignment(.center)
@@ -140,48 +140,51 @@ struct WPESceneDetailView: View {
     /// Inline copy that avoids nesting a full `WPEFallbackCard` (with its
     /// own glass background) inside this card. Mirrors the WPEFallbackCard
     /// strings so users see consistent language across surfaces.
-    private func errorTitle(for reason: FallbackReason) -> String {
+    private func errorTitle(for reason: FallbackReason) -> Text {
         switch reason {
-        case .unsupportedType:        return "Scene format not supported"
-        case .sceneParseFailed:       return "Couldn't read scene.json"
-        case .sceneShaderUnsupported: return "Scene uses unsupported shaders"
-        case .sceneResourceMissing:   return "Some scene assets are missing"
+        case .unsupportedType:        return Text("Scene format not supported")
+        case .sceneParseFailed:       return Text("Couldn't read scene.json")
+        case .sceneShaderUnsupported: return Text("Scene uses unsupported shaders")
+        case .sceneResourceMissing:   return Text("Some scene assets are missing")
         case .missingDependency(let ids):
-            return "Missing \(ids.count) Workshop \(ids.count == 1 ? "dependency" : "dependencies")"
-        case .requiresWindowsPlugin:  return "Windows plugin required"
-        case .texContainerUnsupported: return "Unknown texture container"
-        case .texUnsupportedFormat:    return "Texture format not supported"
-        case .texDecodeFailed:         return "Texture decode failed"
+            if ids.count == 1 {
+                return Text("Missing 1 Workshop dependency")
+            }
+            return Text("Missing \(ids.count) Workshop dependencies", comment: "Scene error title. The placeholder is the number of missing Workshop dependencies.")
+        case .requiresWindowsPlugin:  return Text("Windows plugin required")
+        case .texContainerUnsupported: return Text("Unknown texture container")
+        case .texUnsupportedFormat:    return Text("Texture format not supported")
+        case .texDecodeFailed:         return Text("Texture decode failed")
         }
     }
 
-    private func errorBody(for reason: FallbackReason) -> String {
+    private func errorBody(for reason: FallbackReason) -> Text {
         switch reason {
         case .unsupportedType:
-            return "We can't render this scene's feature set yet."
+            return Text("We can't render this scene's feature set yet.")
         case .sceneParseFailed(let detail):
-            return detail
+            return Text(verbatim: detail)
         case .sceneShaderUnsupported:
-            return "Phase 2.0 ships an image-only renderer."
+            return Text("Phase 2.0 ships an image-only renderer.")
         case .sceneResourceMissing:
-            return "Image layers couldn't be located inside the cache."
+            return Text("Image layers couldn't be located inside the cache.")
         case .missingDependency(let ids):
             // Cap visible IDs so a composite scene with many deps doesn't
             // explode the inline overlay; the full list is still rendered
             // by `WPEFallbackCard` when the user navigates to the error.
             if ids.count <= 2 {
-                return "Subscribe to \(ids.joined(separator: ", ")) in Steam, then re-import."
+                return Text("Subscribe to \(ids.joined(separator: ", ")) in Steam, then re-import.", comment: "Scene dependency recovery hint. The placeholder is one or two Workshop IDs.")
             }
             let head = ids.prefix(2).joined(separator: ", ")
-            return "Subscribe to \(head) and \(ids.count - 2) more in Steam, then re-import."
+            return Text("Subscribe to \(head) and \(ids.count - 2) more in Steam, then re-import.", comment: "Scene dependency recovery hint. Placeholders are Workshop IDs and the remaining count.")
         case .requiresWindowsPlugin:
-            return "macOS can't load Windows native plugins."
+            return Text("macOS can't load Windows native plugins.")
         case .texContainerUnsupported(let magic):
-            return "Container \(magic) — Phase 2.x will add it."
+            return Text("Container \(magic) — Phase 2.x will add it.", comment: "Texture error detail. The placeholder is a texture container magic value.")
         case .texUnsupportedFormat(let code):
-            return "Format \(code) — not yet decoded."
+            return Text("Format \(code) — not yet decoded.", comment: "Texture error detail. The placeholder is a texture format code.")
         case .texDecodeFailed(let detail):
-            return detail
+            return Text(verbatim: detail)
         }
     }
 
@@ -198,13 +201,13 @@ struct WPESceneDetailView: View {
     private var metadata: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(origin.title)
+                Text(verbatim: origin.title)
                     .font(.title3.bold())
                 Spacer()
                 statusPill
             }
             HStack(spacing: 6) {
-                Text("Workshop ID \(origin.workshopID) · capability: \(descriptor.capabilityTier.rawValue)")
+                Text("Workshop ID \(origin.workshopID) · capability: \(descriptor.capabilityTier.localizedLabel)", comment: "Scene metadata row. Placeholders are Workshop ID and capability tier.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 // Tiny info glyph hints that there's a developer panel
@@ -244,10 +247,10 @@ struct WPESceneDetailView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Renderer Diagnostics")
                 .font(.caption.bold())
-            Text("Capability: \(descriptor.capabilityTier.rawValue) · Phase 2.1")
+            Text("Capability: \(descriptor.capabilityTier.localizedLabel) · Phase 2.1", comment: "Renderer diagnostics capability row. The placeholder is the capability tier.")
                 .font(.caption.monospaced())
                 .foregroundStyle(.secondary)
-            Text(diagnosticText)
+            Text(verbatim: diagnosticText)
                 .font(.caption.monospaced())
                 .foregroundStyle(.secondary)
                 .lineLimit(4)
@@ -257,7 +260,7 @@ struct WPESceneDetailView: View {
         .padding(12)
         .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(Text("Renderer diagnostics: capability \(descriptor.capabilityTier.rawValue). \(diagnosticText)"))
+        .accessibilityLabel(Text("Renderer diagnostics: capability \(descriptor.capabilityTier.localizedLabel). \(diagnosticText)", comment: "A11y label for renderer diagnostics. Placeholders are capability tier and diagnostic text."))
     }
 
     private var statusPill: some View {
@@ -265,7 +268,7 @@ struct WPESceneDetailView: View {
             Circle()
                 .fill(statusColor)
                 .frame(width: 8, height: 8)
-            Text(stateLabel)
+            Text(verbatim: stateLabel)
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.primary)
         }
@@ -413,27 +416,39 @@ struct WPESceneDetailView: View {
 
     private var stateLabel: String {
         switch state {
-        case .idle:            return "Idle"
-        case .loading:         return "Loading"
-        case .playing:         return "Playing"
+        case .idle:
+            return String(localized: "Idle", defaultValue: "Idle", comment: "Scene renderer state.")
+        case .loading:
+            return String(localized: "Loading", defaultValue: "Loading", comment: "Scene renderer state.")
+        case .playing:
+            return String(localized: "Playing", defaultValue: "Playing", comment: "Scene renderer state.")
         // Phase 2B: the Metal experimental backend renders one frame at
         // load and pauses the displaylink, so the detail card shows a
         // static thumbnail. Surface that explicitly so the user does not
         // mistake a frozen frame for a hung renderer.
-        case .playingSnapshot: return "Static Preview"
-        case .paused:          return "Paused"
-        case .error:           return "Error"
+        case .playingSnapshot:
+            return String(localized: "Static Preview", defaultValue: "Static Preview", comment: "Scene renderer state.")
+        case .paused:
+            return String(localized: "Paused", defaultValue: "Paused", comment: "Scene renderer state.")
+        case .error:
+            return String(localized: "Error", defaultValue: "Error", comment: "Scene renderer state.")
         }
     }
 
     private var stateAccessibilityText: String {
         switch state {
-        case .idle:            return "Idle"
-        case .loading:         return "Loading scene assets"
-        case .playing:         return "Scene playing"
-        case .playingSnapshot: return "Scene preview, static"
-        case .paused(let reason): return "Paused, \(reason.label)"
-        case .error:           return "Scene cannot be played"
+        case .idle:
+            return String(localized: "Idle", defaultValue: "Idle", comment: "Scene renderer accessibility state.")
+        case .loading:
+            return String(localized: "Loading scene assets", defaultValue: "Loading scene assets", comment: "Scene renderer accessibility state.")
+        case .playing:
+            return String(localized: "Scene playing", defaultValue: "Scene playing", comment: "Scene renderer accessibility state.")
+        case .playingSnapshot:
+            return String(localized: "Scene preview, static", defaultValue: "Scene preview, static", comment: "Scene renderer accessibility state.")
+        case .paused(let reason):
+            return String(localized: "Paused, \(reason.localizedLabel)", comment: "Scene renderer accessibility state. The placeholder is the pause reason.")
+        case .error:
+            return String(localized: "Scene cannot be played", defaultValue: "Scene cannot be played", comment: "Scene renderer accessibility state.")
         }
     }
 
@@ -514,6 +529,28 @@ enum PausedReason: Equatable, Sendable {
         case .throttled:    return "Throttled"
         case .suspended:    return "Suspended"
         case .previewUnavailable: return "Preview Unavailable"
+        }
+    }
+
+    var labelKey: LocalizedStringKey {
+        switch self {
+        case .reduceMotion: return "Reduce Motion"
+        case .throttled:    return "Throttled"
+        case .suspended:    return "Suspended"
+        case .previewUnavailable: return "Preview Unavailable"
+        }
+    }
+
+    var localizedLabel: String {
+        switch self {
+        case .reduceMotion:
+            return String(localized: "Reduce Motion", defaultValue: "Reduce Motion", comment: "Scene pause reason.")
+        case .throttled:
+            return String(localized: "Throttled", defaultValue: "Throttled", comment: "Scene pause reason.")
+        case .suspended:
+            return String(localized: "Suspended", defaultValue: "Suspended", comment: "Scene pause reason.")
+        case .previewUnavailable:
+            return String(localized: "Preview Unavailable", defaultValue: "Preview Unavailable", comment: "Scene pause reason.")
         }
     }
 }

@@ -53,9 +53,9 @@ struct WPESceneSection: View {
             }
         } message: { error in
             VStack(alignment: .leading) {
-                Text(error.localizedDescription)
+                Text(verbatim: error.localizedDescription)
                 if let suggestion = error.recoverySuggestion {
-                    Text(suggestion).font(.caption)
+                    Text(verbatim: suggestion).font(.caption)
                 }
             }
         }

@@ -27,7 +27,7 @@ struct FrameRateControlView: View {
                         Text("Effective:")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        Text(effectiveRate)
+                        Text(verbatim: effectiveRate)
                             .font(.caption)
                             .fontWeight(.medium)
                             .foregroundStyle(.primary)
@@ -46,7 +46,7 @@ struct FrameRateControlView: View {
                             Image(systemName: option.iconName)
                                 .font(.system(size: 14))
                                 .foregroundStyle(selectedLimit == option ? Color.accentColor : Color.gray)
-                            Text(option.description)
+                            Text(option.titleKey)
                                 .font(.caption2)
                         }
                         .frame(maxWidth: .infinity)
