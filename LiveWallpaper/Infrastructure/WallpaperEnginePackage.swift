@@ -47,16 +47,14 @@ struct WallpaperEnginePackage: Sendable, Equatable {
             guard !name.isEmpty else {
                 throw WPEPackageError.invalidEntryName(index: index)
             }
-            guard !Self.isUnsafeEntryName(name) else {
-                throw WPEPackageError.pathTraversal(name: name)
-            }
-            guard seenNames.insert(name).inserted else {
-                throw WPEPackageError.duplicateEntry(name: name)
+            let canonicalName = try Self.canonicalEntryName(name, index: index)
+            guard seenNames.insert(canonicalName).inserted else {
+                throw WPEPackageError.duplicateEntry(name: canonicalName)
             }
 
             let offset = UInt64(try data.wpeReadU32(cursor: &cursor))
             let size = UInt64(try data.wpeReadU32(cursor: &cursor))
-            entries.append(Entry(name: name, dataOffset: offset, dataSize: size))
+            entries.append(Entry(name: canonicalName, dataOffset: offset, dataSize: size))
         }
 
         let dataStart = UInt64(cursor)
@@ -124,13 +122,15 @@ struct WallpaperEnginePackage: Sendable, Equatable {
                 index: index
             )
             guard !name.isEmpty else { throw WPEPackageError.invalidEntryName(index: index) }
-            guard !Self.isUnsafeEntryName(name) else { throw WPEPackageError.pathTraversal(name: name) }
-            guard seenNames.insert(name).inserted else { throw WPEPackageError.duplicateEntry(name: name) }
+            let canonicalName = try Self.canonicalEntryName(name, index: index)
+            guard seenNames.insert(canonicalName).inserted else {
+                throw WPEPackageError.duplicateEntry(name: canonicalName)
+            }
 
             try Self.streamAppend(into: &headerData, from: handle, count: 8)
             let offset = UInt64(try headerData.wpeReadU32(cursor: &cursor))
             let size = UInt64(try headerData.wpeReadU32(cursor: &cursor))
-            entries.append(Entry(name: name, dataOffset: offset, dataSize: size))
+            entries.append(Entry(name: canonicalName, dataOffset: offset, dataSize: size))
         }
 
         let dataStart = UInt64(cursor)
@@ -324,8 +324,28 @@ struct WallpaperEnginePackage: Sendable, Equatable {
         return start..<end
     }
 
-    private static func isUnsafeEntryName(_ name: String) -> Bool {
-        name.hasPrefix("/") || name.contains("..")
+    private static func canonicalEntryName(_ name: String, index: Int) throws -> String {
+        guard !name.hasPrefix("/") else {
+            throw WPEPackageError.pathTraversal(name: name)
+        }
+        let components = name.split(separator: "/", omittingEmptySubsequences: false)
+        var canonical: [String] = []
+        canonical.reserveCapacity(components.count)
+
+        for component in components {
+            if component.isEmpty || component == "." {
+                continue
+            }
+            guard !component.contains("..") else {
+                throw WPEPackageError.pathTraversal(name: name)
+            }
+            canonical.append(String(component))
+        }
+
+        guard !canonical.isEmpty else {
+            throw WPEPackageError.invalidEntryName(index: index)
+        }
+        return canonical.joined(separator: "/")
     }
 }
 

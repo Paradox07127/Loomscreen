@@ -104,7 +104,7 @@ private struct WPEShaderSourceLoader: Sendable {
     }
 
     private func builtinProgram(shaderName: String, combos: [String: Int]) -> WPEShaderProgram? {
-        let normalized = normalizedBuiltinShaderName(shaderName)
+        let normalized = WPEBuiltinShaderName.normalized(shaderName)
         switch normalized {
         case "solidcolor":
             return solidColorProgram(shaderName: shaderName, combos: combos)
@@ -122,58 +122,11 @@ private struct WPEShaderSourceLoader: Sendable {
             if normalized.hasPrefix("effect_") {
                 return copyProgram(shaderName: shaderName, combos: combos)
             }
-            guard isGenericImageShader(shaderName) else {
+            guard WPEBuiltinShaderName.isGenericImageShader(shaderName) else {
                 return nil
             }
             return copyProgram(shaderName: shaderName, combos: combos)
         }
-    }
-
-    private func normalizedBuiltinShaderName(_ shaderName: String) -> String {
-        let lower = shaderName.lowercased()
-        let withoutJSON = lower.hasSuffix(".json") ? String(lower.dropLast(5)) : lower
-        let stripped = withoutJSON.hasPrefix("materials/")
-            ? String(withoutJSON.dropFirst("materials/".count))
-            : withoutJSON
-        switch stripped {
-        case "solidcolor":
-            return "solidcolor"
-        case "solidlayer", "util/solidlayer", "models/util/solidlayer":
-            return "solidlayer"
-        case "copy", "commands/copy", "util/copy":
-            return "copy"
-        case "compose", "util/compose":
-            return "compose"
-        default:
-            // Phase 2D-C: recognise pre-compiled effect aliases so the
-            // builder marks them `isBuiltin: true` and routes the dispatch
-            // through the executor's MSL fragment table. The leading
-            // `materials/` prefix is pre-stripped above so Workshop paths
-            // such as `materials/effects/blur/blur.json` resolve here.
-            if Self.isEffectAlias(stripped, family: "colorbalance") {
-                return "effect_colorbalance"
-            }
-            if Self.isEffectAlias(stripped, family: "blur") {
-                return "effect_blur"
-            }
-            if Self.isEffectAlias(stripped, family: "vignette") {
-                return "effect_vignette"
-            }
-            if Self.isEffectAlias(stripped, family: "water")
-                || Self.isEffectAlias(stripped, family: "distort") {
-                return "effect_water"
-            }
-            if Self.isEffectAlias(stripped, family: "shake") {
-                return "effect_shake"
-            }
-            return stripped
-        }
-    }
-
-    private static func isEffectAlias(_ shaderName: String, family: String) -> Bool {
-        shaderName == family
-            || shaderName == "effects/\(family)"
-            || shaderName == "effects/\(family)/\(family)"
     }
 
     private func solidLayerProgram(shaderName: String, combos: [String: Int]) -> WPEShaderProgram {
@@ -291,14 +244,6 @@ private struct WPEShaderSourceLoader: Sendable {
             ),
             isBuiltin: true
         )
-    }
-
-    private func isGenericImageShader(_ shaderName: String) -> Bool {
-        guard shaderName.hasPrefix("genericimage") else {
-            return false
-        }
-        let suffix = shaderName.dropFirst("genericimage".count)
-        return suffix.allSatisfy(\.isNumber)
     }
 
     private func readShaderSource(path: String, shaderName: String, stage: String) throws -> String {
@@ -536,20 +481,11 @@ private struct WPEShaderSourceLoader: Sendable {
     }
 
     private func parseInt(_ raw: Any?) -> Int? {
-        if let bool = raw as? Bool { return bool ? 1 : 0 }
-        if let int = raw as? Int { return int }
-        if let number = raw as? NSNumber { return number.intValue }
-        if let string = raw as? String { return Int(string) }
-        return nil
+        WPEValueParser.int(raw, boolAsNumber: true)
     }
 
     private func parseDouble(_ raw: Any?) -> Double? {
-        if let bool = raw as? Bool { return bool ? 1 : 0 }
-        if let double = raw as? Double { return double }
-        if let int = raw as? Int { return Double(int) }
-        if let number = raw as? NSNumber { return number.doubleValue }
-        if let string = raw as? String { return Double(string) }
-        return nil
+        WPEValueParser.double(raw, boolAsNumber: true)
     }
 
     private func parseShaderConstant(_ raw: Any?, type: String) -> WPESceneShaderConstantValue? {
@@ -576,16 +512,7 @@ private struct WPEShaderSourceLoader: Sendable {
     }
 
     private func parseNumberVector(_ raw: Any?) -> [Double]? {
-        if let array = raw as? [Any] {
-            let values = array.compactMap(parseDouble)
-            return values.count == array.count && values.count >= 2 ? values : nil
-        }
-        if let string = raw as? String {
-            let pieces = string.split(whereSeparator: { $0.isWhitespace || $0 == "," })
-            let values = pieces.compactMap { Double($0) }
-            return values.count == pieces.count && values.count >= 2 ? values : nil
-        }
-        return nil
+        WPEValueParser.numberVector(raw, boolAsNumber: true)
     }
 
     private func textureBindings(
@@ -757,23 +684,7 @@ private struct WPEShaderSourceLoader: Sendable {
     }
 
     private func resolveURL(relativePath: String) throws -> URL {
-        let components = relativePath.split(separator: "/", omittingEmptySubsequences: false)
-        if relativePath.hasPrefix("/")
-            || relativePath.contains("\\")
-            || components.contains("..")
-            || components.contains(".")
-            || components.contains("") {
-            throw WPERenderPipelineError.includeMissing(path: relativePath, requestedBy: "")
-        }
-
-        let resolved = cacheRootURL
-            .appendingPathComponent(relativePath)
-            .standardizedFileURL
-            .resolvingSymlinksInPath()
-
-        let rootPath = cacheRootURL.path
-        let resolvedPath = resolved.path
-        guard resolvedPath == rootPath || resolvedPath.hasPrefix(rootPath + "/") else {
+        guard let resolved = WPEPathSafety.strictResourceURL(root: cacheRootURL, relativePath: relativePath) else {
             throw WPERenderPipelineError.includeMissing(path: relativePath, requestedBy: "")
         }
         return resolved

@@ -343,109 +343,31 @@ struct WPERenderGraphBuilder: Sendable {
     }
 
     private func parseShaderConstants(_ raw: Any?) -> [String: WPESceneShaderConstantValue] {
-        guard let dict = raw as? [String: Any] else { return [:] }
-        var result: [String: WPESceneShaderConstantValue] = [:]
-        for (key, value) in dict {
-            if let parsed = parseShaderConstant(value) {
-                result[key] = parsed
-            }
-        }
-        return result
+        WPEValueParser.shaderConstants(raw, boolAsNumber: true)
     }
 
     private func parseShaderConstant(_ raw: Any?) -> WPESceneShaderConstantValue? {
-        if let bool = raw as? Bool {
-            return .bool(bool)
-        }
-        if let vector = parseNumberVector(raw) {
-            return .vector(vector)
-        }
-        if let double = parseDouble(raw) {
-            return .number(double)
-        }
-        if let string = raw as? String {
-            return .string(string)
-        }
-        return nil
+        WPEValueParser.shaderConstant(raw, boolAsNumber: true)
     }
 
     private func parseComboMap(_ raw: Any?) -> [String: Int] {
-        guard let dict = raw as? [String: Any] else { return [:] }
-        var result: [String: Int] = [:]
-        for (key, value) in dict {
-            if let intValue = parseInt(value) {
-                result[key] = intValue
-            }
-        }
-        return result
+        WPEValueParser.comboMap(raw, boolAsNumber: true)
     }
 
     private func parseNumberVector(_ raw: Any?) -> [Double]? {
-        if let array = raw as? [Any] {
-            let values = array.compactMap(parseDouble)
-            return values.count == array.count && values.count >= 2 ? values : nil
-        }
-        if let string = raw as? String {
-            let pieces = string.split(whereSeparator: { $0.isWhitespace || $0 == "," })
-            let values = pieces.compactMap { Double($0) }
-            return values.count == pieces.count && values.count >= 2 ? values : nil
-        }
-        return nil
+        WPEValueParser.numberVector(raw, boolAsNumber: true)
     }
 
     private func parseDouble(_ raw: Any?) -> Double? {
-        if let bool = raw as? Bool {
-            return bool ? 1 : 0
-        }
-        if let number = raw as? NSNumber {
-            return number.doubleValue
-        }
-        if let double = raw as? Double {
-            return double
-        }
-        if let int = raw as? Int {
-            return Double(int)
-        }
-        if let string = raw as? String {
-            return Double(string)
-        }
-        return nil
+        WPEValueParser.double(raw, boolAsNumber: true)
     }
 
     private func parseBool(_ raw: Any?) -> Bool? {
-        if let bool = raw as? Bool {
-            return bool
-        }
-        if let number = raw as? NSNumber {
-            return number.boolValue
-        }
-        if let string = raw as? String {
-            switch string.lowercased() {
-            case "true", "1", "yes":
-                return true
-            case "false", "0", "no":
-                return false
-            default:
-                return nil
-            }
-        }
-        return nil
+        WPEValueParser.bool(raw)
     }
 
     private func parseInt(_ raw: Any?) -> Int? {
-        if let bool = raw as? Bool {
-            return bool ? 1 : 0
-        }
-        if let number = raw as? NSNumber {
-            return number.intValue
-        }
-        if let int = raw as? Int {
-            return int
-        }
-        if let string = raw as? String {
-            return Int(string)
-        }
-        return nil
+        WPEValueParser.int(raw, boolAsNumber: true)
     }
 }
 

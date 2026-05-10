@@ -38,10 +38,10 @@ struct WallpaperEngineProject: Sendable, Equatable {
         }
 
         let workshopID = Self.trimmed(decoded.workshopid) ?? folder.lastPathComponent
-        guard Self.isSafePathComponent(workshopID) else {
+        guard WPEPathSafety.isSafeWorkshopID(workshopID) else {
             throw WPEProjectError.manifestMalformed("Invalid workshop id")
         }
-        guard let entryFile = Self.trimmed(decoded.file), Self.isSafeRelativePath(entryFile) else {
+        guard let entryFile = Self.trimmed(decoded.file), WPEPathSafety.isSafeRelativePath(entryFile) else {
             throw WPEProjectError.manifestMalformed("Invalid project entry file")
         }
 
@@ -117,7 +117,7 @@ struct WallpaperEngineProject: Sendable, Equatable {
     }
 
     private static func resolvePreviewFileName(_ manifestValue: String?, in folder: URL) -> String? {
-        if let preview = trimmed(manifestValue), isSafeRelativePath(preview) {
+        if let preview = trimmed(manifestValue), WPEPathSafety.isSafeRelativePath(preview) {
             return preview
         }
 
@@ -129,21 +129,6 @@ struct WallpaperEngineProject: Sendable, Equatable {
         return nil
     }
 
-    private static func isSafePathComponent(_ value: String) -> Bool {
-        !value.isEmpty
-            && value != "."
-            && value != ".."
-            && !value.contains("/")
-            && !value.contains("\\")
-            && !value.contains("..")
-    }
-
-    private static func isSafeRelativePath(_ value: String) -> Bool {
-        !value.isEmpty
-            && !value.hasPrefix("/")
-            && !value.contains("..")
-            && value != "."
-    }
 }
 
 enum WPEProjectError: Error, Equatable, Sendable {

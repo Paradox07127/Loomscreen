@@ -307,41 +307,15 @@ enum WPESceneDocumentParser {
     }
 
     private static func parseComboMap(_ raw: Any?) -> [String: Int] {
-        guard let dict = raw as? [String: Any] else { return [:] }
-        var result: [String: Int] = [:]
-        for (key, value) in dict {
-            if let intValue = parseInt(value) {
-                result[key] = intValue
-            }
-        }
-        return result
+        WPEValueParser.comboMap(raw)
     }
 
     private static func parseShaderConstants(_ raw: Any?) -> [String: WPESceneShaderConstantValue] {
-        guard let dict = raw as? [String: Any] else { return [:] }
-        var result: [String: WPESceneShaderConstantValue] = [:]
-        for (key, value) in dict {
-            if let parsed = parseShaderConstant(value) {
-                result[key] = parsed
-            }
-        }
-        return result
+        WPEValueParser.shaderConstants(raw)
     }
 
     private static func parseShaderConstant(_ raw: Any?) -> WPESceneShaderConstantValue? {
-        if let bool = raw as? Bool {
-            return .bool(bool)
-        }
-        if let vector = parseNumberVector(raw) {
-            return .vector(vector)
-        }
-        if let double = parseDouble(raw) {
-            return .number(double)
-        }
-        if let string = raw as? String {
-            return .string(string)
-        }
-        return nil
+        WPEValueParser.shaderConstant(raw)
     }
 
     private static func parseTextureSlots(_ raw: Any?) -> [Int: String] {
@@ -368,85 +342,22 @@ enum WPESceneDocumentParser {
     /// Accepts JSON arrays of numbers, JSON dictionaries with x/y/z keys,
     /// or WPE's space-separated strings ("0.5 0 0").
     static func parseVector3(_ raw: Any?) -> SIMD3<Double>? {
-        if let array = raw as? [Any] {
-            let values = array.compactMap(parseDouble)
-            guard values.count >= 2 else { return nil }
-            let x = values[0]
-            let y = values[1]
-            let z = values.count >= 3 ? values[2] : 0
-            return SIMD3<Double>(x, y, z)
-        }
-        if let dict = raw as? [String: Any] {
-            let x = parseDouble(dict["x"]) ?? 0
-            let y = parseDouble(dict["y"]) ?? 0
-            let z = parseDouble(dict["z"]) ?? 0
-            if x == 0 && y == 0 && z == 0 { return nil }
-            return SIMD3<Double>(x, y, z)
-        }
-        if let string = raw as? String {
-            let pieces = string.split(whereSeparator: { $0.isWhitespace || $0 == "," })
-            let values = pieces.compactMap { Double($0) }
-            guard values.count >= 2 else { return nil }
-            let x = values[0]
-            let y = values[1]
-            let z = values.count >= 3 ? values[2] : 0
-            return SIMD3<Double>(x, y, z)
-        }
-        return nil
+        WPEValueParser.vector3(raw)
     }
 
     private static func parseNumberVector(_ raw: Any?) -> [Double]? {
-        if let array = raw as? [Any] {
-            let values = array.compactMap(parseDouble)
-            return values.count == array.count && values.count >= 2 ? values : nil
-        }
-        if let string = raw as? String {
-            let pieces = string.split(whereSeparator: { $0.isWhitespace || $0 == "," })
-            let values = pieces.compactMap { Double($0) }
-            return values.count == pieces.count && values.count >= 2 ? values : nil
-        }
-        return nil
+        WPEValueParser.numberVector(raw)
     }
 
     static func parseDouble(_ raw: Any?) -> Double? {
-        if let number = raw as? NSNumber {
-            return number.doubleValue
-        }
-        if let double = raw as? Double {
-            return double
-        }
-        if let int = raw as? Int {
-            return Double(int)
-        }
-        if let string = raw as? String {
-            return Double(string)
-        }
-        return nil
+        WPEValueParser.double(raw)
     }
 
     private static func parseInt(_ raw: Any?) -> Int? {
-        if let number = raw as? NSNumber {
-            return number.intValue
-        }
-        if let int = raw as? Int {
-            return int
-        }
-        if let string = raw as? String {
-            return Int(string)
-        }
-        return nil
+        WPEValueParser.int(raw)
     }
 
     private static func parseBool(_ raw: Any?) -> Bool? {
-        if let bool = raw as? Bool { return bool }
-        if let int = raw as? Int { return int != 0 }
-        if let string = raw as? String {
-            switch string.lowercased() {
-            case "true", "yes", "1": return true
-            case "false", "no", "0": return false
-            default: return nil
-            }
-        }
-        return nil
+        WPEValueParser.bool(raw)
     }
 }

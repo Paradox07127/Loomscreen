@@ -102,10 +102,16 @@ final class WPEMetalRenderTargetPool {
             if slot.secondary == nil {
                 slot.secondary = try makeAllocation(key: key, label: "secondary")
             }
-            return slot.secondary!.texture
+            guard let secondary = slot.secondary else {
+                throw WPEMetalTextureLoaderError.textureAllocationFailed
+            }
+            return secondary.texture
         }
 
-        return slot.primary!.texture
+        guard let primary = slot.primary else {
+            throw WPEMetalTextureLoaderError.textureAllocationFailed
+        }
+        return primary.texture
     }
 
     private func targetSpec(for target: WPERenderTarget, layer: WPERenderLayer) -> WPERenderFBO {

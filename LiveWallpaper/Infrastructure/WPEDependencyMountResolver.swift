@@ -11,13 +11,13 @@ struct WPEDependencyMountResolver {
         applicationSupportRootURL: URL? = nil,
         fileManager: FileManager = .default
     ) -> [WPEAssetMount] {
-        let declared = dependencyWorkshopIDs.filter(Self.isSafeWorkshopID)
+        let declared = dependencyWorkshopIDs.filter(WPEPathSafety.isSafeWorkshopID)
         guard !declared.isEmpty else { return [] }
 
-        let appSupportRoot = (applicationSupportRootURL ?? Self.defaultApplicationSupportRoot(fileManager: fileManager))?
+        let appSupportRoot = (applicationSupportRootURL ?? WPEPathSafety.defaultApplicationSupportRoot(fileManager: fileManager))?
             .standardizedFileURL
             .resolvingSymlinksInPath()
-        let sourceFolderURL = origin.flatMap { Self.resolveBookmark($0.sourceFolderBookmark) }
+        let sourceFolderURL = origin.flatMap { WPEPathSafety.resolveSecurityScopedBookmark($0.sourceFolderBookmark) }
         let workshopRoot = sourceFolderURL?
             .deletingLastPathComponent()
             .standardizedFileURL
@@ -57,7 +57,7 @@ struct WPEDependencyMountResolver {
             .appendingPathComponent(workshopID, isDirectory: true)
             .standardizedFileURL
             .resolvingSymlinksInPath()
-        guard Self.contains(cacheRoot, in: applicationSupportRootURL),
+        guard WPEPathSafety.contains(cacheRoot, in: applicationSupportRootURL),
               Self.isDirectory(cacheRoot, fileManager: fileManager),
               Self.cacheHasPayload(cacheRoot, fileManager: fileManager) else {
             return nil
@@ -74,7 +74,7 @@ struct WPEDependencyMountResolver {
             .appendingPathComponent(workshopID, isDirectory: true)
             .standardizedFileURL
             .resolvingSymlinksInPath()
-        guard Self.contains(siblingRoot, in: workshopRootURL),
+        guard WPEPathSafety.contains(siblingRoot, in: workshopRootURL),
               Self.isDirectory(siblingRoot, fileManager: fileManager) else {
             return nil
         }
@@ -82,38 +82,6 @@ struct WPEDependencyMountResolver {
         let manifest = siblingRoot.appendingPathComponent("project.json")
         guard fileManager.fileExists(atPath: manifest.path) else { return nil }
         return siblingRoot
-    }
-
-    private static func defaultApplicationSupportRoot(fileManager: FileManager) -> URL? {
-        if let applicationSupport = try? fileManager.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        ) {
-            return applicationSupport.appendingPathComponent("LiveWallpaper", isDirectory: true)
-        }
-        return URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent("Library/Application Support/LiveWallpaper", isDirectory: true)
-    }
-
-    private static func resolveBookmark(_ data: Data) -> URL? {
-        var isStale = false
-        return try? URL(
-            resolvingBookmarkData: data,
-            options: .withSecurityScope,
-            relativeTo: nil,
-            bookmarkDataIsStale: &isStale
-        )
-    }
-
-    private static func isSafeWorkshopID(_ value: String) -> Bool {
-        !value.isEmpty
-            && value != "."
-            && value != ".."
-            && !value.contains("/")
-            && !value.contains("\\")
-            && !value.contains("..")
     }
 
     private static func isDirectory(_ url: URL, fileManager: FileManager) -> Bool {
@@ -129,9 +97,4 @@ struct WPEDependencyMountResolver {
         return entries.contains { $0 != "manifest.json" }
     }
 
-    private static func contains(_ child: URL, in parent: URL) -> Bool {
-        let childPath = child.path
-        let parentPath = parent.path
-        return childPath == parentPath || childPath.hasPrefix(parentPath + "/")
-    }
 }

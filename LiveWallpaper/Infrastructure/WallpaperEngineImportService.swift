@@ -360,6 +360,7 @@ final class WallpaperEngineImportService {
         let workshopRoot = sourceFolderURL.deletingLastPathComponent()
         var hits: Set<String> = []
         for id in declared {
+            guard WPEPathSafety.isSafeWorkshopID(id) else { continue }
             let dependencyURL = workshopRoot.appendingPathComponent(id, isDirectory: true)
             var isDirectory: ObjCBool = false
             guard fileManager.fileExists(atPath: dependencyURL.path, isDirectory: &isDirectory),
@@ -379,12 +380,7 @@ final class WallpaperEngineImportService {
     }
 
     private func resourceURL(root: URL, relativePath: String) -> URL? {
-        // Resolve symlinks so an unpacked web fixture can't smuggle an entry
-        // file pointing outside the user-selected folder.
-        let rootURL = root.standardizedFileURL.resolvingSymlinksInPath()
-        let url = root.appendingPathComponent(relativePath).standardizedFileURL.resolvingSymlinksInPath()
-        guard url.path.hasPrefix(rootURL.path + "/") else { return nil }
-        return url
+        WPEPathSafety.resourceURL(root: root, relativePath: relativePath)
     }
 
     private func describe(_ error: Error) -> String {
@@ -432,7 +428,7 @@ struct WPECachedContentResolver {
     func content(for origin: WPEOrigin) -> WallpaperContent? {
         guard origin.resourceLocation == .cache,
               let cacheRelativePath = origin.cacheRelativePath,
-              Self.isSafeCacheRelativePath(cacheRelativePath),
+              WPEPathSafety.isSafeCacheRelativePath(cacheRelativePath),
               let entryFile = origin.entryFile,
               !entryFile.isEmpty else {
             return nil
@@ -442,12 +438,11 @@ struct WPECachedContentResolver {
         // attacker-controlled symlink at `Application Support/LiveWallpaper`
         // could point at a sibling directory and still pass the prefix test.
         let safeSupportRoot = applicationSupportRootURL.standardizedFileURL.resolvingSymlinksInPath()
-        let rootPath = safeSupportRoot.path
         let cacheURL = safeSupportRoot
             .appendingPathComponent(cacheRelativePath, isDirectory: true)
             .standardizedFileURL
             .resolvingSymlinksInPath()
-        guard cacheURL.path == rootPath || cacheURL.path.hasPrefix(rootPath + "/") else {
+        guard WPEPathSafety.contains(cacheURL, in: safeSupportRoot) else {
             return nil
         }
         guard let entryURL = resourceURL(root: cacheURL, relativePath: entryFile),
@@ -487,23 +482,6 @@ struct WPECachedContentResolver {
     }
 
     private func resourceURL(root: URL, relativePath: String) -> URL? {
-        let rootURL = root.standardizedFileURL.resolvingSymlinksInPath()
-        let url = root
-            .appendingPathComponent(relativePath)
-            .standardizedFileURL
-            .resolvingSymlinksInPath()
-        guard url.path.hasPrefix(rootURL.path + "/") else { return nil }
-        return url
-    }
-
-    /// Rejects malformed persisted cache paths before they get appended to the
-    /// application-support root. Mirrors the rules enforced when writing.
-    /// Requires the `wpe-cache/` prefix so persisted state can never resolve
-    /// to a sibling subtree under `Application Support/LiveWallpaper/`.
-    fileprivate static func isSafeCacheRelativePath(_ path: String) -> Bool {
-        path.hasPrefix("wpe-cache/")
-            && !path.contains("\\")
-            && !path.contains("..")
-            && !path.contains("//")
+        WPEPathSafety.resourceURL(root: root, relativePath: relativePath)
     }
 }

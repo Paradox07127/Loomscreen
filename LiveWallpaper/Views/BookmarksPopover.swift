@@ -144,31 +144,7 @@ struct BookmarksPopover: View {
     }
 
     private func apply(_ bookmark: WallpaperBookmark) {
-        Logger.info("Applying bookmark to screen \(screen.id): \(bookmark.wallpaperType.rawValue)", category: .ui)
-        switch bookmark.content {
-        case .video(let bookmarkData):
-            var isStale = false
-            guard let url = try? URL(
-                resolvingBookmarkData: bookmarkData,
-                options: .withSecurityScope,
-                relativeTo: nil,
-                bookmarkDataIsStale: &isStale
-            ) else {
-                Logger.warning("Bookmark video unresolvable; user may need to re-pick", category: .fileAccess)
-                return
-            }
-            screenManager.setVideo(url: url, bookmarkData: bookmarkData, for: screen)
-        case .html(let source, let config):
-            screenManager.setHTMLWallpaper(source: source, config: config, for: screen)
-        case .metalShader(let preset):
-            screenManager.setShaderWallpaper(preset: preset, for: screen)
-        case .scene:
-            // Scene bookmarks are not yet user-applicable from the popover —
-            // the import flow owns SceneDescriptor lifecycle. Surface a log
-            // for diagnostics and ignore so we never hand a stale descriptor
-            // to ScreenManager without going through the import service.
-            Logger.warning("Scene bookmark apply is not supported in Phase 2.0", category: .screenManager)
-        }
+        screenManager.applyBookmark(bookmark, to: screen)
     }
 }
 
@@ -190,7 +166,7 @@ private struct BookmarkRow: View {
         HStack(spacing: 8) {
             Image(systemName: bookmark.iconName)
                 .font(.system(size: 13))
-                .foregroundStyle(iconColor)
+                .foregroundStyle(bookmark.presentationTint)
                 .frame(width: 18)
 
             if isRenaming {
@@ -208,7 +184,7 @@ private struct BookmarkRow: View {
                     Text(verbatim: bookmark.label)
                         .font(.system(size: 12, weight: .medium))
                         .lineLimit(1)
-                    subtitle
+                    bookmark.subtitleText
                         .font(.system(size: 10))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -260,29 +236,4 @@ private struct BookmarkRow: View {
         }
     }
 
-    private var iconColor: Color {
-        switch bookmark.content {
-        case .video: return .blue
-        case .html: return .green
-        case .metalShader: return .purple
-        case .scene: return .orange
-        }
-    }
-
-    private var subtitle: Text {
-        switch bookmark.content {
-        case .video:
-            if let name = bookmark.sourceDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !name.isEmpty {
-                return Text(verbatim: name)
-            }
-            return Text("Source missing")
-        case .html(let source, _):
-            return Text(verbatim: source.displayName)
-        case .metalShader(let preset):
-            return Text(verbatim: preset.localizedTitle)
-        case .scene(let descriptor):
-            return Text("Workshop \(descriptor.workshopID)", comment: "Bookmark subtitle for a Workshop scene. The placeholder is the Workshop ID.")
-        }
-    }
 }

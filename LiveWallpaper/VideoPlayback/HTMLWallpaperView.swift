@@ -398,18 +398,6 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             == effectivePort(for: current, scheme: rhsScheme)
     }
 
-    func loadHTML(_ htmlString: String) {
-        loadSource(.inline(htmlString))
-    }
-
-    func loadURL(_ url: URL) {
-        loadSource(.url(url))
-    }
-
-    func loadFile(_ fileURL: URL) {
-        webView.loadFileURL(fileURL, allowingReadAccessTo: Self.readAccessRoot(forFileURL: fileURL))
-    }
-
     static func readAccessRoot(forFileURL url: URL) -> URL {
         url.deletingLastPathComponent()
     }

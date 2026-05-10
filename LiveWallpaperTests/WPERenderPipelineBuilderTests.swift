@@ -5,6 +5,16 @@ import Testing
 @Suite("WPE render pipeline builder")
 struct WPERenderPipelineBuilderTests {
 
+    @Test("Normalizes built-in shader aliases consistently")
+    func normalizesBuiltinShaderAliasesConsistently() {
+        #expect(WPEBuiltinShaderName.normalized("materials/util/solidlayer.json") == "solidlayer")
+        #expect(WPEBuiltinShaderName.normalized("materials/effects/blur/blur.json") == "effect_blur")
+        #expect(WPEBuiltinShaderName.normalized("effects/distort/distort") == "effect_water")
+        #expect(WPEBuiltinShaderName.normalized("genericimage2") == "genericimage2")
+        #expect(WPEBuiltinShaderName.normalized("genericimage2", genericImageAsCopy: true) == "copy")
+        #expect(WPEBuiltinShaderName.normalized("genericimage_custom", genericImageAsCopy: true) == "genericimage_custom")
+    }
+
     @Test("Builds prepared shader programs from render graph passes")
     func buildsPreparedShaderProgramsFromGraphPasses() throws {
         let fixture = try makeFixture(files: [

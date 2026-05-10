@@ -158,6 +158,14 @@ class Screen: Identifiable, Hashable {
             : screenName
     }
 
+    deinit {
+        NotificationCenter.default.removeObserver(
+            self,
+            name: WallpaperVideoPlayer.didChangePlaybackStateNotification,
+            object: nil
+        )
+    }
+
     private static func generateFallbackID(for screen: NSScreen) -> Int {
         String(format: "%d-%d-%.0f-%.0f",
                Int(screen.frame.origin.x),

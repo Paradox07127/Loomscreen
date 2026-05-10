@@ -373,23 +373,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
     }
 
     private func normalizedBuiltinShaderName(_ shaderName: String) -> String {
-        let lower = shaderName.lowercased()
-        let withoutJSON = lower.hasSuffix(".json") ? String(lower.dropLast(5)) : lower
-        switch withoutJSON {
-        case "solidcolor":
-            return "solidcolor"
-        case "solidlayer", "materials/util/solidlayer", "models/util/solidlayer":
-            return "solidlayer"
-        case "copy", "commands/copy", "materials/util/copy":
-            return "copy"
-        case "compose", "materials/util/compose":
-            return "compose"
-        default:
-            if withoutJSON.hasPrefix("genericimage") {
-                return "copy"
-            }
-            return withoutJSON
-        }
+        WPEBuiltinShaderName.normalized(shaderName, genericImageAsCopy: true)
     }
 
     /// Phase 2E rewrite: returns a `WPELoadedTextureResource` instead of a

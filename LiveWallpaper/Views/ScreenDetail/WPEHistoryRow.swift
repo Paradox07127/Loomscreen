@@ -97,9 +97,7 @@ struct WPEHistoryRow: View {
     }
 
     private var previewURL: URL? {
-        guard let previewName = entry.origin.previewFileName,
-              let folder = resolveFolderURL() else { return nil }
-        return folder.appendingPathComponent(previewName)
+        entry.origin.sourcePreviewURL
     }
 
     private func resolveFolderURL() -> URL? {

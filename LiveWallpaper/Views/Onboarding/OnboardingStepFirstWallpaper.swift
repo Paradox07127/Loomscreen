@@ -421,7 +421,7 @@ private struct HTMLPickerSheet: View {
     let onCancel: () -> Void
     let onConfirm: (HTMLSource) -> Void
 
-    @State private var selectedKind: PickerKind = .url
+    @State private var selectedKind: HTMLSourceKind = .url
     @State private var urlInput: String = ""
     /// The source produced by `pickFile` — usually a `.folder` upgrade so
     /// sibling assets (CSS/JS/images) keep resolving across launches; a
@@ -445,7 +445,7 @@ private struct HTMLPickerSheet: View {
             }
 
             Picker("Source", selection: $selectedKind) {
-                ForEach(PickerKind.allCases) { kind in
+                ForEach(HTMLSourceKind.allCases) { kind in
                     Label(kind.labelKey, systemImage: kind.icon).tag(kind)
                 }
             }
@@ -577,35 +577,6 @@ private struct HTMLPickerSheet: View {
         pickedFolderBookmark = bookmark
         pickedFolderName = folderURL.lastPathComponent
         pickedFolderIndexFile = inferred
-    }
-}
-
-private enum PickerKind: String, CaseIterable, Identifiable {
-    case url, file, folder
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .url: return "URL"
-        case .file: return "File"
-        case .folder: return "Folder"
-        }
-    }
-
-    var labelKey: LocalizedStringKey {
-        switch self {
-        case .url: return "URL"
-        case .file: return "File"
-        case .folder: return "Folder"
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .url: return "globe"
-        case .file: return "doc.richtext"
-        case .folder: return "folder"
-        }
     }
 }
 

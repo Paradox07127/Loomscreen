@@ -58,7 +58,8 @@ final class PowerMonitor: @unchecked Sendable {
 
     private func setupPowerNotification() {
         let callback: IOPowerSourceCallbackType = { context in
-            let monitor = Unmanaged<PowerMonitor>.fromOpaque(context!).takeUnretainedValue()
+            guard let context else { return }
+            let monitor = Unmanaged<PowerMonitor>.fromOpaque(context).takeUnretainedValue()
             monitor.handlePowerSourceChange()
         }
 

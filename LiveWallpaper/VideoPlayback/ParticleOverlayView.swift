@@ -319,7 +319,7 @@ final class ParticleOverlayView: NSView {
             cell.spinRange = 2.0
             cell.xAcceleration = 25 * scale // persistent soft breeze to the right
             cell.yAcceleration = -12 * scale // light gravity
-            cell.color = NSColor(cgColor: baseColor)!.withAlphaComponent(CGFloat(alpha)).cgColor
+            cell.color = baseColor.copy(alpha: CGFloat(alpha)) ?? baseColor
             
             // Add slight color variation per petal
             cell.redRange = 0.1
