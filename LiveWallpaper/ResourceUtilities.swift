@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import UniformTypeIdentifiers
 
 @MainActor
 class ResourceUtilities {
@@ -15,6 +16,14 @@ class ResourceUtilities {
         .withSecurityScope,
         .securityScopeAllowOnlyReadAccess
     ]
+    static let supportedVideoContentTypes: [UTType] = [
+        .movie,
+        .video,
+        .quickTimeMovie,
+        .mpeg4Movie,
+        .avi
+    ]
+    static let supportedHTMLContentTypes: [UTType] = [.html]
 
     static func createBookmark(for url: URL) -> Data? {
         // Some URL sources need an active scope before bookmarkData can read metadata.
@@ -44,6 +53,27 @@ class ResourceUtilities {
             category: .fileAccess
         )
         return nil
+    }
+
+    static func isSupportedVideoURL(_ url: URL) -> Bool {
+        guard url.isFileURL, !isDirectory(url) else { return false }
+        if let contentType = try? url.resourceValues(forKeys: [.contentTypeKey]).contentType,
+           supportedVideoContentTypes.contains(where: { contentType.conforms(to: $0) }) {
+            return true
+        }
+        return ["mp4", "m4v", "mov", "avi"].contains(url.pathExtension.lowercased())
+    }
+
+    static func isSupportedHTMLResourceURL(_ url: URL) -> Bool {
+        guard url.isFileURL else { return false }
+        if isDirectory(url) {
+            return true
+        }
+        if let contentType = try? url.resourceValues(forKeys: [.contentTypeKey]).contentType,
+           supportedHTMLContentTypes.contains(where: { contentType.conforms(to: $0) }) {
+            return true
+        }
+        return ["html", "htm"].contains(url.pathExtension.lowercased())
     }
 
     /// Creates a persistent video bookmark. Security-scoped bookmarks are the
@@ -210,6 +240,12 @@ class ResourceUtilities {
         return sourceSize != nil && sourceSize == targetSize
     }
 
+    private static func isDirectory(_ url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: url.path(percentEncoded: false), isDirectory: &isDirectory)
+            && isDirectory.boolValue
+    }
+
     // MARK: - Bookmark Resolution
 
     /// Resolves a bookmark to a display name.
@@ -219,12 +255,10 @@ class ResourceUtilities {
 
     // MARK: - HTML Source Bookmarking
 
-    /// Prefers a folder bookmark so sibling CSS/JS/images survive relaunch.
+    /// Preserves a user's explicit File-mode choice as a file source.
+    /// Users who need sibling assets should choose Folder mode so the whole
+    /// directory is intentionally bookmarked.
     static func htmlSourceFromPickedFile(_ fileURL: URL) -> HTMLSource? {
-        let folderURL = fileURL.deletingLastPathComponent()
-        if let folderBookmark = createBookmark(for: folderURL) {
-            return .folder(bookmarkData: folderBookmark, indexFileName: fileURL.lastPathComponent)
-        }
         if let fileBookmark = createBookmark(for: fileURL) {
             return .file(bookmarkData: fileBookmark)
         }

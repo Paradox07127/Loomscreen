@@ -206,7 +206,7 @@ struct PlaylistSection: View {
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = true
-        panel.allowedContentTypes = [.movie, .video, .quickTimeMovie, .mpeg4Movie, .avi]
+        panel.allowedContentTypes = ResourceUtilities.supportedVideoContentTypes
         panel.prompt = L10n.Panel.addVideos
         let completion: ([URL]) -> Void = { urls in
             guard !urls.isEmpty else { return }

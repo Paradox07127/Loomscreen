@@ -32,9 +32,6 @@ struct GeneralSettingsView: View {
             generalTab
                 .tabItem { Label("General", systemImage: "gearshape") }
 
-            powerTab
-                .tabItem { Label("Power", systemImage: "bolt.batteryblock") }
-
             ShortcutsSettingsView()
                 .tabItem { Label("Shortcuts", systemImage: "command") }
 
@@ -74,15 +71,7 @@ struct GeneralSettingsView: View {
         settingsForm {
             Section {
                 SettingRow(icon: "globe", iconColor: .teal, title: "Language", subtitle: "Choose the display language used by LiveWallpaper") {
-                    Picker("", selection: appLanguageSelection) {
-                        ForEach(AppLanguagePreference.allCases) { language in
-                            Text(language.titleKey).tag(language)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 180)
-                    .accessibilityLabel(Text("Language"))
-                    .accessibilityHint(Text("Choose the display language used by LiveWallpaper"))
+                    languagePicker
                 }
 
                 SettingRow(icon: "power.circle.fill", iconColor: .green, title: "Start at login", subtitle: "Automatically launch LiveWallpaper when you log in") {
@@ -124,6 +113,10 @@ struct GeneralSettingsView: View {
                 Text("Behavior")
             }
 
+            powerSavingSection
+
+            batteryThresholdSection
+
             Section {
                 troubleshootingActions
             } header: {
@@ -132,82 +125,83 @@ struct GeneralSettingsView: View {
         }
     }
 
-    // MARK: - Power Tab
+    // MARK: - General Sections
 
     @ViewBuilder
-    private var powerTab: some View {
-        settingsForm {
-            Section {
-                SettingRow(icon: "bolt.circle.fill", iconColor: .yellow, title: "Pause on battery", subtitle: "Switch wallpapers to a static frame when your Mac is unplugged") {
-                    Toggle("", isOn: $globalPauseOnBattery)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .onChange(of: globalPauseOnBattery) { _, _ in updateGlobalSettings() }
-                        .accessibilityLabel(Text("Pause on battery"))
-                        .accessibilityHint(Text("Switch wallpapers to a static frame when your Mac is unplugged"))
-                }
-            } header: {
-                Text("Power Saving")
+    private var powerSavingSection: some View {
+        Section {
+            SettingRow(icon: "bolt.circle.fill", iconColor: .yellow, title: "Pause on battery", subtitle: "Switch wallpapers to a static frame when your Mac is unplugged") {
+                Toggle("", isOn: $globalPauseOnBattery)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .onChange(of: globalPauseOnBattery) { _, _ in updateGlobalSettings() }
+                    .accessibilityLabel(Text("Pause on battery"))
+                    .accessibilityHint(Text("Switch wallpapers to a static frame when your Mac is unplugged"))
+            }
+        } header: {
+            Text("Power Saving")
+        }
+    }
+
+    @ViewBuilder
+    private var batteryThresholdSection: some View {
+        Section {
+            SettingRow(icon: "battery.50", iconColor: .orange, title: "Use battery threshold", subtitle: "Pause videos when battery drops below a specific level") {
+                Toggle("", isOn: $useBatteryThreshold)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .onChange(of: useBatteryThreshold) { _, newValue in
+                        if !newValue {
+                            minimumBatteryLevel = nil
+                        } else if minimumBatteryLevel == nil {
+                            minimumBatteryLevel = 0.2
+                        }
+                        updateGlobalSettings()
+                    }
+                    .accessibilityLabel(Text("Use battery threshold"))
+                    .accessibilityHint(Text("Pause videos when battery drops below a specific level"))
             }
 
-            Section {
-                SettingRow(icon: "battery.50", iconColor: .orange, title: "Use battery threshold", subtitle: "Pause videos when battery drops below a specific level") {
-                    Toggle("", isOn: $useBatteryThreshold)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .onChange(of: useBatteryThreshold) { _, newValue in
-                            if !newValue {
-                                minimumBatteryLevel = nil
-                            } else if minimumBatteryLevel == nil {
-                                minimumBatteryLevel = 0.2
-                            }
+            if useBatteryThreshold {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Spacer()
+                        BatteryLevelIndicator(level: minimumBatteryLevel ?? 0.2)
+                        Spacer()
+                    }
+
+                    HStack {
+                        Text("Pause when battery below:")
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        Text(verbatim: FormatUtils.formatFractionAsPercent(minimumBatteryLevel ?? 0.2))
+                            .font(.headline)
+                            .foregroundStyle(
+                                (minimumBatteryLevel ?? 0.2) < 0.2 ? .red :
+                                    (minimumBatteryLevel ?? 0.2) < 0.3 ? .orange : .green
+                            )
+                            .frame(width: 44, alignment: .trailing)
+                    }
+
+                    Slider(value: Binding(
+                        get: { minimumBatteryLevel ?? 0.2 },
+                        set: { newValue in
+                            minimumBatteryLevel = newValue
                             updateGlobalSettings()
                         }
-                        .accessibilityLabel(Text("Use battery threshold"))
-                        .accessibilityHint(Text("Pause videos when battery drops below a specific level"))
+                    ), in: 0.05...0.5, step: 0.05)
+                    .accessibilityLabel(Text("Minimum battery level"))
+                    .accessibilityValue(Text(verbatim: FormatUtils.formatFractionAsPercent(minimumBatteryLevel ?? 0.2)))
+                    .accessibilityHint(Text("Set the battery level below which wallpapers will pause"))
                 }
-
-                if useBatteryThreshold {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            Spacer()
-                            BatteryLevelIndicator(level: minimumBatteryLevel ?? 0.2)
-                            Spacer()
-                        }
-
-                        HStack {
-                            Text("Pause when battery below:")
-                                .font(.subheadline)
-                                .foregroundStyle(.primary)
-                            Spacer()
-                            Text(verbatim: FormatUtils.formatFractionAsPercent(minimumBatteryLevel ?? 0.2))
-                                .font(.headline)
-                                .foregroundStyle(
-                                    (minimumBatteryLevel ?? 0.2) < 0.2 ? .red :
-                                        (minimumBatteryLevel ?? 0.2) < 0.3 ? .orange : .green
-                                )
-                                .frame(width: 44, alignment: .trailing)
-                        }
-
-                        Slider(value: Binding(
-                            get: { minimumBatteryLevel ?? 0.2 },
-                            set: { newValue in
-                                minimumBatteryLevel = newValue
-                                updateGlobalSettings()
-                            }
-                        ), in: 0.05...0.5, step: 0.05)
-                        .accessibilityLabel(Text("Minimum battery level"))
-                        .accessibilityValue(Text(verbatim: FormatUtils.formatFractionAsPercent(minimumBatteryLevel ?? 0.2)))
-                        .accessibilityHint(Text("Set the battery level below which wallpapers will pause"))
-                    }
-                    .padding(.leading, 52)
-                    .padding(.bottom, 8)
-                    .disabled(!useBatteryThreshold)
-                    .animation(.snappy(duration: 0.2), value: useBatteryThreshold)
-                }
-            } header: {
-                Text("Battery Threshold")
+                .padding(.leading, 52)
+                .padding(.bottom, 8)
+                .disabled(!useBatteryThreshold)
+                .animation(.snappy(duration: 0.2), value: useBatteryThreshold)
             }
+        } header: {
+            Text("Battery Threshold")
         }
     }
 
@@ -253,6 +247,18 @@ struct GeneralSettingsView: View {
             content()
         }
         .settingsFormChrome()
+    }
+
+    private var languagePicker: some View {
+        Picker("", selection: appLanguageSelection) {
+            ForEach(AppLanguagePreference.allCases) { language in
+                Text(language.titleKey).tag(language)
+            }
+        }
+        .labelsHidden()
+        .fixedSize()
+        .accessibilityLabel(Text("Language"))
+        .accessibilityHint(Text("Choose the display language used by LiveWallpaper"))
     }
 
     private var troubleshootingActions: some View {

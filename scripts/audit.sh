@@ -95,6 +95,16 @@ static_phase() {
     "$ROOT/LiveWallpaper" "$ROOT/LiveWallpaperTests" \
     >"$AUDIT_DIR/risk-grep.txt" || true
 
+  local insecure_secure_coding="$AUDIT_DIR/insecure-secure-coding.txt"
+  rg -n "NSKeyedUnarchiver.*NSObject|unarchivedObject\\(ofClasses:.*NSObject|allowedClasses:.*NSObject|decodeObject\\(of:.*NSObject|decodeObject\\(ofClasses:.*NSObject" \
+    "$ROOT/LiveWallpaper" "$ROOT/LiveWallpaperTests" \
+    >"$insecure_secure_coding" || true
+  if [[ -s "$insecure_secure_coding" ]]; then
+    echo "ERROR: Insecure NSSecureCoding allow-list found. Do not allow NSObject during secure decode." >&2
+    cat "$insecure_secure_coding" >&2
+    exit 1
+  fi
+
   awk '
     FNR==1 {
       if (block>4) print file ":" start "-" (FNR-1) " " block
@@ -115,7 +125,7 @@ static_phase() {
   ' $(rg --files -g '*.swift' "$ROOT/LiveWallpaper" "$ROOT/LiveWallpaperTests") \
     >"$AUDIT_DIR/long-comments.txt"
 
-  wc -l "$AUDIT_DIR/risk-grep.txt" "$AUDIT_DIR/long-comments.txt"
+  wc -l "$AUDIT_DIR/risk-grep.txt" "$AUDIT_DIR/long-comments.txt" "$insecure_secure_coding"
 }
 
 leaks_phase() {

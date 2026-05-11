@@ -130,7 +130,7 @@ struct ScheduleSection: View {
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [.movie, .video, .quickTimeMovie, .mpeg4Movie, .avi]
+        panel.allowedContentTypes = ResourceUtilities.supportedVideoContentTypes
         panel.prompt = L10n.Panel.setVideo
         // Attach to current key window so the panel appears on the user's active display.
         if let parent = NSApp.keyWindow ?? NSApp.mainWindow {

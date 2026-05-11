@@ -90,7 +90,7 @@ struct HTMLSourceSection: View {
                 Button("Choose…") { pickFile() }
                     .buttonStyle(.bordered)
             }
-            Text("Pick a single .html file or drag and drop one onto this view. Sibling assets next to the file are accessible.")
+            Text("Pick one .html file. Choose Folder when the page needs sibling JS, CSS, or images.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -331,7 +331,7 @@ struct HTMLSourceSection: View {
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [UTType.html]
+        panel.allowedContentTypes = ResourceUtilities.supportedHTMLContentTypes
         panel.prompt = L10n.Panel.useAsWallpaper
         guard panel.runModal() == .OK, let url = panel.url else { return }
         // Prefer a folder bookmark so siblings (CSS/JS/images) keep working

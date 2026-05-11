@@ -278,14 +278,17 @@ struct ScreenDetailView: View {
                 }
 
                 if showsInspector {
-                    InspectorResizeHandle(
-                        width: inspectorPanelWidth,
-                        minWidth: DesignTokens.Inspector.minWidth,
-                        maxWidth: DesignTokens.Inspector.maxWidth,
-                        onPreviewWidthChange: previewInspectorWidth,
-                        onCommitWidth: commitInspectorWidth
-                    )
                     inspectorPanel
+                        .overlay(alignment: .leading) {
+                            InspectorResizeHandle(
+                                width: inspectorPanelWidth,
+                                minWidth: DesignTokens.Inspector.minWidth,
+                                maxWidth: DesignTokens.Inspector.maxWidth,
+                                onPreviewWidthChange: previewInspectorWidth,
+                                onCommitWidth: commitInspectorWidth
+                            )
+                            .offset(x: -InspectorResizeHandle.hitAreaWidth / 2)
+                        }
                         .layoutPriority(0)
                 }
             }
@@ -679,18 +682,17 @@ struct ScreenDetailView: View {
             applyHTMLDrop(droppedURL)
             return true
         }
+        guard ResourceUtilities.isSupportedVideoURL(droppedURL) else {
+            errorMessage = "Choose a video file, HTML file, or folder."
+            showErrorAlert = true
+            return false
+        }
         handleSelectedFile(url: droppedURL)
         return true
     }
 
     private func isHTMLDrop(_ url: URL) -> Bool {
-        var isDirectory: ObjCBool = false
-        let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
-        guard exists else { return false }
-        if isDirectory.boolValue {
-            return true
-        }
-        return url.pathExtension.lowercased() == "html" || url.pathExtension.lowercased() == "htm"
+        ResourceUtilities.isSupportedHTMLResourceURL(url)
     }
 
     private func applyHTMLDrop(_ url: URL) {
@@ -788,7 +790,7 @@ struct ScreenDetailView: View {
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [.movie, .video, .quickTimeMovie, .mpeg4Movie, .avi]
+        panel.allowedContentTypes = ResourceUtilities.supportedVideoContentTypes
         panel.directoryURL = SettingsManager.shared.getLastUsedDirectory()
         panel.prompt = L10n.Panel.useAsWallpaper
         guard panel.runModal() == .OK, let url = panel.url else { return }
@@ -829,6 +831,12 @@ struct ScreenDetailView: View {
     }
 
     private func handleSelectedFile(url: URL) {
+        guard ResourceUtilities.isSupportedVideoURL(url) else {
+            errorMessage = "Choose a supported video file."
+            showErrorAlert = true
+            return
+        }
+
         withAnimation(DesignTokens.motion(reduceMotion, .smooth(duration: 0.2))) { isLoading = true }
         cleanupPreviewPlayer()
 
@@ -944,11 +952,18 @@ struct ScreenDetailView: View {
 }
 
 private struct InspectorResizeHandle: View {
+    static let hitAreaWidth: CGFloat = 28
+
     let width: CGFloat
     let minWidth: CGFloat
     let maxWidth: CGFloat
     let onPreviewWidthChange: (CGFloat) -> Void
     let onCommitWidth: (CGFloat) -> Void
+
+    private let restingHandleWidth: CGFloat = 6
+    private let restingHandleHeight: CGFloat = 52
+    private let activeHandleWidth: CGFloat = 24
+    private let activeHandleHeight: CGFloat = 34
 
     @State private var dragStartWidth: CGFloat?
     @State private var isHovering = false
@@ -959,26 +974,28 @@ private struct InspectorResizeHandle: View {
             Color.clear
                 .contentShape(Rectangle())
 
-            Rectangle()
-                .fill(Color(NSColor.separatorColor).opacity(isActive ? 0.9 : 0.45))
-                .frame(width: isActive ? 2 : 1)
-
-            Image(systemName: "arrow.left.and.right")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
-                .frame(width: 24, height: 34)
-                .background(.regularMaterial, in: Capsule())
+            Capsule()
+                .fill(.regularMaterial)
                 .overlay(
                     Capsule()
                         .strokeBorder(
-                            isActive ? Color.accentColor.opacity(0.45) : Color.primary.opacity(0.10),
+                            isActive ? Color.accentColor.opacity(0.45) : Color.primary.opacity(0.12),
                             lineWidth: 0.75
                         )
                 )
+                .frame(width: isActive ? activeHandleWidth : restingHandleWidth,
+                       height: isActive ? activeHandleHeight : restingHandleHeight)
                 .shadow(color: Color.black.opacity(isActive ? 0.16 : 0.08), radius: 5, x: 0, y: 2)
+
+            Image(systemName: "arrow.left.and.right")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+                .opacity(isActive ? 1 : 0)
                 .accessibilityHidden(true)
         }
-        .frame(width: 18)
+        .frame(width: Self.hitAreaWidth)
+        .frame(maxHeight: .infinity)
+        .animation(.snappy(duration: 0.16), value: isActive)
         .gesture(
             DragGesture(minimumDistance: 2, coordinateSpace: .global)
                 .onChanged { value in

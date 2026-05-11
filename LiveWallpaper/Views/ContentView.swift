@@ -120,7 +120,7 @@ struct ContentView: View {
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [.movie, .video, .quickTimeMovie, .mpeg4Movie, .avi]
+        panel.allowedContentTypes = ResourceUtilities.supportedVideoContentTypes
         panel.directoryURL = SettingsManager.shared.getLastUsedDirectory()
         panel.prompt = L10n.Panel.useAsWallpaper
         guard panel.runModal() == .OK, let url = panel.url,
@@ -135,7 +135,7 @@ struct ContentView: View {
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [UTType.html]
+        panel.allowedContentTypes = ResourceUtilities.supportedHTMLContentTypes
         panel.prompt = L10n.Panel.useAsWallpaper
         guard panel.runModal() == .OK, let url = panel.url,
               let source = ResourceUtilities.htmlSourceFromPickedFile(url) else { return }
@@ -268,6 +268,7 @@ struct Sidebar: View {
 
     private func handleVideoDrop(urls: [URL], for screen: Screen) -> Bool {
         guard let videoURL = urls.first else { return false }
+        guard ResourceUtilities.isSupportedVideoURL(videoURL) else { return false }
         guard let bookmarkData = ResourceUtilities.createVideoBookmark(for: videoURL) else {
             return false
         }
