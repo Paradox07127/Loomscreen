@@ -86,6 +86,14 @@ report_matches \
   '^\s*\.(accessibilityLabel|accessibilityHint|accessibilityValue|help)\(\s*(?!Text\()[^()]*\?\s*"[^"]+"\s*:\s*"'
 
 report_matches \
+  'Do not render enum rawValue/description/label directly; expose a LocalizedStringKey/Text/String(localized:) display API.' \
+  '^\s*(Text|Label)\(\s*(?!verbatim:)[^\n]*(\.(rawValue|description|label)\b)'
+
+report_matches \
+  'Do not interpolate enum rawValue/description/label into accessibility/help copy.' \
+  '^\s*\.(accessibilityLabel|accessibilityHint|accessibilityValue|help)\([^\n]*(\.(rawValue|description|label)\b)'
+
+report_matches \
   'Use L10n.Panel instead of literal NSOpenPanel prompt/message/title strings.' \
   '^\s*panel\.(prompt|message|title)\s*=\s*"[^"]+'
 

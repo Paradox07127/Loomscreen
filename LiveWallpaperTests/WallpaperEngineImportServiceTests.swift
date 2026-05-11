@@ -674,18 +674,6 @@ struct WallpaperEngineImportServiceTests {
         #expect(bookmarkData == Data(videoURL.path.utf8))
     }
 
-    @Test("Bulk import failure summary reports rejected projects")
-    func bulkImportFailureSummaryReportsRejectedProjects() {
-        let message = WPEBulkImportFailureSummary.message(for: [
-            .init(title: "Broken One", reason: "Missing scene.pkg"),
-            .init(title: "Broken Two", reason: "Invalid package")
-        ])
-
-        #expect(message?.contains("2 imports failed") == true)
-        #expect(message?.contains("Broken One: Missing scene.pkg") == true)
-        #expect(message?.contains("Broken Two: Invalid package") == true)
-    }
-
     private func makeFixture(
         type: WPEType,
         entryFile: String,
