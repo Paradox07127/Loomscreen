@@ -190,10 +190,10 @@ struct OnboardingStepFirstWallpaper: View {
             OnboardingOptionCard(
                 icon: "cube.transparent",
                 iconTint: .orange,
-                title: wpeFolderExists ? "Browse Workshop Library" : "Import from Wallpaper Engine",
+                title: wpeFolderExists ? "Browse Workshop Library" : "Apply from Wallpaper Engine",
                 subtitle: wpeFolderExists
-                    ? "We found your Steam folder. Browse Video / Web projects instantly."
-                    : "Use your Steam Workshop wallpapers. Scene types are preview-only.",
+                    ? "We found your Steam folder. Browse Video, Web, and compatible Scene projects."
+                    : "Use a Steam Workshop project folder. Scene support varies.",
                 isFeatured: wpeFolderExists,
                 isLoading: false,
                 action: {

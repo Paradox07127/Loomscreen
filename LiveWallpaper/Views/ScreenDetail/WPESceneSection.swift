@@ -1,8 +1,8 @@
 import SwiftUI
 import AppKit
 
-/// Top-level Scene tab content. Drives the Wallpaper Engine import flow:
-/// folder picker → import service → history grid → unsupported placeholder.
+/// Top-level Scene tab content. Drives the Wallpaper Engine project flow:
+/// folder picker → prepare/apply service → history grid → unsupported placeholder.
 @MainActor
 struct WPESceneSection: View {
     let screen: Screen
@@ -47,7 +47,7 @@ struct WPESceneSection: View {
             WorkshopGalleryView(screen: screen)
                 .environment(screenManager)
         }
-        .alert("Import Failed", isPresented: $showImportErrorAlert, presenting: screenManager.wpeImportError(for: screen)) { _ in
+        .alert("Apply Failed", isPresented: $showImportErrorAlert, presenting: screenManager.wpeImportError(for: screen)) { _ in
             Button("OK", role: .cancel) {
                 screenManager.clearWPEImportError(for: screen)
             }
@@ -71,9 +71,9 @@ struct WPESceneSection: View {
                 .symbolRenderingMode(.hierarchical)
 
             VStack(spacing: 8) {
-                Text("Import Wallpaper Engine project")
+                Text("Apply Wallpaper Engine Project")
                     .font(.title2.bold())
-                Text("Locate your Wallpaper Engine project folder")
+                Text("Choose a Wallpaper Engine project folder to apply")
                     .foregroundStyle(.secondary)
             }
 
@@ -81,11 +81,11 @@ struct WPESceneSection: View {
                 Button {
                     presentFolderPicker()
                 } label: {
-                    Label("Choose Folder…", systemImage: "folder.badge.plus")
+                    Label("Apply Project Folder…", systemImage: "folder.badge.plus")
                 }
                 .buttonStyle(.glassProminent)
                 .controlSize(.large)
-                .accessibilityHint(Text("Opens a folder chooser to import a Wallpaper Engine project"))
+                .accessibilityHint(Text("Opens a folder chooser to apply a Wallpaper Engine project"))
 
                 Button {
                     showWorkshopGallery = true
@@ -94,11 +94,11 @@ struct WPESceneSection: View {
                 }
                 .buttonStyle(.glass)
                 .controlSize(.regular)
-                .accessibilityHint(Text("Discover every project under your Steam library and import in bulk"))
+                .accessibilityHint(Text("Discover Workshop projects under your Steam library"))
             }
             .padding(.top, 4)
 
-            Text("Supports Video / Web · Scene preview only")
+            Text("Supports Video / Web · Scene support varies")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }
@@ -110,7 +110,7 @@ struct WPESceneSection: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text("Recently Imported")
+                    Text("Recent Workshop Projects")
                         .font(.headline)
                     Spacer()
                     Button {
@@ -120,12 +120,12 @@ struct WPESceneSection: View {
                     }
                     .buttonStyle(.glass)
                     .controlSize(.regular)
-                    .accessibilityHint(Text("Bulk-discover and import projects from your Steam Workshop folder"))
+                    .accessibilityHint(Text("Discover Workshop projects from your Steam Workshop folder"))
 
                     Button {
                         presentFolderPicker()
                     } label: {
-                        Label("Import New…", systemImage: "plus")
+                        Label("Apply Project…", systemImage: "plus")
                     }
                     .buttonStyle(.glass)
                     .controlSize(.regular)
@@ -161,7 +161,7 @@ struct WPESceneSection: View {
                 }
                 .buttonStyle(.glass)
                 .controlSize(.regular)
-                .accessibilityHint(Text("Return to the recent imports grid"))
+                .accessibilityHint(Text("Return to the recent Workshop projects grid"))
                 Spacer()
             }
             WPEFallbackCard(
@@ -202,7 +202,7 @@ struct WPESceneSection: View {
                     Button {
                         presentFolderPicker()
                     } label: {
-                        Label("Import New…", systemImage: "plus")
+                        Label("Apply Project…", systemImage: "plus")
                     }
                     .buttonStyle(.glass)
                     .controlSize(.regular)
@@ -233,7 +233,7 @@ struct WPESceneSection: View {
         recentImports = SettingsManager.shared.loadGlobalSettings().recentWPEImports
     }
 
-    /// Plan §A4/A5: when a `scene` / `application` / `unknown` import lands for
+    /// Plan §A4/A5: when a `scene` / `application` / `unknown` check lands for
     /// THIS screen, auto-promote the user into the unsupported placeholder card
     /// so they see the preview + tip without having to dig through the grid.
     /// Defers state mutation to the next runloop tick so we don't ask SwiftUI
@@ -249,14 +249,20 @@ struct WPESceneSection: View {
         let workshopID = notification.userInfo?["workshopID"] as? String
 
         DispatchQueue.main.async {
+            let entry: WPEHistoryEntry?
+            if let workshopID {
+                entry = recentImports.first { $0.origin.workshopID == workshopID }
+            } else {
+                entry = recentImports.first { $0.origin.originalType == type }
+            }
+            guard let entry else { return }
+
             switch type {
-            case .scene, .application, .unknown:
-                if let workshopID {
-                    selectedHistoryEntry = recentImports.first { $0.origin.workshopID == workshopID }
-                } else {
-                    selectedHistoryEntry = recentImports.first { $0.origin.originalType == type }
-                }
-            case .video, .web:
+            case .application, .unknown:
+                selectedHistoryEntry = entry
+            case .scene where entry.origin.resourceLocation == .unsupported:
+                selectedHistoryEntry = entry
+            case .scene, .video, .web:
                 selectedHistoryEntry = nil
             }
         }
@@ -264,9 +270,11 @@ struct WPESceneSection: View {
 
     private func handleTap(entry: WPEHistoryEntry) {
         switch entry.origin.originalType {
-        case .scene, .application, .unknown:
+        case .application, .unknown:
             selectedHistoryEntry = entry
-        case .video, .web:
+        case .scene where entry.origin.resourceLocation == .unsupported:
+            selectedHistoryEntry = entry
+        case .scene, .video, .web:
             Task { @MainActor in
                 await screenManager.activateWPEHistoryEntry(entry, for: screen)
                 reloadHistory()

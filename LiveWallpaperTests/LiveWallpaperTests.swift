@@ -667,8 +667,8 @@ struct SettingsWindowLayoutTests {
     func workshopGalleryExposesRootFolderRecoveryControls() throws {
         let source = try sourceText(for: "LiveWallpaper/Views/ScreenDetail/WorkshopGalleryView.swift")
 
-        #expect(source.contains("Change Folder"))
-        #expect(source.contains("Disconnect Workshop library"))
+        #expect(source.contains("Change Library Folder"))
+        #expect(source.contains("Forget Library Folder"))
         #expect(source.contains("clearWorkshopLibraryRootBookmark()"))
         #expect(source.contains("updateRootAccessState()"))
     }
@@ -685,12 +685,86 @@ struct SettingsWindowLayoutTests {
         #expect(!workshopSource.contains("return await screenManager.importWPEToLibrary(at: project.folderURL)"))
     }
 
-    @Test("Workshop gallery cards expose apply actions for already imported compatible projects")
-    func workshopGalleryCardsExposeApplyActionsForAlreadyImportedCompatibleProjects() throws {
+    @Test("Workshop gallery cards expose apply and bookmark actions without import copy")
+    func workshopGalleryCardsExposeApplyAndBookmarkActionsWithoutImportCopy() throws {
         let source = try sourceText(for: "LiveWallpaper/Views/ScreenDetail/WorkshopGalleryView.swift")
 
-        #expect(source.contains("project.importedAlready ? \"Apply\" : \"Import & Apply\""))
+        #expect(source.contains("onToggleBookmark"))
+        #expect(source.contains("BookmarkStore.shared"))
+        #expect(source.contains("screenManager.prepareWallpaperEngineProject"))
+        #expect(source.contains("\"Add Bookmark\""))
+        #expect(source.contains("\"Remove Bookmark\""))
+        #expect(source.contains("removeWPEBookmarks(workshopID: project.workshopID)"))
+        #expect(!source.contains("\"Import & Apply\""))
         #expect(!source.contains("Label(\"In Library\""))
+        #expect(!source.contains(".disabled(isDisabled || activeAction != nil || isBookmarked)"))
+    }
+
+    @Test("Workshop gallery lets scene projects enter the compatibility check path")
+    func workshopGalleryLetsSceneProjectsEnterCompatibilityCheckPath() throws {
+        let source = try sourceText(for: "LiveWallpaper/Views/ScreenDetail/WorkshopGalleryView.swift")
+
+        #expect(source.contains("case .video, .web, .scene: return true"))
+        #expect(source.contains("Scene · check needed") || source.contains("Scene · may work"))
+        #expect(!source.contains("Scene · preview only"))
+    }
+
+    @Test("Workshop library route asks for an apply target instead of silently using the first display")
+    func workshopLibraryRouteAsksForApplyTarget() throws {
+        let source = try sourceText(for: "LiveWallpaper/Views/ContentView.swift")
+
+        #expect(source.contains("WorkshopGalleryView(allowsTargetSelection: true)"))
+        #expect(!source.contains("WorkshopGalleryView(screen: screenManager.screens.first)"))
+    }
+
+    @Test("Workshop gallery uses adaptive fixed-size cards and browse controls")
+    func workshopGalleryUsesAdaptiveFixedSizeCardsAndBrowseControls() throws {
+        let source = try sourceText(for: "LiveWallpaper/Views/ScreenDetail/WorkshopGalleryView.swift")
+
+        #expect(source.contains("GridItem(.adaptive(minimum: 160, maximum: 160)"))
+        #expect(!source.contains("Array(repeating: GridItem(.fixed(160), spacing: 16), count: 4)"))
+        #expect(source.contains("@State private var searchText"))
+        #expect(source.contains("WorkshopProjectTypeFilter"))
+        #expect(source.contains("WorkshopProjectSortOrder"))
+        #expect(source.contains("visibleProjects"))
+        #expect(source.contains("WorkshopGalleryFilterBar"))
+    }
+
+    @Test("Scene bookmarks apply through ScreenManager instead of logging unsupported")
+    func sceneBookmarksApplyThroughScreenManager() throws {
+        let source = try sourceText(for: "LiveWallpaper/Runtime/ScreenManager+Bookmarks.swift")
+
+        #expect(source.contains("case .scene(let descriptor):"))
+        #expect(source.contains("setSceneWallpaper(descriptor: descriptor, origin: bookmark.wpeOrigin, for: screen)"))
+        #expect(!source.contains("Scene bookmark apply is not supported"))
+    }
+
+    @Test("HTML restore creates only one ambient session")
+    func htmlRestoreCreatesOnlyOneAmbientSession() throws {
+        let source = try sourceText(for: "LiveWallpaper/ScreenManager.swift")
+        let htmlBranchStart = try #require(source.range(of: "case .html(let source, let htmlConfig):"))
+        let htmlBranchEnd = try #require(source[htmlBranchStart.upperBound...].range(of: "case .metalShader"))
+        let htmlBranch = source[htmlBranchStart.lowerBound..<htmlBranchEnd.lowerBound]
+
+        let call = "activateAmbientWallpaper(.html(source, htmlConfig), for: screen, configuration: configuration)"
+        #expect(
+            htmlBranch.components(separatedBy: call).count == 2,
+            "Restoring an HTML wallpaper must create one WKWebView session; duplicate calls reload the same page immediately."
+        )
+    }
+
+    @Test("Reapplying the same HTML wallpaper skips a runtime reload")
+    func reapplyingSameHTMLWallpaperSkipsRuntimeReload() throws {
+        let source = try sourceText(for: "LiveWallpaper/ScreenManager.swift")
+        let setterStart = try #require(source.range(of: "func setHTMLWallpaper(source: HTMLSource"))
+        let setterEnd = try #require(source[setterStart.upperBound...].range(of: "func setHTMLWallpaperPreservingConfig"))
+        let setter = source[setterStart.lowerBound..<setterEnd.lowerBound]
+
+        #expect(setter.contains("case .html(let existingSource, let existingConfig) = configuration.activeWallpaper"))
+        #expect(setter.contains("existingSource == source"))
+        #expect(setter.contains("existingConfig == config"))
+        #expect(setter.contains("screen.runtimeSession?.wallpaperType == .html"))
+        #expect(setter.contains("return"))
     }
 
     @Test("Workshop gallery header uses capsule glass controls and omits bulk import")

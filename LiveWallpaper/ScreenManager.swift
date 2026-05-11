@@ -811,76 +811,65 @@ final class ScreenManager {
         lastWPEImportErrors.removeValue(forKey: screen.id)
     }
 
-    func importWallpaperEngineProject(at folderURL: URL, for screen: Screen) async {
-        let generation = bumpWPEImportGeneration(for: screen.id)
-        do {
-            let result = try await wpeImportService.importProject(folder: folderURL)
-            guard isCurrentWPEImportGeneration(generation, for: screen.id) else { return }
-            switch result {
-            case .ready(let content, let origin):
-                let now = Date()
-                applyReadyWPEImport(content, origin: origin, importedAt: now, lastUsedAt: now, for: screen)
-
-            case .unsupported(let origin):
-                // Plan §A4/A5: scene/application imports must be non-destructive —
-                // record history, fire wpeImportDidComplete so the Scene tab can
-                // surface the placeholder card, and DO NOT raise an error alert.
-                SettingsManager.shared.recordWPEImport(
-                    WPEHistoryEntry(origin: origin, importedAt: Date(), lastUsedAt: nil)
-                )
-                postWPEImportDidComplete(
-                    screenID: screen.id,
-                    type: origin.originalType,
-                    workshopID: origin.workshopID
-                )
-                lastWPEImportErrors.removeValue(forKey: screen.id)
-
-            case .rejected(let reason):
-                lastWPEImportErrors[screen.id] = .wpePackageInvalid(reason)
-            }
-        } catch {
-            guard isCurrentWPEImportGeneration(generation, for: screen.id) else { return }
-            lastWPEImportErrors[screen.id] = .wpeImportFailed(error.localizedDescription)
-        }
-    }
-
-    /// Result of a non-destructive (library-only) WPE import.
-    enum WPELibraryImportOutcome: Sendable, Equatable {
-        case imported(workshopID: String, type: WPEType)
-        case alreadyKnown(workshopID: String)
-        case unsupported(workshopID: String, type: WPEType)
+    enum WPEProjectPreparationOutcome: Sendable, Equatable {
+        case ready(content: WallpaperContent, origin: WPEOrigin)
+        case unsupported(origin: WPEOrigin)
         case rejected(reason: String)
     }
 
-    /// Imports a Wallpaper Engine project into the cache + history WITHOUT
-    /// applying it to any screen. Used by the Workshop Library Gallery for
-    /// bulk imports — the active wallpaper stays untouched.
-    func importWPEToLibrary(at folderURL: URL) async -> WPELibraryImportOutcome {
+    enum WPEProjectApplyOutcome: Sendable, Equatable {
+        case applied(origin: WPEOrigin)
+        case unsupported(origin: WPEOrigin)
+        case rejected(reason: String)
+    }
+
+    func prepareWallpaperEngineProject(at folderURL: URL) async -> WPEProjectPreparationOutcome {
         do {
             let result = try await wpeImportService.importProject(folder: folderURL)
             switch result {
-            case .ready(_, let origin):
-                let alreadyKnown = SettingsManager.shared.loadGlobalSettings()
-                    .recentWPEImports
-                    .contains { $0.origin.workshopID == origin.workshopID }
-                SettingsManager.shared.recordWPEImport(
-                    WPEHistoryEntry(origin: origin, importedAt: Date(), lastUsedAt: nil)
-                )
-                return alreadyKnown
-                    ? .alreadyKnown(workshopID: origin.workshopID)
-                    : .imported(workshopID: origin.workshopID, type: origin.originalType)
-
+            case .ready(let content, let origin):
+                return .ready(content: content, origin: origin)
             case .unsupported(let origin):
-                SettingsManager.shared.recordWPEImport(
-                    WPEHistoryEntry(origin: origin, importedAt: Date(), lastUsedAt: nil)
-                )
-                return .unsupported(workshopID: origin.workshopID, type: origin.originalType)
-
+                return .unsupported(origin: origin)
             case .rejected(let reason):
                 return .rejected(reason: reason)
             }
         } catch {
             return .rejected(reason: error.localizedDescription)
+        }
+    }
+
+    @discardableResult
+    func importWallpaperEngineProject(at folderURL: URL, for screen: Screen) async -> WPEProjectApplyOutcome {
+        let generation = bumpWPEImportGeneration(for: screen.id)
+        let outcome = await prepareWallpaperEngineProject(at: folderURL)
+        guard isCurrentWPEImportGeneration(generation, for: screen.id) else {
+            return .rejected(reason: "Action superseded")
+        }
+
+        switch outcome {
+        case .ready(let content, let origin):
+            let now = Date()
+            applyReadyWPEImport(content, origin: origin, importedAt: now, lastUsedAt: now, for: screen)
+            return .applied(origin: origin)
+
+        case .unsupported(let origin):
+            // Scene/application/unknown checks are non-destructive: record the
+            // origin and let UI show a reason card instead of replacing wallpaper.
+            SettingsManager.shared.recordWPEImport(
+                WPEHistoryEntry(origin: origin, importedAt: Date(), lastUsedAt: nil)
+            )
+            postWPEImportDidComplete(
+                screenID: screen.id,
+                type: origin.originalType,
+                workshopID: origin.workshopID
+            )
+            lastWPEImportErrors.removeValue(forKey: screen.id)
+            return .unsupported(origin: origin)
+
+        case .rejected(let reason):
+            lastWPEImportErrors[screen.id] = .wpePackageInvalid(reason)
+            return .rejected(reason: reason)
         }
     }
 
@@ -1282,6 +1271,17 @@ final class ScreenManager {
         restoreWallpaperSession(for: screen, configuration: config, preservingState: false)
     }
 
+    func setSceneWallpaper(descriptor: SceneDescriptor, origin: WPEOrigin?, for screen: Screen) {
+        var configuration = configurationStore.get(for: screen.id) ?? ScreenConfiguration(
+            screenID: screen.id,
+            wallpaper: .scene(descriptor)
+        )
+        configuration.activeWallpaper = .scene(descriptor)
+        configuration.wpeOrigin = origin
+        saveConfiguration(configuration)
+        restoreWallpaperSession(for: screen, configuration: configuration, preservingState: false)
+    }
+
     private func activateAmbientWallpaper(
         _ definition: WallpaperSessionDefinition,
         for screen: Screen,
@@ -1407,6 +1407,14 @@ final class ScreenManager {
             screenID: screen.id,
             wallpaper: .html(source: source, config: config)
         )
+        if case .html(let existingSource, let existingConfig) = configuration.activeWallpaper,
+           existingSource == source,
+           existingConfig == config,
+           screen.runtimeSession?.wallpaperType == .html {
+            Logger.info("HTML wallpaper unchanged for screen \(screen.id); keeping existing WKWebView session", category: .screenManager)
+            return
+        }
+
         configuration.setHTMLWallpaper(source: source, config: config)
         configuration.reconcileWPEOrigin()
         saveConfiguration(configuration)

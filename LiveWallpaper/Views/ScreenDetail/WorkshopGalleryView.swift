@@ -1,33 +1,108 @@
 import SwiftUI
 import AppKit
 
+private enum WorkshopProjectActiveAction: Equatable {
+    case apply
+    case bookmark
+}
+
+private enum WorkshopProjectTypeFilter: String, CaseIterable, Identifiable {
+    case all
+    case video
+    case web
+    case scene
+    case unsupported
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .all:
+            return String(localized: "All", defaultValue: "All", comment: "Workshop library type filter.")
+        case .video:
+            return WPEType.video.localizedDisplayName
+        case .web:
+            return WPEType.web.localizedDisplayName
+        case .scene:
+            return WPEType.scene.localizedDisplayName
+        case .unsupported:
+            return String(localized: "Unsupported", defaultValue: "Unsupported", comment: "Workshop library type filter.")
+        }
+    }
+
+    func includes(_ project: WallpaperEngineLibraryScanner.DiscoveredProject) -> Bool {
+        switch self {
+        case .all:
+            return true
+        case .video:
+            return project.type == .video
+        case .web:
+            return project.type == .web
+        case .scene:
+            return project.type == .scene
+        case .unsupported:
+            return project.type == .application || project.type == .unknown
+        }
+    }
+}
+
+private enum WorkshopProjectSortOrder: String, CaseIterable, Identifiable {
+    case recommended
+    case name
+    case type
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .recommended:
+            return String(localized: "Recommended", defaultValue: "Recommended", comment: "Workshop library sort order.")
+        case .name:
+            return String(localized: "Name", defaultValue: "Name", comment: "Workshop library sort order.")
+        case .type:
+            return String(localized: "Type", defaultValue: "Type", comment: "Workshop library sort order.")
+        }
+    }
+}
+
 /// Full-screen sheet for browsing and applying projects from the user's Steam Workshop
 /// library. Three states: pre-grant (no root bookmark) → scanning → results.
 @MainActor
 struct WorkshopGalleryView: View {
     let screen: Screen?
-    private let targetScreens: [Screen]
+    private let fixedTargetScreens: [Screen]
+    private let allowsTargetSelection: Bool
 
     @Environment(\.dismiss) private var dismiss
     @Environment(ScreenManager.self) private var screenManager
 
     @State private var state: PaneState = .needsRoot
     @State private var projects: [WallpaperEngineLibraryScanner.DiscoveredProject] = []
-    @State private var activeImportProjectID: String?
+    @State private var activeProjectAction: ActiveProjectAction?
     @State private var errorMessage: String?
     @State private var hasLibraryRoot: Bool = false
     @State private var rootPathSummary: String?
+    @State private var selectedTargetScreenID: CGDirectDisplayID?
+    @State private var selectedUnsupportedOrigin: WPEOrigin?
+    @State private var searchText: String = ""
+    @State private var typeFilter: WorkshopProjectTypeFilter = .all
+    @State private var sortOrder: WorkshopProjectSortOrder = .recommended
+    @State private var bookmarkStore = BookmarkStore.shared
 
     private let scanner = WallpaperEngineLibraryScanner()
 
-    init(screen: Screen? = nil, screens: [Screen]? = nil) {
+    init(screen: Screen? = nil, screens: [Screen]? = nil, allowsTargetSelection: Bool = false) {
         self.screen = screen
+        self.allowsTargetSelection = allowsTargetSelection
         if let screens {
-            targetScreens = screens
+            fixedTargetScreens = screens
+            _selectedTargetScreenID = State(initialValue: screens.first?.id)
         } else if let screen {
-            targetScreens = [screen]
+            fixedTargetScreens = [screen]
+            _selectedTargetScreenID = State(initialValue: screen.id)
         } else {
-            targetScreens = []
+            fixedTargetScreens = []
+            _selectedTargetScreenID = State(initialValue: nil)
         }
     }
 
@@ -39,6 +114,7 @@ struct WorkshopGalleryView: View {
         )
         .frame(minWidth: 760, minHeight: 540)
         .onAppear {
+            selectInitialTargetIfNeeded()
             updateRootAccessState()
             if hasLibraryRoot {
                 Task { await refreshScan() }
@@ -48,6 +124,9 @@ struct WorkshopGalleryView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .workshopLibraryRootBookmarkDidChange)) { _ in
             updateRootAccessState()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .screensRefreshed)) { _ in
+            selectInitialTargetIfNeeded()
         }
         .alert("Library Error", isPresented: Binding(
             get: { errorMessage != nil },
@@ -83,9 +162,13 @@ struct WorkshopGalleryView: View {
                 }
             },
             actions: {
-                GlassEffectContainer(spacing: 12) {
-                    HStack(spacing: 10) {
+                GlassEffectContainer(spacing: 8) {
+                    HStack(spacing: 8) {
                         if hasLibraryRoot {
+                            if allowsTargetSelection {
+                                targetScreenPicker
+                            }
+
                             Button {
                                 Task { await refreshScan() }
                             } label: {
@@ -93,41 +176,63 @@ struct WorkshopGalleryView: View {
                             }
                             .buttonStyle(WorkshopToolbarButtonStyle())
                             .accessibilityHint(Text("Re-scan the workshop folder for new projects"))
-                            .disabled(isImportingProject)
+                            .disabled(isBusy)
 
-                            Button {
-                                presentFolderGrant()
-                            } label: {
-                                Label("Change Folder", systemImage: "folder.badge.gearshape")
-                            }
-                            .buttonStyle(WorkshopToolbarButtonStyle())
-                            .accessibilityHint(Text("Choose a different Steam Workshop folder"))
-                            .disabled(isImportingProject)
+                            Menu {
+                                Button {
+                                    presentFolderGrant()
+                                } label: {
+                                    Label("Change Library Folder...", systemImage: "folder.badge.gearshape")
+                                }
 
-                            Button {
-                                disconnectLibraryRoot()
+                                Button(role: .destructive) {
+                                    disconnectLibraryRoot()
+                                } label: {
+                                    Label("Forget Library Folder", systemImage: "xmark.circle")
+                                }
                             } label: {
-                                Image(systemName: "xmark")
-                                    .frame(width: 18, height: 18)
+                                Label("Library Folder", systemImage: "folder")
                             }
-                            .buttonStyle(WorkshopToolbarButtonStyle(tint: .red, horizontalPadding: 18))
-                            .help(Text("Disconnect Workshop library"))
-                            .accessibilityLabel(Text("Disconnect Workshop library"))
-                            .accessibilityHint(Text("Forgets the selected Steam Workshop folder so you can choose again"))
-                            .disabled(isImportingProject)
+                            .menuStyle(.button)
+                            .buttonStyle(WorkshopToolbarButtonStyle(tint: .secondary))
+                            .accessibilityHint(Text("Change or forget the selected Steam Workshop folder"))
+                            .disabled(isBusy)
                         }
 
-                        Button {
-                            dismiss()
-                        } label: {
-                            Label("Done", systemImage: "checkmark")
+                        if !allowsTargetSelection {
+                            Button {
+                                dismiss()
+                            } label: {
+                                Label("Done", systemImage: "checkmark")
+                            }
+                            .buttonStyle(WorkshopToolbarButtonStyle(tint: .secondary))
+                            .keyboardShortcut(.cancelAction)
                         }
-                        .buttonStyle(WorkshopToolbarButtonStyle(tint: .secondary))
-                        .keyboardShortcut(.cancelAction)
                     }
                 }
             }
         )
+    }
+
+    @ViewBuilder
+    private var targetScreenPicker: some View {
+        if !screenManager.screens.isEmpty {
+            Picker("Apply to", selection: Binding(
+                get: { selectedTargetScreenID ?? screenManager.screens.first?.id },
+                set: { selectedTargetScreenID = $0 }
+            )) {
+                ForEach(screenManager.screens, id: \.id) { screen in
+                    Text(verbatim: screen.name).tag(Optional(screen.id))
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .controlSize(.small)
+            .frame(maxWidth: 150)
+            .help(Text("Choose which display receives Apply actions"))
+            .accessibilityLabel(Text("Apply to display"))
+            .disabled(isBusy)
+        }
     }
 
     private var headerSubtitle: String {
@@ -143,7 +248,7 @@ struct WorkshopGalleryView: View {
             if projects.isEmpty, let rootPathSummary {
                 return String(localized: "No projects found in \(rootPathSummary)", comment: "Workshop library empty status. The placeholder is a folder path.")
             }
-            return String(localized: "\(projects.count) projects · \(compatibleCount) compatible · \(unsupportedCount) preview-only", comment: "Workshop library summary. Placeholders are total project count, compatible count, and preview-only count.")
+            return String(localized: "\(projects.count) projects · \(actionableCount) can check/apply · \(unsupportedCount) unsupported", comment: "Workshop library summary. Placeholders are total project count, actionable count, and unsupported count.")
         }
     }
 
@@ -151,13 +256,17 @@ struct WorkshopGalleryView: View {
 
     @ViewBuilder
     private var content: some View {
-        switch state {
-        case .needsRoot:
-            needsRootView
-        case .scanning:
-            scanningView
-        case .results:
-            resultsView
+        if let selectedUnsupportedOrigin {
+            unsupportedDetail(for: selectedUnsupportedOrigin)
+        } else {
+            switch state {
+            case .needsRoot:
+                needsRootView
+            case .scanning:
+                scanningView
+            case .results:
+                resultsView
+            }
         }
     }
 
@@ -170,7 +279,7 @@ struct WorkshopGalleryView: View {
                 features: [
                     LibraryGuideFeature(icon: "folder.badge.gearshape", text: "Pick the folder that contains numbered Workshop project folders"),
                     LibraryGuideFeature(icon: "arrow.triangle.2.circlepath", text: "Rescan after Steam downloads or removes subscriptions"),
-                    LibraryGuideFeature(icon: "checkmark.shield", text: "Read-only access; imported copies stay managed by LiveWallpaper")
+                    LibraryGuideFeature(icon: "checkmark.shield", text: "Read-only access; projects are prepared only when you apply or bookmark")
                 ],
                 actionTitle: "Choose Folder...",
                 actionSystemImage: "folder.badge.plus",
@@ -196,20 +305,38 @@ struct WorkshopGalleryView: View {
             emptyResultsView
         } else {
             ScrollView {
-                LazyVGrid(
-                    // Fixed-width columns so the 1:1 square preview area is
-                    // identical across cards regardless of window width.
-                    columns: Array(repeating: GridItem(.fixed(160), spacing: 16), count: 4),
-                    alignment: .leading,
-                    spacing: 16
-                ) {
-                    ForEach(projects) { project in
-                        WorkshopGalleryCard(
-                            project: project,
-                            isImporting: activeImportProjectID == project.id,
-                            isDisabled: isImportingProject,
-                            onImport: { Task { await importOne(project) } }
-                        )
+                VStack(alignment: .leading, spacing: 16) {
+                    WorkshopGalleryFilterBar(
+                        searchText: $searchText,
+                        typeFilter: $typeFilter,
+                        sortOrder: $sortOrder,
+                        resultCount: visibleProjects.count,
+                        totalCount: projects.count,
+                        isDisabled: isBusy
+                    )
+
+                    if visibleProjects.isEmpty {
+                        noFilteredResultsView
+                    } else {
+                        LazyVGrid(
+                            // Fixed-width adaptive columns use extra horizontal
+                            // space for more cards without stretching previews.
+                            columns: [GridItem(.adaptive(minimum: 160, maximum: 160), spacing: 16)],
+                            alignment: .leading,
+                            spacing: 16
+                        ) {
+                            ForEach(visibleProjects) { project in
+                                WorkshopGalleryCard(
+                                    project: project,
+                                    activeAction: activeProjectAction?.action(for: project.id),
+                                    isDisabled: isBusy,
+                                    canApply: !effectiveTargetScreens.isEmpty,
+                                    isBookmarked: isBookmarked(project),
+                                    onApply: { Task { await applyOne(project) } },
+                                    onToggleBookmark: { Task { await toggleBookmark(project) } }
+                                )
+                            }
+                        }
                     }
                 }
                 .padding(20)
@@ -226,7 +353,7 @@ struct WorkshopGalleryView: View {
                 features: [
                     LibraryGuideFeature(icon: "folder.badge.gearshape", text: "Choose the folder that contains numbered Workshop project folders"),
                     LibraryGuideFeature(icon: "arrow.triangle.2.circlepath", text: "Rescan after Steam finishes downloading subscriptions"),
-                    LibraryGuideFeature(icon: "checkmark.shield", text: "Only compatible Video and Web projects are imported")
+                    LibraryGuideFeature(icon: "checkmark.shield", text: "Video, Web, and compatible Scene projects can be applied or bookmarked")
                 ],
                 actionTitle: "Change Folder...",
                 actionSystemImage: "folder.badge.gearshape",
@@ -236,6 +363,45 @@ struct WorkshopGalleryView: View {
                 secondaryAction: { Task { await refreshScan() } }
             )
         }
+    }
+
+    private var noFilteredResultsView: some View {
+        VStack(spacing: 12) {
+            Label("No matching projects", systemImage: "magnifyingglass")
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            Button {
+                clearBrowseFilters()
+            } label: {
+                Label("Clear Filters", systemImage: "line.3.horizontal.decrease.circle")
+            }
+            .buttonStyle(GlassCapsuleButtonStyle(tint: .secondary, fontSize: 12, horizontalPadding: 12, verticalPadding: 6))
+            .disabled(isBusy)
+        }
+        .frame(maxWidth: .infinity, minHeight: 220)
+    }
+
+    private func unsupportedDetail(for origin: WPEOrigin) -> some View {
+        VStack(spacing: 16) {
+            HStack {
+                Button {
+                    selectedUnsupportedOrigin = nil
+                } label: {
+                    Label("Back to library", systemImage: "chevron.left")
+                }
+                .buttonStyle(.glass)
+                .controlSize(.regular)
+                Spacer()
+            }
+
+            WPEFallbackCard(
+                origin: origin,
+                reason: WPEFallbackCard.reason(for: origin)
+            )
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, alignment: .top)
     }
 
     // MARK: - Actions
@@ -263,6 +429,7 @@ struct WorkshopGalleryView: View {
             errorMessage = String(localized: "Couldn't create a security-scoped bookmark for that folder.", defaultValue: "Couldn't create a security-scoped bookmark for that folder.", comment: "Workshop library folder grant error.")
             return
         }
+        selectedUnsupportedOrigin = nil
         SettingsManager.shared.saveWorkshopLibraryRootBookmark(bookmark)
         updateRootAccessState()
         Task { await refreshScan() }
@@ -271,7 +438,8 @@ struct WorkshopGalleryView: View {
     private func disconnectLibraryRoot() {
         SettingsManager.shared.clearWorkshopLibraryRootBookmark()
         projects = []
-        activeImportProjectID = nil
+        activeProjectAction = nil
+        selectedUnsupportedOrigin = nil
         hasLibraryRoot = false
         rootPathSummary = nil
         state = .needsRoot
@@ -313,26 +481,33 @@ struct WorkshopGalleryView: View {
         }
     }
 
-    private func importOne(_ project: WallpaperEngineLibraryScanner.DiscoveredProject) async {
-        guard isCompatible(project.type) else { return }
-        guard !targetScreens.isEmpty else {
+    private func applyOne(_ project: WallpaperEngineLibraryScanner.DiscoveredProject) async {
+        guard canAttemptAction(project.type) else { return }
+        let targets = effectiveTargetScreens
+        guard !targets.isEmpty else {
             errorMessage = String(
                 localized: "Open a display first, then choose a Workshop wallpaper to apply.",
                 defaultValue: "Open a display first, then choose a Workshop wallpaper to apply.",
-                comment: "Workshop gallery import error when there is no target display."
+                comment: "Workshop gallery apply error when there is no target display."
             )
             return
         }
 
-        activeImportProjectID = project.id
+        activeProjectAction = .apply(project.id)
         var failures: [String] = []
-        for screen in targetScreens {
+        var unsupportedOrigin: WPEOrigin?
+        for screen in targets {
             screenManager.clearWPEImportError(for: screen)
-            if let failure = await importForScreenWithLibraryAccess(project, screen: screen) {
+            switch await applyForScreenWithLibraryAccess(project, screen: screen) {
+            case .applied:
+                break
+            case .unsupported(let origin):
+                unsupportedOrigin = origin
+            case .rejected(let failure):
                 failures.append(failure)
             }
         }
-        activeImportProjectID = nil
+        activeProjectAction = nil
 
         if !failures.isEmpty {
             errorMessage = uniqueMessages(failures).joined(separator: "\n")
@@ -340,17 +515,61 @@ struct WorkshopGalleryView: View {
             return
         }
 
-        dismiss()
+        if let unsupportedOrigin {
+            selectedUnsupportedOrigin = unsupportedOrigin
+            await refreshScan()
+            return
+        }
+
+        await refreshScan()
+        if !allowsTargetSelection {
+            dismiss()
+        }
+    }
+
+    private func toggleBookmark(_ project: WallpaperEngineLibraryScanner.DiscoveredProject) async {
+        guard canAttemptAction(project.type) else { return }
+
+        if isBookmarked(project) {
+            bookmarkStore.removeWPEBookmarks(workshopID: project.workshopID)
+            return
+        }
+
+        activeProjectAction = .bookmark(project.id)
+        let outcome = await prepareWithLibraryAccess(project)
+        activeProjectAction = nil
+
+        switch outcome {
+        case .ready(let content, let origin):
+            if !bookmarkStore.containsWPEBookmark(workshopID: project.workshopID) {
+                bookmarkStore.add(
+                    label: origin.title,
+                    content: content,
+                    sourceDisplayName: origin.title,
+                    wpeOrigin: origin
+                )
+            }
+        case .unsupported(let origin):
+            selectedUnsupportedOrigin = origin
+        case .rejected(let reason):
+            errorMessage = reason
+        }
+    }
+
+    private func clearBrowseFilters() {
+        searchText = ""
+        typeFilter = .all
+        sortOrder = .recommended
     }
 
     /// Re-acquires the persisted root bookmark's security scope for the
-    /// duration of one import. Without this, child URLs handed back by the
+    /// duration of one project action. Without this, child URLs handed back by the
     /// scanner are unreachable in a sandboxed build because the scanner's
     /// scope ended when `scan()` returned.
-    private func importForScreenWithLibraryAccess(
+    private func applyForScreenWithLibraryAccess(
         _ project: WallpaperEngineLibraryScanner.DiscoveredProject,
         screen: Screen
-    ) async -> String? {
+    ) async -> ScreenManager.WPEProjectApplyOutcome {
         var isStale = false
         guard let rootURL = try? URL(
             resolvingBookmarkData: project.libraryRootBookmarkData,
@@ -358,42 +577,141 @@ struct WorkshopGalleryView: View {
             relativeTo: nil,
             bookmarkDataIsStale: &isStale
         ) else {
-            return "Workshop folder access expired. Re-grant library access."
+            return .rejected(reason: "Workshop folder access expired. Re-grant library access.")
         }
 
         let didStart = rootURL.startAccessingSecurityScopedResource()
         defer { if didStart { rootURL.stopAccessingSecurityScopedResource() } }
 
         guard didStart || FileManager.default.fileExists(atPath: project.folderURL.path) else {
-            return "Workshop folder access denied. Re-grant library access."
+            return .rejected(reason: "Workshop folder access denied. Re-grant library access.")
         }
 
-        await screenManager.importWallpaperEngineProject(at: project.folderURL, for: screen)
+        let outcome = await screenManager.importWallpaperEngineProject(at: project.folderURL, for: screen)
         if let error = screenManager.wpeImportError(for: screen) {
-            return importErrorMessage(error)
+            return .rejected(reason: importErrorMessage(error))
         }
-        return nil
+        return outcome
+    }
+
+    private func prepareWithLibraryAccess(
+        _ project: WallpaperEngineLibraryScanner.DiscoveredProject
+    ) async -> ScreenManager.WPEProjectPreparationOutcome {
+        var isStale = false
+        guard let rootURL = try? URL(
+            resolvingBookmarkData: project.libraryRootBookmarkData,
+            options: .withSecurityScope,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        ) else {
+            return .rejected(reason: "Workshop folder access expired. Re-grant library access.")
+        }
+
+        let didStart = rootURL.startAccessingSecurityScopedResource()
+        defer { if didStart { rootURL.stopAccessingSecurityScopedResource() } }
+
+        guard didStart || FileManager.default.fileExists(atPath: project.folderURL.path) else {
+            return .rejected(reason: "Workshop folder access denied. Re-grant library access.")
+        }
+
+        return await screenManager.prepareWallpaperEngineProject(at: project.folderURL)
     }
 
     // MARK: - Helpers
 
-    private var compatibleCount: Int {
-        projects.filter { isCompatible($0.type) && !$0.importedAlready }.count
+    private var visibleProjects: [WallpaperEngineLibraryScanner.DiscoveredProject] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let filtered = projects.filter { project in
+            typeFilter.includes(project) && matchesSearch(project, query: query)
+        }
+
+        switch sortOrder {
+        case .recommended:
+            return filtered
+        case .name:
+            return filtered.sorted { compareByTitleThenID($0, $1) }
+        case .type:
+            return filtered.sorted {
+                let lhsRank = typeSortRank($0.type)
+                let rhsRank = typeSortRank($1.type)
+                if lhsRank != rhsRank { return lhsRank < rhsRank }
+                return compareByTitleThenID($0, $1)
+            }
+        }
+    }
+
+    private var actionableCount: Int {
+        projects.filter { canAttemptAction($0.type) }.count
     }
 
     private var unsupportedCount: Int {
-        projects.filter { !isCompatible($0.type) }.count
+        projects.filter { !canAttemptAction($0.type) }.count
     }
 
-    private var isImportingProject: Bool {
-        activeImportProjectID != nil
+    private var isBusy: Bool {
+        activeProjectAction != nil
     }
 
-    private func isCompatible(_ type: WPEType) -> Bool {
-        switch type {
-        case .video, .web: return true
-        case .scene, .application, .unknown: return false
+    private var effectiveTargetScreens: [Screen] {
+        if allowsTargetSelection {
+            guard let selectedTargetScreenID,
+                  let selected = screenManager.screens.first(where: { $0.id == selectedTargetScreenID }) else {
+                return []
+            }
+            return [selected]
         }
+        return fixedTargetScreens
+    }
+
+    private func canAttemptAction(_ type: WPEType) -> Bool {
+        switch type {
+        case .video, .web, .scene: return true
+        case .application, .unknown: return false
+        }
+    }
+
+    private func matchesSearch(
+        _ project: WallpaperEngineLibraryScanner.DiscoveredProject,
+        query: String
+    ) -> Bool {
+        guard !query.isEmpty else { return true }
+        return project.title.localizedCaseInsensitiveContains(query)
+            || project.workshopID.localizedCaseInsensitiveContains(query)
+            || project.type.localizedDisplayName.localizedCaseInsensitiveContains(query)
+    }
+
+    private func compareByTitleThenID(
+        _ lhs: WallpaperEngineLibraryScanner.DiscoveredProject,
+        _ rhs: WallpaperEngineLibraryScanner.DiscoveredProject
+    ) -> Bool {
+        let titleOrder = lhs.title.localizedCaseInsensitiveCompare(rhs.title)
+        if titleOrder != .orderedSame {
+            return titleOrder == .orderedAscending
+        }
+        return lhs.workshopID.localizedCaseInsensitiveCompare(rhs.workshopID) == .orderedAscending
+    }
+
+    private func typeSortRank(_ type: WPEType) -> Int {
+        switch type {
+        case .video:        return 0
+        case .web:          return 1
+        case .scene:        return 2
+        case .application:  return 3
+        case .unknown:      return 4
+        }
+    }
+
+    private func isBookmarked(_ project: WallpaperEngineLibraryScanner.DiscoveredProject) -> Bool {
+        bookmarkStore.containsWPEBookmark(workshopID: project.workshopID)
+    }
+
+    private func selectInitialTargetIfNeeded() {
+        guard allowsTargetSelection else { return }
+        if let selectedTargetScreenID,
+           screenManager.screens.contains(where: { $0.id == selectedTargetScreenID }) {
+            return
+        }
+        selectedTargetScreenID = screenManager.screens.first?.id
     }
 
     private func updateRootAccessState() {
@@ -441,15 +759,111 @@ struct WorkshopGalleryView: View {
         case scanning
         case results
     }
+
+    private enum ActiveProjectAction: Equatable {
+        case apply(String)
+        case bookmark(String)
+
+        func action(for projectID: String) -> WorkshopProjectActiveAction? {
+            switch self {
+            case .apply(let activeID) where activeID == projectID:
+                return .apply
+            case .bookmark(let activeID) where activeID == projectID:
+                return .bookmark
+            default:
+                return nil
+            }
+        }
+    }
+}
+
+// MARK: - Browse Controls
+
+private struct WorkshopGalleryFilterBar: View {
+    @Binding var searchText: String
+    @Binding var typeFilter: WorkshopProjectTypeFilter
+    @Binding var sortOrder: WorkshopProjectSortOrder
+
+    let resultCount: Int
+    let totalCount: Int
+    let isDisabled: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            searchField
+
+            Picker("Type", selection: $typeFilter) {
+                ForEach(WorkshopProjectTypeFilter.allCases) { filter in
+                    Text(verbatim: filter.title).tag(filter)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .controlSize(.small)
+            .frame(width: 118)
+            .help(Text("Filter by project type"))
+
+            Picker("Sort", selection: $sortOrder) {
+                ForEach(WorkshopProjectSortOrder.allCases) { order in
+                    Text(verbatim: order.title).tag(order)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .controlSize(.small)
+            .frame(width: 132)
+            .help(Text("Sort workshop projects"))
+
+            Spacer(minLength: 10)
+
+            Text(verbatim: "\(resultCount)/\(totalCount)")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .help(Text("Visible projects"))
+        }
+        .disabled(isDisabled)
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+
+            TextField("Search Workshop", text: $searchText)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help(Text("Clear search"))
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .frame(minWidth: 220, idealWidth: 280, maxWidth: 360)
+        .glassEffect(.regular.interactive(), in: .capsule)
+    }
 }
 
 // MARK: - Card
 
 private struct WorkshopGalleryCard: View {
     let project: WallpaperEngineLibraryScanner.DiscoveredProject
-    let isImporting: Bool
+    let activeAction: WorkshopProjectActiveAction?
     let isDisabled: Bool
-    let onImport: () -> Void
+    let canApply: Bool
+    let isBookmarked: Bool
+    let onApply: () -> Void
+    let onToggleBookmark: () -> Void
 
     @State private var isHovering = false
 
@@ -481,7 +895,7 @@ private struct WorkshopGalleryCard: View {
         .wpeProjectCardChrome(isHovering: isHovering)
         .onHover { isHovering = $0 }
         // Deliberately NOT .accessibilityElement(children: .combine) — that
-        // would swallow the inner Import button. Letting SwiftUI infer the
+        // would swallow the inner action buttons. Letting SwiftUI infer the
         // tree keeps the action reachable for VoiceOver users.
     }
 
@@ -505,19 +919,40 @@ private struct WorkshopGalleryCard: View {
     @ViewBuilder
     private var actionButton: some View {
         switch project.type {
-        case .video, .web:
-            Button(action: onImport) {
-                Label(isImporting ? "Applying..." : actionTitle, systemImage: actionSystemImage)
-                    .font(.system(size: 12, weight: .semibold))
-                    .frame(maxWidth: .infinity)
+        case .video, .web, .scene:
+            VStack(alignment: .leading, spacing: 6) {
+                if project.type == .scene {
+                    sceneStatusLabel
+                }
+
+                HStack(spacing: 6) {
+                    Button(action: onApply) {
+                        Label(primaryTitle, systemImage: primarySystemImage)
+                            .font(.system(size: 11, weight: .semibold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.82)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(GlassCapsuleButtonStyle(fontSize: 11, horizontalPadding: 9, verticalPadding: 5))
+                    .disabled(isDisabled || activeAction != nil || !canApply)
+                    .help(canApply ? Text(primaryTitle) : Text("Choose a display before applying"))
+
+                    Button(action: onToggleBookmark) {
+                        Image(systemName: bookmarkSystemImage)
+                            .font(.system(size: 11, weight: .semibold))
+                            .frame(width: 14, height: 14)
+                    }
+                    .buttonStyle(GlassCapsuleButtonStyle(
+                        tint: isBookmarked ? .yellow : .secondary,
+                        fontSize: 11,
+                        horizontalPadding: 8,
+                        verticalPadding: 5
+                    ))
+                    .disabled(isDisabled || activeAction != nil)
+                    .help(isBookmarked ? Text("Remove Bookmark") : Text("Add Bookmark"))
+                    .accessibilityLabel(Text(isBookmarked ? "Remove Bookmark" : "Add Bookmark"))
+                }
             }
-            .buttonStyle(GlassCapsuleButtonStyle(fontSize: 12, horizontalPadding: 12, verticalPadding: 6))
-            .disabled(isDisabled)
-        case .scene:
-            Label("Scene · preview only", systemImage: "exclamationmark.triangle.fill")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.orange)
-                .frame(maxWidth: .infinity, alignment: .leading)
         case .application:
             Label("Executable · skipped", systemImage: "lock.fill")
                 .font(.system(size: 11, weight: .medium))
@@ -531,13 +966,64 @@ private struct WorkshopGalleryCard: View {
         }
     }
 
-    private var actionTitle: String {
-        project.importedAlready ? "Apply" : "Import & Apply"
+    @ViewBuilder
+    private var sceneStatusLabel: some View {
+        Label(sceneStatusText, systemImage: sceneStatusSystemImage)
+            .font(.system(size: 10, weight: .medium))
+            .foregroundStyle(sceneStatusColor)
+            .lineLimit(1)
+            .minimumScaleFactor(0.85)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var actionSystemImage: String {
-        if isImporting { return "hourglass" }
-        return project.importedAlready ? "play.fill" : "square.and.arrow.down"
+    private var primaryTitle: String {
+        switch activeAction {
+        case .apply:
+            return "Applying..."
+        case .bookmark:
+            return project.type == .scene ? "Check & Apply" : "Apply"
+        case nil:
+            return project.type == .scene ? "Check & Apply" : "Apply"
+        }
+    }
+
+    private var primarySystemImage: String {
+        switch activeAction {
+        case .apply:
+            return "hourglass"
+        case .bookmark, nil:
+            return project.type == .scene ? "checkmark.circle" : "play.fill"
+        }
+    }
+
+    private var bookmarkSystemImage: String {
+        if activeAction == .bookmark { return "hourglass" }
+        return isBookmarked ? "bookmark.fill" : "bookmark"
+    }
+
+    private var sceneStatusText: String {
+        if project.requiresWindowsPlugin {
+            return "Scene · won't run"
+        }
+        if !project.hasScenePackage {
+            return "Scene · check needed"
+        }
+        if !project.dependencyWorkshopIDs.isEmpty {
+            return "Scene · check needed"
+        }
+        return "Scene · may work"
+    }
+
+    private var sceneStatusSystemImage: String {
+        if project.requiresWindowsPlugin { return "xmark.octagon.fill" }
+        if project.hasScenePackage { return "questionmark.circle.fill" }
+        return "exclamationmark.triangle.fill"
+    }
+
+    private var sceneStatusColor: Color {
+        if project.requiresWindowsPlugin { return .red }
+        if project.hasScenePackage { return .orange }
+        return .yellow
     }
 
     private var typeLabel: String {
@@ -545,8 +1031,8 @@ private struct WorkshopGalleryCard: View {
     }
 
     private var cardAccessibilityLabel: Text {
-        if project.importedAlready {
-            return Text("\(project.title), \(typeLabel) wallpaper, already in library", comment: "Workshop gallery card a11y label for an already-imported project. Placeholders are project title and project type.")
+        if isBookmarked {
+            return Text("\(project.title), \(typeLabel) wallpaper, already bookmarked", comment: "Workshop gallery card a11y label for an already-bookmarked project. Placeholders are project title and project type.")
         }
         return Text("\(project.title), \(typeLabel) wallpaper", comment: "Workshop gallery card a11y label. Placeholders are project title and project type.")
     }
@@ -564,9 +1050,9 @@ private struct WorkshopGalleryCard: View {
 
 private struct WorkshopToolbarButtonStyle: ButtonStyle {
     var tint: Color = .accentColor
-    var fontSize: CGFloat = 14
-    var horizontalPadding: CGFloat = 20
-    var verticalPadding: CGFloat = 9
+    var fontSize: CGFloat = 13
+    var horizontalPadding: CGFloat = 15
+    var verticalPadding: CGFloat = 7
 
     func makeBody(configuration: Configuration) -> some View {
         StyledLabel(
@@ -595,7 +1081,7 @@ private struct WorkshopToolbarButtonStyle: ButtonStyle {
                 .foregroundStyle(effectiveTint)
                 .padding(.horizontal, horizontalPadding)
                 .padding(.vertical, verticalPadding)
-                .frame(minHeight: 40)
+                .frame(minHeight: 34)
                 .glassEffect(
                     .regular.tint(effectiveTint.opacity(isEnabled ? 0.16 : 0.06)).interactive(),
                     in: .capsule

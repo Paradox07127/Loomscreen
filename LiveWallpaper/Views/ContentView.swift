@@ -473,7 +473,7 @@ struct DetailContent: View {
                     .transition(.opacity)
 
             case .workshop:
-                WorkshopGalleryView(screen: screenManager.screens.first)
+                WorkshopGalleryView(allowsTargetSelection: true)
                     .transition(.opacity)
 
             case .none:

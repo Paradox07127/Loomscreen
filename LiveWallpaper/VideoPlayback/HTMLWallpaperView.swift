@@ -49,6 +49,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     /// Tracks the last applied `HTMLConfig` so re-`apply()` calls with the
     /// same toggles skip the user-script teardown / re-install.
     private var lastAppliedConfig: HTMLConfig?
+    private var wallpaperEnginePropertyBootstrapScript: String?
     /// Replays into `loadSource(_:)` for retry / re-entry (sleep wake, error banner).
     private var lastSource: HTMLSource?
     /// Counts consecutive navigation failures since the last successful load.
@@ -166,6 +167,14 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             injectionTime: .atDocumentStart,
             forMainFrameOnly: true
         ))
+
+        if let wallpaperEnginePropertyBootstrapScript {
+            controller.addUserScript(WKUserScript(
+                source: wallpaperEnginePropertyBootstrapScript,
+                injectionTime: .atDocumentEnd,
+                forMainFrameOnly: true
+            ))
+        }
     }
 
     // MARK: - Hit Testing
@@ -325,6 +334,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         if case .folder = source {
             // folderURL is set below — do not clear here.
         } else {
+            updateWallpaperEnginePropertyBridge(for: nil)
             folderHandler.folderURL = nil
         }
 
@@ -342,6 +352,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
                 return
             }
             activeSecurityScopedURL = folderURL
+            updateWallpaperEnginePropertyBridge(for: folderURL)
             // Route through custom scheme so ES module / CORS / fetch all
             // behave like normal HTTP. file:// would block `<script type="module" crossorigin>`.
             folderHandler.folderURL = folderURL
@@ -363,6 +374,15 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         case .inline(let html):
             webView.loadHTMLString(html, baseURL: nil)
         }
+    }
+
+    private func updateWallpaperEnginePropertyBridge(for folderURL: URL?) {
+        let nextScript = folderURL.flatMap {
+            WallpaperEngineWebPropertyBridge.bootstrapScript(forFolder: $0)
+        }
+        guard wallpaperEnginePropertyBootstrapScript != nextScript else { return }
+        wallpaperEnginePropertyBootstrapScript = nextScript
+        installBaselineUserScripts(for: lastAppliedConfig)
     }
 
     /// Re-applies the most recent `HTMLSource`. Used by `WallpaperRuntimeSession.retry()`.

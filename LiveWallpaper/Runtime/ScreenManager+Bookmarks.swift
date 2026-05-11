@@ -14,8 +14,8 @@ extension ScreenManager {
             setHTMLWallpaper(source: source, config: config, for: screen)
         case .metalShader(let preset):
             setShaderWallpaper(preset: preset, for: screen)
-        case .scene:
-            Logger.warning("Scene bookmark apply is not supported in Phase 2.0", category: .screenManager)
+        case .scene(let descriptor):
+            setSceneWallpaper(descriptor: descriptor, origin: bookmark.wpeOrigin, for: screen)
         }
     }
 }
