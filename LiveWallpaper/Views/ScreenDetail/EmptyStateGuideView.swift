@@ -19,12 +19,12 @@ struct EmptyStateGuideView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 24) {
+            VStack(spacing: 16) {
                 header
 
                 LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 240, maximum: 320), spacing: 16)],
-                    spacing: 16
+                    columns: [GridItem(.adaptive(minimum: 240, maximum: 320), spacing: 14)],
+                    spacing: 12
                 ) {
                     GuideCard(
                         icon: "film",
@@ -75,7 +75,7 @@ struct EmptyStateGuideView: View {
                 hint
             }
             .padding(.horizontal, 28)
-            .padding(.vertical, 32)
+            .padding(.vertical, 20)
             .frame(maxWidth: 760)
             .frame(maxWidth: .infinity)
         }
@@ -83,9 +83,9 @@ struct EmptyStateGuideView: View {
     }
 
     private var header: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 6) {
             Image(systemName: "sparkles")
-                .font(.system(size: 36, weight: .light))
+                .font(.system(size: 30, weight: .light))
                 .foregroundStyle(Color.accentColor)
                 .symbolRenderingMode(.hierarchical)
                 .accessibilityHidden(true)
@@ -112,7 +112,7 @@ struct EmptyStateGuideView: View {
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
         }
-        .padding(.top, 8)
+        .padding(.top, 2)
     }
 }
 
@@ -134,13 +134,13 @@ private struct GuideCard: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 10) {
                 ZStack {
                     Circle()
                         .fill(iconTint.opacity(0.15))
-                        .frame(width: 44, height: 44)
+                        .frame(width: 40, height: 40)
                     Image(systemName: icon)
-                        .font(.system(size: 20, weight: .medium))
+                        .font(.system(size: 18, weight: .medium))
                         .foregroundStyle(iconTint)
                         .symbolRenderingMode(.hierarchical)
                 }
@@ -156,20 +156,20 @@ private struct GuideCard: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                Spacer(minLength: 6)
+                Spacer(minLength: 2)
 
                 Label(actionTitle, systemImage: actionSystemImage)
                     .font(.system(size: 12, weight: .semibold))
                     .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
+                    .padding(.vertical, 5)
                     .background(
                         Capsule()
                             .fill(Color.accentColor.opacity(isActive ? 0.30 : 0.18))
                     )
                     .foregroundStyle(Color.accentColor)
             }
-            .padding(DesignTokens.Spacing.lg)
-            .frame(minHeight: 168, alignment: .topLeading)
+            .padding(14)
+            .frame(minHeight: 152, alignment: .topLeading)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(RoundedRectangle(cornerRadius: DesignTokens.Corner.lg, style: .continuous))
             .background(

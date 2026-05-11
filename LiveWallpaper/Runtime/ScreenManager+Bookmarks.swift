@@ -5,13 +5,7 @@ extension ScreenManager {
         Logger.info("Applying bookmark to screen \(screen.id): \(bookmark.wallpaperType.rawValue)", category: .ui)
         switch bookmark.content {
         case .video(let bookmarkData):
-            var isStale = false
-            guard let url = try? URL(
-                resolvingBookmarkData: bookmarkData,
-                options: .withSecurityScope,
-                relativeTo: nil,
-                bookmarkDataIsStale: &isStale
-            ) else {
+            guard let url = try? ResourceUtilities.resolveBookmark(bookmarkData).url else {
                 Logger.warning("Bookmark video unresolvable; user may need to re-pick", category: .fileAccess)
                 return
             }

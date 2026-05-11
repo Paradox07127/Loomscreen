@@ -86,6 +86,20 @@ struct SettingsWindowLayoutTests {
         )
     }
 
+    @Test("Initial wallpaper type guide keeps compact vertical rhythm")
+    func initialWallpaperTypeGuideKeepsCompactVerticalRhythm() throws {
+        let source = try sourceText(for: "LiveWallpaper/Views/ScreenDetail/EmptyStateGuideView.swift")
+
+        #expect(source.contains("VStack(spacing: 16)"))
+        #expect(source.contains(".padding(.vertical, 20)"))
+        #expect(source.contains("VStack(spacing: 6)"))
+        #expect(source.contains(".font(.system(size: 30"))
+        #expect(source.contains(".frame(minHeight: 152"))
+        #expect(!source.contains("VStack(spacing: 24)"))
+        #expect(!source.contains(".padding(.vertical, 32)"))
+        #expect(!source.contains(".frame(minHeight: 168"))
+    }
+
     @Test("Screen detail keeps wallpaper type picker in the centered titlebar toolbar")
     func screenDetailKeepsWallpaperTypePickerInCenteredToolbar() throws {
         let source = try sourceText(for: "LiveWallpaper/Views/ScreenDetailView.swift")
@@ -123,6 +137,35 @@ struct SettingsWindowLayoutTests {
             !contentSource.contains("return \"HTML\"") && !contentSource.contains("return \"Shader\""),
             "The sidebar display status should describe activity, not wallpaper type."
         )
+    }
+
+    @Test("Main app chrome avoids under-page background in light mode")
+    func mainAppChromeAvoidsUnderPageBackgroundInLightMode() throws {
+        let chromeFiles = [
+            "LiveWallpaper/Views/ContentView.swift",
+            "LiveWallpaper/Views/DetailPageScaffold.swift",
+            "LiveWallpaper/Views/GeneralSettingsView.swift",
+            "LiveWallpaper/Views/ScreenDetailView.swift",
+            "LiveWallpaper/Views/SettingsFormChrome.swift"
+        ]
+        let combinedSource = try chromeFiles
+            .map(sourceText(for:))
+            .joined(separator: "\n")
+        let tokensSource = try sourceText(for: "LiveWallpaper/Views/Styles/DesignTokens.swift")
+
+        #expect(
+            !combinedSource.contains("underPageBackgroundColor"),
+            "NSColor.underPageBackgroundColor resolves to a dark gray Aqua color and should not be used for the settings window's primary chrome."
+        )
+        #expect(tokensSource.contains("windowBackgroundColor"))
+        #expect(combinedSource.contains("DesignTokens.Colors.pageBackground"))
+    }
+
+    @Test("Hand managed app windows use system window background")
+    func handManagedAppWindowsUseSystemWindowBackground() throws {
+        let source = try sourceText(for: "LiveWallpaper/LiveWallpaperApp.swift")
+
+        #expect(source.components(separatedBy: "window.backgroundColor = .windowBackgroundColor").count >= 3)
     }
 
     @Test("Playback speed segments expose the full segment as the hit target")
@@ -228,7 +271,7 @@ struct SettingsWindowLayoutTests {
         #expect(htmlSource.contains("BookmarkNameResolver.lastPathComponent"))
         #expect(resourceUtilities.contains("BookmarkNameResolver.lastPathComponent"))
         #expect(!htmlSource.contains("resolvingBookmarkData"))
-        #expect(resolver.contains("resolvingBookmarkData"))
+        #expect(resolver.contains("ResourceUtilities.resolveBookmark"))
     }
 
     @Test("RAM scope segmented control is shared")
@@ -404,7 +447,8 @@ struct SettingsWindowLayoutTests {
 
         #expect(appSource.contains(".fullSizeContentView"))
         #expect(appSource.contains("window.titlebarAppearsTransparent = true"))
-        #expect(appSource.contains("window.isMovableByWindowBackground = true"))
+        #expect(!appSource.contains("window.isMovableByWindowBackground = true"))
+        #expect(appSource.components(separatedBy: "window.isMovableByWindowBackground = false").count >= 3)
         #expect(contentSource.contains("NavigationSplitView {"))
         #expect(contentSource.contains("ToolbarItem(placement: .navigation)"))
         #expect(contentSource.contains("Image(systemName: \"gearshape\")"))
@@ -506,9 +550,9 @@ struct SettingsWindowLayoutTests {
         let workshopSource = try sourceText(for: "LiveWallpaper/Views/ScreenDetail/WorkshopGalleryView.swift")
         let scaffoldSource = try sourceText(for: "LiveWallpaper/Views/DetailPageScaffold.swift")
 
-        #expect(contentSource.contains(".background(Color(NSColor.underPageBackgroundColor))"))
+        #expect(contentSource.contains(".background(DesignTokens.Colors.pageBackground)"))
         #expect(workshopSource.contains("DetailPageScaffold("))
-        #expect(scaffoldSource.contains(".background(Color(NSColor.underPageBackgroundColor))"))
+        #expect(scaffoldSource.contains(".background(DesignTokens.Colors.pageBackground)"))
         #expect(!workshopSource.contains(".background(Color(NSColor.windowBackgroundColor))"))
     }
 
@@ -523,7 +567,7 @@ struct SettingsWindowLayoutTests {
         #expect(source.contains("private func settingsForm"))
         #expect(composedSource.contains(".formStyle(.grouped)"))
         #expect(composedSource.contains(".scrollContentBackground(.hidden)"))
-        #expect(composedSource.contains("Color(NSColor.underPageBackgroundColor)"))
+        #expect(composedSource.contains("DesignTokens.Colors.pageBackground"))
         #expect(source.contains("private var troubleshootingActions"))
         #expect(source.contains("private func settingsActionButton"))
         #expect(source.contains("HStack(spacing: DesignTokens.Settings.actionGridSpacing)"))
@@ -629,6 +673,75 @@ struct ResourceUtilitiesTests {
         #expect(plist["com.apple.security.files.user-selected.read-only"] as? Bool == true)
     }
 
+    @Test("Video bookmark creation falls back to an app-owned copy when scoped bookmark creation fails")
+    func videoBookmarkCreationFallsBackToAppOwnedCopy() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let sourceDirectory = root.appendingPathComponent("source", isDirectory: true)
+        let appSupportRoot = root.appendingPathComponent("ApplicationSupport/LiveWallpaper", isDirectory: true)
+        defer { try? fileManager.removeItem(at: root) }
+
+        try fileManager.createDirectory(at: sourceDirectory, withIntermediateDirectories: true)
+        let sourceURL = sourceDirectory.appendingPathComponent("bg.mp4")
+        try Data([0x00, 0x01, 0x02]).write(to: sourceURL)
+
+        let bookmark = ResourceUtilities.createVideoBookmark(
+            for: sourceURL,
+            applicationSupportRootURL: appSupportRoot,
+            secureBookmarkCreator: { _ in nil },
+            localBookmarkCreator: { Data($0.path(percentEncoded: false).utf8) }
+        )
+
+        let importedRoot = appSupportRoot.appendingPathComponent("ImportedVideos", isDirectory: true)
+        let importedDirectories = try fileManager.contentsOfDirectory(
+            at: importedRoot,
+            includingPropertiesForKeys: nil
+        )
+        let copiedURL = try #require(importedDirectories.first?.appendingPathComponent("bg.mp4"))
+
+        #expect(bookmark == Data(copiedURL.path(percentEncoded: false).utf8))
+        #expect(fileManager.fileExists(atPath: copiedURL.path(percentEncoded: false)))
+        #expect(try Data(contentsOf: copiedURL) == Data([0x00, 0x01, 0x02]))
+    }
+
+    @Test("Video fallback reuses the app-owned copy for the same source")
+    func videoBookmarkCreationReusesAppOwnedCopyForSameSource() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let sourceDirectory = root.appendingPathComponent("source", isDirectory: true)
+        let appSupportRoot = root.appendingPathComponent("ApplicationSupport/LiveWallpaper", isDirectory: true)
+        defer { try? fileManager.removeItem(at: root) }
+
+        try fileManager.createDirectory(at: sourceDirectory, withIntermediateDirectories: true)
+        let sourceURL = sourceDirectory.appendingPathComponent("bg.mp4")
+        try Data([0x00, 0x01, 0x02]).write(to: sourceURL)
+
+        let firstBookmark = ResourceUtilities.createVideoBookmark(
+            for: sourceURL,
+            applicationSupportRootURL: appSupportRoot,
+            secureBookmarkCreator: { _ in nil },
+            localBookmarkCreator: { Data($0.path(percentEncoded: false).utf8) }
+        )
+        let secondBookmark = ResourceUtilities.createVideoBookmark(
+            for: sourceURL,
+            applicationSupportRootURL: appSupportRoot,
+            secureBookmarkCreator: { _ in nil },
+            localBookmarkCreator: { Data($0.path(percentEncoded: false).utf8) }
+        )
+
+        let importedRoot = appSupportRoot.appendingPathComponent("ImportedVideos", isDirectory: true)
+        let importedDirectories = try fileManager.contentsOfDirectory(
+            at: importedRoot,
+            includingPropertiesForKeys: nil
+        )
+
+        #expect(firstBookmark == secondBookmark)
+        #expect(importedDirectories.count == 1)
+        #expect(fileManager.fileExists(
+            atPath: importedDirectories[0].appendingPathComponent("bg.mp4").path(percentEncoded: false)
+        ))
+    }
+
     @Test("HTML folder index inference prefers standard names")
     func htmlFolderIndexInferencePrefersStandardNames() {
         let entries = ["about.html", "index.htm", "index.html"]
@@ -705,6 +818,30 @@ struct SettingsManagerTests {
         manager.replaceAllConfigurations([config])
 
         #expect(!manager.validateConfiguration(for: screenID))
+    }
+
+    @Test("App-owned non-scoped video bookmark passes configuration validation")
+    func appOwnedNonScopedVideoBookmarkPassesConfigurationValidation() throws {
+        let manager = SettingsManager.shared
+        let previousConfigurations = manager.loadConfigurations()
+        defer { manager.replaceAllConfigurations(previousConfigurations) }
+
+        let videoURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LiveWallpaper-local-video-\(UUID().uuidString).mp4")
+        defer { try? FileManager.default.removeItem(at: videoURL) }
+        try Data([0x00, 0x01]).write(to: videoURL)
+        let bookmark = try videoURL.bookmarkData(
+            options: [],
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
+
+        let screenID: CGDirectDisplayID = 909_002
+        manager.replaceAllConfigurations([
+            ScreenConfiguration(screenID: screenID, videoBookmarkData: bookmark)
+        ])
+
+        #expect(manager.validateConfiguration(for: screenID))
     }
 
     private func restore(defaults: UserDefaults, values: [String: Any], keys: [String]) {

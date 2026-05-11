@@ -208,7 +208,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.sharingType = .readOnly
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
-        window.isMovableByWindowBackground = true
+        window.backgroundColor = .windowBackgroundColor
+        window.isMovableByWindowBackground = false
         window.center()
         window.contentView = NSHostingView(rootView: contentView)
         window.delegate = self
@@ -242,7 +243,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
-        window.isMovableByWindowBackground = true
+        window.backgroundColor = .windowBackgroundColor
+        window.isMovableByWindowBackground = false
         window.isReleasedWhenClosed = false
         window.center()
 

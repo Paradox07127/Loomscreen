@@ -319,22 +319,25 @@ final class PlaybackCoordinator {
                 ])
             }
 
-            var isStale = false
-            let url = try URL(
-                resolvingBookmarkData: bookmarkData,
-                options: .withSecurityScope,
-                relativeTo: nil,
-                bookmarkDataIsStale: &isStale
-            )
+            let resolution = try ResourceUtilities.resolveBookmark(bookmarkData)
+            let url = resolution.url
 
             guard url.startAccessingSecurityScopedResource() else {
-                throw NSError(domain: "ScreenManager", code: 403, userInfo: [
-                    NSLocalizedDescriptionKey: "Cannot access the video file. Permission denied."
-                ])
+                guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else {
+                    throw NSError(domain: "ScreenManager", code: 403, userInfo: [
+                        NSLocalizedDescriptionKey: "Cannot access the video file. Permission denied."
+                    ])
+                }
+                return applyConfigurationForAccessibleURL(
+                    url,
+                    configuration: configuration,
+                    screen: screen,
+                    preservingState: preservingState
+                )
             }
             defer { url.stopAccessingSecurityScopedResource() }
 
-            if isStale {
+            if resolution.isStale && resolution.isSecurityScoped {
                 do {
                     let updatedBookmarkData = try url.bookmarkData(
                         options: [.withSecurityScope, .securityScopeAllowOnlyReadAccess],
@@ -348,60 +351,12 @@ final class PlaybackCoordinator {
                 }
             }
 
-            let needsNewPlayer = screen.videoPlayer == nil
-
-            if !needsNewPlayer, let player = screen.videoPlayer {
-                let currentTime = preservingState ? player.player?.currentTime() : .zero
-                let wasPlaying = player.isPlaying
-
-                player.setVideoFitMode(configuration.fitMode)
-
-                let currentSpeed = player.player?.defaultRate ?? 1.0
-                if abs(Float(configuration.playbackSpeed) - currentSpeed) > 0.01 {
-                    player.setPlaybackSpeed(configuration.playbackSpeed)
-                }
-
-                if player.videoFrameRate > 0 {
-                    if configuration.effectConfig.hasActiveEffect {
-                        applyVideoEffects(screen, configuration)
-                    } else {
-                        applyFrameRateLimit(configuration.frameRateLimit, to: screen)
-                    }
-                }
-
-                if let currentTime {
-                    player.player?.seek(to: currentTime)
-                }
-
-                let globalSettings = SettingsManager.shared.loadGlobalSettings()
-                let shouldPause = WallpaperPolicyEngine.shouldStartVideoPaused(
-                    globalSettings: globalSettings,
-                    powerSource: powerMonitor.currentPowerSource,
-                    isHiddenByFullScreen: fullScreenDetector.isDesktopHidden(for: screen.id)
-                )
-
-                if shouldPause {
-                    player.pause()
-                } else if !wasPlaying {
-                    schedulePolicyAwarePlaybackStart(to: player, screenID: screen.id)
-                }
-            } else {
-                let player = WallpaperVideoPlayer(
-                    url: url,
-                    frame: screen.frame,
-                    fitMode: configuration.fitMode
-                )
-                let session = VideoWallpaperSession(player: player)
-                session.onRuntimeErrorChange = { [markSessionStateChanged] in markSessionStateChanged() }
-                screen.installRuntimeSession(session)
-                notifyWallpaperSessionChanged()
-
-                player.setPlaybackSpeed(configuration.playbackSpeed)
-                applyConfigurationWhenAssetReady(player: player, screen: screen, configuration: configuration)
-                applyStartupPlaybackPolicy(to: player, for: screen)
-            }
-
-            applyPerformancePolicy(to: screen)
+            applyConfigurationForAccessibleURL(
+                url,
+                configuration: configuration,
+                screen: screen,
+                preservingState: preservingState
+            )
         } catch let error as NSError {
             Logger.error("Failed to apply configuration: \(error.localizedDescription) [domain=\(error.domain) code=\(error.code)]", category: .screenManager)
             // Malformed persisted bookmark; clear it to avoid retry loops.
@@ -414,6 +369,68 @@ final class PlaybackCoordinator {
         } catch {
             Logger.error("Failed to apply configuration: \(error.localizedDescription)", category: .screenManager)
         }
+    }
+
+    private func applyConfigurationForAccessibleURL(
+        _ url: URL,
+        configuration: ScreenConfiguration,
+        screen: Screen,
+        preservingState: Bool
+    ) {
+        let needsNewPlayer = screen.videoPlayer == nil
+
+        if !needsNewPlayer, let player = screen.videoPlayer {
+            let currentTime = preservingState ? player.player?.currentTime() : .zero
+            let wasPlaying = player.isPlaying
+
+            player.setVideoFitMode(configuration.fitMode)
+
+            let currentSpeed = player.player?.defaultRate ?? 1.0
+            if abs(Float(configuration.playbackSpeed) - currentSpeed) > 0.01 {
+                player.setPlaybackSpeed(configuration.playbackSpeed)
+            }
+
+            if player.videoFrameRate > 0 {
+                if configuration.effectConfig.hasActiveEffect {
+                    applyVideoEffects(screen, configuration)
+                } else {
+                    applyFrameRateLimit(configuration.frameRateLimit, to: screen)
+                }
+            }
+
+            if let currentTime {
+                player.player?.seek(to: currentTime)
+            }
+
+            let globalSettings = SettingsManager.shared.loadGlobalSettings()
+            let shouldPause = WallpaperPolicyEngine.shouldStartVideoPaused(
+                globalSettings: globalSettings,
+                powerSource: powerMonitor.currentPowerSource,
+                isHiddenByFullScreen: fullScreenDetector.isDesktopHidden(for: screen.id)
+            )
+
+            if shouldPause {
+                player.pause()
+            } else if !wasPlaying {
+                schedulePolicyAwarePlaybackStart(to: player, screenID: screen.id)
+            }
+        } else {
+            let player = WallpaperVideoPlayer(
+                url: url,
+                frame: screen.frame,
+                fitMode: configuration.fitMode
+            )
+            let session = VideoWallpaperSession(player: player)
+            session.onRuntimeErrorChange = { [markSessionStateChanged] in markSessionStateChanged() }
+            screen.installRuntimeSession(session)
+            notifyWallpaperSessionChanged()
+
+            player.setPlaybackSpeed(configuration.playbackSpeed)
+            applyConfigurationWhenAssetReady(player: player, screen: screen, configuration: configuration)
+            applyStartupPlaybackPolicy(to: player, for: screen)
+        }
+
+        applyPerformancePolicy(to: screen)
     }
 
     func setupVideoPlayback(url: URL, screen: Screen) {
@@ -475,13 +492,6 @@ final class PlaybackCoordinator {
 
     private static func bookmarkResolves(to url: URL, bookmark: Data?) -> Bool {
         guard let bookmark else { return false }
-        var isStale = false
-        let resolved = try? URL(
-            resolvingBookmarkData: bookmark,
-            options: .withSecurityScope,
-            relativeTo: nil,
-            bookmarkDataIsStale: &isStale
-        )
-        return resolved == url
+        return (try? ResourceUtilities.resolveBookmark(bookmark).url) == url
     }
 }

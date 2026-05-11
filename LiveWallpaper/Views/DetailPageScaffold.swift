@@ -26,7 +26,7 @@ struct DetailPageScaffold<Header: View, Content: View>: View {
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(Color(NSColor.underPageBackgroundColor))
+        .background(DesignTokens.Colors.pageBackground)
     }
 }
 

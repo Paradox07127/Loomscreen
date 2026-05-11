@@ -177,7 +177,7 @@ struct ScreenDetailView: View {
 
             HStack(spacing: 0) {
                 ZStack {
-                    Color(NSColor.underPageBackgroundColor)
+                    DesignTokens.Colors.pageBackground
 
                     if shouldShowGuideEmptyState {
                         EmptyStateGuideView(
@@ -292,7 +292,7 @@ struct ScreenDetailView: View {
             .transaction(value: selectedWallpaperType) { $0.animation = nil }
             .transaction(value: liveInspectorWidth) { $0.animation = nil }
         }
-        .background(Color(NSColor.underPageBackgroundColor))
+        .background(DesignTokens.Colors.pageBackground)
         .toolbar {
             ToolbarItem(placement: .principal) {
                 wallpaperTypeToolbar
@@ -832,7 +832,7 @@ struct ScreenDetailView: View {
         withAnimation(DesignTokens.motion(reduceMotion, .smooth(duration: 0.2))) { isLoading = true }
         cleanupPreviewPlayer()
 
-        if let bookmarkData = ResourceUtilities.createBookmark(for: url) {
+        if let bookmarkData = ResourceUtilities.createVideoBookmark(for: url) {
             hasPreviewSource = true
             lastPreviewPosterBookmarkData = bookmarkData
             previewController.startPlaybackPreview(from: url, syncTo: nil)
@@ -882,14 +882,9 @@ struct ScreenDetailView: View {
         if let config = screenManager.getConfiguration(for: screen),
            config.wallpaperType == .video,
            let bookmarkData = config.videoBookmarkData {
-            var isStale = false
-            guard let url = try? URL(
-                resolvingBookmarkData: bookmarkData,
-                options: .withSecurityScope,
-                relativeTo: nil,
-                bookmarkDataIsStale: &isStale
-            ) else { return nil }
-            if isStale, let refreshed = ResourceUtilities.createBookmark(for: url) {
+            guard let resolution = try? ResourceUtilities.resolveBookmark(bookmarkData) else { return nil }
+            let url = resolution.url
+            if resolution.isStale, let refreshed = ResourceUtilities.createVideoBookmark(for: url) {
                 screenManager.replaceActiveBookmark(refreshed, for: screen)
             }
             return url

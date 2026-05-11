@@ -17,7 +17,7 @@ private struct SettingsFormChrome: ViewModifier {
             .scrollContentBackground(.hidden)
             .contentMargins(.horizontal, DesignTokens.Settings.formHorizontalMargin, for: .scrollContent)
             .contentMargins(.vertical, DesignTokens.Settings.formVerticalMargin, for: .scrollContent)
-            .background(Color(NSColor.underPageBackgroundColor))
+            .background(DesignTokens.Colors.pageBackground)
             .frame(minWidth: minWidth, minHeight: minHeight)
     }
 }

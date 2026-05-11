@@ -212,7 +212,7 @@ struct PlaylistSection: View {
             guard !urls.isEmpty else { return }
             SettingsManager.shared.saveLastUsedDirectory(urls[0].deletingLastPathComponent())
             for url in urls {
-                if let bookmark = ResourceUtilities.createBookmark(for: url) {
+                if let bookmark = ResourceUtilities.createVideoBookmark(for: url) {
                     screenManager.recordBookmarkDisplayName(bookmark, name: url.lastPathComponent)
                     playlistBookmarks.append(bookmark)
                 }

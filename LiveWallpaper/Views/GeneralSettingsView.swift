@@ -51,7 +51,7 @@ struct GeneralSettingsView: View {
         // Grouped Form whitespace is absorbed inside Sections (inline Reset button +
         // compact card layout) rather than by constraining overall width.
         .frame(minWidth: 500, minHeight: 400)
-        .background(Color(NSColor.underPageBackgroundColor))
+        .background(DesignTokens.Colors.pageBackground)
         .alert("Reset Settings", isPresented: $showingResetAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Reset All", role: .destructive) {
@@ -245,7 +245,7 @@ struct GeneralSettingsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(32)
-        .background(Color(NSColor.underPageBackgroundColor))
+        .background(DesignTokens.Colors.pageBackground)
     }
 
     private func settingsForm<Content: View>(@ViewBuilder content: () -> Content) -> some View {
