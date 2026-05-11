@@ -43,7 +43,8 @@ final class BookmarkStore {
     func add(
         label: String,
         content: WallpaperContent,
-        sourceDisplayName: String? = nil
+        sourceDisplayName: String? = nil,
+        wpeOrigin: WPEOrigin? = nil
     ) -> WallpaperBookmark {
         let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedSourceDisplayName = sourceDisplayName
@@ -55,7 +56,8 @@ final class BookmarkStore {
         let bookmark = WallpaperBookmark(
             label: resolved,
             content: content,
-            sourceDisplayName: resolvedSourceDisplayName
+            sourceDisplayName: resolvedSourceDisplayName,
+            wpeOrigin: wpeOrigin
         )
         bookmarks.append(bookmark)
         persist()
@@ -89,8 +91,28 @@ final class BookmarkStore {
         bookmarks.contains { $0.content == content }
     }
 
+    func containsWPEBookmark(workshopID: String) -> Bool {
+        bookmarks.contains { Self.matchesWPEBookmark($0, workshopID: workshopID) }
+    }
+
+    func removeWPEBookmarks(workshopID: String) {
+        let removedCount = bookmarks.filter { Self.matchesWPEBookmark($0, workshopID: workshopID) }.count
+        guard removedCount > 0 else { return }
+
+        bookmarks.removeAll { Self.matchesWPEBookmark($0, workshopID: workshopID) }
+        persist()
+        Logger.info("WPE bookmarks removed: workshop \(workshopID), count \(removedCount), total \(bookmarks.count)", category: .ui)
+    }
+
     private func persist() {
         persistence.save(bookmarks)
+    }
+
+    private static func matchesWPEBookmark(_ bookmark: WallpaperBookmark, workshopID: String) -> Bool {
+        if bookmark.wpeOrigin?.workshopID == workshopID {
+            return true
+        }
+        return bookmark.content.sceneDescriptor?.workshopID == workshopID
     }
 
     /// Friendly fallback label derived from the content itself.

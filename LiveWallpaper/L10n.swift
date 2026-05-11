@@ -27,8 +27,8 @@ enum L10n {
 
         static let importProject = String(
             localized: "panel.prompt.import_project",
-            defaultValue: "Import Project",
-            comment: "Confirmation button for choosing a Wallpaper Engine project folder."
+            defaultValue: "Apply Project",
+            comment: "Confirmation button for choosing and applying a Wallpaper Engine project folder."
         )
 
         static let grantAccess = String(

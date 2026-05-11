@@ -34,6 +34,9 @@ final class WallpaperEngineLibraryScanner: @unchecked Sendable {
         let previewURL: URL?
         let importedAlready: Bool
         let libraryRootBookmarkData: Data
+        let dependencyWorkshopIDs: [String]
+        let requiresWindowsPlugin: Bool
+        let hasScenePackage: Bool
 
         var id: String { workshopID }
     }
@@ -117,7 +120,12 @@ final class WallpaperEngineLibraryScanner: @unchecked Sendable {
                 folderURL: child,
                 previewURL: previewURL,
                 importedAlready: alreadyImportedWorkshopIDs.contains(project.workshopID),
-                libraryRootBookmarkData: rootBookmarkData
+                libraryRootBookmarkData: rootBookmarkData,
+                dependencyWorkshopIDs: project.dependencyWorkshopIDs,
+                requiresWindowsPlugin: project.requiresWindowsPlugin,
+                hasScenePackage: fileManager.fileExists(
+                    atPath: child.appendingPathComponent("scene.pkg").path
+                )
             ))
         }
 

@@ -37,6 +37,30 @@ struct BookmarkStoreTests {
         .html(source: .url(URL(string: "https://\(host)")!), config: .default)
     }
 
+    private func sampleSceneContent(workshopID: String = "scene-bookmark") -> WallpaperContent {
+        .scene(SceneDescriptor(
+            workshopID: workshopID,
+            cacheRelativePath: "wpe-cache/\(workshopID)",
+            entryFile: "scene.json",
+            capabilityTier: .imageOnly,
+            dependencyWorkshopIDs: ["123456789012"]
+        ))
+    }
+
+    private func sampleWPEOrigin(workshopID: String = "scene-bookmark") -> WPEOrigin {
+        WPEOrigin(
+            workshopID: workshopID,
+            title: "Bookmarked Scene",
+            originalType: .scene,
+            sourceFolderBookmark: Data([0xA1, 0xB2]),
+            cacheRelativePath: "wpe-cache/\(workshopID)",
+            previewFileName: "preview.jpg",
+            entryFile: "scene.json",
+            resourceLocation: .cache,
+            dependencyWorkshopIDs: ["123456789012"]
+        )
+    }
+
     @Test("Loads seeded bookmarks on init")
     func loadsSeed() {
         let seed = [WallpaperBookmark(label: "Seed", content: sampleVideoContent())]
@@ -78,6 +102,65 @@ struct BookmarkStoreTests {
         store.add(label: "first", content: content)
         #expect(store.contains(content))
         #expect(!store.contains(sampleVideoContent(byte: 0x99)))
+    }
+
+    @Test("add can preserve Wallpaper Engine origin for scene bookmarks")
+    func addPreservesWPEOriginForSceneBookmarks() {
+        let (store, _) = makeStore()
+        let content = sampleSceneContent()
+        let origin = sampleWPEOrigin()
+
+        let bookmark = store.add(
+            label: "Scene",
+            content: content,
+            sourceDisplayName: "Bookmarked Scene",
+            wpeOrigin: origin
+        )
+
+        #expect(bookmark.wpeOrigin == origin)
+        #expect(store.bookmarks.first?.wpeOrigin == origin)
+    }
+
+    @Test("containsWPEBookmark matches by stored Wallpaper Engine origin")
+    func containsWPEBookmarkByOrigin() {
+        let (store, _) = makeStore()
+        store.add(
+            label: "Scene",
+            content: sampleSceneContent(workshopID: "scene-origin"),
+            sourceDisplayName: "Bookmarked Scene",
+            wpeOrigin: sampleWPEOrigin(workshopID: "scene-origin")
+        )
+
+        #expect(store.containsWPEBookmark(workshopID: "scene-origin"))
+        #expect(!store.containsWPEBookmark(workshopID: "other-scene"))
+    }
+
+    @Test("removeWPEBookmarks drops all matching workshop shortcuts and persists")
+    func removeWPEBookmarksDropsMatchingWorkshopShortcuts() {
+        let (store, persistence) = makeStore()
+        store.add(
+            label: "Origin-backed",
+            content: sampleVideoContent(byte: 0x21),
+            wpeOrigin: sampleWPEOrigin(workshopID: "shared-workshop")
+        )
+        store.add(
+            label: "Scene descriptor backed",
+            content: sampleSceneContent(workshopID: "shared-workshop"),
+            wpeOrigin: nil
+        )
+        store.add(
+            label: "Keep",
+            content: sampleSceneContent(workshopID: "keep-workshop"),
+            wpeOrigin: sampleWPEOrigin(workshopID: "keep-workshop")
+        )
+        let saveCountBeforeRemove = persistence.saveCount
+
+        store.removeWPEBookmarks(workshopID: "shared-workshop")
+
+        #expect(store.bookmarks.count == 1)
+        #expect(store.bookmarks.first?.label == "Keep")
+        #expect(persistence.stored.map(\.label) == ["Keep"])
+        #expect(persistence.saveCount == saveCountBeforeRemove + 1)
     }
 
     @Test("remove drops the matching id and persists")
@@ -243,6 +326,39 @@ struct WallpaperBookmarkCodableTests {
         let decoded = try roundTrip(original)
         #expect(decoded == original)
         #expect(decoded.content.shaderPreset == .plasma)
+    }
+
+    @Test("Wallpaper Engine scene bookmark round-trips with origin metadata")
+    func sceneBookmarkRoundTripsWithOrigin() throws {
+        let descriptor = SceneDescriptor(
+            workshopID: "scene-origin",
+            cacheRelativePath: "wpe-cache/scene-origin",
+            entryFile: "scene.json",
+            capabilityTier: .degraded,
+            dependencyWorkshopIDs: ["123456789012"]
+        )
+        let origin = WPEOrigin(
+            workshopID: "scene-origin",
+            title: "Origin Scene",
+            originalType: .scene,
+            sourceFolderBookmark: Data([0x01, 0x02]),
+            cacheRelativePath: "wpe-cache/scene-origin",
+            previewFileName: "preview.png",
+            entryFile: "scene.json",
+            resourceLocation: .cache,
+            dependencyWorkshopIDs: ["123456789012"]
+        )
+        let original = WallpaperBookmark(
+            label: "Origin Scene",
+            content: .scene(descriptor),
+            sourceDisplayName: "Origin Scene",
+            wpeOrigin: origin
+        )
+
+        let decoded = try roundTrip(original)
+
+        #expect(decoded == original)
+        #expect(decoded.wpeOrigin == origin)
     }
 
     @Test("Array of mixed bookmarks round-trips and preserves order")
