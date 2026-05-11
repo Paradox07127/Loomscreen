@@ -363,7 +363,7 @@ struct OnboardingStepFirstWallpaper: View {
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [.movie, .video, .quickTimeMovie, .mpeg4Movie, .avi]
+        panel.allowedContentTypes = ResourceUtilities.supportedVideoContentTypes
         panel.prompt = L10n.Panel.preview
 
         let response = panel.runModal()
@@ -533,7 +533,7 @@ private struct HTMLPickerSheet: View {
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [UTType.html]
+        panel.allowedContentTypes = ResourceUtilities.supportedHTMLContentTypes
         panel.prompt = L10n.Panel.useWallpaper
         guard panel.runModal() == .OK, let url = panel.url,
               let source = ResourceUtilities.htmlSourceFromPickedFile(url) else { return }

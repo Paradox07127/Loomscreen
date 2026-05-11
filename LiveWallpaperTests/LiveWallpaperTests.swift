@@ -368,7 +368,23 @@ struct SettingsWindowLayoutTests {
         #expect(source.contains("liveInspectorWidth = nil"), "The transient drag width should be cleared after commit.")
         #expect(
             source.contains("Image(systemName: \"arrow.left.and.right\")"),
-            "The divider needs a visible centered affordance that communicates horizontal resizing."
+            "The hover state needs a centered affordance that communicates horizontal resizing."
+        )
+        #expect(
+            source.contains(".overlay(alignment: .leading)"),
+            "The resize control should be attached to the inspector edge instead of occupying its own split-view column."
+        )
+        #expect(
+            source.contains("InspectorResizeHandle.hitAreaWidth"),
+            "The attached handle still needs a stable pointer hit area."
+        )
+        #expect(
+            source.contains("private let restingHandleWidth") && source.contains("private let activeHandleWidth"),
+            "The resize affordance should rest as a slim capsule and expand on hover or drag."
+        )
+        #expect(
+            !source.contains("Rectangle()\n                .fill(Color(NSColor.separatorColor)"),
+            "Do not draw an always-visible standalone divider line beside the inspector."
         )
     }
 
@@ -465,6 +481,34 @@ struct SettingsWindowLayoutTests {
         #expect(!screenDetailSource.contains(".toolbar { screenDetailToolbar }"))
         #expect(!contentSource.contains(".safeAreaInset(edge: .top"))
         #expect(!contentSource.contains("struct SettingsTopChrome"))
+    }
+
+    @Test("Video and HTML pickers share ResourceUtilities type lists")
+    func pickersShareResourceUtilitiesTypeLists() throws {
+        let pickerFiles = [
+            "LiveWallpaper/Views/ContentView.swift",
+            "LiveWallpaper/Views/ScreenDetailView.swift",
+            "LiveWallpaper/Views/Onboarding/OnboardingStepFirstWallpaper.swift",
+            "LiveWallpaper/Views/PlaylistSection.swift",
+            "LiveWallpaper/Views/ScheduleSection.swift",
+            "LiveWallpaper/Views/ScreenDetail/HTMLSourceSection.swift",
+        ]
+        let combinedSource = try pickerFiles.map(sourceText(for:)).joined(separator: "\n")
+
+        #expect(!combinedSource.contains("allowedContentTypes = [.movie"))
+        #expect(!combinedSource.contains("allowedContentTypes = [UTType.html]"))
+        #expect(combinedSource.contains("ResourceUtilities.supportedVideoContentTypes"))
+        #expect(combinedSource.contains("ResourceUtilities.supportedHTMLContentTypes"))
+    }
+
+    @Test("Drop handlers reject unsupported files before creating video bookmarks")
+    func dropHandlersRejectUnsupportedFilesBeforeBookmarking() throws {
+        let contentSource = try sourceText(for: "LiveWallpaper/Views/ContentView.swift")
+        let screenDetailSource = try sourceText(for: "LiveWallpaper/Views/ScreenDetailView.swift")
+
+        #expect(contentSource.contains("ResourceUtilities.isSupportedVideoURL(videoURL)"))
+        #expect(screenDetailSource.contains("ResourceUtilities.isSupportedVideoURL(droppedURL)"))
+        #expect(screenDetailSource.contains("Choose a video file, HTML file, or folder."))
     }
 
     @Test("Detail navigation keeps the original transition format")
@@ -573,6 +617,21 @@ struct SettingsWindowLayoutTests {
         #expect(source.contains("HStack(spacing: DesignTokens.Settings.actionGridSpacing)"))
     }
 
+    @Test("General settings absorbs thin power page and right sizes language picker")
+    func generalSettingsAbsorbsThinPowerPageAndRightSizesLanguagePicker() throws {
+        let source = try sourceText(for: "LiveWallpaper/Views/GeneralSettingsView.swift")
+
+        #expect(!source.contains(".tabItem { Label(\"Power\""))
+        #expect(!source.contains("private var powerTab"))
+        #expect(source.contains("private var powerSavingSection"))
+        #expect(source.contains("private var batteryThresholdSection"))
+        #expect(source.contains("powerSavingSection"))
+        #expect(source.contains("batteryThresholdSection"))
+        #expect(source.contains("private var languagePicker"))
+        #expect(source.contains(".fixedSize()"))
+        #expect(!source.contains(".frame(width: 180)"))
+    }
+
     @Test("Apple Aerials guide states do not keep the legacy card copy")
     func appleAerialsGuideStatesDoNotKeepLegacyCardCopy() throws {
         let source = try sourceText(for: "LiveWallpaper/Views/AppleAerialsLibraryView.swift")
@@ -646,6 +705,35 @@ struct VideoPlaybackRuntimeHygieneTests {
     }
 }
 
+@Suite("Release readiness safeguards")
+struct ReleaseReadinessSafeguardsTests {
+    @Test("Static audit rejects broad NSObject NSSecureCoding decode allow-lists")
+    func staticAuditRejectsBroadNSObjectDecodeAllowLists() throws {
+        let auditSource = try sourceText(for: "scripts/audit.sh")
+
+        #expect(auditSource.contains("insecure-secure-coding.txt"))
+        #expect(auditSource.contains("NSKeyedUnarchiver"))
+        #expect(auditSource.contains("NSObject"))
+        #expect(auditSource.contains("ERROR: Insecure NSSecureCoding allow-list"))
+    }
+
+    @Test("Formal release check can require Developer ID signing identity")
+    func formalReleaseCheckCanRequireDeveloperIDSigningIdentity() throws {
+        let releaseCheckSource = try sourceText(for: "scripts/release_candidate_check.sh")
+
+        #expect(releaseCheckSource.contains("REQUIRE_DEVELOPER_ID"))
+        #expect(releaseCheckSource.contains("ERROR: No Developer ID Application signing identity found"))
+        #expect(releaseCheckSource.contains("exit 1"))
+    }
+
+    private func sourceText(for relativePath: String) throws -> String {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let projectRoot = testsDirectory.deletingLastPathComponent()
+        let url = projectRoot.appendingPathComponent(relativePath)
+        return try String(contentsOf: url, encoding: .utf8)
+    }
+}
+
 // MARK: - ResourceUtilities Tests
 
 @Suite("ResourceUtilities") @MainActor
@@ -671,6 +759,54 @@ struct ResourceUtilitiesTests {
 
         #expect(plist["com.apple.security.files.bookmarks.app-scope"] as? Bool == true)
         #expect(plist["com.apple.security.files.user-selected.read-only"] as? Bool == true)
+    }
+
+    @Test("Supported video URL detection accepts video files and rejects unrelated drops")
+    func supportedVideoURLDetectionRejectsUnrelatedFiles() throws {
+        let fileManager = FileManager.default
+        let folder = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: folder) }
+        try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
+        let mp4URL = folder.appendingPathComponent("clip.mp4")
+        let textURL = folder.appendingPathComponent("notes.txt")
+        try Data([0x00]).write(to: mp4URL)
+        try Data("not a video".utf8).write(to: textURL)
+
+        #expect(ResourceUtilities.isSupportedVideoURL(mp4URL))
+        #expect(!ResourceUtilities.isSupportedVideoURL(textURL))
+    }
+
+    @Test("HTML resource detection accepts HTML files and folders only")
+    func htmlResourceDetectionAcceptsHTMLFilesAndFoldersOnly() throws {
+        let fileManager = FileManager.default
+        let folder = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: folder) }
+        try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
+        let htmlURL = folder.appendingPathComponent("index.html")
+        let textURL = folder.appendingPathComponent("notes.txt")
+        try Data("<!doctype html>".utf8).write(to: htmlURL)
+        try Data("not html".utf8).write(to: textURL)
+
+        #expect(ResourceUtilities.isSupportedHTMLResourceURL(folder))
+        #expect(ResourceUtilities.isSupportedHTMLResourceURL(htmlURL))
+        #expect(!ResourceUtilities.isSupportedHTMLResourceURL(textURL))
+    }
+
+    @Test("Picked HTML file stays a file source instead of switching UI to folder mode")
+    func pickedHTMLFileStaysFileSource() throws {
+        let fileManager = FileManager.default
+        let folder = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? fileManager.removeItem(at: folder) }
+        try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
+        let htmlURL = folder.appendingPathComponent("index.html")
+        try Data("<!doctype html><title>QA</title>".utf8).write(to: htmlURL)
+
+        let source = try #require(ResourceUtilities.htmlSourceFromPickedFile(htmlURL))
+
+        guard case .file = source else {
+            Issue.record("Picked HTML file should remain a file source; got \(source)")
+            return
+        }
     }
 
     @Test("Video bookmark creation falls back to an app-owned copy when scoped bookmark creation fails")

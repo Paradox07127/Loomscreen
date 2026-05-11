@@ -18,7 +18,7 @@ A macOS menu bar application that plays video, HTML, and Metal shader content as
 - **System Monitoring** — System-wide CPU/GPU/memory/thermal + per-app metrics, estimated render FPS
 - **Liquid Glass UI** — macOS 26 native design system
 - **Swift 6 Strict Concurrency** — Compile-time data race safety
-- **193 Unit Tests** — Policies, decoders, bookmarks, HTML trust, schedule, playlist
+- **560 Unit Tests** — Policies, decoders, bookmarks, HTML trust, schedule, playlist, WPE import/rendering, and release regressions
 - **Zero Dependencies** — Pure Apple-native frameworks
 
 ## Requirements
@@ -36,3 +36,15 @@ A macOS menu bar application that plays video, HTML, and Metal shader content as
 ## Documentation
 
 - [DESIGN.md](DESIGN.md) — One-page architecture reference: layers, flows, persistence keys, performance contracts
+
+## Release Readiness
+
+- `docs/qa/release-qa-matrix.md` — Manual release-candidate QA matrix.
+- `docs/qa/release-blockers.md` — P0/P1 blocker triage.
+- `docs/qa/privacy-data-map.md` — Privacy and data-flow review source.
+- `docs/qa/packaging-notarization-checklist.md` — Developer ID signing and notarization gate.
+- `docs/qa/performance-stability-protocol.md` — Performance and soak-test protocol.
+- `docs/qa/rc-signoff-template.md` — Final release candidate sign-off template.
+- `docs/legal/privacy-policy-draft.md` — Draft privacy policy for product/legal review.
+- `docs/legal/terms-of-use-draft.md` — Draft terms for product/legal review.
+- `scripts/release_candidate_check.sh` — Automated local release-candidate checks; set `REQUIRE_DEVELOPER_ID=1` on the signing machine.

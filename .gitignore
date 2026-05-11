@@ -120,6 +120,8 @@ Temporary Items
 .audit/
 
 docs/*
+!docs/legal/
+!docs/legal/**
 !docs/qa/
 !docs/qa/**
 !docs/superpowers/
