@@ -1,9 +1,14 @@
 import SwiftUI
+import AppKit
 
 /// Centralised design tokens for spacing, corners, and visual metrics.
 /// Use these instead of inline magic numbers when building new UI.
 /// Existing call sites may migrate incrementally.
 enum DesignTokens {
+    enum Colors {
+        static let pageBackground = Color(nsColor: .windowBackgroundColor)
+    }
+
     enum Spacing {
         static let xxs: CGFloat = 2
         static let xs: CGFloat = 4

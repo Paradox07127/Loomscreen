@@ -224,16 +224,11 @@ final class SettingsManager {
         configuration: ScreenConfiguration
     ) -> Bool {
         do {
-            var isStale = false
-            let url = try URL(
-                resolvingBookmarkData: bookmarkData,
-                options: .withSecurityScope,
-                relativeTo: nil,
-                bookmarkDataIsStale: &isStale
-            )
+            let resolution = try ResourceUtilities.resolveBookmark(bookmarkData)
+            let url = resolution.url
 
             let canAccess = url.startAccessingSecurityScopedResource()
-            if isStale && canAccess {
+            if resolution.isStale && resolution.isSecurityScoped && canAccess {
                 Logger.warning("Stale bookmark detected for screen \(screenID), refreshing", category: .fileAccess)
                 let bookmarkOptions: URL.BookmarkCreationOptions = [.withSecurityScope, .securityScopeAllowOnlyReadAccess]
                 let noKeys: Set<URLResourceKey>? = nil
@@ -250,6 +245,8 @@ final class SettingsManager {
             }
             if canAccess {
                 url.stopAccessingSecurityScopedResource()
+            } else if FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) {
+                return true
             } else {
                 Logger.error("Cannot access file for screen \(screenID)", category: .fileAccess)
             }
@@ -284,13 +281,8 @@ final class SettingsManager {
         for screenID: CGDirectDisplayID
     ) -> Bool {
         do {
-            var isStale = false
-            let url = try URL(
-                resolvingBookmarkData: bookmarkData,
-                options: .withSecurityScope,
-                relativeTo: nil,
-                bookmarkDataIsStale: &isStale
-            )
+            let resolution = try ResourceUtilities.resolveBookmark(bookmarkData)
+            let url = resolution.url
 
             let canAccess = url.startAccessingSecurityScopedResource()
             defer {
@@ -298,7 +290,7 @@ final class SettingsManager {
                     url.stopAccessingSecurityScopedResource()
                 }
             }
-            guard canAccess else {
+            guard canAccess || FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else {
                 Logger.error("Cannot access local HTML resource for screen \(screenID)", category: .fileAccess)
                 return false
             }

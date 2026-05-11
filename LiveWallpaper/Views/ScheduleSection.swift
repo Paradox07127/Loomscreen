@@ -156,7 +156,7 @@ struct ScheduleSection: View {
         case .success(let urls):
             guard let url = urls.first, let slotID = pendingSlotID else { return }
             SettingsManager.shared.saveLastUsedDirectory(url.deletingLastPathComponent())
-            guard let bookmark = ResourceUtilities.createBookmark(for: url),
+            guard let bookmark = ResourceUtilities.createVideoBookmark(for: url),
                   let index = scheduleSlots.firstIndex(where: { $0.id == slotID }) else { return }
             screenManager.recordBookmarkDisplayName(bookmark, name: url.lastPathComponent)
             scheduleSlots[index].videoBookmarkData = bookmark

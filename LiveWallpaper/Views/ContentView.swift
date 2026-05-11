@@ -124,7 +124,7 @@ struct ContentView: View {
         panel.directoryURL = SettingsManager.shared.getLastUsedDirectory()
         panel.prompt = L10n.Panel.useAsWallpaper
         guard panel.runModal() == .OK, let url = panel.url,
-              let bookmark = ResourceUtilities.createBookmark(for: url) else { return }
+              let bookmark = ResourceUtilities.createVideoBookmark(for: url) else { return }
         SettingsManager.shared.saveLastUsedDirectory(url.deletingLastPathComponent())
         screenManager.setVideo(url: url, bookmarkData: bookmark, for: screen)
     }
@@ -268,7 +268,7 @@ struct Sidebar: View {
 
     private func handleVideoDrop(urls: [URL], for screen: Screen) -> Bool {
         guard let videoURL = urls.first else { return false }
-        guard let bookmarkData = ResourceUtilities.createBookmark(for: videoURL) else {
+        guard let bookmarkData = ResourceUtilities.createVideoBookmark(for: videoURL) else {
             return false
         }
         screenManager.setVideo(url: videoURL, bookmarkData: bookmarkData, for: screen)
@@ -484,7 +484,7 @@ struct DetailContent: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(NSColor.underPageBackgroundColor))
+        .background(DesignTokens.Colors.pageBackground)
         .animation(.snappy(duration: 0.3), value: selection)
     }
 }

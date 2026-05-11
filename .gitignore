@@ -119,5 +119,11 @@ Temporary Items
 *.log
 .audit/
 
-docs/
+docs/*
+!docs/qa/
+!docs/qa/**
+!docs/superpowers/
+docs/superpowers/*
+!docs/superpowers/plans/
+!docs/superpowers/plans/**
 .claude/

@@ -1603,13 +1603,7 @@ final class ScreenManager {
         guard cursor < combined.count else { return }
         let targetBookmark = combined[cursor]
 
-        var isStale = false
-        guard let url = try? URL(
-            resolvingBookmarkData: targetBookmark,
-            options: .withSecurityScope,
-            relativeTo: nil,
-            bookmarkDataIsStale: &isStale
-        ) else { return }
+        guard let url = try? ResourceUtilities.resolveBookmark(targetBookmark).url else { return }
         recordBookmarkDisplayName(targetBookmark, name: url.lastPathComponent)
 
         let screenID = screen.id
@@ -1684,13 +1678,7 @@ final class ScreenManager {
         for screen: Screen,
         mutate: @escaping (inout ScreenConfiguration) -> Void
     ) {
-        var isStale = false
-        guard let url = try? URL(
-            resolvingBookmarkData: bookmark,
-            options: .withSecurityScope,
-            relativeTo: nil,
-            bookmarkDataIsStale: &isStale
-        ) else { return }
+        guard let url = try? ResourceUtilities.resolveBookmark(bookmark).url else { return }
         recordBookmarkDisplayName(bookmark, name: url.lastPathComponent)
 
         let screenID = screen.id

@@ -51,13 +51,7 @@ final class AmbientWallpaperSessionBuilder {
     /// Windows-DIP mode.
     private static func looksLikeWallpaperEngineFolder(_ source: HTMLSource) -> Bool {
         guard case .folder(let bookmarkData, _) = source else { return false }
-        var isStale = false
-        guard let folderURL = try? URL(
-            resolvingBookmarkData: bookmarkData,
-            options: .withSecurityScope,
-            relativeTo: nil,
-            bookmarkDataIsStale: &isStale
-        ) else { return false }
+        guard let folderURL = try? ResourceUtilities.resolveBookmark(bookmarkData).url else { return false }
         let didStart = folderURL.startAccessingSecurityScopedResource()
         defer { if didStart { folderURL.stopAccessingSecurityScopedResource() } }
         let manifest = folderURL.appendingPathComponent("project.json")

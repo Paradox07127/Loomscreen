@@ -368,7 +368,7 @@ struct OnboardingStepFirstWallpaper: View {
 
         let response = panel.runModal()
         guard response == .OK, let url = panel.url,
-              let bookmark = ResourceUtilities.createBookmark(for: url) else { return }
+              let bookmark = ResourceUtilities.createVideoBookmark(for: url) else { return }
         SettingsManager.shared.saveLastUsedDirectory(url.deletingLastPathComponent())
         withAnimation(reduceMotion ? nil : .default) { stage = .livePreview(.video(url, bookmark)) }
     }
