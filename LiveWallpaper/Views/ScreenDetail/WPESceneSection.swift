@@ -44,7 +44,7 @@ struct WPESceneSection: View {
             showImportErrorAlert = (error != nil)
         }
         .sheet(isPresented: $showWorkshopGallery) {
-            WorkshopGalleryView()
+            WorkshopGalleryView(screen: screen)
                 .environment(screenManager)
         }
         .alert("Import Failed", isPresented: $showImportErrorAlert, presenting: screenManager.wpeImportError(for: screen)) { _ in

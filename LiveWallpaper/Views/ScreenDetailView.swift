@@ -124,8 +124,8 @@ struct ScreenDetailView: View {
             && [WallpaperType.video, .html].contains(selectedWallpaperType)
     }
 
-    private var showsHeaderVideoActions: Bool {
-        selectedWallpaperType == .video && !shouldShowGuideEmptyState
+    private var showsHeaderWallpaperActions: Bool {
+        hasConfigurableWallpaperSurface && !shouldShowGuideEmptyState
     }
 
     @State private var showErrorAlert = false
@@ -327,16 +327,16 @@ struct ScreenDetailView: View {
             Button("OK", role: .cancel) { }
         } message: { Text(errorMessage) }
         .confirmationDialog(
-            "Clear Wallpaper Video",
+            "Clear Current Wallpaper",
             isPresented: $showClearConfirm,
             titleVisibility: .visible
         ) {
-            Button("Clear Video", role: .destructive) {
-                performClearVideo()
+            Button("Clear Current Wallpaper", role: .destructive) {
+                performClearWallpaper()
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Remove this video and its settings for this display.")
+            Text("Only removes the current wallpaper from this display. It does not delete source files, bookmarks, or library items.")
         }
         .dropDestination(for: URL.self) { urls, _ in
             handleDrop(urls: urls)
@@ -398,30 +398,32 @@ struct ScreenDetailView: View {
                             .environment(screenManager)
                     }
 
-                    if showsHeaderVideoActions {
+                    if showsHeaderWallpaperActions {
                         HStack(spacing: 8) {
-                            Button {
-                                showFilePicker()
-                            } label: {
-                                Label("Select Video", systemImage: "folder.badge.plus")
+                            if selectedWallpaperType == .video {
+                                Button {
+                                    showFilePicker()
+                                } label: {
+                                    Label("Select Video", systemImage: "folder.badge.plus")
+                                }
+                                .buttonStyle(.glassProminent)
+                                .controlSize(.regular)
+                                .help(Text("Choose a video file for this display"))
+                                .accessibilityLabel(Text("Select video"))
+                                .accessibilityHint(Text("Opens a file picker to choose a wallpaper video"))
                             }
-                            .buttonStyle(.glassProminent)
-                            .controlSize(.regular)
-                            .help(Text("Choose a video file for this display"))
-                            .accessibilityLabel(Text("Select video"))
-                            .accessibilityHint(Text("Opens a file picker to choose a wallpaper video"))
 
                             Button(role: .destructive) {
-                                clearVideo()
+                                clearCurrentWallpaper()
                             } label: {
                                 Image(systemName: "trash")
                             }
                             .buttonStyle(.glass)
                             .destructiveControlTint()
                             .controlSize(.regular)
-                            .help(Text("Remove wallpaper video"))
-                            .accessibilityLabel(Text("Clear video"))
-                            .accessibilityHint(Text("Removes the current wallpaper video from this screen"))
+                            .help(Text("Clear current wallpaper"))
+                            .accessibilityLabel(Text("Clear current wallpaper"))
+                            .accessibilityHint(Text("Removes the current wallpaper from this screen without deleting source files or library items"))
                         }
                     }
                 }
@@ -856,11 +858,11 @@ struct ScreenDetailView: View {
         }
     }
 
-    private func clearVideo() {
+    private func clearCurrentWallpaper() {
         showClearConfirm = true
     }
 
-    private func performClearVideo() {
+    private func performClearWallpaper() {
         cleanupPreviewPlayer()
         screenManager.clearWallpaperForScreen(screen)
     }

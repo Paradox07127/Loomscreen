@@ -1,22 +1,35 @@
 import SwiftUI
 import AppKit
 
-/// Full-screen sheet for browsing + bulk-importing the user's Steam Workshop
+/// Full-screen sheet for browsing and applying projects from the user's Steam Workshop
 /// library. Three states: pre-grant (no root bookmark) → scanning → results.
 @MainActor
 struct WorkshopGalleryView: View {
+    let screen: Screen?
+    private let targetScreens: [Screen]
+
     @Environment(\.dismiss) private var dismiss
     @Environment(ScreenManager.self) private var screenManager
 
     @State private var state: PaneState = .needsRoot
     @State private var projects: [WallpaperEngineLibraryScanner.DiscoveredProject] = []
-    @State private var bulkImportInProgress: Bool = false
-    @State private var bulkImportProgress: (current: Int, total: Int) = (0, 0)
+    @State private var activeImportProjectID: String?
     @State private var errorMessage: String?
     @State private var hasLibraryRoot: Bool = false
     @State private var rootPathSummary: String?
 
     private let scanner = WallpaperEngineLibraryScanner()
+
+    init(screen: Screen? = nil, screens: [Screen]? = nil) {
+        self.screen = screen
+        if let screens {
+            targetScreens = screens
+        } else if let screen {
+            targetScreens = [screen]
+        } else {
+            targetScreens = []
+        }
+    }
 
     var body: some View {
         DetailPageScaffold(
@@ -70,66 +83,48 @@ struct WorkshopGalleryView: View {
                 }
             },
             actions: {
-                HStack(spacing: 8) {
-                    if hasLibraryRoot {
-                        Button {
-                            Task { await refreshScan() }
-                        } label: {
-                            Label("Rescan", systemImage: "arrow.clockwise")
-                        }
-                        .buttonStyle(.glass)
-                        .controlSize(.regular)
-                        .accessibilityHint(Text("Re-scan the workshop folder for new projects"))
-                        .disabled(bulkImportInProgress)
-
-                        Button {
-                            presentFolderGrant()
-                        } label: {
-                            Label("Change Folder", systemImage: "folder.badge.gearshape")
-                        }
-                        .buttonStyle(.glass)
-                        .controlSize(.regular)
-                        .accessibilityHint(Text("Choose a different Steam Workshop folder"))
-                        .disabled(bulkImportInProgress)
-
-                        Button {
-                            disconnectLibraryRoot()
-                        } label: {
-                            Image(systemName: "xmark.circle")
-                        }
-                        .buttonStyle(.glass)
-                        .destructiveControlTint()
-                        .controlSize(.regular)
-                        .help(Text("Disconnect Workshop library"))
-                        .accessibilityLabel(Text("Disconnect Workshop library"))
-                        .accessibilityHint(Text("Forgets the selected Steam Workshop folder so you can choose again"))
-                        .disabled(bulkImportInProgress)
-                    }
-
-                    if case .results = state, !projects.isEmpty {
-                        Button {
-                            Task { await bulkImportCompatible() }
-                        } label: {
-                            if bulkImportInProgress {
-                                Label("Importing \(bulkImportProgress.current)/\(bulkImportProgress.total)", systemImage: "square.and.arrow.down.fill")
-                            } else {
-                                Label("Import All Compatible", systemImage: "square.and.arrow.down")
+                GlassEffectContainer(spacing: 12) {
+                    HStack(spacing: 10) {
+                        if hasLibraryRoot {
+                            Button {
+                                Task { await refreshScan() }
+                            } label: {
+                                Label("Rescan", systemImage: "arrow.clockwise")
                             }
-                        }
-                        .buttonStyle(.glassProminent)
-                        .controlSize(.regular)
-                        .disabled(bulkImportInProgress || compatibleCount == 0)
-                        .accessibilityHint(Text("Imports every Video and Web project not already in your library"))
-                    }
+                            .buttonStyle(WorkshopToolbarButtonStyle())
+                            .accessibilityHint(Text("Re-scan the workshop folder for new projects"))
+                            .disabled(isImportingProject)
 
-                    Button {
-                        dismiss()
-                    } label: {
-                        Text("Done")
+                            Button {
+                                presentFolderGrant()
+                            } label: {
+                                Label("Change Folder", systemImage: "folder.badge.gearshape")
+                            }
+                            .buttonStyle(WorkshopToolbarButtonStyle())
+                            .accessibilityHint(Text("Choose a different Steam Workshop folder"))
+                            .disabled(isImportingProject)
+
+                            Button {
+                                disconnectLibraryRoot()
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .frame(width: 18, height: 18)
+                            }
+                            .buttonStyle(WorkshopToolbarButtonStyle(tint: .red, horizontalPadding: 18))
+                            .help(Text("Disconnect Workshop library"))
+                            .accessibilityLabel(Text("Disconnect Workshop library"))
+                            .accessibilityHint(Text("Forgets the selected Steam Workshop folder so you can choose again"))
+                            .disabled(isImportingProject)
+                        }
+
+                        Button {
+                            dismiss()
+                        } label: {
+                            Label("Done", systemImage: "checkmark")
+                        }
+                        .buttonStyle(WorkshopToolbarButtonStyle(tint: .secondary))
+                        .keyboardShortcut(.cancelAction)
                     }
-                    .buttonStyle(.glass)
-                    .controlSize(.regular)
-                    .keyboardShortcut(.cancelAction)
                 }
             }
         )
@@ -211,7 +206,8 @@ struct WorkshopGalleryView: View {
                     ForEach(projects) { project in
                         WorkshopGalleryCard(
                             project: project,
-                            isImporting: bulkImportInProgress,
+                            isImporting: activeImportProjectID == project.id,
+                            isDisabled: isImportingProject,
                             onImport: { Task { await importOne(project) } }
                         )
                     }
@@ -275,8 +271,7 @@ struct WorkshopGalleryView: View {
     private func disconnectLibraryRoot() {
         SettingsManager.shared.clearWorkshopLibraryRootBookmark()
         projects = []
-        bulkImportInProgress = false
-        bulkImportProgress = (0, 0)
+        activeImportProjectID = nil
         hasLibraryRoot = false
         rootPathSummary = nil
         state = .needsRoot
@@ -319,43 +314,43 @@ struct WorkshopGalleryView: View {
     }
 
     private func importOne(_ project: WallpaperEngineLibraryScanner.DiscoveredProject) async {
-        let outcome = await importWithLibraryAccess(project)
-        switch outcome {
-        case .imported, .alreadyKnown, .unsupported:
-            await refreshScan()
-        case .rejected(let reason):
-            errorMessage = reason
+        guard isCompatible(project.type) else { return }
+        guard !targetScreens.isEmpty else {
+            errorMessage = String(
+                localized: "Open a display first, then choose a Workshop wallpaper to apply.",
+                defaultValue: "Open a display first, then choose a Workshop wallpaper to apply.",
+                comment: "Workshop gallery import error when there is no target display."
+            )
+            return
         }
-    }
 
-    private func bulkImportCompatible() async {
-        let candidates = projects.filter { isCompatible($0.type) && !$0.importedAlready }
-        guard !candidates.isEmpty else { return }
-        bulkImportInProgress = true
-        bulkImportProgress = (0, candidates.count)
-        var failures: [WPEBulkImportFailureSummary.Rejection] = []
-
-        for (index, project) in candidates.enumerated() {
-            bulkImportProgress = (index + 1, candidates.count)
-            let outcome = await importWithLibraryAccess(project)
-            if case .rejected(let reason) = outcome {
-                failures.append(.init(title: project.title, reason: reason))
+        activeImportProjectID = project.id
+        var failures: [String] = []
+        for screen in targetScreens {
+            screenManager.clearWPEImportError(for: screen)
+            if let failure = await importForScreenWithLibraryAccess(project, screen: screen) {
+                failures.append(failure)
             }
         }
+        activeImportProjectID = nil
 
-        bulkImportInProgress = false
-        bulkImportProgress = (0, 0)
-        await refreshScan()
-        errorMessage = WPEBulkImportFailureSummary.message(for: failures)
+        if !failures.isEmpty {
+            errorMessage = uniqueMessages(failures).joined(separator: "\n")
+            await refreshScan()
+            return
+        }
+
+        dismiss()
     }
 
     /// Re-acquires the persisted root bookmark's security scope for the
     /// duration of one import. Without this, child URLs handed back by the
     /// scanner are unreachable in a sandboxed build because the scanner's
     /// scope ended when `scan()` returned.
-    private func importWithLibraryAccess(
-        _ project: WallpaperEngineLibraryScanner.DiscoveredProject
-    ) async -> ScreenManager.WPELibraryImportOutcome {
+    private func importForScreenWithLibraryAccess(
+        _ project: WallpaperEngineLibraryScanner.DiscoveredProject,
+        screen: Screen
+    ) async -> String? {
         var isStale = false
         guard let rootURL = try? URL(
             resolvingBookmarkData: project.libraryRootBookmarkData,
@@ -363,16 +358,21 @@ struct WorkshopGalleryView: View {
             relativeTo: nil,
             bookmarkDataIsStale: &isStale
         ) else {
-            return .rejected(reason: "Workshop folder access expired. Re-grant library access.")
+            return "Workshop folder access expired. Re-grant library access."
         }
 
         let didStart = rootURL.startAccessingSecurityScopedResource()
         defer { if didStart { rootURL.stopAccessingSecurityScopedResource() } }
 
         guard didStart || FileManager.default.fileExists(atPath: project.folderURL.path) else {
-            return .rejected(reason: "Workshop folder access denied. Re-grant library access.")
+            return "Workshop folder access denied. Re-grant library access."
         }
-        return await screenManager.importWPEToLibrary(at: project.folderURL)
+
+        await screenManager.importWallpaperEngineProject(at: project.folderURL, for: screen)
+        if let error = screenManager.wpeImportError(for: screen) {
+            return importErrorMessage(error)
+        }
+        return nil
     }
 
     // MARK: - Helpers
@@ -383,6 +383,10 @@ struct WorkshopGalleryView: View {
 
     private var unsupportedCount: Int {
         projects.filter { !isCompatible($0.type) }.count
+    }
+
+    private var isImportingProject: Bool {
+        activeImportProjectID != nil
     }
 
     private func isCompatible(_ type: WPEType) -> Bool {
@@ -416,31 +420,26 @@ struct WorkshopGalleryView: View {
         )
     }
 
+    private func importErrorMessage(_ error: AppError) -> String {
+        let description = error.localizedDescription
+        guard let suggestion = error.recoverySuggestion, !suggestion.isEmpty else {
+            return description
+        }
+        return "\(description)\n\(suggestion)"
+    }
+
+    private func uniqueMessages(_ messages: [String]) -> [String] {
+        var result: [String] = []
+        for message in messages where !result.contains(message) {
+            result.append(message)
+        }
+        return result
+    }
+
     private enum PaneState: Equatable {
         case needsRoot
         case scanning
         case results
-    }
-}
-
-struct WPEBulkImportFailureSummary {
-    struct Rejection: Equatable, Sendable {
-        let title: String
-        let reason: String
-    }
-
-    static func message(for rejections: [Rejection]) -> String? {
-        guard !rejections.isEmpty else { return nil }
-        let header = rejections.count == 1
-            ? String(localized: "1 import failed", defaultValue: "1 import failed", comment: "Workshop bulk import failure summary.")
-            : String(localized: "\(rejections.count) imports failed", comment: "Workshop bulk import failure summary. The placeholder is the failure count.")
-        let visible = rejections.prefix(5).map { "\($0.title): \($0.reason)" }
-        let remaining = rejections.count - visible.count
-        if remaining > 0 {
-            let more = String(localized: "+\(remaining) more", comment: "Workshop bulk import failure summary. The placeholder is additional failure count.")
-            return ([header] + visible + [more]).joined(separator: "\n")
-        }
-        return ([header] + visible).joined(separator: "\n")
     }
 }
 
@@ -449,6 +448,7 @@ struct WPEBulkImportFailureSummary {
 private struct WorkshopGalleryCard: View {
     let project: WallpaperEngineLibraryScanner.DiscoveredProject
     let isImporting: Bool
+    let isDisabled: Bool
     let onImport: () -> Void
 
     @State private var isHovering = false
@@ -506,21 +506,13 @@ private struct WorkshopGalleryCard: View {
     private var actionButton: some View {
         switch project.type {
         case .video, .web:
-            if project.importedAlready {
-                Label("In Library", systemImage: "checkmark.circle.fill")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.green)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                Button(action: onImport) {
-                    Label("Import", systemImage: "square.and.arrow.down")
-                        .font(.system(size: 12, weight: .medium))
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.glassProminent)
-                .controlSize(.small)
-                .disabled(isImporting)
+            Button(action: onImport) {
+                Label(isImporting ? "Applying..." : actionTitle, systemImage: actionSystemImage)
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(maxWidth: .infinity)
             }
+            .buttonStyle(GlassCapsuleButtonStyle(fontSize: 12, horizontalPadding: 12, verticalPadding: 6))
+            .disabled(isDisabled)
         case .scene:
             Label("Scene · preview only", systemImage: "exclamationmark.triangle.fill")
                 .font(.system(size: 11, weight: .medium))
@@ -537,6 +529,15 @@ private struct WorkshopGalleryCard: View {
                 .foregroundStyle(.gray)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    private var actionTitle: String {
+        project.importedAlready ? "Apply" : "Import & Apply"
+    }
+
+    private var actionSystemImage: String {
+        if isImporting { return "hourglass" }
+        return project.importedAlready ? "play.fill" : "square.and.arrow.down"
     }
 
     private var typeLabel: String {
@@ -557,6 +558,51 @@ private struct WorkshopGalleryCard: View {
         case .scene:        return .orange
         case .application:  return .red
         case .unknown:      return .gray
+        }
+    }
+}
+
+private struct WorkshopToolbarButtonStyle: ButtonStyle {
+    var tint: Color = .accentColor
+    var fontSize: CGFloat = 14
+    var horizontalPadding: CGFloat = 20
+    var verticalPadding: CGFloat = 9
+
+    func makeBody(configuration: Configuration) -> some View {
+        StyledLabel(
+            configuration: configuration,
+            tint: tint,
+            fontSize: fontSize,
+            horizontalPadding: horizontalPadding,
+            verticalPadding: verticalPadding
+        )
+    }
+
+    private struct StyledLabel: View {
+        let configuration: Configuration
+        let tint: Color
+        let fontSize: CGFloat
+        let horizontalPadding: CGFloat
+        let verticalPadding: CGFloat
+
+        @Environment(\.isEnabled) private var isEnabled
+
+        var body: some View {
+            let effectiveTint = isEnabled ? tint : Color.secondary
+            configuration.label
+                .font(.system(size: fontSize, weight: .semibold))
+                .labelStyle(.titleAndIcon)
+                .foregroundStyle(effectiveTint)
+                .padding(.horizontal, horizontalPadding)
+                .padding(.vertical, verticalPadding)
+                .frame(minHeight: 40)
+                .glassEffect(
+                    .regular.tint(effectiveTint.opacity(isEnabled ? 0.16 : 0.06)).interactive(),
+                    in: .capsule
+                )
+                .contentShape(Capsule())
+                .scaleEffect(configuration.isPressed ? 0.97 : 1)
+                .opacity(isEnabled ? 1 : 0.46)
         }
     }
 }

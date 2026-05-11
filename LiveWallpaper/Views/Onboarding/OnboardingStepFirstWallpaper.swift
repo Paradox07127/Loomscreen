@@ -48,7 +48,7 @@ struct OnboardingStepFirstWallpaper: View {
         .onAppear { configureInitialStage() }
         .onDisappear { previewController.cleanup() }
         .sheet(isPresented: $showWorkshopGallery, onDismiss: nextStep) {
-            WorkshopGalleryView()
+            WorkshopGalleryView(screens: workshopGalleryTargetScreens)
                 .environment(screenManager)
         }
         .sheet(isPresented: $showHTMLSheet) {
@@ -307,6 +307,12 @@ struct OnboardingStepFirstWallpaper: View {
             selectedScreenIDs = [only.id]
             stage = .sourcePicker
         }
+    }
+
+    private var workshopGalleryTargetScreens: [Screen] {
+        let selected = screenManager.screens.filter { selectedScreenIDs.contains($0.id) }
+        if !selected.isEmpty { return selected }
+        return Array(screenManager.screens.prefix(1))
     }
 
     private func confirmAndApply(draft: SourceDraft) {

@@ -473,7 +473,7 @@ struct DetailContent: View {
                     .transition(.opacity)
 
             case .workshop:
-                WorkshopGalleryView()
+                WorkshopGalleryView(screen: screenManager.screens.first)
                     .transition(.opacity)
 
             case .none:

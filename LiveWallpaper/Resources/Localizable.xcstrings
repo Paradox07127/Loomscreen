@@ -288,6 +288,7 @@
     },
     "%lld imports failed" : {
       "comment" : "Workshop bulk import failure summary. The placeholder is the failure count.",
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -358,6 +359,7 @@
     },
     "+%lld more" : {
       "comment" : "Workshop bulk import failure summary. The placeholder is additional failure count.",
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -409,6 +411,7 @@
     },
     "1 import failed" : {
       "comment" : "Workshop bulk import failure summary.",
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1153,6 +1156,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "应用网页 URL"
+          }
+        }
+      }
+    },
+    "Applying..." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Applying..."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在应用..."
           }
         }
       }
@@ -2297,6 +2317,38 @@
         }
       }
     },
+    "Clear current wallpaper" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Clear current wallpaper"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除当前壁纸"
+          }
+        }
+      }
+    },
+    "Clear Current Wallpaper" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Clear Current Wallpaper"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除当前壁纸"
+          }
+        }
+      }
+    },
     "Clear Data on Exit" : {
       "localizations" : {
         "en" : {
@@ -2346,27 +2398,12 @@
       }
     },
     "Clear video" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "new",
             "value" : "Clear video"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "清除视频"
-          }
-        }
-      }
-    },
-    "Clear Video" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Clear Video"
           }
         },
         "zh-Hans" : {
@@ -2390,22 +2427,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "清除 %@ 的视频"
-          }
-        }
-      }
-    },
-    "Clear Wallpaper Video" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Clear Wallpaper Video"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "清除壁纸视频"
           }
         }
       }
@@ -5715,6 +5736,7 @@
       }
     },
     "Import" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -5730,18 +5752,19 @@
         }
       }
     },
-    "Import All Compatible" : {
+    "Import & Apply" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "new",
-            "value" : "Import All Compatible"
+            "value" : "Import & Apply"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "导入所有兼容项"
+            "value" : "导入并应用"
           }
         }
       }
@@ -5811,6 +5834,7 @@
       }
     },
     "Importing %lld/%lld" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -5827,6 +5851,7 @@
       }
     },
     "Imports every Video and Web project not already in your library" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -5843,6 +5868,7 @@
       }
     },
     "In Library" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -7213,6 +7239,22 @@
         }
       }
     },
+    "Only removes the current wallpaper from this display. It does not delete source files, bookmarks, or library items." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Only removes the current wallpaper from this display. It does not delete source files, bookmarks, or library items."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅移除此显示器的当前壁纸，不会删除源文件、书签或库项目。"
+          }
+        }
+      }
+    },
     "Open" : {
       "localizations" : {
         "en" : {
@@ -7225,6 +7267,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "打开"
+          }
+        }
+      }
+    },
+    "Open a display first, then choose a Workshop wallpaper to apply." : {
+      "comment" : "Workshop gallery import error when there is no target display.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Open a display first, then choose a Workshop wallpaper to apply."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先打开一个显示器，再选择要应用的 Workshop 壁纸。"
           }
         }
       }
@@ -9337,38 +9396,6 @@
         }
       }
     },
-    "Remove this video and its settings for this display." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Remove this video and its settings for this display."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "移除此视频及其在此显示器上的设置。"
-          }
-        }
-      }
-    },
-    "Remove wallpaper video" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Remove wallpaper video"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "移除壁纸视频"
-          }
-        }
-      }
-    },
     "Removes all schedule slots and returns to normal playback" : {
       "localizations" : {
         "en" : {
@@ -9401,18 +9428,35 @@
         }
       }
     },
-    "Removes the current wallpaper video from this screen" : {
+    "Removes the current wallpaper from this screen" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "new",
-            "value" : "Removes the current wallpaper video from this screen"
+            "value" : "Removes the current wallpaper from this screen"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "从此屏幕移除当前壁纸视频"
+            "value" : "从此屏幕移除当前壁纸"
+          }
+        }
+      }
+    },
+    "Removes the current wallpaper from this screen without deleting source files or library items" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Removes the current wallpaper from this screen without deleting source files or library items"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从此屏幕移除当前壁纸，但不删除源文件或库项目"
           }
         }
       }

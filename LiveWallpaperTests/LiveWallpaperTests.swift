@@ -73,16 +73,35 @@ struct SettingsWindowLayoutTests {
         )
     }
 
-    @Test("Screen detail guide-only state hides video toolbar actions")
-    func screenDetailGuideHidesVideoToolbarActions() throws {
+    @Test("Screen detail guide-only state hides wallpaper toolbar actions")
+    func screenDetailGuideHidesWallpaperToolbarActions() throws {
         let source = try sourceText(for: "LiveWallpaper/Views/ScreenDetailView.swift")
 
-        #expect(source.contains("private var showsHeaderVideoActions"))
-        #expect(source.contains("selectedWallpaperType == .video && !shouldShowGuideEmptyState"))
-        #expect(source.contains("if showsHeaderVideoActions {"))
+        #expect(source.contains("private var showsHeaderWallpaperActions"))
+        #expect(source.contains("hasConfigurableWallpaperSurface && !shouldShowGuideEmptyState"))
+        #expect(source.contains("if showsHeaderWallpaperActions {"))
         #expect(
             !source.contains("if selectedWallpaperType == .video {\n                    HStack(spacing: 8)"),
-            "The header video actions must not be keyed only off selectedWallpaperType; the guide already owns first-pick actions."
+            "The header wallpaper actions must not be keyed only off selectedWallpaperType; the guide already owns first-pick actions."
+        )
+    }
+
+    @Test("Screen detail clear action is generic across wallpaper types")
+    func screenDetailClearActionIsGenericAcrossWallpaperTypes() throws {
+        let source = try sourceText(for: "LiveWallpaper/Views/ScreenDetailView.swift")
+
+        #expect(source.contains("Clear Current Wallpaper"))
+        #expect(source.contains("performClearWallpaper()"))
+        #expect(source.contains("screenManager.clearWallpaperForScreen(screen)"))
+        #expect(!source.contains("Clear Wallpaper Video"))
+        #expect(!source.contains("Clear Video"))
+        #expect(!source.contains("performClearVideo"))
+        #expect(!source.contains("clearVideo()"))
+        #expect(!source.contains("Remove wallpaper video"))
+        #expect(!source.contains("Clear video"))
+        #expect(
+            source.contains("Only removes the current wallpaper from this display"),
+            "The destructive confirmation must say it does not delete source files or library items."
         )
     }
 
@@ -652,6 +671,36 @@ struct SettingsWindowLayoutTests {
         #expect(source.contains("Disconnect Workshop library"))
         #expect(source.contains("clearWorkshopLibraryRootBookmark()"))
         #expect(source.contains("updateRootAccessState()"))
+    }
+
+    @Test("Workshop gallery applies selected compatible projects to the current screen")
+    func workshopGalleryAppliesSelectedCompatibleProjectsToCurrentScreen() throws {
+        let workshopSource = try sourceText(for: "LiveWallpaper/Views/ScreenDetail/WorkshopGalleryView.swift")
+        let sceneSectionSource = try sourceText(for: "LiveWallpaper/Views/ScreenDetail/WPESceneSection.swift")
+
+        #expect(workshopSource.contains("let screen: Screen"))
+        #expect(sceneSectionSource.contains("WorkshopGalleryView(screen: screen)"))
+        #expect(workshopSource.contains("screenManager.importWallpaperEngineProject(at: project.folderURL, for: screen)"))
+        #expect(workshopSource.contains("dismiss()"))
+        #expect(!workshopSource.contains("return await screenManager.importWPEToLibrary(at: project.folderURL)"))
+    }
+
+    @Test("Workshop gallery cards expose apply actions for already imported compatible projects")
+    func workshopGalleryCardsExposeApplyActionsForAlreadyImportedCompatibleProjects() throws {
+        let source = try sourceText(for: "LiveWallpaper/Views/ScreenDetail/WorkshopGalleryView.swift")
+
+        #expect(source.contains("project.importedAlready ? \"Apply\" : \"Import & Apply\""))
+        #expect(!source.contains("Label(\"In Library\""))
+    }
+
+    @Test("Workshop gallery header uses capsule glass controls and omits bulk import")
+    func workshopGalleryHeaderUsesCapsuleGlassControlsAndOmitsBulkImport() throws {
+        let source = try sourceText(for: "LiveWallpaper/Views/ScreenDetail/WorkshopGalleryView.swift")
+
+        #expect(source.contains("GlassEffectContainer"))
+        #expect(source.contains("WorkshopToolbarButtonStyle"))
+        #expect(!source.contains("Import All Compatible"))
+        #expect(!source.contains("bulkImportCompatible"))
     }
 
     @Test("Workshop gallery has guided empty states")
