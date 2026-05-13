@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Testing
+import WebKit
 @testable import LiveWallpaper
 
 /// Validates the surface that PlaybackCoordinator extraction is meant to
@@ -429,6 +430,40 @@ struct ScreenManagerCoordinationTests {
             #expect(!Self.isSameSession(screen.runtimeSession, session))
             #expect(manager.getConfiguration(for: screen)?.htmlConfig == updated)
         }
+    }
+
+    @Test("Cancelled HTML navigations do not surface as runtime errors")
+    func cancelledHTMLNavigationIsIgnored() {
+        let view = HTMLWallpaperView(frame: CGRect(x: 0, y: 0, width: 64, height: 64))
+        defer { view.cleanup() }
+
+        var errors: [WallpaperRuntimeError] = []
+        view.onError = { errors.append($0) }
+
+        view.webView(
+            WKWebView(frame: .zero),
+            didFailProvisionalNavigation: nil,
+            withError: NSError(domain: NSURLErrorDomain, code: NSURLErrorCancelled)
+        )
+
+        #expect(errors.isEmpty)
+    }
+
+    @Test("Late HTML navigation failures after cleanup do not surface as runtime errors")
+    func lateHTMLNavigationFailureAfterCleanupIsIgnored() {
+        let view = HTMLWallpaperView(frame: CGRect(x: 0, y: 0, width: 64, height: 64))
+
+        var errors: [WallpaperRuntimeError] = []
+        view.onError = { errors.append($0) }
+        view.cleanup()
+
+        view.webView(
+            WKWebView(frame: .zero),
+            didFailProvisionalNavigation: nil,
+            withError: NSError(domain: NSURLErrorDomain, code: NSURLErrorCannotFindHost)
+        )
+
+        #expect(errors.isEmpty)
     }
 
     // MARK: - Helpers
