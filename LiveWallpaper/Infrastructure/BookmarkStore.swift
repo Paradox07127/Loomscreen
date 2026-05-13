@@ -76,6 +76,13 @@ final class BookmarkStore {
         bookmarks.removeAll()
     }
 
+    /// Re-reads the persistence layer and replaces the in-memory list.
+    /// Used after Import Configuration restores `WallpaperBookmarks.v1`
+    /// from a backup bundle.
+    func reload() {
+        bookmarks = persistence.load()
+    }
+
     func rename(_ id: UUID, to newLabel: String) {
         let trimmed = newLabel.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty,

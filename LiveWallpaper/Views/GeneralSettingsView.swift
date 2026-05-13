@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 struct GeneralSettingsView: View {
     @Environment(ScreenManager.self) private var screenManager
@@ -15,6 +16,21 @@ struct GeneralSettingsView: View {
     @State private var showingResetAlert = false
     @State private var showingValidationResults = false
     @State private var validationMessage = ""
+
+    /// Pending import bundle: shown in a confirmation alert before applying
+    /// so users can back out after seeing what's inside.
+    @State private var pendingImportBundle: ConfigurationBundle?
+    @State private var pendingImportSource: URL?
+    @State private var importFeedback: String?
+    @State private var importErrorMessage: String?
+    @State private var exportErrorMessage: String?
+
+    /// Drives SwiftUI's native `.fileExporter` / `.fileImporter` sheets —
+    /// these handle UTType filtering, sandbox extensions, and sheet
+    /// modality automatically, which `NSSavePanel.runModal()` does not.
+    @State private var isPresentingExporter = false
+    @State private var isPresentingImporter = false
+    @State private var exportDocument: ConfigurationDocument?
 
     init() {
         let settings = SettingsManager.shared.loadGlobalSettings()
@@ -62,6 +78,251 @@ struct GeneralSettingsView: View {
         } message: {
             Text(verbatim: validationMessage)
         }
+        .alert(
+            "Import Configuration?",
+            isPresented: Binding(
+                get: { pendingImportBundle != nil },
+                set: { if !$0 { pendingImportBundle = nil; pendingImportSource = nil } }
+            )
+        ) {
+            Button("Cancel", role: .cancel) {
+                pendingImportBundle = nil
+                pendingImportSource = nil
+            }
+            Button("Import", role: .destructive) { applyPendingImport() }
+        } message: {
+            Text(importConfirmationMessage)
+        }
+        .alert(
+            "Configuration Imported",
+            isPresented: Binding(
+                get: { importFeedback != nil },
+                set: { if !$0 { importFeedback = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(verbatim: importFeedback ?? "")
+        }
+        .alert(
+            "Import Failed",
+            isPresented: Binding(
+                get: { importErrorMessage != nil },
+                set: { if !$0 { importErrorMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(verbatim: importErrorMessage ?? "")
+        }
+        .alert(
+            "Export Failed",
+            isPresented: Binding(
+                get: { exportErrorMessage != nil },
+                set: { if !$0 { exportErrorMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(verbatim: exportErrorMessage ?? "")
+        }
+        // Native SwiftUI export: sheet-modal, automatic sandbox extension,
+        // honours our registered `.lwconfig` UTType so Finder shows the
+        // right icon + extension chip in the Save dialog.
+        .fileExporter(
+            isPresented: $isPresentingExporter,
+            document: exportDocument,
+            contentType: ConfigurationBundle.contentType,
+            defaultFilename: ConfigurationPorter.suggestedExportFileName()
+        ) { result in
+            exportDocument = nil
+            switch result {
+            case .success:
+                Logger.info("Configuration export completed", category: .settings)
+            case .failure(let error):
+                exportErrorMessage = error.localizedDescription
+            }
+        }
+        // Native SwiftUI import: file panel filters strictly to our UTType
+        // so users can't accidentally pick a foreign .json. Decoding + the
+        // confirmation alert still happen below in `handleImportResult`.
+        .fileImporter(
+            isPresented: $isPresentingImporter,
+            allowedContentTypes: [ConfigurationBundle.contentType],
+            allowsMultipleSelection: false
+        ) { result in
+            handleImportResult(result)
+        }
+    }
+
+    // MARK: - Import / Export Action Handlers
+
+    /// Builds the document snapshot from the current SettingsManager state
+    /// and asks SwiftUI to present its native export sheet. The actual
+    /// `.fileExporter` modifier handles UTType filtering, sheet modality,
+    /// and (in sandboxed builds) the security-scoped extension grant.
+    private func beginExport() {
+        do {
+            exportDocument = try ConfigurationDocument.snapshot()
+            isPresentingExporter = true
+        } catch {
+            exportErrorMessage = error.localizedDescription
+        }
+    }
+
+    /// Triggers the `.fileImporter` sheet. Decoding + the confirmation
+    /// dialog happen in `handleImportResult` once SwiftUI returns the URL.
+    private func beginImport() {
+        isPresentingImporter = true
+    }
+
+    private func handleImportResult(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let source = urls.first else { return }
+            // `.fileImporter` returns a security-scoped URL; balance the
+            // start/stop calls so we have access for the read.
+            let didStartAccess = source.startAccessingSecurityScopedResource()
+            defer {
+                if didStartAccess {
+                    source.stopAccessingSecurityScopedResource()
+                }
+            }
+
+            do {
+                let bundle = try ConfigurationPorter.decode(from: source)
+                pendingImportSource = source
+                pendingImportBundle = bundle
+            } catch let error as ConfigurationPorter.ImportError {
+                importErrorMessage = error.errorDescription
+            } catch {
+                importErrorMessage = error.localizedDescription
+            }
+
+        case .failure(let error):
+            // User-cancelled imports surface as NSCocoaErrorDomain code 3072
+            // (NSUserCancelledError) and shouldn't show an alert.
+            if (error as NSError).code != NSUserCancelledError {
+                importErrorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func applyPendingImport() {
+        guard let bundle = pendingImportBundle else { return }
+        let summary = ConfigurationPorter.apply(bundle)
+        pendingImportBundle = nil
+        pendingImportSource = nil
+
+        // Mirror resetAllSettings()'s broadcast: refresh subsystems that
+        // cache GlobalSettings or screen configs out-of-band.
+        NotificationCenter.default.post(name: .dockVisibilityDidChange, object: nil)
+        NotificationCenter.default.post(name: .globalShortcutsDidChange, object: nil)
+        NotificationCenter.default.post(name: .weatherLocationPreferenceDidChange, object: nil)
+        screenManager.handleGlobalSettingsChanged()
+        screenManager.resetAllWallpaperSessions()
+        screenManager.refreshScreens(preserveRuntimeSessions: false)
+
+        // Re-seed the local State so the form reflects the imported values.
+        let settings = SettingsManager.shared.loadGlobalSettings()
+        globalPauseOnBattery = settings.globalPauseOnBattery
+        startOnLogin = settings.startOnLogin
+        preservePlaybackOnLock = settings.preservePlaybackOnLock
+        minimumBatteryLevel = settings.minimumBatteryLevel
+        useBatteryThreshold = settings.minimumBatteryLevel != nil
+        pauseOnFullScreen = settings.pauseOnFullScreen
+        showInDock = settings.showInDock
+
+        // SwiftUI sometimes drops a follow-up `.alert` if it's set in the
+        // same runloop tick that dismisses the previous one — wait one
+        // hop so the confirmation alert finishes its dismiss animation.
+        let feedback = importFeedbackMessage(for: summary)
+        DispatchQueue.main.async {
+            importFeedback = feedback
+        }
+    }
+
+    /// Renders the post-import summary using individual `String(localized:)`
+    /// format strings so each restored section gets its own pluralization
+    /// rule via xcstrings (no manual "(s)" suffixes, no concatenation).
+    private func importFeedbackMessage(for summary: ConfigurationPorter.ApplySummary) -> String {
+        guard !summary.isEmpty else {
+            return String(
+                localized: "Imported file contained no recognizable settings.",
+                comment: "Toast shown after importing an empty configuration bundle."
+            )
+        }
+
+        var lines: [String] = []
+        if let count = summary.displayCount {
+            // xcstrings will pluralize `display` / `displays` from the
+            // `%lld` rule. Each `String(localized:)` is its own translation
+            // key so translators can pick any grammatical structure.
+            lines.append(String(
+                localized: "Restored \(count) display configurations.",
+                comment: "Import success line: how many displays were restored. xcstrings provides a pluralized variant."
+            ))
+        }
+        if summary.didRestoreGlobalSettings {
+            lines.append(String(
+                localized: "Restored global preferences, schedule, and shortcuts.",
+                comment: "Import success line: global settings were restored."
+            ))
+        }
+        if let count = summary.bookmarkCount {
+            lines.append(String(
+                localized: "Restored \(count) saved bookmarks.",
+                comment: "Import success line: how many bookmarks were restored. xcstrings provides a pluralized variant."
+            ))
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private var importConfirmationMessage: String {
+        guard let bundle = pendingImportBundle else { return "" }
+        var lines: [String] = []
+        if let count = bundle.screenConfigurations?.count {
+            // xcstrings pluralizes `display` / `displays` from `%lld`.
+            lines.append(String(
+                localized: "• \(count) display configurations",
+                comment: "Import confirmation bullet: how many displays the bundle includes. xcstrings provides a pluralized variant."
+            ))
+        }
+        if bundle.globalSettings != nil {
+            lines.append(String(
+                localized: "• Global settings (preferences, schedule, shortcuts)",
+                comment: "Import confirmation bullet: presence of global settings."
+            ))
+        }
+        if let count = bundle.wallpaperBookmarks?.count {
+            lines.append(String(
+                localized: "• \(count) saved bookmarks",
+                comment: "Import confirmation bullet: how many bookmarks the bundle includes. xcstrings provides a pluralized variant."
+            ))
+        }
+
+        let summary = lines.isEmpty
+            ? String(
+                localized: "The file contains no recognizable settings.",
+                comment: "Import confirmation when bundle is empty."
+            )
+            : lines.joined(separator: "\n")
+
+        // Single localized format string with two placeholders so
+        // translators can reorder the summary, the device-portability
+        // warning, and the call-to-action question freely (critical for
+        // RTL and verb-final languages).
+        return String(
+            localized: "\(summary)\n\n\(localizedBookmarkPortabilityWarning)\n\nReplace current configuration?",
+            comment: "Import confirmation alert message. First placeholder is a bulleted list of restored sections; second is the device-portability warning."
+        )
+    }
+
+    private var localizedBookmarkPortabilityWarning: String {
+        String(
+            localized: "Selected files and folders will need to be re-granted on this Mac because security bookmarks are device-specific.",
+            comment: "Import confirmation footer warning about cross-device bookmark portability."
+        )
     }
 
     // MARK: - General Tab
@@ -262,8 +523,15 @@ struct GeneralSettingsView: View {
     }
 
     private var troubleshootingActions: some View {
-        VStack(spacing: DesignTokens.Settings.actionGridSpacing) {
-            HStack(spacing: DesignTokens.Settings.actionGridSpacing) {
+        // `Grid` keeps the two-column layout but its rows align cleanly
+        // even after the form was widened to host the Export/Import row.
+        // SwiftUI compresses each tile's `.frame(maxWidth: .infinity)` so
+        // narrow windows stay readable instead of clipping the trailing
+        // button. We don't switch to ViewThatFits because the Settings
+        // panel has a fixed minWidth of 500pt — two-column always fits.
+        Grid(horizontalSpacing: DesignTokens.Settings.actionGridSpacing,
+             verticalSpacing: DesignTokens.Settings.actionGridSpacing) {
+            GridRow {
                 settingsActionButton(
                     title: "Validate Settings",
                     accessibilityLabel: "Validate settings",
@@ -281,7 +549,25 @@ struct GeneralSettingsView: View {
                 )
             }
 
-            HStack(spacing: DesignTokens.Settings.actionGridSpacing) {
+            GridRow {
+                settingsActionButton(
+                    title: "Export Configuration…",
+                    accessibilityLabel: "Export configuration",
+                    accessibilityHint: "Save the current settings, bookmarks, and per-display setup to a backup file",
+                    systemImage: "square.and.arrow.up",
+                    action: beginExport
+                )
+
+                settingsActionButton(
+                    title: "Import Configuration…",
+                    accessibilityLabel: "Import configuration",
+                    accessibilityHint: "Restore settings, bookmarks, and per-display setup from a backup file",
+                    systemImage: "square.and.arrow.down",
+                    action: beginImport
+                )
+            }
+
+            GridRow {
                 settingsActionButton(
                     title: "Welcome Tour",
                     accessibilityLabel: "Show welcome tour",
