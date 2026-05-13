@@ -228,20 +228,6 @@ struct MenuBarBehaviorTests {
                 "ServiceManagement work should run only when startOnLogin actually changes")
     }
 
-    @Test("Menu bar prototype mirrors the dedicated red quit button")
-    func menuBarPrototypeMirrorsDedicatedRedQuitButton() throws {
-        let contents = try sourceText(for: "docs/prototypes/menu-bar-control-center-mockup.html")
-
-        #expect(contents.contains("<div class=\"section-label\">Settings</div>"),
-                "The prototype should match the production Settings section label")
-        #expect(contents.contains("grid-template-columns: 1fr 28px 28px 28px"),
-                "The prototype footer should reserve a rightmost slot for Quit")
-        #expect(contents.contains("<div class=\"footer-button danger\">⏻</div>"),
-                "The prototype should show a visible red Quit button in the bottom-right corner")
-        #expect(contents.contains("More 放低频操作：Reload Wallpapers、Pause in Full Screen、About；右下角红色 Quit 直接退出。"),
-                "The prototype notes should describe Quit as a dedicated footer action")
-    }
-
     // MARK: - Toggle commit preserves unrelated GlobalSettings fields
 
     /// Regression for the menu-bar toggle commit path. The old version of

@@ -633,7 +633,11 @@ struct SettingsWindowLayoutTests {
         #expect(composedSource.contains("DesignTokens.Colors.pageBackground"))
         #expect(source.contains("private var troubleshootingActions"))
         #expect(source.contains("private func settingsActionButton"))
-        #expect(source.contains("HStack(spacing: DesignTokens.Settings.actionGridSpacing)"))
+        // troubleshootingActions now uses a `Grid` so the action tiles wrap
+        // cleanly when a sixth row (Export / Import) was added — but the
+        // design token for inter-tile spacing must still drive both axes.
+        #expect(source.contains("DesignTokens.Settings.actionGridSpacing"))
+        #expect(source.contains("GridRow {"))
     }
 
     @Test("General settings absorbs thin power page and right sizes language picker")
@@ -951,16 +955,26 @@ struct ResourceUtilitiesTests {
             localBookmarkCreator: { Data($0.path(percentEncoded: false).utf8) }
         )
 
+        // The production code constructs the copied URL via
+        // `appSupportRoot.appendingPathComponent("ImportedVideos").appendingPathComponent(hash)…`
+        // and passes that to `localBookmarkCreator`. Listing the directory
+        // via `contentsOfDirectory` would resolve `/var → /private/var`
+        // symlinks and yield a different byte sequence, so we reconstruct
+        // the expected URL the same way the production code did — only the
+        // hash subfolder name needs to come from disk.
         let importedRoot = appSupportRoot.appendingPathComponent("ImportedVideos", isDirectory: true)
         let importedDirectories = try fileManager.contentsOfDirectory(
             at: importedRoot,
             includingPropertiesForKeys: nil
         )
-        let copiedURL = try #require(importedDirectories.first?.appendingPathComponent("bg.mp4"))
+        let hashDirectoryName = try #require(importedDirectories.first?.lastPathComponent)
+        let reconstructedCopiedURL = importedRoot
+            .appendingPathComponent(hashDirectoryName, isDirectory: true)
+            .appendingPathComponent("bg.mp4", isDirectory: false)
 
-        #expect(bookmark == Data(copiedURL.path(percentEncoded: false).utf8))
-        #expect(fileManager.fileExists(atPath: copiedURL.path(percentEncoded: false)))
-        #expect(try Data(contentsOf: copiedURL) == Data([0x00, 0x01, 0x02]))
+        #expect(bookmark == Data(reconstructedCopiedURL.path(percentEncoded: false).utf8))
+        #expect(fileManager.fileExists(atPath: reconstructedCopiedURL.path(percentEncoded: false)))
+        #expect(try Data(contentsOf: reconstructedCopiedURL) == Data([0x00, 0x01, 0x02]))
     }
 
     @Test("Video fallback reuses the app-owned copy for the same source")
