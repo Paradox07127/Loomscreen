@@ -56,6 +56,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     /// Capped by `HTMLConfig.maxRetries`; used to drive exponential backoff.
     private var consecutiveFailureCount: Int = 0
     private var pendingRetryTask: Task<Void, Never>?
+    private var isCleaningUp = false
 
     /// Forwarded to the owning `AmbientWallpaperSession` so failures surface as
     /// `RuntimeErrorBanner` and can be retried from the screen-detail UI.
@@ -443,6 +444,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     }
 
     private func setMediaPlaybackSuspended(_ suspended: Bool) {
+        guard !isCleaningUp else { return }
         webView.setAllMediaPlaybackSuspended(suspended) {}
     }
 
@@ -607,9 +609,11 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     // MARK: - Cleanup
 
     func cleanup() {
+        isCleaningUp = true
         trackerBlockingRequested = false
         pendingRetryTask?.cancel()
         pendingRetryTask = nil
+        onError = nil
         webView.stopLoading()
         webView.navigationDelegate = nil
         webView.uiDelegate = nil
@@ -619,6 +623,11 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             hasTrackerRulesAttached = false
         }
         stopActiveSecurityScope()
+    }
+
+    private func shouldIgnoreNavigationFailure(_ error: NSError) -> Bool {
+        if isCleaningUp { return true }
+        return error.domain == NSURLErrorDomain && error.code == NSURLErrorCancelled
     }
 
     // MARK: - Bookmark Resolution
@@ -751,6 +760,7 @@ extension HTMLWallpaperView: WKNavigationDelegate {
     /// Server-side / authentication failures.
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         let nsError = error as NSError
+        guard !shouldIgnoreNavigationFailure(nsError) else { return }
         Logger.error(
             "HTML wallpaper didFail [domain=\(nsError.domain) code=\(nsError.code)] url=\(webView.url?.absoluteString ?? "<no url>") — \(nsError.localizedDescription); userInfo=\(nsError.userInfo)",
             category: .screenManager
@@ -766,6 +776,7 @@ extension HTMLWallpaperView: WKNavigationDelegate {
     /// Pre-commit failures (file not found, sandbox denial, scheme blocked).
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         let nsError = error as NSError
+        guard !shouldIgnoreNavigationFailure(nsError) else { return }
         Logger.error(
             "HTML wallpaper didFailProvisionalNavigation [domain=\(nsError.domain) code=\(nsError.code)] url=\(webView.url?.absoluteString ?? "<no url>") — \(nsError.localizedDescription); userInfo=\(nsError.userInfo)",
             category: .screenManager
