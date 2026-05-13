@@ -106,8 +106,8 @@ struct MenuBarBehaviorTests {
                 "Add Wallpaper should route to the main window flow, not keep inline URL entry state")
         #expect(!contents.contains("Pause on Full-Screen Apps"),
                 "Full-screen pause belongs in More/settings, not as a primary menu-bar control")
-        #expect(!contents.contains("arrow.up.right.square"),
-                "Display rows should open settings from the whole row, not keep a permanent trailing settings button")
+        #expect(contents.contains("arrow.up.right"),
+                "Display rows should expose a visible window arrow again for discoverability")
     }
 
     @Test("MenuBarContent wires every compact control to the owning app interface")
@@ -122,12 +122,16 @@ struct MenuBarBehaviorTests {
                 "Battery policy must preserve GlobalSettings by using the mutate-then-save commit path")
         #expect(contents.contains("openSettingsForScreen(screen.id)"),
                 "Clicking a display row must open settings for that display")
+        #expect(contents.contains("openAction: { invokeOpenScreenSettings(screen.id) }"),
+                "Display-row open affordances must dismiss the menu-bar window before opening settings")
+        #expect(contents.contains("private func invokeOpenScreenSettings(_ id: CGDirectDisplayID)"),
+                "Display-row settings navigation should share a dismissing helper instead of calling openSettingsForScreen directly")
         #expect(contents.contains("screenManager.regressPlaylist(for: screen)"),
                 "Previous playlist control must call ScreenManager.regressPlaylist(for:)")
         #expect(contents.contains("screenManager.advancePlaylist(for: screen)"),
                 "Next playlist control must call ScreenManager.advancePlaylist(for:)")
-        #expect(contents.contains("requestAddWallpaper(kind: \"video\")"),
-                "Add Wallpaper must offer the existing main-window video add flow")
+        #expect(contents.contains("invokeAddWallpaperWindow()"),
+                "Add Wallpaper should directly open the main settings window instead of asking for a type in the menu bar")
         #expect(contents.contains(".glassEffect("),
                 "The menu bar control center should use Liquid Glass surfaces")
         #expect(contents.contains("screenManager.setWallpapersEnabled("),
@@ -146,8 +150,12 @@ struct MenuBarBehaviorTests {
     func menuBarContentUsesLargerReadableSettingsSurface() throws {
         let contents = try sourceText(for: "LiveWallpaper/Views/MenuBarContent.swift")
 
-        #expect(contents.contains("static let popoverWidth: CGFloat = 267"),
-                "The control center should be about 15% wider than the 232pt first pass")
+        #expect(contents.contains("static let popoverWidth: CGFloat = 292"),
+                "The control center should be wider again so controls have breathing room")
+        #expect(contents.contains("static let outerPadding: CGFloat = 12"),
+                "The control center should reserve more outer padding for the Liquid Glass surface")
+        #expect(contents.contains("static let rowPaddingVertical: CGFloat = 8"),
+                "Display rows should have more vertical padding than the dense pass")
         #expect(contents.contains("sectionLabel(\"SETTINGS\")"),
                 "The global controls section should be labeled Settings instead of All Displays")
         #expect(contents.contains("ReadableGlassSurface"),
@@ -178,8 +186,8 @@ struct MenuBarBehaviorTests {
                 "Quit should be a dedicated footer control, not only a nested More item")
         #expect(contents.contains("Button(action: invokeQuit)"),
                 "The dedicated quit button should be wired directly from the footer")
-        #expect(contents.contains(".readableGlass(radius: 10, tint: .red, interactive: true)"),
-                "Quit should use the red danger treatment requested for the bottom-right button")
+        #expect(contents.contains(".readableGlass(radius: 11, tint: .red, interactive: true)"),
+                "Quit should use the red danger treatment with the roomier footer control shape")
         #expect(contents.contains("NSApp.terminate(nil)"),
                 "Quit should call the standard AppKit terminate action")
     }
@@ -189,13 +197,17 @@ struct MenuBarBehaviorTests {
         let contents = try sourceText(for: "LiveWallpaper/Views/MenuBarContent.swift")
 
         #expect(contents.contains("private enum MenuBarOverlay"),
-                "Add and More should share a lightweight menu-bar overlay state")
+                "More should still use lightweight menu-bar overlay state")
         #expect(contents.contains("private var activeOverlayContent: some View"),
                 "The menu-bar window should render secondary actions as inline content")
         #expect(contents.contains(".overlay(alignment: .bottomTrailing)"),
                 "Secondary actions should be positioned inside the existing menu-bar window")
-        #expect(contents.contains("toggleOverlay(.addWallpaper)"),
-                "Add Wallpaper should use the shared in-window overlay, not a system Menu")
+        #expect(!contents.contains("toggleOverlay(.addWallpaper)"),
+                "Add Wallpaper should no longer open a second-step menu-bar overlay")
+        #expect(!contents.contains("case addWallpaper"),
+                "The add-wallpaper type picker should be removed from the menu-bar overlay")
+        #expect(contents.contains("Button(action: invokeAddWallpaperWindow)"),
+                "Add Wallpaper should be a direct one-click route to the main window")
         #expect(contents.contains("toggleOverlay(.more)"),
                 "More should use the shared in-window overlay, not a nested popover")
         #expect(!contents.contains(".popover(isPresented: $isMorePopoverPresented"),

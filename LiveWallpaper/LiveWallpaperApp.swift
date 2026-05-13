@@ -365,9 +365,6 @@ struct LiveWallpaperApp: App {
                 },
                 openSettingsForScreen: { [appDelegate] id in
                     appDelegate.showSettings(initialScreenID: id)
-                },
-                promptAddWallpaper: { [appDelegate] kind in
-                    appDelegate.showSettings(initialAddWallpaperPromptKind: kind)
                 }
             )
             .environment(screenManager)

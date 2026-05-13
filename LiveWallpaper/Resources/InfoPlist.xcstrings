@@ -37,7 +37,20 @@
       }
     },
     "LiveWallpaper Configuration" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "LiveWallpaper Configuration"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LiveWallpaper 配置"
+          }
+        }
+      }
     },
     "NSDesktopFolderUsageDescription" : {
       "extractionState" : "manual",
