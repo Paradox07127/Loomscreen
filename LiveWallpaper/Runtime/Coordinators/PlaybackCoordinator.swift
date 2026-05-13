@@ -377,9 +377,10 @@ final class PlaybackCoordinator {
         screen: Screen,
         preservingState: Bool
     ) {
-        let needsNewPlayer = screen.videoPlayer == nil
+        let existingPlayer = screen.videoPlayer
+        let needsNewPlayer = existingPlayer == nil || existingPlayer?.videoURL != url
 
-        if !needsNewPlayer, let player = screen.videoPlayer {
+        if !needsNewPlayer, let player = existingPlayer {
             let currentTime = preservingState ? player.player?.currentTime() : .zero
             let wasPlaying = player.isPlaying
 
@@ -415,6 +416,9 @@ final class PlaybackCoordinator {
                 schedulePolicyAwarePlaybackStart(to: player, screenID: screen.id)
             }
         } else {
+            if existingPlayer != nil {
+                releaseRuntimeSession(screen)
+            }
             let player = WallpaperVideoPlayer(
                 url: url,
                 frame: screen.frame,

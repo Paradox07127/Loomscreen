@@ -238,6 +238,99 @@ struct ScreenManagerCoordinationTests {
         }
     }
 
+    @Test("Switching to video while the same video wallpaper is already active keeps the live session")
+    func switchToVideoWhenAlreadyActiveKeepsSession() async throws {
+        let fixture = try Self.makeTemporaryVideoBookmark(prefix: "switch-video")
+        defer { try? FileManager.default.removeItem(at: fixture.url) }
+
+        try await Self.runWithVideoConfiguration(bookmarkData: fixture.bookmark) { manager, screen in
+            let session = TestRuntimeSession(wallpaperType: .video)
+            screen.installRuntimeSession(session)
+            let capture = Self.attachConfigurationObserver()
+            defer { capture.detach() }
+
+            manager.switchToVideoWallpaper(for: screen)
+            await Self.drainMainQueue()
+
+            #expect(session.cleanupCount == 0)
+            #expect(Self.isSameSession(screen.runtimeSession, session))
+            #expect(capture.notifications.isEmpty)
+            #expect(manager.getConfiguration(for: screen)?.wallpaperType == .video)
+        }
+    }
+
+    @Test("Re-applying the same scene wallpaper keeps the live session")
+    func setSameSceneWallpaperKeepsSession() async throws {
+        let descriptor = Self.makeSceneDescriptor()
+
+        try await Self.runWithSceneConfiguration(descriptor: descriptor) { manager, screen in
+            let session = TestRuntimeSession(wallpaperType: .scene)
+            screen.installRuntimeSession(session)
+            let capture = Self.attachConfigurationObserver()
+            defer { capture.detach() }
+
+            manager.setSceneWallpaper(descriptor: descriptor, origin: nil, for: screen)
+            await Self.drainMainQueue()
+
+            #expect(session.cleanupCount == 0)
+            #expect(Self.isSameSession(screen.runtimeSession, session))
+            #expect(capture.notifications.isEmpty)
+            #expect(manager.getConfiguration(for: screen)?.wallpaperType == .scene)
+        }
+    }
+
+    @Test("Applying a different video bookmark replaces the live player")
+    func applyDifferentVideoConfigurationReplacesLivePlayer() async throws {
+        guard let screen = NSScreen.screens.first.map(Screen.init(nsScreen:)) else {
+            Issue.record("No NSScreen available for video replacement test")
+            return
+        }
+        let originalConfigurations = SettingsManager.shared.loadConfigurations()
+        defer { SettingsManager.shared.replaceAllConfigurations(originalConfigurations) }
+
+        let first = try Self.makeTemporaryVideoBookmark(prefix: "old-video")
+        let second = try Self.makeTemporaryVideoBookmark(prefix: "new-video")
+        defer {
+            try? FileManager.default.removeItem(at: first.url)
+            try? FileManager.default.removeItem(at: second.url)
+            screen.resetRuntimeSession()
+        }
+
+        let configuration = ScreenConfiguration(screenID: screen.id, videoBookmarkData: second.bookmark)
+        SettingsManager.shared.replaceAllConfigurations([configuration])
+        let store = WallpaperConfigurationStore()
+        _ = store.loadAll()
+
+        let oldPlayer = WallpaperVideoPlayer(url: first.url, frame: screen.frame)
+        screen.installRuntimeSession(VideoWallpaperSession(player: oldPlayer))
+
+        var releaseCount = 0
+        let coordinator = PlaybackCoordinator(
+            configurationStore: store,
+            powerMonitor: FakePowerMonitor(),
+            fullScreenDetector: FakeFullScreenDetector(),
+            powerPolicy: PowerPolicyController(),
+            playableVideoLoader: FakePlayableVideoLoader(),
+            applyVideoEffects: { _, _ in },
+            refreshRateLookup: { _ in 60 },
+            screensProvider: { [screen] },
+            markSessionStateChanged: {},
+            releaseRuntimeSession: { target in
+                releaseCount += 1
+                target.resetRuntimeSession()
+            },
+            notifyWallpaperSessionChanged: {}
+        )
+        defer { coordinator.transition.cancelAssetReadiness(for: screen.id) }
+
+        coordinator.applyConfiguration(configuration, to: screen, preservingState: false)
+
+        let currentPlayer = try #require(screen.videoPlayer)
+        #expect(releaseCount == 1)
+        #expect(currentPlayer !== oldPlayer)
+        #expect(currentPlayer.videoURL == second.url)
+    }
+
     @Test("Updating live HTML config hot-applies ordinary toggles without rebuilding the session")
     func updateHTMLConfigHotAppliesWithoutRebuild() async throws {
         try await Self.runWithHTMLConfiguration { manager, screen in
@@ -245,7 +338,6 @@ struct ScreenManagerCoordinationTests {
             screen.installRuntimeSession(session)
 
             var updated = HTMLConfig.default
-            updated.allowJavaScript = false
             updated.allowMouseInteraction = true
             updated.customCSS = "html { background: black; }"
 
@@ -256,6 +348,85 @@ struct ScreenManagerCoordinationTests {
             #expect(session.cleanupCount == 0)
             #expect(Self.isSameSession(screen.runtimeSession, session))
             #expect(session.appliedHTMLConfigs == [updated])
+            #expect(manager.getConfiguration(for: screen)?.htmlConfig == updated)
+        }
+    }
+
+    @Test("Switching to HTML while the same HTML wallpaper is already active keeps the live session")
+    func switchToHTMLWhenAlreadyActiveKeepsSession() async throws {
+        try await Self.runWithHTMLConfiguration { manager, screen in
+            let session = TestRuntimeSession(wallpaperType: .html)
+            screen.installRuntimeSession(session)
+            let capture = Self.attachConfigurationObserver()
+            defer { capture.detach() }
+
+            manager.switchToHTMLWallpaper(for: screen)
+            await Self.drainMainQueue()
+
+            #expect(session.cleanupCount == 0)
+            #expect(Self.isSameSession(screen.runtimeSession, session))
+            #expect(capture.notifications.isEmpty)
+            #expect(manager.getConfiguration(for: screen)?.wallpaperType == .html)
+        }
+    }
+
+    @Test("Trusting the current remote HTML origin forces the live page to rebuild")
+    func trustingCurrentRemoteHTMLOriginForcesRebuild() async throws {
+        let originURL = try #require(URL(string: "https://html-refresh-\(UUID().uuidString).example.com/live"))
+        let source = HTMLSource.url(originURL)
+        let origin = try #require(TrustedHTMLOrigin(url: originURL))
+        var config = HTMLConfig.default
+        config.allowJavaScript = true
+
+        try await Self.runWithHTMLConfiguration(source: source, config: config) { manager, screen in
+            let session = TestRuntimeSession(wallpaperType: .html)
+            screen.installRuntimeSession(session)
+            defer { _ = TrustedHostStore.shared.revoke(origin) }
+
+            #expect(TrustedHostStore.shared.trust(origin))
+            manager.setHTMLWallpaper(source: source, config: config, forceReload: true, for: screen)
+            await Self.drainMainQueue()
+
+            #expect(session.cleanupCount == 1)
+            #expect(!Self.isSameSession(screen.runtimeSession, session))
+            #expect(manager.getConfiguration(for: screen)?.wallpaperType == .html)
+        }
+    }
+
+    @Test("Changing HTML JavaScript permission rebuilds the page")
+    func updateHTMLConfigJavaScriptToggleRebuildsSession() async throws {
+        try await Self.runWithHTMLConfiguration { manager, screen in
+            let session = TestRuntimeSession(wallpaperType: .html)
+            screen.installRuntimeSession(session)
+
+            var updated = HTMLConfig.default
+            updated.allowJavaScript = false
+
+            try await Self.expectChange(notificationFor: screen) {
+                manager.updateHTMLConfig(updated, for: screen)
+            }
+
+            #expect(session.cleanupCount == 1)
+            #expect(!Self.isSameSession(screen.runtimeSession, session))
+            #expect(manager.getConfiguration(for: screen)?.htmlConfig == updated)
+        }
+    }
+
+    @Test("Changing HTML tracker blocking rebuilds the page")
+    func updateHTMLConfigTrackerBlockingToggleRebuildsSession() async throws {
+        try await Self.runWithHTMLConfiguration { manager, screen in
+            let session = TestRuntimeSession(wallpaperType: .html)
+            screen.installRuntimeSession(session)
+
+            var updated = HTMLConfig.default
+            updated.blockTrackers = false
+
+            try await Self.expectChange(notificationFor: screen) {
+                manager.updateHTMLConfig(updated, for: screen)
+            }
+
+            #expect(session.cleanupCount == 1)
+            #expect(!Self.isSameSession(screen.runtimeSession, session))
             #expect(manager.getConfiguration(for: screen)?.htmlConfig == updated)
         }
     }
@@ -324,6 +495,8 @@ struct ScreenManagerCoordinationTests {
     }
 
     private static func runWithHTMLConfiguration(
+        source: HTMLSource = .inline("<html><body></body></html>"),
+        config: HTMLConfig = .default,
         _ body: (ScreenManager, Screen) async throws -> Void
     ) async throws {
         guard let screen = NSScreen.screens.first.map(Screen.init(nsScreen:)) else {
@@ -336,7 +509,7 @@ struct ScreenManagerCoordinationTests {
         SettingsManager.shared.replaceAllConfigurations([
             ScreenConfiguration(
                 screenID: screen.id,
-                wallpaper: .html(source: .inline("<html><body></body></html>"), config: .default),
+                wallpaper: .html(source: source, config: config),
                 savedVideoBookmarkData: nil
             )
         ])
@@ -350,7 +523,85 @@ struct ScreenManagerCoordinationTests {
             displayRegistry: FakeDisplayRegistry(screens: [screen])
         ))
 
+        defer { screen.resetRuntimeSession() }
         try await body(manager, screen)
+    }
+
+    private static func runWithVideoConfiguration(
+        bookmarkData: Data,
+        _ body: (ScreenManager, Screen) async throws -> Void
+    ) async throws {
+        guard let screen = NSScreen.screens.first.map(Screen.init(nsScreen:)) else {
+            Issue.record("No NSScreen available for ScreenManager coordination test")
+            return
+        }
+        let originalConfigurations = SettingsManager.shared.loadConfigurations()
+        defer { SettingsManager.shared.replaceAllConfigurations(originalConfigurations) }
+
+        SettingsManager.shared.replaceAllConfigurations([
+            ScreenConfiguration(screenID: screen.id, videoBookmarkData: bookmarkData)
+        ])
+
+        let manager = ScreenManager(startupOptions: ScreenManagerStartupOptions(
+            restoreSavedWallpapers: false,
+            startAutomation: false,
+            powerMonitor: FakePowerMonitor(),
+            fullScreenDetector: FakeFullScreenDetector(),
+            playableVideoLoader: FakePlayableVideoLoader(),
+            displayRegistry: FakeDisplayRegistry(screens: [screen])
+        ))
+
+        defer { screen.resetRuntimeSession() }
+        try await body(manager, screen)
+    }
+
+    private static func runWithSceneConfiguration(
+        descriptor: SceneDescriptor,
+        _ body: (ScreenManager, Screen) async throws -> Void
+    ) async throws {
+        guard let screen = NSScreen.screens.first.map(Screen.init(nsScreen:)) else {
+            Issue.record("No NSScreen available for ScreenManager coordination test")
+            return
+        }
+        let originalConfigurations = SettingsManager.shared.loadConfigurations()
+        defer { SettingsManager.shared.replaceAllConfigurations(originalConfigurations) }
+
+        SettingsManager.shared.replaceAllConfigurations([
+            ScreenConfiguration(screenID: screen.id, wallpaper: .scene(descriptor))
+        ])
+
+        let manager = ScreenManager(startupOptions: ScreenManagerStartupOptions(
+            restoreSavedWallpapers: false,
+            startAutomation: false,
+            powerMonitor: FakePowerMonitor(),
+            fullScreenDetector: FakeFullScreenDetector(),
+            playableVideoLoader: FakePlayableVideoLoader(),
+            displayRegistry: FakeDisplayRegistry(screens: [screen])
+        ))
+
+        defer { screen.resetRuntimeSession() }
+        try await body(manager, screen)
+    }
+
+    private static func makeTemporaryVideoBookmark(prefix: String) throws -> (url: URL, bookmark: Data) {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LiveWallpaper-\(prefix)-\(UUID().uuidString).mp4")
+        try Data([0x00, 0x01]).write(to: url)
+        let bookmark = try url.bookmarkData(
+            options: [],
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
+        return (url, bookmark)
+    }
+
+    private static func makeSceneDescriptor() -> SceneDescriptor {
+        SceneDescriptor(
+            workshopID: "scene-refresh-\(UUID().uuidString)",
+            cacheRelativePath: "wpe-cache/scene-refresh",
+            entryFile: "scene.json",
+            capabilityTier: .imageOnly
+        )
     }
 
     private static func isSameSession(

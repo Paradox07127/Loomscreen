@@ -199,9 +199,9 @@ struct HTMLSourceSection: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 if origin.isSecure {
                     Button("Trust this origin") {
-                        trustStore.trust(origin)
+                        _ = trustStore.trust(origin)
                         // Re-apply with the now-trusted origin so JS turns on.
-                        screenManager.setHTMLWallpaper(source: source, config: config, for: screen)
+                        screenManager.setHTMLWallpaper(source: source, config: config, forceReload: true, for: screen)
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.mini)
