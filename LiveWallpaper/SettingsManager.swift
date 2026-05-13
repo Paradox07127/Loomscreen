@@ -8,10 +8,17 @@ import ServiceManagement
 final class SettingsManager {
     static let shared = SettingsManager()
 
-    private let encoder = JSONEncoder()
-    private let decoder = JSONDecoder()
     private var cachedGlobalSettings: GlobalSettings?
     private var cachedConfigurations: [ScreenConfiguration]?
+
+    /// Three big JSON blobs that used to live in `UserDefaults`. Moved to
+    /// `~/Library/Application Support/<bundle-id>/Configuration/` so writes
+    /// are observable, atomic, and independent of `cfprefsd`. Small
+    /// primitives (language, bookmarks for single folders, trusted hosts)
+    /// remain in `UserDefaults` because they're boot-critical and tiny.
+    private let screenConfigStore: AtomicFileStore<[ScreenConfiguration]>
+    private let globalSettingsStore: AtomicFileStore<GlobalSettings>
+    private let wallpaperBookmarksStore: AtomicFileStore<[WallpaperBookmark]>
 
     private enum Keys {
         static let screenConfigurations = "screenConfigurations"
@@ -22,6 +29,28 @@ final class SettingsManager {
         static let trustedHosts = "TrustedHTMLHosts.v1"
         static let workshopLibraryRootBookmark = "WPELibrary.RootBookmark.v1"
         static let appLanguage = AppLanguagePreference.storageKey
+        /// Bumped each time we successfully migrate a blob out of UserDefaults
+        /// into the file store. Lets us run the migration at most once even
+        /// though we keep the legacy keys for one version (rollback safety).
+        static let configMigrationVersion = "Settings.MigrationVersion"
+    }
+
+    /// Current migration revision. Bump when introducing a new file-backed
+    /// store or schema change so the migration path re-runs on next launch.
+    private static let currentMigrationVersion = 1
+
+    init(directory: ConfigurationDirectory = ConfigurationDirectory()) {
+        self.screenConfigStore = AtomicFileStore(
+            fileURL: directory.url(for: .screenConfigurations)
+        )
+        self.globalSettingsStore = AtomicFileStore(
+            fileURL: directory.url(for: .globalSettings)
+        )
+        self.wallpaperBookmarksStore = AtomicFileStore(
+            fileURL: directory.url(for: .wallpaperBookmarks)
+        )
+
+        migrateLegacyUserDefaultsIfNeeded()
     }
 
     // MARK: - Screen Configurations
@@ -33,38 +62,38 @@ final class SettingsManager {
         } else {
             configs.append(configuration)
         }
-        cachedConfigurations = configs
+        // persistConfigurations owns the cache update — it only writes the
+        // cache after the disk write succeeds.
         persistConfigurations(configs)
     }
 
     func replaceAllConfigurations(_ configurations: [ScreenConfiguration]) {
-        cachedConfigurations = configurations
         persistConfigurations(configurations)
     }
 
     func loadConfigurations() -> [ScreenConfiguration] {
         if let cached = cachedConfigurations { return cached }
-        guard let data = UserDefaults.standard.data(forKey: Keys.screenConfigurations) else { return [] }
-        do {
-            let configs = try decoder.decode([ScreenConfiguration].self, from: data)
-            cachedConfigurations = configs
-            return configs
-        } catch {
-            Logger.error("Failed to decode screen configurations: \(error.localizedDescription)", category: .settings)
-            return []
-        }
+        let configs = screenConfigStore.read() ?? []
+        cachedConfigurations = configs
+        return configs
     }
 
     func getConfiguration(for screenID: CGDirectDisplayID) -> ScreenConfiguration? {
         loadConfigurations().first { $0.screenID == screenID }
     }
 
+    /// Persists the array and only updates the in-memory cache if the disk
+    /// write succeeds. This way a transient disk-full / permission error
+    /// doesn't silently desync cache from durable state.
     private func persistConfigurations(_ configs: [ScreenConfiguration]) {
         do {
-            let data = try encoder.encode(configs)
-            UserDefaults.standard.set(data, forKey: Keys.screenConfigurations)
+            try screenConfigStore.write(configs)
+            cachedConfigurations = configs
         } catch {
-            Logger.error("Failed to encode screen configurations: \(error.localizedDescription)", category: .settings)
+            Logger.error("Failed to persist screen configurations: \(error.localizedDescription)", category: .settings)
+            // Drop the cache so the next read goes back to disk (which
+            // still has the previous good version).
+            cachedConfigurations = nil
         }
     }
     
@@ -72,36 +101,27 @@ final class SettingsManager {
 
     func saveGlobalSettings(_ settings: GlobalSettings) {
         let previousStartOnLogin = cachedGlobalSettings?.startOnLogin ?? loadGlobalSettings().startOnLogin
-        cachedGlobalSettings = settings
         do {
-            let data = try encoder.encode(settings)
-            UserDefaults.standard.set(data, forKey: Keys.globalSettings)
+            // Write to disk first; only commit the cache if it sticks.
+            try globalSettingsStore.write(settings)
+            cachedGlobalSettings = settings
             if previousStartOnLogin != settings.startOnLogin {
                 applyStartOnLoginSetting(settings.startOnLogin)
             }
             Logger.settingsChanged(setting: "globalSettings", value: "Updated global settings")
         } catch {
-            Logger.error("Failed to encode global settings: \(error.localizedDescription)", category: .settings)
+            Logger.error("Failed to persist global settings: \(error.localizedDescription)", category: .settings)
+            // Force a re-read on next access so we return the last-good
+            // persisted version instead of the rejected update.
+            cachedGlobalSettings = nil
         }
     }
 
     func loadGlobalSettings() -> GlobalSettings {
         if let cached = cachedGlobalSettings { return cached }
-        guard let data = UserDefaults.standard.data(forKey: Keys.globalSettings) else {
-            let defaults = GlobalSettings()
-            cachedGlobalSettings = defaults
-            return defaults
-        }
-        do {
-            let settings = try decoder.decode(GlobalSettings.self, from: data)
-            cachedGlobalSettings = settings
-            return settings
-        } catch {
-            Logger.error("Failed to decode global settings: \(error.localizedDescription)", category: .settings)
-            let defaults = GlobalSettings()
-            cachedGlobalSettings = defaults
-            return defaults
-        }
+        let settings = globalSettingsStore.read() ?? GlobalSettings()
+        cachedGlobalSettings = settings
+        return settings
     }
 
     // MARK: - Wallpaper Engine History (LRU, capped at 20)
@@ -180,6 +200,14 @@ final class SettingsManager {
     func cleanAllSettings(applyLoginSetting: Bool = true) {
         cachedGlobalSettings = nil
         cachedConfigurations = nil
+
+        // File-backed stores (large blobs).
+        screenConfigStore.delete()
+        globalSettingsStore.delete()
+        wallpaperBookmarksStore.delete()
+
+        // Legacy UserDefaults keys (kept for rollback during the migration
+        // window). Clearing them here makes Reset truly idempotent.
         UserDefaults.standard.removeObject(forKey: Keys.screenConfigurations)
         UserDefaults.standard.removeObject(forKey: Keys.globalSettings)
         UserDefaults.standard.removeObject(forKey: Keys.aerialsDirectoryBookmark)
@@ -187,10 +215,93 @@ final class SettingsManager {
         UserDefaults.standard.removeObject(forKey: Keys.trustedHosts)
         UserDefaults.standard.removeObject(forKey: Keys.workshopLibraryRootBookmark)
         UserDefaults.standard.removeObject(forKey: Keys.appLanguage)
+        // `configMigrationVersion` is intentionally preserved — it tracks
+        // "which migration steps have already been applied to this install",
+        // not "is there data". Resetting it would re-run the seed pass on
+        // the next launch; with the legacy keys already cleared above
+        // that's a no-op today, but keeping the counter prevents any
+        // future migration step from re-firing against partially-cleared
+        // state.
+
         BookmarkStore.shared.resetAfterSettingsCleared()
         TrustedHostStore.shared.resetAfterSettingsCleared()
         if applyLoginSetting {
             applyStartOnLoginSetting(false)
+        }
+    }
+
+    // MARK: - Legacy Migration
+
+    /// Seeds the new file-backed stores from any pre-existing `UserDefaults`
+    /// blobs. Idempotent — gated on `Keys.configMigrationVersion` but only
+    /// when every required seed succeeded. A transient disk-full / TCC /
+    /// read-only home will leave the version counter at zero so the next
+    /// launch retries; otherwise we'd permanently strand the user's data.
+    ///
+    /// The legacy UserDefaults entries are intentionally NOT removed here
+    /// so users can roll back to the previous app version once if needed.
+    /// The next release will drop them.
+    private func migrateLegacyUserDefaultsIfNeeded() {
+        let storedVersion = UserDefaults.standard.integer(forKey: Keys.configMigrationVersion)
+        guard storedVersion < Self.currentMigrationVersion else { return }
+
+        var allSucceeded = true
+        allSucceeded = seedStoreFromUserDefaults(
+            store: screenConfigStore,
+            legacyKey: Keys.screenConfigurations,
+            label: "screenConfigurations"
+        ) && allSucceeded
+        allSucceeded = seedStoreFromUserDefaults(
+            store: globalSettingsStore,
+            legacyKey: Keys.globalSettings,
+            label: "globalSettings"
+        ) && allSucceeded
+        allSucceeded = seedStoreFromUserDefaults(
+            store: wallpaperBookmarksStore,
+            legacyKey: Keys.bookmarks,
+            label: "wallpaperBookmarks"
+        ) && allSucceeded
+
+        guard allSucceeded else {
+            Logger.error(
+                "SettingsManager migration v\(Self.currentMigrationVersion) DID NOT complete cleanly; will retry on next launch",
+                category: .settings
+            )
+            return
+        }
+
+        UserDefaults.standard.set(Self.currentMigrationVersion, forKey: Keys.configMigrationVersion)
+        Logger.info(
+            "SettingsManager migration v\(Self.currentMigrationVersion) complete",
+            category: .settings
+        )
+    }
+
+    /// Returns `true` if the seed step succeeded — either the legacy blob
+    /// was absent (nothing to do) or it was successfully written to the
+    /// file store. Returns `false` only on an actual write/encode failure
+    /// so the caller can defer bumping the migration version.
+    private func seedStoreFromUserDefaults<V: Codable>(
+        store: AtomicFileStore<V>,
+        legacyKey: String,
+        label: String
+    ) -> Bool {
+        // Never overwrite an existing file payload — the file always wins.
+        guard !store.hasPersistedValue else { return true }
+        guard let data = UserDefaults.standard.data(forKey: legacyKey) else { return true }
+        do {
+            try store.writeRaw(data)
+            Logger.info(
+                "Migrated \(label) from UserDefaults → file (\(data.count) bytes)",
+                category: .settings
+            )
+            return true
+        } catch {
+            Logger.error(
+                "Failed to migrate \(label): \(error.localizedDescription)",
+                category: .settings
+            )
+            return false
         }
     }
     
@@ -353,21 +464,14 @@ final class SettingsManager {
     // MARK: - Wallpaper Bookmarks
 
     func loadWallpaperBookmarks() -> [WallpaperBookmark] {
-        guard let data = UserDefaults.standard.data(forKey: Keys.bookmarks) else { return [] }
-        do {
-            return try decoder.decode([WallpaperBookmark].self, from: data)
-        } catch {
-            Logger.error("Failed to decode wallpaper bookmarks: \(error.localizedDescription)", category: .settings)
-            return []
-        }
+        wallpaperBookmarksStore.read() ?? []
     }
 
     func saveWallpaperBookmarks(_ bookmarks: [WallpaperBookmark]) {
         do {
-            let data = try encoder.encode(bookmarks)
-            UserDefaults.standard.set(data, forKey: Keys.bookmarks)
+            try wallpaperBookmarksStore.write(bookmarks)
         } catch {
-            Logger.error("Failed to encode wallpaper bookmarks: \(error.localizedDescription)", category: .settings)
+            Logger.error("Failed to persist wallpaper bookmarks: \(error.localizedDescription)", category: .settings)
         }
     }
 
