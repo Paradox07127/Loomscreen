@@ -94,6 +94,110 @@ struct MenuBarBehaviorTests {
         }
     }
 
+    @Test("MenuBarContent is the compact control center, not the legacy dashboard panel")
+    func menuBarContentDropsLegacyDashboardPanel() throws {
+        let contents = try sourceText(for: "LiveWallpaper/Views/MenuBarContent.swift")
+
+        #expect(!contents.contains("DashboardChip"),
+                "The menu bar surface should use a one-line resource strip, not the old expandable dashboard chips")
+        #expect(!contents.contains("RAMScopePicker("),
+                "The compact control center should not expose dashboard RAM scope controls")
+        #expect(!contents.contains("commitWebURLEntry"),
+                "Add Wallpaper should route to the main window flow, not keep inline URL entry state")
+        #expect(!contents.contains("Pause on Full-Screen Apps"),
+                "Full-screen pause belongs in More/settings, not as a primary menu-bar control")
+        #expect(!contents.contains("arrow.up.right.square"),
+                "Display rows should open settings from the whole row, not keep a permanent trailing settings button")
+    }
+
+    @Test("MenuBarContent wires every compact control to the owning app interface")
+    func menuBarContentWiresCompactControls() throws {
+        let contents = try sourceText(for: "LiveWallpaper/Views/MenuBarContent.swift")
+
+        #expect(contents.contains("screenManager.togglePlayback()"),
+                "Pause All must call ScreenManager.togglePlayback()")
+        #expect(contents.contains("toggleGlobalMute()"),
+                "Mute must flip all display audio through the menu-bar helper")
+        #expect(contents.contains("commitGlobalToggles()"),
+                "Battery policy must preserve GlobalSettings by using the mutate-then-save commit path")
+        #expect(contents.contains("openSettingsForScreen(screen.id)"),
+                "Clicking a display row must open settings for that display")
+        #expect(contents.contains("screenManager.regressPlaylist(for: screen)"),
+                "Previous playlist control must call ScreenManager.regressPlaylist(for:)")
+        #expect(contents.contains("screenManager.advancePlaylist(for: screen)"),
+                "Next playlist control must call ScreenManager.advancePlaylist(for:)")
+        #expect(contents.contains("promptAddWallpaper(\"video\")"),
+                "Add Wallpaper must offer the existing main-window video add flow")
+        #expect(contents.contains(".glassEffect("),
+                "The menu bar control center should use Liquid Glass surfaces")
+        #expect(contents.contains("screenManager.setWallpapersEnabled("),
+                "The On/Off switch must call ScreenManager.setWallpapersEnabled(_:)")
+    }
+
+    @Test("ScreenManager owns the menu-bar wallpaper enabled switch")
+    func screenManagerOwnsWallpaperEnabledSwitch() throws {
+        let contents = try sourceText(for: "LiveWallpaper/ScreenManager.swift")
+
+        #expect(contents.contains("func setWallpapersEnabled(_ enabled: Bool)"),
+                "The menu bar should not directly manipulate runtime sessions")
+    }
+
+    @Test("MenuBarContent uses the larger readable settings surface")
+    func menuBarContentUsesLargerReadableSettingsSurface() throws {
+        let contents = try sourceText(for: "LiveWallpaper/Views/MenuBarContent.swift")
+
+        #expect(contents.contains("static let popoverWidth: CGFloat = 267"),
+                "The control center should be about 15% wider than the 232pt first pass")
+        #expect(contents.contains("sectionLabel(\"SETTINGS\")"),
+                "The global controls section should be labeled Settings instead of All Displays")
+        #expect(contents.contains("ReadableGlassSurface"),
+                "Custom glass buttons should add a readable edge/contrast layer")
+        #expect(contents.contains("@State private var isMorePopoverPresented"),
+                "More should be owned by SwiftUI state instead of a lazy native Menu")
+        #expect(contents.contains(".popover(isPresented: $isMorePopoverPresented"),
+                "More should use a SwiftUI popover to avoid the native Menu first-open delay")
+    }
+
+    @Test("Menu bar gear opens the general settings page")
+    func menuBarGearOpensGeneralSettings() throws {
+        let appSource = try sourceText(for: "LiveWallpaper/LiveWallpaperApp.swift")
+
+        #expect(appSource.contains("opensGeneralSettings: Bool = false"),
+                "AppDelegate.showSettings should support opening the General settings page directly")
+        #expect(appSource.contains("let initialNavigation: Navigation? = opensGeneralSettings ? .general"),
+                "A newly-created settings window should land on General when the menu-bar gear is used")
+        #expect(appSource.contains("showSettings(opensGeneralSettings: true)"),
+                "The menu-bar gear should call the General settings route, not the default preview route")
+    }
+
+    @Test("Menu bar footer exposes a dedicated red quit button")
+    func menuBarFooterExposesDedicatedRedQuitButton() throws {
+        let contents = try sourceText(for: "LiveWallpaper/Views/MenuBarContent.swift")
+
+        #expect(contents.contains("MenuBarQuitButton"),
+                "Quit should be a dedicated footer control, not only a nested More item")
+        #expect(contents.contains("Button(action: invokeQuit)"),
+                "The dedicated quit button should be wired directly from the footer")
+        #expect(contents.contains(".readableGlass(radius: 10, tint: .red, interactive: true)"),
+                "Quit should use the red danger treatment requested for the bottom-right button")
+        #expect(contents.contains("NSApp.terminate(nil)"),
+                "Quit should call the standard AppKit terminate action")
+    }
+
+    @Test("Menu bar prototype mirrors the dedicated red quit button")
+    func menuBarPrototypeMirrorsDedicatedRedQuitButton() throws {
+        let contents = try sourceText(for: "docs/prototypes/menu-bar-control-center-mockup.html")
+
+        #expect(contents.contains("<div class=\"section-label\">Settings</div>"),
+                "The prototype should match the production Settings section label")
+        #expect(contents.contains("grid-template-columns: 1fr 28px 28px 28px"),
+                "The prototype footer should reserve a rightmost slot for Quit")
+        #expect(contents.contains("<div class=\"footer-button danger\">⏻</div>"),
+                "The prototype should show a visible red Quit button in the bottom-right corner")
+        #expect(contents.contains("More 放低频操作：Reload Wallpapers、Pause in Full Screen、About；右下角红色 Quit 直接退出。"),
+                "The prototype notes should describe Quit as a dedicated footer action")
+    }
+
     // MARK: - Toggle commit preserves unrelated GlobalSettings fields
 
     /// Regression for the menu-bar toggle commit path. The old version of
@@ -162,6 +266,23 @@ struct MenuBarBehaviorTests {
         }
 
         try body()
+    }
+
+    private func sourceText(for relativePath: String) throws -> String {
+        let bases = [
+            URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent(),
+            URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        ]
+
+        guard let source = bases
+            .lazy
+            .map({ $0.appendingPathComponent(relativePath) })
+            .first(where: { FileManager.default.fileExists(atPath: $0.path) })
+        else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+
+        return try String(contentsOf: source, encoding: .utf8)
     }
 
     private func makeEntry(

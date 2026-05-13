@@ -160,7 +160,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// `ContentView.onAppear` to launch the matching picker — this replaces
     /// the racy `dismiss + DispatchQueue.async + post` chain that the menu
     /// bar previously used to hand off picker requests.
-    func showSettings(initialScreenID: CGDirectDisplayID? = nil, initialAddWallpaperPromptKind: String? = nil) {
+    func showSettings(
+        initialScreenID: CGDirectDisplayID? = nil,
+        initialAddWallpaperPromptKind: String? = nil,
+        opensGeneralSettings: Bool = false
+    ) {
         guard let manager = screenManager else { return }
         Logger.info("Settings window requested", category: .ui)
 
@@ -170,6 +174,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             controller.window?.makeKeyAndOrderFront(nil)
             controller.window?.orderFrontRegardless()
             Logger.info("Settings window reused", category: .ui)
+            if opensGeneralSettings {
+                NotificationCenter.default.post(name: .openGeneralSettings, object: nil)
+            }
             if let id = initialScreenID {
                 NotificationCenter.default.post(
                     name: .selectScreenInSettings,
@@ -187,7 +194,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        let initialNavigation: Navigation? = initialScreenID.map { .screen($0) }
+        let initialNavigation: Navigation? = opensGeneralSettings ? .general : initialScreenID.map { .screen($0) }
         let contentView = ContentView(
             initialNavigation: initialNavigation,
             initialAddWallpaperPromptKind: initialAddWallpaperPromptKind
@@ -303,7 +310,7 @@ struct LiveWallpaperApp: App {
         if let screenManager = appDelegate.screenManager {
             MenuBarContent(
                 openSettings: { [appDelegate] in
-                    appDelegate.showSettings()
+                    appDelegate.showSettings(opensGeneralSettings: true)
                 },
                 openSettingsForScreen: { [appDelegate] id in
                     appDelegate.showSettings(initialScreenID: id)

@@ -293,8 +293,8 @@ struct SettingsWindowLayoutTests {
         #expect(resolver.contains("ResourceUtilities.resolveBookmark"))
     }
 
-    @Test("RAM scope segmented control is shared")
-    func ramScopeSegmentedControlIsShared() throws {
+    @Test("RAM scope segmented control stays scoped to the full monitor view")
+    func ramScopeSegmentedControlStaysScopedToFullMonitorView() throws {
         let systemMonitor = try sourceText(for: "LiveWallpaper/Views/SystemMonitorView.swift")
         let menuBarContent = try sourceText(for: "LiveWallpaper/Views/MenuBarContent.swift")
         let sharedControl = try sourceText(for: "LiveWallpaper/Views/RAMScopePicker.swift")
@@ -302,7 +302,7 @@ struct SettingsWindowLayoutTests {
         #expect(!systemMonitor.contains("private func ramScopeButton"))
         #expect(!menuBarContent.contains("private func ramScopeButton"))
         #expect(systemMonitor.contains("RAMScopePicker("))
-        #expect(menuBarContent.contains("RAMScopePicker("))
+        #expect(!menuBarContent.contains("RAMScopePicker("))
         #expect(sharedControl.contains("private func scopeButton"))
     }
 
