@@ -71,11 +71,14 @@ final class SettingsManager {
     // MARK: - Global Settings
 
     func saveGlobalSettings(_ settings: GlobalSettings) {
+        let previousStartOnLogin = cachedGlobalSettings?.startOnLogin ?? loadGlobalSettings().startOnLogin
         cachedGlobalSettings = settings
         do {
             let data = try encoder.encode(settings)
             UserDefaults.standard.set(data, forKey: Keys.globalSettings)
-            applyStartOnLoginSetting(settings.startOnLogin)
+            if previousStartOnLogin != settings.startOnLogin {
+                applyStartOnLoginSetting(settings.startOnLogin)
+            }
             Logger.settingsChanged(setting: "globalSettings", value: "Updated global settings")
         } catch {
             Logger.error("Failed to encode global settings: \(error.localizedDescription)", category: .settings)

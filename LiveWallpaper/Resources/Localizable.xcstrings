@@ -42,6 +42,12 @@
             "state" : "new",
             "value" : "%1$@ %2$@"
           }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ %2$@"
+          }
         }
       }
     },
@@ -6866,7 +6872,20 @@
       }
     },
     "More" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "More"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更多"
+          }
+        }
+      }
     },
     "More options for %@" : {
       "comment" : "Shortcut row menu a11y label. The placeholder is the shortcut action name.",
@@ -7528,7 +7547,20 @@
       }
     },
     "On" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "On"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开启"
+          }
+        }
+      }
     },
     "onboarding.header.live_preview.subtitle" : {
       "comment" : "Onboarding subtitle in preview stage; %lld is selected display count. Translators: please use a plural-aware phrase for your locale.",
@@ -7753,7 +7785,20 @@
       }
     },
     "Open display settings" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Open display settings"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开显示器设置"
+          }
+        }
+      }
     },
     "Open Location Services settings" : {
       "localizations" : {
@@ -12973,10 +13018,36 @@
       }
     },
     "Turn off wallpapers" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Turn off wallpapers"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭壁纸"
+          }
+        }
+      }
     },
     "Turn on wallpapers" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Turn on wallpapers"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开启壁纸"
+          }
+        }
+      }
     },
     "Type" : {
       "comment" : "Workshop library sort order.",
@@ -13456,7 +13527,20 @@
       }
     },
     "Video File" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Video File"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "视频文件"
+          }
+        }
+      }
     },
     "Video file (.mp4, .mov, …)" : {
       "localizations" : {
@@ -13834,7 +13918,20 @@
       }
     },
     "Wallpapers" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Wallpapers"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "壁纸"
+          }
+        }
+      }
     },
     "Warmth" : {
       "localizations" : {
