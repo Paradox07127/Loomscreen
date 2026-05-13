@@ -5,7 +5,6 @@ import AppKit
 struct MenuBarContent: View {
     let openSettings: () -> Void
     let openSettingsForScreen: (CGDirectDisplayID) -> Void
-    let promptAddWallpaper: (String) -> Void
 
     @Environment(ScreenManager.self) private var screenManager
     @Environment(\.dismiss) private var dismiss
@@ -36,8 +35,8 @@ struct MenuBarContent: View {
     }
 
     var body: some View {
-        GlassEffectContainer(spacing: 8) {
-            VStack(alignment: .leading, spacing: 8) {
+        GlassEffectContainer(spacing: MenuBarControlCenterMetrics.componentSpacing) {
+            VStack(alignment: .leading, spacing: MenuBarControlCenterMetrics.componentSpacing) {
                 header
                 sectionLabel("DISPLAYS")
                 displays
@@ -65,15 +64,15 @@ struct MenuBarContent: View {
     }
 
     private var header: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             Image(systemName: "play.rectangle.fill")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Color.accentColor)
-                .frame(width: 22, height: 22)
-                .readableGlass(radius: 7, tint: Color.accentColor)
+                .frame(width: 24, height: 24)
+                .readableGlass(radius: 8, tint: Color.accentColor)
                 .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text("LiveWallpaper")
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
@@ -109,12 +108,12 @@ struct MenuBarContent: View {
     }
 
     private var displays: some View {
-        VStack(spacing: 5) {
+        VStack(spacing: MenuBarControlCenterMetrics.rowSpacing) {
             if screenManager.screens.isEmpty {
                 Text("No displays detected")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 34, alignment: .center)
+                    .frame(maxWidth: .infinity, minHeight: 40, alignment: .center)
                     .readableGlass(radius: 10, tint: .secondary)
             } else {
                 ForEach(screenManager.screens, id: \.id) { screen in
@@ -127,7 +126,7 @@ struct MenuBarContent: View {
                         showsStatusDot: screenManager.wallpaperSummary(for: screen).activity != .inactive,
                         supportsPlayback: screenManager.wallpaperSummary(for: screen).supportsPlaybackControl,
                         canStepPlaylist: canStepPlaylist(for: screen),
-                        openAction: { openSettingsForScreen(screen.id) },
+                        openAction: { invokeOpenScreenSettings(screen.id) },
                         previousAction: { screenManager.regressPlaylist(for: screen) },
                         playbackAction: { togglePlayback(for: screen) },
                         nextAction: { screenManager.advancePlaylist(for: screen) }
@@ -139,7 +138,7 @@ struct MenuBarContent: View {
     }
 
     private var allDisplayActions: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: MenuBarControlCenterMetrics.controlSpacing) {
             MenuBarControlButton(
                 title: screenManager.wallpaperOverviewStatus == .active ? "Pause All" : "Play All",
                 systemImage: screenManager.wallpaperOverviewStatus == .active ? "pause.fill" : "play.fill",
@@ -195,10 +194,8 @@ struct MenuBarContent: View {
     }
 
     private var footer: some View {
-        HStack(spacing: 5) {
-            Button {
-                toggleOverlay(.addWallpaper)
-            } label: {
+        HStack(spacing: MenuBarControlCenterMetrics.controlSpacing) {
+            Button(action: invokeAddWallpaperWindow) {
                 MenuBarFooterLabel(title: "Add Wallpaper", systemImage: "plus")
             }
             .buttonStyle(.plain)
@@ -209,8 +206,8 @@ struct MenuBarContent: View {
             Button(action: invokeOpenSettings) {
                 Image(systemName: "gearshape")
                     .font(.system(size: 12, weight: .semibold))
-                    .frame(width: 32, height: 30)
-                    .readableGlass(radius: 10, tint: .secondary, interactive: true)
+                    .frame(width: 34, height: 34)
+                    .readableGlass(radius: 11, tint: .secondary, interactive: true)
             }
             .buttonStyle(.plain)
             .help(Text("Settings"))
@@ -221,8 +218,8 @@ struct MenuBarContent: View {
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 12, weight: .semibold))
-                    .frame(width: 32, height: 30)
-                    .readableGlass(radius: 10, tint: .secondary, interactive: true)
+                    .frame(width: 34, height: 34)
+                    .readableGlass(radius: 11, tint: .secondary, interactive: true)
             }
             .buttonStyle(.plain)
             .help(Text("More"))
@@ -243,23 +240,6 @@ struct MenuBarContent: View {
         if let overlay = activeOverlay {
             MenuBarInlineOverlayPanel {
                 switch overlay {
-                case .addWallpaper:
-                    MenuBarOverlayButton(
-                        title: "Video File",
-                        systemImage: "film",
-                        action: { requestAddWallpaper(kind: "video") }
-                    )
-                    MenuBarOverlayButton(
-                        title: "HTML File",
-                        systemImage: "doc.richtext",
-                        action: { requestAddWallpaper(kind: "html-file") }
-                    )
-                    MenuBarOverlayButton(
-                        title: "Folder",
-                        systemImage: "folder",
-                        action: { requestAddWallpaper(kind: "html-folder") }
-                    )
-
                 case .more:
                     MenuBarOverlayButton(
                         title: "Reload Wallpapers",
@@ -382,10 +362,20 @@ struct MenuBarContent: View {
         }
     }
 
-    private func requestAddWallpaper(kind: String) {
+    private func invokeAddWallpaperWindow() {
         activeOverlay = nil
         dismiss()
-        promptAddWallpaper(kind)
+        if let screen = screenManager.screens.first {
+            openSettingsForScreen(screen.id)
+        } else {
+            openSettings()
+        }
+    }
+
+    private func invokeOpenScreenSettings(_ id: CGDirectDisplayID) {
+        activeOverlay = nil
+        dismiss()
+        openSettingsForScreen(id)
     }
 
     private func invokeOpenSettings() {
@@ -429,13 +419,17 @@ struct MenuBarContent: View {
 }
 
 private enum MenuBarControlCenterMetrics {
-    static let popoverWidth: CGFloat = 267
-    static let outerPadding: CGFloat = 9
-    static let overlayBottomPadding: CGFloat = 42
+    static let popoverWidth: CGFloat = 292
+    static let outerPadding: CGFloat = 12
+    static let componentSpacing: CGFloat = 10
+    static let rowSpacing: CGFloat = 7
+    static let controlSpacing: CGFloat = 7
+    static let rowPaddingHorizontal: CGFloat = 9
+    static let rowPaddingVertical: CGFloat = 8
+    static let overlayBottomPadding: CGFloat = 48
 }
 
 private enum MenuBarOverlay: Equatable {
-    case addWallpaper
     case more
 }
 
@@ -483,16 +477,16 @@ private struct MenuBarDisplayRow: View {
     let nextAction: () -> Void
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             Button(action: openAction) {
-                HStack(spacing: 6) {
+                HStack(spacing: 8) {
                     Image(systemName: iconName)
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(iconTint)
-                        .frame(width: 20, height: 20)
-                        .readableGlass(radius: 7, tint: iconTint)
+                        .frame(width: 22, height: 22)
+                        .readableGlass(radius: 8, tint: iconTint)
 
-                    VStack(alignment: .leading, spacing: 1) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(verbatim: title)
                             .font(.system(size: 11, weight: .semibold))
                             .lineLimit(1)
@@ -514,7 +508,7 @@ private struct MenuBarDisplayRow: View {
             .buttonStyle(.plain)
             .help(Text("Open display settings"))
 
-            HStack(spacing: 3) {
+            HStack(spacing: 4) {
                 IconControlButton(
                     systemImage: "chevron.left",
                     isEnabled: supportsPlayback && canStepPlaylist,
@@ -536,12 +530,19 @@ private struct MenuBarDisplayRow: View {
                     action: nextAction,
                     accessibilityLabel: "Next wallpaper"
                 )
+
+                IconControlButton(
+                    systemImage: "arrow.up.right",
+                    isEnabled: true,
+                    action: openAction,
+                    accessibilityLabel: "Open display settings"
+                )
             }
         }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 6)
+        .padding(.horizontal, MenuBarControlCenterMetrics.rowPaddingHorizontal)
+        .padding(.vertical, MenuBarControlCenterMetrics.rowPaddingVertical)
         .frame(maxWidth: .infinity)
-        .readableGlass(radius: 11, tint: iconTint, interactive: true)
+        .readableGlass(radius: 12, tint: iconTint, interactive: true)
     }
 }
 
@@ -557,9 +558,9 @@ private struct IconControlButton: View {
             Image(systemName: systemImage)
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(isProminent ? Color.accentColor : Color.primary.opacity(0.72))
-                .frame(width: 21, height: 21)
+                .frame(width: 23, height: 23)
                 .readableGlass(
-                    radius: 7,
+                    radius: 8,
                     tint: isProminent ? Color.accentColor : Color.secondary,
                     interactive: isEnabled
                 )
@@ -581,7 +582,7 @@ private struct MenuBarControlButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 5) {
+            HStack(spacing: 6) {
                 Image(systemName: systemImage)
                     .font(.system(size: 10, weight: .semibold))
                 Text(verbatim: title)
@@ -590,8 +591,8 @@ private struct MenuBarControlButton: View {
                     .minimumScaleFactor(0.82)
             }
             .foregroundStyle(tint)
-            .frame(maxWidth: .infinity, minHeight: 31)
-            .readableGlass(radius: 10, tint: tint, interactive: true)
+            .frame(maxWidth: .infinity, minHeight: 34)
+            .readableGlass(radius: 11, tint: tint, interactive: true)
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
@@ -610,15 +611,15 @@ private struct MenuBarUsageStrip: View {
     let metrics: [MenuBarUsageMetric]
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 9) {
             ForEach(metrics, id: \.label) { metric in
                 MenuBarUsageMetricView(metric: metric)
             }
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 8)
         .frame(maxWidth: .infinity)
-        .readableGlass(radius: 10, tint: .secondary)
+        .readableGlass(radius: 11, tint: .secondary)
     }
 }
 
@@ -662,10 +663,10 @@ private struct MenuBarInlineOverlayPanel<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 7) {
             content()
         }
-        .padding(8)
+        .padding(9)
         .frame(width: 198)
         .readableGlass(radius: 14, tint: .secondary)
     }
@@ -680,7 +681,7 @@ private struct MenuBarOverlayButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
+            HStack(spacing: 9) {
                 Image(systemName: systemImage)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(tint)
@@ -691,9 +692,9 @@ private struct MenuBarOverlayButton: View {
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 9)
-            .frame(maxWidth: .infinity, minHeight: 30)
-            .readableGlass(radius: 9, tint: surfaceTint, interactive: true)
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, minHeight: 32)
+            .readableGlass(radius: 10, tint: surfaceTint, interactive: true)
         }
         .buttonStyle(.plain)
     }
@@ -704,15 +705,15 @@ private struct MenuBarFooterLabel: View {
     let systemImage: String
 
     var body: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 6) {
             Image(systemName: systemImage)
                 .font(.system(size: 10, weight: .semibold))
             Text(verbatim: title)
                 .font(.system(size: 11, weight: .semibold))
                 .lineLimit(1)
         }
-        .frame(maxWidth: .infinity, minHeight: 30)
-        .readableGlass(radius: 10, tint: .accentColor, interactive: true)
+        .frame(maxWidth: .infinity, minHeight: 34)
+        .readableGlass(radius: 11, tint: .accentColor, interactive: true)
     }
 }
 
@@ -721,8 +722,8 @@ private struct MenuBarQuitButton: View {
         Image(systemName: "power")
             .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(.red)
-            .frame(width: 32, height: 30)
-            .readableGlass(radius: 10, tint: .red, interactive: true)
+            .frame(width: 34, height: 34)
+            .readableGlass(radius: 11, tint: .red, interactive: true)
     }
 }
 

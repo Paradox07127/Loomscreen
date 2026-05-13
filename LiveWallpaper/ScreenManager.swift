@@ -1283,6 +1283,8 @@ final class ScreenManager {
         let previousWallpaper = config.activeWallpaper
         guard config.activateSavedVideoWallpaper() else { return }
 
+        // No-op switch: discard the local mutation (incl. playlistCursorIndex reset)
+        // since nothing actually changed; persistence + session rebuild are skipped.
         if previousWallpaper == config.activeWallpaper,
            screen.runtimeSession?.wallpaperType == .video {
             Logger.info("Video wallpaper already active for screen \(screen.id); keeping existing player session", category: .screenManager)

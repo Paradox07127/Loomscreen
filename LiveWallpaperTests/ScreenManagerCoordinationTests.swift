@@ -280,6 +280,24 @@ struct ScreenManagerCoordinationTests {
         }
     }
 
+    @Test("Applying a different scene descriptor replaces the live session")
+    func setDifferentSceneWallpaperReplacesSession() async throws {
+        let original = Self.makeSceneDescriptor()
+        let replacement = Self.makeSceneDescriptor()
+
+        try await Self.runWithSceneConfiguration(descriptor: original) { manager, screen in
+            let session = TestRuntimeSession(wallpaperType: .scene)
+            screen.installRuntimeSession(session)
+
+            manager.setSceneWallpaper(descriptor: replacement, origin: nil, for: screen)
+            await Self.drainMainQueue()
+
+            #expect(session.cleanupCount == 1)
+            #expect(!Self.isSameSession(screen.runtimeSession, session))
+            #expect(manager.getConfiguration(for: screen)?.activeWallpaper == .scene(replacement))
+        }
+    }
+
     @Test("Applying a different video bookmark replaces the live player")
     func applyDifferentVideoConfigurationReplacesLivePlayer() async throws {
         guard let screen = NSScreen.screens.first.map(Screen.init(nsScreen:)) else {
