@@ -1279,8 +1279,16 @@ final class ScreenManager {
     // MARK: - Wallpaper Type Switching
 
     func switchToVideoWallpaper(for screen: Screen) {
-        guard var config = configurationStore.get(for: screen.id),
-              config.activateSavedVideoWallpaper() else { return }
+        guard var config = configurationStore.get(for: screen.id) else { return }
+        let previousWallpaper = config.activeWallpaper
+        guard config.activateSavedVideoWallpaper() else { return }
+
+        if previousWallpaper == config.activeWallpaper,
+           screen.runtimeSession?.wallpaperType == .video {
+            Logger.info("Video wallpaper already active for screen \(screen.id); keeping existing player session", category: .screenManager)
+            return
+        }
+
         saveConfiguration(config)
 
         loadConfigurationForScreen(screen)
@@ -1289,8 +1297,16 @@ final class ScreenManager {
     /// Restore previously-applied HTML source after the user toggles the type
     /// picker back to HTML. No-op if no HTML was ever set on this screen.
     func switchToHTMLWallpaper(for screen: Screen) {
-        guard var config = configurationStore.get(for: screen.id),
-              config.activateSavedHTMLWallpaper() else { return }
+        guard var config = configurationStore.get(for: screen.id) else { return }
+        let previousWallpaper = config.activeWallpaper
+        guard config.activateSavedHTMLWallpaper() else { return }
+
+        if previousWallpaper == config.activeWallpaper,
+           screen.runtimeSession?.wallpaperType == .html {
+            Logger.info("HTML wallpaper already active for screen \(screen.id); keeping existing WKWebView session", category: .screenManager)
+            return
+        }
+
         saveConfiguration(config)
         restoreWallpaperSession(for: screen, configuration: config, preservingState: false)
     }
@@ -1300,6 +1316,13 @@ final class ScreenManager {
             screenID: screen.id,
             wallpaper: .scene(descriptor)
         )
+        if configuration.activeWallpaper == .scene(descriptor),
+           configuration.wpeOrigin == origin,
+           screen.runtimeSession?.wallpaperType == .scene {
+            Logger.info("Scene wallpaper already active for screen \(screen.id); keeping existing scene session", category: .screenManager)
+            return
+        }
+
         configuration.activeWallpaper = .scene(descriptor)
         configuration.wpeOrigin = origin
         saveConfiguration(configuration)
@@ -1426,12 +1449,13 @@ final class ScreenManager {
 
     // MARK: - HTML Wallpaper
 
-    func setHTMLWallpaper(source: HTMLSource, config: HTMLConfig = .default, for screen: Screen) {
+    func setHTMLWallpaper(source: HTMLSource, config: HTMLConfig = .default, forceReload: Bool = false, for screen: Screen) {
         var configuration = configurationStore.get(for: screen.id) ?? ScreenConfiguration(
             screenID: screen.id,
             wallpaper: .html(source: source, config: config)
         )
-        if case .html(let existingSource, let existingConfig) = configuration.activeWallpaper,
+        if !forceReload,
+           case .html(let existingSource, let existingConfig) = configuration.activeWallpaper,
            existingSource == source,
            existingConfig == config,
            screen.runtimeSession?.wallpaperType == .html {
@@ -1479,6 +1503,8 @@ final class ScreenManager {
 
     private func requiresHTMLSessionRebuild(previous: HTMLConfig, current: HTMLConfig) -> Bool {
         previous.useEphemeralStorage != current.useEphemeralStorage
+            || previous.allowJavaScript != current.allowJavaScript
+            || previous.blockTrackers != current.blockTrackers
     }
 
     // MARK: - Metal Shader Wallpaper
