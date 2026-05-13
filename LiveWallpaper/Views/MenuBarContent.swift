@@ -12,7 +12,7 @@ struct MenuBarContent: View {
 
     @State private var globalPauseOnBattery: Bool = SettingsManager.shared.loadGlobalSettings().globalPauseOnBattery
     @State private var globalPauseOnFullScreen: Bool = SettingsManager.shared.loadGlobalSettings().pauseOnFullScreen
-    @State private var isMorePopoverPresented = false
+    @State private var activeOverlay: MenuBarOverlay?
 
     private var monitor: SystemMonitor { .shared }
 
@@ -49,6 +49,18 @@ struct MenuBarContent: View {
             .padding(MenuBarControlCenterMetrics.outerPadding)
             .frame(width: MenuBarControlCenterMetrics.popoverWidth)
         }
+        .overlay {
+            if activeOverlay != nil {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { activeOverlay = nil }
+                    .transition(.opacity)
+            }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            activeOverlayContent
+        }
+        .animation(.snappy(duration: 0.14), value: activeOverlay)
         .onAppear { refreshGlobalToggles() }
     }
 
@@ -184,31 +196,15 @@ struct MenuBarContent: View {
 
     private var footer: some View {
         HStack(spacing: 5) {
-            Menu {
-                Button {
-                    dismiss()
-                    promptAddWallpaper("video")
-                } label: {
-                    Label("Video File", systemImage: "film")
-                }
-
-                Button {
-                    requestAddWallpaper(kind: "html-file")
-                } label: {
-                    Label("HTML File", systemImage: "doc.richtext")
-                }
-
-                Button {
-                    requestAddWallpaper(kind: "html-folder")
-                } label: {
-                    Label("Folder", systemImage: "folder")
-                }
+            Button {
+                toggleOverlay(.addWallpaper)
             } label: {
                 MenuBarFooterLabel(title: "Add Wallpaper", systemImage: "plus")
             }
-            .menuStyle(.button)
             .buttonStyle(.plain)
             .frame(maxWidth: .infinity)
+            .help(Text("Add Wallpaper"))
+            .accessibilityLabel(Text("Add Wallpaper"))
 
             Button(action: invokeOpenSettings) {
                 Image(systemName: "gearshape")
@@ -221,7 +217,7 @@ struct MenuBarContent: View {
             .accessibilityLabel(Text("Settings"))
 
             Button {
-                isMorePopoverPresented.toggle()
+                toggleOverlay(.more)
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 12, weight: .semibold))
@@ -231,23 +227,6 @@ struct MenuBarContent: View {
             .buttonStyle(.plain)
             .help(Text("More"))
             .accessibilityLabel(Text("More"))
-            .popover(isPresented: $isMorePopoverPresented, arrowEdge: .bottom) {
-                MenuBarMorePopover(
-                    globalPauseOnFullScreen: globalPauseOnFullScreen,
-                    reloadAction: {
-                        isMorePopoverPresented = false
-                        screenManager.reloadAllScreens()
-                    },
-                    toggleFullScreenPauseAction: {
-                        globalPauseOnFullScreen.toggle()
-                        commitGlobalToggles()
-                    },
-                    aboutAction: {
-                        isMorePopoverPresented = false
-                        NSApp.orderFrontStandardAboutPanel(nil)
-                    }
-                )
-            }
 
             Button(action: invokeQuit) {
                 MenuBarQuitButton()
@@ -257,6 +236,61 @@ struct MenuBarContent: View {
             .accessibilityLabel(Text("Quit LiveWallpaper"))
         }
         .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private var activeOverlayContent: some View {
+        if let overlay = activeOverlay {
+            MenuBarInlineOverlayPanel {
+                switch overlay {
+                case .addWallpaper:
+                    MenuBarOverlayButton(
+                        title: "Video File",
+                        systemImage: "film",
+                        action: { requestAddWallpaper(kind: "video") }
+                    )
+                    MenuBarOverlayButton(
+                        title: "HTML File",
+                        systemImage: "doc.richtext",
+                        action: { requestAddWallpaper(kind: "html-file") }
+                    )
+                    MenuBarOverlayButton(
+                        title: "Folder",
+                        systemImage: "folder",
+                        action: { requestAddWallpaper(kind: "html-folder") }
+                    )
+
+                case .more:
+                    MenuBarOverlayButton(
+                        title: "Reload Wallpapers",
+                        systemImage: "arrow.clockwise",
+                        action: { deferMenuBarAction { screenManager.reloadAllScreens() } }
+                    )
+                    MenuBarOverlayButton(
+                        title: globalPauseOnFullScreen ? "Disable Full-Screen Pause" : "Enable Full-Screen Pause",
+                        systemImage: "macwindow",
+                        action: {
+                            globalPauseOnFullScreen.toggle()
+                            activeOverlay = nil
+                            commitGlobalToggles()
+                        }
+                    )
+                    Divider()
+                    MenuBarOverlayButton(
+                        title: "About LiveWallpaper",
+                        systemImage: "info.circle",
+                        action: {
+                            activeOverlay = nil
+                            NSApp.orderFrontStandardAboutPanel(nil)
+                        }
+                    )
+                }
+            }
+            .padding(.trailing, MenuBarControlCenterMetrics.outerPadding)
+            .padding(.bottom, MenuBarControlCenterMetrics.overlayBottomPadding)
+            .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .bottomTrailing)))
+            .zIndex(10)
+        }
     }
 
     private var isGlobalMuted: Bool {
@@ -336,12 +370,26 @@ struct MenuBarContent: View {
         PlaybackToggle.toggle(playback)
     }
 
+    private func toggleOverlay(_ overlay: MenuBarOverlay) {
+        activeOverlay = activeOverlay == overlay ? nil : overlay
+    }
+
+    private func deferMenuBarAction(_ action: @escaping @MainActor () -> Void) {
+        activeOverlay = nil
+        Task { @MainActor in
+            await Task.yield()
+            action()
+        }
+    }
+
     private func requestAddWallpaper(kind: String) {
+        activeOverlay = nil
         dismiss()
         promptAddWallpaper(kind)
     }
 
     private func invokeOpenSettings() {
+        activeOverlay = nil
         dismiss()
         openSettings()
     }
@@ -383,6 +431,12 @@ struct MenuBarContent: View {
 private enum MenuBarControlCenterMetrics {
     static let popoverWidth: CGFloat = 267
     static let outerPadding: CGFloat = 9
+    static let overlayBottomPadding: CGFloat = 42
+}
+
+private enum MenuBarOverlay: Equatable {
+    case addWallpaper
+    case more
 }
 
 @MainActor
@@ -604,33 +658,12 @@ private struct MenuBarUsageMetricView: View {
     }
 }
 
-private struct MenuBarMorePopover: View {
-    let globalPauseOnFullScreen: Bool
-    let reloadAction: () -> Void
-    let toggleFullScreenPauseAction: () -> Void
-    let aboutAction: () -> Void
+private struct MenuBarInlineOverlayPanel<Content: View>: View {
+    @ViewBuilder let content: () -> Content
 
     var body: some View {
         VStack(spacing: 6) {
-            MenuBarMoreButton(
-                title: "Reload Wallpapers",
-                systemImage: "arrow.clockwise",
-                action: reloadAction
-            )
-
-            MenuBarMoreButton(
-                title: globalPauseOnFullScreen ? "Disable Full-Screen Pause" : "Enable Full-Screen Pause",
-                systemImage: "macwindow",
-                action: toggleFullScreenPauseAction
-            )
-
-            Divider()
-
-            MenuBarMoreButton(
-                title: "About LiveWallpaper",
-                systemImage: "info.circle",
-                action: aboutAction
-            )
+            content()
         }
         .padding(8)
         .frame(width: 198)
@@ -638,7 +671,7 @@ private struct MenuBarMorePopover: View {
     }
 }
 
-private struct MenuBarMoreButton: View {
+private struct MenuBarOverlayButton: View {
     let title: String
     let systemImage: String
     var tint: Color = .primary

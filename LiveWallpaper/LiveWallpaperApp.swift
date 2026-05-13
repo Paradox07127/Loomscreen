@@ -117,6 +117,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async { [weak self] in
                 self?.showOnboarding()
             }
+        } else {
+            scheduleSettingsWindowPrewarm()
         }
     }
 
@@ -155,6 +157,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Settings Window
 
+    private func scheduleSettingsWindowPrewarm() {
+        guard !runtimeOptions.isTesting else { return }
+
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1.2))
+            self?.prewarmSettingsWindow()
+        }
+    }
+
+    func prewarmSettingsWindow() {
+        guard settingsWindowController == nil,
+              let manager = screenManager
+        else { return }
+
+        settingsWindowController = makeSettingsWindowController(
+            manager: manager,
+            initialNavigation: nil,
+            initialAddWallpaperPromptKind: nil
+        )
+        Logger.info("Settings window prewarmed", category: .ui)
+    }
+
     /// Opens settings, optionally selecting a display from the menu bar.
     /// `initialAddWallpaperPromptKind`, when non-nil, is consumed by
     /// `ContentView.onAppear` to launch the matching picker — this replaces
@@ -169,32 +193,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Logger.info("Settings window requested", category: .ui)
 
         if let controller = settingsWindowController {
-            controller.showWindow(nil)
-            NSApp.activate(ignoringOtherApps: true)
-            controller.window?.makeKeyAndOrderFront(nil)
-            controller.window?.orderFrontRegardless()
+            presentSettingsWindow(controller)
             Logger.info("Settings window reused", category: .ui)
-            if opensGeneralSettings {
-                NotificationCenter.default.post(name: .openGeneralSettings, object: nil)
-            }
-            if let id = initialScreenID {
-                NotificationCenter.default.post(
-                    name: .selectScreenInSettings,
-                    object: nil,
-                    userInfo: ["screenID": id]
-                )
-            }
-            if let kind = initialAddWallpaperPromptKind {
-                NotificationCenter.default.post(
-                    name: .promptAddWallpaper,
-                    object: nil,
-                    userInfo: ["kind": kind]
-                )
-            }
+            postSettingsWindowRequest(
+                initialScreenID: initialScreenID,
+                initialAddWallpaperPromptKind: initialAddWallpaperPromptKind,
+                opensGeneralSettings: opensGeneralSettings
+            )
             return
         }
 
         let initialNavigation: Navigation? = opensGeneralSettings ? .general : initialScreenID.map { .screen($0) }
+        let controller = makeSettingsWindowController(
+            manager: manager,
+            initialNavigation: initialNavigation,
+            initialAddWallpaperPromptKind: initialAddWallpaperPromptKind
+        )
+        settingsWindowController = controller
+        presentSettingsWindow(controller)
+        Logger.info("Settings window shown", category: .ui)
+    }
+
+    private func makeSettingsWindowController(
+        manager: ScreenManager,
+        initialNavigation: Navigation?,
+        initialAddWallpaperPromptKind: String?
+    ) -> NSWindowController {
         let contentView = ContentView(
             initialNavigation: initialNavigation,
             initialAddWallpaperPromptKind: initialAddWallpaperPromptKind
@@ -222,13 +246,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.delegate = self
         window.setFrameAutosaveName("LiveWallpaperSettingsWindow")
 
-        let controller = NSWindowController(window: window)
-        settingsWindowController = controller
+        return NSWindowController(window: window)
+    }
+
+    private func presentSettingsWindow(_ controller: NSWindowController) {
         controller.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
-        window.orderFrontRegardless()
-        Logger.info("Settings window shown", category: .ui)
+        controller.window?.makeKeyAndOrderFront(nil)
+        controller.window?.orderFrontRegardless()
+    }
+
+    private func postSettingsWindowRequest(
+        initialScreenID: CGDirectDisplayID?,
+        initialAddWallpaperPromptKind: String?,
+        opensGeneralSettings: Bool
+    ) {
+        DispatchQueue.main.async {
+            if opensGeneralSettings {
+                NotificationCenter.default.post(name: .openGeneralSettings, object: nil)
+            }
+            if let id = initialScreenID {
+                NotificationCenter.default.post(
+                    name: .selectScreenInSettings,
+                    object: nil,
+                    userInfo: ["screenID": id]
+                )
+            }
+            if let kind = initialAddWallpaperPromptKind {
+                NotificationCenter.default.post(
+                    name: .promptAddWallpaper,
+                    object: nil,
+                    userInfo: ["kind": kind]
+                )
+            }
+        }
     }
 
     // MARK: - Onboarding Window
