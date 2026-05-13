@@ -35,6 +35,16 @@
         }
       }
     },
+    "%@ %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ %2$@"
+          }
+        }
+      }
+    },
     "%@ can run scripts only after you trust it." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -205,6 +215,7 @@
     },
     "%@: %@" : {
       "comment" : "A11y label for a dashboard metric chip. The first placeholder is the metric label, the second is its value.",
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -757,6 +768,7 @@
       }
     },
     "ADD WALLPAPER" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1310,6 +1322,7 @@
       }
     },
     "Apply web URL" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2795,6 +2808,7 @@
     },
     "Collapsed, %@" : {
       "comment" : "A11y value for the collapsed system monitor dashboard. The placeholder is the CPU/GPU/RAM summary.",
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2859,6 +2873,7 @@
       }
     },
     "Configure this display" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3560,6 +3575,7 @@
       }
     },
     "DISPLAYS" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3592,6 +3608,7 @@
       }
     },
     "Double tap to collapse" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3608,6 +3625,7 @@
       }
     },
     "Double tap to expand" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -5222,6 +5240,7 @@
     },
     "Expanded, %@" : {
       "comment" : "A11y value for the expanded system monitor dashboard. The placeholder is the CPU/GPU/RAM summary.",
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -5922,6 +5941,7 @@
       }
     },
     "HTML wallpaper" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -6845,6 +6865,9 @@
         }
       }
     },
+    "More" : {
+
+    },
     "More options for %@" : {
       "comment" : "Shortcut row menu a11y label. The placeholder is the shortcut action name.",
       "localizations" : {
@@ -7029,6 +7052,7 @@
       }
     },
     "Next video" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -7143,6 +7167,7 @@
       }
     },
     "No display detected" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -7502,6 +7527,9 @@
         }
       }
     },
+    "On" : {
+
+    },
     "onboarding.header.live_preview.subtitle" : {
       "comment" : "Onboarding subtitle in preview stage; %lld is selected display count. Translators: please use a plural-aware phrase for your locale.",
       "extractionState" : "extracted_with_value",
@@ -7723,6 +7751,9 @@
           }
         }
       }
+    },
+    "Open display settings" : {
+
     },
     "Open Location Services settings" : {
       "localizations" : {
@@ -8297,7 +8328,7 @@
       }
     },
     "Pause" : {
-      "comment" : "A11y label for playback toggle when playing.\nTooltip for the play/pause button when playback is active.\nTooltip for the playback toggle when video is playing.",
+      "comment" : "A11y label for playback toggle when playing.\nTooltip for the playback toggle when video is playing.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -8347,6 +8378,7 @@
       }
     },
     "Pause on Battery" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -8379,6 +8411,7 @@
       }
     },
     "Pause on Full-Screen Apps" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -8741,7 +8774,7 @@
       }
     },
     "Play" : {
-      "comment" : "A11y label for playback toggle when paused.\nTooltip for the play/pause button when playback is paused.\nTooltip for the playback toggle when video is paused.",
+      "comment" : "A11y label for playback toggle when paused.\nTooltip for the playback toggle when video is paused.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -9088,6 +9121,7 @@
       }
     },
     "Previous video" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -9187,6 +9221,7 @@
       }
     },
     "QUICK TOGGLES" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -9203,6 +9238,7 @@
       }
     },
     "Quit" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -9625,6 +9661,7 @@
       }
     },
     "Reload" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -11211,6 +11248,7 @@
       }
     },
     "Shader wallpaper" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -12154,6 +12192,7 @@
       }
     },
     "System Monitor" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -12933,6 +12972,12 @@
         }
       }
     },
+    "Turn off wallpapers" : {
+
+    },
+    "Turn on wallpapers" : {
+
+    },
     "Type" : {
       "comment" : "Workshop library sort order.",
       "localizations" : {
@@ -13178,6 +13223,7 @@
       }
     },
     "Use as wallpaper for the first display" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -13258,6 +13304,7 @@
       }
     },
     "Use the URL above as wallpaper for the first display" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -13375,6 +13422,7 @@
     },
     "Version %@" : {
       "comment" : "A11y label for the app version. The placeholder is the version string.",
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -13406,6 +13454,9 @@
           }
         }
       }
+    },
+    "Video File" : {
+
     },
     "Video file (.mp4, .mov, …)" : {
       "localizations" : {
@@ -13782,6 +13833,9 @@
         }
       }
     },
+    "Wallpapers" : {
+
+    },
     "Warmth" : {
       "localizations" : {
         "en" : {
@@ -13998,6 +14052,7 @@
       }
     },
     "Web Page" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {

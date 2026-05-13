@@ -643,6 +643,30 @@ final class ScreenManager {
 
         updatePlaybackState()
     }
+
+    func setWallpapersEnabled(_ enabled: Bool) {
+        guard !screens.isEmpty else { return }
+
+        Logger.info("\(enabled ? "Enabling" : "Disabling") all wallpaper sessions from menu bar", category: .screenManager)
+
+        for screen in screens {
+            guard let session = screen.runtimeSession else { continue }
+
+            if enabled {
+                session.show()
+                if let playback = screen.playbackController {
+                    playback.play()
+                } else {
+                    session.resume()
+                }
+            } else {
+                screen.playbackController?.pause()
+                session.hide()
+            }
+        }
+
+        markWallpaperSessionStateChanged()
+    }
     
     // MARK: - Power Management
     private func handlePowerStateChange(_ powerSource: PowerMonitor.PowerSource) {

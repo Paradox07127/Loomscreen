@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import UniformTypeIdentifiers
 
 /// MenuBarExtra window content.
 struct MenuBarContent: View {
@@ -13,270 +12,323 @@ struct MenuBarContent: View {
 
     @State private var globalPauseOnBattery: Bool = SettingsManager.shared.loadGlobalSettings().globalPauseOnBattery
     @State private var globalPauseOnFullScreen: Bool = SettingsManager.shared.loadGlobalSettings().pauseOnFullScreen
-    @AppStorage("Dashboard.RAMScope") private var ramScopeRaw: String = "system"
-    /// Persisted across launches so power users keep the live readout visible
-    /// while casual users see a one-line summary by default. The 280pt status
-    /// bar overlay was the noisiest surface in the audit.
-    @AppStorage("MenuBar.DashboardExpanded") private var dashboardExpanded: Bool = false
-
-    @State private var isWebURLEntryExpanded: Bool = false
-    @State private var webURLDraft: String = ""
-    @State private var showBookmarksPopover = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isMorePopoverPresented = false
 
     private var monitor: SystemMonitor { .shared }
-    private var ramPercent: Double {
-        ramScopeRaw == "app" ? monitor.memoryPercentage() : monitor.systemMemoryUsage * 100
+
+    private var isWallpaperEnabled: Bool {
+        screenManager.wallpaperOverviewStatus == .active
     }
-    private var cpuPercent: Double {
-        ramScopeRaw == "app" ? monitor.cpuUsage : monitor.systemCpuUsage
+
+    private var isWallpaperSwitchDisabled: Bool {
+        screenManager.wallpaperOverviewStatus == .notConfigured
+    }
+
+    private var overviewSubtitle: String {
+        switch screenManager.wallpaperOverviewStatus {
+        case .notConfigured:
+            return "No wallpaper configured"
+        case .active:
+            return "\(screenManager.screens.count) displays active"
+        case .paused:
+            return "\(screenManager.screens.count) displays paused"
+        }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            header
-            miniDashboard
-            Divider()
-            screenSection
-            Divider()
-            quickActions
-            Divider()
-            quickToggles
-            Divider()
-            footer
+        GlassEffectContainer(spacing: 8) {
+            VStack(alignment: .leading, spacing: 8) {
+                header
+                sectionLabel("DISPLAYS")
+                displays
+                sectionLabel("SETTINGS")
+                allDisplayActions
+                usageStrip
+                footer
+            }
+            .padding(MenuBarControlCenterMetrics.outerPadding)
+            .frame(width: MenuBarControlCenterMetrics.popoverWidth)
         }
-        .padding(12)
-        .frame(width: 280)
         .onAppear { refreshGlobalToggles() }
     }
 
-    // MARK: - Header
-
     private var header: some View {
-        HStack(alignment: .center) {
+        HStack(spacing: 8) {
             Image(systemName: "play.rectangle.fill")
-                .font(.system(size: 16))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Color.accentColor)
+                .frame(width: 22, height: 22)
+                .readableGlass(radius: 7, tint: Color.accentColor)
                 .accessibilityHidden(true)
-            Text("LiveWallpaper")
-                .font(.system(size: 14, weight: .semibold))
-            Spacer()
-            Text(verbatim: versionString)
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .accessibilityLabel(Text("Version \(versionString)", comment: "A11y label for the app version. The placeholder is the version string."))
-        }
-    }
 
-    // MARK: - Mini Dashboard
+            VStack(alignment: .leading, spacing: 1) {
+                Text("LiveWallpaper")
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                Text(verbatim: overviewSubtitle)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
 
-    private var miniDashboard: some View {
-        VStack(alignment: .leading, spacing: 6) {
+            Spacer(minLength: 6)
+
             Button {
-                withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.18))) { dashboardExpanded.toggle() }
+                screenManager.setWallpapersEnabled(!isWallpaperEnabled)
             } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .rotationEffect(.degrees(dashboardExpanded ? 90 : 0))
-                        .foregroundStyle(.secondary)
-                    Text(verbatim: dashboardSummary)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                }
-                .contentShape(Rectangle())
+                PowerTogglePill(isOn: isWallpaperEnabled)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(Text("System Monitor"))
-            .accessibilityValue(dashboardAccessibilityValue)
-            .accessibilityHint(dashboardExpanded
-                ? Text("Double tap to collapse")
-                : Text("Double tap to expand"))
-
-            if dashboardExpanded {
-                // RAM scope picker — explicit segmented capsule shared with sidebar.
-                RAMScopePicker(selection: $ramScopeRaw, maxWidth: 180)
-
-                chipRow
-            }
+            .disabled(isWallpaperSwitchDisabled)
+            .help(isWallpaperEnabled ? Text("Turn off wallpapers") : Text("Turn on wallpapers"))
+            .accessibilityLabel(Text("Wallpapers"))
+            .accessibilityValue(isWallpaperEnabled ? Text("On") : Text("Off"))
         }
+        .frame(maxWidth: .infinity)
     }
 
-    private var dashboardSummary: String {
-        let cpu = FormatUtils.formatPercent(cpuPercent.rounded())
-        let ram = FormatUtils.formatPercent(ramPercent.rounded())
-        let gpu = FormatUtils.formatPercent(monitor.gpuUsage.rounded())
-        return "CPU \(cpu) · GPU \(gpu) · RAM \(ram)"
+    private func sectionLabel(_ title: String) -> some View {
+        Text(verbatim: title)
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .tracking(0.8)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var dashboardAccessibilityValue: Text {
-        dashboardExpanded
-            ? Text("Expanded, \(dashboardSummary)", comment: "A11y value for the expanded system monitor dashboard. The placeholder is the CPU/GPU/RAM summary.")
-            : Text("Collapsed, \(dashboardSummary)", comment: "A11y value for the collapsed system monitor dashboard. The placeholder is the CPU/GPU/RAM summary.")
-    }
-
-    private var chipRow: some View {
-        HStack(spacing: 8) {
-            DashboardChip(label: "CPU", value: cpuPercent, color: dashboardColor(for: cpuPercent), icon: "cpu")
-            DashboardChip(label: "GPU", value: monitor.gpuUsage, color: dashboardColor(for: monitor.gpuUsage), icon: "square.stack.3d.up.fill")
-            DashboardChip(label: "RAM", value: ramPercent, color: dashboardColor(for: ramPercent), icon: "memorychip")
-            DashboardChip(
-                label: monitor.videoFPS > 0 ? "EST" : "—",
-                value: min(monitor.videoFPS, 120) / 120 * 100,
-                color: monitor.videoFPS >= 30 ? .green : (monitor.videoFPS > 0 ? .orange : .secondary),
-                icon: "speedometer",
-                displayValue: monitor.videoFPS > 0 ? "\(Int(monitor.videoFPS))" : "—"
-            )
-        }
-    }
-
-    // MARK: - Per-Screen Cards
-
-    private var screenSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("DISPLAYS")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .tracking(0.6)
-
+    private var displays: some View {
+        VStack(spacing: 5) {
             if screenManager.screens.isEmpty {
                 Text("No displays detected")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 34, alignment: .center)
+                    .readableGlass(radius: 10, tint: .secondary)
             } else {
                 ForEach(screenManager.screens, id: \.id) { screen in
-                    MenuBarScreenCard(
-                        screen: screen,
-                        videoName: screenManager.currentVideoDisplayName(for: screen),
-                        htmlName: resolveCurrentHTMLName(for: screen),
-                        onOpen: { openSettingsForScreen(screen.id) },
-                        onPlayPause: { togglePlayback(for: screen) },
-                        onPrev: { screenManager.regressPlaylist(for: screen) },
-                        onNext: { screenManager.advancePlaylist(for: screen) }
+                    MenuBarDisplayRow(
+                        title: screen.name,
+                        subtitle: displaySubtitle(for: screen),
+                        iconName: displayIconName(for: screen),
+                        iconTint: displayIconColor(for: screen),
+                        isPlaying: screenManager.wallpaperSummary(for: screen).activity == .active,
+                        showsStatusDot: screenManager.wallpaperSummary(for: screen).activity != .inactive,
+                        supportsPlayback: screenManager.wallpaperSummary(for: screen).supportsPlaybackControl,
+                        canStepPlaylist: canStepPlaylist(for: screen),
+                        openAction: { openSettingsForScreen(screen.id) },
+                        previousAction: { screenManager.regressPlaylist(for: screen) },
+                        playbackAction: { togglePlayback(for: screen) },
+                        nextAction: { screenManager.advancePlaylist(for: screen) }
                     )
                 }
             }
         }
+        .frame(maxWidth: .infinity)
     }
 
-    // MARK: - Quick Actions
+    private var allDisplayActions: some View {
+        HStack(spacing: 5) {
+            MenuBarControlButton(
+                title: screenManager.wallpaperOverviewStatus == .active ? "Pause All" : "Play All",
+                systemImage: screenManager.wallpaperOverviewStatus == .active ? "pause.fill" : "play.fill",
+                tint: .accentColor,
+                isProminent: true,
+                isEnabled: screenManager.hasControllableWallpaperSessions,
+                action: { screenManager.togglePlayback() }
+            )
 
-    private var quickActions: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("ADD WALLPAPER")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .tracking(0.6)
+            MenuBarControlButton(
+                title: "Battery",
+                systemImage: globalPauseOnBattery ? "battery.50" : "battery.100",
+                tint: globalPauseOnBattery ? .orange : .secondary,
+                isProminent: globalPauseOnBattery,
+                action: {
+                    globalPauseOnBattery.toggle()
+                    commitGlobalToggles()
+                }
+            )
 
-            HStack(spacing: 6) {
-                QuickActionButton(label: "Web Page", systemImage: "globe") {
-                    withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.18))) { isWebURLEntryExpanded.toggle() }
-                }
-                QuickActionButton(label: "HTML File", systemImage: "doc.richtext") {
-                    requestAddWallpaper(kind: "html-file")
-                }
-                QuickActionButton(label: "Folder", systemImage: "folder") {
-                    requestAddWallpaper(kind: "html-folder")
-                }
-                QuickActionButton(label: "Bookmarks", systemImage: "bookmark.fill") {
-                    showBookmarksPopover = true
-                }
-                .popover(isPresented: $showBookmarksPopover, arrowEdge: .bottom) {
-                    if let target = screenManager.screens.first {
-                        BookmarksPopover(screen: target)
-                            .environment(screenManager)
-                    } else {
-                        Text("No display detected").padding(20)
-                    }
-                }
-            }
-
-            if isWebURLEntryExpanded {
-                webURLEntryRow
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-            }
+            MenuBarControlButton(
+                title: "Mute",
+                systemImage: isGlobalMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
+                tint: isGlobalMuted ? .orange : .secondary,
+                isProminent: isGlobalMuted,
+                action: { toggleGlobalMute() }
+            )
         }
+        .frame(maxWidth: .infinity)
     }
 
-    private var webURLEntryRow: some View {
-        HStack(spacing: 6) {
-            TextField("example.com or https://…", text: $webURLDraft)
-                .textFieldStyle(.roundedBorder)
-                .font(.system(size: 12))
-                .onSubmit { commitWebURLEntry() }
-
-            Button {
-                commitWebURLEntry()
-            } label: {
-                Image(systemName: "arrow.right.circle.fill")
-                    .font(.system(size: 16))
-            }
-            .buttonStyle(.plain)
-            .disabled(webURLDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            .help(Text("Use as wallpaper for the first display"))
-            .accessibilityLabel(Text("Apply web URL"))
-            .accessibilityHint(Text("Use the URL above as wallpaper for the first display"))
-        }
+    private var usageStrip: some View {
+        MenuBarUsageStrip(metrics: [
+            MenuBarUsageMetric(
+                label: "CPU",
+                valueText: FormatUtils.formatPercent(monitor.systemCpuUsage.rounded()),
+                progress: monitor.systemCpuUsage / 100,
+                color: usageColor(for: monitor.systemCpuUsage)
+            ),
+            MenuBarUsageMetric(
+                label: "GPU",
+                valueText: FormatUtils.formatPercent(monitor.gpuUsage.rounded()),
+                progress: monitor.gpuUsage / 100,
+                color: usageColor(for: monitor.gpuUsage)
+            ),
+            MenuBarUsageMetric(
+                label: "RAM",
+                valueText: FormatUtils.formatPercent((monitor.systemMemoryUsage * 100).rounded()),
+                progress: monitor.systemMemoryUsage,
+                color: usageColor(for: monitor.systemMemoryUsage * 100)
+            )
+        ])
     }
-
-    // MARK: - Quick Toggles
-
-    private var quickToggles: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("QUICK TOGGLES")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .tracking(0.6)
-
-            Toggle(isOn: $globalPauseOnBattery) {
-                Label("Pause on Battery", systemImage: "bolt.slash")
-                    .font(.system(size: 12))
-            }
-            .toggleStyle(.switch)
-            .controlSize(.mini)
-            .onChange(of: globalPauseOnBattery) { _, _ in commitGlobalToggles() }
-
-            Toggle(isOn: $globalPauseOnFullScreen) {
-                Label("Pause on Full-Screen Apps", systemImage: "macwindow")
-                    .font(.system(size: 12))
-            }
-            .toggleStyle(.switch)
-            .controlSize(.mini)
-            .onChange(of: globalPauseOnFullScreen) { _, _ in commitGlobalToggles() }
-        }
-    }
-
-    // MARK: - Footer
 
     private var footer: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 5) {
+            Menu {
+                Button {
+                    dismiss()
+                    promptAddWallpaper("video")
+                } label: {
+                    Label("Video File", systemImage: "film")
+                }
+
+                Button {
+                    requestAddWallpaper(kind: "html-file")
+                } label: {
+                    Label("HTML File", systemImage: "doc.richtext")
+                }
+
+                Button {
+                    requestAddWallpaper(kind: "html-folder")
+                } label: {
+                    Label("Folder", systemImage: "folder")
+                }
+            } label: {
+                MenuBarFooterLabel(title: "Add Wallpaper", systemImage: "plus")
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity)
+
             Button(action: invokeOpenSettings) {
-                Label("Settings", systemImage: "gearshape")
-                    .frame(maxWidth: .infinity)
+                Image(systemName: "gearshape")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 32, height: 30)
+                    .readableGlass(radius: 10, tint: .secondary, interactive: true)
             }
-            .keyboardShortcut(",", modifiers: .command)
+            .buttonStyle(.plain)
+            .help(Text("Settings"))
+            .accessibilityLabel(Text("Settings"))
 
-            Button(action: { screenManager.reloadAllScreens() }) {
-                Label("Reload", systemImage: "arrow.clockwise")
-                    .frame(maxWidth: .infinity)
+            Button {
+                isMorePopoverPresented.toggle()
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 32, height: 30)
+                    .readableGlass(radius: 10, tint: .secondary, interactive: true)
             }
-            .keyboardShortcut("r", modifiers: .command)
+            .buttonStyle(.plain)
+            .help(Text("More"))
+            .accessibilityLabel(Text("More"))
+            .popover(isPresented: $isMorePopoverPresented, arrowEdge: .bottom) {
+                MenuBarMorePopover(
+                    globalPauseOnFullScreen: globalPauseOnFullScreen,
+                    reloadAction: {
+                        isMorePopoverPresented = false
+                        screenManager.reloadAllScreens()
+                    },
+                    toggleFullScreenPauseAction: {
+                        globalPauseOnFullScreen.toggle()
+                        commitGlobalToggles()
+                    },
+                    aboutAction: {
+                        isMorePopoverPresented = false
+                        NSApp.orderFrontStandardAboutPanel(nil)
+                    }
+                )
+            }
 
-            Button(role: .destructive, action: { NSApp.terminate(nil) }) {
-                Label("Quit", systemImage: "power")
-                    .frame(maxWidth: .infinity)
+            Button(action: invokeQuit) {
+                MenuBarQuitButton()
             }
-            .keyboardShortcut("q", modifiers: .command)
+            .buttonStyle(.plain)
+            .help(Text("Quit LiveWallpaper"))
+            .accessibilityLabel(Text("Quit LiveWallpaper"))
         }
-        .controlSize(.small)
+        .frame(maxWidth: .infinity)
     }
 
-    // MARK: - Helpers
+    private var isGlobalMuted: Bool {
+        let configurations = SettingsManager.shared.loadConfigurations()
+        guard !configurations.isEmpty else { return false }
+        return configurations.allSatisfy(\.muted)
+    }
 
-    private func invokeOpenSettings() {
-        dismiss()
-        openSettings()
+    private func displaySubtitle(for screen: Screen) -> String {
+        let summary = screenManager.wallpaperSummary(for: screen)
+        if let message = summary.subtitle, !message.isEmpty {
+            return message
+        }
+
+        if summary.wallpaperType == .video,
+           let name = screenManager.currentVideoDisplayName(for: screen) {
+            return name
+        }
+
+        if let name = screenManager.wallpaperDisplayName(for: screen) {
+            return name
+        }
+
+        switch summary.wallpaperType {
+        case .html:
+            return "HTML wallpaper"
+        case .metalShader:
+            return "Shader wallpaper"
+        case .scene:
+            return "Scene wallpaper"
+        case .video:
+            return "Video wallpaper"
+        case nil:
+            return "Not configured"
+        }
+    }
+
+    private func displayIconName(for screen: Screen) -> String {
+        switch screenManager.wallpaperSummary(for: screen).wallpaperType {
+        case .html:
+            return "globe"
+        case .metalShader:
+            return "wand.and.stars"
+        case .scene:
+            return "cube.transparent"
+        case .video:
+            return "play.rectangle"
+        case nil:
+            return "display"
+        }
+    }
+
+    private func displayIconColor(for screen: Screen) -> Color {
+        switch screenManager.wallpaperSummary(for: screen).activity {
+        case .active:
+            return .green
+        case .paused:
+            return .orange
+        case .inactive:
+            return .secondary
+        }
+    }
+
+    private func canStepPlaylist(for screen: Screen) -> Bool {
+        guard let config = screenManager.getConfiguration(for: screen),
+              config.wallpaperMode == .playlist,
+              config.savedVideoBookmarkData != nil
+        else {
+            return false
+        }
+
+        return 1 + (config.playlistBookmarks ?? []).count > 1
     }
 
     private func togglePlayback(for screen: Screen) {
@@ -284,42 +336,26 @@ struct MenuBarContent: View {
         PlaybackToggle.toggle(playback)
     }
 
-    private func resolveCurrentHTMLName(for screen: Screen) -> String? {
-        screenManager.getConfiguration(for: screen)?.htmlSource?.displayName
-    }
-
-    // MARK: - Quick Action Handlers
-
-    private func commitWebURLEntry() {
-        let trimmed = webURLDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        guard let source = HTMLSource(userInput: trimmed),
-              let target = screenManager.screens.first else { return }
-        screenManager.setHTMLWallpaperPreservingConfig(source: source, for: target)
-        webURLDraft = ""
-        withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.18))) { isWebURLEntryExpanded = false }
-    }
-
-    /// Hands the picker off to the main window via a synchronous closure
-    /// that calls `AppDelegate.showSettings(initialAddWallpaperPromptKind:)`
-    /// — this guarantees `ContentView` receives the request at init time
-    /// (or via post when the window already exists) instead of racing against
-    /// SwiftUI mounting the new scene.
     private func requestAddWallpaper(kind: String) {
         dismiss()
         promptAddWallpaper(kind)
     }
 
-    private func refreshGlobalToggles() {
-        let s = SettingsManager.shared.loadGlobalSettings()
-        globalPauseOnBattery = s.globalPauseOnBattery
-        globalPauseOnFullScreen = s.pauseOnFullScreen
+    private func invokeOpenSettings() {
+        dismiss()
+        openSettings()
     }
 
-    /// Mutate-then-save preserves any GlobalSettings field this surface
-    /// doesn't bind. The previous full-constructor approach silently reset
-    /// every field outside the two booleans (defaultFrameRateLimit, showInDock,
-    /// weatherLocation, globalShortcuts, recentWPEImports) on every toggle.
+    private func invokeQuit() {
+        NSApp.terminate(nil)
+    }
+
+    private func refreshGlobalToggles() {
+        let settings = SettingsManager.shared.loadGlobalSettings()
+        globalPauseOnBattery = settings.globalPauseOnBattery
+        globalPauseOnFullScreen = settings.pauseOnFullScreen
+    }
+
     private func commitGlobalToggles() {
         var settings = SettingsManager.shared.loadGlobalSettings()
         settings.globalPauseOnBattery = globalPauseOnBattery
@@ -328,17 +364,25 @@ struct MenuBarContent: View {
         screenManager.handleGlobalSettingsChanged()
     }
 
-    private func dashboardColor(for percent: Double) -> Color {
+    private func toggleGlobalMute() {
+        let configurations = SettingsManager.shared.loadConfigurations()
+        let shouldMute = configurations.contains { !$0.muted }
+
+        for screen in screenManager.screens {
+            screenManager.updateMuted(shouldMute, for: screen)
+        }
+    }
+
+    private func usageColor(for percent: Double) -> Color {
         if percent >= 80 { return .red }
         if percent >= 50 { return .orange }
         return .green
     }
+}
 
-    private var versionString: String {
-        let info = Bundle.main.infoDictionary
-        let version = info?["CFBundleShortVersionString"] as? String ?? "—"
-        return "v\(version)"
-    }
+private enum MenuBarControlCenterMetrics {
+    static let popoverWidth: CGFloat = 267
+    static let outerPadding: CGFloat = 9
 }
 
 @MainActor
@@ -352,206 +396,353 @@ enum PlaybackToggle {
     }
 }
 
-// MARK: - Dashboard Chip
-
-private struct DashboardChip: View {
-    let label: String
-    let value: Double
-    let color: Color
-    let icon: String
-    var displayValue: String?
+private struct PowerTogglePill: View {
+    let isOn: Bool
 
     var body: some View {
-        VStack(spacing: 2) {
-            HStack(spacing: 3) {
-                Image(systemName: icon)
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(color)
-                Text(verbatim: label)
-                    .font(.system(size: 9, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.secondary)
-            }
-            Text(verbatim: displayValue ?? FormatUtils.formatPercent(value))
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundStyle(.primary)
-            Capsule()
-                .fill(Color.gray.opacity(0.18))
-                .frame(height: 3)
-                .overlay(
-                    GeometryReader { geo in
-                        Capsule()
-                            .fill(color)
-                            .frame(width: geo.size.width * CGFloat(min(max(value, 0), 100) / 100))
-                    }
-                )
-                .frame(height: 3)
+        HStack(spacing: 5) {
+            Circle()
+                .fill(isOn ? Color.green : Color.secondary)
+                .frame(width: 6, height: 6)
+            Text(isOn ? "On" : "Off")
+                .font(.system(size: 11, weight: .semibold))
         }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 5)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 7))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text("\(label): \(displayValue ?? FormatUtils.formatPercent(value))", comment: "A11y label for a dashboard metric chip. The first placeholder is the metric label, the second is its value."))
-    }
-}
-
-// MARK: - Per-Screen Card
-
-private struct MenuBarScreenCard: View {
-    let screen: Screen
-    let videoName: String?
-    let htmlName: String?
-    let onOpen: () -> Void
-    let onPlayPause: () -> Void
-    let onPrev: () -> Void
-    let onNext: () -> Void
-
-    @Environment(ScreenManager.self) private var screenManager
-    @State private var isHovering = false
-
-    private var isPlaying: Bool {
-        summary.activity == .active
-    }
-
-    private var summary: WallpaperSessionSummary {
-        screenManager.wallpaperSummary(for: screen)
-    }
-
-    var body: some View {
-        let summary = screenManager.wallpaperSummary(for: screen)
-        let isPlaying = summary.activity == .active
-
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Image(systemName: iconName)
-                    .font(.system(size: 13))
-                    .foregroundStyle(iconColor)
-                    .frame(width: 18)
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(verbatim: screen.name)
-                        .font(.system(size: 12, weight: .medium))
-                        .lineLimit(1)
-                    subtitleText
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-
-                Spacer()
-
-                Button(action: onOpen) {
-                    Image(systemName: "arrow.up.right.square")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .opacity(isHovering ? 1 : 0.5)
-                .help(Text("Configure this display"))
-            }
-
-            if summary.supportsPlaybackControl {
-                HStack(spacing: 12) {
-                    Button(action: onPrev) {
-                        Image(systemName: "backward.fill")
-                            .font(.system(size: 11))
-                    }
-                    .buttonStyle(.plain)
-                    .help(Text("Previous video"))
-
-                    Button(action: onPlayPause) {
-                        Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                            .font(.system(size: 18))
-                            .foregroundStyle(Color.accentColor)
-                    }
-                    .buttonStyle(.plain)
-                    .contentTransition(.symbolEffect(.replace))
-                    .help(isPlaying
-                        ? Text("Pause", comment: "Tooltip for the play/pause button when playback is active.")
-                        : Text("Play", comment: "Tooltip for the play/pause button when playback is paused."))
-
-                    Button(action: onNext) {
-                        Image(systemName: "forward.fill")
-                            .font(.system(size: 11))
-                    }
-                    .buttonStyle(.plain)
-                    .help(Text("Next video"))
-
-                    Spacer()
-                }
-                .padding(.leading, 26)
-            }
-        }
+        .foregroundStyle(isOn ? Color.green : Color.secondary)
         .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(isHovering ? Color.primary.opacity(0.06) : Color.clear)
-        )
-        .onHover { isHovering = $0 }
-    }
-
-    private var iconName: String {
-        switch summary.wallpaperType {
-        case .html: return "globe"
-        case .metalShader: return "sparkles.rectangle.stack"
-        case .video: return summary.activity == .active ? "play.rectangle.fill" : "pause.rectangle.fill"
-        case .scene: return "cube.transparent"
-        case nil: return "display"
-        }
-    }
-
-    private var iconColor: Color {
-        switch summary.activity {
-        case .active: return .green
-        case .paused: return .orange
-        case .inactive: return .secondary
-        }
-    }
-
-    private var subtitleText: Text {
-        if let videoName, summary.wallpaperType == .video { return Text(verbatim: videoName) }
-        if let htmlName, summary.wallpaperType == .html { return Text(verbatim: htmlName) }
-        switch summary.wallpaperType {
-        case .html: return Text("HTML wallpaper")
-        case .metalShader: return Text("Shader wallpaper")
-        case .video: return Text("Not configured")
-        case .scene: return Text("Scene wallpaper")
-        case nil: return Text("Not configured")
-        }
+        .frame(height: 27)
+        .readableGlass(radius: 14, tint: isOn ? Color.green : Color.secondary, interactive: true)
     }
 }
 
-// MARK: - Quick Action Button
+private struct MenuBarDisplayRow: View {
+    let title: String
+    let subtitle: String
+    let iconName: String
+    let iconTint: Color
+    let isPlaying: Bool
+    let showsStatusDot: Bool
+    let supportsPlayback: Bool
+    let canStepPlaylist: Bool
+    let openAction: () -> Void
+    let previousAction: () -> Void
+    let playbackAction: () -> Void
+    let nextAction: () -> Void
 
-private struct QuickActionButton: View {
-    let label: LocalizedStringKey
+    var body: some View {
+        HStack(spacing: 6) {
+            Button(action: openAction) {
+                HStack(spacing: 6) {
+                    Image(systemName: iconName)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(iconTint)
+                        .frame(width: 20, height: 20)
+                        .readableGlass(radius: 7, tint: iconTint)
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(verbatim: title)
+                            .font(.system(size: 11, weight: .semibold))
+                            .lineLimit(1)
+                        Text(verbatim: subtitle)
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Circle()
+                        .fill(iconTint)
+                        .frame(width: 5, height: 5)
+                        .opacity(showsStatusDot ? 1 : 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(Text("Open display settings"))
+
+            HStack(spacing: 3) {
+                IconControlButton(
+                    systemImage: "chevron.left",
+                    isEnabled: supportsPlayback && canStepPlaylist,
+                    action: previousAction,
+                    accessibilityLabel: "Previous wallpaper"
+                )
+
+                IconControlButton(
+                    systemImage: isPlaying ? "pause.fill" : "play.fill",
+                    isEnabled: supportsPlayback,
+                    action: playbackAction,
+                    accessibilityLabel: isPlaying ? "Pause wallpaper" : "Play wallpaper",
+                    isProminent: true
+                )
+
+                IconControlButton(
+                    systemImage: "chevron.right",
+                    isEnabled: supportsPlayback && canStepPlaylist,
+                    action: nextAction,
+                    accessibilityLabel: "Next wallpaper"
+                )
+            }
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity)
+        .readableGlass(radius: 11, tint: iconTint, interactive: true)
+    }
+}
+
+private struct IconControlButton: View {
     let systemImage: String
+    let isEnabled: Bool
     let action: () -> Void
-
-    @State private var isHovering = false
+    let accessibilityLabel: String
+    var isProminent: Bool = false
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 3) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 14, weight: .medium))
-                Text(label)
-                    .font(.system(size: 9, weight: .semibold, design: .rounded))
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity, minHeight: 38)
-            .padding(.vertical, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(isHovering ? Color.accentColor.opacity(0.20) : Color.gray.opacity(0.12))
-            )
-            .contentShape(Rectangle())
+            Image(systemName: systemImage)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(isProminent ? Color.accentColor : Color.primary.opacity(0.72))
+                .frame(width: 21, height: 21)
+                .readableGlass(
+                    radius: 7,
+                    tint: isProminent ? Color.accentColor : Color.secondary,
+                    interactive: isEnabled
+                )
         }
         .buttonStyle(.plain)
-        .focusable()
-        .onHover { isHovering = $0 }
-        .accessibilityLabel(Text(label))
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.38)
+        .accessibilityLabel(Text(accessibilityLabel))
+    }
+}
+
+private struct MenuBarControlButton: View {
+    let title: String
+    let systemImage: String
+    let tint: Color
+    var isProminent: Bool = false
+    var isEnabled: Bool = true
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 10, weight: .semibold))
+                Text(verbatim: title)
+                    .font(.system(size: 10, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+            }
+            .foregroundStyle(tint)
+            .frame(maxWidth: .infinity, minHeight: 31)
+            .readableGlass(radius: 10, tint: tint, interactive: true)
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.42)
+    }
+}
+
+private struct MenuBarUsageMetric {
+    let label: String
+    let valueText: String
+    let progress: Double
+    let color: Color
+}
+
+private struct MenuBarUsageStrip: View {
+    let metrics: [MenuBarUsageMetric]
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(metrics, id: \.label) { metric in
+                MenuBarUsageMetricView(metric: metric)
+            }
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity)
+        .readableGlass(radius: 10, tint: .secondary)
+    }
+}
+
+private struct MenuBarUsageMetricView: View {
+    let metric: MenuBarUsageMetric
+
+    private var clampedProgress: Double {
+        min(max(metric.progress, 0), 1)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 3) {
+                Text(verbatim: metric.label)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 2)
+                Text(verbatim: metric.valueText)
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.primary)
+            }
+
+            GeometryReader { proxy in
+                Capsule()
+                    .fill(Color.secondary.opacity(0.18))
+                    .overlay(alignment: .leading) {
+                        Capsule()
+                            .fill(metric.color)
+                            .frame(width: proxy.size.width * clampedProgress)
+                    }
+            }
+            .frame(height: 3)
+        }
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text("\(metric.label) \(metric.valueText)"))
+    }
+}
+
+private struct MenuBarMorePopover: View {
+    let globalPauseOnFullScreen: Bool
+    let reloadAction: () -> Void
+    let toggleFullScreenPauseAction: () -> Void
+    let aboutAction: () -> Void
+
+    var body: some View {
+        VStack(spacing: 6) {
+            MenuBarMoreButton(
+                title: "Reload Wallpapers",
+                systemImage: "arrow.clockwise",
+                action: reloadAction
+            )
+
+            MenuBarMoreButton(
+                title: globalPauseOnFullScreen ? "Disable Full-Screen Pause" : "Enable Full-Screen Pause",
+                systemImage: "macwindow",
+                action: toggleFullScreenPauseAction
+            )
+
+            Divider()
+
+            MenuBarMoreButton(
+                title: "About LiveWallpaper",
+                systemImage: "info.circle",
+                action: aboutAction
+            )
+        }
+        .padding(8)
+        .frame(width: 198)
+        .readableGlass(radius: 14, tint: .secondary)
+    }
+}
+
+private struct MenuBarMoreButton: View {
+    let title: String
+    let systemImage: String
+    var tint: Color = .primary
+    var surfaceTint: Color = .secondary
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(tint)
+                    .frame(width: 16)
+                Text(verbatim: title)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(tint)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 9)
+            .frame(maxWidth: .infinity, minHeight: 30)
+            .readableGlass(radius: 9, tint: surfaceTint, interactive: true)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct MenuBarFooterLabel: View {
+    let title: String
+    let systemImage: String
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: systemImage)
+                .font(.system(size: 10, weight: .semibold))
+            Text(verbatim: title)
+                .font(.system(size: 11, weight: .semibold))
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, minHeight: 30)
+        .readableGlass(radius: 10, tint: .accentColor, interactive: true)
+    }
+}
+
+private struct MenuBarQuitButton: View {
+    var body: some View {
+        Image(systemName: "power")
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(.red)
+            .frame(width: 32, height: 30)
+            .readableGlass(radius: 10, tint: .red, interactive: true)
+    }
+}
+
+private extension View {
+    func readableGlass(radius: CGFloat, tint: Color, interactive: Bool = false) -> some View {
+        modifier(ReadableGlassSurface(radius: radius, tint: tint, interactive: interactive))
+    }
+}
+
+private struct ReadableGlassSurface: ViewModifier {
+    let radius: CGFloat
+    let tint: Color
+    let interactive: Bool
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var tintOpacity: Double {
+        colorScheme == .dark ? 0.20 : 0.11
+    }
+
+    private var edgeOpacity: Double {
+        colorScheme == .dark ? 0.18 : 0.13
+    }
+
+    private var shadowOpacity: Double {
+        colorScheme == .dark ? 0.22 : 0.08
+    }
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if interactive {
+            decorated(
+                content.glassEffect(
+                    .regular.tint(tint.opacity(tintOpacity)).interactive(),
+                    in: .rect(cornerRadius: radius)
+                )
+            )
+        } else {
+            decorated(
+                content.glassEffect(
+                    .regular.tint(tint.opacity(tintOpacity)),
+                    in: .rect(cornerRadius: radius)
+                )
+            )
+        }
+    }
+
+    private func decorated<V: View>(_ view: V) -> some View {
+        view
+            .overlay {
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(edgeOpacity), lineWidth: 0.6)
+            }
+            .shadow(color: Color.black.opacity(shadowOpacity), radius: 5, y: 1)
     }
 }
