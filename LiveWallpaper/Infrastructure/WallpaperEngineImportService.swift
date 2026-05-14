@@ -241,12 +241,19 @@ final class WallpaperEngineImportService {
             ))
         }
 
-        // Phase 2.0 contract: scene wallpapers must ship a `scene.pkg` (the
-        // unpacked-folder shape rarely lands in workshop downloads). If the
-        // pkg is missing we still surface as unsupported with a clear reason
-        // so the UI can show the fallback card instead of a generic error.
         let pkgURL = folderURL.appendingPathComponent("scene.pkg")
-        guard fileManager.fileExists(atPath: pkgURL.path) else {
+        if fileManager.fileExists(atPath: pkgURL.path) {
+            let cacheResult = await ensureExtracted(project: project, pkgURL: pkgURL)
+            guard case .success(let cacheURL) = cacheResult else {
+                if case .failure(let failure) = cacheResult { return .rejected(reason: failure.reason) }
+                return .rejected(reason: "Extraction failed")
+            }
+
+            return finishSceneImport(project: project, cacheURL: cacheURL, sourceBookmark: sourceBookmark)
+        }
+
+        guard let entryURL = resourceURL(root: folderURL, relativePath: project.entryFile),
+              fileManager.fileExists(atPath: entryURL.path) else {
             return .unsupported(origin: makeOrigin(
                 project: project,
                 sourceBookmark: sourceBookmark,
@@ -255,12 +262,20 @@ final class WallpaperEngineImportService {
             ))
         }
 
-        let cacheResult = await ensureExtracted(project: project, pkgURL: pkgURL)
+        let cacheResult = await ensureMirrored(project: project, folderURL: folderURL)
         guard case .success(let cacheURL) = cacheResult else {
             if case .failure(let failure) = cacheResult { return .rejected(reason: failure.reason) }
-            return .rejected(reason: "Extraction failed")
+            return .rejected(reason: "Directory mirror failed")
         }
 
+        return finishSceneImport(project: project, cacheURL: cacheURL, sourceBookmark: sourceBookmark)
+    }
+
+    private func finishSceneImport(
+        project: WallpaperEngineProject,
+        cacheURL: URL,
+        sourceBookmark: Data
+    ) -> ImportResult {
         guard let entryURL = resourceURL(root: cacheURL, relativePath: project.entryFile),
               fileManager.fileExists(atPath: entryURL.path) else {
             return .rejected(reason: "Missing scene entry \(project.entryFile)")
@@ -308,6 +323,18 @@ final class WallpaperEngineImportService {
     private func ensureExtracted(project: WallpaperEngineProject, pkgURL: URL) async -> Result<URL, ExtractionFailure> {
         do {
             let url = try await cache.ensureExtracted(workshopID: project.workshopID, sourcePkgURL: pkgURL)
+            return .success(url)
+        } catch {
+            return .failure(ExtractionFailure(reason: describe(error)))
+        }
+    }
+
+    private func ensureMirrored(project: WallpaperEngineProject, folderURL: URL) async -> Result<URL, ExtractionFailure> {
+        do {
+            let url = try await cache.ensureMirroredDirectory(
+                workshopID: project.workshopID,
+                sourceFolderURL: folderURL
+            )
             return .success(url)
         } catch {
             return .failure(ExtractionFailure(reason: describe(error)))
@@ -461,13 +488,12 @@ struct WPECachedContentResolver {
                 config: HTMLConfig(physicalPixelLayout: true)
             )
         case .scene:
-            let tier: SceneCapabilityTier
+            var tier: SceneCapabilityTier = .unsupported
             do {
                 let data = try Data(contentsOf: entryURL)
                 let document = try WPESceneDocumentParser.parse(data: data)
                 tier = WPESceneCapabilityClassifier().capabilityTier(for: document, cacheURL: cacheURL)
             } catch {
-                tier = .unsupported
             }
             return .scene(SceneDescriptor(
                 workshopID: origin.workshopID,

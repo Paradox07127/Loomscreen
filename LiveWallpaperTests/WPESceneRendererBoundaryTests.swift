@@ -50,26 +50,8 @@ struct WPESceneRendererBoundaryTests {
         #expect(controller.view.frame.size == CGSize(width: 100, height: 100))
     }
 
-    @Test("Ambient builder keeps SpriteKit as the default scene backend")
-    func ambientBuilderKeepsSpriteKitDefaultBackend() async throws {
-        let fixture = try SceneFixture.cacheBackedPNGScene()
-        defer { fixture.cleanup() }
-
-        let session = try #require(AmbientWallpaperSessionBuilder().makeSceneSession(
-            descriptor: fixture.descriptor,
-            frame: CGRect(x: 0, y: 0, width: 64, height: 64),
-            applicationSupportRootURL: fixture.root
-        ))
-        defer { session.cleanup() }
-
-        let renderer = try #require(session.sceneRenderer)
-        let controller = try #require(session.sceneController)
-        #expect(renderer === controller)
-        try await waitForSessionLoad(session)
-    }
-
-    @Test("Ambient builder can opt in to the experimental Metal scene backend")
-    func ambientBuilderCanOptIntoMetalBackend() async throws {
+    @Test("Ambient builder uses Metal as the default scene backend")
+    func ambientBuilderUsesMetalDefaultBackend() async throws {
         _ = try #require(MTLCreateSystemDefaultDevice())
         let fixture = try SceneFixture.cacheBackedSolidColorScene()
         defer { fixture.cleanup() }
@@ -77,7 +59,6 @@ struct WPESceneRendererBoundaryTests {
         let session = try #require(AmbientWallpaperSessionBuilder().makeSceneSession(
             descriptor: fixture.descriptor,
             frame: CGRect(x: 0, y: 0, width: 64, height: 64),
-            rendererBackend: .metalExperimental,
             applicationSupportRootURL: fixture.root
         ))
         defer { session.cleanup() }
@@ -85,6 +66,25 @@ struct WPESceneRendererBoundaryTests {
         #expect(session.sceneRenderer is WPEMetalSceneRenderer)
         #expect(session.sceneRenderer?.nsView is MTKView)
         #expect(session.sceneController == nil)
+        try await waitForSessionLoad(session)
+    }
+
+    @Test("Ambient builder can explicitly use the SpriteKit fallback backend")
+    func ambientBuilderCanUseSpriteKitFallbackBackend() async throws {
+        let fixture = try SceneFixture.cacheBackedPNGScene()
+        defer { fixture.cleanup() }
+
+        let session = try #require(AmbientWallpaperSessionBuilder().makeSceneSession(
+            descriptor: fixture.descriptor,
+            frame: CGRect(x: 0, y: 0, width: 64, height: 64),
+            rendererBackend: .spriteKit,
+            applicationSupportRootURL: fixture.root
+        ))
+        defer { session.cleanup() }
+
+        let renderer = try #require(session.sceneRenderer)
+        let controller = try #require(session.sceneController)
+        #expect(renderer === controller)
         try await waitForSessionLoad(session)
     }
 

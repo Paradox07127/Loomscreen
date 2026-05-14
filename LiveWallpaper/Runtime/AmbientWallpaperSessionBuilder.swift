@@ -75,7 +75,7 @@ final class AmbientWallpaperSessionBuilder {
         descriptor: SceneDescriptor,
         frame: CGRect,
         dependencyMounts: [WPEAssetMount] = [],
-        rendererBackend: WPESceneRendererBackend = .spriteKit,
+        rendererBackend: WPESceneRendererBackend = .metalExperimental,
         applicationSupportRootURL: URL? = nil,
         fileManager: FileManager = .default
     ) -> SceneWallpaperSession? {
