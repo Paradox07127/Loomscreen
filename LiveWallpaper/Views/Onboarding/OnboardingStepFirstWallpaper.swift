@@ -21,6 +21,14 @@ struct OnboardingStepFirstWallpaper: View {
     @State private var stage: OnboardingPickerStage = .sourcePicker
     @State private var selectedScreenIDs: Set<CGDirectDisplayID> = []
     @State private var previewController = InspectorPreviewController()
+    /// Inline error displayed below the source picker when a step fails (Aerial
+    /// access denied / WPE import failed / Workshop returned nothing). The
+    /// failure path no longer auto-advances — the user retries or hits Skip.
+    @State private var inlineError: String?
+    /// Set to true when at least one screen received a `.wpeImportDidComplete`
+    /// notification while the Workshop gallery sheet was open. The sheet
+    /// `onDismiss` callback only advances when this is true (audit P0-C).
+    @State private var workshopAppliedAny: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -47,7 +55,7 @@ struct OnboardingStepFirstWallpaper: View {
         }
         .onAppear { configureInitialStage() }
         .onDisappear { previewController.cleanup() }
-        .sheet(isPresented: $showWorkshopGallery, onDismiss: nextStep) {
+        .sheet(isPresented: $showWorkshopGallery, onDismiss: handleWorkshopGalleryDismiss) {
             WorkshopGalleryView(screens: workshopGalleryTargetScreens)
                 .environment(screenManager)
         }
@@ -56,6 +64,13 @@ struct OnboardingStepFirstWallpaper: View {
                 onCancel: { showHTMLSheet = false },
                 onConfirm: { source in applyHTML(source) }
             )
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .wpeImportDidComplete)) { _ in
+            // Track success while the Workshop gallery is open so onDismiss
+            // knows whether to advance or stay in source picker.
+            if showWorkshopGallery {
+                workshopAppliedAny = true
+            }
         }
     }
 
@@ -229,7 +244,25 @@ struct OnboardingStepFirstWallpaper: View {
             )
             .keyboardShortcut("5", modifiers: [])
             .padding(.top, 4)
+
+            if let inlineError {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .accessibilityHidden(true)
+                    Text(verbatim: inlineError)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(10)
+                .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                .accessibilityElement(children: .combine)
+                .transition(.opacity)
+            }
         }
+        .animation(.easeOut(duration: 0.18), value: inlineError != nil)
     }
 
     @ViewBuilder
@@ -353,14 +386,24 @@ struct OnboardingStepFirstWallpaper: View {
 
     private func chooseAerials() {
         guard !isRequestingAerials else { return }
+        inlineError = nil
         isRequestingAerials = true
         Task {
             let granted = await AppleAerialsLibrary.shared.requestAccess()
             isRequestingAerials = false
+            // Audit P0-C: only advance on grant. Denying the prompt used to
+            // dump the user on "All Set" with no wallpaper — now it surfaces
+            // an inline error so they can retry or hit Skip.
             if granted {
                 NotificationCenter.default.post(name: .openAppleAerials, object: nil)
+                nextStep()
+            } else {
+                inlineError = String(
+                    localized: "Apple Aerials access was denied. Grant access in System Settings → Privacy & Security, or pick another source.",
+                    defaultValue: "Apple Aerials access was denied. Grant access in System Settings → Privacy & Security, or pick another source.",
+                    comment: "Inline error shown in onboarding when the user denies Apple Aerials access."
+                )
             }
-            nextStep()
         }
     }
 
@@ -375,30 +418,63 @@ struct OnboardingStepFirstWallpaper: View {
         let response = panel.runModal()
         guard response == .OK, let url = panel.url,
               let bookmark = ResourceUtilities.createVideoBookmark(for: url) else { return }
+        inlineError = nil
         SettingsManager.shared.saveLastUsedDirectory(url.deletingLastPathComponent())
         withAnimation(reduceMotion ? nil : .default) { stage = .livePreview(.video(url, bookmark)) }
     }
 
     private func applyHTML(_ source: HTMLSource) {
         showHTMLSheet = false
+        inlineError = nil
         withAnimation(reduceMotion ? nil : .default) { stage = .livePreview(.html(source)) }
     }
 
     private func chooseWPEFolder() {
         guard let url = WPEFolderPicker.chooseImportFolder() else { return }
 
-        // WPE import is async + multi-step (validation → cache extraction); the
-        // live-preview path doesn't apply. Apply directly to every selected
-        // display, then advance.
         let targets = screenManager.screens.filter { selectedScreenIDs.contains($0.id) }
-        guard !targets.isEmpty else {
-            nextStep()
-            return
-        }
+        guard !targets.isEmpty else { return }
+
+        inlineError = nil
         Task { @MainActor in
+            // Audit P0-C: count successful applies. Unsupported / rejected
+            // outcomes used to be silently absorbed — now the user only
+            // advances when at least one display actually got a wallpaper.
+            var appliedCount = 0
+            var lastFailureReason: String?
             for screen in targets {
-                await screenManager.importWallpaperEngineProject(at: url, for: screen)
+                let outcome = await screenManager.importWallpaperEngineProject(at: url, for: screen)
+                switch outcome {
+                case .applied:
+                    appliedCount += 1
+                case .unsupported:
+                    lastFailureReason = String(
+                        localized: "This Wallpaper Engine project type isn't supported yet. Try a Video or Web variant.",
+                        defaultValue: "This Wallpaper Engine project type isn't supported yet. Try a Video or Web variant.",
+                        comment: "Inline error shown in onboarding when a WPE project type is unsupported."
+                    )
+                case .rejected(let reason):
+                    lastFailureReason = reason
+                }
             }
+            if appliedCount > 0 {
+                nextStep()
+            } else {
+                inlineError = lastFailureReason ?? String(
+                    localized: "Couldn't apply that Wallpaper Engine project. Pick a different folder or skip this step.",
+                    defaultValue: "Couldn't apply that Wallpaper Engine project. Pick a different folder or skip this step.",
+                    comment: "Inline error shown in onboarding when no WPE display was applied."
+                )
+            }
+        }
+    }
+
+    private func handleWorkshopGalleryDismiss() {
+        // Audit P0-C: the Workshop gallery sheet used to advance unconditionally,
+        // including when the user just hit Cancel/Close. Only advance if a
+        // `.wpeImportDidComplete` actually fired while the sheet was open.
+        defer { workshopAppliedAny = false }
+        if workshopAppliedAny {
             nextStep()
         }
     }

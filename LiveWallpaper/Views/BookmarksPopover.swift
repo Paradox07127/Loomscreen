@@ -76,19 +76,13 @@ struct BookmarksPopover: View {
     @ViewBuilder
     private var list: some View {
         if store.bookmarks.isEmpty {
-            HStack {
-                Spacer()
-                VStack(spacing: 4) {
-                    Image(systemName: "bookmark")
-                        .font(.system(size: 22))
-                        .foregroundStyle(.tertiary)
-                    Text("No bookmarks yet")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.vertical, 16)
-                Spacer()
-            }
+            IllustratedEmptyState(
+                symbol: "bookmark",
+                title: "No bookmarks yet",
+                message: "Save a wallpaper from the form above and it shows up here.",
+                variant: .compact
+            )
+            .frame(maxWidth: .infinity)
         } else {
             ScrollView {
                 LazyVStack(spacing: 4) {

@@ -113,23 +113,13 @@ struct PlaylistSection: View {
 
     @ViewBuilder
     private var emptyState: some View {
-        HStack {
-            Spacer()
-            VStack(spacing: 6) {
-                Image(systemName: "film.stack")
-                    .font(.system(size: 22))
-                    .foregroundStyle(.tertiary)
-                Text("No videos yet")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                Text("Drop a video on this screen, or use Add Videos below.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
-                    .multilineTextAlignment(.center)
-            }
-            .padding(.vertical, 6)
-            Spacer()
-        }
+        IllustratedEmptyState(
+            symbol: "film.stack",
+            title: "No videos yet",
+            message: "Drop a video on this screen, or use Add Videos below.",
+            variant: .compact
+        )
+        .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder

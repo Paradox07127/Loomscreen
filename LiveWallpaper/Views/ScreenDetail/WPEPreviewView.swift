@@ -84,6 +84,22 @@ struct WPEPreviewView: View {
 
 // MARK: - Aspect-fill bridge
 
+/// In-memory cache of raw image bytes keyed by URL. WorkshopGallery renders
+/// dozens of previews in a single grid; pulling the same Wallpaper Engine
+/// thumbnail off disk N times per scroll was the root cause of the audit
+/// P0-D main-thread stall. `NSCache` evicts under memory pressure on its own.
+private enum WPEPreviewDataCache {
+    // NSCache is thread-safe internally; the unsafe annotation here just
+    // suppresses the Swift 6 Sendable diagnostic since NSCache isn't formally
+    // marked Sendable.
+    nonisolated(unsafe) static let shared: NSCache<NSURL, NSData> = {
+        let cache = NSCache<NSURL, NSData>()
+        cache.countLimit = 256
+        cache.totalCostLimit = 64 * 1024 * 1024 // 64 MiB
+        return cache
+    }()
+}
+
 private struct AspectFillImage: NSViewRepresentable {
     let imageURL: URL?
     let securityScopedBookmarkData: Data?
@@ -100,6 +116,7 @@ private struct AspectFillImage: NSViewRepresentable {
 
     func updateNSView(_ nsView: AspectFillAnimatedImageView, context: Context) {
         guard let url = imageURL else {
+            context.coordinator.cancelInflight()
             context.coordinator.reset()
             nsView.clearImage()
             return
@@ -112,42 +129,73 @@ private struct AspectFillImage: NSViewRepresentable {
 
         context.coordinator.currentURL = url
         context.coordinator.lastAttempt = loadAttempt
+        context.coordinator.cancelInflight()
 
-        let success = loadInto(view: nsView, url: url)
-        DispatchQueue.main.async {
-            onLoadResult(success)
+        // Fast-path: serve cached bytes synchronously on main; still no disk
+        // I/O so the UI thread stays responsive even on cold scroll.
+        if let cached = WPEPreviewDataCache.shared.object(forKey: url as NSURL) {
+            let ok = nsView.setImage(data: cached as Data)
+            onLoadResult(ok)
+            return
         }
+
+        let bookmarkData = securityScopedBookmarkData
+        let coordinator = context.coordinator
+        let resultHandler = onLoadResult
+        let task = Task { @MainActor in
+            // Heavy I/O runs in a nested userInitiated detached task; here we
+            // just await the bytes on main and apply them. Cancellation flips
+            // before any layer mutation so a stale load can't stomp a fresh one.
+            let data = await Self.loadData(url: url, bookmarkData: bookmarkData)
+            guard !Task.isCancelled, coordinator.currentURL == url else { return }
+            if let data {
+                WPEPreviewDataCache.shared.setObject(data as NSData, forKey: url as NSURL, cost: data.count)
+                let ok = nsView.setImage(data: data)
+                resultHandler(ok)
+            } else {
+                nsView.clearImage()
+                resultHandler(false)
+            }
+        }
+        coordinator.inflightTask = task
     }
 
-    private func loadInto(view: AspectFillAnimatedImageView, url: URL) -> Bool {
-        var scopedURL: URL?
-        if let securityScopedBookmarkData {
-            var isStale = false
-            scopedURL = try? URL(
-                resolvingBookmarkData: securityScopedBookmarkData,
-                options: .withSecurityScope,
-                relativeTo: nil,
-                bookmarkDataIsStale: &isStale
-            )
-        }
-
-        let didStart = scopedURL?.startAccessingSecurityScopedResource() ?? false
-        defer { if didStart { scopedURL?.stopAccessingSecurityScopedResource() } }
-
-        guard let data = try? Data(contentsOf: url) else {
-            view.clearImage()
-            return false
-        }
-        return view.setImage(data: data)
+    /// Reads the image off the main thread. Security-scoped bookmarks have to
+    /// be resolved on the calling thread because `startAccessingSecurityScopedResource`
+    /// pairs with the URL; we keep that paired here so the bookmark scope is
+    /// released the instant the read completes.
+    private static func loadData(url: URL, bookmarkData: Data?) async -> Data? {
+        await Task.detached(priority: .userInitiated) {
+            var scopedURL: URL?
+            if let bookmarkData {
+                var isStale = false
+                scopedURL = try? URL(
+                    resolvingBookmarkData: bookmarkData,
+                    options: .withSecurityScope,
+                    relativeTo: nil,
+                    bookmarkDataIsStale: &isStale
+                )
+            }
+            let didStart = scopedURL?.startAccessingSecurityScopedResource() ?? false
+            defer { if didStart { scopedURL?.stopAccessingSecurityScopedResource() } }
+            return try? Data(contentsOf: url)
+        }.value
     }
 
+    @MainActor
     final class Coordinator {
         var currentURL: URL?
         var lastAttempt: Int = 0
+        var inflightTask: Task<Void, Never>?
 
         func reset() {
             currentURL = nil
             lastAttempt = 0
+        }
+
+        func cancelInflight() {
+            inflightTask?.cancel()
+            inflightTask = nil
         }
     }
 }

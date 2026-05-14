@@ -59,4 +59,8 @@ extension Notification.Name {
     /// User changed the weather location preference (source / manual coord).
     /// `WeatherReactiveService` reacts by re-resolving its provider chain.
     static let weatherLocationPreferenceDidChange = Notification.Name("WeatherLocationPreferenceDidChange")
+
+    /// `GlobalSettings.menuBarDensity` changed. `MenuBarContent` listens so
+    /// the menubar dropdown re-resolves its padding/spacing on the next show.
+    static let menuBarDensityDidChange = Notification.Name("MenuBarDensityDidChange")
 }

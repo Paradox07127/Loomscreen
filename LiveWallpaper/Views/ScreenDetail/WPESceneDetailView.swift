@@ -15,9 +15,10 @@ struct WPESceneDetailView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var state: SceneRenderState = .idle
-    /// Hidden developer disclosure toggled by Option-click on the metadata
-    /// row. Surfaces capability tier + first failure diagnostic so power
-    /// users can see *why* a layer was skipped without diving into Console.
+    /// Developer disclosure toggled by the info button on the metadata row
+    /// or by right-clicking the row. Surfaces capability tier + first failure
+    /// diagnostic so power users can see *why* a layer was skipped without
+    /// diving into Console.
     @State private var showDiagnostics = false
 
     var body: some View {
@@ -210,28 +211,35 @@ struct WPESceneDetailView: View {
                 Text("Workshop ID \(origin.workshopID) · capability: \(descriptor.capabilityTier.localizedLabel)", comment: "Scene metadata row. Placeholders are Workshop ID and capability tier.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                // Tiny info glyph hints that there's a developer panel
-                // hiding under Option-click. Without this affordance the
-                // panel was completely undiscoverable (gemini audit).
-                Image(systemName: "info.circle")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .help(Text("Option-click for renderer diagnostics"))
-                    .accessibilityHidden(true)
+                Spacer(minLength: 4)
+                // Discoverable affordance for the renderer diagnostics panel.
+                // Replaces the previous Option-click hidden gesture, which the
+                // gemini audit flagged as completely undiscoverable.
+                Button {
+                    withAnimation(DesignTokens.motion(reduceMotion, .spring(response: 0.35, dampingFraction: 0.85))) {
+                        showDiagnostics.toggle()
+                    }
+                } label: {
+                    Image(systemName: showDiagnostics ? "info.circle.fill" : "info.circle")
+                        .font(.caption2)
+                        .foregroundStyle(showDiagnostics ? Color.accentColor : .secondary)
+                }
+                .buttonStyle(.plain)
+                .help(Text(showDiagnostics
+                    ? "Hide renderer diagnostics"
+                    : "Show renderer diagnostics"))
+                .accessibilityLabel(Text(showDiagnostics ? "Hide renderer diagnostics" : "Show renderer diagnostics"))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
-        // Option-click toggles the hidden developer diagnostic panel. We
-        // attach the gesture to the metadata row (rather than the whole
-        // card) so retry / clear buttons aren't intercepted. SwiftUI for
-        // macOS doesn't expose a typed modifier-aware tap gesture, so
-        // we sniff `NSEvent.modifierFlags` at click time — plain clicks
-        // become a no-op and only Option-clicks toggle the panel.
-        .onTapGesture {
-            guard NSEvent.modifierFlags.contains(.option) else { return }
-            withAnimation(DesignTokens.motion(reduceMotion, .spring(response: 0.35, dampingFraction: 0.85))) {
-                showDiagnostics.toggle()
+        .contextMenu {
+            Button {
+                withAnimation(DesignTokens.motion(reduceMotion, .spring(response: 0.35, dampingFraction: 0.85))) {
+                    showDiagnostics.toggle()
+                }
+            } label: {
+                Label(showDiagnostics ? "Hide Diagnostics" : "Show Diagnostics", systemImage: "info.circle")
             }
         }
     }

@@ -25,17 +25,18 @@ struct SettingRow<Content: View>: View {
                     .fill(iconColor.opacity(0.15))
                     .frame(width: 22, height: 22)
                 Image(systemName: icon)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.footnote.weight(.medium))
                     .foregroundStyle(iconColor)
             }
+            .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.subheadline.weight(.medium))
                     .fixedSize(horizontal: false, vertical: true)
                 if let subtitle = subtitle {
                     Text(subtitle)
-                        .font(.system(size: 10))
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -47,5 +48,6 @@ struct SettingRow<Content: View>: View {
         }
         .controlSize(.small)
         .padding(.vertical, 3)
+        .dynamicTypeSize(...DynamicTypeSize.accessibility3)
     }
 }

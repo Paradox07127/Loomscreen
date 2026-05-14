@@ -12,6 +12,7 @@ struct GeneralSettingsView: View {
     @State private var useBatteryThreshold: Bool
     @State private var pauseOnFullScreen: Bool
     @State private var showInDock: Bool
+    @State private var menuBarDensity: MenuBarDensity
 
     @State private var showingResetAlert = false
     @State private var showingValidationResults = false
@@ -41,6 +42,7 @@ struct GeneralSettingsView: View {
         _useBatteryThreshold = State(initialValue: settings.minimumBatteryLevel != nil)
         _pauseOnFullScreen = State(initialValue: settings.pauseOnFullScreen)
         _showInDock = State(initialValue: settings.showInDock)
+        _menuBarDensity = State(initialValue: settings.menuBarDensity)
     }
 
     var body: some View {
@@ -232,6 +234,7 @@ struct GeneralSettingsView: View {
         useBatteryThreshold = settings.minimumBatteryLevel != nil
         pauseOnFullScreen = settings.pauseOnFullScreen
         showInDock = settings.showInDock
+        menuBarDensity = settings.menuBarDensity
 
         // SwiftUI sometimes drops a follow-up `.alert` if it's set in the
         // same runloop tick that dismisses the previous one — wait one
@@ -369,6 +372,19 @@ struct GeneralSettingsView: View {
                         .onChange(of: showInDock) { _, _ in updateGlobalSettings() }
                         .accessibilityLabel(Text("Show in Dock"))
                         .accessibilityHint(Text("Toggles whether the app appears in the Dock and the Cmd-Tab switcher"))
+                }
+
+                SettingRow(icon: "menubar.rectangle", iconColor: .teal, title: "Menu bar density", subtitle: "Compact tightens padding so more displays fit without scrolling") {
+                    Picker("", selection: $menuBarDensity) {
+                        ForEach(MenuBarDensity.allCases) { density in
+                            Text(LocalizedStringKey(density.titleKey)).tag(density)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 200)
+                    .onChange(of: menuBarDensity) { _, _ in updateGlobalSettings() }
+                    .accessibilityLabel(Text("Menu bar density"))
                 }
             } header: {
                 Text("Behavior")
@@ -639,16 +655,21 @@ struct GeneralSettingsView: View {
         // outside this form). Only override what this view actually owns.
         var settings = SettingsManager.shared.loadGlobalSettings()
         let dockChanged = settings.showInDock != showInDock
+        let densityChanged = settings.menuBarDensity != menuBarDensity
         settings.globalPauseOnBattery = globalPauseOnBattery
         settings.preservePlaybackOnLock = preservePlaybackOnLock
         settings.startOnLogin = startOnLogin
         settings.minimumBatteryLevel = useBatteryThreshold ? minimumBatteryLevel : nil
         settings.pauseOnFullScreen = pauseOnFullScreen
         settings.showInDock = showInDock
+        settings.menuBarDensity = menuBarDensity
         SettingsManager.shared.saveGlobalSettings(settings)
         screenManager.handleGlobalSettingsChanged()
         if dockChanged {
             NotificationCenter.default.post(name: .dockVisibilityDidChange, object: nil)
+        }
+        if densityChanged {
+            NotificationCenter.default.post(name: .menuBarDensityDidChange, object: nil)
         }
     }
 
@@ -662,6 +683,7 @@ struct GeneralSettingsView: View {
         useBatteryThreshold = false
         pauseOnFullScreen = true
         showInDock = false
+        menuBarDensity = .comfortable
 
         // Reset wipes Dock visibility, weather location preference, and
         // shortcut bindings. Broadcast all three so the AppDelegate, weather

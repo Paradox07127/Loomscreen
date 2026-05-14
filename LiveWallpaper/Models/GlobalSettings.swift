@@ -1,5 +1,22 @@
 import Foundation
 
+/// Layout density for the MenuBar dropdown. Comfortable mirrors macOS system
+/// menus (default); Compact tightens padding + drops one type step so users
+/// on multi-display setups see more without scrolling.
+enum MenuBarDensity: String, Codable, CaseIterable, Identifiable {
+    case comfortable
+    case compact
+
+    var id: String { rawValue }
+
+    var titleKey: String {
+        switch self {
+        case .comfortable: return "Comfortable"
+        case .compact:     return "Compact"
+        }
+    }
+}
+
 struct GlobalSettings: Codable {
     var globalPauseOnBattery: Bool
     var preservePlaybackOnLock: Bool
@@ -20,6 +37,10 @@ struct GlobalSettings: Codable {
     /// LRU of recently imported Wallpaper Engine projects (capped at 20 by
     /// `SettingsManager.recordWPEImport(_:)`). Most recent at index 0.
     var recentWPEImports: [WPEHistoryEntry] = []
+    /// Density preference for the MenuBar dropdown. Defaults to comfortable
+    /// (current behaviour); compact tightens padding for users on busy
+    /// multi-display setups.
+    var menuBarDensity: MenuBarDensity = .comfortable
 
     init(
         // Default `false` so a freshly-installed or reset app plays its
@@ -34,7 +55,8 @@ struct GlobalSettings: Codable {
         showInDock: Bool = false,
         weatherLocation: WeatherLocationPreference = .default,
         globalShortcuts: [GlobalShortcutAction.RawAction: GlobalShortcutBinding?] = [:],
-        recentWPEImports: [WPEHistoryEntry] = []
+        recentWPEImports: [WPEHistoryEntry] = [],
+        menuBarDensity: MenuBarDensity = .comfortable
     ) {
         self.globalPauseOnBattery = globalPauseOnBattery
         self.preservePlaybackOnLock = preservePlaybackOnLock
@@ -46,6 +68,7 @@ struct GlobalSettings: Codable {
         self.weatherLocation = weatherLocation
         self.globalShortcuts = globalShortcuts
         self.recentWPEImports = recentWPEImports
+        self.menuBarDensity = menuBarDensity
     }
 
     init(from decoder: Decoder) throws {
@@ -62,6 +85,7 @@ struct GlobalSettings: Codable {
         // Lossy decode: a malformed WPE history entry should not invalidate the
         // entire settings blob. Falls back to empty array if any entry breaks.
         recentWPEImports = (try? c.decodeIfPresent([WPEHistoryEntry].self, forKey: .recentWPEImports)) ?? []
+        menuBarDensity = (try? c.decodeIfPresent(MenuBarDensity.self, forKey: .menuBarDensity)) ?? .comfortable
         // Legacy `batteryResolutionCap` key is silently ignored on decode — superseded
         // by the "pause on battery = static wallpaper" model; no frame-rate or resolution
         // degradation is applied anymore.
