@@ -20,6 +20,38 @@ struct WallpaperEngineCacheTests {
         #expect(FileManager.default.fileExists(atPath: sentinel.path))
     }
 
+    @Test("Mirrors unpacked scene directory into workshop cache and reuses unchanged mirrors")
+    func mirrorsUnpackedSceneDirectoryIntoCache() async throws {
+        let scratch = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPEMirror-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let source = scratch.appendingPathComponent("source", isDirectory: true)
+        let materials = source.appendingPathComponent("materials", isDirectory: true)
+        let cacheRoot = scratch.appendingPathComponent("cache", isDirectory: true)
+        try FileManager.default.createDirectory(at: materials, withIntermediateDirectories: true)
+        try Data(#"{ "camera": {}, "general": {}, "objects": [] }"#.utf8)
+            .write(to: source.appendingPathComponent("scene.json"))
+        try Data([0xCA, 0xFE]).write(to: materials.appendingPathComponent("layer.bin"))
+
+        let cache = WallpaperEngineCache(rootURL: cacheRoot)
+        let firstURL = try await cache.ensureMirroredDirectory(
+            workshopID: "unpacked-scene",
+            sourceFolderURL: source
+        )
+        let sentinel = firstURL.appendingPathComponent("hit-marker.txt")
+        try Data("hit".utf8).write(to: sentinel)
+
+        let secondURL = try await cache.ensureMirroredDirectory(
+            workshopID: "unpacked-scene",
+            sourceFolderURL: source
+        )
+
+        #expect(secondURL == firstURL)
+        #expect(FileManager.default.fileExists(atPath: firstURL.appendingPathComponent("scene.json").path))
+        #expect(try Data(contentsOf: firstURL.appendingPathComponent("materials/layer.bin")) == Data([0xCA, 0xFE]))
+        #expect(FileManager.default.fileExists(atPath: sentinel.path))
+    }
+
     @Test("Cache miss when source pkg fingerprint changes")
     func cacheMissOnFingerprintChange() async throws {
         let env = try TempCacheEnvironment.make(workshopID: "222")

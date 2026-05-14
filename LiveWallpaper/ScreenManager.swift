@@ -1362,7 +1362,8 @@ final class ScreenManager {
             guard let sceneSession = ambientSessionBuilder.makeSceneSession(
                 descriptor: descriptor,
                 frame: screen.frame,
-                dependencyMounts: dependencyMounts
+                dependencyMounts: dependencyMounts,
+                rendererBackend: .metalExperimental
             ) else {
                 Logger.warning("Scene wallpaper for screen \(screen.id) (workshop \(descriptor.workshopID)) could not be built — cache missing or descriptor invalid", category: .screenManager)
                 return
