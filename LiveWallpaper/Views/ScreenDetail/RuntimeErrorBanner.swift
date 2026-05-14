@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// Inline banner shown above the screen-detail content when the active
-/// wallpaper session reports a `WallpaperRuntimeError`. Provides a
-/// retryable hint plus a re-pick fallback for unrecoverable cases.
+/// wallpaper session reports a `WallpaperRuntimeError`. Renders a title +
+/// truncated path subtitle + up to two recovery actions, themed by severity
+/// (error / warning / info).
 struct RuntimeErrorBanner: View {
     let error: WallpaperRuntimeError
     /// `false` for backends that don't have a picker (shader / scene); the
@@ -11,34 +12,30 @@ struct RuntimeErrorBanner: View {
     let onRetry: () -> Void
     let onRePick: () -> Void
 
-    private var subtitleText: String {
-        switch (error.canRetry, canRePick) {
-        case (true, true):
-            return String(localized: "Tap Retry to try again or Re-pick to choose another source.", defaultValue: "Tap Retry to try again or Re-pick to choose another source.", comment: "Runtime error banner guidance.")
-        case (true, false):
-            return String(localized: "Tap Retry to try again.", defaultValue: "Tap Retry to try again.", comment: "Runtime error banner guidance.")
-        case (false, true):
-            return String(localized: "Tap Re-pick to choose another source.", defaultValue: "Tap Re-pick to choose another source.", comment: "Runtime error banner guidance.")
-        case (false, false):
-            return String(localized: "Switch to a different wallpaper type to recover.", defaultValue: "Switch to a different wallpaper type to recover.", comment: "Runtime error banner guidance.")
-        }
-    }
-
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: severityIcon)
+                .foregroundStyle(severityTint)
                 .font(.title3)
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(verbatim: error.userMessage)
+                Text(verbatim: error.title)
                     .font(.callout.weight(.medium))
                     .lineLimit(2)
-                Text(verbatim: subtitleText)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if let subtitle = error.subtitlePath, !subtitle.isEmpty {
+                    Text(verbatim: subtitle)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
             }
+            // Combine the title + truncated path for VoiceOver, but use the
+            // un-truncated path so screen readers get the full context.
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(Text(error.title))
+            .accessibilityValue(Text(verbatim: error.accessibilityDetail))
 
             Spacer(minLength: 8)
 
@@ -56,12 +53,33 @@ struct RuntimeErrorBanner: View {
             }
         }
         .padding(12)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .background(severityFill, in: RoundedRectangle(cornerRadius: DesignTokens.Corner.md))
         .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(.orange.opacity(0.4), lineWidth: 1)
+            RoundedRectangle(cornerRadius: DesignTokens.Corner.md)
+                .stroke(severityTint.opacity(0.4), lineWidth: 0.5)
         )
         .padding(.horizontal, 12)
         .padding(.top, 8)
+        .dynamicTypeSize(...DynamicTypeSize.accessibility3)
+    }
+
+    private var severityIcon: String {
+        switch error.severity {
+        case .error:   return "exclamationmark.octagon.fill"
+        case .warning: return "exclamationmark.triangle.fill"
+        case .info:    return "info.circle.fill"
+        }
+    }
+
+    private var severityTint: Color {
+        switch error.severity {
+        case .error:   return .red
+        case .warning: return .orange
+        case .info:    return .blue
+        }
+    }
+
+    private var severityFill: some ShapeStyle {
+        AnyShapeStyle(.regularMaterial)
     }
 }

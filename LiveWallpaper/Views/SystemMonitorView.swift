@@ -165,12 +165,15 @@ struct MiniGaugeCard: View {
 
             VStack(spacing: 0) {
                 Text(verbatim: title)
-                    .font(.system(size: 8, weight: .semibold, design: .rounded))
+                    .font(.system(.caption2, design: .rounded).weight(.semibold))
                     .foregroundStyle(.secondary)
                 Text(verbatim: FormatUtils.formatPercent(Double(displayedPercent)))
-                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .font(.system(.caption2, design: .rounded).weight(.bold))
             }
             .offset(y: 18)
+            // Round gauge has a fixed footprint; cap Dynamic Type so the label
+            // does not overflow the 54pt circle at accessibility sizes.
+            .dynamicTypeSize(...DynamicTypeSize.large)
         }
         .frame(width: 54, height: 54)
         .frame(maxWidth: .infinity)
@@ -212,12 +215,15 @@ struct PowerStatusCard: View {
 
             VStack(spacing: 0) {
                 Text(verbatim: powerSource.shortLabel)
-                    .font(.system(size: 8, weight: .semibold, design: .rounded))
+                    .font(.system(.caption2, design: .rounded).weight(.semibold))
                     .foregroundStyle(.secondary)
                 Text(verbatim: powerSource.valueLabel)
-                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .font(.system(.caption2, design: .rounded).weight(.bold))
             }
             .offset(y: 18)
+            // Round gauge has a fixed footprint; cap Dynamic Type so the label
+            // does not overflow the 54pt circle at accessibility sizes.
+            .dynamicTypeSize(...DynamicTypeSize.large)
         }
         .frame(width: 54, height: 54)
         .frame(maxWidth: .infinity)

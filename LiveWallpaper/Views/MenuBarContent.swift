@@ -11,7 +11,12 @@ struct MenuBarContent: View {
 
     @State private var globalPauseOnBattery: Bool = SettingsManager.shared.loadGlobalSettings().globalPauseOnBattery
     @State private var globalPauseOnFullScreen: Bool = SettingsManager.shared.loadGlobalSettings().pauseOnFullScreen
+    @State private var density: MenuBarDensity = SettingsManager.shared.loadGlobalSettings().menuBarDensity
     @State private var activeOverlay: MenuBarOverlay?
+
+    private var metrics: MenuBarControlCenterMetrics.Resolved {
+        MenuBarControlCenterMetrics.resolved(for: density)
+    }
 
     private var monitor: SystemMonitor { .shared }
 
@@ -35,8 +40,8 @@ struct MenuBarContent: View {
     }
 
     var body: some View {
-        GlassEffectContainer(spacing: MenuBarControlCenterMetrics.componentSpacing) {
-            VStack(alignment: .leading, spacing: MenuBarControlCenterMetrics.componentSpacing) {
+        GlassEffectContainer(spacing: metrics.componentSpacing) {
+            VStack(alignment: .leading, spacing: metrics.componentSpacing) {
                 header
                 sectionLabel("DISPLAYS")
                 displays
@@ -45,8 +50,8 @@ struct MenuBarContent: View {
                 usageStrip
                 footer
             }
-            .padding(MenuBarControlCenterMetrics.outerPadding)
-            .frame(width: MenuBarControlCenterMetrics.popoverWidth)
+            .padding(metrics.outerPadding)
+            .frame(width: metrics.popoverWidth)
         }
         .overlay {
             if activeOverlay != nil {
@@ -61,6 +66,9 @@ struct MenuBarContent: View {
         }
         .animation(.snappy(duration: 0.14), value: activeOverlay)
         .onAppear { refreshGlobalToggles() }
+        .onReceive(NotificationCenter.default.publisher(for: .menuBarDensityDidChange)) { _ in
+            density = SettingsManager.shared.loadGlobalSettings().menuBarDensity
+        }
     }
 
     private var header: some View {
@@ -108,7 +116,7 @@ struct MenuBarContent: View {
     }
 
     private var displays: some View {
-        VStack(spacing: MenuBarControlCenterMetrics.rowSpacing) {
+        VStack(spacing: metrics.rowSpacing) {
             if screenManager.screens.isEmpty {
                 Text("No displays detected")
                     .font(.system(size: 12))
@@ -126,6 +134,7 @@ struct MenuBarContent: View {
                         showsStatusDot: screenManager.wallpaperSummary(for: screen).activity != .inactive,
                         supportsPlayback: screenManager.wallpaperSummary(for: screen).supportsPlaybackControl,
                         canStepPlaylist: canStepPlaylist(for: screen),
+                        density: density,
                         openAction: { invokeOpenScreenSettings(screen.id) },
                         previousAction: { screenManager.regressPlaylist(for: screen) },
                         playbackAction: { togglePlayback(for: screen) },
@@ -138,7 +147,7 @@ struct MenuBarContent: View {
     }
 
     private var allDisplayActions: some View {
-        HStack(spacing: MenuBarControlCenterMetrics.controlSpacing) {
+        HStack(spacing: metrics.controlSpacing) {
             MenuBarControlButton(
                 title: screenManager.wallpaperOverviewStatus == .active ? "Pause All" : "Play All",
                 systemImage: screenManager.wallpaperOverviewStatus == .active ? "pause.fill" : "play.fill",
@@ -194,7 +203,7 @@ struct MenuBarContent: View {
     }
 
     private var footer: some View {
-        HStack(spacing: MenuBarControlCenterMetrics.controlSpacing) {
+        HStack(spacing: metrics.controlSpacing) {
             Button(action: invokeAddWallpaperWindow) {
                 MenuBarFooterLabel(title: "Add Wallpaper", systemImage: "plus")
             }
@@ -266,8 +275,8 @@ struct MenuBarContent: View {
                     )
                 }
             }
-            .padding(.trailing, MenuBarControlCenterMetrics.outerPadding)
-            .padding(.bottom, MenuBarControlCenterMetrics.overlayBottomPadding)
+            .padding(.trailing, metrics.outerPadding)
+            .padding(.bottom, metrics.overlayBottomPadding)
             .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .bottomTrailing)))
             .zIndex(10)
         }
@@ -418,6 +427,10 @@ struct MenuBarContent: View {
     }
 }
 
+/// Metric block driven by the user's `MenuBarDensity` preference. Comfortable
+/// keeps the existing defaults; Compact trims padding + row spacing so users
+/// on busy multi-display setups see more without scrolling. Layout uses these
+/// statics today; the dynamic resolver lives in `metrics(for:)`.
 private enum MenuBarControlCenterMetrics {
     static let popoverWidth: CGFloat = 292
     static let outerPadding: CGFloat = 12
@@ -427,6 +440,47 @@ private enum MenuBarControlCenterMetrics {
     static let rowPaddingHorizontal: CGFloat = 9
     static let rowPaddingVertical: CGFloat = 8
     static let overlayBottomPadding: CGFloat = 48
+
+    struct Resolved {
+        let popoverWidth: CGFloat
+        let outerPadding: CGFloat
+        let componentSpacing: CGFloat
+        let rowSpacing: CGFloat
+        let controlSpacing: CGFloat
+        let rowPaddingHorizontal: CGFloat
+        let rowPaddingVertical: CGFloat
+        let overlayBottomPadding: CGFloat
+    }
+
+    static func resolved(for density: MenuBarDensity) -> Resolved {
+        switch density {
+        case .comfortable:
+            return Resolved(
+                popoverWidth: popoverWidth,
+                outerPadding: outerPadding,
+                componentSpacing: componentSpacing,
+                rowSpacing: rowSpacing,
+                controlSpacing: controlSpacing,
+                rowPaddingHorizontal: rowPaddingHorizontal,
+                rowPaddingVertical: rowPaddingVertical,
+                overlayBottomPadding: overlayBottomPadding
+            )
+        case .compact:
+            // Trim padding ≈ 35% so 3+ displays + power controls fit on a
+            // single 1080p external panel without scrolling. Width unchanged
+            // so the header / titles still read cleanly.
+            return Resolved(
+                popoverWidth: popoverWidth,
+                outerPadding: 8,
+                componentSpacing: 6,
+                rowSpacing: 4,
+                controlSpacing: 5,
+                rowPaddingHorizontal: 7,
+                rowPaddingVertical: 5,
+                overlayBottomPadding: 36
+            )
+        }
+    }
 }
 
 private enum MenuBarOverlay: Equatable {
@@ -471,10 +525,15 @@ private struct MenuBarDisplayRow: View {
     let showsStatusDot: Bool
     let supportsPlayback: Bool
     let canStepPlaylist: Bool
+    let density: MenuBarDensity
     let openAction: () -> Void
     let previousAction: () -> Void
     let playbackAction: () -> Void
     let nextAction: () -> Void
+
+    private var metrics: MenuBarControlCenterMetrics.Resolved {
+        MenuBarControlCenterMetrics.resolved(for: density)
+    }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -539,8 +598,8 @@ private struct MenuBarDisplayRow: View {
                 )
             }
         }
-        .padding(.horizontal, MenuBarControlCenterMetrics.rowPaddingHorizontal)
-        .padding(.vertical, MenuBarControlCenterMetrics.rowPaddingVertical)
+        .padding(.horizontal, metrics.rowPaddingHorizontal)
+        .padding(.vertical, metrics.rowPaddingVertical)
         .frame(maxWidth: .infinity)
         .readableGlass(radius: 12, tint: iconTint, interactive: true)
     }

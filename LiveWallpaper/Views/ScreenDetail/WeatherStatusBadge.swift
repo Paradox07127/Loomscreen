@@ -19,22 +19,23 @@ struct WeatherStatusBadge: View {
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: weatherIcon)
-                .font(.system(size: 11))
+                .font(.footnote)
                 .foregroundStyle(statusColor)
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 1) {
                 if let condition = weatherService.currentCondition {
                     Text(condition.titleKey)
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.footnote.weight(.medium))
                 } else {
                     Text(weatherService.locationStatus.titleKey)
-                        .font(.system(size: 11))
+                        .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
 
                 if let label = weatherService.activeLocationLabel, weatherService.lastError == nil {
                     Text(verbatim: label)
-                        .font(.system(size: 9))
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -42,24 +43,29 @@ struct WeatherStatusBadge: View {
 
                 if let error = weatherService.lastError {
                     Text(verbatim: error)
-                        .font(.system(size: 9))
+                        .font(.caption2)
                         .foregroundStyle(.red)
                         .lineLimit(1)
                 }
             }
+            // Status text combines into one VoiceOver string; the buttons below
+            // intentionally stay outside this group so each remains focusable.
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(Text("Weather status: \(weatherStatusLabel)", comment: "Weather badge a11y label. The placeholder is the current condition or location status."))
 
             Spacer()
 
             if weatherService.currentParticleEffect != .none {
                 Image(systemName: weatherService.currentParticleEffect.iconName)
-                    .font(.system(size: 10))
+                    .font(.caption)
                     .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
             }
 
             if needsLocationSettingsLink {
                 Button(action: openLocationSettings) {
                     Text("Open Settings")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.caption.weight(.semibold))
                 }
                 .buttonStyle(GlassCapsuleButtonStyle(fontSize: 10, horizontalPadding: 7, verticalPadding: 3))
                 .help(Text("Open System Settings → Privacy & Security → Location Services"))
@@ -68,15 +74,14 @@ struct WeatherStatusBadge: View {
 
             Button(action: refresh) {
                 Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.caption.weight(.semibold))
             }
             .buttonStyle(.plain)
             .help(Text("Refresh weather now"))
             .accessibilityLabel(Text("Refresh weather"))
         }
         .padding(.vertical, 4)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(Text("Weather status: \(weatherStatusLabel)", comment: "Weather badge a11y label. The placeholder is the current condition or location status."))
+        .dynamicTypeSize(...DynamicTypeSize.accessibility3)
     }
 
     private func openLocationSettings() {

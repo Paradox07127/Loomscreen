@@ -54,14 +54,11 @@ struct BookmarksLibraryView: View {
         if store.bookmarks.isEmpty {
             emptyState
         } else if filteredBookmarks.isEmpty {
-            VStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 30))
-                    .foregroundStyle(.tertiary)
-                Text("No matches for \"\(searchText)\"")
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            IllustratedEmptyState(
+                symbol: "magnifyingglass",
+                title: "No bookmarks match your search",
+                message: "Try a different keyword, or clear the search field to see every saved wallpaper."
+            )
         } else {
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 12) {
@@ -96,19 +93,11 @@ struct BookmarksLibraryView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "bookmark")
-                .font(.system(size: 48))
-                .foregroundStyle(.tertiary)
-            Text("No bookmarks yet")
-                .font(.system(size: 16, weight: .semibold))
-            Text("Open any display, configure a video / website / shader, then click the bookmark icon in the inspector header to save it here.")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 400)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        IllustratedEmptyState(
+            symbol: "bookmark",
+            title: "No bookmarks yet",
+            message: "Open any display, configure a video / website / shader, then click the bookmark icon in the inspector header to save it here."
+        )
     }
 
     private var filteredBookmarks: [WallpaperBookmark] {
