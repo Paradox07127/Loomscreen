@@ -13,6 +13,7 @@ struct PlaylistSection: View {
 
     @State private var entries: [PlaylistEntry] = []
     @State private var draggingID: PlaylistEntry.ID?
+    @State private var pendingDestructive: PendingDestructive?
 
     private let rotationOptions: [(LocalizedStringKey, Int?)] = [
         ("Off", nil),
@@ -105,6 +106,7 @@ struct PlaylistSection: View {
                 loadEntries()
             }
         }
+        .confirmDestructive($pendingDestructive)
     }
 
     // MARK: - Sub Views
@@ -242,6 +244,18 @@ struct PlaylistSection: View {
     }
 
     private func remove(_ entry: PlaylistEntry) {
+        // Removing the only remaining entry clears the wallpaper on this display.
+        // Surface a Liquid Glass confirmation so users don't lose their setup unintentionally.
+        if entries.count == 1 {
+            pendingDestructive = PendingDestructive(
+                .removePlaylistItem(isLast: true, displayName: screen.name)
+            ) { performRemove(entry) }
+        } else {
+            performRemove(entry)
+        }
+    }
+
+    private func performRemove(_ entry: PlaylistEntry) {
         var newEntries = entries
         newEntries.removeAll(where: { $0.id == entry.id })
         applyEntries(newEntries, removedPrimary: entry.isPrimary)

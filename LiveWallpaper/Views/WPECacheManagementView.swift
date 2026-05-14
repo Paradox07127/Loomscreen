@@ -12,6 +12,7 @@ struct WPECacheManagementView: View {
     @State private var pendingPurgeWorkshopID: String?
     @State private var lastFreedBytes: UInt64?
     @State private var errorMessage: String?
+    @State private var pendingDestructive: PendingDestructive?
 
     private let cache: WallpaperEngineCache
 
@@ -53,7 +54,7 @@ struct WPECacheManagementView: View {
                         .controlSize(.regular)
 
                         Button {
-                            Task { await purgeOlderThan(days: 30) }
+                            confirmPurgeOlderThan(days: 30)
                         } label: {
                             Label("Clear Unused > 30 days", systemImage: "calendar.badge.minus")
                         }
@@ -77,6 +78,7 @@ struct WPECacheManagementView: View {
         .onReceive(NotificationCenter.default.publisher(for: .wpeHistoryDidChange)) { _ in
             Task { await refreshStats() }
         }
+        .confirmDestructive($pendingDestructive)
         .alert("Clear all cached Wallpaper Engine projects?", isPresented: $showClearAllConfirm) {
             Button("Cancel", role: .cancel) {}
             Button("Clear All", role: .destructive) {
@@ -199,6 +201,20 @@ struct WPECacheManagementView: View {
         lastFreedBytes = freed
         await refreshStats()
         NotificationCenter.default.post(name: .wpeHistoryDidChange, object: nil)
+    }
+
+    /// Surface the unified Liquid Glass confirmation so users see exactly which
+    /// entries (count + total size) are about to be removed before bulk purging.
+    private func confirmPurgeOlderThan(days: Int) {
+        let cutoff = Date().addingTimeInterval(TimeInterval(-days * 86_400))
+        let candidates = (stats?.entries ?? []).filter { ($0.lastUsed ?? .distantPast) <= cutoff }
+        let totalBytes = candidates.reduce(UInt64(0)) { $0 + $1.sizeBytes }
+        let size = byteFormatter.string(fromByteCount: Int64(totalBytes))
+        pendingDestructive = PendingDestructive(
+            .clearUnusedWallpapers(itemCount: candidates.count, byteSize: size)
+        ) {
+            Task { await purgeOlderThan(days: days) }
+        }
     }
 
     // MARK: - Helpers

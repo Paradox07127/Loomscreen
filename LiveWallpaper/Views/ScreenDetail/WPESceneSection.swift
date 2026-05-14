@@ -12,6 +12,7 @@ struct WPESceneSection: View {
     @State private var selectedHistoryEntry: WPEHistoryEntry?
     @State private var showImportErrorAlert = false
     @State private var showWorkshopGallery: Bool = false
+    @State private var pendingDestructive: PendingDestructive?
 
     var body: some View {
         Group {
@@ -47,6 +48,7 @@ struct WPESceneSection: View {
             WorkshopGalleryView(screen: screen)
                 .environment(screenManager)
         }
+        .confirmDestructive($pendingDestructive)
         .alert("Apply Failed", isPresented: $showImportErrorAlert, presenting: screenManager.wpeImportError(for: screen)) { _ in
             Button("OK", role: .cancel) {
                 screenManager.clearWPEImportError(for: screen)
@@ -212,7 +214,11 @@ struct WPESceneSection: View {
                     descriptor: descriptor,
                     session: session,
                     onClearWallpaper: {
-                        screenManager.clearWallpaperForScreen(screen)
+                        pendingDestructive = PendingDestructive(
+                            .clearScene(sceneName: origin.title, displayName: screen.name)
+                        ) {
+                            screenManager.clearWallpaperForScreen(screen)
+                        }
                     }
                 )
             }
@@ -283,11 +289,15 @@ struct WPESceneSection: View {
     }
 
     private func handleRemove(entry: WPEHistoryEntry) {
-        screenManager.removeWPEImport(workshopID: entry.id)
-        if selectedHistoryEntry?.id == entry.id {
-            selectedHistoryEntry = nil
+        pendingDestructive = PendingDestructive(
+            .removeSceneHistory(sceneName: entry.origin.title)
+        ) {
+            screenManager.removeWPEImport(workshopID: entry.id)
+            if selectedHistoryEntry?.id == entry.id {
+                selectedHistoryEntry = nil
+            }
+            reloadHistory()
         }
-        reloadHistory()
     }
 
     private func presentFolderPicker() {

@@ -1,0 +1,245 @@
+import SwiftUI
+
+/// Unified confirmation flow for destructive actions.
+///
+/// Replaces ad-hoc inline destruction (`onDelete`, `Button { delete() }`) with a
+/// single Liquid Glass confirmation that follows macOS 26 Tahoe HIG:
+/// - Destructive button on top, Cancel on bottom
+/// - Cancel keeps default focus (Esc / ⌘. dismisses)
+/// - Subtitle carries action target + side-effect + recovery path
+///
+/// Attach with `.confirmDestructive($action, perform:)` and trigger by writing
+/// a `DestructiveAction` value into the binding.
+enum DestructiveAction: Identifiable, Equatable {
+    case removePlaylistItem(isLast: Bool, displayName: String)
+    case clearScene(sceneName: String, displayName: String)
+    case removeSceneHistory(sceneName: String)
+    case deleteBookmark(bookmarkName: String)
+    case applyBookmarkToAll(bookmarkName: String, displayCount: Int)
+    case removeScheduleSlot(slotLabel: String)
+    case disableSchedule(slotCount: Int)
+    case clearUnusedWallpapers(itemCount: Int, byteSize: String)
+    case forgetWorkshopLibrary(path: String)
+    case removeHistoryEntry(name: String)
+    case clearAllShortcuts
+    case resetShortcut(commandName: String)
+
+    var id: String {
+        switch self {
+        case .removePlaylistItem(let isLast, let name): return "removePlaylistItem-\(isLast)-\(name)"
+        case .clearScene(let s, let d): return "clearScene-\(s)-\(d)"
+        case .removeSceneHistory(let s): return "removeSceneHistory-\(s)"
+        case .deleteBookmark(let n): return "deleteBookmark-\(n)"
+        case .applyBookmarkToAll(let n, let c): return "applyBookmarkToAll-\(n)-\(c)"
+        case .removeScheduleSlot(let l): return "removeScheduleSlot-\(l)"
+        case .disableSchedule(let c): return "disableSchedule-\(c)"
+        case .clearUnusedWallpapers(let i, let b): return "clearUnusedWallpapers-\(i)-\(b)"
+        case .forgetWorkshopLibrary(let p): return "forgetWorkshopLibrary-\(p)"
+        case .removeHistoryEntry(let n): return "removeHistoryEntry-\(n)"
+        case .clearAllShortcuts: return "clearAllShortcuts"
+        case .resetShortcut(let n): return "resetShortcut-\(n)"
+        }
+    }
+
+    var title: LocalizedStringKey {
+        switch self {
+        case .removePlaylistItem(let isLast, _):
+            return isLast ? "Remove the last playlist item?" : "Remove this playlist item?"
+        case .clearScene:                return "Clear the Scene wallpaper?"
+        case .removeSceneHistory:        return "Remove this scene from history?"
+        case .deleteBookmark:            return "Delete this bookmark?"
+        case .applyBookmarkToAll:        return "Apply to all displays?"
+        case .removeScheduleSlot:        return "Remove this schedule slot?"
+        case .disableSchedule:           return "Disable schedule?"
+        case .clearUnusedWallpapers:     return "Clear unused wallpapers?"
+        case .forgetWorkshopLibrary:     return "Forget Workshop library?"
+        case .removeHistoryEntry:        return "Remove from history?"
+        case .clearAllShortcuts:         return "Reset all keyboard shortcuts?"
+        case .resetShortcut:             return "Reset this shortcut?"
+        }
+    }
+
+    /// Subtitle should mention: what gets removed → what side-effect → what's recoverable.
+    var message: String {
+        switch self {
+        case .removePlaylistItem(let isLast, let displayName):
+            return isLast
+                ? "This is the only wallpaper in the playlist. Removing it will clear the wallpaper on \(displayName)."
+                : "The item will be removed from the playlist. Other displays using this video keep their copy."
+        case .clearScene(let sceneName, let displayName):
+            return "Removing \(sceneName) will return \(displayName) to its saved wallpaper. The scene cache stays on disk."
+        case .removeSceneHistory(let sceneName):
+            return "\(sceneName) won't appear in your recent history anymore. The local cache is kept."
+        case .deleteBookmark(let name):
+            return "'\(name)' will be removed from your library. Displays using this bookmark fall back to their saved wallpaper."
+        case .applyBookmarkToAll(let name, let count):
+            return "'\(name)' will replace the current wallpaper on \(count) displays. Existing assignments are saved and can be restored from history."
+        case .removeScheduleSlot(let slotLabel):
+            return "The \(slotLabel) slot will be removed. Wallpapers outside this window keep their schedules."
+        case .disableSchedule(let count):
+            return "All \(count) time-based wallpaper rules will be cleared. The current wallpaper stays applied."
+        case .clearUnusedWallpapers(let itemCount, let byteSize):
+            return "Removes \(itemCount) items · \(byteSize) not displayed for more than 30 days. Currently-applied and pinned wallpapers are untouched."
+        case .forgetWorkshopLibrary(let path):
+            return "The library at '\(path)' will be unlinked. Local scene caches are kept; you can re-link the folder later."
+        case .removeHistoryEntry(let name):
+            return "'\(name)' will be removed from your recent items. The underlying file or scene is not deleted."
+        case .clearAllShortcuts:
+            return "All custom keyboard shortcuts revert to the LiveWallpaper defaults."
+        case .resetShortcut(let commandName):
+            return "The shortcut for '\(commandName)' returns to its default key combination."
+        }
+    }
+
+    var destructiveButtonTitle: LocalizedStringKey {
+        switch self {
+        case .removePlaylistItem(let isLast, _):
+            return isLast ? "Remove & Clear" : "Remove"
+        case .clearScene:                return "Clear Scene"
+        case .removeSceneHistory:        return "Remove"
+        case .deleteBookmark:            return "Delete"
+        case .applyBookmarkToAll:        return "Apply to All"
+        case .removeScheduleSlot:        return "Remove Slot"
+        case .disableSchedule:           return "Disable Schedule"
+        case .clearUnusedWallpapers(let itemCount, _): return "Clear \(itemCount) Items"
+        case .forgetWorkshopLibrary:     return "Forget Library"
+        case .removeHistoryEntry:        return "Remove"
+        case .clearAllShortcuts:         return "Reset All"
+        case .resetShortcut:             return "Reset"
+        }
+    }
+
+    var iconSystemName: String {
+        switch self {
+        case .removePlaylistItem, .deleteBookmark, .removeHistoryEntry,
+             .removeSceneHistory, .removeScheduleSlot:
+            return "trash"
+        case .clearScene, .clearUnusedWallpapers:
+            return "xmark.bin"
+        case .applyBookmarkToAll, .disableSchedule:
+            return "exclamationmark.triangle"
+        case .forgetWorkshopLibrary:
+            return "folder.badge.minus"
+        case .clearAllShortcuts, .resetShortcut:
+            return "arrow.uturn.backward.circle"
+        }
+    }
+}
+
+/// Liquid Glass confirmation sheet for destructive actions.
+private struct DestructiveConfirmationView: View {
+    let action: DestructiveAction
+    let onConfirm: () -> Void
+    let onCancel: () -> Void
+
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var body: some View {
+        VStack(spacing: DesignTokens.Spacing.md) {
+            Image(systemName: action.iconSystemName)
+                .font(.system(size: 26, weight: .semibold))
+                .foregroundStyle(Color.red)
+                .frame(width: 56, height: 56)
+                .background {
+                    Circle()
+                        .fill(Color.red.opacity(0.15))
+                        .overlay(Circle().strokeBorder(Color.red.opacity(0.25), lineWidth: 0.5))
+                }
+                .accessibilityHidden(true)
+
+            Text(action.title)
+                .font(.headline)
+                .multilineTextAlignment(.center)
+
+            Text(action.message)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(spacing: DesignTokens.Spacing.xs) {
+                Button(role: .destructive, action: onConfirm) {
+                    Text(action.destructiveButtonTitle)
+                        .frame(maxWidth: .infinity)
+                }
+                .controlSize(.large)
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .keyboardShortcut(.defaultAction)
+
+                Button(role: .cancel, action: onCancel) {
+                    Text("Cancel")
+                        .frame(maxWidth: .infinity)
+                }
+                .controlSize(.large)
+                .buttonStyle(.bordered)
+                .keyboardShortcut(.cancelAction)
+            }
+            .padding(.top, DesignTokens.Spacing.xs)
+        }
+        .padding(DesignTokens.Spacing.lg)
+        .frame(width: 280)
+        .background(alignment: .top) {
+            // Top specular sheen — emulates the Tahoe glass refraction.
+            LinearGradient(
+                stops: [
+                    .init(color: Color.white.opacity(reduceTransparency ? 0 : 0.10), location: 0),
+                    .init(color: Color.white.opacity(reduceTransparency ? 0 : 0.02), location: 0.2),
+                    .init(color: .clear, location: 0.5)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .allowsHitTesting(false)
+        }
+        .background(.regularMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(Color.white.opacity(reduceTransparency ? 0.10 : 0.16), lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.55), radius: 40, x: 0, y: 24)
+    }
+}
+
+/// Bundles a `DestructiveAction` with the closure to invoke on confirmation.
+/// Pattern: each callsite builds one of these and assigns it to its
+/// `@State pending: PendingDestructive?`. The view's `.confirmDestructive`
+/// modifier surfaces the Liquid Glass sheet and invokes `perform()` on confirm.
+struct PendingDestructive: Identifiable {
+    let id = UUID()
+    let action: DestructiveAction
+    let perform: () -> Void
+
+    init(_ action: DestructiveAction, perform: @escaping () -> Void) {
+        self.action = action
+        self.perform = perform
+    }
+}
+
+extension View {
+    /// Presents the unified Liquid Glass destructive confirmation sheet when
+    /// `pending` becomes non-nil. The bundled `perform` closure runs on confirm.
+    func confirmDestructive(_ pending: Binding<PendingDestructive?>) -> some View {
+        modifier(DestructiveConfirmationModifier(pending: pending))
+    }
+}
+
+private struct DestructiveConfirmationModifier: ViewModifier {
+    @Binding var pending: PendingDestructive?
+
+    func body(content: Content) -> some View {
+        content.sheet(item: $pending) { current in
+            DestructiveConfirmationView(
+                action: current.action,
+                onConfirm: {
+                    let captured = current.perform
+                    pending = nil
+                    captured()
+                },
+                onCancel: { pending = nil }
+            )
+            .presentationBackground(.clear)
+        }
+    }
+}

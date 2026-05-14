@@ -12,6 +12,7 @@ struct BookmarksPopover: View {
     @State private var addLabel: String = ""
     @State private var renamingID: UUID? = nil
     @State private var renameDraft: String = ""
+    @State private var pendingDestructive: PendingDestructive?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -22,6 +23,7 @@ struct BookmarksPopover: View {
         }
         .padding(14)
         .frame(width: 340)
+        .confirmDestructive($pendingDestructive)
     }
 
     private var header: some View {
@@ -110,7 +112,11 @@ struct BookmarksPopover: View {
                             onCancelRename: {
                                 renamingID = nil
                             },
-                            onDelete: { store.remove(bookmark.id) }
+                            onDelete: {
+                                pendingDestructive = PendingDestructive(
+                                    .deleteBookmark(bookmarkName: bookmark.label)
+                                ) { store.remove(bookmark.id) }
+                            }
                         )
                     }
                 }
