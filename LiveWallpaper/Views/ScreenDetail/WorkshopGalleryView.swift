@@ -86,6 +86,7 @@ struct WorkshopGalleryView: View {
     @State private var selectedUnsupportedOrigin: WPEOrigin?
     @State private var searchText: String = ""
     @State private var typeFilter: WorkshopProjectTypeFilter = .all
+    @State private var pendingDestructive: PendingDestructive?
     @State private var sortOrder: WorkshopProjectSortOrder = .recommended
     @State private var bookmarkStore = BookmarkStore.shared
 
@@ -136,6 +137,7 @@ struct WorkshopGalleryView: View {
         } message: {
             Text(verbatim: errorMessage ?? "")
         }
+        .confirmDestructive($pendingDestructive)
     }
 
     // MARK: - Header
@@ -186,7 +188,7 @@ struct WorkshopGalleryView: View {
                                 }
 
                                 Button(role: .destructive) {
-                                    disconnectLibraryRoot()
+                                    confirmDisconnectLibraryRoot()
                                 } label: {
                                     Label("Forget Library Folder", systemImage: "xmark.circle")
                                 }
@@ -443,6 +445,13 @@ struct WorkshopGalleryView: View {
         hasLibraryRoot = false
         rootPathSummary = nil
         state = .needsRoot
+    }
+
+    private func confirmDisconnectLibraryRoot() {
+        let path = rootPathSummary ?? "your Workshop library folder"
+        pendingDestructive = PendingDestructive(.forgetWorkshopLibrary(path: path)) {
+            disconnectLibraryRoot()
+        }
     }
 
     private func refreshScan() async {

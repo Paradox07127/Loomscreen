@@ -20,58 +20,38 @@ struct SegmentedSpeedPicker: View {
     @Binding var selectedSpeed: Double
     var onChange: (Double) -> Void
     private let speeds: [Double] = [0.5, 0.75, 1.0, 1.5, 2.0]
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        GlassEffectContainer(spacing: 2) {
-            HStack(spacing: 2) {
-                ForEach(speeds, id: \.self) { speed in
-                    Button(action: {
-                        withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.2))) {
-                            selectedSpeed = speed
-                        }
-                        onChange(speed)
-                    }) {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(Color.clear)
-                            Text(label(for: speed))
-                                .font(.system(size: 12, weight: selectedSpeed == speed ? .semibold : .regular))
-                        }
-                        .frame(minWidth: 44, maxWidth: .infinity)
-                        .frame(height: 28)
-                        .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                    }
-                    .buttonStyle(.plain)
-                    .frame(maxWidth: .infinity)
-                    .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                    .glassEffect(
-                        selectedSpeed == speed
-                            ? .regular.tint(Color.accentColor.opacity(0.35)).interactive()
-                            : .regular.interactive(),
-                        in: .rect(cornerRadius: 6)
-                    )
-                    .help(Text("Playback speed: \(label(for: speed))", comment: "Tooltip for a playback speed button. %@ is the multiplier."))
-                    .accessibilityLabel(Text("Speed \(label(for: speed))", comment: "A11y label for playback speed button. %@ is the multiplier."))
-                    .accessibilityHint(selectedSpeed == speed
-                        ? Text("Currently selected", comment: "A11y hint when the playback speed button is the active one.")
-                        : Text("Set playback speed to \(label(for: speed))", comment: "A11y hint to set playback speed. %@ is the multiplier."))
-                }
+        Picker(selection: speedBinding) {
+            ForEach(speeds, id: \.self) { speed in
+                Text(label(for: speed)).tag(speed)
             }
-            .frame(maxWidth: .infinity)
+        } label: {
+            Text("Playback speed", comment: "A11y label for the playback speed picker.")
         }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .help(Text("Playback speed", comment: "Tooltip for the playback speed picker."))
+        .accessibilityLabel(Text("Playback speed", comment: "A11y label for the playback speed picker."))
+        .accessibilityValue(Text(label(for: selectedSpeed)))
+    }
+
+    private var speedBinding: Binding<Double> {
+        Binding(
+            get: { selectedSpeed },
+            set: { newValue in
+                selectedSpeed = newValue
+                onChange(newValue)
+            }
+        )
     }
 
     private func label(for speed: Double) -> String {
         switch speed {
-        case 0.75:
-            return "0.75x"
-        case 1.0:
-            return "1x"
-        case 2.0:
-            return "2x"
-        default:
-            return "\(String(format: "%.1f", speed))x"
+        case 0.75: return "0.75x"
+        case 1.0:  return "1x"
+        case 2.0:  return "2x"
+        default:   return "\(String(format: "%.1f", speed))x"
         }
     }
 }

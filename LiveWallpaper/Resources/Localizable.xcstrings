@@ -1365,6 +1365,9 @@
         }
       }
     },
+    "Apply to all displays?" : {
+
+    },
     "Apply to display" : {
       "localizations" : {
         "en" : {
@@ -2656,6 +2659,9 @@
         }
       }
     },
+    "Clear %lld Items" : {
+
+    },
     "Clear All" : {
       "localizations" : {
         "en" : {
@@ -2784,6 +2790,9 @@
         }
       }
     },
+    "Clear the Scene wallpaper?" : {
+
+    },
     "Clear Unused > 30 days" : {
       "localizations" : {
         "en" : {
@@ -2799,6 +2808,9 @@
           }
         }
       }
+    },
+    "Clear unused wallpapers?" : {
+
     },
     "Clear video" : {
       "extractionState" : "stale",
@@ -3409,7 +3421,7 @@
       }
     },
     "Currently selected" : {
-      "comment" : "A11y hint for the active fit mode button.\nA11y hint for the active shader preset button.\nA11y hint when the playback speed button is the active one.",
+      "comment" : "A11y hint for the active fit mode button.\nA11y hint for the active shader preset button.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3523,6 +3535,9 @@
         }
       }
     },
+    "Delete this bookmark?" : {
+
+    },
     "Density" : {
       "localizations" : {
         "en" : {
@@ -3586,6 +3601,9 @@
           }
         }
       }
+    },
+    "Disable schedule?" : {
+
     },
     "Disconnect Aerials library" : {
       "localizations" : {
@@ -5729,6 +5747,9 @@
         }
       }
     },
+    "Forget Library" : {
+
+    },
     "Forget Library Folder" : {
       "localizations" : {
         "en" : {
@@ -5744,6 +5765,9 @@
           }
         }
       }
+    },
+    "Forget Workshop library?" : {
+
     },
     "Forgets the selected Steam Workshop folder so you can choose again" : {
       "extractionState" : "stale",
@@ -9161,8 +9185,12 @@
         }
       }
     },
+    "Playback speed" : {
+      "comment" : "A11y label for the playback speed picker.\nTooltip for the playback speed picker."
+    },
     "Playback speed: %@" : {
       "comment" : "Tooltip for a playback speed button. %@ is the multiplier.",
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -10097,6 +10125,9 @@
         }
       }
     },
+    "Remove & Clear" : {
+
+    },
     "Remove %@ from trusted hosts" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -10197,6 +10228,15 @@
         }
       }
     },
+    "Remove from history?" : {
+
+    },
+    "Remove Slot" : {
+
+    },
+    "Remove the last playlist item?" : {
+
+    },
     "Remove this cache entry?" : {
       "localizations" : {
         "en" : {
@@ -10212,6 +10252,15 @@
           }
         }
       }
+    },
+    "Remove this playlist item?" : {
+
+    },
+    "Remove this scene from history?" : {
+
+    },
+    "Remove this schedule slot?" : {
+
     },
     "Removes all schedule slots and returns to normal playback" : {
       "localizations" : {
@@ -10407,6 +10456,9 @@
         }
       }
     },
+    "Reset" : {
+
+    },
     "Reset All" : {
       "localizations" : {
         "en" : {
@@ -10438,6 +10490,9 @@
           }
         }
       }
+    },
+    "Reset all keyboard shortcuts?" : {
+
     },
     "Reset all settings to default" : {
       "localizations" : {
@@ -10505,6 +10560,9 @@
           }
         }
       }
+    },
+    "Reset this shortcut?" : {
+
     },
     "Reset to Default" : {
       "localizations" : {
@@ -11545,6 +11603,7 @@
     },
     "Set playback speed to %@" : {
       "comment" : "A11y hint to set playback speed. %@ is the multiplier.",
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -12150,6 +12209,7 @@
     },
     "Speed %@" : {
       "comment" : "A11y label for playback speed button. %@ is the multiplier.",
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {

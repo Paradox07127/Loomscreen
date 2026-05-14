@@ -962,10 +962,8 @@ private struct InspectorResizeHandle: View {
     let onPreviewWidthChange: (CGFloat) -> Void
     let onCommitWidth: (CGFloat) -> Void
 
-    private let restingHandleWidth: CGFloat = 6
-    private let restingHandleHeight: CGFloat = 52
-    private let activeHandleWidth: CGFloat = 24
-    private let activeHandleHeight: CGFloat = 34
+    private let handleWidth: CGFloat = 6
+    private let handleHeight: CGFloat = 52
 
     @State private var dragStartWidth: CGFloat?
     @State private var isHovering = false
@@ -981,23 +979,17 @@ private struct InspectorResizeHandle: View {
                 .overlay(
                     Capsule()
                         .strokeBorder(
-                            isActive ? Color.accentColor.opacity(0.45) : Color.primary.opacity(0.12),
+                            isActive ? Color.primary.opacity(0.28) : Color.primary.opacity(0.12),
                             lineWidth: 0.75
                         )
                 )
-                .frame(width: isActive ? activeHandleWidth : restingHandleWidth,
-                       height: isActive ? activeHandleHeight : restingHandleHeight)
-                .shadow(color: Color.black.opacity(isActive ? 0.16 : 0.08), radius: 5, x: 0, y: 2)
-
-            Image(systemName: "arrow.left.and.right")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(Color.accentColor)
-                .opacity(isActive ? 1 : 0)
-                .accessibilityHidden(true)
+                .frame(width: handleWidth, height: handleHeight)
+                .shadow(color: Color.black.opacity(0.08), radius: 5, x: 0, y: 2)
+                .opacity(isActive ? 0.95 : 0.55)
         }
         .frame(width: Self.hitAreaWidth)
         .frame(maxHeight: .infinity)
-        .animation(.snappy(duration: 0.16), value: isActive)
+        .animation(.easeOut(duration: 0.12), value: isActive)
         .gesture(
             DragGesture(minimumDistance: 2, coordinateSpace: .global)
                 .onChanged { value in
@@ -1015,7 +1007,14 @@ private struct InspectorResizeHandle: View {
                     isDragging = false
                 }
         )
-        .onHover { isHovering = $0 }
+        .onHover { hovering in
+            isHovering = hovering
+            if hovering {
+                NSCursor.resizeLeftRight.push()
+            } else {
+                NSCursor.pop()
+            }
+        }
         .help(Text("Drag to resize properties panel"))
         .accessibilityLabel(Text("Resize properties panel"))
         .accessibilityHint(Text("Drag horizontally to change the properties panel width"))

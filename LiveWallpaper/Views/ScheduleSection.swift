@@ -15,6 +15,7 @@ struct ScheduleSection: View {
     @State private var conflictHighlight: Set<UUID> = []
     @State private var addSlotErrorMessage: String?
     @State private var conflictMessage: String?
+    @State private var pendingDestructive: PendingDestructive?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -92,6 +93,7 @@ struct ScheduleSection: View {
                 try? await Task.sleep(for: .seconds(delay))
             }
         }
+        .confirmDestructive($pendingDestructive)
     }
 
     @ViewBuilder
@@ -120,8 +122,16 @@ struct ScheduleSection: View {
     }
 
     private func disableSchedule() {
-        scheduleSlots = []
-        screenManager.updateScheduleSlots(nil, for: screen)
+        let slotCount = scheduleSlots.count
+        guard slotCount > 0 else {
+            scheduleSlots = []
+            screenManager.updateScheduleSlots(nil, for: screen)
+            return
+        }
+        pendingDestructive = PendingDestructive(.disableSchedule(slotCount: slotCount)) {
+            scheduleSlots = []
+            screenManager.updateScheduleSlots(nil, for: screen)
+        }
     }
 
     private func selectVideo(for slotID: UUID) {
@@ -200,6 +210,23 @@ struct ScheduleSection: View {
     }
 
     private func removeSlot(_ slotID: UUID) {
+        // Last-slot removal disables the whole schedule, which is more disruptive
+        // than dropping one of several — surface the same confirmation that
+        // "Disable Schedule" would.
+        if scheduleSlots.count <= 1 {
+            let slotCount = scheduleSlots.count
+            pendingDestructive = PendingDestructive(.disableSchedule(slotCount: slotCount)) {
+                performRemoveSlot(slotID)
+            }
+            return
+        }
+        guard let slot = scheduleSlots.first(where: { $0.id == slotID }) else { return }
+        pendingDestructive = PendingDestructive(.removeScheduleSlot(slotLabel: slot.localizedLabel)) {
+            performRemoveSlot(slotID)
+        }
+    }
+
+    private func performRemoveSlot(_ slotID: UUID) {
         scheduleSlots.removeAll(where: { $0.id == slotID })
         if scheduleSlots.isEmpty {
             screenManager.updateScheduleSlots(nil, for: screen)

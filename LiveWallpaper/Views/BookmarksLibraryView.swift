@@ -7,6 +7,7 @@ struct BookmarksLibraryView: View {
     @State private var renamingID: UUID? = nil
     @State private var renameDraft: String = ""
     @State private var searchText: String = ""
+    @State private var pendingDestructive: PendingDestructive?
 
     private let columns = [GridItem(.adaptive(minimum: 260), spacing: 12)]
 
@@ -15,6 +16,7 @@ struct BookmarksLibraryView: View {
             header: { header },
             content: { content }
         )
+        .confirmDestructive($pendingDestructive)
     }
 
     // MARK: - Header
@@ -80,7 +82,11 @@ struct BookmarksLibraryView: View {
                                 renamingID = nil
                             },
                             onCancelRename: { renamingID = nil },
-                            onDelete: { store.remove(bookmark.id) }
+                            onDelete: {
+                                pendingDestructive = PendingDestructive(
+                                    .deleteBookmark(bookmarkName: bookmark.label)
+                                ) { store.remove(bookmark.id) }
+                            }
                         )
                     }
                 }
