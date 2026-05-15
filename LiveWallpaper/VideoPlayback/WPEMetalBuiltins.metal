@@ -321,6 +321,63 @@ fragment half4 wpe_particle_instanced_fragment(
     return half4(float4(rgb * alpha, alpha));
 }
 
+// Phase 2D-N: text overlay quad. Vertex stage takes per-overlay center
+// + size + color from a uniform buffer; fragment samples the rasterized
+// CoreText output.
+
+struct WPETextOverlayUniforms {
+    float4 centerAndSize;   // x,y center (pixel space) ; z,w width,height (pixels)
+    float4 sceneSize;       // x = scene width, y = scene height
+    float4 color;           // rgb tint × per-text alpha (already premultiplied by alpha in .a)
+};
+
+struct WPETextOverlayVertexOut {
+    float4 position [[position]];
+    float2 uv;
+};
+
+vertex WPETextOverlayVertexOut wpe_text_overlay_vertex(
+    uint vertexID [[vertex_id]],
+    constant WPETextOverlayUniforms& u [[buffer(0)]]
+) {
+    float2 corner;
+    float2 uv;
+    switch (vertexID) {
+        case 0: corner = float2(-0.5, -0.5); uv = float2(0.0, 1.0); break;
+        case 1: corner = float2( 0.5, -0.5); uv = float2(1.0, 1.0); break;
+        case 2: corner = float2(-0.5,  0.5); uv = float2(0.0, 0.0); break;
+        default: corner = float2( 0.5,  0.5); uv = float2(1.0, 0.0); break;
+    }
+    float halfWidth = max(u.sceneSize.x, 1.0) * 0.5;
+    float halfHeight = max(u.sceneSize.y, 1.0) * 0.5;
+    float2 centerNDC = float2(
+        u.centerAndSize.x / halfWidth,
+        u.centerAndSize.y / halfHeight
+    );
+    float2 cornerNDC = corner * float2(
+        u.centerAndSize.z / halfWidth,
+        u.centerAndSize.w / halfHeight
+    );
+    WPETextOverlayVertexOut out;
+    out.position = float4(centerNDC + cornerNDC, 0.0, 1.0);
+    out.uv = uv;
+    return out;
+}
+
+fragment half4 wpe_text_overlay_fragment(
+    WPETextOverlayVertexOut in [[stage_in]],
+    texture2d<half, access::sample> texture0 [[texture(0)]],
+    constant WPETextOverlayUniforms& u [[buffer(0)]]
+) {
+    constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
+    float4 sampled = float4(texture0.sample(linearSampler, in.uv));
+    // CoreText drew premultiplied alpha into rgba8Unorm; tint takes
+    // effect via per-overlay color × the sampled premultiplied output.
+    float3 rgb = sampled.rgb * u.color.rgb;
+    float alpha = sampled.a * u.color.a;
+    return half4(float4(rgb, alpha));
+}
+
 fragment half4 wpe_genericparticle_fragment(
     WPEVertexOut in [[stage_in]],
     texture2d<half, access::sample> texture0 [[texture(0)]],

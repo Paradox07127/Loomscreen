@@ -13,6 +13,8 @@ struct WPESceneDocument: Equatable, Sendable {
     /// metadata for a future CPU emitter to consume; the renderer still
     /// downgrades these to "unsupported" diagnostics until the runtime ships.
     let particleObjects: [WPESceneParticleObject]
+    /// Phase 2D-N: text objects parsed for the CoreText rasterizer.
+    let textObjects: [WPESceneTextObject]
     let diagnostics: [WPESceneDiagnostic]
 
     init(
@@ -20,14 +22,42 @@ struct WPESceneDocument: Equatable, Sendable {
         general: WPESceneGeneral,
         imageObjects: [WPESceneImageObject],
         particleObjects: [WPESceneParticleObject] = [],
+        textObjects: [WPESceneTextObject] = [],
         diagnostics: [WPESceneDiagnostic]
     ) {
         self.camera = camera
         self.general = general
         self.imageObjects = imageObjects
         self.particleObjects = particleObjects
+        self.textObjects = textObjects
         self.diagnostics = diagnostics
     }
+}
+
+/// Text object record. Phase 2D-N captures enough attributes for the
+/// CoreText rasterizer to lay out a static line of text. Animated /
+/// scripted text (WPE's `text: { script: "...", value: "..." }` shape)
+/// initializes from `value` until the SceneScript runtime ships.
+struct WPESceneTextObject: Equatable, Sendable, Identifiable {
+    let id: String
+    let name: String
+    let text: String
+    /// Path relative to the scene cache root, e.g. `fonts/p5hatty.ttf`.
+    /// Optional: when nil, the renderer falls back to the system font.
+    let fontRelativePath: String?
+    let pointSize: Double
+    let color: SIMD3<Double>
+    let alpha: Double
+    let origin: SIMD3<Double>
+    let scale: SIMD3<Double>
+    let visible: Bool
+    /// `left` / `center` / `right` (default center).
+    let horizontalAlignment: String
+    /// `top` / `middle` / `bottom` (default middle).
+    let verticalAlignment: String
+    /// Optional explicit max width in scene pixels for soft-wrapping.
+    let maxWidth: Double?
+    let parallaxDepth: Double
 }
 
 /// Lean particle object record. Captures the per-instance attributes

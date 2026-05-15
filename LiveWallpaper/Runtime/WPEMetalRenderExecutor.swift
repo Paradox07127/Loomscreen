@@ -176,6 +176,93 @@ final class WPEMetalRenderExecutor {
         commandBuffer.waitUntilCompleted()
     }
 
+    /// Phase 2D-N: composite a list of pre-rasterized text overlays on
+    /// top of the supplied output texture. Each overlay is one quad
+    /// draw, sized in pixel space and projected via the scene's
+    /// orthogonal width/height. Reuses the layer pixel format so the
+    /// pipeline state is cached separately from particles.
+    func drawTextOverlays(
+        overlays: [WPETextOverlayDraw],
+        sceneSize: CGSize,
+        output: MTLTexture
+    ) throws {
+        guard !overlays.isEmpty else { return }
+        guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+            throw WPEMetalRenderExecutorError.commandBufferFailed
+        }
+        let descriptor = MTLRenderPassDescriptor()
+        descriptor.colorAttachments[0].texture = output
+        descriptor.colorAttachments[0].loadAction = .load
+        descriptor.colorAttachments[0].storeAction = .store
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
+            throw WPEMetalRenderExecutorError.commandBufferFailed
+        }
+        let state = try textOverlayPipelineState(colorPixelFormat: output.pixelFormat)
+        encoder.setRenderPipelineState(state)
+
+        for overlay in overlays {
+            var u = WPETextOverlayUniforms(
+                centerAndSize: SIMD4<Float>(
+                    Float(overlay.centerInScenePixels.x),
+                    Float(overlay.centerInScenePixels.y),
+                    Float(overlay.sizeInScenePixels.width),
+                    Float(overlay.sizeInScenePixels.height)
+                ),
+                sceneSize: SIMD4<Float>(
+                    Float(max(sceneSize.width, 1)),
+                    Float(max(sceneSize.height, 1)),
+                    0, 0
+                ),
+                color: SIMD4<Float>(
+                    overlay.tint.x,
+                    overlay.tint.y,
+                    overlay.tint.z,
+                    overlay.alpha
+                )
+            )
+            encoder.setFragmentTexture(overlay.texture, index: 0)
+            encoder.setVertexBytes(&u, length: MemoryLayout<WPETextOverlayUniforms>.stride, index: 0)
+            encoder.setFragmentBytes(&u, length: MemoryLayout<WPETextOverlayUniforms>.stride, index: 0)
+            encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+        }
+        encoder.endEncoding()
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()
+    }
+
+    private var textOverlayPipelineCache: [UInt: MTLRenderPipelineState] = [:]
+
+    private func textOverlayPipelineState(colorPixelFormat: MTLPixelFormat) throws -> MTLRenderPipelineState {
+        if let cached = textOverlayPipelineCache[colorPixelFormat.rawValue] {
+            return cached
+        }
+        guard let library = device.makeDefaultLibrary(),
+              let vertex = library.makeFunction(name: "wpe_text_overlay_vertex"),
+              let fragment = library.makeFunction(name: "wpe_text_overlay_fragment") else {
+            throw WPEMetalRenderExecutorError.pipelineUnavailable("wpe_text_overlay_fragment")
+        }
+        let descriptor = MTLRenderPipelineDescriptor()
+        descriptor.vertexFunction = vertex
+        descriptor.fragmentFunction = fragment
+        guard let attachment = descriptor.colorAttachments[0] else {
+            throw WPEMetalRenderExecutorError.pipelineUnavailable("wpe_text_overlay_fragment")
+        }
+        attachment.pixelFormat = colorPixelFormat
+        // Standard premultiplied translucent compositing. CoreText
+        // already produced premultiplied output so srcRGB = sourceRGB
+        // (no alpha multiply on top).
+        attachment.isBlendingEnabled = true
+        attachment.rgbBlendOperation = .add
+        attachment.alphaBlendOperation = .add
+        attachment.sourceRGBBlendFactor = .one
+        attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
+        attachment.sourceAlphaBlendFactor = .one
+        attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        let state = try device.makeRenderPipelineState(descriptor: descriptor)
+        textOverlayPipelineCache[colorPixelFormat.rawValue] = state
+        return state
+    }
+
     private var particlePipelineCache: [UInt: MTLRenderPipelineState] = [:]
 
     private func particlePipelineState(colorPixelFormat: MTLPixelFormat) throws -> MTLRenderPipelineState {
