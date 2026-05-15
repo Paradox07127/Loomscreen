@@ -1,0 +1,116 @@
+import Foundation
+import Metal
+
+/// Caches `MTLRenderPipelineState` keyed by (fragment, blend, color format,
+/// depth format) so identical pipelines can be reused across passes and
+/// frames. Owns the library + device handles so the executor doesn't have
+/// to expose them. Carved out of `WPEMetalRenderExecutor`.
+final class WPEMetalPipelineCache {
+    private let device: MTLDevice
+    private let library: MTLLibrary
+    private var pipelineStates: [WPEMetalPipelineKey: MTLRenderPipelineState] = [:]
+
+    init(device: MTLDevice, library: MTLLibrary) {
+        self.device = device
+        self.library = library
+    }
+
+    func pipelineState(
+        fragmentName: String,
+        blendMode: String,
+        colorPixelFormat: MTLPixelFormat,
+        depthPixelFormat: MTLPixelFormat
+    ) throws -> MTLRenderPipelineState {
+        let normalizedBlend = blendMode.lowercased()
+        let key = WPEMetalPipelineKey(
+            fragmentName: fragmentName,
+            blendMode: normalizedBlend,
+            colorPixelFormat: colorPixelFormat,
+            depthPixelFormat: depthPixelFormat
+        )
+        if let cached = pipelineStates[key] {
+            return cached
+        }
+
+        guard let vertex = library.makeFunction(name: "wpe_fullscreen_vertex"),
+              let fragment = library.makeFunction(name: fragmentName) else {
+            throw WPEMetalRenderExecutorError.pipelineUnavailable(fragmentName)
+        }
+
+        let descriptor = MTLRenderPipelineDescriptor()
+        descriptor.vertexFunction = vertex
+        descriptor.fragmentFunction = fragment
+        guard let colorAttachment = descriptor.colorAttachments[0] else {
+            throw WPEMetalRenderExecutorError.pipelineUnavailable(fragmentName)
+        }
+        colorAttachment.pixelFormat = colorPixelFormat
+        descriptor.depthAttachmentPixelFormat = depthPixelFormat
+        Self.applyBlendMode(normalizedBlend, to: colorAttachment)
+
+        let state = try device.makeRenderPipelineState(descriptor: descriptor)
+        pipelineStates[key] = state
+        return state
+    }
+
+    static func cullMode(for raw: String) -> MTLCullMode {
+        switch raw.lowercased() {
+        case "back":
+            return .back
+        case "front":
+            return .front
+        default:
+            return .none
+        }
+    }
+
+    private static func applyBlendMode(
+        _ mode: String,
+        to attachment: MTLRenderPipelineColorAttachmentDescriptor
+    ) {
+        switch mode {
+        case "disabled":
+            attachment.isBlendingEnabled = false
+
+        case "additive":
+            attachment.isBlendingEnabled = true
+            attachment.rgbBlendOperation = .add
+            attachment.alphaBlendOperation = .add
+            attachment.sourceRGBBlendFactor = .sourceAlpha
+            attachment.destinationRGBBlendFactor = .one
+            attachment.sourceAlphaBlendFactor = .one
+            attachment.destinationAlphaBlendFactor = .one
+
+        case "multiply":
+            // WPE multiply preserves the destination alpha (OpenGL convention).
+            // RGB = src.rgb * dst.rgb; alpha = dst.alpha.
+            attachment.isBlendingEnabled = true
+            attachment.rgbBlendOperation = .add
+            attachment.alphaBlendOperation = .add
+            attachment.sourceRGBBlendFactor = .destinationColor
+            attachment.destinationRGBBlendFactor = .zero
+            attachment.sourceAlphaBlendFactor = .zero
+            attachment.destinationAlphaBlendFactor = .one
+
+        case "translucent":
+            attachment.isBlendingEnabled = true
+            attachment.rgbBlendOperation = .add
+            attachment.alphaBlendOperation = .add
+            attachment.sourceRGBBlendFactor = .one
+            attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
+            attachment.sourceAlphaBlendFactor = .one
+            attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+
+        case "normalmapped", "normal":
+            fallthrough
+
+        default:
+            attachment.isBlendingEnabled = true
+            attachment.rgbBlendOperation = .add
+            attachment.alphaBlendOperation = .add
+            attachment.sourceRGBBlendFactor = .sourceAlpha
+            attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
+            attachment.sourceAlphaBlendFactor = .one
+            attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        }
+    }
+}

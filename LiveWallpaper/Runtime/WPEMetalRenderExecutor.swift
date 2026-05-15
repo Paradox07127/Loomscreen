@@ -13,10 +13,9 @@ final class WPEMetalRenderExecutor {
 
     private let device: MTLDevice
     private let commandQueue: MTLCommandQueue
-    private let library: MTLLibrary
     private let targetPool: WPEMetalRenderTargetPool
     private let depthCache: WPEMetalDepthStateCache
-    private var pipelines: [WPEMetalPipelineKey: MTLRenderPipelineState] = [:]
+    private let pipelineCache: WPEMetalPipelineCache
 
     init(device: MTLDevice) throws {
         guard let queue = device.makeCommandQueue() else {
@@ -27,9 +26,9 @@ final class WPEMetalRenderExecutor {
         }
         self.device = device
         commandQueue = queue
-        self.library = library
         self.targetPool = WPEMetalRenderTargetPool(device: device)
         self.depthCache = WPEMetalDepthStateCache(device: device)
+        self.pipelineCache = WPEMetalPipelineCache(device: device, library: library)
     }
 
     /// Phase 2E: lets `WPEMetalSceneRenderer` hand the executor's MTLDevice
@@ -184,7 +183,7 @@ final class WPEMetalRenderExecutor {
         defer { encoder.endEncoding() }
 
         encoder.setFrontFacing(.counterClockwise)
-        encoder.setCullMode(cullMode(for: pass.pass.cullMode))
+        encoder.setCullMode(WPEMetalPipelineCache.cullMode(for: pass.pass.cullMode))
         encoder.setDepthStencilState(depthCache.stencilState(
             depthTest: pass.pass.depthTest,
             depthWrite: pass.pass.depthWrite
@@ -337,103 +336,21 @@ final class WPEMetalRenderExecutor {
         )
     }
 
+    /// Thin delegate so call sites — including `WPEMetalShaderDispatcher`
+    /// across files — keep the same call shape after the pipeline cache
+    /// became a separate type.
     func renderPipeline(
         fragmentName: String,
         blendMode: String = "disabled",
         colorPixelFormat: MTLPixelFormat = WPEMetalRenderExecutor.outputPixelFormat,
         depthPixelFormat: MTLPixelFormat = .invalid
     ) throws -> MTLRenderPipelineState {
-        let normalizedBlend = blendMode.lowercased()
-        let key = WPEMetalPipelineKey(
+        try pipelineCache.pipelineState(
             fragmentName: fragmentName,
-            blendMode: normalizedBlend,
+            blendMode: blendMode,
             colorPixelFormat: colorPixelFormat,
             depthPixelFormat: depthPixelFormat
         )
-        if let cached = pipelines[key] {
-            return cached
-        }
-
-        guard let vertex = library.makeFunction(name: "wpe_fullscreen_vertex"),
-              let fragment = library.makeFunction(name: fragmentName) else {
-            throw WPEMetalRenderExecutorError.pipelineUnavailable(fragmentName)
-        }
-
-        let descriptor = MTLRenderPipelineDescriptor()
-        descriptor.vertexFunction = vertex
-        descriptor.fragmentFunction = fragment
-        guard let colorAttachment = descriptor.colorAttachments[0] else {
-            throw WPEMetalRenderExecutorError.pipelineUnavailable(fragmentName)
-        }
-        colorAttachment.pixelFormat = colorPixelFormat
-        descriptor.depthAttachmentPixelFormat = depthPixelFormat
-        applyBlendMode(normalizedBlend, to: colorAttachment)
-
-        let state = try device.makeRenderPipelineState(descriptor: descriptor)
-        pipelines[key] = state
-        return state
-    }
-
-    private func applyBlendMode(
-        _ mode: String,
-        to attachment: MTLRenderPipelineColorAttachmentDescriptor
-    ) {
-        switch mode {
-        case "disabled":
-            attachment.isBlendingEnabled = false
-
-        case "additive":
-            attachment.isBlendingEnabled = true
-            attachment.rgbBlendOperation = .add
-            attachment.alphaBlendOperation = .add
-            attachment.sourceRGBBlendFactor = .sourceAlpha
-            attachment.destinationRGBBlendFactor = .one
-            attachment.sourceAlphaBlendFactor = .one
-            attachment.destinationAlphaBlendFactor = .one
-
-        case "multiply":
-            // WPE multiply preserves the destination alpha (OpenGL convention).
-            // RGB = src.rgb * dst.rgb; alpha = dst.alpha.
-            attachment.isBlendingEnabled = true
-            attachment.rgbBlendOperation = .add
-            attachment.alphaBlendOperation = .add
-            attachment.sourceRGBBlendFactor = .destinationColor
-            attachment.destinationRGBBlendFactor = .zero
-            attachment.sourceAlphaBlendFactor = .zero
-            attachment.destinationAlphaBlendFactor = .one
-
-        case "translucent":
-            attachment.isBlendingEnabled = true
-            attachment.rgbBlendOperation = .add
-            attachment.alphaBlendOperation = .add
-            attachment.sourceRGBBlendFactor = .one
-            attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
-            attachment.sourceAlphaBlendFactor = .one
-            attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
-
-        case "normalmapped", "normal":
-            fallthrough
-
-        default:
-            attachment.isBlendingEnabled = true
-            attachment.rgbBlendOperation = .add
-            attachment.alphaBlendOperation = .add
-            attachment.sourceRGBBlendFactor = .sourceAlpha
-            attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
-            attachment.sourceAlphaBlendFactor = .one
-            attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
-        }
-    }
-
-    private func cullMode(for raw: String) -> MTLCullMode {
-        switch raw.lowercased() {
-        case "back":
-            return .back
-        case "front":
-            return .front
-        default:
-            return .none
-        }
     }
 
     private func makeOutputTexture(size: CGSize) throws -> MTLTexture {
