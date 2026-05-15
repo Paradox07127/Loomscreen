@@ -9,19 +9,45 @@ struct WPESceneDocument: Equatable, Sendable {
     let camera: WPESceneCamera
     let general: WPESceneGeneral
     let imageObjects: [WPESceneImageObject]
+    /// Particle objects parsed from the scene. Phase 2D-K preserves enough
+    /// metadata for a future CPU emitter to consume; the renderer still
+    /// downgrades these to "unsupported" diagnostics until the runtime ships.
+    let particleObjects: [WPESceneParticleObject]
     let diagnostics: [WPESceneDiagnostic]
 
     init(
         camera: WPESceneCamera,
         general: WPESceneGeneral,
         imageObjects: [WPESceneImageObject],
+        particleObjects: [WPESceneParticleObject] = [],
         diagnostics: [WPESceneDiagnostic]
     ) {
         self.camera = camera
         self.general = general
         self.imageObjects = imageObjects
+        self.particleObjects = particleObjects
         self.diagnostics = diagnostics
     }
+}
+
+/// Lean particle object record. Captures the per-instance attributes
+/// (position, name, file path, blend mode, scale) without trying to model
+/// the emitter/initializer/operator DSL — the renderer-side particle
+/// runtime parses the linked particle JSON when it executes the system.
+struct WPESceneParticleObject: Equatable, Sendable, Identifiable {
+    let id: String
+    let name: String
+    /// Path to the linked particle definition JSON (e.g.
+    /// `particles/snowflat.json`). The runtime resolves it relative to
+    /// the scene cache root.
+    let particleRelativePath: String
+    let origin: SIMD3<Double>
+    let scale: SIMD3<Double>
+    let angles: SIMD3<Double>
+    let visible: Bool
+    let alpha: Double
+    let color: SIMD3<Double>
+    let parallaxDepth: Double
 }
 
 /// Camera block — Phase 2.0 keeps the values around for future projection
