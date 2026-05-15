@@ -46,10 +46,10 @@ enum WPESceneDocumentError: Error, LocalizedError, Equatable, Sendable {
     }
 }
 
-/// Failure modes that surface from the SpriteKit runtime layer when a parsed
-/// scene cannot be staged. These are observed by the UI state machine and
-/// mapped to `FallbackReason` so the user gets a specific message rather than
-/// a generic "scene failed to load".
+/// Failure modes that surface from the scene runtime when a parsed scene
+/// cannot be staged. These are observed by the UI state machine and mapped
+/// to `FallbackReason` so the user gets a specific message rather than a
+/// generic "scene failed to load".
 enum SceneRenderingError: Error, LocalizedError, Equatable, Sendable {
     case cacheRootMissing
     case entryFileMissing(String)
@@ -100,10 +100,10 @@ enum SceneRenderingError: Error, LocalizedError, Equatable, Sendable {
     }
 }
 
-/// Per-layer failure recorded by `SceneRenderingController.load()`. Phase 2.1
-/// uses this to (a) decide whether the scene mounts in degraded mode (≥1
-/// layer renders) or fails outright, and (b) surface a concrete reason in
-/// the developer diagnostic panel and the fallback card.
+/// Per-layer failure recorded by `WPEMetalSceneRenderer.load()`. Used to
+/// (a) decide whether the scene mounts in degraded mode (≥1 layer renders)
+/// or fails outright, and (b) surface a concrete reason in the developer
+/// diagnostic panel and the fallback card.
 enum SceneLoadDiagnostic: Equatable, Sendable {
     case texture(layer: String, error: WPETexDecodeError)
     case legacyUnsupportedTexture(layer: String)

@@ -1,5 +1,4 @@
 import AppKit
-import SpriteKit
 import SwiftUI
 
 /// Scene detail card for Wallpaper Engine projects. Drives the loading /
@@ -61,10 +60,11 @@ struct WPESceneDetailView: View {
     @ViewBuilder
     private var previewCard: some View {
         ZStack {
-            // The SKView preview never unmounts mid-lifecycle — keeping the
-            // SpriteKit pipeline warm avoids a Metal command-buffer thrash
-            // when the user toggles ReduceMotion / focus / throttle. Pause
-            // is communicated by overlay, not by replacing the SKView.
+            // The snapshot preview never unmounts mid-lifecycle — paused
+            // state is communicated by an overlay on top of the existing
+            // image, not by replacing the host view. This avoids a Metal
+            // command-buffer thrash when the user toggles ReduceMotion /
+            // focus / throttle.
             switch state {
             case .idle:
                 fallbackBackground
@@ -72,17 +72,10 @@ struct WPESceneDetailView: View {
             case .loading(let progress):
                 fallbackBackground
                 LiquidGlassSpinner(progressText: progress)
-            case .playing(let controller):
-                ScenePreviewContainer(controller: controller)
-                    .aspectRatio(16.0 / 9.0, contentMode: .fit)
             case .playingSnapshot(let image):
                 MetalSnapshotPreview(image: image)
             case .paused(let reason):
-                if let controller = session?.sceneController {
-                    ScenePreviewContainer(controller: controller)
-                        .aspectRatio(16.0 / 9.0, contentMode: .fit)
-                        .overlay(pausedOverlay(reason: reason))
-                } else if let image = session?.sceneRenderer?.previewSnapshot {
+                if let image = session?.sceneRenderer?.previewSnapshot {
                     MetalSnapshotPreview(image: image)
                         .overlay(pausedOverlay(reason: reason))
                 } else {
@@ -95,9 +88,8 @@ struct WPESceneDetailView: View {
             }
         }
         // Use opacity-only transitions: `.scale` would animate the size of
-        // the NSViewRepresentable host (`ScenePreviewContainer` /
-        // `WPEPreviewView`), which triggers an AppKit Auto-Layout cycle in
-        // the host window pass.
+        // the NSViewRepresentable host (`WPEPreviewView`), which triggers
+        // an AppKit Auto-Layout cycle in the host window pass.
         .transition(.opacity)
         .animation(.easeInOut(duration: 0.2), value: stateKey)
         .frame(maxWidth: .infinity)
@@ -350,15 +342,11 @@ struct WPESceneDetailView: View {
             state = .paused(reason: reduceMotion ? .reduceMotion : .throttled)
             return
         }
-        if let controller = session.sceneController {
-            state = .playing(controller)
-            return
-        }
-        // Phase 2B Task 5: Metal backend has a CGImage readback once load
-        // completes. Surface it as `.playingSnapshot` so the view shows the
-        // actual rendered scene instead of the static preview-unavailable
-        // card; only fall back to `.previewUnavailable` if the snapshot
-        // pipeline somehow returned nil (offscreen-only fixtures).
+        // Metal backend has a CGImage readback once load completes. Surface
+        // it as `.playingSnapshot` so the view shows the actual rendered
+        // scene instead of the static preview-unavailable card; only fall
+        // back to `.previewUnavailable` if the snapshot pipeline somehow
+        // returned nil (offscreen-only fixtures).
         if let snapshot = renderer.previewSnapshot {
             state = .playingSnapshot(snapshot)
             return
@@ -412,12 +400,11 @@ struct WPESceneDetailView: View {
 
     private var stateKey: Int {
         // Lightweight state-change fingerprint for animation triggers; the
-        // associated values (controller / fallback) compare poorly so we
+        // associated values (snapshot / fallback) compare poorly so we
         // map down to ints.
         switch state {
         case .idle:            return 0
         case .loading:         return 1
-        case .playing:         return 2
         case .playingSnapshot: return 2
         case .paused:          return 3
         case .error:           return 4
@@ -430,12 +417,11 @@ struct WPESceneDetailView: View {
             return String(localized: "Idle", defaultValue: "Idle", comment: "Scene renderer state.")
         case .loading:
             return String(localized: "Loading", defaultValue: "Loading", comment: "Scene renderer state.")
-        case .playing:
-            return String(localized: "Playing", defaultValue: "Playing", comment: "Scene renderer state.")
-        // Phase 2B: the Metal experimental backend renders one frame at
-        // load and pauses the displaylink, so the detail card shows a
-        // static thumbnail. Surface that explicitly so the user does not
-        // mistake a frozen frame for a hung renderer.
+        // The Metal renderer pauses its displaylink after first paint and
+        // surfaces a CGImage readback as the inspector thumbnail. The live
+        // pixels keep flowing into the wallpaper window; this label calls
+        // out that the inspector card is the static preview, not a hung
+        // renderer.
         case .playingSnapshot:
             return String(localized: "Static Preview", defaultValue: "Static Preview", comment: "Scene renderer state.")
         case .paused:
@@ -451,8 +437,6 @@ struct WPESceneDetailView: View {
             return String(localized: "Idle", defaultValue: "Idle", comment: "Scene renderer accessibility state.")
         case .loading:
             return String(localized: "Loading scene assets", defaultValue: "Loading scene assets", comment: "Scene renderer accessibility state.")
-        case .playing:
-            return String(localized: "Scene playing", defaultValue: "Scene playing", comment: "Scene renderer accessibility state.")
         case .playingSnapshot:
             return String(localized: "Scene preview, static", defaultValue: "Scene preview, static", comment: "Scene renderer accessibility state.")
         case .paused(let reason):
@@ -464,10 +448,6 @@ struct WPESceneDetailView: View {
 
     private var statusColor: Color {
         switch state {
-        case .playing:         return .green
-        // Distinguish the Metal static preview with a blue pill — green
-        // would imply "live" which is misleading until the per-frame
-        // readback timer ships in Phase 2C.
         case .playingSnapshot: return .blue
         case .loading:         return .yellow
         case .paused:          return .orange
@@ -486,12 +466,11 @@ struct WPESceneDetailView: View {
 enum SceneRenderState: Equatable {
     case idle
     case loading(progress: String?)
-    case playing(SceneRenderingController)
-    /// Phase 2B Task 5: Metal-backed scene with a CGImage readback. The
-    /// SpriteKit live preview path stays on `.playing(controller)` because
-    /// `SKView` runs its own runloop; this case lets the detail view show
-    /// a static thumbnail for the Metal backend instead of falling through
-    /// to `.previewUnavailable`.
+    /// Metal-backed scene with a CGImage readback. The renderer produces a
+    /// static thumbnail once load completes (the live `MTKView` continues
+    /// rendering into the wallpaper window itself); this case lets the
+    /// detail card show that thumbnail instead of falling through to
+    /// `.previewUnavailable`.
     case playingSnapshot(NSImage)
     case paused(reason: PausedReason)
     case error(FallbackReason)
@@ -510,7 +489,6 @@ enum SceneRenderState: Equatable {
         switch (lhs, rhs) {
         case (.idle, .idle): return true
         case (.loading(let l), .loading(let r)): return l == r
-        case (.playing(let lhsCtrl), .playing(let rhsCtrl)): return lhsCtrl === rhsCtrl
         case (.playingSnapshot(let l), .playingSnapshot(let r)): return l === r
         case (.paused(let l), .paused(let r)): return l == r
         case (.error(let l), .error(let r)): return l == r
@@ -559,11 +537,10 @@ enum PausedReason: Equatable, Sendable {
 
 // MARK: - Metal snapshot preview
 
-/// Static thumbnail for the Metal scene backend per the UX & Frontend Spec
-/// in `2026-05-05-wpe-phase2b-scene-runtime-hardening.md` §1. Honours the
-/// rendered texture's intrinsic aspect ratio (orthogonal projections are
-/// often square or portrait) and letterboxes inside the controlBackground
-/// fill so the card chrome stays consistent with the SpriteKit path.
+/// Static thumbnail for the Metal scene backend. Honours the rendered
+/// texture's intrinsic aspect ratio (orthogonal projections are often
+/// square or portrait) and letterboxes inside the controlBackground fill
+/// so the card chrome stays consistent across all detail states.
 @MainActor
 private struct MetalSnapshotPreview: View {
     let image: NSImage

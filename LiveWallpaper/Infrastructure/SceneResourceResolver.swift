@@ -286,7 +286,7 @@ struct SceneResourceResolver: Sendable {
 
     /// Validates `relativePath`, joins it onto the cache root, and confirms
     /// the result is a regular file inside the cache. Used by callers that
-    /// need a safe URL up-front (e.g. `SceneRenderingController.load()` for
+    /// need a safe URL up-front (e.g. `AmbientWallpaperSessionBuilder` for
     /// the entry file safety probe). Throws `.fileMissing` for both missing
     /// files and directory hits so callers don't accidentally try to read
     /// a directory as data.

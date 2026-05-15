@@ -13,6 +13,15 @@ private struct WPEMetalTextureLoadContextError: Error {
 
 @MainActor
 final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
+    /// Default frame rate target when not throttled. `MTKView` clamps this
+    /// to the display's refresh rate so 60 means "render every vsync".
+    static let defaultPreferredFPS = 60
+    /// Frame rate target when an external coordinator wants the renderer
+    /// out of the way (e.g. console window in focus, multi-display
+    /// exclusive rendering takeover). 1fps keeps the timer alive so we can
+    /// bounce back when throttling is released.
+    static let throttledPreferredFPS = 1
+
     private let descriptor: SceneDescriptor
     private let cacheRootURL: URL
     private let dependencyMounts: [WPEAssetMount]
@@ -126,7 +135,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         mtkView.delegate = self
         mtkView.colorPixelFormat = WPEMetalRenderExecutor.outputPixelFormat
         mtkView.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
-        mtkView.preferredFramesPerSecond = SceneRenderingController.defaultPreferredFPS
+        mtkView.preferredFramesPerSecond = Self.defaultPreferredFPS
         mtkView.autoresizingMask = [.width, .height]
         mtkView.enableSetNeedsDisplay = false
         mtkView.isPaused = true
@@ -460,8 +469,8 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         isThrottled = throttled
         guard currentProfile != .suspended else { return }
         mtkView.preferredFramesPerSecond = throttled
-            ? SceneRenderingController.throttledPreferredFPS
-            : SceneRenderingController.defaultPreferredFPS
+            ? Self.throttledPreferredFPS
+            : Self.defaultPreferredFPS
     }
 
     func applyPerformanceProfile(_ profile: WallpaperPerformanceProfile) {
@@ -480,8 +489,8 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             mtkView.isPaused = !hasDynamic
             mtkView.enableSetNeedsDisplay = !hasDynamic
             mtkView.preferredFramesPerSecond = isThrottled
-                ? SceneRenderingController.throttledPreferredFPS
-                : SceneRenderingController.defaultPreferredFPS
+                ? Self.throttledPreferredFPS
+                : Self.defaultPreferredFPS
         case .suspended:
             mtkView.isPaused = true
             mtkView.enableSetNeedsDisplay = true
@@ -844,11 +853,11 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         return (String(parts[1]), parts.dropFirst(2).joined(separator: "/"))
     }
 
-    /// Maps any error raised during `performLoad()` onto the same
-    /// `SceneLoadDiagnostic` taxonomy `SceneRenderingController` populates so
-    /// SpriteKit and Metal report failures through one UI path. The
-    /// `WPEMetalTextureLoadContextError` wrapper carries both the asset path
-    /// and the failing WPE object name through the recursion so missing-asset
+    /// Maps any error raised during `performLoad()` onto the shared
+    /// `SceneLoadDiagnostic` taxonomy so the UI gets one consistent
+    /// failure-reporting path. The `WPEMetalTextureLoadContextError`
+    /// wrapper carries both the asset path and the failing WPE object
+    /// name through the recursion so missing-asset
     /// diagnostics blame the exact layer instead of the generic scene entry.
     private func diagnostic(for error: Error) -> SceneLoadDiagnostic {
         diagnostic(for: error, fallbackPath: nil, layerName: "scene")

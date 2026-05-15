@@ -1197,7 +1197,6 @@ final class ScreenManager {
                 descriptor: descriptor,
                 frame: screen.frame,
                 dependencyMounts: dependencyMounts,
-                rendererBackend: .metalExperimental,
                 engineAssetsRootURL: engineRoot
             ) else {
                 Logger.warning("Scene wallpaper for screen \(screen.id) (workshop \(descriptor.workshopID)) could not be built — cache missing or descriptor invalid", category: .screenManager)
