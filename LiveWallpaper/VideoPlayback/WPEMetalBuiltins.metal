@@ -250,6 +250,77 @@ struct WPEGenericParticleUniforms {
     float4 sizeAndAge;   // x=alpha, y=brightness, z=padding, w=padding
 };
 
+// Phase 2D-L: instanced particle render. Vertex stage reads a per-
+// instance attribute (position+size, color+alpha) from `buffer(1)` and
+// fans out a quad sized to that instance. Coordinates are in pixel
+// space; the scene's orthogonal projection is supplied via buffer(2)
+// as a vec4 (renderSizeX, renderSizeY, _, _) so we can map to NDC
+// without a full 4x4 matrix.
+
+struct WPEParticleInstance {
+    float4 positionAndSize;   // x, y, z (unused), size in pixels
+    float4 color;             // rgb 0..1, a = current alpha
+};
+
+struct WPEParticleVertexOut {
+    float4 position [[position]];
+    float2 uv;
+    float4 color;
+};
+
+struct WPEParticleProjection {
+    float4 sceneSize;         // x = width, y = height (pixels)
+    float4 padding;           // reserved for future world transform
+};
+
+vertex WPEParticleVertexOut wpe_particle_vertex(
+    uint vertexID [[vertex_id]],
+    uint instanceID [[instance_id]],
+    constant WPEParticleInstance* instances [[buffer(1)]],
+    constant WPEParticleProjection& projection [[buffer(2)]]
+) {
+    // 4-vertex tri-strip in clip-space-relative units. Same layout as
+    // `wpe_fullscreen_vertex` so UV mapping stays consistent with the
+    // generic particle fragment.
+    float2 corner;
+    float2 uv;
+    switch (vertexID) {
+        case 0: corner = float2(-0.5, -0.5); uv = float2(0.0, 1.0); break;
+        case 1: corner = float2( 0.5, -0.5); uv = float2(1.0, 1.0); break;
+        case 2: corner = float2(-0.5,  0.5); uv = float2(0.0, 0.0); break;
+        default: corner = float2( 0.5,  0.5); uv = float2(1.0, 0.0); break;
+    }
+    WPEParticleInstance instance = instances[instanceID];
+    float halfWidth = max(projection.sceneSize.x, 1.0) * 0.5;
+    float halfHeight = max(projection.sceneSize.y, 1.0) * 0.5;
+    // Pixel-space center position, expand by per-instance size, project
+    // into NDC. WPE's y is screen-up positive; flip sign so it matches
+    // Metal's NDC convention (also y-up).
+    float2 centerNDC = float2(
+        instance.positionAndSize.x / halfWidth,
+        instance.positionAndSize.y / halfHeight
+    );
+    float2 cornerNDC = corner * (instance.positionAndSize.w * 2.0)
+        / float2(halfWidth * 2.0, halfHeight * 2.0);
+    WPEParticleVertexOut out;
+    out.position = float4(centerNDC + cornerNDC, 0.0, 1.0);
+    out.uv = uv;
+    out.color = instance.color;
+    return out;
+}
+
+fragment half4 wpe_particle_instanced_fragment(
+    WPEParticleVertexOut in [[stage_in]],
+    texture2d<half, access::sample> texture0 [[texture(0)]]
+) {
+    constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
+    float4 sampled = float4(texture0.sample(linearSampler, in.uv));
+    float3 rgb = sampled.rgb * in.color.rgb;
+    float alpha = sampled.a * in.color.a;
+    // Premultiplied output so `translucent` blend mode renders correctly.
+    return half4(float4(rgb * alpha, alpha));
+}
+
 fragment half4 wpe_genericparticle_fragment(
     WPEVertexOut in [[stage_in]],
     texture2d<half, access::sample> texture0 [[texture(0)]],

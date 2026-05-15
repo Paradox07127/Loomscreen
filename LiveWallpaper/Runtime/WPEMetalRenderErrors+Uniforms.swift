@@ -230,3 +230,9 @@ struct WPEShimmerUniforms {
     var time: Float
     var padding: Float = 0
 }
+
+/// Layout MUST match `WPEParticleProjection` in WPEMetalBuiltins.metal.
+struct WPEParticleProjection {
+    var sceneSize: SIMD4<Float>   // x = width, y = height (pixels)
+    var padding: SIMD4<Float> = SIMD4<Float>(0, 0, 0, 0)
+}
