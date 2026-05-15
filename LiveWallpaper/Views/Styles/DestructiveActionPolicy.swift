@@ -139,103 +139,13 @@ enum DestructiveAction: Identifiable, Equatable {
         }
     }
 
-    var iconSystemName: String {
-        switch self {
-        case .removePlaylistItem, .deleteBookmark, .removeHistoryEntry,
-             .removeSceneHistory, .removeScheduleSlot, .removeWPECacheEntry:
-            return "trash"
-        case .clearScene, .clearUnusedWallpapers, .clearAllWPECache, .clearCurrentWallpaper:
-            return "xmark.bin"
-        case .applyBookmarkToAll, .applyConfigurationToAllDisplays, .disableSchedule:
-            return "exclamationmark.triangle"
-        case .forgetWorkshopLibrary:
-            return "folder.badge.minus"
-        case .clearAllShortcuts, .resetShortcut, .resetAllSettings:
-            return "arrow.uturn.backward.circle"
-        }
-    }
-}
-
-/// Liquid Glass confirmation sheet for destructive actions.
-private struct DestructiveConfirmationView: View {
-    let action: DestructiveAction
-    let onConfirm: () -> Void
-    let onCancel: () -> Void
-
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-
-    var body: some View {
-        VStack(spacing: DesignTokens.Spacing.md) {
-            Image(systemName: action.iconSystemName)
-                .font(.system(size: 26, weight: .semibold))
-                .foregroundStyle(Color.red)
-                .frame(width: 56, height: 56)
-                .background {
-                    Circle()
-                        .fill(Color.red.opacity(0.15))
-                        .overlay(Circle().strokeBorder(Color.red.opacity(0.25), lineWidth: 0.5))
-                }
-                .accessibilityHidden(true)
-
-            Text(action.title)
-                .font(.headline)
-                .multilineTextAlignment(.center)
-
-            Text(action.message)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-
-            VStack(spacing: DesignTokens.Spacing.xs) {
-                Button(role: .destructive, action: onConfirm) {
-                    Text(action.destructiveButtonTitle)
-                        .frame(maxWidth: .infinity)
-                }
-                .controlSize(.large)
-                .buttonStyle(.borderedProminent)
-                .tint(.red)
-                .keyboardShortcut(.defaultAction)
-
-                Button(role: .cancel, action: onCancel) {
-                    Text("Cancel")
-                        .frame(maxWidth: .infinity)
-                }
-                .controlSize(.large)
-                .buttonStyle(.bordered)
-                .keyboardShortcut(.cancelAction)
-            }
-            .padding(.top, DesignTokens.Spacing.xs)
-        }
-        .padding(DesignTokens.Spacing.lg)
-        .frame(width: 280)
-        .background(alignment: .top) {
-            // Top specular sheen — emulates the Tahoe glass refraction.
-            LinearGradient(
-                stops: [
-                    .init(color: Color.white.opacity(reduceTransparency ? 0 : 0.10), location: 0),
-                    .init(color: Color.white.opacity(reduceTransparency ? 0 : 0.02), location: 0.2),
-                    .init(color: .clear, location: 0.5)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .allowsHitTesting(false)
-        }
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(Color.white.opacity(reduceTransparency ? 0.10 : 0.16), lineWidth: 0.5)
-        }
-        .shadow(color: .black.opacity(0.55), radius: 40, x: 0, y: 24)
-    }
 }
 
 /// Bundles a `DestructiveAction` with the closure to invoke on confirmation.
 /// Pattern: each callsite builds one of these and assigns it to its
 /// `@State pending: PendingDestructive?`. The view's `.confirmDestructive`
-/// modifier surfaces the Liquid Glass sheet and invokes `perform()` on confirm.
+/// modifier surfaces the native macOS alert and invokes `perform()` on
+/// confirm.
 struct PendingDestructive: Identifiable {
     let id = UUID()
     let action: DestructiveAction
@@ -248,8 +158,11 @@ struct PendingDestructive: Identifiable {
 }
 
 extension View {
-    /// Presents the unified Liquid Glass destructive confirmation sheet when
-    /// `pending` becomes non-nil. The bundled `perform` closure runs on confirm.
+    /// Presents the native macOS confirmation alert when `pending` becomes
+    /// non-nil. macOS 26 Tahoe's system alert chrome already renders in
+    /// the Liquid Glass material — we get the platform look for free,
+    /// keep HIG-perfect button placement / destructive tint / keyboard
+    /// shortcuts, and stop drifting from system theme refreshes.
     func confirmDestructive(_ pending: Binding<PendingDestructive?>) -> some View {
         modifier(DestructiveConfirmationModifier(pending: pending))
     }
@@ -259,17 +172,24 @@ private struct DestructiveConfirmationModifier: ViewModifier {
     @Binding var pending: PendingDestructive?
 
     func body(content: Content) -> some View {
-        content.sheet(item: $pending) { current in
-            DestructiveConfirmationView(
-                action: current.action,
-                onConfirm: {
-                    let captured = current.perform
-                    pending = nil
-                    captured()
-                },
-                onCancel: { pending = nil }
-            )
-            .presentationBackground(.clear)
+        content.alert(
+            pending?.action.title ?? "",
+            isPresented: Binding(
+                get: { pending != nil },
+                set: { if !$0 { pending = nil } }
+            ),
+            presenting: pending
+        ) { current in
+            Button(current.action.destructiveButtonTitle, role: .destructive) {
+                let captured = current.perform
+                pending = nil
+                captured()
+            }
+            Button("Cancel", role: .cancel) {
+                pending = nil
+            }
+        } message: { current in
+            Text(current.action.message)
         }
     }
 }
