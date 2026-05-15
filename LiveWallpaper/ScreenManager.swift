@@ -138,6 +138,25 @@ final class ScreenManager {
     /// Owns the CIFilter video-effects pipeline + weather-reactive monitor.
     /// Lazy because the saveConfiguration / applyFrameRateLimit /
     /// screenRefreshRate / screensProvider callbacks capture self.
+    /// Owns HTML wallpaper management (setters + multi-instance audio-leader
+    /// + trust evaluation). Lazy because the saveConfiguration /
+    /// restoreWallpaperSession / notifyWallpaperSessionChanged callbacks
+    /// capture self.
+    @ObservationIgnored private lazy var htmlCoordinator = HTMLWallpaperCoordinator(
+        configurationStore: configurationStore,
+        screensProvider: { [weak self] in
+            self?.screens ?? []
+        },
+        saveConfiguration: { [weak self] config in
+            self?.saveConfiguration(config)
+        },
+        restoreWallpaperSession: { [weak self] screen, config, preservingState in
+            self?.restoreWallpaperSession(for: screen, configuration: config, preservingState: preservingState)
+        },
+        notifyWallpaperSessionChanged: { [weak self] in
+            self?.notifyWallpaperSessionChanged()
+        }
+    )
     @ObservationIgnored private lazy var effectsCoordinator = WallpaperEffectsCoordinator(
         configurationStore: configurationStore,
         screensProvider: { [weak self] in
@@ -1067,8 +1086,8 @@ final class ScreenManager {
             // Force-mute all but the leader to avoid stacked audio. The
             // visual remains identical so users still get N×GPU — they're
             // warned via the Inspector banner.
-            let isLeader = isAudioLeaderForHTML(source: source, excluding: screen.id)
-            let effectiveConfig = runtimeHTMLConfig(source: source, config: htmlConfig, for: screen)
+            let isLeader = htmlCoordinator.isAudioLeader(source: source, excluding: screen.id)
+            let effectiveConfig = htmlCoordinator.runtimeConfig(source: source, config: htmlConfig, for: screen)
             session = ambientSessionBuilder.makeHTMLSession(source: source, config: effectiveConfig, frame: screen.frame)
             Logger.info("Set HTML wallpaper for screen \(screen.id) — \(source.displayName) [leader=\(isLeader)]", category: .screenManager)
         case .metalShader(let preset):
@@ -1122,112 +1141,30 @@ final class ScreenManager {
         notifyWallpaperSessionChanged()
     }
 
-    // MARK: - HTML Multi-Instance Diagnostics
+    // MARK: - HTML Wallpaper (delegates to HTMLWallpaperCoordinator)
 
-    /// Maps each currently-active HTML source signature to the screens that
-    /// run it. Inspector uses this to surface "also active on N other screen(s)"
-    /// when the user is configuring a wallpaper that's already in use elsewhere.
     func htmlSourceMultiplicity() -> [String: [CGDirectDisplayID]] {
-        var map: [String: [CGDirectDisplayID]] = [:]
-        for screen in screens {
-            guard screen.runtimeSession?.wallpaperType == .html,
-                  let config = configurationStore.get(for: screen.id),
-                  case .html(let source, _) = config.activeWallpaper else { continue }
-            map[source.diagnosticSignature, default: []].append(screen.id)
-        }
-        return map
+        htmlCoordinator.sourceMultiplicity()
     }
 
-    /// Screens (other than `excluding`) currently running the same HTML source.
     func screensRunningSameHTMLSource(as source: HTMLSource, excluding: CGDirectDisplayID) -> [Screen] {
-        let signature = source.diagnosticSignature
-        return screens.filter { other in
-            other.id != excluding
-                && other.runtimeSession?.wallpaperType == .html
-                && (configurationStore.get(for: other.id)?.activeWallpaper).flatMap { content -> String? in
-                    if case .html(let s, _) = content { return s.diagnosticSignature }
-                    return nil
-                } == signature
-        }
+        htmlCoordinator.screensRunningSameSource(as: source, excluding: excluding)
     }
-
-    /// True when no other screen is already playing this HTML source — the
-    /// caller becomes the audio leader.
-    private func isAudioLeaderForHTML(source: HTMLSource, excluding screenID: CGDirectDisplayID) -> Bool {
-        screensRunningSameHTMLSource(as: source, excluding: screenID).isEmpty
-    }
-
-    private func runtimeHTMLConfig(source: HTMLSource, config: HTMLConfig, for screen: Screen) -> HTMLConfig {
-        var effectiveConfig = config
-
-        if !isAudioLeaderForHTML(source: source, excluding: screen.id), !effectiveConfig.muteAudio {
-            effectiveConfig.muteAudio = true
-            Logger.info("Multi-instance HTML wallpaper: muting screen \(screen.id) (audio leader is another screen running same source)", category: .screenManager)
-        }
-
-        let trust = HTMLTrust.evaluate(source: source, trustedOrigins: TrustedHostStore.shared.originSet)
-        effectiveConfig.allowJavaScript = trust.effectiveAllowJavaScript(requested: config.allowJavaScript)
-        return effectiveConfig
-    }
-
-    // MARK: - HTML Wallpaper
 
     func setHTMLWallpaper(source: HTMLSource, config: HTMLConfig = .default, forceReload: Bool = false, for screen: Screen) {
-        var configuration = configurationStore.get(for: screen.id) ?? ScreenConfiguration(
-            screenID: screen.id,
-            wallpaper: .html(source: source, config: config)
-        )
-        if !forceReload,
-           case .html(let existingSource, let existingConfig) = configuration.activeWallpaper,
-           existingSource == source,
-           existingConfig == config,
-           screen.runtimeSession?.wallpaperType == .html {
-            Logger.info("HTML wallpaper unchanged for screen \(screen.id); keeping existing WKWebView session", category: .screenManager)
-            return
-        }
-
-        configuration.setHTMLWallpaper(source: source, config: config)
-        configuration.reconcileWPEOrigin()
-        saveConfiguration(configuration)
-
-        restoreWallpaperSession(for: screen, configuration: configuration, preservingState: false)
+        htmlCoordinator.setWallpaper(source: source, config: config, forceReload: forceReload, for: screen)
     }
 
-    /// Swaps HTML source while keeping existing HTML settings.
     func setHTMLWallpaperPreservingConfig(source: HTMLSource, for screen: Screen) {
-        let preserved = configurationStore.get(for: screen.id)?.htmlConfig ?? .default
-        setHTMLWallpaper(source: source, config: preserved, for: screen)
+        htmlCoordinator.setWallpaperPreservingConfig(source: source, for: screen)
     }
 
     func setHTMLWallpaper(url: String, for screen: Screen) {
-        guard let source = HTMLSource(userInput: url) else { return }
-        setHTMLWallpaper(source: source, for: screen)
+        htmlCoordinator.setWallpaper(url: url, for: screen)
     }
 
     func updateHTMLConfig(_ config: HTMLConfig, for screen: Screen) {
-        guard var existing = configurationStore.get(for: screen.id),
-              case .html(let source, let previousConfig) = existing.activeWallpaper else { return }
-        existing.activeWallpaper = .html(source: source, config: config)
-        saveConfiguration(existing)
-
-        let runtimeConfig = runtimeHTMLConfig(source: source, config: config, for: screen)
-        if !requiresHTMLSessionRebuild(previous: previousConfig, current: config),
-           let applier = screen.runtimeSession as? any HTMLWallpaperConfigApplying,
-           applier.applyHTMLConfig(runtimeConfig) {
-            if let window = screen.activeWallpaperWindow as? VideoWallpaperWindow {
-                window.setWallpaperMouseInteractionEnabled(config.allowMouseInteraction)
-            }
-            notifyWallpaperSessionChanged()
-            return
-        }
-
-        restoreWallpaperSession(for: screen, configuration: existing, preservingState: false)
-    }
-
-    private func requiresHTMLSessionRebuild(previous: HTMLConfig, current: HTMLConfig) -> Bool {
-        previous.useEphemeralStorage != current.useEphemeralStorage
-            || previous.allowJavaScript != current.allowJavaScript
-            || previous.blockTrackers != current.blockTrackers
+        htmlCoordinator.updateConfig(config, for: screen)
     }
 
     // MARK: - Metal Shader Wallpaper
