@@ -248,7 +248,7 @@ struct WPESceneDetailView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Renderer Diagnostics")
                 .font(.caption.bold())
-            Text("Capability: \(descriptor.capabilityTier.localizedLabel) · Phase 2.1", comment: "Renderer diagnostics capability row. The placeholder is the capability tier.")
+            Text("Capability: \(descriptor.capabilityTier.localizedLabel)", comment: "Renderer diagnostics capability row. The placeholder is the capability tier.")
                 .font(.caption.monospaced())
                 .foregroundStyle(.secondary)
             Text(verbatim: diagnosticText)
@@ -356,14 +356,10 @@ struct WPESceneDetailView: View {
 
     private func mapToFallbackReason(_ error: SceneRenderingError) -> FallbackReason {
         switch error {
-        case .cacheRootMissing, .entryFileMissing:
+        case .cacheRootMissing:
             return .sceneResourceMissing
         case .parseFailed(let detail):
             return .sceneParseFailed(detail)
-        case .unsupportedShader:
-            return .sceneShaderUnsupported
-        case .noRenderableObjects:
-            return .sceneResourceMissing
         case .resourceFailed(let diagnostic):
             return Self.fallbackReason(for: diagnostic)
         }
