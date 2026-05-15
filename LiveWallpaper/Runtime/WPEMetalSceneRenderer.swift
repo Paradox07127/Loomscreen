@@ -22,6 +22,11 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
     private let executor: WPEMetalRenderExecutor
     private let textureLoader: WPEMetalTextureLoader
     private var outputTexture: MTLTexture?
+    /// Phase 2D-L: alive particle systems and the per-system sprite
+    /// texture. Built on load from the scene's `particleObjects`; ticked
+    /// + drawn each frame.
+    private var particleSystems: [WPEParticleSystem] = []
+    private var particleTextures: [ObjectIdentifier: MTLTexture] = [:]
     private var loadedTextures: [String: MTLTexture] = [:]
     /// Phase 2E: animated and video texture sources keyed by the same path
     /// the executor uses to look up `MTLTexture` for each pass. Populated
@@ -134,6 +139,9 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         onProgress?("Loading textures")
         try await loadTextures(for: pipeline)
 
+        onProgress?("Loading particle systems")
+        await loadParticleSystems(from: document)
+
         onProgress?("Rendering scene")
         outputTexture = try renderCurrentFrame()
         if let outputTexture {
@@ -161,13 +169,77 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         )
         lastRuntimeUniforms = uniforms
         let currentTextures = texturesForCurrentFrame(time: uniforms.time)
-        return try executor.render(
+        let frame = try executor.render(
             pipeline: pipeline,
             size: sceneRenderSize,
             textures: currentTextures,
             runtimeUniforms: uniforms,
             cameraUniforms: cameraUniforms
         )
+        // Phase 2D-L: particles render after the layer/effect pipeline so
+        // they composite on top of the scene's background. CPU tick uses
+        // the scene clock so animation stays in lockstep with shaders'
+        // `g_Time`.
+        if !particleSystems.isEmpty {
+            for system in particleSystems {
+                system.tick(now: uniforms.time)
+            }
+            try executor.drawParticles(
+                systems: particleSystems,
+                texturesByMaterial: particleTextures,
+                sceneSize: sceneRenderSize,
+                output: frame
+            )
+        }
+        return frame
+    }
+
+    /// Spawn one `WPEParticleSystem` per parsed particle object. Reads
+    /// the linked particle JSON, parses it into a definition, and
+    /// allocates a GPU instance buffer. Resolves the material → first
+    /// texture path so the draw call has a sprite atlas to sample.
+    private func loadParticleSystems(from document: WPESceneDocument) async {
+        particleSystems.removeAll(keepingCapacity: true)
+        particleTextures.removeAll(keepingCapacity: true)
+        for object in document.particleObjects where object.visible {
+            guard let particleURL = try? entryResolver.resolveExistingFileURL(relativePath: object.particleRelativePath),
+                  let data = try? Data(contentsOf: particleURL),
+                  let definition = WPEParticleDefinitionParser.parse(data: data) else {
+                continue
+            }
+            guard let system = WPEParticleSystem(
+                definition: definition,
+                device: executor.textureSourceDevice
+            ) else {
+                continue
+            }
+            particleSystems.append(system)
+            // Try to resolve the material → first texture so the
+            // particle has something to sample. We re-walk the material
+            // here rather than route it through the render-graph builder
+            // because particle materials live outside the layer pipeline.
+            if let materialPath = definition.materialRelativePath,
+               let materialURL = try? entryResolver.resolveExistingFileURL(relativePath: materialPath),
+               let materialData = try? Data(contentsOf: materialURL),
+               let materialJSON = try? JSONSerialization.jsonObject(with: materialData) as? [String: Any],
+               let passes = materialJSON["passes"] as? [[String: Any]],
+               let firstPass = passes.first,
+               let textures = firstPass["textures"] as? [Any],
+               let firstTexturePath = textures.first as? String,
+               let texturePayload = try? await makeTextureResource(
+                    relativePath: firstTexturePath,
+                    label: "particle texture \(firstTexturePath)"
+               ) {
+                switch texturePayload {
+                case .staticTexture(let texture):
+                    particleTextures[ObjectIdentifier(system)] = texture
+                case .dynamicSource(let source):
+                    if let texture = source.texture(at: 0) {
+                        particleTextures[ObjectIdentifier(system)] = texture
+                    }
+                }
+            }
+        }
     }
 
     func reload() async throws {
@@ -178,6 +250,8 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         renderPipeline = nil
         loadDiagnostics = nil
         releaseDynamicTextureSources()
+        particleSystems.removeAll(keepingCapacity: false)
+        particleTextures.removeAll(keepingCapacity: false)
         sceneRenderSize = CGSize(width: 1, height: 1)
         cameraUniforms = .identity
         lastRuntimeUniforms = nil
@@ -228,6 +302,8 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         mtkView.delegate = nil
         outputTexture = nil
         releaseDynamicTextureSources()
+        particleSystems.removeAll(keepingCapacity: false)
+        particleTextures.removeAll(keepingCapacity: false)
         lastRuntimeUniforms = nil
         cachedSnapshot = nil
         executor.releaseTransientResources()

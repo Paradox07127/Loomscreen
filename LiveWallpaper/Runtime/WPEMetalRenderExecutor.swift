@@ -119,6 +119,96 @@ final class WPEMetalRenderExecutor {
         return output
     }
 
+    /// Phase 2D-L: render every alive particle system on top of the
+    /// supplied output texture. Each system contributes one instanced
+    /// draw call, so the per-frame overhead scales with the number of
+    /// emitters (typically 1-5) rather than total particle count.
+    /// Existing render output is loaded as the color attachment so we
+    /// composite over the layer/effect chain that built the frame.
+    func drawParticles(
+        systems: [WPEParticleSystem],
+        texturesByMaterial: [ObjectIdentifier: MTLTexture],
+        sceneSize: CGSize,
+        output: MTLTexture
+    ) throws {
+        let alive = systems.filter { $0.liveInstanceCount > 0 }
+        guard !alive.isEmpty else { return }
+        guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+            throw WPEMetalRenderExecutorError.commandBufferFailed
+        }
+        let descriptor = MTLRenderPassDescriptor()
+        descriptor.colorAttachments[0].texture = output
+        descriptor.colorAttachments[0].loadAction = .load
+        descriptor.colorAttachments[0].storeAction = .store
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
+            throw WPEMetalRenderExecutorError.commandBufferFailed
+        }
+
+        var projection = WPEParticleProjection(
+            sceneSize: SIMD4<Float>(
+                Float(max(sceneSize.width, 1)),
+                Float(max(sceneSize.height, 1)),
+                0, 0
+            )
+        )
+
+        for system in alive {
+            let texture = texturesByMaterial[ObjectIdentifier(system)]
+                ?? texturesByMaterial.values.first
+            let pipelineState = try particlePipelineState(
+                colorPixelFormat: output.pixelFormat
+            )
+            encoder.setRenderPipelineState(pipelineState)
+            encoder.setVertexBuffer(system.instanceBuffer, offset: 0, index: 1)
+            encoder.setVertexBytes(&projection, length: MemoryLayout<WPEParticleProjection>.stride, index: 2)
+            if let texture {
+                encoder.setFragmentTexture(texture, index: 0)
+            }
+            encoder.drawPrimitives(
+                type: .triangleStrip,
+                vertexStart: 0,
+                vertexCount: 4,
+                instanceCount: system.liveInstanceCount
+            )
+        }
+        encoder.endEncoding()
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()
+    }
+
+    private var particlePipelineCache: [UInt: MTLRenderPipelineState] = [:]
+
+    private func particlePipelineState(colorPixelFormat: MTLPixelFormat) throws -> MTLRenderPipelineState {
+        if let cached = particlePipelineCache[colorPixelFormat.rawValue] {
+            return cached
+        }
+        guard let library = device.makeDefaultLibrary(),
+              let vertex = library.makeFunction(name: "wpe_particle_vertex"),
+              let fragment = library.makeFunction(name: "wpe_particle_instanced_fragment") else {
+            throw WPEMetalRenderExecutorError.pipelineUnavailable("wpe_particle_instanced_fragment")
+        }
+        let descriptor = MTLRenderPipelineDescriptor()
+        descriptor.vertexFunction = vertex
+        descriptor.fragmentFunction = fragment
+        guard let attachment = descriptor.colorAttachments[0] else {
+            throw WPEMetalRenderExecutorError.pipelineUnavailable("wpe_particle_instanced_fragment")
+        }
+        attachment.pixelFormat = colorPixelFormat
+        // Particles render with translucent (premultiplied) blending —
+        // the fragment outputs premultiplied alpha so destination contents
+        // pass through where alpha is zero.
+        attachment.isBlendingEnabled = true
+        attachment.rgbBlendOperation = .add
+        attachment.alphaBlendOperation = .add
+        attachment.sourceRGBBlendFactor = .one
+        attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
+        attachment.sourceAlphaBlendFactor = .one
+        attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        let state = try device.makeRenderPipelineState(descriptor: descriptor)
+        particlePipelineCache[colorPixelFormat.rawValue] = state
+        return state
+    }
+
     @MainActor
     func present(texture source: MTLTexture, in view: MTKView) throws -> Bool {
         guard let drawable = view.currentDrawable else { return false }
