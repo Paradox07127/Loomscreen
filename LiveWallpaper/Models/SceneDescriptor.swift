@@ -21,19 +21,30 @@ struct SceneDescriptor: Codable, Equatable, Sendable {
     /// Declared Workshop dependencies that may be mounted as sibling cache or
     /// source roots at runtime.
     let dependencyWorkshopIDs: [String]
+    /// Preflight tier from `WPEScenePreflight`. Optional so historical
+    /// descriptors persisted before preflight existed still decode.
+    let preflightTier: WPEScenePreflightTier?
+    /// Per-scene feature declarations from preflight. Sorted set kept as a
+    /// `[String]` on disk for forward-compatibility — unknown future flags
+    /// round-trip without the decoder rejecting the blob.
+    let preflightFeatureFlags: [WPESceneFeatureFlag]
 
     init(
         workshopID: String,
         cacheRelativePath: String,
         entryFile: String,
         capabilityTier: SceneCapabilityTier,
-        dependencyWorkshopIDs: [String] = []
+        dependencyWorkshopIDs: [String] = [],
+        preflightTier: WPEScenePreflightTier? = nil,
+        preflightFeatureFlags: [WPESceneFeatureFlag] = []
     ) {
         self.workshopID = workshopID
         self.cacheRelativePath = cacheRelativePath
         self.entryFile = entryFile
         self.capabilityTier = capabilityTier
         self.dependencyWorkshopIDs = dependencyWorkshopIDs
+        self.preflightTier = preflightTier
+        self.preflightFeatureFlags = preflightFeatureFlags
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -42,6 +53,8 @@ struct SceneDescriptor: Codable, Equatable, Sendable {
         case entryFile
         case capabilityTier
         case dependencyWorkshopIDs
+        case preflightTier
+        case preflightFeatureFlags
     }
 
     init(from decoder: Decoder) throws {
@@ -53,6 +66,23 @@ struct SceneDescriptor: Codable, Equatable, Sendable {
         // to `.unsupported` so an old build does not blow up on new payloads.
         capabilityTier = (try? c.decode(SceneCapabilityTier.self, forKey: .capabilityTier)) ?? .unsupported
         dependencyWorkshopIDs = (try? c.decodeIfPresent([String].self, forKey: .dependencyWorkshopIDs)) ?? []
+        preflightTier = try? c.decodeIfPresent(WPEScenePreflightTier.self, forKey: .preflightTier)
+        // Drop unknown future flags so old builds keep loading new payloads.
+        let rawFlags = (try? c.decodeIfPresent([String].self, forKey: .preflightFeatureFlags)) ?? []
+        preflightFeatureFlags = rawFlags.compactMap(WPESceneFeatureFlag.init(rawValue:))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(workshopID, forKey: .workshopID)
+        try c.encode(cacheRelativePath, forKey: .cacheRelativePath)
+        try c.encode(entryFile, forKey: .entryFile)
+        try c.encode(capabilityTier, forKey: .capabilityTier)
+        try c.encode(dependencyWorkshopIDs, forKey: .dependencyWorkshopIDs)
+        try c.encodeIfPresent(preflightTier, forKey: .preflightTier)
+        // Persist as raw strings so unknown enum cases produced by future
+        // builds round-trip through older versions of the decoder.
+        try c.encode(preflightFeatureFlags.map(\.rawValue), forKey: .preflightFeatureFlags)
     }
 }
 
