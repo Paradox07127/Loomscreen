@@ -34,14 +34,14 @@ struct WPEMetalRenderExecutorTests {
         #expect(pixel.a >= 250)
     }
 
-    @Test("Fails closed for non-built-in shader programs")
-    func rejectsCustomShader() throws {
+    @Test("Custom shader without recognizable main surfaces a precise translator error")
+    func rejectsUntranslatableCustomShader() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let executor = try WPEMetalRenderExecutor(device: device)
         let pass = WPERenderPass(
             id: "1.0",
-            phase: .effect(file: "effects/custom/effect.json"),
-            shader: "effects/custom",
+            phase: .effect(file: "effects/broken/effect.json"),
+            shader: "effects/broken",
             source: .image("materials/base.png"),
             target: .scene,
             textures: [:],
@@ -58,7 +58,15 @@ struct WPEMetalRenderExecutorTests {
                 graphLayer: graphLayer(pass: pass),
                 passes: [WPEPreparedRenderPass(
                     pass: pass,
-                    shader: WPEShaderProgram(name: "effects/custom", vertexSource: "", fragmentSource: "", isBuiltin: false),
+                    shader: WPEShaderProgram(
+                        name: "effects/broken",
+                        vertexSource: "// no main",
+                        // Valid GLSL syntax-wise but no `void main()` — the
+                        // transpiler must surface a translationFailed
+                        // error rather than emit malformed MSL.
+                        fragmentSource: "uniform sampler2D g_Texture0;\n// missing main",
+                        isBuiltin: false
+                    ),
                     textureBindings: [:],
                     comboValues: [:],
                     uniformValues: [:]
@@ -66,9 +74,86 @@ struct WPEMetalRenderExecutorTests {
             )
         ])
 
-        #expect(throws: WPEMetalRenderExecutorError.unsupportedShader("effects/custom")) {
+        do {
             _ = try executor.render(pipeline: pipeline, size: CGSize(width: 4, height: 4), textures: [:])
+            #expect(Bool(false), "Untranslatable shader render should throw")
+        } catch let error as WPEMetalRenderExecutorError {
+            switch error {
+            case .shaderTranslatorUnavailable(let name, let reason):
+                #expect(name == "effects/broken")
+                #expect(reason.contains("main"))
+            default:
+                #expect(Bool(false), "Expected .shaderTranslatorUnavailable, got \(error)")
+            }
         }
+    }
+
+    @Test("Custom shader with valid GLSL is now translated and renders end-to-end")
+    func translatesAndRendersCustomShader() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let input = try makeRGBAInputTexture(device: device, bytes: Data([
+            0, 0, 255, 255,
+            0, 0, 255, 255,
+            0, 0, 255, 255,
+            0, 0, 255, 255
+        ]))
+        let pass = WPERenderPass(
+            id: "1.0",
+            phase: .effect(file: "effects/multiply_red/effect.json"),
+            shader: "effects/multiply_red",
+            source: .image("materials/base.png"),
+            target: .scene,
+            textures: [0: .image("materials/base.png")],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: graphLayer(pass: pass),
+                passes: [WPEPreparedRenderPass(
+                    pass: pass,
+                    shader: WPEShaderProgram(
+                        name: "effects/multiply_red",
+                        vertexSource: "// fullscreen quad: executor supplies the vertex stage",
+                        // Real-shape WPE-flavor fragment: sampler + varying
+                        // + gl_FragColor write. After preprocess + transpile
+                        // it becomes valid MSL the executor can dispatch.
+                        fragmentSource: """
+                        uniform sampler2D g_Texture0;
+                        varying vec2 v_TexCoord;
+                        void main() {
+                            vec4 c = texture(g_Texture0, v_TexCoord);
+                            gl_FragColor = vec4(c.r + 1.0, c.g, c.b, c.a);
+                        }
+                        """,
+                        isBuiltin: false
+                    ),
+                    textureBindings: [0: .image("materials/base.png")],
+                    comboValues: [:],
+                    uniformValues: [:]
+                )]
+            )
+        ])
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 2, height: 2),
+            textures: ["materials/base.png": input]
+        )
+        let pixel = try readPixel(output, x: 1, y: 1)
+
+        // Input was pure blue (0, 0, 255). Shader added 1.0 to red channel
+        // (saturated to 1.0) and kept blue at 255. Expect bright red+blue
+        // → magenta-ish pixel with full alpha.
+        #expect(pixel.r >= 250)
+        #expect(pixel.b >= 250)
+        #expect(pixel.a >= 250)
     }
 
     @Test("Copies sampled input texture to offscreen output")
@@ -106,6 +191,257 @@ struct WPEMetalRenderExecutorTests {
         #expect(pixel.g >= 250)
         #expect(pixel.b <= 5)
         #expect(pixel.a >= 250)
+    }
+
+    @Test("Multi-pass custom shader reads previous-pass FBO via pass.binds")
+    func multiPassEffectChainsFBOsViaBinds() throws {
+        // Two-pass setup: pass 0 writes a custom shader output to an
+        // FBO; pass 1 reads that FBO via `binds[0]` and renders to scene.
+        // If the dispatcher honours `pass.binds`, the second pass sees
+        // the first pass's output and the test passes. Without that
+        // wiring the second pass would re-sample the original input.
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let input = try makeRGBAInputTexture(device: device, bytes: Data([
+            10, 10, 10, 255,
+            10, 10, 10, 255,
+            10, 10, 10, 255,
+            10, 10, 10, 255
+        ]))
+
+        let pass0 = WPERenderPass(
+            id: "pass0",
+            phase: .effect(file: "effects/two_pass/effect.json"),
+            shader: "effects/two_pass_first",
+            source: .image("materials/base.png"),
+            target: .fbo(name: "_rt_two_pass_intermediate"),
+            textures: [0: .image("materials/base.png")],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        // Second pass: reads the FBO from pass 0 via binds and writes
+        // to the scene output. The actual GLSL just samples slot 0 and
+        // adds a constant red, so we can detect end-to-end correctness.
+        let pass1 = WPERenderPass(
+            id: "pass1",
+            phase: .effect(file: "effects/two_pass/effect.json"),
+            shader: "effects/two_pass_second",
+            source: .image("materials/base.png"),
+            target: .scene,
+            textures: [:],
+            binds: [0: .fbo("_rt_two_pass_intermediate")],
+            constants: [:],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: WPERenderLayer(
+                    objectID: "layer",
+                    objectName: "Layer",
+                    imagePath: "materials/base.png",
+                    materialPath: nil,
+                    compositeA: "a",
+                    compositeB: "b",
+                    localFBOs: [WPERenderFBO(name: "_rt_two_pass_intermediate", scale: 1, format: "rgba8888", unique: false)],
+                    passes: []
+                ),
+                passes: [
+                    WPEPreparedRenderPass(
+                        pass: pass0,
+                        shader: WPEShaderProgram(
+                            name: "effects/two_pass_first",
+                            vertexSource: "// fullscreen vertex from executor",
+                            // First pass: amplify R channel by 25× → maps
+                            // gray (10) up to ≈250.
+                            fragmentSource: """
+                            uniform sampler2D g_Texture0;
+                            varying vec2 v_TexCoord;
+                            void main() {
+                                vec4 c = texture(g_Texture0, v_TexCoord);
+                                gl_FragColor = vec4(c.r * 25.0, c.g, c.b, c.a);
+                            }
+                            """,
+                            isBuiltin: false
+                        ),
+                        textureBindings: [0: .image("materials/base.png")],
+                        comboValues: [:],
+                        uniformValues: [:]
+                    ),
+                    WPEPreparedRenderPass(
+                        pass: pass1,
+                        shader: WPEShaderProgram(
+                            name: "effects/two_pass_second",
+                            vertexSource: "// fullscreen vertex",
+                            // Second pass samples slot 0 (which the
+                            // dispatcher must bind to the pass-0 FBO via
+                            // `binds`) and adds a green tint. If `binds`
+                            // were ignored, slot 0 would fall back to
+                            // pass.pass.source = the original gray image
+                            // and the red channel would stay near 10.
+                            fragmentSource: """
+                            uniform sampler2D g_Texture0;
+                            varying vec2 v_TexCoord;
+                            void main() {
+                                vec4 c = texture(g_Texture0, v_TexCoord);
+                                gl_FragColor = vec4(c.r, c.g + 1.0, c.b, c.a);
+                            }
+                            """,
+                            isBuiltin: false
+                        ),
+                        textureBindings: [:],
+                        comboValues: [:],
+                        uniformValues: [:]
+                    )
+                ]
+            )
+        ])
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 2, height: 2),
+            textures: ["materials/base.png": input]
+        )
+        let pixel = try readPixel(output, x: 1, y: 1)
+
+        // Pass 0 amplified R from 10 → ≈250 in the FBO.
+        // Pass 1 read the FBO (NOT the original) and added green.
+        // Final pixel: high red + high green + zero blue, full alpha.
+        #expect(pixel.r >= 200, "Multi-pass output should carry pass-0's amplified R; got \(pixel.r)")
+        #expect(pixel.g >= 200, "Pass-1 should contribute saturated green; got \(pixel.g)")
+        #expect(pixel.a >= 250)
+    }
+
+    @Test("genericimage2 native MSL fragment renders texture with color tint")
+    func genericImage2RendersWithTint() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let input = try makeRGBAInputTexture(device: device, bytes: Data([
+            255, 255, 255, 255,
+            255, 255, 255, 255,
+            255, 255, 255, 255,
+            255, 255, 255, 255
+        ]))
+        let pass = WPERenderPass(
+            id: "img2.0",
+            phase: .material,
+            shader: "genericimage2",
+            source: .image("materials/base.png"),
+            target: .scene,
+            textures: [0: .image("materials/base.png")],
+            binds: [:],
+            // sRGB 1.0 mid-tint of red so we can detect both color routing
+            // and gamma handling. Executor converts sRGB→linear before
+            // shading; sRGB-tagged target re-encodes on store.
+            constants: ["g_Color": .vector([1, 0, 0, 1])],
+            combos: [:],
+            blending: "normal",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: graphLayer(pass: pass),
+                passes: [WPEPreparedRenderPass(
+                    pass: pass,
+                    shader: WPEShaderProgram(name: "genericimage2", vertexSource: "", fragmentSource: "", isBuiltin: true),
+                    textureBindings: [:],
+                    comboValues: [:],
+                    uniformValues: ["g_Color": .vector([1, 0, 0, 1])]
+                )]
+            )
+        ])
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 2, height: 2),
+            textures: ["materials/base.png": input]
+        )
+        let pixel = try readPixel(output, x: 1, y: 1)
+
+        // White texture × red tint → red pixel at full alpha. The shader
+        // premultiplies, the sRGB target stores back, so r is at the high
+        // end of the byte range with g/b near zero.
+        #expect(pixel.r >= 250)
+        #expect(pixel.g <= 5)
+        #expect(pixel.b <= 5)
+        #expect(pixel.a >= 250)
+    }
+
+    @Test("genericimage4 alpha mask drops alpha when mask is opaque-black")
+    func genericImage4AlphaMaskGatesOutput() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let primary = try makeRGBAInputTexture(device: device, bytes: Data([
+            0, 255, 0, 255,
+            0, 255, 0, 255,
+            0, 255, 0, 255,
+            0, 255, 0, 255
+        ]))
+        // Mask alpha = 0 → output alpha must collapse to 0 regardless of
+        // primary alpha. This is the gating test for the hasMask path.
+        let mask = try makeRGBAInputTexture(device: device, bytes: Data([
+            0, 0, 0, 0,
+            0, 0, 0, 0,
+            0, 0, 0, 0,
+            0, 0, 0, 0
+        ]))
+        let pass = WPERenderPass(
+            id: "img4.0",
+            phase: .material,
+            shader: "genericimage4",
+            source: .image("materials/base.png"),
+            target: .scene,
+            textures: [0: .image("materials/base.png"), 1: .image("materials/mask.png")],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "normal",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: graphLayer(pass: pass),
+                passes: [WPEPreparedRenderPass(
+                    pass: pass,
+                    shader: WPEShaderProgram(name: "genericimage4", vertexSource: "", fragmentSource: "", isBuiltin: true),
+                    textureBindings: [
+                        0: .image("materials/base.png"),
+                        1: .image("materials/mask.png")
+                    ],
+                    comboValues: [:],
+                    uniformValues: [:]
+                )]
+            )
+        ])
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 2, height: 2),
+            textures: [
+                "materials/base.png": primary,
+                "materials/mask.png": mask
+            ]
+        )
+        let pixel = try readPixel(output, x: 1, y: 1)
+
+        // Mask zeroed alpha + premultiplied output → all channels collapse.
+        // Pass blends "normal" against the cleared (0,0,0,1) backbuffer,
+        // so the result is the clear color, not the texture sample.
+        #expect(pixel.a >= 250) // clear-color alpha
+        #expect(pixel.g <= 5)   // green texture didn't bleed through
     }
 
     @Test("Copies image layers that have no material passes")

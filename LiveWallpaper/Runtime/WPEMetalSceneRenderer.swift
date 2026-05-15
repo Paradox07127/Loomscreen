@@ -22,6 +22,24 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
     private let executor: WPEMetalRenderExecutor
     private let textureLoader: WPEMetalTextureLoader
     private var outputTexture: MTLTexture?
+    /// Phase 2D-L: alive particle systems and the per-system sprite
+    /// texture. Built on load from the scene's `particleObjects`; ticked
+    /// + drawn each frame.
+    private var particleSystems: [WPEParticleSystem] = []
+    private var particleTextures: [ObjectIdentifier: MTLTexture] = [:]
+    /// Phase 2D-N: text overlay draws assembled at load time. Each
+    /// frame re-rasterizes via the cached WPETextRenderer (cache hits
+    /// the common case) and draws atop the scene output.
+    private var textRenderer: WPETextRenderer?
+    private var textObjects: [WPESceneTextObject] = []
+    /// Phase 2D-O: audio runtime publishing live FFT bins into the
+    /// runtime uniform that audio-reactive shaders sample. Optional —
+    /// scenes without sound objects skip this entirely.
+    private var soundRuntime: WPESoundRuntime?
+    /// Phase 2D-P: per-text-object SceneScript instances. Keyed by
+    /// the text object's id so the renderer can look up the latest
+    /// scripted value when rasterizing.
+    private var textScriptInstances: [String: WPESceneScriptInstance] = [:]
     private var loadedTextures: [String: MTLTexture] = [:]
     /// Phase 2E: animated and video texture sources keyed by the same path
     /// the executor uses to look up `MTLTexture` for each pass. Populated
@@ -134,6 +152,15 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         onProgress?("Loading textures")
         try await loadTextures(for: pipeline)
 
+        onProgress?("Loading particle systems")
+        await loadParticleSystems(from: document)
+
+        onProgress?("Loading text overlays")
+        loadTextOverlays(from: document)
+
+        onProgress?("Starting audio runtime")
+        startSoundRuntime(from: document)
+
         onProgress?("Rendering scene")
         outputTexture = try renderCurrentFrame()
         if let outputTexture {
@@ -155,19 +182,218 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         guard let pipeline = renderPipeline else {
             throw WPEMetalRenderExecutorError.noRenderablePasses
         }
-        let uniforms = frameClock.runtimeUniforms(
+        var uniforms = frameClock.runtimeUniforms(
             profile: currentProfile,
             pointerPosition: pointerSampler.sample(mtkView)
         )
+        // Phase 2D-O: feed live FFT bins into the runtime uniform so
+        // audio-reactive shaders animate to the playing audio. When no
+        // sound runtime is active, the default zero spectrum stays.
+        if let soundRuntime {
+            uniforms = WPEMetalRuntimeUniforms(
+                time: uniforms.time,
+                daytime: uniforms.daytime,
+                brightness: uniforms.brightness,
+                pointerPosition: uniforms.pointerPosition,
+                audioSpectrum: soundRuntime.currentSpectrum
+            )
+        }
         lastRuntimeUniforms = uniforms
         let currentTextures = texturesForCurrentFrame(time: uniforms.time)
-        return try executor.render(
+        let frame = try executor.render(
             pipeline: pipeline,
             size: sceneRenderSize,
             textures: currentTextures,
             runtimeUniforms: uniforms,
             cameraUniforms: cameraUniforms
         )
+        // Phase 2D-L: particles render after the layer/effect pipeline so
+        // they composite on top of the scene's background. CPU tick uses
+        // the scene clock so animation stays in lockstep with shaders'
+        // `g_Time`.
+        if !particleSystems.isEmpty {
+            for system in particleSystems {
+                system.tick(now: uniforms.time)
+            }
+            try executor.drawParticles(
+                systems: particleSystems,
+                texturesByMaterial: particleTextures,
+                sceneSize: sceneRenderSize,
+                output: frame
+            )
+        }
+        // Phase 2D-N: text overlays composite on top of particles. The
+        // rasterizer caches by content hash, so static text only walks
+        // CoreText once.
+        if let textRenderer, !textObjects.isEmpty {
+            var draws: [WPETextOverlayDraw] = []
+            draws.reserveCapacity(textObjects.count)
+            for object in textObjects where object.visible && object.alpha > 0 {
+                // Phase 2D-P: refresh scripted text from its JS instance
+                // before the CoreText cache lookup. The cache key
+                // includes the rendered string so a new value triggers
+                // a fresh rasterization automatically.
+                let liveObject: WPESceneTextObject
+                if let instance = textScriptInstances[object.id] {
+                    let updated = instance.tickString()
+                    if updated != object.text {
+                        liveObject = WPESceneTextObject(
+                            id: object.id,
+                            name: object.name,
+                            text: updated,
+                            textScript: object.textScript,
+                            fontRelativePath: object.fontRelativePath,
+                            pointSize: object.pointSize,
+                            color: object.color,
+                            alpha: object.alpha,
+                            origin: object.origin,
+                            scale: object.scale,
+                            visible: object.visible,
+                            horizontalAlignment: object.horizontalAlignment,
+                            verticalAlignment: object.verticalAlignment,
+                            maxWidth: object.maxWidth,
+                            parallaxDepth: object.parallaxDepth
+                        )
+                    } else {
+                        liveObject = object
+                    }
+                } else {
+                    liveObject = object
+                }
+                guard let entry = textRenderer.rasterize(liveObject) else { continue }
+                // WPE pixel-space origin is screen-relative; the scene
+                // canvas is centered at (width/2, height/2). Subtract
+                // half-canvas so origin "1920 1080 0" lands at the
+                // center of a 1920×1080 scene. Y is also flipped to
+                // match Metal's NDC convention (already y-up).
+                let halfWidth = Double(sceneRenderSize.width) * 0.5
+                let halfHeight = Double(sceneRenderSize.height) * 0.5
+                let center = SIMD2<Float>(
+                    Float(liveObject.origin.x - halfWidth),
+                    Float(liveObject.origin.y - halfHeight)
+                )
+                let scale = SIMD2<Float>(
+                    Float(max(liveObject.scale.x, 0.0001)),
+                    Float(max(liveObject.scale.y, 0.0001))
+                )
+                let scaledSize = CGSize(
+                    width: entry.size.width * CGFloat(scale.x),
+                    height: entry.size.height * CGFloat(scale.y)
+                )
+                draws.append(WPETextOverlayDraw(
+                    texture: entry.texture,
+                    centerInScenePixels: center,
+                    sizeInScenePixels: scaledSize,
+                    tint: SIMD3<Float>(
+                        Float(liveObject.color.x),
+                        Float(liveObject.color.y),
+                        Float(liveObject.color.z)
+                    ),
+                    alpha: Float(liveObject.alpha)
+                ))
+            }
+            if !draws.isEmpty {
+                try executor.drawTextOverlays(
+                    overlays: draws,
+                    sceneSize: sceneRenderSize,
+                    output: frame
+                )
+            }
+        }
+        return frame
+    }
+
+    /// Phase 2D-O: spin up the audio runtime and start playback if the
+    /// scene declared sound objects. Failures are non-fatal — the
+    /// renderer keeps going with silence and surfaces a diagnostic.
+    private func startSoundRuntime(from document: WPESceneDocument) {
+        guard !document.soundObjects.isEmpty else {
+            soundRuntime = nil
+            return
+        }
+        let runtime = WPESoundRuntime(resolver: resourceResolver)
+        let attachedCount = runtime.start(sounds: document.soundObjects)
+        if attachedCount == 0 {
+            // Engine couldn't start any players (missing files, decode
+            // failure, or no audio device). Keep the runtime around so
+            // the FFT tap still publishes silence to audio shaders.
+        }
+        soundRuntime = runtime
+    }
+
+    /// Phase 2D-N: build the WPETextRenderer + cache the parsed text
+    /// object list. Rasterization happens lazily during the first frame
+    /// so we don't pay the CoreText cost when the scene is preview-only.
+    private func loadTextOverlays(from document: WPESceneDocument) {
+        textObjects = document.textObjects
+        guard !textObjects.isEmpty else {
+            textRenderer = nil
+            textScriptInstances.removeAll(keepingCapacity: false)
+            return
+        }
+        textRenderer = WPETextRenderer(
+            device: executor.textureSourceDevice,
+            resolver: resourceResolver
+        )
+        // Phase 2D-P: spin up a SceneScript instance for every text
+        // object whose `text` field carried an embedded script. The
+        // instance evaluates the module once at load (running `init`)
+        // and is ticked per frame to refresh the rendered string.
+        textScriptInstances.removeAll(keepingCapacity: false)
+        for object in textObjects {
+            guard let script = object.textScript else { continue }
+            if let instance = try? WPESceneScriptInstance(script: script, initialValue: object.text) {
+                textScriptInstances[object.id] = instance
+            }
+        }
+    }
+
+    /// Spawn one `WPEParticleSystem` per parsed particle object. Reads
+    /// the linked particle JSON, parses it into a definition, and
+    /// allocates a GPU instance buffer. Resolves the material → first
+    /// texture path so the draw call has a sprite atlas to sample.
+    private func loadParticleSystems(from document: WPESceneDocument) async {
+        particleSystems.removeAll(keepingCapacity: true)
+        particleTextures.removeAll(keepingCapacity: true)
+        for object in document.particleObjects where object.visible {
+            guard let particleURL = try? entryResolver.resolveExistingFileURL(relativePath: object.particleRelativePath),
+                  let data = try? Data(contentsOf: particleURL),
+                  let definition = WPEParticleDefinitionParser.parse(data: data) else {
+                continue
+            }
+            guard let system = WPEParticleSystem(
+                definition: definition,
+                device: executor.textureSourceDevice
+            ) else {
+                continue
+            }
+            particleSystems.append(system)
+            // Try to resolve the material → first texture so the
+            // particle has something to sample. We re-walk the material
+            // here rather than route it through the render-graph builder
+            // because particle materials live outside the layer pipeline.
+            if let materialPath = definition.materialRelativePath,
+               let materialURL = try? entryResolver.resolveExistingFileURL(relativePath: materialPath),
+               let materialData = try? Data(contentsOf: materialURL),
+               let materialJSON = try? JSONSerialization.jsonObject(with: materialData) as? [String: Any],
+               let passes = materialJSON["passes"] as? [[String: Any]],
+               let firstPass = passes.first,
+               let textures = firstPass["textures"] as? [Any],
+               let firstTexturePath = textures.first as? String,
+               let texturePayload = try? await makeTextureResource(
+                    relativePath: firstTexturePath,
+                    label: "particle texture \(firstTexturePath)"
+               ) {
+                switch texturePayload {
+                case .staticTexture(let texture):
+                    particleTextures[ObjectIdentifier(system)] = texture
+                case .dynamicSource(let source):
+                    if let texture = source.texture(at: 0) {
+                        particleTextures[ObjectIdentifier(system)] = texture
+                    }
+                }
+            }
+        }
     }
 
     func reload() async throws {
@@ -178,6 +404,14 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         renderPipeline = nil
         loadDiagnostics = nil
         releaseDynamicTextureSources()
+        particleSystems.removeAll(keepingCapacity: false)
+        particleTextures.removeAll(keepingCapacity: false)
+        textObjects.removeAll(keepingCapacity: false)
+        textRenderer?.releaseAll()
+        textRenderer = nil
+        textScriptInstances.removeAll(keepingCapacity: false)
+        soundRuntime?.stop()
+        soundRuntime = nil
         sceneRenderSize = CGSize(width: 1, height: 1)
         cameraUniforms = .identity
         lastRuntimeUniforms = nil
@@ -228,6 +462,14 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         mtkView.delegate = nil
         outputTexture = nil
         releaseDynamicTextureSources()
+        particleSystems.removeAll(keepingCapacity: false)
+        particleTextures.removeAll(keepingCapacity: false)
+        textObjects.removeAll(keepingCapacity: false)
+        textRenderer?.releaseAll()
+        textRenderer = nil
+        textScriptInstances.removeAll(keepingCapacity: false)
+        soundRuntime?.stop()
+        soundRuntime = nil
         lastRuntimeUniforms = nil
         cachedSnapshot = nil
         executor.releaseTransientResources()
@@ -342,22 +584,47 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         case "solidcolor", "solidlayer":
             return []
 
-        case "copy":
-            let reference = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
-            return [reference].filter(\.isExternalTextureReference)
-
         case "compose":
             let first = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
             let second = pass.textureBindings[1] ?? pass.pass.textures[1] ?? first
             return [first, second].filter(\.isExternalTextureReference)
 
+        case "genericimage4":
+            // Slot 0 + slot 1 (alpha mask). Slot 1 is optional; only
+            // request load if it's actually bound.
+            let primary = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
+            var refs: [WPETextureReference] = [primary]
+            if let mask = pass.textureBindings[1] ?? pass.pass.textures[1] {
+                refs.append(mask)
+            }
+            return refs.filter(\.isExternalTextureReference)
+
         default:
-            return []
+            // Single-input shaders: copy, genericimage2, genericparticle,
+            // and every effect_* variant. The translator-driven custom
+            // shader path also goes here — it always reads at least slot 0.
+            // Multi-pass effects (lightshafts, blur_precise_gaussian, …)
+            // express inter-pass texture references via `pass.binds`,
+            // resolving to FBO names that the executor produces during
+            // earlier passes — those don't need to be pre-loaded.
+            let reference = pass.pass.binds[0]
+                ?? pass.textureBindings[0]
+                ?? pass.pass.textures[0]
+                ?? pass.pass.source
+            var refs: [WPETextureReference] = [reference]
+            for slot in 1..<4 {
+                if let extra = pass.pass.binds[slot] ?? pass.textureBindings[slot] ?? pass.pass.textures[slot] {
+                    refs.append(extra)
+                }
+            }
+            return refs.filter(\.isExternalTextureReference)
         }
     }
 
     private func normalizedBuiltinShaderName(_ shaderName: String) -> String {
-        WPEBuiltinShaderName.normalized(shaderName, genericImageAsCopy: true)
+        // Mirrors WPEMetalRenderExecutor.normalizedBuiltinShaderName so the
+        // loader and dispatcher route on the same canonical names.
+        WPEBuiltinShaderName.normalized(shaderName, genericImageAsCopy: false)
     }
 
     /// Phase 2E rewrite: returns a `WPELoadedTextureResource` instead of a
@@ -556,6 +823,11 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             switch executorError {
             case .unsupportedShader(let name):
                 return .materialUnresolved(layer: layerName, reason: "Shader \"\(name)\" is not supported by the Metal renderer yet.")
+            case .shaderTranslatorUnavailable(let name, let reason):
+                return .materialUnresolved(
+                    layer: layerName,
+                    reason: "Shader \"\(name)\" needs the WPE GLSL translator: \(reason)"
+                )
             case .unsupportedTarget:
                 return .materialUnresolved(layer: layerName, reason: "This wallpaper uses an unsupported rendering target.")
             case .missingTexture(let reference):

@@ -306,6 +306,32 @@ struct WallpaperEnginePackage: Sendable, Equatable {
         }
     }
 
+    /// Streams a single entry's bytes from the supplied handle. The corpus
+    /// scanner uses this to read `scene.json` (or any single material/effect
+    /// JSON) without paying the cost of extracting the whole package or
+    /// memory-mapping a multi-hundred-MB blob.
+    func readEntry(_ entry: Entry, from handle: FileHandle) throws -> Data {
+        let absoluteStart = dataStart + entry.dataOffset
+        do {
+            try handle.seek(toOffset: absoluteStart)
+        } catch {
+            throw WPEPackageError.entryOutOfBounds(name: entry.name)
+        }
+        let toRead = Int(entry.dataSize)
+        guard let data = try handle.read(upToCount: toRead),
+              data.count == toRead else {
+            throw WPEPackageError.entryOutOfBounds(name: entry.name)
+        }
+        return data
+    }
+
+    /// Convenience: locate an entry by case-insensitive name match. Returns
+    /// nil when no entry matches — callers decide whether that's an error.
+    func entry(named name: String) -> Entry? {
+        let target = name.lowercased()
+        return entries.first { $0.name.lowercased() == target }
+    }
+
     private func dataRange(for entry: Entry, dataCount: Int) throws -> Range<Data.Index> {
         let (absoluteStart, startOverflow) = dataStart.addingReportingOverflow(entry.dataOffset)
         let (absoluteEnd, endOverflow) = absoluteStart.addingReportingOverflow(entry.dataSize)
