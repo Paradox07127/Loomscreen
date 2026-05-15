@@ -97,27 +97,17 @@ struct PlaylistSection: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .onAppear {
-            // `loadEntries()` writes @State (entries) — defer to next
-            // main-actor tick so the first paint doesn't fire it inside
-            // body computation. Same pattern used by ScreenDetailView /
-            // HTMLSourceSection / WPESceneSection.
-            Task { @MainActor in loadEntries() }
-        }
+        .onAppear { scheduleEntriesLoad() }
         .onChange(of: screen.id) {
-            Task { @MainActor in loadEntries() }
+            scheduleEntriesLoad()
         }
         .onChange(of: playlistBookmarks) {
-            Task { @MainActor in loadEntries() }
+            scheduleEntriesLoad()
         }
         .onReceive(NotificationCenter.default.publisher(for: .wallpaperConfigurationDidChange)) { notification in
             guard let changedID = notification.userInfo?["screenID"] as? CGDirectDisplayID,
                   changedID == screen.id else { return }
-            // saveConfiguration → store.save → posts this notification
-            // synchronously. Loading entries here writes @State during
-            // SwiftUI's reconcile pass; deferring one tick removes the
-            // "Modifying state during view update" warnings.
-            Task { @MainActor in loadEntries() }
+            scheduleEntriesLoad()
         }
         .confirmDestructive($pendingDestructive)
     }
@@ -176,10 +166,16 @@ struct PlaylistSection: View {
 
     // MARK: - Entry Loading
 
+    private func scheduleEntriesLoad() {
+        Task { @MainActor in
+            loadEntries()
+        }
+    }
+
     private func loadEntries() {
         guard let config = screenManager.getConfiguration(for: screen),
               let primary = config.savedVideoBookmarkData else {
-            entries = []
+            if !entries.isEmpty { entries = [] }
             return
         }
         let extras = config.playlistBookmarks ?? []
@@ -187,7 +183,7 @@ struct PlaylistSection: View {
         let cursor = config.playlistCursorIndex ?? 0
         let activeBookmark = (cursor < combined.count) ? combined[cursor] : primary
 
-        entries = [PlaylistEntry(
+        let nextEntries = [PlaylistEntry(
             bookmark: primary,
             isPrimary: true,
             isPlaying: primary == activeBookmark,
@@ -202,6 +198,7 @@ struct PlaylistSection: View {
                     ?? String(localized: "Unknown", defaultValue: "Unknown", comment: "Fallback playlist entry name.")
             )
         }
+        if entries != nextEntries { entries = nextEntries }
     }
 
     // MARK: - Actions

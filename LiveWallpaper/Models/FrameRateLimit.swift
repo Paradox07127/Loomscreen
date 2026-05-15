@@ -1,6 +1,6 @@
 import SwiftUI
 
-enum FrameRateLimit: Int, CaseIterable, Identifiable, Codable {
+enum FrameRateLimit: Int, CaseIterable, Identifiable, Codable, Sendable {
     case fps30 = 30
     case fps60 = 60
     case unlimited = 0

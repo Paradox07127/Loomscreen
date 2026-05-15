@@ -4,7 +4,7 @@ import SwiftUI
 /// Top-level automation mode chosen by the user per screen. Resolves the
 /// long-standing playlist/schedule conflict by giving a single authoritative
 /// source of truth for which automation, if any, is active.
-enum WallpaperMode: String, Codable, CaseIterable, Identifiable {
+enum WallpaperMode: String, Codable, CaseIterable, Identifiable, Sendable {
     case single
     case playlist
     case schedule

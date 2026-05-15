@@ -105,12 +105,19 @@ final class WallpaperPersistenceCoordinator {
         return (validCount, invalidCount)
     }
 
+    /// Deferred to the next main-actor tick so subscribers run outside the
+    /// current SwiftUI reconcile pass. The cache update inside
+    /// `store.save(_:)` is already synchronous, so readers see the new
+    /// configuration before this notification fires — the hop only delays
+    /// the secondary "redraw" signal, not the data.
     private func postChange(for screenID: CGDirectDisplayID) {
-        NotificationCenter.default.post(
-            name: .wallpaperConfigurationDidChange,
-            object: nil,
-            userInfo: ["screenID": screenID]
-        )
+        Task { @MainActor in
+            NotificationCenter.default.post(
+                name: .wallpaperConfigurationDidChange,
+                object: nil,
+                userInfo: ["screenID": screenID]
+            )
+        }
     }
 
     /// All video-bookmark `Data` values referenced by a configuration.
