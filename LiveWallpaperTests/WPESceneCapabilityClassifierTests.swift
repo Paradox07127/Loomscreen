@@ -5,10 +5,32 @@ import Testing
 @Suite("WPESceneCapabilityClassifier")
 struct WPESceneCapabilityClassifierTests {
 
-    @Test("Classifier marks model chains with missing terminal texture unsupported")
-    func missingTerminalTextureIsUnsupported() throws {
+    @Test("Classifier rejects scenes where the declared image reference resolves nowhere")
+    func unreachableImageReferenceIsUnsupported() throws {
         let fixture = try makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
+        // No file shipped — the only declared image reference can't be
+        // found in the primary cache, in the bundled built-ins, or in any
+        // dependency mount. Classifier rejects so the user sees the
+        // failure at import time instead of after applying the wallpaper.
+        let document = try parseScene(imagePath: "materials/totally-missing.png")
+
+        let tier = WPESceneCapabilityClassifier().capabilityTier(for: document, cacheURL: fixture.cacheRoot)
+
+        #expect(tier == .unsupported)
+    }
+
+    @Test("Classifier accepts scenes whose direct image reference resolves even if the deep chain fails")
+    func reachableImageReferenceWithBrokenChainIsImageOnly() throws {
+        let fixture = try makeFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        // Scene declares a model wrapper that resolves on disk; the inner
+        // material references a missing terminal texture. The runtime
+        // resolver owns the deep `model.json → material.json → texture`
+        // chain walk + graceful degradation when intermediate refs miss
+        // (including special runtime tokens like `_rt_FullFrameBuffer`).
+        // The import gate just confirms the directly-named entry resolves
+        // through *some* mount in the multi-root chain.
         let modelsDir = fixture.cacheRoot.appendingPathComponent("models", isDirectory: true)
         let materialsDir = fixture.cacheRoot.appendingPathComponent("materials", isDirectory: true)
         try FileManager.default.createDirectory(at: modelsDir, withIntermediateDirectories: true)
@@ -19,7 +41,7 @@ struct WPESceneCapabilityClassifierTests {
 
         let tier = WPESceneCapabilityClassifier().capabilityTier(for: document, cacheURL: fixture.cacheRoot)
 
-        #expect(tier == .unsupported)
+        #expect(tier == .imageOnly)
     }
 
     @Test("Classifier keeps renderable images with unsupported diagnostics degraded")

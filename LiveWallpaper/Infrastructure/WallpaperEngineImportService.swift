@@ -299,7 +299,21 @@ final class WallpaperEngineImportService {
             return .rejected(reason: describe(error))
         }
 
-        let tier = WPESceneCapabilityClassifier().capabilityTier(for: document, cacheURL: cacheURL)
+        // Mirror the runtime's mount chain so the import gate sees the
+        // same resources the renderer will: bundled framework built-ins +
+        // dependency-mounted workshop addons + the optional user-granted
+        // WPE assets root (if any).
+        let dependencyMounts = WPEDependencyMountResolver().mounts(
+            dependencyWorkshopIDs: project.dependencyWorkshopIDs,
+            origin: nil
+        )
+        let engineRoot = WPEEngineAssetsLibrary.shared.resolveAuthorizedRoot()
+        let tier = WPESceneCapabilityClassifier().capabilityTier(
+            for: document,
+            cacheURL: cacheURL,
+            dependencyMounts: dependencyMounts,
+            engineAssetsRootURL: engineRoot
+        )
         let preflight = WPEScenePreflight.classify(
             document: document,
             project: project,
@@ -501,7 +515,21 @@ struct WPECachedContentResolver {
             do {
                 let data = try Data(contentsOf: entryURL)
                 let document = try WPESceneDocumentParser.parse(data: data)
-                tier = WPESceneCapabilityClassifier().capabilityTier(for: document, cacheURL: cacheURL)
+                // Match the runtime's mount chain (bundled built-ins +
+                // dependency mounts + optional engine assets root) so the
+                // re-classify on cached content lines up with what the
+                // renderer will actually be able to load.
+                let dependencyMounts = WPEDependencyMountResolver().mounts(
+                    dependencyWorkshopIDs: origin.dependencyWorkshopIDs,
+                    origin: origin
+                )
+                let engineRoot = WPEEngineAssetsLibrary.shared.resolveAuthorizedRoot()
+                tier = WPESceneCapabilityClassifier().capabilityTier(
+                    for: document,
+                    cacheURL: cacheURL,
+                    dependencyMounts: dependencyMounts,
+                    engineAssetsRootURL: engineRoot
+                )
                 // Reconstruct a minimal `WallpaperEngineProject` from the
                 // persisted origin so preflight can read the same flags it
                 // does at first-import time. The `propertyCount` is

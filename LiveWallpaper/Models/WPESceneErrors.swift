@@ -52,10 +52,7 @@ enum WPESceneDocumentError: Error, LocalizedError, Equatable, Sendable {
 /// generic "scene failed to load".
 enum SceneRenderingError: Error, LocalizedError, Equatable, Sendable {
     case cacheRootMissing
-    case entryFileMissing(String)
     case parseFailed(String)
-    case unsupportedShader
-    case noRenderableObjects
     /// Every layer hit a resource-level failure (decode / missing / unsupported
     /// format / etc.). The associated diagnostic carries the *first* such
     /// failure we encountered so the UI can surface a precise reason instead
@@ -70,29 +67,11 @@ enum SceneRenderingError: Error, LocalizedError, Equatable, Sendable {
                 defaultValue: "Scene cache directory is missing.",
                 comment: "Error shown when the extracted scene cache directory cannot be found."
             )
-        case .entryFileMissing(let entry):
-            return String(
-                localized: "error.scene.rendering.entry_file_missing",
-                defaultValue: "Scene entry file \(entry) was not found in the cache.",
-                comment: "Error shown when a Wallpaper Engine scene entry file is missing from cache."
-            )
         case .parseFailed(let detail):
             return String(
                 localized: "error.scene.rendering.parse_failed",
                 defaultValue: "Failed to parse scene.json: \(detail)",
                 comment: "Error shown when a Wallpaper Engine scene.json file cannot be parsed."
-            )
-        case .unsupportedShader:
-            return String(
-                localized: "error.scene.rendering.unsupported_shader",
-                defaultValue: "Scene uses unsupported shader features.",
-                comment: "Error shown when a scene requires unsupported shader features."
-            )
-        case .noRenderableObjects:
-            return String(
-                localized: "error.scene.rendering.no_renderable_objects",
-                defaultValue: "Scene has no renderable image layers.",
-                comment: "Error shown when a scene has no image layers the renderer can display."
             )
         case .resourceFailed(let diagnostic):
             return diagnostic.errorDescription
