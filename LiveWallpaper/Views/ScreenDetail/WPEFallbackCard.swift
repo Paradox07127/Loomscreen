@@ -50,11 +50,6 @@ struct WPEFallbackCard: View {
         return .unsupportedType
     }
 
-    /// True when the user can probably take an action (subscribe, retry,
-    /// re-download) and have the wallpaper start working. Drives both the
-    /// warning chip color and the Retry button visibility.
-    var canRetry: Bool { reason.isActionable }
-
     var body: some View {
         VStack(spacing: 24) {
             WPEPreviewView(
@@ -104,7 +99,7 @@ struct WPEFallbackCard: View {
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.orange.opacity(0.14), in: RoundedRectangle(cornerRadius: 16))
+            .background(reason.severityTint.opacity(0.14), in: RoundedRectangle(cornerRadius: 16))
             // Combine ONLY the warning text into a single VoiceOver element
             // so the title + body announce together, while leaving the
             // dependency list rows and primary buttons individually
@@ -247,7 +242,7 @@ struct WPEFallbackCard: View {
         case .sceneShaderUnsupported:
             return String(localized: "This scene uses a custom shader the renderer couldn't translate to Metal. Try re-downloading the project in Steam.", defaultValue: "This scene uses a custom shader the renderer couldn't translate to Metal. Try re-downloading the project in Steam.", comment: "Wallpaper Engine fallback warning body.")
         case .sceneResourceMissing:
-            return String(localized: "Some assets the scene needs aren't where the renderer expected them. If the scene references shared Wallpaper Engine framework files (materials/util, models/util), open the Workshop Library and grant your Wallpaper Engine install folder via the Engine Assets menu — most other cases mean re-downloading the project in Steam will fix it.", defaultValue: "Some assets the scene needs aren't where the renderer expected them. If the scene references shared Wallpaper Engine framework files (materials/util, models/util), open the Workshop Library and grant your Wallpaper Engine install folder via the Engine Assets menu — most other cases mean re-downloading the project in Steam will fix it.", comment: "Wallpaper Engine fallback warning body.")
+            return String(localized: "Some assets the scene needs aren't where the renderer expected them. The renderer ships built-in equivalents for the most common Wallpaper Engine framework files; if this scene needs something extra, an advanced option in the Workshop Library lets you link a Wallpaper Engine install. Otherwise, re-downloading the project in Steam usually fixes it.", defaultValue: "Some assets the scene needs aren't where the renderer expected them. The renderer ships built-in equivalents for the most common Wallpaper Engine framework files; if this scene needs something extra, an advanced option in the Workshop Library lets you link a Wallpaper Engine install. Otherwise, re-downloading the project in Steam usually fixes it.", comment: "Wallpaper Engine fallback warning body.")
         case .missingDependency:
             return String(localized: "This wallpaper relies on other Workshop projects we don't have on disk yet. Subscribe to them in Steam, then re-import this folder.", defaultValue: "This wallpaper relies on other Workshop projects we don't have on disk yet. Subscribe to them in Steam, then re-import this folder.", comment: "Wallpaper Engine fallback warning body.")
         case .requiresWindowsPlugin:

@@ -72,6 +72,42 @@ struct WPEMultiRootResourceResolverTests {
         #expect(String(data: try Data(contentsOf: url), encoding: .utf8) == "project-version")
     }
 
+    @Test(
+        "Engine fallback honors built-ins before engine assets",
+        .enabled(if: WPEBuiltinFrameworkAssets.rootURL != nil)
+    )
+    func engineFallbackHonorsBuiltinsBeforeEngineAssets() throws {
+        let builtinRoot = try #require(WPEBuiltinFrameworkAssets.rootURL)
+        let path = "models/util/composelayer.json"
+        let builtinResolver = SceneResourceResolver(cacheRootURL: builtinRoot)
+        let builtinURL = try #require(
+            try? builtinResolver.resolveExistingFileURL(relativePath: path)
+        )
+
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+
+        // Plant a sentinel file at the same relative path under the
+        // engine-assets root. If our resolver incorrectly preferred the
+        // engine resolver over the built-in, this is the file it would
+        // return — and the test would fail.
+        let engineModels = fixture.engineRoot
+            .appendingPathComponent("assets/models/util", isDirectory: true)
+        try FileManager.default.createDirectory(at: engineModels, withIntermediateDirectories: true)
+        let engineURL = engineModels.appendingPathComponent("composelayer.json")
+        try Data("engine-sentinel".utf8).write(to: engineURL)
+
+        let resolver = WPEMultiRootResourceResolver(
+            primaryRootURL: fixture.primaryRoot,
+            dependencyMounts: [],
+            engineAssetsRootURL: fixture.engineRoot
+        )
+
+        let resolvedURL = try resolver.resolveExistingFileURL(relativePath: path)
+        #expect(resolvedURL == builtinURL)
+        #expect(String(data: try Data(contentsOf: resolvedURL), encoding: .utf8) != "engine-sentinel")
+    }
+
     @Test("Engine assets fallback only triggers on .fileMissing")
     func engineAssetsFallbackOnlyTriggersOnFileMissing() throws {
         let fixture = try makeFixture()

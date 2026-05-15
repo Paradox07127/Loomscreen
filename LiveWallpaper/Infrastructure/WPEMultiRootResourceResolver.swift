@@ -4,11 +4,16 @@ import Foundation
 struct WPEMultiRootResourceResolver: Sendable {
     private let primary: SceneResourceResolver
     private let dependencyMounts: [String: SceneResourceResolver]
+    /// App-bundled clean-room equivalents of the small WPE framework files
+    /// (~68 KB across 15 files under `wpe-builtins/`). Tried before the
+    /// optional engine-assets resolver so most scenes work zero-config on
+    /// macOS, where WPE isn't installable. `nil` only when the bundle
+    /// subtree is unreachable (some unit-test contexts).
+    private let builtinResolver: SceneResourceResolver?
     /// Optional read-only fallback rooted at `<engineRoot>/assets/`. Tried
-    /// only after the primary mount misses a non-dependency path — so it
-    /// resolves shared WPE framework assets (`materials/util/...`,
-    /// `models/util/...`, `effects/...`) without ever shadowing a project's
-    /// own files.
+    /// only after the primary AND built-in resolvers miss — so it covers
+    /// the rare scene that references files outside our built-in inventory
+    /// without ever shadowing a project's own files.
     private let engineAssetsResolver: SceneResourceResolver?
 
     init(
@@ -17,6 +22,7 @@ struct WPEMultiRootResourceResolver: Sendable {
         engineAssetsRootURL: URL? = nil
     ) {
         self.primary = SceneResourceResolver(cacheRootURL: primaryRootURL)
+        self.builtinResolver = WPEBuiltinFrameworkAssets.makeResolver()
         self.engineAssetsResolver = engineAssetsRootURL.map {
             SceneResourceResolver(
                 cacheRootURL: $0.appendingPathComponent("assets", isDirectory: true)
@@ -36,7 +42,7 @@ struct WPEMultiRootResourceResolver: Sendable {
             }
             return try resolver.resolveImage(relativePath: dependency.childPath)
         }
-        return try resolveWithEngineAssetsFallback(relativePath: relativePath) { resolver, path in
+        return try resolveWithFallbacks(relativePath: relativePath) { resolver, path in
             try resolver.resolveImage(relativePath: path)
         }
     }
@@ -48,7 +54,7 @@ struct WPEMultiRootResourceResolver: Sendable {
             }
             return try resolver.resolveExistingFileURL(relativePath: dependency.childPath)
         }
-        return try resolveWithEngineAssetsFallback(relativePath: relativePath) { resolver, path in
+        return try resolveWithFallbacks(relativePath: relativePath) { resolver, path in
             try resolver.resolveExistingFileURL(relativePath: path)
         }
     }
@@ -60,28 +66,39 @@ struct WPEMultiRootResourceResolver: Sendable {
             }
             return try resolver.resolveTexturePayload(relativePath: dependency.childPath)
         }
-        return try resolveWithEngineAssetsFallback(relativePath: relativePath) { resolver, path in
+        return try resolveWithFallbacks(relativePath: relativePath) { resolver, path in
             try resolver.resolveTexturePayload(relativePath: path)
         }
     }
 
-    /// Tries the primary resolver first; falls through to the engine assets
-    /// resolver ONLY on `.fileMissing`. Other `ResolveError` cases
-    /// (`.pathEscape`, `.materialUnresolved`, `.texture`, …) propagate
-    /// without retry — the engine root cannot fix a malformed path or a
-    /// project's broken JSON chain.
-    private func resolveWithEngineAssetsFallback<T>(
+    /// Tries the primary resolver first; on `.fileMissing` falls through to
+    /// the app-bundled built-ins, then to the optional engine-assets
+    /// resolver. Other `ResolveError` cases (`.pathEscape`,
+    /// `.materialUnresolved`, `.texture`, …) propagate without retry —
+    /// another root can't fix a malformed path or a project's broken JSON
+    /// chain.
+    private func resolveWithFallbacks<T>(
         relativePath: String,
         _ resolve: (SceneResourceResolver, String) throws -> T
     ) throws -> T {
         do {
             return try resolve(primary, relativePath)
         } catch SceneResourceResolver.ResolveError.fileMissing {
-            guard let engineAssetsResolver else {
-                throw SceneResourceResolver.ResolveError.fileMissing
-            }
-            return try resolve(engineAssetsResolver, relativePath)
+            // Continue to the built-in resolver below.
         }
+
+        if let builtinResolver {
+            do {
+                return try resolve(builtinResolver, relativePath)
+            } catch SceneResourceResolver.ResolveError.fileMissing {
+                // Continue to the optional engine-assets resolver below.
+            }
+        }
+
+        guard let engineAssetsResolver else {
+            throw SceneResourceResolver.ResolveError.fileMissing
+        }
+        return try resolve(engineAssetsResolver, relativePath)
     }
 
     private func dependencyReference(_ relativePath: String) -> (workshopID: String, childPath: String)? {

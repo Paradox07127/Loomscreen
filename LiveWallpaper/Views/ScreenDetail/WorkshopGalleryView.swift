@@ -210,9 +210,15 @@ struct WorkshopGalleryView: View {
                             .buttonStyle(WorkshopToolbarButtonStyle(tint: .secondary))
                             .accessibilityHint(Text("Change or forget the selected Steam Workshop folder"))
                             .disabled(isBusy)
-
-                            engineAssetsMenu
                         }
+
+                        // Engine-assets escape hatch lives OUTSIDE the
+                        // `hasLibraryRoot` gate — a user who manually
+                        // imported a project via WPESceneSection (without
+                        // ever connecting a Workshop library) still needs
+                        // to reach this entry point when a `.sceneResourceMissing`
+                        // fallback card points them here.
+                        engineAssetsMenu
 
                         if !allowsTargetSelection {
                             Button {
@@ -443,6 +449,8 @@ struct WorkshopGalleryView: View {
                     Label("Forget Engine Folder", systemImage: "xmark.circle")
                 }
             } else {
+                Text("Most scenes ship the files they need. Link a Wallpaper Engine install only if you have one and want extra coverage.")
+                Divider()
                 Button {
                     presentEngineAssetsGrant()
                 } label: {
@@ -450,11 +458,11 @@ struct WorkshopGalleryView: View {
                 }
             }
         } label: {
-            Label("Engine Assets", systemImage: isEngineAssetsAuthorized ? "puzzlepiece.extension.fill" : "puzzlepiece.extension")
+            Label("Advanced: WPE Folder", systemImage: isEngineAssetsAuthorized ? "puzzlepiece.extension.fill" : "puzzlepiece.extension")
         }
         .menuStyle(.button)
-        .buttonStyle(WorkshopToolbarButtonStyle(tint: isEngineAssetsAuthorized ? .secondary : .yellow))
-        .accessibilityHint(Text("Grant or forget the Wallpaper Engine install folder so scenes can resolve shared framework files"))
+        .buttonStyle(WorkshopToolbarButtonStyle(tint: .secondary))
+        .accessibilityHint(Text("Optional: link a Wallpaper Engine install folder for additional framework asset coverage. Most scenes don't need this."))
         .disabled(isBusy)
     }
 
