@@ -15,8 +15,8 @@ final class WPEMetalRenderExecutor {
     private let commandQueue: MTLCommandQueue
     private let library: MTLLibrary
     private let targetPool: WPEMetalRenderTargetPool
+    private let depthCache: WPEMetalDepthStateCache
     private var pipelines: [WPEMetalPipelineKey: MTLRenderPipelineState] = [:]
-    private var depthStates: [WPEMetalDepthKey: MTLDepthStencilState] = [:]
 
     init(device: MTLDevice) throws {
         guard let queue = device.makeCommandQueue() else {
@@ -29,6 +29,7 @@ final class WPEMetalRenderExecutor {
         commandQueue = queue
         self.library = library
         self.targetPool = WPEMetalRenderTargetPool(device: device)
+        self.depthCache = WPEMetalDepthStateCache(device: device)
     }
 
     /// Phase 2E: lets `WPEMetalSceneRenderer` hand the executor's MTLDevice
@@ -161,7 +162,7 @@ final class WPEMetalRenderExecutor {
             frameState.markInitialized(destination.texture)
         }
 
-        let needsDepth = needsDepthAttachment(pass: pass)
+        let needsDepth = depthCache.needsAttachment(for: pass)
 
         let descriptor = MTLRenderPassDescriptor()
         descriptor.colorAttachments[0].texture = destination.texture
@@ -170,7 +171,7 @@ final class WPEMetalRenderExecutor {
         descriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
 
         if needsDepth {
-            let depth = try depthTexture(for: destination, frameState: &frameState)
+            let depth = try depthCache.attachmentTexture(for: destination, frameState: &frameState)
             descriptor.depthAttachment.texture = depth
             descriptor.depthAttachment.loadAction = frameState.hasInitialized(destination.texture) ? .load : .clear
             descriptor.depthAttachment.storeAction = .store
@@ -184,7 +185,7 @@ final class WPEMetalRenderExecutor {
 
         encoder.setFrontFacing(.counterClockwise)
         encoder.setCullMode(cullMode(for: pass.pass.cullMode))
-        encoder.setDepthStencilState(depthStencilState(
+        encoder.setDepthStencilState(depthCache.stencilState(
             depthTest: pass.pass.depthTest,
             depthWrite: pass.pass.depthWrite
         ))
@@ -432,90 +433,6 @@ final class WPEMetalRenderExecutor {
             return .front
         default:
             return .none
-        }
-    }
-
-    private func needsDepthAttachment(pass: WPEPreparedRenderPass) -> Bool {
-        pass.pass.depthWrite.lowercased() == "enabled"
-            || pass.pass.depthWrite.lowercased() == "true"
-            || pass.pass.depthTest.lowercased() != "disabled"
-    }
-
-    private func makeDepthTexture(width: Int, height: Int) throws -> MTLTexture {
-        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
-            pixelFormat: .depth32Float,
-            width: max(width, 1),
-            height: max(height, 1),
-            mipmapped: false
-        )
-        descriptor.usage = [.renderTarget]
-        descriptor.storageMode = .private
-
-        guard let texture = device.makeTexture(descriptor: descriptor) else {
-            throw WPEMetalTextureLoaderError.textureAllocationFailed
-        }
-        texture.label = "WPE Metal executor depth"
-        return texture
-    }
-
-    /// Phase 2C audit fix: depth textures key on (target, exact destination
-    /// dimensions) so a scaled FBO's depth attachment matches its color
-    /// attachment dimensions instead of being stuck at scene size.
-    private func depthTexture(
-        for destination: (id: WPEMetalTargetID, texture: MTLTexture),
-        frameState: inout WPEMetalFrameState
-    ) throws -> MTLTexture {
-        let key = WPEMetalDepthTextureKey(
-            targetID: destination.id,
-            width: destination.texture.width,
-            height: destination.texture.height
-        )
-        if let existing = frameState.depthTextures[key] {
-            return existing
-        }
-        let texture = try makeDepthTexture(width: key.width, height: key.height)
-        frameState.depthTextures[key] = texture
-        return texture
-    }
-
-    private func depthStencilState(depthTest: String, depthWrite: String) -> MTLDepthStencilState {
-        let key = WPEMetalDepthKey(
-            depthTest: depthTest.lowercased(),
-            depthWrite: depthWrite.lowercased()
-        )
-        if let cached = depthStates[key] {
-            return cached
-        }
-
-        let descriptor = MTLDepthStencilDescriptor()
-        descriptor.depthCompareFunction = depthCompareFunction(for: key.depthTest)
-        descriptor.isDepthWriteEnabled = key.depthWrite == "enabled" || key.depthWrite == "true"
-
-        let state = device.makeDepthStencilState(descriptor: descriptor)!
-        depthStates[key] = state
-        return state
-    }
-
-    private func depthCompareFunction(for raw: String) -> MTLCompareFunction {
-        switch raw.lowercased() {
-        case "always":
-            return .always
-        case "never":
-            return .never
-        case "less":
-            return .less
-        case "lequal", "lessequal", "less_equal":
-            return .lessEqual
-        case "greater":
-            return .greater
-        case "gequal", "greaterequal", "greater_equal":
-            return .greaterEqual
-        case "equal":
-            return .equal
-        case "notequal", "not_equal":
-            return .notEqual
-        default:
-            return .always
         }
     }
 
