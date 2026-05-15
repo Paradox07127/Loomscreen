@@ -66,20 +66,28 @@ enum WPEScenePreflight {
             return .unsupported
         }
 
-        // Order matters: the most expensive missing capability dominates.
-        if flags.contains(.particleObject)
-            || flags.contains(.textObject)
-            || flags.contains(.soundObject)
-            || flags.contains(.lightObject)
-            || flags.contains(.animationLayer) {
+        // Phase 2D-O: particle/text/sound runtimes have shipped — they
+        // no longer auto-bump to `runtimeSystemsRequired`. Only the
+        // remaining unimplemented runtime objects (lights) and
+        // animation-layer mesh deformation block playback. Scenes
+        // declaring animationlayers still render their base image
+        // layers; the warp is approximated as a static composite.
+        if flags.contains(.lightObject) {
             return .runtimeSystemsRequired
         }
         if flags.contains(.customShaderSource) {
-            return .shaderTranslationRequired
+            // Shader translator is shipping — degrade to indicate the
+            // visual may differ from the WPE reference, but don't
+            // declare the scene unplayable.
+            return .degradedPlayable
+        }
+        if flags.contains(.animationLayer) {
+            // Animation layers parse and the base image renders; mesh
+            // deformation is approximated as static. Surface as
+            // degraded so users know.
+            return .degradedPlayable
         }
         if flags.contains(.imageEffect) {
-            // Effects pipeline is partially supported by the built-in
-            // shaders; treat as degraded so the UI surfaces the caveat.
             return .degradedPlayable
         }
         return .nativePlayable
