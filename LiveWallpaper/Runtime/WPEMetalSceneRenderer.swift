@@ -32,6 +32,10 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
     /// the common case) and draws atop the scene output.
     private var textRenderer: WPETextRenderer?
     private var textObjects: [WPESceneTextObject] = []
+    /// Phase 2D-O: audio runtime publishing live FFT bins into the
+    /// runtime uniform that audio-reactive shaders sample. Optional —
+    /// scenes without sound objects skip this entirely.
+    private var soundRuntime: WPESoundRuntime?
     private var loadedTextures: [String: MTLTexture] = [:]
     /// Phase 2E: animated and video texture sources keyed by the same path
     /// the executor uses to look up `MTLTexture` for each pass. Populated
@@ -150,6 +154,9 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         onProgress?("Loading text overlays")
         loadTextOverlays(from: document)
 
+        onProgress?("Starting audio runtime")
+        startSoundRuntime(from: document)
+
         onProgress?("Rendering scene")
         outputTexture = try renderCurrentFrame()
         if let outputTexture {
@@ -171,10 +178,22 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         guard let pipeline = renderPipeline else {
             throw WPEMetalRenderExecutorError.noRenderablePasses
         }
-        let uniforms = frameClock.runtimeUniforms(
+        var uniforms = frameClock.runtimeUniforms(
             profile: currentProfile,
             pointerPosition: pointerSampler.sample(mtkView)
         )
+        // Phase 2D-O: feed live FFT bins into the runtime uniform so
+        // audio-reactive shaders animate to the playing audio. When no
+        // sound runtime is active, the default zero spectrum stays.
+        if let soundRuntime {
+            uniforms = WPEMetalRuntimeUniforms(
+                time: uniforms.time,
+                daytime: uniforms.daytime,
+                brightness: uniforms.brightness,
+                pointerPosition: uniforms.pointerPosition,
+                audioSpectrum: soundRuntime.currentSpectrum
+            )
+        }
         lastRuntimeUniforms = uniforms
         let currentTextures = texturesForCurrentFrame(time: uniforms.time)
         let frame = try executor.render(
@@ -247,6 +266,24 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             }
         }
         return frame
+    }
+
+    /// Phase 2D-O: spin up the audio runtime and start playback if the
+    /// scene declared sound objects. Failures are non-fatal — the
+    /// renderer keeps going with silence and surfaces a diagnostic.
+    private func startSoundRuntime(from document: WPESceneDocument) {
+        guard !document.soundObjects.isEmpty else {
+            soundRuntime = nil
+            return
+        }
+        let runtime = WPESoundRuntime(resolver: resourceResolver)
+        let attachedCount = runtime.start(sounds: document.soundObjects)
+        if attachedCount == 0 {
+            // Engine couldn't start any players (missing files, decode
+            // failure, or no audio device). Keep the runtime around so
+            // the FFT tap still publishes silence to audio shaders.
+        }
+        soundRuntime = runtime
     }
 
     /// Phase 2D-N: build the WPETextRenderer + cache the parsed text
@@ -325,6 +362,8 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         textObjects.removeAll(keepingCapacity: false)
         textRenderer?.releaseAll()
         textRenderer = nil
+        soundRuntime?.stop()
+        soundRuntime = nil
         sceneRenderSize = CGSize(width: 1, height: 1)
         cameraUniforms = .identity
         lastRuntimeUniforms = nil
@@ -380,6 +419,8 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         textObjects.removeAll(keepingCapacity: false)
         textRenderer?.releaseAll()
         textRenderer = nil
+        soundRuntime?.stop()
+        soundRuntime = nil
         lastRuntimeUniforms = nil
         cachedSnapshot = nil
         executor.releaseTransientResources()

@@ -15,6 +15,8 @@ struct WPESceneDocument: Equatable, Sendable {
     let particleObjects: [WPESceneParticleObject]
     /// Phase 2D-N: text objects parsed for the CoreText rasterizer.
     let textObjects: [WPESceneTextObject]
+    /// Phase 2D-O: sound objects driving the audio runtime + FFT tap.
+    let soundObjects: [WPESceneSoundObject]
     let diagnostics: [WPESceneDiagnostic]
 
     init(
@@ -23,6 +25,7 @@ struct WPESceneDocument: Equatable, Sendable {
         imageObjects: [WPESceneImageObject],
         particleObjects: [WPESceneParticleObject] = [],
         textObjects: [WPESceneTextObject] = [],
+        soundObjects: [WPESceneSoundObject] = [],
         diagnostics: [WPESceneDiagnostic]
     ) {
         self.camera = camera
@@ -30,8 +33,22 @@ struct WPESceneDocument: Equatable, Sendable {
         self.imageObjects = imageObjects
         self.particleObjects = particleObjects
         self.textObjects = textObjects
+        self.soundObjects = soundObjects
         self.diagnostics = diagnostics
     }
+}
+
+/// Sound object record. Phase 2D-O drives the audio runtime + FFT tap.
+/// `soundRelativePaths` is an array because WPE's sound field can be
+/// either a single string or an array (random pick / playlist); we
+/// preserve the order so the runtime can play any/all of them.
+struct WPESceneSoundObject: Equatable, Sendable, Identifiable {
+    let id: String
+    let name: String
+    let soundRelativePaths: [String]
+    let volume: Double
+    let playbackMode: String   // "loop" | "random" | "playoncestop" — runtime interprets
+    let startSilent: Bool
 }
 
 /// Text object record. Phase 2D-N captures enough attributes for the

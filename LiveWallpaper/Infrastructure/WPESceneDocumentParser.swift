@@ -45,6 +45,7 @@ enum WPESceneDocumentParser {
         var imageObjects: [WPESceneImageObject] = []
         var particleObjects: [WPESceneParticleObject] = []
         var textObjects: [WPESceneTextObject] = []
+        var soundObjects: [WPESceneSoundObject] = []
 
         for entry in rawObjects {
             let objectName = entry["name"] as? String ?? "?"
@@ -70,13 +71,20 @@ enum WPESceneDocumentParser {
             if resolution.primary == .text, let object = parseTextObject(entry, diagnostics: &diagnostics) {
                 textObjects.append(object)
             }
+            // Phase 2D-O: sound objects feed the AVAudioEngine playback
+            // path + FFT tap. We preserve them at the parse layer so
+            // the runtime can play any audio file the scene declares.
+            if resolution.primary == .sound, let object = parseSoundObject(entry, diagnostics: &diagnostics) {
+                soundObjects.append(object)
+            }
 
             var unsupportedKinds = resolution.candidates.filter {
-                $0 != .image && $0 != .unknown && $0 != .particle && $0 != .text
+                $0 != .image && $0 != .unknown && $0 != .particle && $0 != .text && $0 != .sound
             }
             if resolution.primary != .image
                 && resolution.primary != .particle
                 && resolution.primary != .text
+                && resolution.primary != .sound
                 && resolution.primary != .unknown
                 && !unsupportedKinds.contains(resolution.primary) {
                 unsupportedKinds.append(resolution.primary)
@@ -89,6 +97,9 @@ enum WPESceneDocumentParser {
             }
             if resolution.primary == .text {
                 diagnostics.append(.init(severity: .info, message: "Text object \(objectName) parsed; CoreText rasterizer renders static content"))
+            }
+            if resolution.primary == .sound {
+                diagnostics.append(.init(severity: .info, message: "Sound object \(objectName) parsed; AVAudioEngine playback runs at scene start"))
             }
 
             if resolution.primary == .unknown {
@@ -117,7 +128,47 @@ enum WPESceneDocumentParser {
             imageObjects: imageObjects,
             particleObjects: particleObjects,
             textObjects: textObjects,
+            soundObjects: soundObjects,
             diagnostics: diagnostics
+        )
+    }
+
+    private static func parseSoundObject(
+        _ dict: [String: Any],
+        diagnostics: inout [WPESceneDiagnostic]
+    ) -> WPESceneSoundObject? {
+        // WPE writes the `sound` field as either a single string or an
+        // array (multiple files for random/playlist mode). We accept
+        // both forms and normalize to an array.
+        var paths: [String] = []
+        if let single = dict["sound"] as? String, !single.isEmpty {
+            paths.append(single)
+        } else if let array = dict["sound"] as? [Any] {
+            for value in array {
+                if let s = value as? String, !s.isEmpty {
+                    paths.append(s)
+                }
+            }
+        }
+        guard !paths.isEmpty else {
+            diagnostics.append(.init(severity: .warning, message: "Sound object \(dict["name"] as? String ?? "?") has no sound files"))
+            return nil
+        }
+        let id = (dict["id"] as? String)
+            ?? (dict["id"] as? Int).map(String.init)
+            ?? (dict["name"] as? String)
+            ?? paths[0]
+        let name = (dict["name"] as? String) ?? id
+        let volume = unwrapDouble(dict["volume"]) ?? 1
+        let mode = (dict["playbackmode"] as? String) ?? "loop"
+        let startSilent = (dict["startsilent"] as? Bool) ?? false
+        return WPESceneSoundObject(
+            id: id,
+            name: name,
+            soundRelativePaths: paths,
+            volume: max(0, min(volume, 1)),
+            playbackMode: mode.lowercased(),
+            startSilent: startSilent
         )
     }
 
