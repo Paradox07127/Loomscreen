@@ -470,11 +470,18 @@ struct WorkshopGalleryView: View {
             projects = discovered
             state = .results
         } catch WallpaperEngineLibraryScanner.ScanError.rootInaccessible(let detail) {
-            errorMessage = String(localized: "Workshop folder is unreachable: \(detail). Try re-granting access.", comment: "Workshop library folder access error. The placeholder is the system detail.")
-            SettingsManager.shared.clearWorkshopLibraryRootBookmark()
-            updateRootAccessState()
+            // Transient scan failure (security-scoped resource not yet
+            // started, directory temporarily missing during a re-launch,
+            // etc.). Keep the saved bookmark so the user can retry without
+            // re-granting access via the system file panel — only the
+            // explicit "Forget Library" destructive action clears the
+            // saved bookmark via `disconnectLibraryRoot()`.
+            errorMessage = String(
+                localized: "Workshop folder is unreachable: \(detail). Try again — your saved access remains.",
+                comment: "Workshop library folder access error after a transient scan failure. The placeholder is the system detail. The saved bookmark is preserved so the user can retry."
+            )
             projects = []
-            state = .needsRoot
+            state = hasLibraryRoot ? .results : .needsRoot
         } catch {
             errorMessage = error.localizedDescription
             projects = []

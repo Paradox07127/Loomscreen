@@ -91,10 +91,15 @@ final class AppleAerialsLibrary {
 
         guard let plan = Self.scanPlan(for: directoryURL) else {
             guard scanGeneration == myGeneration else { return }
+            // Don't drop the saved bookmark for this — the directory is
+            // still reachable, just doesn't contain a recognised Apple
+            // wallpaper layout. The user may have a transient situation
+            // (macOS mid-update, files temporarily moved) or they may want
+            // to re-pick the directory via the "Reconnect" button. Either
+            // way, retaining the bookmark is non-destructive: the user can
+            // re-pick with the system file panel from the error view.
             let message = "The selected folder doesn't contain Apple wallpapers. Try ~/Library/Application Support/com.apple.wallpaper/aerials/."
             Logger.warning(message, category: .fileAccess)
-            SettingsManager.shared.clearAerialsDirectoryBookmark()
-            isAuthorized = false
             lastScanError = message
             assets = []
             return
@@ -164,18 +169,27 @@ extension AppleAerialsLibrary {
 
         do {
             let resolution = try resolver(bookmarkData)
-            guard !resolution.isStale else {
-                let message = "Apple Aerials directory bookmark is stale. Grant access again."
-                Logger.warning(message, category: .fileAccess)
-                SettingsManager.shared.clearAerialsDirectoryBookmark()
-                isAuthorized = false
-                assets = []
-                lastScanError = message
-                return nil
+            if resolution.isStale {
+                // Apple recommends re-creating the bookmark from the
+                // resolved URL when isStale=true — the URL is still good
+                // for this run; the stored Data needs a fresh copy so
+                // future relaunches don't trip the flag again.
+                Logger.info(
+                    "Apple Aerials directory bookmark is stale; refreshing in place",
+                    category: .fileAccess
+                )
+                if let fresh = try? Self.createReadOnlyBookmark(for: resolution.url) {
+                    SettingsManager.shared.saveAerialsDirectoryBookmark(fresh)
+                }
             }
             isAuthorized = true
             return resolution.url
         } catch {
+            // Resolution failed — could be transient (sandbox not warmed,
+            // home directory moved by Migration Assistant). Surface the
+            // error but keep the saved bookmark so the next launch /
+            // explicit retry can resolve it; the user can still hit
+            // "Reconnect" or "Forget" to take control.
             let message = "Failed to resolve Apple Aerials directory bookmark: \(error.localizedDescription)"
             Logger.error(message, category: .fileAccess)
             isAuthorized = false
