@@ -54,7 +54,7 @@ struct WPEShaderTranspiler {
         shaderName: String,
         preprocessedSource: String
     ) throws -> WPEShaderTranslationResult {
-        var lines = preprocessedSource.components(separatedBy: "\n")
+        let lines = preprocessedSource.components(separatedBy: "\n")
 
         var uniforms: [WPEUniformDecl] = []
         var samplers: [WPESamplerDecl] = []

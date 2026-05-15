@@ -556,7 +556,7 @@ final class WPEMetalRenderExecutor {
     /// (opacity, scroll, pulse, iris, waterwaves). They all sample one
     /// source texture and emit a transformed copy, so the only thing that
     /// changes per-effect is the fragment name + the uniform struct.
-    func dispatchSingleSampleEffect<U>(
+    func dispatchSingleSampleEffect<U: BitwiseCopyable>(
         fragmentName: String,
         pass: WPEPreparedRenderPass,
         destination: (id: WPEMetalTargetID, texture: MTLTexture),
