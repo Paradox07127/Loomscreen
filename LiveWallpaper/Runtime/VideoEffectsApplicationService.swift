@@ -101,10 +101,4 @@ final class VideoEffectsApplicationService {
         // composition even if the same config arrives again.
         appliedFingerprints[screenID] = nil
     }
-
-    func cancelAll() {
-        for task in inflightTasks.values { task.cancel() }
-        inflightTasks.removeAll()
-        appliedFingerprints.removeAll()
-    }
 }

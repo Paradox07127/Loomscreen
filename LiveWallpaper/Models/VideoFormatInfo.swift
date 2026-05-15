@@ -39,23 +39,6 @@ extension VideoFormatInfo {
         return max(size.width, size.height) >= 7680
     }
 
-    /// Short codec label suitable for a small badge ("ProRes", "HEVC", "H.264").
-    var codecLabel: String? {
-        guard let codec = codecFourCC?.lowercased() else { return nil }
-        switch codec {
-        case "apch", "apcn", "apcs", "apco":
-            return "ProRes"
-        case "ap4h", "ap4x":
-            return "ProRes 4444"
-        case "hvc1", "hev1":
-            return "HEVC"
-        case "avc1":
-            return "H.264"
-        default:
-            return nil
-        }
-    }
-
     /// Ordered list of badges to display, longest-edge resolution first so
     /// "4K HDR ProRes" reads naturally.
     var badges: [String] {

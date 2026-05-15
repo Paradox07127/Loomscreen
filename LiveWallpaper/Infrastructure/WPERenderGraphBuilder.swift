@@ -346,16 +346,8 @@ struct WPERenderGraphBuilder: Sendable {
         WPEValueParser.shaderConstants(raw, boolAsNumber: true)
     }
 
-    private func parseShaderConstant(_ raw: Any?) -> WPESceneShaderConstantValue? {
-        WPEValueParser.shaderConstant(raw, boolAsNumber: true)
-    }
-
     private func parseComboMap(_ raw: Any?) -> [String: Int] {
         WPEValueParser.comboMap(raw, boolAsNumber: true)
-    }
-
-    private func parseNumberVector(_ raw: Any?) -> [Double]? {
-        WPEValueParser.numberVector(raw, boolAsNumber: true)
     }
 
     private func parseDouble(_ raw: Any?) -> Double? {

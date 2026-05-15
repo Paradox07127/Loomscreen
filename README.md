@@ -18,7 +18,7 @@ A macOS menu bar application that plays video, HTML, and Metal shader content as
 - **System Monitoring** — System-wide CPU/GPU/memory/thermal + per-app metrics, estimated render FPS
 - **Liquid Glass UI** — macOS 26 native design system
 - **Swift 6 Strict Concurrency** — Compile-time data race safety
-- **560 Unit Tests** — Policies, decoders, bookmarks, HTML trust, schedule, playlist, WPE import/rendering, and release regressions
+- **546 Unit Tests** — Policies, decoders, bookmarks, HTML trust, schedule, playlist, WPE import/rendering, and release regressions
 - **Zero Dependencies** — Pure Apple-native frameworks
 
 ## Requirements

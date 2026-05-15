@@ -13,8 +13,6 @@ final class WPETexAnimatedTextureSource: WPEDynamicTextureSource {
     private let frameRate: Double
     private let loop: Bool
 
-    var frameCount: Int { frames.count }
-
     init(frames: [MTLTexture], frameRate: Double, loop: Bool) {
         self.frames = frames
         self.frameRate = frameRate > 0 ? frameRate : WPETexAnimationTrack.defaultFrameRate

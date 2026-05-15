@@ -65,10 +65,6 @@ struct WallpaperEnginePackage: Sendable, Equatable {
         return package
     }
 
-    func dataRange(for entry: Entry) throws -> Range<Data.Index> {
-        try dataRange(for: entry, dataCount: Int.max)
-    }
-
     /// Streaming variant of `parseIndex(of:)`. Reads only the header bytes
     /// from the given handle so multi-hundred-MB packages don't have to be
     /// memory-mapped just to discover their entry table. The handle's offset
