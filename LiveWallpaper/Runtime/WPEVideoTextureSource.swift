@@ -152,7 +152,7 @@ final class WPEVideoTextureSource: @unchecked Sendable {
             return
         }
 
-        let (track, durationSeconds) = try Self.loadVideoTrackAndDuration(asset: asset)
+        let (track, _) = try Self.loadVideoTrackAndDuration(asset: asset)
 
         let reader = try AVAssetReader(asset: asset)
         let output = AVAssetReaderTrackOutput(
