@@ -3,8 +3,11 @@ import Foundation
 struct WPERenderPipelineBuilder: Sendable {
     private let shaderLoader: WPEShaderSourceLoader
 
-    init(cacheRootURL: URL) {
-        self.shaderLoader = WPEShaderSourceLoader(cacheRootURL: cacheRootURL)
+    init(cacheRootURL: URL, engineAssetsRootURL: URL? = nil) {
+        self.shaderLoader = WPEShaderSourceLoader(
+            cacheRootURL: cacheRootURL,
+            engineAssetsRootURL: engineAssetsRootURL
+        )
     }
 
     func build(graph: WPERenderGraph) throws -> WPEPreparedRenderPipeline {
@@ -54,10 +57,18 @@ private struct WPEShaderUniformAnnotation {
 }
 
 private struct WPEShaderSourceLoader: Sendable {
-    private let cacheRootURL: URL
+    private let resolver: WPEMultiRootResourceResolver
 
-    init(cacheRootURL: URL) {
-        self.cacheRootURL = cacheRootURL.standardizedFileURL.resolvingSymlinksInPath()
+    init(cacheRootURL: URL, engineAssetsRootURL: URL? = nil) {
+        // Reuse the same fall-through chain as scene-asset lookup so shader
+        // `#include` resolution lands on the engine root for common helpers
+        // (`common_composite.h`, `common_blur.h`, …) that WPE ships under
+        // `assets/shaders/`.
+        self.resolver = WPEMultiRootResourceResolver(
+            primaryRootURL: cacheRootURL,
+            dependencyMounts: [],
+            engineAssetsRootURL: engineAssetsRootURL
+        )
     }
 
     func load(shaderName: String, pass: WPERenderPass) throws -> WPEShaderLoadResult {
@@ -674,19 +685,16 @@ private struct WPEShaderSourceLoader: Sendable {
     }
 
     private func resolveExistingFileURL(relativePath: String) throws -> URL {
-        let url = try resolveURL(relativePath: relativePath)
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
-              !isDirectory.boolValue else {
+        // Map the resolver's `ResolveError` into the pipeline-builder's
+        // `WPERenderPipelineError.includeMissing` so existing call sites
+        // (and tests asserting `throws: WPERenderPipelineError.self`) keep
+        // their error contract while still picking up the engine-root
+        // fall-through.
+        do {
+            return try resolver.resolveExistingFileURL(relativePath: relativePath)
+        } catch SceneResourceResolver.ResolveError.fileMissing,
+                SceneResourceResolver.ResolveError.pathEscape {
             throw WPERenderPipelineError.includeMissing(path: relativePath, requestedBy: "")
         }
-        return url
-    }
-
-    private func resolveURL(relativePath: String) throws -> URL {
-        guard let resolved = WPEPathSafety.strictResourceURL(root: cacheRootURL, relativePath: relativePath) else {
-            throw WPERenderPipelineError.includeMissing(path: relativePath, requestedBy: "")
-        }
-        return resolved
     }
 }

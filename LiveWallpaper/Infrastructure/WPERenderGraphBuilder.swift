@@ -3,10 +3,11 @@ import Foundation
 struct WPERenderGraphBuilder: Sendable {
     private let resolver: WPEMultiRootResourceResolver
 
-    init(cacheRootURL: URL, dependencyMounts: [WPEAssetMount] = []) {
+    init(cacheRootURL: URL, dependencyMounts: [WPEAssetMount] = [], engineAssetsRootURL: URL? = nil) {
         self.resolver = WPEMultiRootResourceResolver(
             primaryRootURL: cacheRootURL,
-            dependencyMounts: dependencyMounts
+            dependencyMounts: dependencyMounts,
+            engineAssetsRootURL: engineAssetsRootURL
         )
     }
 
