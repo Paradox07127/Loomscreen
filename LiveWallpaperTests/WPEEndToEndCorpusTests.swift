@@ -20,20 +20,29 @@ struct WPEEndToEndCorpusTests {
     @MainActor
     @Test("Every corpus scene reaches first frame or surfaces a precise error")
     func everyCorpusSceneRunsThroughPipeline() async throws {
-        // Source the corpus root from env var first; xcodebuild's test
-        // harness sometimes filters env vars, so as a development fallback
-        // try the known local Workshop sync path. Production CI sets the
-        // env explicitly.
-        let envRoot = ProcessInfo.processInfo.environment["WPE_CORPUS_ROOT"] ?? ""
-        let candidate = envRoot.isEmpty
-            ? "/Users/taijial/Documents/Live Wallpapers/431960"
-            : envRoot
-        let root = URL(fileURLWithPath: candidate, isDirectory: true)
-        guard FileManager.default.fileExists(atPath: root.path) else {
-            print("[corpus] root '\(candidate)' does not exist — skipping")
+        // Strict env-var gate. We deliberately do NOT fall back to a
+        // hardcoded path: the LiveWallpaper app sandbox uses
+        // `files.user-selected.read-only`, so any directory the user
+        // hasn't explicitly granted via NSOpenPanel will hang the test
+        // on `__open` waiting for an interactive sandbox prompt that
+        // never displays. Run this gate from a non-sandboxed context
+        // (CLI tool / direct `swift run`) or grant the path through the
+        // running app first.
+        guard let envRoot = ProcessInfo.processInfo.environment["WPE_CORPUS_ROOT"], !envRoot.isEmpty else {
+            print("[corpus] WPE_CORPUS_ROOT not set — skipping (sandbox prevents arbitrary-path access from xcodebuild test harness)")
             return
         }
-        print("[corpus] sourcing scenes from \(candidate)")
+        let root = URL(fileURLWithPath: envRoot, isDirectory: true)
+        // The first FS call against a sandbox-restricted path can hang
+        // indefinitely. Probe with a short timeout: if we can't read the
+        // directory in 2 seconds, assume the sandbox is blocking us and
+        // bail out before the harness times out the whole suite.
+        let probeOK = await Self.probeReadable(root, timeoutSeconds: 2)
+        guard probeOK else {
+            print("[corpus] root '\(envRoot)' is not readable from this sandbox — skipping")
+            return
+        }
+        print("[corpus] sourcing scenes from \(envRoot)")
         guard let device = MTLCreateSystemDefaultDevice() else {
             print("[corpus] no Metal device — skipping")
             return
@@ -139,5 +148,30 @@ struct WPEEndToEndCorpusTests {
         // Soft expectation: the count of rendered scenes is non-zero so we
         // catch hard regressions (build broken / pipeline crash) in CI.
         #expect(rendered + diagnosticOnly + hardFailures == summary.count)
+    }
+
+    /// Sandbox-safe directory probe. Spawns a detached task that tries
+    /// `contentsOfDirectory` and races it against a timeout — under the
+    /// sandbox, the underlying `__open` syscall hangs indefinitely if the
+    /// path is restricted, so we can't use `FileManager.fileExists`
+    /// alone to gate access.
+    static func probeReadable(_ url: URL, timeoutSeconds: TimeInterval) async -> Bool {
+        await withTaskGroup(of: Bool.self, returning: Bool.self) { group in
+            group.addTask {
+                (try? FileManager.default.contentsOfDirectory(
+                    at: url,
+                    includingPropertiesForKeys: nil
+                )) != nil
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
+                return false
+            }
+            for await result in group {
+                group.cancelAll()
+                return result
+            }
+            return false
+        }
     }
 }
