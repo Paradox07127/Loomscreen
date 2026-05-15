@@ -383,19 +383,6 @@ final class WallpaperVideoPlayer {
         Logger.debug("Video playback paused", category: .videoPlayer)
     }
 
-    func seek(to time: Double) {
-        player?.seek(to: CMTime(seconds: time, preferredTimescale: CMTimeScale(NSEC_PER_SEC)))
-    }
-
-    /// Frame-accurate seek for playlist boundaries / lock-screen mirroring
-    /// where the default `seek(to:)` tolerances would drift the transition by
-    /// up to ~1 second on long-GOP H.264.
-    func seekExact(seconds: TimeInterval) async {
-        guard let player else { return }
-        let target = CMTime(seconds: seconds, preferredTimescale: 600)
-        await player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
-    }
-
     func setPlaybackSpeed(_ speed: Double) {
         player?.defaultRate = Float(speed)
         // Only apply rate immediately if currently playing; avoid implicit resume

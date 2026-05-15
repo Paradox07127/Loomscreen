@@ -94,16 +94,6 @@ struct WPEOrigin: Codable, Equatable, Sendable {
         requiresWindowsPlugin = (try? container.decodeIfPresent(Bool.self, forKey: .requiresWindowsPlugin)) ?? false
     }
 
-    var displayTypeName: String {
-        switch originalType {
-        case .video:        return "Video"
-        case .web:          return "Web"
-        case .scene:        return "Scene"
-        case .application:  return "App"
-        case .unknown:      return "Unknown"
-        }
-    }
-
     var localizedDisplayTypeName: String {
         originalType.localizedDisplayName
     }

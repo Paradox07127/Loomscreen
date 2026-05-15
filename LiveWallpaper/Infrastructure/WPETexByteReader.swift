@@ -17,7 +17,6 @@ struct WPETexByteReader {
         self.cursor = cursor
     }
 
-    var remaining: Int { data.count - cursor }
     var isAtEnd: Bool { cursor >= data.count }
 
     mutating func readUInt32(blockName: String = "?") throws -> UInt32 {

@@ -7,7 +7,6 @@ final class ParticleOverlayView: NSView {
     // MARK: - State
 
     private var currentEffect: ParticleEffect = .none
-    private var currentDensity: CGFloat = 1.0
 
     private var activeEmitter: CAEmitterLayer?
 
@@ -43,7 +42,6 @@ final class ParticleOverlayView: NSView {
         }
 
         currentEffect = effect
-        currentDensity = density
 
         // Remove immediately; existing particles finish their lifetime.
         if let oldEmitter = activeEmitter {
@@ -72,7 +70,6 @@ final class ParticleOverlayView: NSView {
     }
 
     func updateDensity(_ density: CGFloat) {
-        currentDensity = density
         activeEmitter?.birthRate = Float(max(0.05, density))
     }
 

@@ -5,14 +5,6 @@ enum HTMLSourceKind: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var label: String {
-        switch self {
-        case .url: return "URL"
-        case .file: return "File"
-        case .folder: return "Folder"
-        }
-    }
-
     var labelKey: LocalizedStringKey {
         switch self {
         case .url: return "URL"

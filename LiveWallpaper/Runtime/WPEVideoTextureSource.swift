@@ -33,7 +33,6 @@ final class WPEVideoTextureSource: @unchecked Sendable {
         var requestedTime: TimeInterval = 0
         var isRunning = false
         var isSuspended = false
-        var duration: TimeInterval = 0
     }
 
     private let device: MTLDevice
@@ -183,7 +182,6 @@ final class WPEVideoTextureSource: @unchecked Sendable {
         lock.lock()
         state.reader = reader
         state.output = output
-        state.duration = max(durationSeconds, 0)
         lock.unlock()
     }
 

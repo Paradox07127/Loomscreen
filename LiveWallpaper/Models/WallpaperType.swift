@@ -25,11 +25,4 @@ enum WallpaperType: String, Codable, CaseIterable, Identifiable {
         case .scene: return "cube.transparent"
         }
     }
-
-    /// Phase 2.0+: every wallpaper type — including `.scene` — now maps to a
-    /// `WallpaperContent` case at runtime. Kept around as an explicit hook so
-    /// future UI-only labels can opt out without rewriting call sites.
-    var hasDirectContent: Bool {
-        true
-    }
 }

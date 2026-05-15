@@ -13,14 +13,6 @@ enum FrameRateLimit: Int, CaseIterable, Identifiable, Codable {
         self = FrameRateLimit(rawValue: rawValue) ?? .fps60
     }
 
-    var description: String {
-        switch self {
-        case .fps30: return "30 FPS"
-        case .fps60: return "60 FPS"
-        case .unlimited: return "Unlimited"
-        }
-    }
-
     var titleKey: LocalizedStringKey {
         switch self {
         case .fps30: return "30 FPS"

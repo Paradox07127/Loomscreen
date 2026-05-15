@@ -11,14 +11,6 @@ enum WallpaperMode: String, Codable, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var label: String {
-        switch self {
-        case .single:   return "Single"
-        case .playlist: return "Playlist"
-        case .schedule: return "Schedule"
-        }
-    }
-
     var labelKey: LocalizedStringKey {
         switch self {
         case .single:   return "Single"

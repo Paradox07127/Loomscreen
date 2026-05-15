@@ -314,10 +314,6 @@ enum WPESceneDocumentParser {
         WPEValueParser.shaderConstants(raw)
     }
 
-    private static func parseShaderConstant(_ raw: Any?) -> WPESceneShaderConstantValue? {
-        WPEValueParser.shaderConstant(raw)
-    }
-
     private static func parseTextureSlots(_ raw: Any?) -> [Int: String] {
         guard let array = raw as? [Any] else { return [:] }
         var result: [Int: String] = [:]
@@ -343,10 +339,6 @@ enum WPESceneDocumentParser {
     /// or WPE's space-separated strings ("0.5 0 0").
     static func parseVector3(_ raw: Any?) -> SIMD3<Double>? {
         WPEValueParser.vector3(raw)
-    }
-
-    private static func parseNumberVector(_ raw: Any?) -> [Double]? {
-        WPEValueParser.numberVector(raw)
     }
 
     static func parseDouble(_ raw: Any?) -> Double? {
