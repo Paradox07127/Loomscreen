@@ -40,6 +40,7 @@ final class SettingsManager {
         static let bookmarks = "WallpaperBookmarks.v1"
         static let trustedHosts = "TrustedHTMLHosts.v1"
         static let workshopLibraryRootBookmark = "WPELibrary.RootBookmark.v1"
+        static let wpeEngineAssetsRootBookmark = "WPEEngineAssets.RootBookmark.v1"
         static let appLanguage = AppLanguagePreference.storageKey
         /// Bumped each time we successfully migrate a blob out of UserDefaults
         /// into the file store. Lets us run the migration at most once even
@@ -213,6 +214,26 @@ final class SettingsManager {
         NotificationCenter.default.post(name: .workshopLibraryRootBookmarkDidChange, object: nil)
     }
 
+    // MARK: - Wallpaper Engine Assets Root Bookmark
+
+    /// Persists the security-scoped bookmark to the Wallpaper Engine install
+    /// root. Scene renderers mount `<root>/assets` as a read-only fallback so
+    /// projects that reference shared engine framework files (e.g.
+    /// `materials/util/composelayer.json`) can resolve them.
+    func saveWPEEngineAssetsBookmark(_ bookmark: Data) {
+        UserDefaults.standard.set(bookmark, forKey: Keys.wpeEngineAssetsRootBookmark)
+        NotificationCenter.default.post(name: .wpeEngineAssetsBookmarkDidChange, object: nil)
+    }
+
+    func loadWPEEngineAssetsBookmark() -> Data? {
+        UserDefaults.standard.data(forKey: Keys.wpeEngineAssetsRootBookmark)
+    }
+
+    func clearWPEEngineAssetsBookmark() {
+        UserDefaults.standard.removeObject(forKey: Keys.wpeEngineAssetsRootBookmark)
+        NotificationCenter.default.post(name: .wpeEngineAssetsBookmarkDidChange, object: nil)
+    }
+
     private func applyStartOnLoginSetting(_ startOnLogin: Bool) {
         do {
             let service = SMAppService.mainApp
@@ -267,6 +288,7 @@ final class SettingsManager {
         UserDefaults.standard.removeObject(forKey: Keys.bookmarks)
         UserDefaults.standard.removeObject(forKey: Keys.trustedHosts)
         UserDefaults.standard.removeObject(forKey: Keys.workshopLibraryRootBookmark)
+        UserDefaults.standard.removeObject(forKey: Keys.wpeEngineAssetsRootBookmark)
         UserDefaults.standard.removeObject(forKey: Keys.appLanguage)
         // `configMigrationVersion` is intentionally preserved — it tracks
         // "which migration steps have already been applied to this install",

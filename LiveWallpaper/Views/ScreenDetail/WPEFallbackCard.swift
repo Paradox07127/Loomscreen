@@ -5,12 +5,12 @@ import AppKit
 /// to the inspector so the user gets a specific reason instead of a generic
 /// "unsupported" message.
 enum FallbackReason: Equatable, Sendable {
-    // Phase 2.0
+    // Scene diagnostics
     case unsupportedType
     case sceneParseFailed(String)
     case sceneShaderUnsupported
     case sceneResourceMissing
-    // Phase 2.0.1
+    // Dependency / platform gating
     /// Project declares Steam Workshop dependencies we couldn't satisfy
     /// from the local cache. Lists IDs the user must subscribe to in
     /// Steam before retrying the import.
@@ -18,8 +18,8 @@ enum FallbackReason: Equatable, Sendable {
     /// Project ships a Windows `.dll` plugin under `bin/`. Permanent on
     /// macOS — subscribing more workshop items will not help.
     case requiresWindowsPlugin
-    // Phase 2.1 — `.tex` decoder failures with precise codes so the user
-    // sees "Format 8 (RGBA1010102) not yet supported" instead of a vague
+    // Texture decoder failures with precise codes so the user sees
+    // "Format 8 (RGBA1010102) not yet supported" instead of a vague
     // "scene unsupported".
     case texContainerUnsupported(magic: String)
     case texUnsupportedFormat(code: Int)
@@ -243,11 +243,11 @@ struct WPEFallbackCard: View {
                 return String(localized: "We couldn't recognize this Wallpaper Engine project type.", defaultValue: "We couldn't recognize this Wallpaper Engine project type.", comment: "Wallpaper Engine fallback warning body.")
             }
         case .sceneParseFailed(let detail):
-            return String(localized: "Phase 2.0 ships an image-only renderer. The author's scene.json couldn't be parsed: \(detail)", comment: "Wallpaper Engine fallback warning body. The placeholder is parser detail.")
+            return String(localized: "The author's scene.json couldn't be parsed: \(detail)", comment: "Wallpaper Engine fallback warning body. The placeholder is parser detail.")
         case .sceneShaderUnsupported:
-            return String(localized: "This scene relies on custom shaders that the image-only Phase 2.0 renderer can't compile yet.", defaultValue: "This scene relies on custom shaders that the image-only Phase 2.0 renderer can't compile yet.", comment: "Wallpaper Engine fallback warning body.")
+            return String(localized: "This scene uses a custom shader the renderer couldn't translate to Metal. Try re-downloading the project in Steam.", defaultValue: "This scene uses a custom shader the renderer couldn't translate to Metal. Try re-downloading the project in Steam.", comment: "Wallpaper Engine fallback warning body.")
         case .sceneResourceMissing:
-            return String(localized: "Some image layers couldn't be located inside the cache. The wallpaper may have been published partially or your cache is corrupted.", defaultValue: "Some image layers couldn't be located inside the cache. The wallpaper may have been published partially or your cache is corrupted.", comment: "Wallpaper Engine fallback warning body.")
+            return String(localized: "Some assets the scene needs aren't where the renderer expected them. If the scene references shared Wallpaper Engine framework files (materials/util, models/util), open the Workshop Library and grant your Wallpaper Engine install folder via the Engine Assets menu — most other cases mean re-downloading the project in Steam will fix it.", defaultValue: "Some assets the scene needs aren't where the renderer expected them. If the scene references shared Wallpaper Engine framework files (materials/util, models/util), open the Workshop Library and grant your Wallpaper Engine install folder via the Engine Assets menu — most other cases mean re-downloading the project in Steam will fix it.", comment: "Wallpaper Engine fallback warning body.")
         case .missingDependency:
             return String(localized: "This wallpaper relies on other Workshop projects we don't have on disk yet. Subscribe to them in Steam, then re-import this folder.", defaultValue: "This wallpaper relies on other Workshop projects we don't have on disk yet. Subscribe to them in Steam, then re-import this folder.", comment: "Wallpaper Engine fallback warning body.")
         case .requiresWindowsPlugin:
