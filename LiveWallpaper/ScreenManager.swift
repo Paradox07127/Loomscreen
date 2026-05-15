@@ -117,6 +117,22 @@ final class ScreenManager {
             self?.restoreWallpaperSession(for: screen, configuration: config, preservingState: preservingState)
         }
     )
+    /// Centralises the write side of ScreenConfiguration persistence (save /
+    /// remove / prune / validate / display-name priming). Lazy because the
+    /// `releaseRuntimeSession` callback resolves a `Screen` by ID via `self`.
+    @ObservationIgnored private lazy var persistence = WallpaperPersistenceCoordinator(
+        store: configurationStore,
+        bookmarkDisplayNameCache: bookmarkDisplayNameCache,
+        releaseRuntimeSession: { [weak self] screenID in
+            guard let self,
+                  let screen = self.screens.first(where: { $0.id == screenID }) else { return }
+            Logger.warning("Removing invalid resource configuration for screen \(screenID)", category: .settings)
+            self.releaseRuntimeSession(screen)
+        },
+        notifyWallpaperSessionChanged: { [weak self] in
+            self?.notifyWallpaperSessionChanged()
+        }
+    )
     @ObservationIgnored private var transitionRegistry: PlaybackTransitionRegistry {
         playbackCoordinator.transition
     }
@@ -375,8 +391,7 @@ final class ScreenManager {
     func clearWallpaperForScreen(_ screen: Screen) {
         Logger.info("Clearing wallpaper for screen \(screen.id)", category: .screenManager)
         releaseRuntimeSession(screen)
-        configurationStore.remove(for: screen.id)
-        postConfigurationDidChange(for: screen.id)
+        persistence.remove(for: screen.id)
         notifyWallpaperSessionChanged()
     }
 
@@ -407,19 +422,7 @@ final class ScreenManager {
     /// Light launch-time pass: prunes configurations whose local resource
     /// bookmark is no longer resolvable. Does not tear down healthy sessions.
     func pruneInvalidConfigurationsIfNeeded() {
-        let removedScreenIDs = configurationStore.pruneInvalidResourceConfigurations(
-            using: SettingsManager.shared.validateConfiguration
-        )
-
-        guard !removedScreenIDs.isEmpty else { return }
-
-        for removedScreenID in removedScreenIDs {
-            if let screen = screens.first(where: { $0.id == removedScreenID }) {
-                Logger.warning("Removing invalid resource configuration for screen \(removedScreenID)", category: .settings)
-                releaseRuntimeSession(screen)
-            }
-        }
-        notifyWallpaperSessionChanged()
+        persistence.pruneInvalidConfigurations()
     }
 
     private func loadConfigurationForScreen(_ screen: Screen) {
@@ -566,28 +569,7 @@ final class ScreenManager {
     }
 
     private func primeBookmarkDisplayNames(from configuration: ScreenConfiguration) {
-        bookmarkDisplayNameCache.prime(bookmarks: videoBookmarks(in: configuration))
-    }
-
-    private func videoBookmarks(in configuration: ScreenConfiguration) -> [Data] {
-        var result: [Data] = []
-        var seen: Set<Data> = []
-
-        func append(_ bookmarkData: Data?) {
-            guard let bookmarkData,
-                  !bookmarkData.isEmpty,
-                  seen.insert(bookmarkData).inserted else { return }
-            result.append(bookmarkData)
-        }
-
-        if case .video(let bookmarkData) = configuration.activeWallpaper {
-            append(bookmarkData)
-        }
-        append(configuration.savedVideoBookmarkData)
-        configuration.playlistBookmarks?.forEach { append($0) }
-        configuration.scheduleSlots?.forEach { append($0.videoBookmarkData) }
-
-        return result
+        persistence.primeDisplayNames(from: configuration)
     }
 
     private func updatePlaybackState() {
@@ -853,17 +835,7 @@ final class ScreenManager {
     // MARK: - Configuration Update Helpers
 
     private func saveConfiguration(_ configuration: ScreenConfiguration) {
-        primeBookmarkDisplayNames(from: configuration)
-        configurationStore.save(configuration)
-        postConfigurationDidChange(for: configuration.screenID)
-    }
-
-    private func postConfigurationDidChange(for screenID: CGDirectDisplayID) {
-        NotificationCenter.default.post(
-            name: .wallpaperConfigurationDidChange,
-            object: nil,
-            userInfo: ["screenID": screenID]
-        )
+        persistence.save(configuration)
     }
 
     func updatePlaybackSpeed(_ speed: Double, for screen: Screen) {
@@ -917,21 +889,7 @@ final class ScreenManager {
     }
     
     func validateAllConfigurations() -> (valid: Int, invalid: Int) {
-        let screenIDs = configurationStore.allScreenIDs()
-        var validConfigCount = 0
-        var invalidConfigCount = 0
-        
-        for screenID in screenIDs {
-            if SettingsManager.shared.validateConfiguration(for: screenID) {
-                validConfigCount += 1
-            } else {
-                invalidConfigCount += 1
-                Logger.warning("Invalid configuration found for screen \(screenID)", category: .settings)
-            }
-        }
-        
-        Logger.info("Configuration validation complete: \(validConfigCount) valid, \(invalidConfigCount) invalid", category: .settings)
-        return (validConfigCount, invalidConfigCount)
+        persistence.validateAll()
     }
     
     /// Rebuilds display registry and runtime sessions from persisted config.
