@@ -280,7 +280,7 @@ final class WPEMetalRenderExecutor {
             colorPixelFormat: destination.texture.pixelFormat
         ))
         encoder.setFragmentTexture(
-            try resolve(
+            try WPEMetalShaderInputs.resolve(
                 reference: reference,
                 textures: textures,
                 frameState: frameState,
@@ -289,7 +289,7 @@ final class WPEMetalRenderExecutor {
             index: 0
         )
         var uniforms = WPECopyUniforms(
-            uvOffset: Self.parallaxUVOffset(
+            uvOffset: WPEMetalShaderInputs.parallaxUVOffset(
                 pointerPosition: runtimeUniforms.pointerPosition,
                 parallaxDepth: layer.parallaxDepth
             )
@@ -297,43 +297,6 @@ final class WPEMetalRenderExecutor {
         encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPECopyUniforms>.stride, index: 0)
         encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
         frameState.registerWrite(texture: destination.texture, targetID: destination.id)
-    }
-
-    /// Conservative WPE mouse-parallax model. The shader receives a UV
-    /// offset bounded to ±0.05 so a layer with depth 0.1 and the cursor at
-    /// the screen edge shifts samples by 5% — enough to feel parallax
-    /// without exposing texture borders. Phase 2D's GLSL translator will
-    /// replace this with the full WPE camera-parallax math.
-    static func parallaxUVOffset(
-        pointerPosition: SIMD2<Double>,
-        parallaxDepth: Double
-    ) -> SIMD2<Float> {
-        guard parallaxDepth != 0 else {
-            return SIMD2<Float>(0, 0)
-        }
-        let delta = SIMD2<Double>(
-            pointerPosition.x - 0.5,
-            pointerPosition.y - 0.5
-        )
-        let offset = delta * parallaxDepth * 0.1
-        return SIMD2<Float>(
-            Float(min(max(offset.x, -0.05), 0.05)),
-            Float(min(max(offset.y, -0.05), 0.05))
-        )
-    }
-
-    func copyUniforms(for pass: WPEPreparedRenderPass, layer: WPERenderLayer) -> WPECopyUniforms {
-        let vector = pass.uniformValues["g_PointerPosition"]?.vectorValue ?? [0.5, 0.5]
-        let pointer = SIMD2<Double>(
-            vector[safe: 0] ?? 0.5,
-            vector[safe: 1] ?? 0.5
-        )
-        return WPECopyUniforms(
-            uvOffset: Self.parallaxUVOffset(
-                pointerPosition: pointer,
-                parallaxDepth: layer.parallaxDepth
-            )
-        )
     }
 
     /// Thin delegate so call sites — including `WPEMetalShaderDispatcher`
@@ -390,59 +353,6 @@ final class WPEMetalRenderExecutor {
         }
     }
 
-    func colorVector(for pass: WPEPreparedRenderPass) -> SIMD4<Float> {
-        // WPE scene JSON authors `g_Color` in sRGB perceptual space ("0.5 0.5
-        // 0.5" → mid-gray on screen). The render target is sRGB-tagged, so
-        // the hardware applies linear→sRGB encode on store; we therefore
-        // must feed the shader linear-space RGB. Alpha stays unchanged —
-        // Metal does not gamma-encode the alpha channel on sRGB targets.
-        let vector = pass.uniformValues["g_Color"]?.vectorValue
-            ?? pass.pass.constants["g_Color"]?.vectorValue
-            ?? [1, 1, 1, 1]
-        return SIMD4<Float>(
-            Self.sRGBToLinear(Float(vector[safe: 0] ?? 1)),
-            Self.sRGBToLinear(Float(vector[safe: 1] ?? 1)),
-            Self.sRGBToLinear(Float(vector[safe: 2] ?? 1)),
-            Float(vector[safe: 3] ?? 1)
-        )
-    }
-
-    /// Standard sRGB EOTF used by Metal's `_srgb` pixel formats.
-    private static func sRGBToLinear(_ value: Float) -> Float {
-        let clamped = min(max(value, 0), 1)
-        if clamped <= 0.04045 {
-            return clamped / 12.92
-        }
-        return Float(pow(Double((clamped + 0.055) / 1.055), 2.4))
-    }
-
-    func resolve(
-        reference: WPETextureReference,
-        textures: [String: MTLTexture],
-        frameState: WPEMetalFrameState,
-        currentTargetID: WPEMetalTargetID
-    ) throws -> MTLTexture {
-        switch reference {
-        case .image(let path), .asset(let path):
-            guard let texture = textures[path] else {
-                throw WPEMetalRenderExecutorError.missingTexture(reference)
-            }
-            return texture
-
-        case .fbo(let name):
-            guard let texture = frameState.latestNamedTextures[name] else {
-                throw WPEMetalRenderExecutorError.missingTexture(reference)
-            }
-            return texture
-
-        case .previous:
-            guard let texture = frameState.latestTexture(for: currentTargetID) else {
-                throw WPEMetalRenderExecutorError.missingTexture(reference)
-            }
-            return texture
-        }
-    }
-
     private func passReadsCurrentTarget(_ pass: WPEPreparedRenderPass, targetID: WPEMetalTargetID) -> Bool {
         textureReferences(for: pass).contains { reference in
             switch (reference, targetID) {
@@ -462,69 +372,5 @@ final class WPEMetalRenderExecutor {
         references.append(contentsOf: pass.pass.binds.values)
         references.append(contentsOf: pass.textureBindings.values)
         return references
-    }
-
-    /// Maps the WPE shader name onto one of the executor's built-in fragment
-    /// functions. Phase 2C recognises `solidcolor`, `solidlayer`, `copy`,
-    /// `compose`, and `genericimage*`. Phase 2D-C extends the table with the
-    /// pre-compiled MSL effect set: `colorbalance`, `blur`, `vignette`,
-    /// `water` (alias `distort`), `shake`. Custom shaders still throw
-    /// `unsupportedShader` until the full GLSL translator (Phase 2D-A/B)
-    /// lands.
-    func normalizedBuiltinShaderName(_ shaderName: String) -> String {
-        WPEBuiltinShaderName.normalized(shaderName, genericImageAsCopy: true)
-    }
-
-    /// Phase 2D-C: scalar-uniform lookup that walks `pass.uniformValues`
-    /// first (runtime-merged values from Phase 2B) then `pass.pass.constants`
-    /// (authored material defaults). Multiple aliases supported because WPE
-    /// shader uniforms ship under several legacy names (`u_X`, `X`,
-    /// `g_XOffset`, etc.).
-    func floatScalar(
-        named name: String,
-        in pass: WPEPreparedRenderPass,
-        default defaultValue: Float
-    ) -> Float {
-        Self.scalarFloat(pass.uniformValues[name])
-            ?? Self.scalarFloat(pass.pass.constants[name])
-            ?? defaultValue
-    }
-
-    func floatScalar(
-        named names: [String],
-        in pass: WPEPreparedRenderPass,
-        default defaultValue: Float
-    ) -> Float {
-        for name in names {
-            if let value = Self.scalarFloat(pass.uniformValues[name]) {
-                return value
-            }
-        }
-        for name in names {
-            if let value = Self.scalarFloat(pass.pass.constants[name]) {
-                return value
-            }
-        }
-        return defaultValue
-    }
-
-    private static func scalarFloat(_ value: WPESceneShaderConstantValue?) -> Float? {
-        switch value {
-        case .number(let number):
-            return Float(number)
-        case .vector(let vector):
-            return vector.first.map(Float.init)
-        case .bool(let bool):
-            return bool ? 1 : 0
-        case .string(let string):
-            return Float(string)
-        case nil:
-            return nil
-        }
-    }
-}
-private extension Array {
-    subscript(safe index: Int) -> Element? {
-        indices.contains(index) ? self[index] : nil
     }
 }
