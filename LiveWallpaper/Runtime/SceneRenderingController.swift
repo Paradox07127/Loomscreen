@@ -21,6 +21,15 @@ final class SceneRenderingController: WPESceneRenderer {
 
     private let descriptor: SceneDescriptor
     private let cacheRootURL: URL
+    private let dependencyMounts: [WPEAssetMount]
+    /// Resolved Wallpaper Engine install root (the directory that contains
+    /// `assets/`). Captured at init so the graph builder Task can hand it
+    /// off to `WPERenderGraphBuilder` without re-fetching from the
+    /// engine-assets singleton.
+    private let engineAssetsRootURL: URL?
+    /// `(unsafe)` because `deinit` is non-isolated. All other writes happen
+    /// on `@MainActor` (`cleanup()`); single-thread mutation is preserved.
+    nonisolated(unsafe) private var activeEngineAssetsRootURL: URL?
     private let resolver: SceneResourceResolver
     private let imageResolver: WPEMultiRootResourceResolver
     private let initialFrame: CGRect
@@ -50,16 +59,28 @@ final class SceneRenderingController: WPESceneRenderer {
         descriptor: SceneDescriptor,
         cacheRootURL: URL,
         dependencyMounts: [WPEAssetMount] = [],
+        engineAssetsRootURL: URL? = nil,
         frame: CGRect
     ) {
         self.descriptor = descriptor
         self.cacheRootURL = cacheRootURL
+        self.dependencyMounts = dependencyMounts
+        self.engineAssetsRootURL = engineAssetsRootURL
+        let didStartEngineAssetsAccess = engineAssetsRootURL?.startAccessingSecurityScopedResource() ?? false
+        self.activeEngineAssetsRootURL = didStartEngineAssetsAccess ? engineAssetsRootURL : nil
         self.resolver = SceneResourceResolver(cacheRootURL: cacheRootURL)
         self.imageResolver = WPEMultiRootResourceResolver(
             primaryRootURL: cacheRootURL,
-            dependencyMounts: dependencyMounts
+            dependencyMounts: dependencyMounts,
+            engineAssetsRootURL: engineAssetsRootURL
         )
         self.initialFrame = frame
+        if engineAssetsRootURL != nil && !didStartEngineAssetsAccess {
+            Logger.warning(
+                "Wallpaper Engine assets security scope could not be started — engine fallback disabled for this session",
+                category: .fileAccess
+            )
+        }
         let view = SKView(frame: frame)
         view.allowsTransparency = true
         view.ignoresSiblingOrder = true
@@ -132,8 +153,14 @@ final class SceneRenderingController: WPESceneRenderer {
         )
 
         do {
+            let mounts = dependencyMounts
+            let engineRoot = engineAssetsRootURL
             let graph = try await Task.detached(priority: .userInitiated) { [cacheRootURL] in
-                try WPERenderGraphBuilder(cacheRootURL: cacheRootURL).build(document: document)
+                try WPERenderGraphBuilder(
+                    cacheRootURL: cacheRootURL,
+                    dependencyMounts: mounts,
+                    engineAssetsRootURL: engineRoot
+                ).build(document: document)
             }.value
             renderGraph = graph
             let passCount = graph.layers.reduce(0) { $0 + $1.passes.count }
@@ -143,7 +170,10 @@ final class SceneRenderingController: WPESceneRenderer {
             )
             do {
                 let pipeline = try await Task.detached(priority: .userInitiated) { [cacheRootURL] in
-                    try WPERenderPipelineBuilder(cacheRootURL: cacheRootURL).build(graph: graph)
+                    try WPERenderPipelineBuilder(
+                        cacheRootURL: cacheRootURL,
+                        engineAssetsRootURL: engineRoot
+                    ).build(graph: graph)
                 }.value
                 renderPipeline = pipeline
                 let preparedPassCount = pipeline.layers.reduce(0) { $0 + $1.passes.count }
@@ -264,6 +294,17 @@ final class SceneRenderingController: WPESceneRenderer {
         loadDiagnostics = nil
         renderGraph = nil
         renderPipeline = nil
+        stopEngineAssetsAccessIfNeeded()
+    }
+
+    deinit {
+        stopEngineAssetsAccessIfNeeded()
+    }
+
+    nonisolated private func stopEngineAssetsAccessIfNeeded() {
+        guard let url = activeEngineAssetsRootURL else { return }
+        url.stopAccessingSecurityScopedResource()
+        activeEngineAssetsRootURL = nil
     }
 
     /// Tears the current SKScene down and re-runs `load()`. Used by the
