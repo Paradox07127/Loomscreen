@@ -149,7 +149,8 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
     /// pointer) and submits the render pipeline with both runtime and camera
     /// uniforms. Called once during `performLoad()` and then per-frame from
     /// `draw(in:)` so animated scenes refresh without rebuilding the
-    /// pipeline. `lastRuntimeUniforms` is exposed for tests.
+    /// pipeline. The captured value is re-read by dynamic texture sources
+    /// in `draw(in:)` to drive their frame selection.
     private func renderCurrentFrame() throws -> MTLTexture {
         guard let pipeline = renderPipeline else {
             throw WPEMetalRenderExecutorError.noRenderablePasses
