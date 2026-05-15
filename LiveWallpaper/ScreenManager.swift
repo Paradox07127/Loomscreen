@@ -1131,11 +1131,16 @@ final class ScreenManager {
                 dependencyWorkshopIDs: descriptor.dependencyWorkshopIDs,
                 origin: configuration.wpeOrigin
             )
+            // Resolve the engine assets root at the call site so the runtime
+            // never reaches back into the UI singleton; the renderer owns
+            // the security scope for its lifetime.
+            let engineRoot = WPEEngineAssetsLibrary.shared.resolveAuthorizedRoot()
             guard let sceneSession = ambientSessionBuilder.makeSceneSession(
                 descriptor: descriptor,
                 frame: screen.frame,
                 dependencyMounts: dependencyMounts,
-                rendererBackend: .metalExperimental
+                rendererBackend: .metalExperimental,
+                engineAssetsRootURL: engineRoot
             ) else {
                 Logger.warning("Scene wallpaper for screen \(screen.id) (workshop \(descriptor.workshopID)) could not be built — cache missing or descriptor invalid", category: .screenManager)
                 return

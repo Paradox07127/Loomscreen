@@ -300,12 +300,19 @@ final class WallpaperEngineImportService {
         }
 
         let tier = WPESceneCapabilityClassifier().capabilityTier(for: document, cacheURL: cacheURL)
+        let preflight = WPEScenePreflight.classify(
+            document: document,
+            project: project,
+            scenePackageEntries: scenePackageEntryNames(in: cacheURL, fileManager: fileManager)
+        )
         let descriptor = SceneDescriptor(
             workshopID: project.workshopID,
             cacheRelativePath: cacheRelativePath(for: project),
             entryFile: project.entryFile,
             capabilityTier: tier,
-            dependencyWorkshopIDs: project.dependencyWorkshopIDs
+            dependencyWorkshopIDs: project.dependencyWorkshopIDs,
+            preflightTier: preflight.tier,
+            preflightFeatureFlags: sortedPreflightFeatureFlags(preflight.featureFlags)
         )
         let origin = makeOrigin(
             project: project,
@@ -489,10 +496,33 @@ struct WPECachedContentResolver {
             )
         case .scene:
             var tier: SceneCapabilityTier = .unsupported
+            var preflightTier: WPEScenePreflightTier?
+            var preflightFeatureFlags: [WPESceneFeatureFlag] = []
             do {
                 let data = try Data(contentsOf: entryURL)
                 let document = try WPESceneDocumentParser.parse(data: data)
                 tier = WPESceneCapabilityClassifier().capabilityTier(for: document, cacheURL: cacheURL)
+                // Reconstruct a minimal `WallpaperEngineProject` from the
+                // persisted origin so preflight can read the same flags it
+                // does at first-import time. The `propertyCount` is
+                // irrelevant to preflight; we pass 0.
+                let synthesizedProject = WallpaperEngineProject(
+                    workshopID: origin.workshopID,
+                    title: origin.title,
+                    entryFile: entryFile,
+                    type: origin.originalType,
+                    previewFileName: origin.previewFileName,
+                    propertyCount: 0,
+                    dependencyWorkshopIDs: origin.dependencyWorkshopIDs,
+                    requiresWindowsPlugin: origin.requiresWindowsPlugin
+                )
+                let preflight = WPEScenePreflight.classify(
+                    document: document,
+                    project: synthesizedProject,
+                    scenePackageEntries: scenePackageEntryNames(in: cacheURL, fileManager: fileManager)
+                )
+                preflightTier = preflight.tier
+                preflightFeatureFlags = sortedPreflightFeatureFlags(preflight.featureFlags)
             } catch {
             }
             return .scene(SceneDescriptor(
@@ -500,7 +530,9 @@ struct WPECachedContentResolver {
                 cacheRelativePath: cacheRelativePath,
                 entryFile: entryFile,
                 capabilityTier: tier,
-                dependencyWorkshopIDs: origin.dependencyWorkshopIDs
+                dependencyWorkshopIDs: origin.dependencyWorkshopIDs,
+                preflightTier: preflightTier,
+                preflightFeatureFlags: preflightFeatureFlags
             ))
         case .application, .unknown:
             return nil
@@ -510,4 +542,41 @@ struct WPECachedContentResolver {
     private func resourceURL(root: URL, relativePath: String) -> URL? {
         WPEPathSafety.resourceURL(root: root, relativePath: relativePath)
     }
+}
+
+/// Enumerates regular-file entries under a scene cache root so
+/// `WPEScenePreflight` can probe for custom shader payloads (`.vert`,
+/// `.frag`) without having to walk the directory itself. Capped at
+/// `limit` files to keep large auxiliary asset folders from dominating the
+/// import critical path.
+private func scenePackageEntryNames(
+    in rootURL: URL,
+    fileManager: FileManager,
+    limit: Int = 10_000
+) -> [String] {
+    guard limit > 0,
+          let enumerator = fileManager.enumerator(
+              at: rootURL,
+              includingPropertiesForKeys: [.isRegularFileKey],
+              options: [.skipsHiddenFiles, .skipsPackageDescendants]
+          ) else {
+        return []
+    }
+
+    var entries: [String] = []
+    entries.reserveCapacity(min(limit, 256))
+    for case let url as URL in enumerator {
+        guard entries.count < limit else { break }
+        guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else {
+            continue
+        }
+        entries.append(url.lastPathComponent)
+    }
+    return entries
+}
+
+/// `WPEScenePreflight` emits an unordered `Set` so descriptor persistence
+/// matches the historical ordering convention (alphabetical by raw value).
+private func sortedPreflightFeatureFlags(_ flags: Set<WPESceneFeatureFlag>) -> [WPESceneFeatureFlag] {
+    flags.sorted { $0.rawValue < $1.rawValue }
 }

@@ -12,32 +12,54 @@ struct WPESceneSection: View {
     @State private var selectedHistoryEntry: WPEHistoryEntry?
     @State private var showWorkshopGallery: Bool = false
     @State private var pendingDestructive: PendingDestructive?
+    /// User has opted out of seeing the engine-assets banner for this
+    /// run. Resets to `false` on next launch so granting access later
+    /// (or removing the grant) re-evaluates banner visibility.
+    @State private var bannerDismissedForSession: Bool = false
+    @State private var isEngineAssetsAuthorized: Bool = WPEEngineAssetsLibrary.shared.isAuthorized
 
     var body: some View {
-        Group {
-            if hasActiveSceneWallpaper {
-                activeSceneCard
-            } else if recentImports.isEmpty {
-                emptyState
-            } else if let selected = selectedHistoryEntry {
-                unsupportedDetail(for: selected)
-            } else {
-                historyList
+        VStack(spacing: 0) {
+            if shouldShowEngineAssetsBanner {
+                engineAssetsBanner
+                    .padding([.horizontal, .top], 24)
+                    .padding(.bottom, 8)
+                    // Slide-in from the top so the layout shift is read as
+                    // "new affordance arriving" rather than a jarring jump.
+                    // Reduce Motion swaps the spring for a cross-fade
+                    // automatically per SwiftUI accessibility semantics.
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
+            Group {
+                if hasActiveSceneWallpaper {
+                    activeSceneCard
+                } else if recentImports.isEmpty {
+                    emptyState
+                } else if let selected = selectedHistoryEntry {
+                    unsupportedDetail(for: selected)
+                } else {
+                    historyList
+                }
+            }
+            // Animate only the empty↔grid transition (both pure-SwiftUI
+            // subtrees). Cross-branch animation into `unsupportedDetail` is
+            // deliberately skipped because that branch hosts
+            // `WPEPreviewView` (NSViewRepresentable) and animating across
+            // NSView boundaries triggers an AppKit Auto-Layout constraint
+            // cycle (`needs Update Constraints in Window pass …`).
+            .animation(.default, value: recentImports.isEmpty)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        // Animate only the empty↔grid transition (both pure-SwiftUI subtrees).
-        // Cross-branch animation into `unsupportedDetail` is deliberately
-        // skipped because that branch hosts `WPEPreviewView` (NSViewRepresentable)
-        // and animating across NSView boundaries triggers an AppKit Auto-Layout
-        // constraint cycle (`needs Update Constraints in Window pass …`).
-        .animation(.default, value: recentImports.isEmpty)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: shouldShowEngineAssetsBanner)
         .onAppear {
             // `reloadHistory()` writes `recentImports` / `selectedHistoryEntry`
             // @State — defer to next main-actor tick to keep the first paint
             // out of the "Modifying state during view update" cascade. Same
             // pattern as the .onReceive handlers below.
-            Task { @MainActor in reloadHistory() }
+            Task { @MainActor in
+                reloadHistory()
+                isEngineAssetsAuthorized = WPEEngineAssetsLibrary.shared.isAuthorized
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .wpeImportDidComplete)) { notification in
             Task { @MainActor in
@@ -47,6 +69,11 @@ struct WPESceneSection: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .wpeHistoryDidChange)) { _ in
             Task { @MainActor in reloadHistory() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .wpeEngineAssetsBookmarkDidChange)) { _ in
+            Task { @MainActor in
+                isEngineAssetsAuthorized = WPEEngineAssetsLibrary.shared.isAuthorized
+            }
         }
         .sheet(isPresented: $showWorkshopGallery) {
             WorkshopGalleryView(screen: screen)
@@ -60,6 +87,60 @@ struct WPESceneSection: View {
                 set: { if $0 == nil { screenManager.clearWPEImportError(for: screen) } }
             )
         )
+    }
+
+    // MARK: - Engine assets banner
+
+    /// Banner appears when (a) we don't already have access AND
+    /// (b) the user has at least tried to import a scene AND
+    /// (c) the user hasn't dismissed it this session. Hiding on the empty
+    /// state keeps the very first launch focused on the primary CTA.
+    private var shouldShowEngineAssetsBanner: Bool {
+        !isEngineAssetsAuthorized
+            && !bannerDismissedForSession
+            && !recentImports.isEmpty
+    }
+
+    private var engineAssetsBanner: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Image(systemName: "puzzlepiece.extension")
+                    .font(.title2)
+                    .foregroundStyle(.yellow)
+                    .accessibilityHidden(true)
+                Text("Grant Wallpaper Engine install folder")
+                    .font(.headline)
+            }
+            Text("Many scenes reference shared engine framework files (materials/util/composelayer.json, models/util/*.json, effects/*). Grant your Wallpaper Engine install folder so we can resolve them like WPE does.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 12) {
+                Button {
+                    Task { @MainActor in
+                        _ = await WPEEngineAssetsLibrary.shared.requestAccess()
+                    }
+                } label: {
+                    Label("Grant Folder…", systemImage: "folder.badge.plus")
+                }
+                .buttonStyle(.glassProminent)
+                .controlSize(.regular)
+                .accessibilityHint(Text("Opens a folder chooser to grant access to your Wallpaper Engine install root"))
+
+                Button {
+                    bannerDismissedForSession = true
+                } label: {
+                    Label("Skip for now", systemImage: "xmark")
+                }
+                .buttonStyle(.glass)
+                .controlSize(.regular)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular, in: .rect(cornerRadius: 16))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text("Grant Wallpaper Engine install folder. Many scenes need access to shared engine framework files (materials, models, effects) to render correctly."))
     }
 
     // MARK: - States
