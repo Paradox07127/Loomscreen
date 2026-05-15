@@ -358,6 +358,70 @@ final class WPEMetalRenderExecutor {
         }
     }
 
+    /// Phase 2D-E: shared dispatch path for single-input effect built-ins
+    /// (opacity, scroll, pulse, iris, waterwaves). They all sample one
+    /// source texture and emit a transformed copy, so the only thing that
+    /// changes per-effect is the fragment name + the uniform struct.
+    func dispatchSingleSampleEffect<U>(
+        fragmentName: String,
+        pass: WPEPreparedRenderPass,
+        destination: (id: WPEMetalTargetID, texture: MTLTexture),
+        textures: [String: MTLTexture],
+        frameState: WPEMetalFrameState,
+        encoder: MTLRenderCommandEncoder,
+        depthPixelFormat: MTLPixelFormat,
+        uniforms: U
+    ) throws {
+        encoder.setRenderPipelineState(try renderPipeline(
+            fragmentName: fragmentName,
+            blendMode: pass.pass.blending,
+            colorPixelFormat: destination.texture.pixelFormat,
+            depthPixelFormat: depthPixelFormat
+        ))
+        let reference = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
+        let texture = try WPEMetalShaderInputs.resolve(
+            reference: reference,
+            textures: textures,
+            frameState: frameState,
+            currentTargetID: destination.id
+        )
+        encoder.setFragmentTexture(texture, index: 0)
+        var local = uniforms
+        encoder.setFragmentBytes(&local, length: MemoryLayout<U>.stride, index: 0)
+    }
+
+    /// Phase 2D-D: pack scene uniforms for the genericimage* built-ins.
+    /// The MSL fragment expects (color × g_Color × brightness, alpha mask
+    /// flag) so we resolve g_Color through the same sRGB→linear path as
+    /// `WPEMetalShaderInputs.colorVector(for:)` and combine with g_Alpha
+    /// + g_Brightness.
+    func genericImageUniforms(for pass: WPEPreparedRenderPass, hasMask: Bool) -> WPEGenericImageUniforms {
+        WPEGenericImageUniforms(
+            color: WPEMetalShaderInputs.colorVector(for: pass),
+            alphaMaskUV: SIMD4<Float>(
+                WPEMetalShaderInputs.floatScalar(named: ["g_Alpha", "u_Alpha", "alpha"], in: pass, default: 1),
+                WPEMetalShaderInputs.floatScalar(named: ["g_Brightness", "u_Brightness", "brightness"], in: pass, default: 1),
+                hasMask ? 1 : 0,
+                0
+            )
+        )
+    }
+
+    /// Phase 2D-D: per-particle uniform pack. Same color path as the image
+    /// fragments; the spectrum slot in `sizeAndAge` stays zero until the
+    /// audio runtime ships and feeds an FFT bin into the executor.
+    func genericParticleUniforms(for pass: WPEPreparedRenderPass) -> WPEGenericParticleUniforms {
+        WPEGenericParticleUniforms(
+            color: WPEMetalShaderInputs.colorVector(for: pass),
+            sizeAndAge: SIMD4<Float>(
+                WPEMetalShaderInputs.floatScalar(named: ["g_Alpha", "u_Alpha", "alpha"], in: pass, default: 1),
+                WPEMetalShaderInputs.floatScalar(named: ["g_Brightness", "u_Brightness", "brightness"], in: pass, default: 1),
+                0,
+                0
+            )
+        )
+    }
+
     private func passReadsCurrentTarget(_ pass: WPEPreparedRenderPass, targetID: WPEMetalTargetID) -> Bool {
         textureReferences(for: pass).contains { reference in
             switch (reference, targetID) {

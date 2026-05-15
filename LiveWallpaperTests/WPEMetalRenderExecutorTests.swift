@@ -121,6 +121,129 @@ struct WPEMetalRenderExecutorTests {
         #expect(pixel.a >= 250)
     }
 
+    @Test("genericimage2 native MSL fragment renders texture with color tint")
+    func genericImage2RendersWithTint() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let input = try makeRGBAInputTexture(device: device, bytes: Data([
+            255, 255, 255, 255,
+            255, 255, 255, 255,
+            255, 255, 255, 255,
+            255, 255, 255, 255
+        ]))
+        let pass = WPERenderPass(
+            id: "img2.0",
+            phase: .material,
+            shader: "genericimage2",
+            source: .image("materials/base.png"),
+            target: .scene,
+            textures: [0: .image("materials/base.png")],
+            binds: [:],
+            // sRGB 1.0 mid-tint of red so we can detect both color routing
+            // and gamma handling. Executor converts sRGB→linear before
+            // shading; sRGB-tagged target re-encodes on store.
+            constants: ["g_Color": .vector([1, 0, 0, 1])],
+            combos: [:],
+            blending: "normal",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: graphLayer(pass: pass),
+                passes: [WPEPreparedRenderPass(
+                    pass: pass,
+                    shader: WPEShaderProgram(name: "genericimage2", vertexSource: "", fragmentSource: "", isBuiltin: true),
+                    textureBindings: [:],
+                    comboValues: [:],
+                    uniformValues: ["g_Color": .vector([1, 0, 0, 1])]
+                )]
+            )
+        ])
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 2, height: 2),
+            textures: ["materials/base.png": input]
+        )
+        let pixel = try readPixel(output, x: 1, y: 1)
+
+        // White texture × red tint → red pixel at full alpha. The shader
+        // premultiplies, the sRGB target stores back, so r is at the high
+        // end of the byte range with g/b near zero.
+        #expect(pixel.r >= 250)
+        #expect(pixel.g <= 5)
+        #expect(pixel.b <= 5)
+        #expect(pixel.a >= 250)
+    }
+
+    @Test("genericimage4 alpha mask drops alpha when mask is opaque-black")
+    func genericImage4AlphaMaskGatesOutput() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let primary = try makeRGBAInputTexture(device: device, bytes: Data([
+            0, 255, 0, 255,
+            0, 255, 0, 255,
+            0, 255, 0, 255,
+            0, 255, 0, 255
+        ]))
+        // Mask alpha = 0 → output alpha must collapse to 0 regardless of
+        // primary alpha. This is the gating test for the hasMask path.
+        let mask = try makeRGBAInputTexture(device: device, bytes: Data([
+            0, 0, 0, 0,
+            0, 0, 0, 0,
+            0, 0, 0, 0,
+            0, 0, 0, 0
+        ]))
+        let pass = WPERenderPass(
+            id: "img4.0",
+            phase: .material,
+            shader: "genericimage4",
+            source: .image("materials/base.png"),
+            target: .scene,
+            textures: [0: .image("materials/base.png"), 1: .image("materials/mask.png")],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "normal",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: graphLayer(pass: pass),
+                passes: [WPEPreparedRenderPass(
+                    pass: pass,
+                    shader: WPEShaderProgram(name: "genericimage4", vertexSource: "", fragmentSource: "", isBuiltin: true),
+                    textureBindings: [
+                        0: .image("materials/base.png"),
+                        1: .image("materials/mask.png")
+                    ],
+                    comboValues: [:],
+                    uniformValues: [:]
+                )]
+            )
+        ])
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 2, height: 2),
+            textures: [
+                "materials/base.png": primary,
+                "materials/mask.png": mask
+            ]
+        )
+        let pixel = try readPixel(output, x: 1, y: 1)
+
+        // Mask zeroed alpha + premultiplied output → all channels collapse.
+        // Pass blends "normal" against the cleared (0,0,0,1) backbuffer,
+        // so the result is the clear color, not the texture sample.
+        #expect(pixel.a >= 250) // clear-color alpha
+        #expect(pixel.g <= 5)   // green texture didn't bleed through
+    }
+
     @Test("Copies image layers that have no material passes")
     func copiesImageLayerWithoutPasses() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())

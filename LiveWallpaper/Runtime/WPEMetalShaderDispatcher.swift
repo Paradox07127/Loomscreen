@@ -222,6 +222,298 @@ struct WPEMetalShaderDispatcher {
             )
             encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEWaterUniforms>.stride, index: 0)
 
+        case "genericimage2":
+            encoder.setRenderPipelineState(try executor.renderPipeline(
+                fragmentName: "wpe_genericimage2_fragment",
+                blendMode: pass.pass.blending,
+                colorPixelFormat: destination.texture.pixelFormat,
+                depthPixelFormat: depthPixelFormat
+            ))
+            let reference = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
+            let texture = try executor.resolve(
+                reference: reference,
+                textures: textures,
+                frameState: frameState,
+                currentTargetID: destination.id
+            )
+            encoder.setFragmentTexture(texture, index: 0)
+            var uniforms = executor.genericImageUniforms(for: pass, hasMask: false)
+            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEGenericImageUniforms>.stride, index: 0)
+
+        case "genericimage4":
+            encoder.setRenderPipelineState(try executor.renderPipeline(
+                fragmentName: "wpe_genericimage4_fragment",
+                blendMode: pass.pass.blending,
+                colorPixelFormat: destination.texture.pixelFormat,
+                depthPixelFormat: depthPixelFormat
+            ))
+            let primaryRef = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
+            let primary = try executor.resolve(
+                reference: primaryRef,
+                textures: textures,
+                frameState: frameState,
+                currentTargetID: destination.id
+            )
+            encoder.setFragmentTexture(primary, index: 0)
+            // Slot 1 is the alpha mask (most common combo). When the
+            // material doesn't bind it, fall back to slot 0 so the shader
+            // sample is still valid Metal — the `hasMask` flag below
+            // gates the actual contribution to alpha.
+            let maskRef = pass.textureBindings[1] ?? pass.pass.textures[1]
+            let hasMask = maskRef != nil
+            let mask: MTLTexture
+            if let maskRef {
+                mask = try executor.resolve(
+                    reference: maskRef,
+                    textures: textures,
+                    frameState: frameState,
+                    currentTargetID: destination.id
+                )
+            } else {
+                mask = primary
+            }
+            encoder.setFragmentTexture(mask, index: 1)
+            var uniforms = executor.genericImageUniforms(for: pass, hasMask: hasMask)
+            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEGenericImageUniforms>.stride, index: 0)
+
+        case "effect_opacity":
+            try executor.dispatchSingleSampleEffect(
+                fragmentName: "wpe_effect_opacity_fragment",
+                pass: pass,
+                destination: destination,
+                textures: textures,
+                frameState: frameState,
+                encoder: encoder,
+                depthPixelFormat: depthPixelFormat,
+                uniforms: WPEOpacityUniforms(
+                    opacity: executor.floatScalar(named: ["u_Opacity", "opacity", "amount", "alpha"], in: pass, default: 1)
+                )
+            )
+
+        case "effect_scroll":
+            let speedVec = pass.uniformValues["u_Speed"]?.vectorValue
+                ?? pass.pass.constants["u_Speed"]?.vectorValue
+                ?? pass.pass.constants["speed"]?.vectorValue
+                ?? [0.1, 0]
+            try executor.dispatchSingleSampleEffect(
+                fragmentName: "wpe_effect_scroll_fragment",
+                pass: pass,
+                destination: destination,
+                textures: textures,
+                frameState: frameState,
+                encoder: encoder,
+                depthPixelFormat: depthPixelFormat,
+                uniforms: WPEScrollUniforms(
+                    speed: SIMD2<Float>(Float(speedVec.first ?? 0.1), Float(speedVec.dropFirst().first ?? 0)),
+                    time: executor.floatScalar(named: "g_Time", in: pass, default: 0)
+                )
+            )
+
+        case "effect_pulse":
+            try executor.dispatchSingleSampleEffect(
+                fragmentName: "wpe_effect_pulse_fragment",
+                pass: pass,
+                destination: destination,
+                textures: textures,
+                frameState: frameState,
+                encoder: encoder,
+                depthPixelFormat: depthPixelFormat,
+                uniforms: WPEPulseUniforms(
+                    frequency: executor.floatScalar(named: ["u_Frequency", "frequency", "speed"], in: pass, default: 1),
+                    amplitude: executor.floatScalar(named: ["u_Amplitude", "amplitude", "amount", "strength"], in: pass, default: 0.25),
+                    time: executor.floatScalar(named: "g_Time", in: pass, default: 0)
+                )
+            )
+
+        case "effect_iris":
+            try executor.dispatchSingleSampleEffect(
+                fragmentName: "wpe_effect_iris_fragment",
+                pass: pass,
+                destination: destination,
+                textures: textures,
+                frameState: frameState,
+                encoder: encoder,
+                depthPixelFormat: depthPixelFormat,
+                uniforms: WPEIrisUniforms(
+                    radius: executor.floatScalar(named: ["u_Radius", "radius", "size"], in: pass, default: 0.6),
+                    softness: executor.floatScalar(named: ["u_Softness", "softness", "feather"], in: pass, default: 0.1)
+                )
+            )
+
+        case "effect_waterwaves":
+            try executor.dispatchSingleSampleEffect(
+                fragmentName: "wpe_effect_waterwaves_fragment",
+                pass: pass,
+                destination: destination,
+                textures: textures,
+                frameState: frameState,
+                encoder: encoder,
+                depthPixelFormat: depthPixelFormat,
+                uniforms: WPEWaterUniforms(
+                    amplitude: executor.floatScalar(named: ["u_Amplitude", "amplitude", "amount", "strength"], in: pass, default: 0.005),
+                    frequency: executor.floatScalar(named: ["u_Frequency", "frequency", "scale"], in: pass, default: 18),
+                    speed: executor.floatScalar(named: ["u_Speed", "speed"], in: pass, default: 1),
+                    time: executor.floatScalar(named: "g_Time", in: pass, default: 0)
+                )
+            )
+
+        case "effect_spin":
+            try executor.dispatchSingleSampleEffect(
+                fragmentName: "wpe_effect_spin_fragment",
+                pass: pass,
+                destination: destination,
+                textures: textures,
+                frameState: frameState,
+                encoder: encoder,
+                depthPixelFormat: depthPixelFormat,
+                uniforms: WPESpinUniforms(
+                    angularSpeed: executor.floatScalar(named: ["u_AngularSpeed", "u_Speed", "speed", "angularSpeed"], in: pass, default: 0.5),
+                    time: executor.floatScalar(named: "g_Time", in: pass, default: 0)
+                )
+            )
+
+        case "effect_tint":
+            try executor.dispatchSingleSampleEffect(
+                fragmentName: "wpe_effect_tint_fragment",
+                pass: pass,
+                destination: destination,
+                textures: textures,
+                frameState: frameState,
+                encoder: encoder,
+                depthPixelFormat: depthPixelFormat,
+                uniforms: WPETintUniforms(
+                    color: executor.colorVector(for: pass),
+                    intensity: executor.floatScalar(named: ["u_Intensity", "intensity", "amount", "strength"], in: pass, default: 1)
+                )
+            )
+
+        case "effect_foliagesway":
+            try executor.dispatchSingleSampleEffect(
+                fragmentName: "wpe_effect_foliagesway_fragment",
+                pass: pass,
+                destination: destination,
+                textures: textures,
+                frameState: frameState,
+                encoder: encoder,
+                depthPixelFormat: depthPixelFormat,
+                uniforms: WPEFoliageSwayUniforms(
+                    amplitude: executor.floatScalar(named: ["u_Amplitude", "amplitude", "amount", "strength"], in: pass, default: 0.02),
+                    frequency: executor.floatScalar(named: ["u_Frequency", "frequency", "scale"], in: pass, default: 4),
+                    speed: executor.floatScalar(named: ["u_Speed", "speed"], in: pass, default: 1.5),
+                    time: executor.floatScalar(named: "g_Time", in: pass, default: 0)
+                )
+            )
+
+        case "effect_waterripple":
+            try executor.dispatchSingleSampleEffect(
+                fragmentName: "wpe_effect_waterripple_fragment",
+                pass: pass,
+                destination: destination,
+                textures: textures,
+                frameState: frameState,
+                encoder: encoder,
+                depthPixelFormat: depthPixelFormat,
+                uniforms: WPEWaterRippleUniforms(
+                    amplitude: executor.floatScalar(named: ["u_Amplitude", "amplitude", "amount", "strength"], in: pass, default: 0.005),
+                    frequency: executor.floatScalar(named: ["u_Frequency", "frequency", "scale"], in: pass, default: 60),
+                    speed: executor.floatScalar(named: ["u_Speed", "speed"], in: pass, default: 1.0),
+                    time: executor.floatScalar(named: "g_Time", in: pass, default: 0)
+                )
+            )
+
+        case "effect_blend":
+            try executor.dispatchSingleSampleEffect(
+                fragmentName: "wpe_effect_blend_fragment",
+                pass: pass,
+                destination: destination,
+                textures: textures,
+                frameState: frameState,
+                encoder: encoder,
+                depthPixelFormat: depthPixelFormat,
+                uniforms: WPEBlendUniforms(
+                    color: executor.colorVector(for: pass),
+                    opacity: executor.floatScalar(named: ["u_Opacity", "opacity", "amount", "strength"], in: pass, default: 1)
+                )
+            )
+
+        case "effect_waterflow":
+            let dirVec = pass.uniformValues["u_Direction"]?.vectorValue
+                ?? pass.pass.constants["u_Direction"]?.vectorValue
+                ?? [0, 0.1]
+            try executor.dispatchSingleSampleEffect(
+                fragmentName: "wpe_effect_waterflow_fragment",
+                pass: pass,
+                destination: destination,
+                textures: textures,
+                frameState: frameState,
+                encoder: encoder,
+                depthPixelFormat: depthPixelFormat,
+                uniforms: WPEWaterFlowUniforms(
+                    direction: SIMD2<Float>(Float(dirVec.first ?? 0), Float(dirVec.dropFirst().first ?? 0.1)),
+                    speed: executor.floatScalar(named: ["u_Speed", "speed"], in: pass, default: 1),
+                    time: executor.floatScalar(named: "g_Time", in: pass, default: 0)
+                )
+            )
+
+        case "effect_color_grading":
+            func vec4(_ source: [Double]?, fallback: SIMD4<Float>) -> SIMD4<Float> {
+                guard let s = source else { return fallback }
+                return SIMD4<Float>(
+                    Float(s.indices.contains(0) ? s[0] : Double(fallback.x)),
+                    Float(s.indices.contains(1) ? s[1] : Double(fallback.y)),
+                    Float(s.indices.contains(2) ? s[2] : Double(fallback.z)),
+                    Float(s.indices.contains(3) ? s[3] : Double(fallback.w))
+                )
+            }
+            try executor.dispatchSingleSampleEffect(
+                fragmentName: "wpe_effect_color_grading_fragment",
+                pass: pass,
+                destination: destination,
+                textures: textures,
+                frameState: frameState,
+                encoder: encoder,
+                depthPixelFormat: depthPixelFormat,
+                uniforms: WPEColorGradingUniforms(
+                    lift: vec4(pass.uniformValues["u_Lift"]?.vectorValue, fallback: SIMD4<Float>(0, 0, 0, 0)),
+                    gamma: vec4(pass.uniformValues["u_Gamma"]?.vectorValue, fallback: SIMD4<Float>(1, 1, 1, 1)),
+                    gain: vec4(pass.uniformValues["u_Gain"]?.vectorValue, fallback: SIMD4<Float>(1, 1, 1, 1))
+                )
+            )
+
+        case "effect_shimmer":
+            try executor.dispatchSingleSampleEffect(
+                fragmentName: "wpe_effect_shimmer_fragment",
+                pass: pass,
+                destination: destination,
+                textures: textures,
+                frameState: frameState,
+                encoder: encoder,
+                depthPixelFormat: depthPixelFormat,
+                uniforms: WPEShimmerUniforms(
+                    speed: executor.floatScalar(named: ["u_Speed", "speed"], in: pass, default: 4),
+                    intensity: executor.floatScalar(named: ["u_Intensity", "intensity", "amount", "strength"], in: pass, default: 0.2),
+                    time: executor.floatScalar(named: "g_Time", in: pass, default: 0)
+                )
+            )
+
+        case "genericparticle":
+            encoder.setRenderPipelineState(try executor.renderPipeline(
+                fragmentName: "wpe_genericparticle_fragment",
+                blendMode: pass.pass.blending,
+                colorPixelFormat: destination.texture.pixelFormat,
+                depthPixelFormat: depthPixelFormat
+            ))
+            let reference = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
+            let texture = try executor.resolve(
+                reference: reference,
+                textures: textures,
+                frameState: frameState,
+                currentTargetID: destination.id
+            )
+            encoder.setFragmentTexture(texture, index: 0)
+            var uniforms = executor.genericParticleUniforms(for: pass)
+            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEGenericParticleUniforms>.stride, index: 0)
+
         case "effect_shake":
             encoder.setRenderPipelineState(try executor.renderPipeline(
                 fragmentName: "wpe_effect_shake_fragment",
