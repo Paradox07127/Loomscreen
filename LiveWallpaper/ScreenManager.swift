@@ -47,9 +47,12 @@ final class ScreenManager {
     private(set) var screens: [Screen] = []
     private(set) var wallpaperSessionStateVersion: UInt64 = 0
     private(set) var wallpaperSessionSummaryCache = WallpaperSessionSummaryCache()
-    /// Per-screen WPE import error state. Keying on `CGDirectDisplayID` keeps
-    /// concurrent multi-screen imports from overwriting each other's alerts.
-    private(set) var lastWPEImportErrors: [CGDirectDisplayID: AppError] = [:]
+    /// Per-screen WPE import bookkeeping (last error + generation counter).
+    /// Held as an observed property so SwiftUI views reading
+    /// `screenManager.wpeImportError(for:)` re-render when imports succeed
+    /// or fail — the original `lastWPEImportErrors` dict was on this
+    /// `@Observable` class, and we must preserve that invalidation flow.
+    private let wpeImportTracker = WPEImportTracker()
     private(set) var bookmarkDisplayNames: [Data: String] = [:]
 
     @ObservationIgnored private var cleanupTasks: Set<AnyCancellable> = []
@@ -102,8 +105,6 @@ final class ScreenManager {
     @ObservationIgnored private var transitionRegistry: PlaybackTransitionRegistry {
         playbackCoordinator.transition
     }
-    /// Drops stale async WPE imports per screen (mirrors `transitionRegistry`).
-    @ObservationIgnored private var wpeImportGeneration: [CGDirectDisplayID: Int] = [:]
     @ObservationIgnored let weatherService = WeatherReactiveService()
     @ObservationIgnored private lazy var lockScreenSnapshotCoordinator = LockScreenSnapshotCoordinator { [weak self] in
         self?.captureDesktopSnapshotsForLockIfNeeded()
@@ -828,11 +829,11 @@ final class ScreenManager {
     /// Used by the Scene tab to surface failures without bleeding state across
     /// concurrent imports on different displays.
     func wpeImportError(for screen: Screen) -> AppError? {
-        lastWPEImportErrors[screen.id]
+        wpeImportTracker.error(for: screen.id)
     }
 
     func clearWPEImportError(for screen: Screen) {
-        lastWPEImportErrors.removeValue(forKey: screen.id)
+        wpeImportTracker.clearError(for: screen.id)
     }
 
     enum WPEProjectPreparationOutcome: Sendable, Equatable {
@@ -865,9 +866,9 @@ final class ScreenManager {
 
     @discardableResult
     func importWallpaperEngineProject(at folderURL: URL, for screen: Screen) async -> WPEProjectApplyOutcome {
-        let generation = bumpWPEImportGeneration(for: screen.id)
+        let generation = wpeImportTracker.bumpGeneration(for: screen.id)
         let outcome = await prepareWallpaperEngineProject(at: folderURL)
-        guard isCurrentWPEImportGeneration(generation, for: screen.id) else {
+        guard wpeImportTracker.isCurrentGeneration(generation, for: screen.id) else {
             return .rejected(reason: "Action superseded")
         }
 
@@ -888,11 +889,11 @@ final class ScreenManager {
                 type: origin.originalType,
                 workshopID: origin.workshopID
             )
-            lastWPEImportErrors.removeValue(forKey: screen.id)
+            wpeImportTracker.clearError(for: screen.id)
             return .unsupported(origin: origin)
 
         case .rejected(let reason):
-            lastWPEImportErrors[screen.id] = .wpePackageInvalid(reason)
+            wpeImportTracker.recordError(.wpePackageInvalid(reason), for: screen.id)
             return .rejected(reason: reason)
         }
     }
@@ -917,20 +918,20 @@ final class ScreenManager {
                 if applyCachedWPEHistoryEntry(entry, for: screen) {
                     return
                 }
-                lastWPEImportErrors[screen.id] = .fileAccessDenied(entry.origin.title)
+                wpeImportTracker.recordError(.fileAccessDenied(entry.origin.title), for: screen.id)
                 return
             }
 
-            lastWPEImportErrors.removeValue(forKey: screen.id)
+            wpeImportTracker.clearError(for: screen.id)
             await importWallpaperEngineProject(at: folderURL, for: screen)
-            if lastWPEImportErrors[screen.id] != nil {
+            if wpeImportTracker.error(for: screen.id) != nil {
                 _ = applyCachedWPEHistoryEntry(entry, for: screen)
             }
         } catch {
             if applyCachedWPEHistoryEntry(entry, for: screen) {
                 return
             }
-            lastWPEImportErrors[screen.id] = .wpeImportFailed(error.localizedDescription)
+            wpeImportTracker.recordError(.wpeImportFailed(error.localizedDescription), for: screen.id)
         }
     }
 
@@ -989,7 +990,7 @@ final class ScreenManager {
             type: origin.originalType,
             workshopID: origin.workshopID
         )
-        lastWPEImportErrors.removeValue(forKey: screen.id)
+        wpeImportTracker.clearError(for: screen.id)
     }
 
     @discardableResult
@@ -1007,15 +1008,6 @@ final class ScreenManager {
         return true
     }
 
-    private func bumpWPEImportGeneration(for screenID: CGDirectDisplayID) -> Int {
-        let next = (wpeImportGeneration[screenID] ?? 0) &+ 1
-        wpeImportGeneration[screenID] = next
-        return next
-    }
-
-    private func isCurrentWPEImportGeneration(_ generation: Int, for screenID: CGDirectDisplayID) -> Bool {
-        wpeImportGeneration[screenID] == generation
-    }
 
     // MARK: - Configuration Update Helpers
 
