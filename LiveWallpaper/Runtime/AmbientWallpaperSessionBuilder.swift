@@ -75,7 +75,6 @@ final class AmbientWallpaperSessionBuilder {
         descriptor: SceneDescriptor,
         frame: CGRect,
         dependencyMounts: [WPEAssetMount] = [],
-        rendererBackend: WPESceneRendererBackend = .metalExperimental,
         engineAssetsRootURL: URL? = nil,
         applicationSupportRootURL: URL? = nil,
         fileManager: FileManager = .default
@@ -117,8 +116,8 @@ final class AmbientWallpaperSessionBuilder {
             Logger.warning("Scene descriptor cache directory missing: \(cacheURL.path)", category: .screenManager)
             return nil
         }
-        // Last-mile entry file probe so we don't mount an SKView that the
-        // controller will immediately throw out of `load()`.
+        // Last-mile entry file probe so we don't mount an MTKView that the
+        // renderer will immediately throw out of `load()`.
         let entryProbe = SceneResourceResolver(cacheRootURL: cacheURL)
         guard (try? entryProbe.resolveExistingFileURL(relativePath: descriptor.entryFile)) != nil else {
             Logger.warning("Scene descriptor entry file failed safety check: \(descriptor.entryFile)", category: .screenManager)
@@ -126,34 +125,23 @@ final class AmbientWallpaperSessionBuilder {
         }
 
         let rendererFrame = CGRect(origin: .zero, size: frame.size)
+        guard let device = MTLCreateSystemDefaultDevice() else {
+            Logger.warning("Metal scene renderer requested but Metal is unavailable", category: .screenManager)
+            return nil
+        }
         let renderer: WPESceneRenderer
-        switch rendererBackend {
-        case .spriteKit:
-            renderer = SceneRenderingController(
+        do {
+            renderer = try WPEMetalSceneRenderer(
                 descriptor: descriptor,
                 cacheRootURL: cacheURL,
                 dependencyMounts: dependencyMounts,
                 engineAssetsRootURL: engineAssetsRootURL,
-                frame: rendererFrame
+                frame: rendererFrame,
+                device: device
             )
-        case .metalExperimental:
-            guard let device = MTLCreateSystemDefaultDevice() else {
-                Logger.warning("Experimental Metal scene renderer requested but Metal is unavailable", category: .screenManager)
-                return nil
-            }
-            do {
-                renderer = try WPEMetalSceneRenderer(
-                    descriptor: descriptor,
-                    cacheRootURL: cacheURL,
-                    dependencyMounts: dependencyMounts,
-                    engineAssetsRootURL: engineAssetsRootURL,
-                    frame: rendererFrame,
-                    device: device
-                )
-            } catch {
-                Logger.warning("Experimental Metal scene renderer could not be created: \(error.localizedDescription)", category: .screenManager)
-                return nil
-            }
+        } catch {
+            Logger.warning("Metal scene renderer could not be created: \(error.localizedDescription)", category: .screenManager)
+            return nil
         }
 
         let window = VideoWallpaperWindow(frame: frame)

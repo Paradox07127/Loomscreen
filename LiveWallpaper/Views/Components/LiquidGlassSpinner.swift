@@ -1,9 +1,9 @@
 import SwiftUI
 
 /// Custom Liquid Glass loading indicator. Used by the scene detail card while
-/// the SpriteKit runtime is decoding image layers. Two stacked rotating arcs
-/// keep the motion gentle so it doesn't compete with the underlying GIF
-/// preview that fades through during the loading phase.
+/// the renderer is decoding image layers. Two stacked rotating arcs keep
+/// the motion gentle so it doesn't compete with the underlying GIF preview
+/// that fades through during the loading phase.
 struct LiquidGlassSpinner: View {
     var size: CGFloat = 44
     var lineWidth: CGFloat = 4
