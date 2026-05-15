@@ -562,15 +562,25 @@ struct WPEMetalShaderDispatcher {
             )
             encoder.setRenderPipelineState(pipelineState)
 
-            // Texture binding. For each sampler slot the shader declared,
-            // resolve from `pass.textureBindings` first (material override),
-            // then from `pass.pass.textures` (graph defaults). When a slot
-            // is unbound, fall back to the primary so the Metal sampler
-            // still has a valid texture (the shader is responsible for
-            // ignoring unused channels).
+            // Texture binding. Lookup chain (highest priority first):
+            //   1. `pass.pass.binds[slot]` — effect.json `bind` entry
+            //      that explicitly rebinds this slot to an FBO. This is
+            //      the multi-pass-effect path: the second pass of a
+            //      separable blur or a lightshafts combine reads the
+            //      previous pass's FBO from this slot.
+            //   2. `pass.textureBindings[slot]` — runtime override
+            //      merged in from scene effect overrides.
+            //   3. `pass.pass.textures[slot]` — material's `textures: []`
+            //      array (the artist-bound input).
+            //   4. `pass.pass.source` for slot 0 — implicit "what came
+            //      before me on the layer composite chain".
+            //   5. Reuse slot 0's texture for unused slots so Metal's
+            //      sampler always has a valid binding.
             var primary: MTLTexture? = nil
             for slot in 0..<4 {
-                let reference = pass.textureBindings[slot] ?? pass.pass.textures[slot]
+                let reference = pass.pass.binds[slot]
+                    ?? pass.textureBindings[slot]
+                    ?? pass.pass.textures[slot]
                 let texture: MTLTexture?
                 if let reference {
                     texture = try executor.resolve(
