@@ -1,4 +1,6 @@
+import CoreGraphics
 import Foundation
+import Metal
 import simd
 
 enum WPEMetalRenderExecutorError: Error, Equatable, LocalizedError, Sendable {
@@ -235,4 +237,28 @@ struct WPEShimmerUniforms {
 struct WPEParticleProjection {
     var sceneSize: SIMD4<Float>   // x = width, y = height (pixels)
     var padding: SIMD4<Float> = SIMD4<Float>(0, 0, 0, 0)
+}
+
+/// Layout MUST match `WPETextOverlayUniforms` in WPEMetalBuiltins.metal.
+struct WPETextOverlayUniforms {
+    var centerAndSize: SIMD4<Float>  // x,y center (pixel space), z,w width,height
+    var sceneSize: SIMD4<Float>      // x = scene width, y = scene height
+    var color: SIMD4<Float>          // rgb tint, a = effective alpha
+}
+
+/// Per-overlay draw payload assembled by the renderer and consumed by
+/// `WPEMetalRenderExecutor.drawTextOverlays`. Carries the rasterized
+/// MTLTexture along with the geometry the dispatcher needs to project
+/// it into NDC over the rendered scene.
+struct WPETextOverlayDraw {
+    let texture: MTLTexture
+    /// Pixel-space center derived from the text object's `origin`,
+    /// using the same convention as image layers.
+    let centerInScenePixels: SIMD2<Float>
+    /// Pixel-space width/height of the rasterized texture (post-CoreText).
+    let sizeInScenePixels: CGSize
+    /// Effective tint × per-text alpha. We use a separate alpha so the
+    /// shader can re-multiply if the rasterizer ever ships unpremultiplied.
+    let tint: SIMD3<Float>
+    let alpha: Float
 }

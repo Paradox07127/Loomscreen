@@ -27,6 +27,11 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
     /// + drawn each frame.
     private var particleSystems: [WPEParticleSystem] = []
     private var particleTextures: [ObjectIdentifier: MTLTexture] = [:]
+    /// Phase 2D-N: text overlay draws assembled at load time. Each
+    /// frame re-rasterizes via the cached WPETextRenderer (cache hits
+    /// the common case) and draws atop the scene output.
+    private var textRenderer: WPETextRenderer?
+    private var textObjects: [WPESceneTextObject] = []
     private var loadedTextures: [String: MTLTexture] = [:]
     /// Phase 2E: animated and video texture sources keyed by the same path
     /// the executor uses to look up `MTLTexture` for each pass. Populated
@@ -142,6 +147,9 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         onProgress?("Loading particle systems")
         await loadParticleSystems(from: document)
 
+        onProgress?("Loading text overlays")
+        loadTextOverlays(from: document)
+
         onProgress?("Rendering scene")
         outputTexture = try renderCurrentFrame()
         if let outputTexture {
@@ -191,7 +199,69 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
                 output: frame
             )
         }
+        // Phase 2D-N: text overlays composite on top of particles. The
+        // rasterizer caches by content hash, so static text only walks
+        // CoreText once.
+        if let textRenderer, !textObjects.isEmpty {
+            var draws: [WPETextOverlayDraw] = []
+            draws.reserveCapacity(textObjects.count)
+            for object in textObjects where object.visible && object.alpha > 0 {
+                guard let entry = textRenderer.rasterize(object) else { continue }
+                // WPE pixel-space origin is screen-relative; the scene
+                // canvas is centered at (width/2, height/2). Subtract
+                // half-canvas so origin "1920 1080 0" lands at the
+                // center of a 1920×1080 scene. Y is also flipped to
+                // match Metal's NDC convention (already y-up).
+                let halfWidth = Double(sceneRenderSize.width) * 0.5
+                let halfHeight = Double(sceneRenderSize.height) * 0.5
+                let center = SIMD2<Float>(
+                    Float(object.origin.x - halfWidth),
+                    Float(object.origin.y - halfHeight)
+                )
+                let scale = SIMD2<Float>(
+                    Float(max(object.scale.x, 0.0001)),
+                    Float(max(object.scale.y, 0.0001))
+                )
+                let scaledSize = CGSize(
+                    width: entry.size.width * CGFloat(scale.x),
+                    height: entry.size.height * CGFloat(scale.y)
+                )
+                draws.append(WPETextOverlayDraw(
+                    texture: entry.texture,
+                    centerInScenePixels: center,
+                    sizeInScenePixels: scaledSize,
+                    tint: SIMD3<Float>(
+                        Float(object.color.x),
+                        Float(object.color.y),
+                        Float(object.color.z)
+                    ),
+                    alpha: Float(object.alpha)
+                ))
+            }
+            if !draws.isEmpty {
+                try executor.drawTextOverlays(
+                    overlays: draws,
+                    sceneSize: sceneRenderSize,
+                    output: frame
+                )
+            }
+        }
         return frame
+    }
+
+    /// Phase 2D-N: build the WPETextRenderer + cache the parsed text
+    /// object list. Rasterization happens lazily during the first frame
+    /// so we don't pay the CoreText cost when the scene is preview-only.
+    private func loadTextOverlays(from document: WPESceneDocument) {
+        textObjects = document.textObjects
+        guard !textObjects.isEmpty else {
+            textRenderer = nil
+            return
+        }
+        textRenderer = WPETextRenderer(
+            device: executor.textureSourceDevice,
+            resolver: resourceResolver
+        )
     }
 
     /// Spawn one `WPEParticleSystem` per parsed particle object. Reads
@@ -252,6 +322,9 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         releaseDynamicTextureSources()
         particleSystems.removeAll(keepingCapacity: false)
         particleTextures.removeAll(keepingCapacity: false)
+        textObjects.removeAll(keepingCapacity: false)
+        textRenderer?.releaseAll()
+        textRenderer = nil
         sceneRenderSize = CGSize(width: 1, height: 1)
         cameraUniforms = .identity
         lastRuntimeUniforms = nil
@@ -304,6 +377,9 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         releaseDynamicTextureSources()
         particleSystems.removeAll(keepingCapacity: false)
         particleTextures.removeAll(keepingCapacity: false)
+        textObjects.removeAll(keepingCapacity: false)
+        textRenderer?.releaseAll()
+        textRenderer = nil
         lastRuntimeUniforms = nil
         cachedSnapshot = nil
         executor.releaseTransientResources()
