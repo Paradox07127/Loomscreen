@@ -70,11 +70,6 @@ final class WPEVideoTextureSource: @unchecked Sendable {
     }
 
     @MainActor
-    var readerHandleForTests: AVAssetReader? {
-        lock.withLockGuard { state.reader }
-    }
-
-    @MainActor
     func texture(at time: TimeInterval) -> MTLTexture? {
         let shouldStart: Bool
         let latest: MTLTexture?

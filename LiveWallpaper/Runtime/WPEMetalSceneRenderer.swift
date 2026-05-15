@@ -43,23 +43,6 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
     private(set) var renderGraph: WPERenderGraph?
     private(set) var renderPipeline: WPEPreparedRenderPipeline?
     private(set) var lastRuntimeUniforms: WPEMetalRuntimeUniforms?
-    /// Test-only forwarder for the executor's pooled FBO/composite texture
-    /// count so suspended-release behaviour can be asserted at the renderer
-    /// boundary (Phase 2C Task 2).
-    var transientTargetTextureCountForTesting: Int {
-        executor.transientTargetTextureCountForTesting
-    }
-    /// Phase 2E test-only counters: number of animated/video sources and
-    /// the count of live AVAssetReader handles among them. Suspended
-    /// release tests assert the latter drops to zero.
-    var dynamicTextureSourceCountForTests: Int {
-        dynamicTextureSources.count
-    }
-    var dynamicVideoReaderCountForTests: Int {
-        dynamicTextureSources.values.compactMap { source in
-            (source as? WPEVideoTextureSource)?.readerHandleForTests
-        }.count
-    }
     var renderedTexture: MTLTexture? { outputTexture }
     /// CGImage readback of the most recent rendered frame; populated at the
     /// end of `performLoad()` so `WPESceneDetailView` can show a thumbnail

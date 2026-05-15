@@ -54,12 +54,6 @@ final class WPEMetalRenderTargetPool {
         self.device = device
     }
 
-    var allocatedTextureCount: Int {
-        slots.values.reduce(0) { count, slot in
-            count + (slot.primary == nil ? 0 : 1) + (slot.secondary == nil ? 0 : 1)
-        }
-    }
-
     func prepare(pipeline: WPEPreparedRenderPipeline) {
         declaredFBOs.removeAll(keepingCapacity: true)
         for layer in pipeline.layers {
