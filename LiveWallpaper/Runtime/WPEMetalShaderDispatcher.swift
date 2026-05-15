@@ -257,6 +257,16 @@ struct WPEMetalShaderDispatcher {
             encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEShakeUniforms>.stride, index: 0)
 
         default:
+            // Custom shader → route through the translator boundary. Until
+            // the C++ backend (glslang + SPIRV-Cross) is vendored,
+            // `compileCustomShader` throws `.shaderTranslatorUnavailable`
+            // with the precise reason, which the renderer surfaces as a
+            // diagnostic instead of a silent black frame. When the backend
+            // ships, this branch grows the MTLPipelineState construction +
+            // texture/uniform binding logic.
+            _ = try executor.compileCustomShader(for: pass)
+            // Never reached today: stub compiler always throws above. This
+            // explicit fallthrough makes the future code path visible.
             throw WPEMetalRenderExecutorError.unsupportedShader(pass.pass.shader)
         }
     }

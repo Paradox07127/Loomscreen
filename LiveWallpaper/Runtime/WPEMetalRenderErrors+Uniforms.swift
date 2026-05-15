@@ -6,6 +6,10 @@ enum WPEMetalRenderExecutorError: Error, Equatable, LocalizedError, Sendable {
     case libraryUnavailable
     case pipelineUnavailable(String)
     case unsupportedShader(String)
+    /// Custom shader needs the WPE→MSL translator but the backend isn't
+    /// vendored yet. Carries the underlying compiler reason so the diagnostic
+    /// surfaced to the UI is precise instead of "unsupported".
+    case shaderTranslatorUnavailable(name: String, reason: String)
     case unsupportedTarget(WPERenderTarget)
     case missingTexture(WPETextureReference)
     case noRenderablePasses
@@ -36,6 +40,12 @@ enum WPEMetalRenderExecutorError: Error, Equatable, LocalizedError, Sendable {
                 localized: "error.render.executor.unsupported_shader",
                 defaultValue: "WPE Metal executor does not support shader \(name).",
                 comment: "Error shown when the Metal renderer does not support a shader."
+            )
+        case .shaderTranslatorUnavailable(let name, let reason):
+            return String(
+                localized: "error.render.executor.shader_translator_unavailable",
+                defaultValue: "WPE shader '\(name)' needs the GLSL→MSL translator: \(reason)",
+                comment: "Error shown when a custom WPE shader needs translation but the backend is not yet integrated."
             )
         case .unsupportedTarget(let target):
             let targetDescription = String(describing: target)

@@ -556,6 +556,11 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             switch executorError {
             case .unsupportedShader(let name):
                 return .materialUnresolved(layer: layerName, reason: "Shader \"\(name)\" is not supported by the Metal renderer yet.")
+            case .shaderTranslatorUnavailable(let name, let reason):
+                return .materialUnresolved(
+                    layer: layerName,
+                    reason: "Shader \"\(name)\" needs the WPE GLSL translator: \(reason)"
+                )
             case .unsupportedTarget:
                 return .materialUnresolved(layer: layerName, reason: "This wallpaper uses an unsupported rendering target.")
             case .missingTexture(let reference):
