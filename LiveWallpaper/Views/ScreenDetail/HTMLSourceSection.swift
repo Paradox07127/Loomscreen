@@ -44,8 +44,10 @@ struct HTMLSourceSection: View {
             .padding(14)
         }
         .groupBoxStyle(ContainerGroupBoxStyle())
-        .onAppear { syncFromBinding() }
-        .onChange(of: source) { _, _ in syncFromBinding() }
+        .onAppear { Task { @MainActor in syncFromBinding() } }
+        .onChange(of: source) { _, _ in
+            Task { @MainActor in syncFromBinding() }
+        }
     }
 
     // MARK: - Source Pane

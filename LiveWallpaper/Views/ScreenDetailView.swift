@@ -321,7 +321,15 @@ struct ScreenDetailView: View {
         .onReceive(NotificationCenter.default.publisher(for: .wallpaperConfigurationDidChange)) { notification in
             guard let changedID = notification.userInfo?["screenID"] as? CGDirectDisplayID,
                   changedID == screen.id else { return }
-            loadScreenConfiguration()
+            // `wallpaperConfigurationDidChange` is posted synchronously inside
+            // `ScreenManager.saveConfiguration`, which can fire while SwiftUI
+            // is still reconciling this view. Pushing the reload onto the next
+            // main-actor tick prevents the cascade of "Modifying state during
+            // view update" warnings that previously caused WKWebView to drop
+            // media playback assertions a couple of seconds after load.
+            Task { @MainActor in
+                loadScreenConfiguration()
+            }
         }
         .alert("Error", isPresented: $showErrorAlert) {
             Button("OK", role: .cancel) { }

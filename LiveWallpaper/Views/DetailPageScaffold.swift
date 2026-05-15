@@ -27,6 +27,13 @@ struct DetailPageScaffold<Header: View, Content: View>: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(DesignTokens.Colors.pageBackground)
+        // Anchor every detail page to a floor that comfortably fits the
+        // shared header bar plus a 760×540 content area. macOS 26
+        // NavigationSplitView lets the detail column collapse below the
+        // sidebar's declared minimum when this is missing, which manifests
+        // as the sidebar Displays/Library sections being pushed out of view
+        // and the SystemMonitorView appearing pinned to the toolbar.
+        .frame(minWidth: DesignTokens.LibraryPage.minWidth, minHeight: DesignTokens.LibraryPage.minHeight)
     }
 }
 

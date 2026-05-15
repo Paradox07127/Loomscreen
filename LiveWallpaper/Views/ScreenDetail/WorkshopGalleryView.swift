@@ -113,7 +113,6 @@ struct WorkshopGalleryView: View {
             header: { header },
             content: { content }
         )
-        .frame(minWidth: 760, minHeight: 540)
         .onAppear {
             selectInitialTargetIfNeeded()
             updateRootAccessState()
