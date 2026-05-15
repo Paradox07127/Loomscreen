@@ -148,6 +148,66 @@ struct WPEShaderTranspilerTests {
         #expect(result.library.makeFunction(name: "wpe_translated_fragment") != nil)
     }
 
+    @Test("Translates audio-spectrum shader with uniform float array to MSL")
+    func translatesAudioSpectrumArray() throws {
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform float g_AudioSpectrum32Left[32];
+        uniform float u_BarCount;
+        in vec2 v_TexCoord;
+        void main() {
+            int idx = int(v_TexCoord.x * u_BarCount);
+            float bar = g_AudioSpectrum32Left[idx];
+            gl_FragColor = vec4(bar, bar, bar, 1.0);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "audio_bars",
+            preprocessedSource: source
+        )
+        // Layout: 32-element array first (32 slots), then u_BarCount (1 slot).
+        let spectrum = try #require(result.uniformLayout.first { $0.name == "g_AudioSpectrum32Left" })
+        #expect(spectrum.arrayLength == 32)
+        #expect(spectrum.slotCount == 32)
+        #expect(spectrum.slot == 0)
+        let barCount = try #require(result.uniformLayout.first { $0.name == "u_BarCount" })
+        #expect(barCount.slot == 32)
+
+        // MSL emission must declare the array and unroll element reads
+        // so dynamic indexing works at draw time.
+        #expect(result.mslSource.contains("float g_AudioSpectrum32Left[32];"))
+        #expect(result.mslSource.contains("g_AudioSpectrum32Left[0] = u.vals[0].x;"))
+        #expect(result.mslSource.contains("g_AudioSpectrum32Left[31] = u.vals[31].x;"))
+
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("Audio runtime publishes spectrum slices for each resolution")
+    func audioRuntimePublishesSpectrumSlices() {
+        let runtime = WPEMetalRuntimeUniforms(
+            time: 1,
+            daytime: 0.5,
+            brightness: 1,
+            pointerPosition: SIMD2<Double>(0.5, 0.5),
+            audioSpectrum: (0..<64).map { Double($0) / 63.0 }
+        )
+        let values = runtime.uniformValues
+        guard case .vector(let s32) = values["g_AudioSpectrum32Left"] else {
+            #expect(Bool(false), "Missing g_AudioSpectrum32Left"); return
+        }
+        guard case .vector(let s64) = values["g_AudioSpectrum64Left"] else {
+            #expect(Bool(false), "Missing g_AudioSpectrum64Left"); return
+        }
+        #expect(s32.count == 32)
+        #expect(s64.count == 64)
+        // 32-bin slice averages adjacent 64-bin pairs.
+        #expect(abs(s32[0] - (s64[0] + s64[1]) * 0.5) < 1e-9)
+    }
+
     @Test("Rejects shaders with no main entry point")
     func rejectsShadersWithoutMain() {
         let source = """
