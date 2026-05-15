@@ -330,7 +330,7 @@ private extension WPEMetalRenderExecutorTests {
 
     @Test("Generic image parallax offset is bounded by pointer delta and layer depth")
     func genericImageParallaxOffsetIsBounded() throws {
-        let offset = WPEMetalRenderExecutor.parallaxUVOffset(
+        let offset = WPEMetalShaderInputs.parallaxUVOffset(
             pointerPosition: SIMD2<Double>(1.5, 0.5),
             parallaxDepth: 0.1
         )
