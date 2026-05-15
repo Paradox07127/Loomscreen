@@ -755,8 +755,10 @@ struct ScreenDetailView: View {
     }
 
     private func scheduleConfigurationLoad() {
-        Task { @MainActor in
-            loadScreenConfiguration()
+        DispatchQueue.main.async {
+            Task { @MainActor in
+                loadScreenConfiguration()
+            }
         }
     }
 

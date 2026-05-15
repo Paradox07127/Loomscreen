@@ -323,16 +323,20 @@ struct HTMLSourceSection: View {
     // MARK: - Actions
 
     private func scheduleBindingSync() {
-        Task { @MainActor in
-            syncFromBinding()
+        DispatchQueue.main.async {
+            Task { @MainActor in
+                syncFromBinding()
+            }
         }
     }
 
     private func scheduleCustomCSSDraftSync(_ customCSS: String?) {
-        Task { @MainActor in
-            let nextValue = customCSS ?? ""
-            if draftCustomCSS != nextValue {
-                draftCustomCSS = nextValue
+        DispatchQueue.main.async {
+            Task { @MainActor in
+                let nextValue = customCSS ?? ""
+                if draftCustomCSS != nextValue {
+                    draftCustomCSS = nextValue
+                }
             }
         }
     }
