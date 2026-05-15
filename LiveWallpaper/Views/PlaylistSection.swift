@@ -167,8 +167,10 @@ struct PlaylistSection: View {
     // MARK: - Entry Loading
 
     private func scheduleEntriesLoad() {
-        Task { @MainActor in
-            loadEntries()
+        DispatchQueue.main.async {
+            Task { @MainActor in
+                loadEntries()
+            }
         }
     }
 

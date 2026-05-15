@@ -59,8 +59,10 @@ struct ContentView: View {
     }
 
     private func scheduleDefaultDisplaySelection() {
-        Task { @MainActor in
-            selectDefaultDisplayIfNeeded()
+        DispatchQueue.main.async {
+            Task { @MainActor in
+                selectDefaultDisplayIfNeeded()
+            }
         }
     }
 
@@ -377,9 +379,11 @@ struct ScreenRow: View {
         .onReceive(NotificationCenter.default.publisher(for: .wallpaperConfigurationDidChange)) { notification in
             guard let changedID = notification.userInfo?["screenID"] as? CGDirectDisplayID,
                   changedID == screen.id else { return }
-            Task { @MainActor in
-                withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.2))) {
-                    refreshEffectBadge()
+            DispatchQueue.main.async {
+                Task { @MainActor in
+                    withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.2))) {
+                        refreshEffectBadge()
+                    }
                 }
             }
         }
@@ -390,8 +394,10 @@ struct ScreenRow: View {
     }
 
     private func scheduleEffectBadgeRefresh() {
-        Task { @MainActor in
-            refreshEffectBadge()
+        DispatchQueue.main.async {
+            Task { @MainActor in
+                refreshEffectBadge()
+            }
         }
     }
 
