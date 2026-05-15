@@ -19,11 +19,6 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
     /// "Decoding 7/12 textures…" instead of an opaque spinner.
     private(set) var loadProgress: String?
 
-    init(window: NSWindow, controller: SceneRenderingController) {
-        self.window = window
-        self.renderer = controller
-    }
-
     init(window: NSWindow, renderer: WPESceneRenderer) {
         self.window = window
         self.renderer = renderer
@@ -53,7 +48,6 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
     /// the exclusive-rendering coordinator) can flip throttle state without
     /// reaching through `wallpaperWindow.contentView`.
     var sceneRenderer: WPESceneRenderer? { renderer }
-    var sceneController: SceneRenderingController? { renderer as? SceneRenderingController }
 
     func updateFrame(to frame: CGRect) {
         window?.setFrame(frame, display: true)
@@ -123,8 +117,8 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
     }
 
     // No prepareForDisplay override: the protocol-extension default
-    // (50ms warm-up) gives the SpriteKit pipeline enough lead time before
-    // the wallpaper window is brought to screen.
+    // (50ms warm-up) gives the Metal renderer enough lead time to present
+    // its first frame before the wallpaper window is brought to screen.
 
     /// Tears the controller's scene down and re-runs `load()`. Used by
     /// the inspector's Retry button so the user has a recovery path
