@@ -34,7 +34,7 @@ struct WPEMetalRenderExecutorTests {
         #expect(pixel.a >= 250)
     }
 
-    @Test("Fails closed for non-built-in shader programs")
+    @Test("Custom shader routes through translator and surfaces unavailable backend")
     func rejectsCustomShader() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let executor = try WPEMetalRenderExecutor(device: device)
@@ -58,7 +58,7 @@ struct WPEMetalRenderExecutorTests {
                 graphLayer: graphLayer(pass: pass),
                 passes: [WPEPreparedRenderPass(
                     pass: pass,
-                    shader: WPEShaderProgram(name: "effects/custom", vertexSource: "", fragmentSource: "", isBuiltin: false),
+                    shader: WPEShaderProgram(name: "effects/custom", vertexSource: "void main(){}", fragmentSource: "void main(){}", isBuiltin: false),
                     textureBindings: [:],
                     comboValues: [:],
                     uniformValues: [:]
@@ -66,8 +66,21 @@ struct WPEMetalRenderExecutorTests {
             )
         ])
 
-        #expect(throws: WPEMetalRenderExecutorError.unsupportedShader("effects/custom")) {
+        // Phase 2D-A: custom shaders now flow through the translator. With
+        // the stub backend in place, any custom shader fails with a precise
+        // `shaderTranslatorUnavailable` instead of the legacy
+        // `unsupportedShader`. When the C++ backend lands, this test should
+        // be replaced with a positive assertion that the shader compiles.
+        do {
             _ = try executor.render(pipeline: pipeline, size: CGSize(width: 4, height: 4), textures: [:])
+            #expect(Bool(false), "Custom shader render should throw")
+        } catch let error as WPEMetalRenderExecutorError {
+            switch error {
+            case .shaderTranslatorUnavailable(let name, _):
+                #expect(name == "effects/custom")
+            default:
+                #expect(Bool(false), "Expected .shaderTranslatorUnavailable, got \(error)")
+            }
         }
     }
 

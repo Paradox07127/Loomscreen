@@ -16,8 +16,12 @@ final class WPEMetalRenderExecutor {
     private let targetPool: WPEMetalRenderTargetPool
     private let depthCache: WPEMetalDepthStateCache
     private let pipelineCache: WPEMetalPipelineCache
+    /// Phase 2D-A: invoked when the dispatcher sees a non-built-in shader.
+    /// Default is the stub which fails loudly with `.backendUnavailable`;
+    /// production builds inject a real translator once the toolchain ships.
+    let shaderCompiler: WPEShaderCompiling
 
-    init(device: MTLDevice) throws {
+    init(device: MTLDevice, shaderCompiler: WPEShaderCompiling = WPEStubShaderCompiler()) throws {
         guard let queue = device.makeCommandQueue() else {
             throw WPEMetalRenderExecutorError.commandQueueUnavailable
         }
@@ -29,6 +33,7 @@ final class WPEMetalRenderExecutor {
         self.targetPool = WPEMetalRenderTargetPool(device: device)
         self.depthCache = WPEMetalDepthStateCache(device: device)
         self.pipelineCache = WPEMetalPipelineCache(device: device, library: library)
+        self.shaderCompiler = shaderCompiler
     }
 
     /// Phase 2E: lets `WPEMetalSceneRenderer` hand the executor's MTLDevice
@@ -372,5 +377,66 @@ final class WPEMetalRenderExecutor {
         references.append(contentsOf: pass.pass.binds.values)
         references.append(contentsOf: pass.textureBindings.values)
         return references
+    }
+
+    /// Run the WPE preprocessor + the configured `WPEShaderCompiling` over
+    /// the given prepared pass. Used by the dispatcher's `default:` arm so
+    /// custom shaders fail with a precise, actionable error instead of the
+    /// generic `unsupportedShader` legacy path.
+    ///
+    /// Today the stub always reports `backendUnavailable` — callers should
+    /// surface that to the UI and fall back to a placeholder draw. When the
+    /// real translator lands, this will return a `WPEShaderCompileResult`
+    /// the dispatcher can build a `MTLRenderPipelineState` from.
+    func compileCustomShader(
+        for pass: WPEPreparedRenderPass
+    ) throws -> WPEShaderCompileResult {
+        guard let program = pass.shader else {
+            throw WPEMetalRenderExecutorError.unsupportedShader(pass.pass.shader)
+        }
+        let processor = WPEShaderPreprocessor { _, _ in
+            // Pipeline-builder already inlined includes, so the per-stage
+            // pass shouldn't see new ones. Returning nil here leaves a
+            // residual `#include` line as a translator-time error rather
+            // than a silent miss.
+            nil
+        }
+        let request: WPEShaderCompileRequest
+        do {
+            request = try processor.process(
+                shaderName: program.name,
+                vertexSource: program.vertexSource,
+                fragmentSource: program.fragmentSource,
+                comboValues: pass.comboValues,
+                materialTextureBindings: Dictionary(
+                    uniqueKeysWithValues: pass.textureBindings.compactMap { (slot, ref) -> (Int, String)? in
+                        switch ref {
+                        case .image(let p), .asset(let p): return (slot, p)
+                        case .fbo(let n): return (slot, n)
+                        case .previous: return nil
+                        }
+                    }
+                )
+            )
+        } catch let error as WPEShaderCompilerError {
+            throw WPEMetalRenderExecutorError.shaderTranslatorUnavailable(
+                name: program.name,
+                reason: String(describing: error)
+            )
+        }
+        do {
+            return try shaderCompiler.compile(request)
+        } catch let error as WPEShaderCompilerError {
+            switch error {
+            case .backendUnavailable(let reason),
+                 .glslPreprocessFailed(let reason),
+                 .translationFailed(let reason),
+                 .mslLibraryFailed(let reason):
+                throw WPEMetalRenderExecutorError.shaderTranslatorUnavailable(
+                    name: program.name,
+                    reason: reason
+                )
+            }
+        }
     }
 }
