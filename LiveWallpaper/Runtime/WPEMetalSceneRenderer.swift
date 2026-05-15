@@ -342,22 +342,42 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         case "solidcolor", "solidlayer":
             return []
 
-        case "copy":
-            let reference = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
-            return [reference].filter(\.isExternalTextureReference)
-
         case "compose":
             let first = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
             let second = pass.textureBindings[1] ?? pass.pass.textures[1] ?? first
             return [first, second].filter(\.isExternalTextureReference)
 
+        case "genericimage4":
+            // Slot 0 + slot 1 (alpha mask). Slot 1 is optional; only
+            // request load if it's actually bound.
+            let primary = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
+            var refs: [WPETextureReference] = [primary]
+            if let mask = pass.textureBindings[1] ?? pass.pass.textures[1] {
+                refs.append(mask)
+            }
+            return refs.filter(\.isExternalTextureReference)
+
         default:
-            return []
+            // Single-input shaders: copy, genericimage2, genericparticle,
+            // and every effect_* variant. The translator-driven custom
+            // shader path also goes here — it always reads at least slot 0.
+            let reference = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
+            var refs: [WPETextureReference] = [reference]
+            // Translator may use additional slots; pre-load any that
+            // appear in the binding map.
+            for slot in 1..<4 {
+                if let extra = pass.textureBindings[slot] ?? pass.pass.textures[slot] {
+                    refs.append(extra)
+                }
+            }
+            return refs.filter(\.isExternalTextureReference)
         }
     }
 
     private func normalizedBuiltinShaderName(_ shaderName: String) -> String {
-        WPEBuiltinShaderName.normalized(shaderName, genericImageAsCopy: true)
+        // Mirrors WPEMetalRenderExecutor.normalizedBuiltinShaderName so the
+        // loader and dispatcher route on the same canonical names.
+        WPEBuiltinShaderName.normalized(shaderName, genericImageAsCopy: false)
     }
 
     /// Phase 2E rewrite: returns a `WPELoadedTextureResource` instead of a

@@ -63,7 +63,11 @@ enum WPEMetalShaderInputs {
     /// `unsupportedShader` until the full GLSL translator (Phase 2D-A/B)
     /// lands.
     static func normalizedBuiltinShaderName(_ shaderName: String) -> String {
-        WPEBuiltinShaderName.normalized(shaderName, genericImageAsCopy: true)
+        // Phase 2D-D: drop the legacy genericImageAsCopy fallback so the
+        // dispatcher routes genericimage* through the new native MSL
+        // built-ins instead of the bare copy shader. Callers that still
+        // want the old behavior pass `genericImageAsCopy: true` directly.
+        WPEBuiltinShaderName.normalized(shaderName, genericImageAsCopy: false)
     }
 
     /// Phase 2D-C: scalar-uniform lookup that walks `pass.uniformValues`

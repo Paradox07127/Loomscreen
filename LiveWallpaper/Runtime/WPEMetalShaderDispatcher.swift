@@ -549,17 +549,60 @@ struct WPEMetalShaderDispatcher {
             encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEShakeUniforms>.stride, index: 0)
 
         default:
-            // Custom shader → route through the translator boundary. Until
-            // the C++ backend (glslang + SPIRV-Cross) is vendored,
-            // `compileCustomShader` throws `.shaderTranslatorUnavailable`
-            // with the precise reason, which the renderer surfaces as a
-            // diagnostic instead of a silent black frame. When the backend
-            // ships, this branch grows the MTLPipelineState construction +
-            // texture/uniform binding logic.
-            _ = try executor.compileCustomShader(for: pass)
-            // Never reached today: stub compiler always throws above. This
-            // explicit fallthrough makes the future code path visible.
-            throw WPEMetalRenderExecutorError.unsupportedShader(pass.pass.shader)
+            // Phase 2D-H: custom shader. The injected `WPEShaderCompiling`
+            // (default `WPESwiftShaderCompiler`) translates WPE GLSL to
+            // MSL on first use; subsequent frames hit the executor's
+            // memoization cache.
+            let result = try executor.compileCustomShader(for: pass)
+            let pipelineState = try executor.translatedPipelineState(
+                for: result,
+                blendMode: pass.pass.blending,
+                colorPixelFormat: destination.texture.pixelFormat,
+                depthPixelFormat: depthPixelFormat
+            )
+            encoder.setRenderPipelineState(pipelineState)
+
+            // Texture binding. For each sampler slot the shader declared,
+            // resolve from `pass.textureBindings` first (material override),
+            // then from `pass.pass.textures` (graph defaults). When a slot
+            // is unbound, fall back to the primary so the Metal sampler
+            // still has a valid texture (the shader is responsible for
+            // ignoring unused channels).
+            var primary: MTLTexture? = nil
+            for slot in 0..<4 {
+                let reference = pass.textureBindings[slot] ?? pass.pass.textures[slot]
+                let texture: MTLTexture?
+                if let reference {
+                    texture = try executor.resolve(
+                        reference: reference,
+                        textures: textures,
+                        frameState: frameState,
+                        currentTargetID: destination.id
+                    )
+                } else if slot == 0 {
+                    // Slot 0 must always be bound; fall back to source.
+                    texture = try executor.resolve(
+                        reference: pass.pass.source,
+                        textures: textures,
+                        frameState: frameState,
+                        currentTargetID: destination.id
+                    )
+                } else {
+                    texture = primary  // Reuse for unused slots.
+                }
+                if slot == 0, let texture { primary = texture }
+                encoder.setFragmentTexture(texture, index: slot)
+            }
+
+            // Uniform packing. Shaders without uniforms still get a
+            // zero-filled buffer bound — the function signature emitted by
+            // the transpiler omits the `constant WPEUniforms&` parameter
+            // when the layout is empty, so we only bind when needed.
+            if !result.uniformLayout.isEmpty {
+                var slots = executor.packTranslatedUniforms(for: pass, layout: result.uniformLayout)
+                let byteCount = MemoryLayout<SIMD4<Float>>.stride * slots.count
+                encoder.setFragmentBytes(&slots, length: byteCount, index: 0)
+            }
         }
     }
 }
