@@ -106,28 +106,8 @@ struct GeneralSettingsView: View {
         } message: {
             Text(verbatim: importFeedback ?? "")
         }
-        .alert(
-            "Import Failed",
-            isPresented: Binding(
-                get: { importErrorMessage != nil },
-                set: { if !$0 { importErrorMessage = nil } }
-            )
-        ) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(verbatim: importErrorMessage ?? "")
-        }
-        .alert(
-            "Export Failed",
-            isPresented: Binding(
-                get: { exportErrorMessage != nil },
-                set: { if !$0 { exportErrorMessage = nil } }
-            )
-        ) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(verbatim: exportErrorMessage ?? "")
-        }
+        .errorAlert("Import Failed", message: $importErrorMessage)
+        .errorAlert("Export Failed", message: $exportErrorMessage)
         // Native SwiftUI export: sheet-modal, automatic sandbox extension,
         // honours our registered `.lwconfig` UTType so Finder shows the
         // right icon + extension chip in the Save dialog.
