@@ -44,9 +44,9 @@ struct HTMLSourceSection: View {
             .padding(14)
         }
         .groupBoxStyle(ContainerGroupBoxStyle())
-        .onAppear { Task { @MainActor in syncFromBinding() } }
+        .onAppear { scheduleBindingSync() }
         .onChange(of: source) { _, _ in
-            Task { @MainActor in syncFromBinding() }
+            scheduleBindingSync()
         }
     }
 
@@ -314,13 +314,32 @@ struct HTMLSourceSection: View {
             Label("Custom CSS", systemImage: "paintbrush")
                 .font(.subheadline)
         }
-        .onAppear { draftCustomCSS = config.customCSS ?? "" }
+        .onAppear { scheduleCustomCSSDraftSync(config.customCSS) }
         .onChange(of: config.customCSS) { _, newValue in
-            draftCustomCSS = newValue ?? ""
+            scheduleCustomCSSDraftSync(newValue)
         }
     }
 
     // MARK: - Actions
+
+    private func scheduleBindingSync() {
+        DispatchQueue.main.async {
+            Task { @MainActor in
+                syncFromBinding()
+            }
+        }
+    }
+
+    private func scheduleCustomCSSDraftSync(_ customCSS: String?) {
+        DispatchQueue.main.async {
+            Task { @MainActor in
+                let nextValue = customCSS ?? ""
+                if draftCustomCSS != nextValue {
+                    draftCustomCSS = nextValue
+                }
+            }
+        }
+    }
 
     private func commitURL() {
         let trimmed = urlInput.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -367,21 +386,21 @@ struct HTMLSourceSection: View {
 
     private func syncFromBinding() {
         guard let source else {
-            selectedKind = .url
-            urlInput = ""
+            if selectedKind != .url { selectedKind = .url }
+            if !urlInput.isEmpty { urlInput = "" }
             return
         }
         switch source {
         case .url(let url):
-            selectedKind = .url
-            urlInput = url.absoluteString
+            if selectedKind != .url { selectedKind = .url }
+            if urlInput != url.absoluteString { urlInput = url.absoluteString }
         case .file:
-            selectedKind = .file
+            if selectedKind != .file { selectedKind = .file }
         case .folder:
-            selectedKind = .folder
+            if selectedKind != .folder { selectedKind = .folder }
         case .inline(let html):
-            selectedKind = .url
-            urlInput = html
+            if selectedKind != .url { selectedKind = .url }
+            if urlInput != html { urlInput = html }
         }
     }
 

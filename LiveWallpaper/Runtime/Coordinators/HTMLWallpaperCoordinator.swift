@@ -135,6 +135,7 @@ final class HTMLWallpaperCoordinator {
     func updateConfig(_ config: HTMLConfig, for screen: Screen) {
         guard var existing = configurationStore.get(for: screen.id),
               case .html(let source, let previousConfig) = existing.activeWallpaper else { return }
+        guard previousConfig != config else { return }
         existing.activeWallpaper = .html(source: source, config: config)
         saveConfiguration(existing)
 

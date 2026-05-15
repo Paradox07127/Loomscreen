@@ -115,7 +115,8 @@ final class WallpaperAutomationOrchestrator {
     }
 
     func updateShufflePlaylist(_ shuffle: Bool, for screen: Screen) {
-        guard var config = configurationStore.get(for: screen.id) else { return }
+        guard var config = configurationStore.get(for: screen.id),
+              config.shufflePlaylist != shuffle else { return }
         config.shufflePlaylist = shuffle
         saveConfiguration(config)
     }
@@ -164,6 +165,8 @@ final class WallpaperAutomationOrchestrator {
 
     func updateWallpaperMode(_ mode: WallpaperMode, for screen: Screen) {
         guard var config = configurationStore.get(for: screen.id),
+              config.wallpaperType == .video,
+              config.hasConfiguredVideoSource,
               config.wallpaperMode != mode else { return }
         config.wallpaperMode = mode
         saveConfiguration(config)

@@ -39,7 +39,7 @@ final class PlaybackCoordinator {
     private let releaseRuntimeSession: @MainActor (Screen) -> Void
     /// Hook into ScreenManager's full session-changed pipeline (state version
     /// bump + summary cache refresh + playback state push + full-screen
-    /// fallback re-evaluation + screensRefreshed notification).
+    /// fallback re-evaluation).
     private let notifyWallpaperSessionChanged: @MainActor () -> Void
 
     init(

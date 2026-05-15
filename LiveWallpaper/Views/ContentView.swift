@@ -50,15 +50,19 @@ struct ContentView: View {
             selectedNavigation = .general
         }
         .onReceive(NotificationCenter.default.publisher(for: .screensRefreshed)) { _ in
-            // Posted synchronously from ScreenManager.refreshScreens
-            // during init / display reconfigure. Defer the @State write
-            // (selectedNavigation) to next tick so it doesn't fire inside
-            // SwiftUI's reconcile.
-            Task { @MainActor in selectDefaultDisplayIfNeeded() }
+            scheduleDefaultDisplaySelection()
         }
         .onAppear {
-            selectDefaultDisplayIfNeeded()
+            scheduleDefaultDisplaySelection()
             consumeInitialAddWallpaperPromptIfNeeded()
+        }
+    }
+
+    private func scheduleDefaultDisplaySelection() {
+        DispatchQueue.main.async {
+            Task { @MainActor in
+                selectDefaultDisplayIfNeeded()
+            }
         }
     }
 
@@ -368,23 +372,18 @@ struct ScreenRow: View {
             }
         }
         .padding(.vertical, 2)
-        .onAppear {
-            Task { @MainActor in refreshEffectBadge() }
-        }
+        .onAppear { scheduleEffectBadgeRefresh() }
         .onChange(of: screen.id) {
-            Task { @MainActor in refreshEffectBadge() }
+            scheduleEffectBadgeRefresh()
         }
         .onReceive(NotificationCenter.default.publisher(for: .wallpaperConfigurationDidChange)) { notification in
             guard let changedID = notification.userInfo?["screenID"] as? CGDirectDisplayID,
                   changedID == screen.id else { return }
-            // The notification is posted synchronously from
-            // `WallpaperPersistenceCoordinator.save(_:)`. Deferring the
-            // @State mutation (hasEffectBadge) one tick avoids
-            // "Modifying state during view update" cascades — matches
-            // the pattern used elsewhere in the sidebar / detail views.
-            Task { @MainActor in
-                withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.2))) {
-                    refreshEffectBadge()
+            DispatchQueue.main.async {
+                Task { @MainActor in
+                    withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.2))) {
+                        refreshEffectBadge()
+                    }
                 }
             }
         }
@@ -394,12 +393,21 @@ struct ScreenRow: View {
         .accessibilityHint(Text("Double-tap to configure this display"))
     }
 
+    private func scheduleEffectBadgeRefresh() {
+        DispatchQueue.main.async {
+            Task { @MainActor in
+                refreshEffectBadge()
+            }
+        }
+    }
+
     private func refreshEffectBadge() {
         guard let config = screenManager.getConfiguration(for: screen) else {
-            hasEffectBadge = false
+            if hasEffectBadge { hasEffectBadge = false }
             return
         }
-        hasEffectBadge = config.effectConfig.hasActiveEffect || config.particleEffect != .none
+        let nextValue = config.effectConfig.hasActiveEffect || config.particleEffect != .none
+        if hasEffectBadge != nextValue { hasEffectBadge = nextValue }
     }
 
     private func iconName(for summary: WallpaperSessionSummary) -> String {
