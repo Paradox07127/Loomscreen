@@ -89,6 +89,12 @@ struct WorkshopGalleryView: View {
     @State private var pendingDestructive: PendingDestructive?
     @State private var sortOrder: WorkshopProjectSortOrder = .recommended
     @State private var bookmarkStore = BookmarkStore.shared
+    /// Mirrors `WPEEngineAssetsLibrary.shared.isAuthorized` so the toolbar
+    /// chip reflects current state without consumers having to subscribe
+    /// to the @Observable directly. Refreshed via the
+    /// `wpeEngineAssetsBookmarkDidChange` notification.
+    @State private var isEngineAssetsAuthorized: Bool = WPEEngineAssetsLibrary.shared.isAuthorized
+    @State private var engineAssetsDisplayName: String? = WPEEngineAssetsLibrary.shared.engineRootDisplayName
 
     private let scanner = WallpaperEngineLibraryScanner()
 
@@ -132,8 +138,17 @@ struct WorkshopGalleryView: View {
         .onReceive(NotificationCenter.default.publisher(for: .screensRefreshed)) { _ in
             Task { @MainActor in selectInitialTargetIfNeeded() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .wpeEngineAssetsBookmarkDidChange)) { _ in
+            Task { @MainActor in refreshEngineAssetsState() }
+        }
         .errorAlert("Library Error", message: $errorMessage)
         .confirmDestructive($pendingDestructive)
+    }
+
+    private func refreshEngineAssetsState() {
+        let library = WPEEngineAssetsLibrary.shared
+        isEngineAssetsAuthorized = library.isAuthorized
+        engineAssetsDisplayName = library.engineRootDisplayName
     }
 
     // MARK: - Header
@@ -195,6 +210,8 @@ struct WorkshopGalleryView: View {
                             .buttonStyle(WorkshopToolbarButtonStyle(tint: .secondary))
                             .accessibilityHint(Text("Change or forget the selected Steam Workshop folder"))
                             .disabled(isBusy)
+
+                            engineAssetsMenu
                         }
 
                         if !allowsTargetSelection {
@@ -400,6 +417,62 @@ struct WorkshopGalleryView: View {
         }
         .padding(24)
         .frame(maxWidth: .infinity, alignment: .top)
+    }
+
+    // MARK: - Engine Assets
+
+    /// Toolbar peer of "Library Folder". Lets the user grant / forget the
+    /// Wallpaper Engine install root — the same bookmark the runtime
+    /// resolver falls through to for shared framework files
+    /// (`materials/util/composelayer.json`, `models/util/*.json`, …).
+    @ViewBuilder
+    private var engineAssetsMenu: some View {
+        Menu {
+            if isEngineAssetsAuthorized {
+                if let displayName = engineAssetsDisplayName {
+                    Text("Granted: \(displayName)")
+                }
+                Button {
+                    presentEngineAssetsGrant()
+                } label: {
+                    Label("Change Engine Folder...", systemImage: "folder.badge.gearshape")
+                }
+                Button(role: .destructive) {
+                    confirmDisconnectEngineAssets()
+                } label: {
+                    Label("Forget Engine Folder", systemImage: "xmark.circle")
+                }
+            } else {
+                Button {
+                    presentEngineAssetsGrant()
+                } label: {
+                    Label("Grant Engine Folder…", systemImage: "folder.badge.plus")
+                }
+            }
+        } label: {
+            Label("Engine Assets", systemImage: isEngineAssetsAuthorized ? "puzzlepiece.extension.fill" : "puzzlepiece.extension")
+        }
+        .menuStyle(.button)
+        .buttonStyle(WorkshopToolbarButtonStyle(tint: isEngineAssetsAuthorized ? .secondary : .yellow))
+        .accessibilityHint(Text("Grant or forget the Wallpaper Engine install folder so scenes can resolve shared framework files"))
+        .disabled(isBusy)
+    }
+
+    private func presentEngineAssetsGrant() {
+        Task { @MainActor in
+            _ = await WPEEngineAssetsLibrary.shared.requestAccess()
+        }
+    }
+
+    private func confirmDisconnectEngineAssets() {
+        let path = engineAssetsDisplayName ?? String(
+            localized: "your Wallpaper Engine install folder",
+            defaultValue: "your Wallpaper Engine install folder",
+            comment: "Fallback label used in the engine assets disconnect confirmation when no display name is available."
+        )
+        pendingDestructive = PendingDestructive(.forgetEngineAssets(path: path)) {
+            WPEEngineAssetsLibrary.shared.clearAccess()
+        }
     }
 
     // MARK: - Actions
