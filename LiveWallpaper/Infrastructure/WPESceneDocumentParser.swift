@@ -183,12 +183,19 @@ enum WPESceneDocumentParser {
     ) -> WPESceneTextObject? {
         let raw = dict["text"]
         let text: String?
+        var textScript: String? = nil
         switch raw {
         case let value as String:
             text = value
         case let nested as [String: Any]:
             // Either `{value: "..."}` or `{script: "...", value: "..."}`.
             text = (nested["value"] as? String) ?? (nested["text"] as? String)
+            // Phase 2D-P: capture the embedded JS so the runtime can
+            // tick it each frame. Initial `value` becomes the visible
+            // text until the first script update returns.
+            if let script = nested["script"] as? String, !script.isEmpty {
+                textScript = script
+            }
         default:
             text = nil
         }
@@ -217,6 +224,7 @@ enum WPESceneDocumentParser {
             id: id,
             name: name,
             text: text,
+            textScript: textScript,
             fontRelativePath: font,
             pointSize: max(1, pointSize),
             color: color,

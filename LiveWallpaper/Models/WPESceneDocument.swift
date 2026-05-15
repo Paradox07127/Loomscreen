@@ -54,11 +54,16 @@ struct WPESceneSoundObject: Equatable, Sendable, Identifiable {
 /// Text object record. Phase 2D-N captures enough attributes for the
 /// CoreText rasterizer to lay out a static line of text. Animated /
 /// scripted text (WPE's `text: { script: "...", value: "..." }` shape)
-/// initializes from `value` until the SceneScript runtime ships.
+/// initializes from `value`; if a `textScript` is present, the JS
+/// runtime ticks it each frame to refresh the rendered string.
 struct WPESceneTextObject: Equatable, Sendable, Identifiable {
     let id: String
     let name: String
     let text: String
+    /// Phase 2D-P: source code of the SceneScript that drives this text
+    /// each frame. Nil for static text. The runtime evaluates `update()`
+    /// per frame and uses the return value as the new content.
+    let textScript: String?
     /// Path relative to the scene cache root, e.g. `fonts/p5hatty.ttf`.
     /// Optional: when nil, the renderer falls back to the system font.
     let fontRelativePath: String?
@@ -75,6 +80,40 @@ struct WPESceneTextObject: Equatable, Sendable, Identifiable {
     /// Optional explicit max width in scene pixels for soft-wrapping.
     let maxWidth: Double?
     let parallaxDepth: Double
+
+    init(
+        id: String,
+        name: String,
+        text: String,
+        textScript: String? = nil,
+        fontRelativePath: String?,
+        pointSize: Double,
+        color: SIMD3<Double>,
+        alpha: Double,
+        origin: SIMD3<Double>,
+        scale: SIMD3<Double>,
+        visible: Bool,
+        horizontalAlignment: String,
+        verticalAlignment: String,
+        maxWidth: Double?,
+        parallaxDepth: Double
+    ) {
+        self.id = id
+        self.name = name
+        self.text = text
+        self.textScript = textScript
+        self.fontRelativePath = fontRelativePath
+        self.pointSize = pointSize
+        self.color = color
+        self.alpha = alpha
+        self.origin = origin
+        self.scale = scale
+        self.visible = visible
+        self.horizontalAlignment = horizontalAlignment
+        self.verticalAlignment = verticalAlignment
+        self.maxWidth = maxWidth
+        self.parallaxDepth = parallaxDepth
+    }
 }
 
 /// Lean particle object record. Captures the per-instance attributes
