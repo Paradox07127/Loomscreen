@@ -36,6 +36,10 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
     /// runtime uniform that audio-reactive shaders sample. Optional —
     /// scenes without sound objects skip this entirely.
     private var soundRuntime: WPESoundRuntime?
+    /// Phase 2D-P: per-text-object SceneScript instances. Keyed by
+    /// the text object's id so the renderer can look up the latest
+    /// scripted value when rasterizing.
+    private var textScriptInstances: [String: WPESceneScriptInstance] = [:]
     private var loadedTextures: [String: MTLTexture] = [:]
     /// Phase 2E: animated and video texture sources keyed by the same path
     /// the executor uses to look up `MTLTexture` for each pass. Populated
@@ -225,7 +229,38 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             var draws: [WPETextOverlayDraw] = []
             draws.reserveCapacity(textObjects.count)
             for object in textObjects where object.visible && object.alpha > 0 {
-                guard let entry = textRenderer.rasterize(object) else { continue }
+                // Phase 2D-P: refresh scripted text from its JS instance
+                // before the CoreText cache lookup. The cache key
+                // includes the rendered string so a new value triggers
+                // a fresh rasterization automatically.
+                let liveObject: WPESceneTextObject
+                if let instance = textScriptInstances[object.id] {
+                    let updated = instance.tickString()
+                    if updated != object.text {
+                        liveObject = WPESceneTextObject(
+                            id: object.id,
+                            name: object.name,
+                            text: updated,
+                            textScript: object.textScript,
+                            fontRelativePath: object.fontRelativePath,
+                            pointSize: object.pointSize,
+                            color: object.color,
+                            alpha: object.alpha,
+                            origin: object.origin,
+                            scale: object.scale,
+                            visible: object.visible,
+                            horizontalAlignment: object.horizontalAlignment,
+                            verticalAlignment: object.verticalAlignment,
+                            maxWidth: object.maxWidth,
+                            parallaxDepth: object.parallaxDepth
+                        )
+                    } else {
+                        liveObject = object
+                    }
+                } else {
+                    liveObject = object
+                }
+                guard let entry = textRenderer.rasterize(liveObject) else { continue }
                 // WPE pixel-space origin is screen-relative; the scene
                 // canvas is centered at (width/2, height/2). Subtract
                 // half-canvas so origin "1920 1080 0" lands at the
@@ -234,12 +269,12 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
                 let halfWidth = Double(sceneRenderSize.width) * 0.5
                 let halfHeight = Double(sceneRenderSize.height) * 0.5
                 let center = SIMD2<Float>(
-                    Float(object.origin.x - halfWidth),
-                    Float(object.origin.y - halfHeight)
+                    Float(liveObject.origin.x - halfWidth),
+                    Float(liveObject.origin.y - halfHeight)
                 )
                 let scale = SIMD2<Float>(
-                    Float(max(object.scale.x, 0.0001)),
-                    Float(max(object.scale.y, 0.0001))
+                    Float(max(liveObject.scale.x, 0.0001)),
+                    Float(max(liveObject.scale.y, 0.0001))
                 )
                 let scaledSize = CGSize(
                     width: entry.size.width * CGFloat(scale.x),
@@ -250,11 +285,11 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
                     centerInScenePixels: center,
                     sizeInScenePixels: scaledSize,
                     tint: SIMD3<Float>(
-                        Float(object.color.x),
-                        Float(object.color.y),
-                        Float(object.color.z)
+                        Float(liveObject.color.x),
+                        Float(liveObject.color.y),
+                        Float(liveObject.color.z)
                     ),
-                    alpha: Float(object.alpha)
+                    alpha: Float(liveObject.alpha)
                 ))
             }
             if !draws.isEmpty {
@@ -293,12 +328,24 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         textObjects = document.textObjects
         guard !textObjects.isEmpty else {
             textRenderer = nil
+            textScriptInstances.removeAll(keepingCapacity: false)
             return
         }
         textRenderer = WPETextRenderer(
             device: executor.textureSourceDevice,
             resolver: resourceResolver
         )
+        // Phase 2D-P: spin up a SceneScript instance for every text
+        // object whose `text` field carried an embedded script. The
+        // instance evaluates the module once at load (running `init`)
+        // and is ticked per frame to refresh the rendered string.
+        textScriptInstances.removeAll(keepingCapacity: false)
+        for object in textObjects {
+            guard let script = object.textScript else { continue }
+            if let instance = try? WPESceneScriptInstance(script: script, initialValue: object.text) {
+                textScriptInstances[object.id] = instance
+            }
+        }
     }
 
     /// Spawn one `WPEParticleSystem` per parsed particle object. Reads
@@ -362,6 +409,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         textObjects.removeAll(keepingCapacity: false)
         textRenderer?.releaseAll()
         textRenderer = nil
+        textScriptInstances.removeAll(keepingCapacity: false)
         soundRuntime?.stop()
         soundRuntime = nil
         sceneRenderSize = CGSize(width: 1, height: 1)
@@ -419,6 +467,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         textObjects.removeAll(keepingCapacity: false)
         textRenderer?.releaseAll()
         textRenderer = nil
+        textScriptInstances.removeAll(keepingCapacity: false)
         soundRuntime?.stop()
         soundRuntime = nil
         lastRuntimeUniforms = nil
