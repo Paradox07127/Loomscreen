@@ -230,7 +230,7 @@ struct WPEMetalShaderDispatcher {
                 depthPixelFormat: depthPixelFormat
             ))
             let reference = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
-            let texture = try executor.resolve(
+            let texture = try WPEMetalShaderInputs.resolve(
                 reference: reference,
                 textures: textures,
                 frameState: frameState,
@@ -248,7 +248,7 @@ struct WPEMetalShaderDispatcher {
                 depthPixelFormat: depthPixelFormat
             ))
             let primaryRef = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
-            let primary = try executor.resolve(
+            let primary = try WPEMetalShaderInputs.resolve(
                 reference: primaryRef,
                 textures: textures,
                 frameState: frameState,
@@ -263,7 +263,7 @@ struct WPEMetalShaderDispatcher {
             let hasMask = maskRef != nil
             let mask: MTLTexture
             if let maskRef {
-                mask = try executor.resolve(
+                mask = try WPEMetalShaderInputs.resolve(
                     reference: maskRef,
                     textures: textures,
                     frameState: frameState,
@@ -286,7 +286,7 @@ struct WPEMetalShaderDispatcher {
                 encoder: encoder,
                 depthPixelFormat: depthPixelFormat,
                 uniforms: WPEOpacityUniforms(
-                    opacity: executor.floatScalar(named: ["u_Opacity", "opacity", "amount", "alpha"], in: pass, default: 1)
+                    opacity: WPEMetalShaderInputs.floatScalar(named: ["u_Opacity", "opacity", "amount", "alpha"], in: pass, default: 1)
                 )
             )
 
@@ -305,7 +305,7 @@ struct WPEMetalShaderDispatcher {
                 depthPixelFormat: depthPixelFormat,
                 uniforms: WPEScrollUniforms(
                     speed: SIMD2<Float>(Float(speedVec.first ?? 0.1), Float(speedVec.dropFirst().first ?? 0)),
-                    time: executor.floatScalar(named: "g_Time", in: pass, default: 0)
+                    time: WPEMetalShaderInputs.floatScalar(named: "g_Time", in: pass, default: 0)
                 )
             )
 
@@ -319,9 +319,9 @@ struct WPEMetalShaderDispatcher {
                 encoder: encoder,
                 depthPixelFormat: depthPixelFormat,
                 uniforms: WPEPulseUniforms(
-                    frequency: executor.floatScalar(named: ["u_Frequency", "frequency", "speed"], in: pass, default: 1),
-                    amplitude: executor.floatScalar(named: ["u_Amplitude", "amplitude", "amount", "strength"], in: pass, default: 0.25),
-                    time: executor.floatScalar(named: "g_Time", in: pass, default: 0)
+                    frequency: WPEMetalShaderInputs.floatScalar(named: ["u_Frequency", "frequency", "speed"], in: pass, default: 1),
+                    amplitude: WPEMetalShaderInputs.floatScalar(named: ["u_Amplitude", "amplitude", "amount", "strength"], in: pass, default: 0.25),
+                    time: WPEMetalShaderInputs.floatScalar(named: "g_Time", in: pass, default: 0)
                 )
             )
 
@@ -335,8 +335,8 @@ struct WPEMetalShaderDispatcher {
                 encoder: encoder,
                 depthPixelFormat: depthPixelFormat,
                 uniforms: WPEIrisUniforms(
-                    radius: executor.floatScalar(named: ["u_Radius", "radius", "size"], in: pass, default: 0.6),
-                    softness: executor.floatScalar(named: ["u_Softness", "softness", "feather"], in: pass, default: 0.1)
+                    radius: WPEMetalShaderInputs.floatScalar(named: ["u_Radius", "radius", "size"], in: pass, default: 0.6),
+                    softness: WPEMetalShaderInputs.floatScalar(named: ["u_Softness", "softness", "feather"], in: pass, default: 0.1)
                 )
             )
 
@@ -350,10 +350,10 @@ struct WPEMetalShaderDispatcher {
                 encoder: encoder,
                 depthPixelFormat: depthPixelFormat,
                 uniforms: WPEWaterUniforms(
-                    amplitude: executor.floatScalar(named: ["u_Amplitude", "amplitude", "amount", "strength"], in: pass, default: 0.005),
-                    frequency: executor.floatScalar(named: ["u_Frequency", "frequency", "scale"], in: pass, default: 18),
-                    speed: executor.floatScalar(named: ["u_Speed", "speed"], in: pass, default: 1),
-                    time: executor.floatScalar(named: "g_Time", in: pass, default: 0)
+                    amplitude: WPEMetalShaderInputs.floatScalar(named: ["u_Amplitude", "amplitude", "amount", "strength"], in: pass, default: 0.005),
+                    frequency: WPEMetalShaderInputs.floatScalar(named: ["u_Frequency", "frequency", "scale"], in: pass, default: 18),
+                    speed: WPEMetalShaderInputs.floatScalar(named: ["u_Speed", "speed"], in: pass, default: 1),
+                    time: WPEMetalShaderInputs.floatScalar(named: "g_Time", in: pass, default: 0)
                 )
             )
 
@@ -367,8 +367,8 @@ struct WPEMetalShaderDispatcher {
                 encoder: encoder,
                 depthPixelFormat: depthPixelFormat,
                 uniforms: WPESpinUniforms(
-                    angularSpeed: executor.floatScalar(named: ["u_AngularSpeed", "u_Speed", "speed", "angularSpeed"], in: pass, default: 0.5),
-                    time: executor.floatScalar(named: "g_Time", in: pass, default: 0)
+                    angularSpeed: WPEMetalShaderInputs.floatScalar(named: ["u_AngularSpeed", "u_Speed", "speed", "angularSpeed"], in: pass, default: 0.5),
+                    time: WPEMetalShaderInputs.floatScalar(named: "g_Time", in: pass, default: 0)
                 )
             )
 
@@ -382,8 +382,8 @@ struct WPEMetalShaderDispatcher {
                 encoder: encoder,
                 depthPixelFormat: depthPixelFormat,
                 uniforms: WPETintUniforms(
-                    color: executor.colorVector(for: pass),
-                    intensity: executor.floatScalar(named: ["u_Intensity", "intensity", "amount", "strength"], in: pass, default: 1)
+                    color: WPEMetalShaderInputs.colorVector(for: pass),
+                    intensity: WPEMetalShaderInputs.floatScalar(named: ["u_Intensity", "intensity", "amount", "strength"], in: pass, default: 1)
                 )
             )
 
@@ -397,10 +397,10 @@ struct WPEMetalShaderDispatcher {
                 encoder: encoder,
                 depthPixelFormat: depthPixelFormat,
                 uniforms: WPEFoliageSwayUniforms(
-                    amplitude: executor.floatScalar(named: ["u_Amplitude", "amplitude", "amount", "strength"], in: pass, default: 0.02),
-                    frequency: executor.floatScalar(named: ["u_Frequency", "frequency", "scale"], in: pass, default: 4),
-                    speed: executor.floatScalar(named: ["u_Speed", "speed"], in: pass, default: 1.5),
-                    time: executor.floatScalar(named: "g_Time", in: pass, default: 0)
+                    amplitude: WPEMetalShaderInputs.floatScalar(named: ["u_Amplitude", "amplitude", "amount", "strength"], in: pass, default: 0.02),
+                    frequency: WPEMetalShaderInputs.floatScalar(named: ["u_Frequency", "frequency", "scale"], in: pass, default: 4),
+                    speed: WPEMetalShaderInputs.floatScalar(named: ["u_Speed", "speed"], in: pass, default: 1.5),
+                    time: WPEMetalShaderInputs.floatScalar(named: "g_Time", in: pass, default: 0)
                 )
             )
 
@@ -414,10 +414,10 @@ struct WPEMetalShaderDispatcher {
                 encoder: encoder,
                 depthPixelFormat: depthPixelFormat,
                 uniforms: WPEWaterRippleUniforms(
-                    amplitude: executor.floatScalar(named: ["u_Amplitude", "amplitude", "amount", "strength"], in: pass, default: 0.005),
-                    frequency: executor.floatScalar(named: ["u_Frequency", "frequency", "scale"], in: pass, default: 60),
-                    speed: executor.floatScalar(named: ["u_Speed", "speed"], in: pass, default: 1.0),
-                    time: executor.floatScalar(named: "g_Time", in: pass, default: 0)
+                    amplitude: WPEMetalShaderInputs.floatScalar(named: ["u_Amplitude", "amplitude", "amount", "strength"], in: pass, default: 0.005),
+                    frequency: WPEMetalShaderInputs.floatScalar(named: ["u_Frequency", "frequency", "scale"], in: pass, default: 60),
+                    speed: WPEMetalShaderInputs.floatScalar(named: ["u_Speed", "speed"], in: pass, default: 1.0),
+                    time: WPEMetalShaderInputs.floatScalar(named: "g_Time", in: pass, default: 0)
                 )
             )
 
@@ -431,8 +431,8 @@ struct WPEMetalShaderDispatcher {
                 encoder: encoder,
                 depthPixelFormat: depthPixelFormat,
                 uniforms: WPEBlendUniforms(
-                    color: executor.colorVector(for: pass),
-                    opacity: executor.floatScalar(named: ["u_Opacity", "opacity", "amount", "strength"], in: pass, default: 1)
+                    color: WPEMetalShaderInputs.colorVector(for: pass),
+                    opacity: WPEMetalShaderInputs.floatScalar(named: ["u_Opacity", "opacity", "amount", "strength"], in: pass, default: 1)
                 )
             )
 
@@ -450,8 +450,8 @@ struct WPEMetalShaderDispatcher {
                 depthPixelFormat: depthPixelFormat,
                 uniforms: WPEWaterFlowUniforms(
                     direction: SIMD2<Float>(Float(dirVec.first ?? 0), Float(dirVec.dropFirst().first ?? 0.1)),
-                    speed: executor.floatScalar(named: ["u_Speed", "speed"], in: pass, default: 1),
-                    time: executor.floatScalar(named: "g_Time", in: pass, default: 0)
+                    speed: WPEMetalShaderInputs.floatScalar(named: ["u_Speed", "speed"], in: pass, default: 1),
+                    time: WPEMetalShaderInputs.floatScalar(named: "g_Time", in: pass, default: 0)
                 )
             )
 
@@ -490,9 +490,9 @@ struct WPEMetalShaderDispatcher {
                 encoder: encoder,
                 depthPixelFormat: depthPixelFormat,
                 uniforms: WPEShimmerUniforms(
-                    speed: executor.floatScalar(named: ["u_Speed", "speed"], in: pass, default: 4),
-                    intensity: executor.floatScalar(named: ["u_Intensity", "intensity", "amount", "strength"], in: pass, default: 0.2),
-                    time: executor.floatScalar(named: "g_Time", in: pass, default: 0)
+                    speed: WPEMetalShaderInputs.floatScalar(named: ["u_Speed", "speed"], in: pass, default: 4),
+                    intensity: WPEMetalShaderInputs.floatScalar(named: ["u_Intensity", "intensity", "amount", "strength"], in: pass, default: 0.2),
+                    time: WPEMetalShaderInputs.floatScalar(named: "g_Time", in: pass, default: 0)
                 )
             )
 
@@ -504,7 +504,7 @@ struct WPEMetalShaderDispatcher {
                 depthPixelFormat: depthPixelFormat
             ))
             let reference = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
-            let texture = try executor.resolve(
+            let texture = try WPEMetalShaderInputs.resolve(
                 reference: reference,
                 textures: textures,
                 frameState: frameState,
@@ -583,7 +583,7 @@ struct WPEMetalShaderDispatcher {
                     ?? pass.pass.textures[slot]
                 let texture: MTLTexture?
                 if let reference {
-                    texture = try executor.resolve(
+                    texture = try WPEMetalShaderInputs.resolve(
                         reference: reference,
                         textures: textures,
                         frameState: frameState,
@@ -591,7 +591,7 @@ struct WPEMetalShaderDispatcher {
                     )
                 } else if slot == 0 {
                     // Slot 0 must always be bound; fall back to source.
-                    texture = try executor.resolve(
+                    texture = try WPEMetalShaderInputs.resolve(
                         reference: pass.pass.source,
                         textures: textures,
                         frameState: frameState,
