@@ -245,14 +245,6 @@ final class WPEMetalRenderExecutor {
         device
     }
 
-    var transientTargetTextureCountForTesting: Int {
-        targetPool.allocatedTextureCount
-    }
-
-    var pipelineStateCountForTesting: Int {
-        pipelines.count
-    }
-
     func releaseTransientResources() {
         targetPool.releaseAll()
     }
