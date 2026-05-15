@@ -48,6 +48,11 @@ extension Notification.Name {
     /// without needing a manual reopen.
     static let workshopLibraryRootBookmarkDidChange = Notification.Name("WorkshopLibraryRootBookmarkDidChange")
 
+    /// Wallpaper Engine install-root bookmark was set or cleared. Runtime
+    /// scenes use it to mount WPE's bundled framework assets, and the Scene
+    /// section's onboarding banner watches it to dismiss itself once granted.
+    static let wpeEngineAssetsBookmarkDidChange = Notification.Name("WPEEngineAssetsBookmarkDidChange")
+
     /// `GlobalSettings.showInDock` changed. The app delegate listens so the
     /// activation policy switch happens immediately without a relaunch.
     static let dockVisibilityDidChange = Notification.Name("DockVisibilityDidChange")

@@ -76,6 +76,7 @@ final class AmbientWallpaperSessionBuilder {
         frame: CGRect,
         dependencyMounts: [WPEAssetMount] = [],
         rendererBackend: WPESceneRendererBackend = .metalExperimental,
+        engineAssetsRootURL: URL? = nil,
         applicationSupportRootURL: URL? = nil,
         fileManager: FileManager = .default
     ) -> SceneWallpaperSession? {
@@ -132,6 +133,7 @@ final class AmbientWallpaperSessionBuilder {
                 descriptor: descriptor,
                 cacheRootURL: cacheURL,
                 dependencyMounts: dependencyMounts,
+                engineAssetsRootURL: engineAssetsRootURL,
                 frame: rendererFrame
             )
         case .metalExperimental:
@@ -144,6 +146,7 @@ final class AmbientWallpaperSessionBuilder {
                     descriptor: descriptor,
                     cacheRootURL: cacheURL,
                     dependencyMounts: dependencyMounts,
+                    engineAssetsRootURL: engineAssetsRootURL,
                     frame: rendererFrame,
                     device: device
                 )

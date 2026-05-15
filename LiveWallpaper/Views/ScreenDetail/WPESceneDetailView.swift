@@ -2,10 +2,11 @@ import AppKit
 import SpriteKit
 import SwiftUI
 
-/// Phase 2.0 scene detail card. Drives the loading/playing/paused/error state
-/// machine on top of the SKView the wallpaper session already mounted into
-/// the desktop window. The inspector reuses the same `SceneRenderingController`
-/// instance so the preview seen here is byte-identical to the live wallpaper.
+/// Scene detail card for Wallpaper Engine projects. Drives the loading /
+/// playing / paused / error state machine on top of the renderer view the
+/// wallpaper session already mounted into the desktop window. The inspector
+/// reuses the same renderer instance so the preview seen here is
+/// byte-identical to the live wallpaper.
 @MainActor
 struct WPESceneDetailView: View {
     let origin: WPEOrigin
@@ -166,7 +167,7 @@ struct WPESceneDetailView: View {
         case .sceneParseFailed(let detail):
             return Text(verbatim: detail)
         case .sceneShaderUnsupported:
-            return Text("Phase 2.0 ships an image-only renderer.")
+            return Text("A custom shader couldn't be translated. Try re-downloading the project.")
         case .sceneResourceMissing:
             return Text("Image layers couldn't be located inside the cache.")
         case .missingDependency(let ids):
