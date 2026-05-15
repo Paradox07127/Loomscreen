@@ -16,6 +16,14 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
     private let descriptor: SceneDescriptor
     private let cacheRootURL: URL
     private let dependencyMounts: [WPEAssetMount]
+    /// Resolved Wallpaper Engine install root (the directory that contains
+    /// `assets/`). Captured at init for graph + pipeline builder use; the
+    /// security scope is owned here for the lifetime of the renderer.
+    private let engineAssetsRootURL: URL?
+    /// `(unsafe)` because `deinit` is non-isolated and needs to clear the
+    /// reference + drop the scope. All other writes happen on `@MainActor`
+    /// (`cleanup()`), so observed mutation is single-threaded.
+    nonisolated(unsafe) private var activeEngineAssetsRootURL: URL?
     private let entryResolver: SceneResourceResolver
     private let resourceResolver: WPEMultiRootResourceResolver
     private let mtkView: MTKView
@@ -73,6 +81,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         descriptor: SceneDescriptor,
         cacheRootURL: URL,
         dependencyMounts: [WPEAssetMount],
+        engineAssetsRootURL: URL? = nil,
         frame: CGRect,
         device: MTLDevice,
         frameClock: WPEMetalFrameClock = WPEMetalFrameClock(),
@@ -82,18 +91,37 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         self.descriptor = descriptor
         self.cacheRootURL = cacheRootURL
         self.dependencyMounts = dependencyMounts
+        self.engineAssetsRootURL = engineAssetsRootURL
+        // Build the throwing dependencies BEFORE opening the security
+        // scope. If executor init fails, Swift will not run `deinit` for a
+        // partially-initialized instance — opening the scope first would
+        // leak that reference count until process exit. Audited by codex.
+        let executor = try WPEMetalRenderExecutor(device: device)
+        // Open the security scope once for the renderer's lifetime; balanced
+        // by `cleanup()` / `deinit`. Tracking the URL that actually started
+        // a scope means we won't try to stop one that never opened.
+        let didStartEngineAssetsAccess = engineAssetsRootURL?.startAccessingSecurityScopedResource() ?? false
+        self.activeEngineAssetsRootURL = didStartEngineAssetsAccess ? engineAssetsRootURL : nil
         self.entryResolver = SceneResourceResolver(cacheRootURL: cacheRootURL)
         self.resourceResolver = WPEMultiRootResourceResolver(
             primaryRootURL: cacheRootURL,
-            dependencyMounts: dependencyMounts
+            dependencyMounts: dependencyMounts,
+            engineAssetsRootURL: engineAssetsRootURL
         )
-        self.executor = try WPEMetalRenderExecutor(device: device)
+        self.executor = executor
         self.textureLoader = WPEMetalTextureLoader(device: device)
         self.mtkView = MTKView(frame: frame, device: device)
         self.frameClock = frameClock
         self.pointerSampler = pointerSampler
         self.snapshotter = snapshotter
         super.init()
+
+        if engineAssetsRootURL != nil && !didStartEngineAssetsAccess {
+            Logger.warning(
+                "Wallpaper Engine assets security scope could not be started — engine fallback disabled for this session",
+                category: .fileAccess
+            )
+        }
 
         mtkView.delegate = self
         mtkView.colorPixelFormat = WPEMetalRenderExecutor.outputPixelFormat
@@ -132,13 +160,21 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         onProgress?("Building render graph")
         let cacheRoot = cacheRootURL
         let mounts = dependencyMounts
+        let engineRoot = engineAssetsRootURL
         let graph = try await Task.detached(priority: .userInitiated) {
-            try WPERenderGraphBuilder(cacheRootURL: cacheRoot, dependencyMounts: mounts).build(document: document)
+            try WPERenderGraphBuilder(
+                cacheRootURL: cacheRoot,
+                dependencyMounts: mounts,
+                engineAssetsRootURL: engineRoot
+            ).build(document: document)
         }.value
 
         onProgress?("Preparing render pipeline")
         let pipeline = try await Task.detached(priority: .userInitiated) {
-            try WPERenderPipelineBuilder(cacheRootURL: cacheRoot).build(graph: graph)
+            try WPERenderPipelineBuilder(
+                cacheRootURL: cacheRoot,
+                engineAssetsRootURL: engineRoot
+            ).build(graph: graph)
         }.value
 
         renderGraph = graph
@@ -473,6 +509,17 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         lastRuntimeUniforms = nil
         cachedSnapshot = nil
         executor.releaseTransientResources()
+        stopEngineAssetsAccessIfNeeded()
+    }
+
+    deinit {
+        stopEngineAssetsAccessIfNeeded()
+    }
+
+    nonisolated private func stopEngineAssetsAccessIfNeeded() {
+        guard let url = activeEngineAssetsRootURL else { return }
+        url.stopAccessingSecurityScopedResource()
+        activeEngineAssetsRootURL = nil
     }
 
     nonisolated func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}

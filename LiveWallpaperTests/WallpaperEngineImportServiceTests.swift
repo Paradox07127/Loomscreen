@@ -642,6 +642,50 @@ struct WallpaperEngineImportServiceTests {
         #expect(origin.resourceLocation == .cache)
     }
 
+    @Test("Scene import persists preflight tier and feature flags")
+    func sceneImportPersistsPreflightMetadata() async throws {
+        let sceneJSON = """
+        {
+            "camera": { "center": "0 0 0" },
+            "general": {
+                "orthogonalprojection": { "width": 1920, "height": 1080, "auto": true }
+            },
+            "objects": [{
+                "id": "layer1",
+                "name": "Layer 1",
+                "type": "image",
+                "image": "materials/layer.png"
+            }]
+        }
+        """
+        let png = try makeFixturePNG(width: 1, height: 1)
+        let fixture = try makeFixture(
+            type: .scene,
+            entryFile: "scene.json",
+            pkgEntries: [
+                PackageEntrySpec("scene.json", Array(sceneJSON.utf8)),
+                PackageEntrySpec("materials/layer.png", Array(png)),
+                PackageEntrySpec("shaders/custom.frag", Array("void main() {}".utf8))
+            ]
+        )
+        defer { fixture.cleanup() }
+
+        let result = try await fixture.service.importProject(folder: fixture.folderURL)
+
+        guard case .ready(let content, _) = result else {
+            Issue.record("Expected .ready, got \(result)")
+            return
+        }
+        guard case .scene(let descriptor) = content else {
+            Issue.record("Expected .scene content, got \(content)")
+            return
+        }
+
+        #expect(descriptor.capabilityTier == .imageOnly)
+        #expect(descriptor.preflightTier == .degradedPlayable)
+        #expect(descriptor.preflightFeatureFlags == [.customShaderSource])
+    }
+
     @Test("Cached content resolver rebuilds scene descriptor by reclassifying scene.json")
     func cachedContentResolverRebuildsSceneDescriptor() throws {
         let fileManager = FileManager.default
@@ -663,6 +707,11 @@ struct WallpaperEngineImportServiceTests {
         }
         """
         try Data(sceneJSON.utf8).write(to: cacheURL.appendingPathComponent("scene.json"))
+        // Drop a custom shader file in the cache so preflight detects the
+        // `.customShaderSource` flag during reclassification.
+        let shaderDir = cacheURL.appendingPathComponent("shaders", isDirectory: true)
+        try fileManager.createDirectory(at: shaderDir, withIntermediateDirectories: true)
+        try Data("void main() {}".utf8).write(to: shaderDir.appendingPathComponent("cached.frag"))
 
         let origin = WPEOrigin(
             workshopID: "resolve-scene",
@@ -688,6 +737,11 @@ struct WallpaperEngineImportServiceTests {
         #expect(descriptor.entryFile == "scene.json")
         #expect(descriptor.capabilityTier == .unsupported)
         #expect(descriptor.dependencyWorkshopIDs == [])
+        // Preflight reclassification picks up the custom shader source on
+        // the cached side too — the descriptor should carry the same flag
+        // set the first-import path would have produced.
+        #expect(descriptor.preflightTier == .degradedPlayable)
+        #expect(descriptor.preflightFeatureFlags == [.customShaderSource])
     }
 
     @Test("Cached content resolver rebuilds packaged video without source folder access")

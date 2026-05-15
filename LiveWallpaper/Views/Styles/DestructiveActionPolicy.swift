@@ -20,6 +20,7 @@ enum DestructiveAction: Identifiable, Equatable {
     case disableSchedule(slotCount: Int)
     case clearUnusedWallpapers(itemCount: Int, byteSize: String)
     case forgetWorkshopLibrary(path: String)
+    case forgetEngineAssets(path: String)
     case removeHistoryEntry(name: String)
     case clearAllShortcuts
     case resetShortcut(commandName: String)
@@ -40,6 +41,7 @@ enum DestructiveAction: Identifiable, Equatable {
         case .disableSchedule(let c): return "disableSchedule-\(c)"
         case .clearUnusedWallpapers(let i, let b): return "clearUnusedWallpapers-\(i)-\(b)"
         case .forgetWorkshopLibrary(let p): return "forgetWorkshopLibrary-\(p)"
+        case .forgetEngineAssets(let p): return "forgetEngineAssets-\(p)"
         case .removeHistoryEntry(let n): return "removeHistoryEntry-\(n)"
         case .clearAllShortcuts: return "clearAllShortcuts"
         case .resetShortcut(let n): return "resetShortcut-\(n)"
@@ -63,6 +65,7 @@ enum DestructiveAction: Identifiable, Equatable {
         case .disableSchedule:           return "Disable schedule?"
         case .clearUnusedWallpapers:     return "Clear unused wallpapers?"
         case .forgetWorkshopLibrary:     return "Forget Workshop library?"
+        case .forgetEngineAssets:        return "Forget Wallpaper Engine install folder?"
         case .removeHistoryEntry:        return "Remove from history?"
         case .clearAllShortcuts:         return "Reset all keyboard shortcuts?"
         case .resetShortcut:             return "Reset this shortcut?"
@@ -97,6 +100,8 @@ enum DestructiveAction: Identifiable, Equatable {
             return "Removes \(itemCount) items · \(byteSize) not displayed for more than 30 days. Currently-applied and pinned wallpapers are untouched."
         case .forgetWorkshopLibrary(let path):
             return "The library at '\(path)' will be unlinked. Local scene caches are kept; you can re-link the folder later."
+        case .forgetEngineAssets(let path):
+            return "The Wallpaper Engine install folder at '\(path)' will be unlinked. Scenes that depend on shared engine framework files will fail to render until you grant access again."
         case .removeHistoryEntry(let name):
             return "'\(name)' will be removed from your recent items. The underlying file or scene is not deleted."
         case .clearAllShortcuts:
@@ -128,6 +133,7 @@ enum DestructiveAction: Identifiable, Equatable {
         case .disableSchedule:           return "Disable Schedule"
         case .clearUnusedWallpapers(let itemCount, _): return "Clear \(itemCount) Items"
         case .forgetWorkshopLibrary:     return "Forget Library"
+        case .forgetEngineAssets:        return "Forget Engine Folder"
         case .removeHistoryEntry:        return "Remove"
         case .clearAllShortcuts:         return "Reset All"
         case .resetShortcut:             return "Reset"
