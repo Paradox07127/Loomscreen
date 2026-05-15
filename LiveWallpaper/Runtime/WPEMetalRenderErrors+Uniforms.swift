@@ -123,3 +123,110 @@ struct WPEShakeUniforms {
     var frequency: Float
     var padding: Float = 0
 }
+
+// Phase 2D-D: layout MUST match `WPEGenericImageUniforms` /
+// `WPEGenericParticleUniforms` in `WPEMetalBuiltins.metal`.
+
+struct WPEGenericImageUniforms {
+    var color: SIMD4<Float>
+    /// x = alpha (g_Alpha), y = brightness (g_Brightness), z = hasMask (0/1),
+    /// w = padding. Packed as a vec4 because Metal struct alignment on
+    /// `constant` buffers rounds up to vec4 boundaries anyway, and a single
+    /// vec4 slot is cheaper than three scalars + per-field padding.
+    var alphaMaskUV: SIMD4<Float>
+}
+
+struct WPEGenericParticleUniforms {
+    var color: SIMD4<Float>
+    /// x = alpha, y = brightness, z/w = padding (reserved for spectrum
+    /// reactivity in Phase 4 audio runtime).
+    var sizeAndAge: SIMD4<Float>
+}
+
+// Phase 2D-E: native MSL effect uniforms.
+
+struct WPEOpacityUniforms {
+    var opacity: Float
+    var padding0: Float = 0
+    var padding1: Float = 0
+    var padding2: Float = 0
+}
+
+struct WPEScrollUniforms {
+    var speed: SIMD2<Float>
+    var time: Float
+    var padding: Float = 0
+}
+
+struct WPEPulseUniforms {
+    var frequency: Float
+    var amplitude: Float
+    var time: Float
+    var padding: Float = 0
+}
+
+struct WPEIrisUniforms {
+    var radius: Float
+    var softness: Float
+    var padding0: Float = 0
+    var padding1: Float = 0
+}
+
+// WaterWaves shares the WPEWaterUniforms layout — declared above near the
+// Water effect — to keep MSL/Swift struct alignments in lockstep.
+
+struct WPESpinUniforms {
+    var angularSpeed: Float
+    var time: Float
+    var padding0: Float = 0
+    var padding1: Float = 0
+}
+
+struct WPETintUniforms {
+    var color: SIMD4<Float>
+    var intensity: Float
+    var padding0: Float = 0
+    var padding1: Float = 0
+    var padding2: Float = 0
+}
+
+struct WPEFoliageSwayUniforms {
+    var amplitude: Float
+    var frequency: Float
+    var speed: Float
+    var time: Float
+}
+
+struct WPEWaterRippleUniforms {
+    var amplitude: Float
+    var frequency: Float
+    var speed: Float
+    var time: Float
+}
+
+struct WPEBlendUniforms {
+    var color: SIMD4<Float>
+    var opacity: Float
+    var padding0: Float = 0
+    var padding1: Float = 0
+    var padding2: Float = 0
+}
+
+struct WPEWaterFlowUniforms {
+    var direction: SIMD2<Float>
+    var speed: Float
+    var time: Float
+}
+
+struct WPEColorGradingUniforms {
+    var lift: SIMD4<Float>
+    var gamma: SIMD4<Float>
+    var gain: SIMD4<Float>
+}
+
+struct WPEShimmerUniforms {
+    var speed: Float
+    var intensity: Float
+    var time: Float
+    var padding: Float = 0
+}

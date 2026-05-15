@@ -199,6 +199,350 @@ struct WPEShakeUniforms {
     float padding;
 };
 
+// Phase 2D-D: native MSL implementations of WPE's most-used material
+// shaders. Together they cover ~858 of the top shader uses across the
+// 431960 corpus (562 genericimage4 + 103 genericimage2 + 193 genericparticle),
+// so any scene built only on these + the existing built-ins now renders
+// without needing the GLSL→MSL translator. Combos are not interpreted —
+// the default no-combo case is what most scenes ship.
+
+struct WPEGenericImageUniforms {
+    float4 color;        // g_Color (sRGB→linear converted by executor)
+    float4 alphaMaskUV;  // x=alpha multiplier, y=brightness, z=hasMask, w=padding
+};
+
+fragment half4 wpe_genericimage2_fragment(
+    WPEVertexOut in [[stage_in]],
+    texture2d<half, access::sample> texture0 [[texture(0)]],
+    constant WPEGenericImageUniforms& uniforms [[buffer(0)]]
+) {
+    constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
+    float4 sampled = float4(texture0.sample(linearSampler, in.uv));
+    float3 rgb = sampled.rgb * uniforms.color.rgb * uniforms.alphaMaskUV.y;
+    float alpha = sampled.a * uniforms.color.a * uniforms.alphaMaskUV.x;
+    // Premultiply the output for the "translucent" blend mode used by
+    // genericimage2 in practice — matches WPE's expected rendering path.
+    return half4(float4(rgb * alpha, alpha));
+}
+
+fragment half4 wpe_genericimage4_fragment(
+    WPEVertexOut in [[stage_in]],
+    texture2d<half, access::sample> texture0 [[texture(0)]],
+    texture2d<half, access::sample> texture1 [[texture(1)]],
+    constant WPEGenericImageUniforms& uniforms [[buffer(0)]]
+) {
+    constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
+    float4 sampled = float4(texture0.sample(linearSampler, in.uv));
+    float maskAlpha = 1.0;
+    if (uniforms.alphaMaskUV.z > 0.5) {
+        // Slot 1 carries an opacity/blend mask in WPE's genericimage4 default
+        // configuration. Multiply against the source alpha — this is the
+        // "ALPHAMASK" combo the workshop overwhelmingly enables.
+        maskAlpha = float(texture1.sample(linearSampler, in.uv).a);
+    }
+    float3 rgb = sampled.rgb * uniforms.color.rgb * uniforms.alphaMaskUV.y;
+    float alpha = sampled.a * maskAlpha * uniforms.color.a * uniforms.alphaMaskUV.x;
+    return half4(float4(rgb * alpha, alpha));
+}
+
+struct WPEGenericParticleUniforms {
+    float4 color;        // g_Color × per-particle tint
+    float4 sizeAndAge;   // x=alpha, y=brightness, z=padding, w=padding
+};
+
+fragment half4 wpe_genericparticle_fragment(
+    WPEVertexOut in [[stage_in]],
+    texture2d<half, access::sample> texture0 [[texture(0)]],
+    constant WPEGenericParticleUniforms& uniforms [[buffer(0)]]
+) {
+    constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
+    float4 sampled = float4(texture0.sample(linearSampler, in.uv));
+    float3 rgb = sampled.rgb * uniforms.color.rgb * uniforms.sizeAndAge.y;
+    float alpha = sampled.a * uniforms.color.a * uniforms.sizeAndAge.x;
+    // Particle sprites typically render in additive or translucent mode;
+    // both want premultiplied output to behave correctly under the
+    // dispatcher's blend state.
+    return half4(float4(rgb * alpha, alpha));
+}
+
+// Phase 2D-E: native MSL implementations of the most-common WPE effect
+// shaders (per-corpus frequency: opacity 7, scroll 10, pulse 9, iris 6,
+// shine_gaussian 6). All take a single source texture and emit an
+// effect-modulated copy. These cover the simple 1-pass effects that
+// dominate the long tail; multi-pass blur/lightshafts still need the
+// translator.
+
+struct WPEOpacityUniforms {
+    float opacity;
+    float padding0;
+    float padding1;
+    float padding2;
+};
+
+fragment half4 wpe_effect_opacity_fragment(
+    WPEVertexOut in [[stage_in]],
+    texture2d<half, access::sample> texture0 [[texture(0)]],
+    constant WPEOpacityUniforms& uniforms [[buffer(0)]]
+) {
+    constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
+    float4 sampled = float4(texture0.sample(linearSampler, in.uv));
+    float a = saturate(uniforms.opacity);
+    return half4(float4(sampled.rgb * a, sampled.a * a));
+}
+
+struct WPEScrollUniforms {
+    float2 speed;        // UV per second
+    float time;
+    float padding;
+};
+
+fragment half4 wpe_effect_scroll_fragment(
+    WPEVertexOut in [[stage_in]],
+    texture2d<half, access::sample> texture0 [[texture(0)]],
+    constant WPEScrollUniforms& uniforms [[buffer(0)]]
+) {
+    constexpr sampler linearSampler(address::repeat, filter::linear);
+    float2 uv = fract(in.uv + uniforms.speed * uniforms.time);
+    return texture0.sample(linearSampler, uv);
+}
+
+struct WPEPulseUniforms {
+    float frequency;
+    float amplitude;     // 0..1 modulation depth
+    float time;
+    float padding;
+};
+
+fragment half4 wpe_effect_pulse_fragment(
+    WPEVertexOut in [[stage_in]],
+    texture2d<half, access::sample> texture0 [[texture(0)]],
+    constant WPEPulseUniforms& uniforms [[buffer(0)]]
+) {
+    constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
+    float4 sampled = float4(texture0.sample(linearSampler, in.uv));
+    float modulation = 1.0 + sin(uniforms.time * uniforms.frequency * 6.2831853) * uniforms.amplitude;
+    return half4(float4(saturate(sampled.rgb * modulation), sampled.a));
+}
+
+struct WPEIrisUniforms {
+    float radius;
+    float softness;
+    float padding0;
+    float padding1;
+};
+
+fragment half4 wpe_effect_iris_fragment(
+    WPEVertexOut in [[stage_in]],
+    texture2d<half, access::sample> texture0 [[texture(0)]],
+    constant WPEIrisUniforms& uniforms [[buffer(0)]]
+) {
+    constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
+    float4 sampled = float4(texture0.sample(linearSampler, in.uv));
+    float dist = distance(in.uv, float2(0.5, 0.5));
+    float radius = max(uniforms.radius, 0.0);
+    float softness = max(uniforms.softness, 0.0001);
+    float gate = 1.0 - smoothstep(radius, radius + softness, dist);
+    return half4(float4(sampled.rgb * gate, sampled.a * gate));
+}
+
+struct WPEWaterWavesUniforms {
+    float amplitude;
+    float frequency;
+    float speed;
+    float time;
+};
+
+fragment half4 wpe_effect_waterwaves_fragment(
+    WPEVertexOut in [[stage_in]],
+    texture2d<half, access::sample> texture0 [[texture(0)]],
+    constant WPEWaterWavesUniforms& uniforms [[buffer(0)]]
+) {
+    // WaterWaves is structurally similar to Water (both displace UVs by a
+    // sin/cos field) but ships separate uniforms in the corpus. Reuse the
+    // displacement model so scenes that reference the family render even
+    // if the result isn't pixel-identical to the WPE original.
+    constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
+    float phase = uniforms.time * uniforms.speed;
+    float frequency = max(uniforms.frequency, 0.0);
+    float2 wave = float2(
+        sin((in.uv.y + phase) * frequency * 1.3),
+        cos((in.uv.x + phase) * frequency * 1.7)
+    ) * uniforms.amplitude;
+    float2 uv = clamp(in.uv + wave, float2(0.0), float2(1.0));
+    return texture0.sample(linearSampler, uv);
+}
+
+// Phase 2D-F: more single-pass effect approximations that show up across
+// the corpus. These are visually plausible drop-ins; the shader translator
+// will replace them with the WPE-original output when it ships.
+
+struct WPESpinUniforms {
+    float angularSpeed;  // radians per second
+    float time;
+    float padding0;
+    float padding1;
+};
+
+fragment half4 wpe_effect_spin_fragment(
+    WPEVertexOut in [[stage_in]],
+    texture2d<half, access::sample> texture0 [[texture(0)]],
+    constant WPESpinUniforms& uniforms [[buffer(0)]]
+) {
+    constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
+    float a = uniforms.angularSpeed * uniforms.time;
+    float2 c = float2(0.5, 0.5);
+    float2 d = in.uv - c;
+    float s = sin(a), co = cos(a);
+    float2 r = float2(d.x * co - d.y * s, d.x * s + d.y * co) + c;
+    float2 uv = clamp(r, float2(0.0), float2(1.0));
+    return texture0.sample(linearSampler, uv);
+}
+
+struct WPETintUniforms {
+    float4 color;        // tint color (linear, executor pre-converts)
+    float intensity;
+    float padding0;
+    float padding1;
+    float padding2;
+};
+
+fragment half4 wpe_effect_tint_fragment(
+    WPEVertexOut in [[stage_in]],
+    texture2d<half, access::sample> texture0 [[texture(0)]],
+    constant WPETintUniforms& uniforms [[buffer(0)]]
+) {
+    constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
+    float4 sampled = float4(texture0.sample(linearSampler, in.uv));
+    float t = saturate(uniforms.intensity);
+    float3 rgb = mix(sampled.rgb, sampled.rgb * uniforms.color.rgb, t);
+    return half4(float4(rgb, sampled.a));
+}
+
+struct WPEFoliageSwayUniforms {
+    float amplitude;
+    float frequency;
+    float speed;
+    float time;
+};
+
+fragment half4 wpe_effect_foliagesway_fragment(
+    WPEVertexOut in [[stage_in]],
+    texture2d<half, access::sample> texture0 [[texture(0)]],
+    constant WPEFoliageSwayUniforms& uniforms [[buffer(0)]]
+) {
+    // Foliage sway: top of layer displaces horizontally, bottom stays.
+    // Linear y-mask keeps the rooted-base feel; sin(time) drives the sway.
+    constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
+    float yMask = 1.0 - in.uv.y;        // top = 1, bottom = 0 (UV is top-down)
+    float wave = sin(uniforms.time * uniforms.speed + in.uv.y * uniforms.frequency);
+    float2 uv = clamp(in.uv + float2(wave * uniforms.amplitude * yMask, 0.0), float2(0.0), float2(1.0));
+    return texture0.sample(linearSampler, uv);
+}
+
+struct WPEWaterRippleUniforms {
+    float amplitude;
+    float frequency;
+    float speed;
+    float time;
+};
+
+fragment half4 wpe_effect_waterripple_fragment(
+    WPEVertexOut in [[stage_in]],
+    texture2d<half, access::sample> texture0 [[texture(0)]],
+    constant WPEWaterRippleUniforms& uniforms [[buffer(0)]]
+) {
+    // Radial ripple from center, time-driven phase.
+    constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
+    float2 c = float2(0.5, 0.5);
+    float2 d = in.uv - c;
+    float r = length(d);
+    float wave = sin(r * uniforms.frequency - uniforms.time * uniforms.speed);
+    float2 disp = (r > 0.0001) ? (d / r) * wave * uniforms.amplitude : float2(0.0);
+    float2 uv = clamp(in.uv + disp, float2(0.0), float2(1.0));
+    return texture0.sample(linearSampler, uv);
+}
+
+struct WPEBlendUniforms {
+    float4 color;        // blend color
+    float opacity;
+    float padding0;
+    float padding1;
+    float padding2;
+};
+
+fragment half4 wpe_effect_blend_fragment(
+    WPEVertexOut in [[stage_in]],
+    texture2d<half, access::sample> texture0 [[texture(0)]],
+    constant WPEBlendUniforms& uniforms [[buffer(0)]]
+) {
+    constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
+    float4 sampled = float4(texture0.sample(linearSampler, in.uv));
+    float o = saturate(uniforms.opacity);
+    float3 rgb = mix(sampled.rgb, sampled.rgb * uniforms.color.rgb, o);
+    return half4(float4(rgb, sampled.a));
+}
+
+// Phase 2D-G: more single-pass effects.
+
+struct WPEWaterFlowUniforms {
+    float2 direction;    // unit-vector flow direction in UV space
+    float speed;
+    float time;
+};
+
+fragment half4 wpe_effect_waterflow_fragment(
+    WPEVertexOut in [[stage_in]],
+    texture2d<half, access::sample> texture0 [[texture(0)]],
+    constant WPEWaterFlowUniforms& uniforms [[buffer(0)]]
+) {
+    constexpr sampler linearSampler(address::repeat, filter::linear);
+    float2 uv = fract(in.uv + uniforms.direction * uniforms.speed * uniforms.time);
+    return texture0.sample(linearSampler, uv);
+}
+
+struct WPEColorGradingUniforms {
+    float4 lift;         // shadow lift (linear color)
+    float4 gamma;        // mid-tone gamma curve
+    float4 gain;         // highlight gain
+};
+
+fragment half4 wpe_effect_color_grading_fragment(
+    WPEVertexOut in [[stage_in]],
+    texture2d<half, access::sample> texture0 [[texture(0)]],
+    constant WPEColorGradingUniforms& uniforms [[buffer(0)]]
+) {
+    // Lift/gamma/gain (ASC-CDL) is the standard color-grading model. Not
+    // an exact match for every WPE color_grading variant — the family is
+    // really a 3D-LUT applied through a sample — but enough to keep
+    // scenes that depend on its presence rendering with stable colors.
+    constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
+    float4 sampled = float4(texture0.sample(linearSampler, in.uv));
+    float3 lifted = sampled.rgb + uniforms.lift.rgb;
+    float3 gained = lifted * max(uniforms.gain.rgb, float3(0.0001));
+    float3 graded = pow(saturate(gained), float3(1.0) / max(uniforms.gamma.rgb, float3(0.0001)));
+    return half4(float4(saturate(graded), sampled.a));
+}
+
+struct WPEShimmerUniforms {
+    float speed;
+    float intensity;
+    float time;
+    float padding;
+};
+
+fragment half4 wpe_effect_shimmer_fragment(
+    WPEVertexOut in [[stage_in]],
+    texture2d<half, access::sample> texture0 [[texture(0)]],
+    constant WPEShimmerUniforms& uniforms [[buffer(0)]]
+) {
+    constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
+    float4 sampled = float4(texture0.sample(linearSampler, in.uv));
+    // Hash the UV into a high-frequency twinkle, time-modulated.
+    float n = fract(sin(dot(in.uv * 100.0, float2(12.9898, 78.233)) + uniforms.time * uniforms.speed) * 43758.5453);
+    float boost = 1.0 + n * uniforms.intensity;
+    return half4(float4(saturate(sampled.rgb * boost), sampled.a));
+}
+
 fragment half4 wpe_effect_shake_fragment(
     WPEVertexOut in [[stage_in]],
     texture2d<half, access::sample> texture0 [[texture(0)]],
