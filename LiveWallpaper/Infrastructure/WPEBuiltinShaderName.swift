@@ -84,15 +84,16 @@ enum WPEBuiltinShaderName {
             // need the full GLSL translator — but this lights up the
             // overwhelming majority of corpus scenes that just sample
             // their material texture and apply g_Color/g_Alpha.
+            //
+            // genericImageAsCopy keeps the legacy executor-fallback
+            // behavior available; callers that want the new MSL
+            // fast-path must opt out of that flag.
             if isGenericImageCanonicalName(stripped) {
-                if stripped == "genericimage4" || stripped == "genericimage5" {
-                    return "genericimage4"
-                }
-                if stripped == "genericimage1" || stripped == "genericimage2" || stripped == "genericimage3" {
-                    return "genericimage2"
-                }
                 if genericImageAsCopy {
                     return "copy"
+                }
+                if stripped == "genericimage4" || stripped == "genericimage5" {
+                    return "genericimage4"
                 }
                 return "genericimage2"
             }

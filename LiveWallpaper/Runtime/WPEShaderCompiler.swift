@@ -34,7 +34,7 @@ struct WPEShaderCompileRequest: Sendable, Hashable {
     let textureBindings: [Int: String]
 }
 
-struct WPEShaderCompileResult: Sendable {
+struct WPEShaderCompileResult: @unchecked Sendable {
     let library: MTLLibrary
     let vertexFunctionName: String
     let fragmentFunctionName: String
@@ -43,6 +43,12 @@ struct WPEShaderCompileResult: Sendable {
     /// Diagnostics from the underlying compiler (warnings, info). Empty in
     /// the happy path; surfaced verbatim to make corpus regressions obvious.
     let diagnostics: [String]
+    /// Per-uniform float4 slot assignment matching the layout the
+    /// transpiler emitted. The dispatcher walks this to pack the runtime
+    /// uniform buffer. Empty when the shader took no uniforms.
+    let uniformLayout: [WPEUniformSlot]
+    /// Names of the texture samplers the shader expects, ordered by slot.
+    let samplerNames: [String]
 }
 
 enum WPEShaderCompilerError: Error, Sendable, Equatable {

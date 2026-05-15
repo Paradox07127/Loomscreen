@@ -20,8 +20,22 @@ final class WPEMetalRenderExecutor {
     /// Default is the stub which fails loudly with `.backendUnavailable`;
     /// production builds inject a real translator once the toolchain ships.
     let shaderCompiler: WPEShaderCompiling
+    /// Phase 2D-H: memoize the per-shader compile across frames so we
+    /// don't re-translate every draw call.
+    private var translatedShaderCache: [String: WPEShaderCompileResult] = [:]
+    /// Phase 2D-H: cache MTLRenderPipelineState built from translated
+    /// shaders. Library + blend + format set is the key.
+    private var translatedPipelineCache: [TranslatedPipelineKey: MTLRenderPipelineState] = [:]
 
-    init(device: MTLDevice, shaderCompiler: WPEShaderCompiling = WPEStubShaderCompiler()) throws {
+    private struct TranslatedPipelineKey: Hashable {
+        let libraryID: ObjectIdentifier
+        let fragmentName: String
+        let blendMode: String
+        let colorPixelFormat: UInt
+        let depthPixelFormat: UInt
+    }
+
+    init(device: MTLDevice, shaderCompiler: WPEShaderCompiling? = nil) throws {
         guard let queue = device.makeCommandQueue() else {
             throw WPEMetalRenderExecutorError.commandQueueUnavailable
         }
@@ -33,7 +47,10 @@ final class WPEMetalRenderExecutor {
         self.targetPool = WPEMetalRenderTargetPool(device: device)
         self.depthCache = WPEMetalDepthStateCache(device: device)
         self.pipelineCache = WPEMetalPipelineCache(device: device, library: library)
-        self.shaderCompiler = shaderCompiler
+        // Phase 2D-H: default to the Swift transpiler, falling back to the
+        // stub if a caller wants to opt out (tests). Production now goes
+        // through the real translator path.
+        self.shaderCompiler = shaderCompiler ?? WPESwiftShaderCompiler(device: device)
     }
 
     /// Phase 2E: lets `WPEMetalSceneRenderer` hand the executor's MTLDevice
@@ -443,15 +460,164 @@ final class WPEMetalRenderExecutor {
         return references
     }
 
+    /// Build (or fetch from cache) an `MTLRenderPipelineState` for a
+    /// translated shader's fragment function. Keyed by library identity
+    /// + blend + formats so distinct render targets can share the
+    /// upstream library without re-creating Metal pipelines per frame.
+    func translatedPipelineState(
+        for result: WPEShaderCompileResult,
+        blendMode: String,
+        colorPixelFormat: MTLPixelFormat,
+        depthPixelFormat: MTLPixelFormat
+    ) throws -> MTLRenderPipelineState {
+        let key = TranslatedPipelineKey(
+            libraryID: ObjectIdentifier(result.library),
+            fragmentName: result.fragmentFunctionName,
+            blendMode: blendMode.lowercased(),
+            colorPixelFormat: colorPixelFormat.rawValue,
+            depthPixelFormat: depthPixelFormat.rawValue
+        )
+        if let cached = translatedPipelineCache[key] {
+            return cached
+        }
+        // Fall through to the standard pipeline cache path by passing the
+        // custom library + functions in directly. We can't re-use
+        // WPEMetalPipelineCache because that one is bound to the default
+        // library; instead we replicate the descriptor+blend setup.
+        guard let vertex = result.library.makeFunction(name: result.vertexFunctionName)
+            ?? device.makeDefaultLibrary()?.makeFunction(name: result.vertexFunctionName),
+              let fragment = result.library.makeFunction(name: result.fragmentFunctionName) else {
+            throw WPEMetalRenderExecutorError.pipelineUnavailable(result.fragmentFunctionName)
+        }
+        let descriptor = MTLRenderPipelineDescriptor()
+        descriptor.vertexFunction = vertex
+        descriptor.fragmentFunction = fragment
+        guard let colorAttachment = descriptor.colorAttachments[0] else {
+            throw WPEMetalRenderExecutorError.pipelineUnavailable(result.fragmentFunctionName)
+        }
+        colorAttachment.pixelFormat = colorPixelFormat
+        descriptor.depthAttachmentPixelFormat = depthPixelFormat
+        Self.applyBlendMode(blendMode.lowercased(), to: colorAttachment)
+        let state = try device.makeRenderPipelineState(descriptor: descriptor)
+        translatedPipelineCache[key] = state
+        return state
+    }
+
+    /// Phase 2D-H: pack a runtime uniform buffer matching the layout the
+    /// transpiler emitted (every uniform takes 1-4 float4 slots). Pulls
+    /// values from `pass.uniformValues` first (runtime-merged) then
+    /// `pass.pass.constants` (material defaults). Missing values default
+    /// to zero. The buffer is sized to the slot maximum so any future
+    /// shader that fits the cap binds against the same fixed layout.
+    func packTranslatedUniforms(
+        for pass: WPEPreparedRenderPass,
+        layout: [WPEUniformSlot]
+    ) -> [SIMD4<Float>] {
+        var slots = [SIMD4<Float>](repeating: SIMD4<Float>(0, 0, 0, 0), count: WPEShaderTranspiler.uniformSlotMaximum)
+        for u in layout {
+            let value = pass.uniformValues[u.name] ?? pass.pass.constants[u.name]
+            switch u.glslType {
+            case "float", "int", "bool":
+                slots[u.slot].x = Self.scalarValue(value, default: 0)
+            case "vec2":
+                let v = Self.vectorValue(value, count: 2)
+                slots[u.slot] = SIMD4<Float>(v[0], v[1], 0, 0)
+            case "vec3":
+                let v = Self.vectorValue(value, count: 3)
+                slots[u.slot] = SIMD4<Float>(v[0], v[1], v[2], 0)
+            case "vec4":
+                let v = Self.vectorValue(value, count: 4)
+                slots[u.slot] = SIMD4<Float>(v[0], v[1], v[2], v[3])
+            case "mat2":
+                let v = Self.vectorValue(value, count: 4)
+                slots[u.slot] = SIMD4<Float>(v[0], v[1], 0, 0)
+                slots[u.slot + 1] = SIMD4<Float>(v[2], v[3], 0, 0)
+            case "mat3":
+                let v = Self.vectorValue(value, count: 9)
+                slots[u.slot] = SIMD4<Float>(v[0], v[1], v[2], 0)
+                slots[u.slot + 1] = SIMD4<Float>(v[3], v[4], v[5], 0)
+                slots[u.slot + 2] = SIMD4<Float>(v[6], v[7], v[8], 0)
+            case "mat4":
+                let v = Self.vectorValue(value, count: 16)
+                slots[u.slot] = SIMD4<Float>(v[0], v[1], v[2], v[3])
+                slots[u.slot + 1] = SIMD4<Float>(v[4], v[5], v[6], v[7])
+                slots[u.slot + 2] = SIMD4<Float>(v[8], v[9], v[10], v[11])
+                slots[u.slot + 3] = SIMD4<Float>(v[12], v[13], v[14], v[15])
+            default:
+                slots[u.slot].x = Self.scalarValue(value, default: 0)
+            }
+        }
+        return slots
+    }
+
+    private static func scalarValue(_ value: WPESceneShaderConstantValue?, default fallback: Float) -> Float {
+        switch value {
+        case .number(let n): return Float(n)
+        case .vector(let v): return Float(v.first ?? Double(fallback))
+        case .bool(let b):   return b ? 1 : 0
+        case .string(let s): return Float(s) ?? fallback
+        case nil:            return fallback
+        }
+    }
+
+    private static func vectorValue(_ value: WPESceneShaderConstantValue?, count: Int) -> [Float] {
+        switch value {
+        case .vector(let v):
+            var out = v.map(Float.init)
+            while out.count < count { out.append(0) }
+            return out
+        case .number(let n):
+            var out = [Float](repeating: 0, count: count)
+            out[0] = Float(n)
+            return out
+        default:
+            return [Float](repeating: 0, count: count)
+        }
+    }
+
+    /// Mirrors WPEMetalPipelineCache.applyBlendMode so the translated
+    /// pipeline path uses the same blend arithmetic as built-ins.
+    private static func applyBlendMode(_ mode: String, to attachment: MTLRenderPipelineColorAttachmentDescriptor) {
+        switch mode {
+        case "disabled":
+            attachment.isBlendingEnabled = false
+        case "additive":
+            attachment.isBlendingEnabled = true
+            attachment.rgbBlendOperation = .add
+            attachment.alphaBlendOperation = .add
+            attachment.sourceRGBBlendFactor = .sourceAlpha
+            attachment.destinationRGBBlendFactor = .one
+            attachment.sourceAlphaBlendFactor = .one
+            attachment.destinationAlphaBlendFactor = .one
+        case "multiply":
+            attachment.isBlendingEnabled = true
+            attachment.rgbBlendOperation = .add
+            attachment.alphaBlendOperation = .add
+            attachment.sourceRGBBlendFactor = .destinationColor
+            attachment.destinationRGBBlendFactor = .zero
+            attachment.sourceAlphaBlendFactor = .zero
+            attachment.destinationAlphaBlendFactor = .one
+        case "translucent":
+            attachment.isBlendingEnabled = true
+            attachment.rgbBlendOperation = .add
+            attachment.alphaBlendOperation = .add
+            attachment.sourceRGBBlendFactor = .one
+            attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
+            attachment.sourceAlphaBlendFactor = .one
+            attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        default:
+            attachment.isBlendingEnabled = true
+            attachment.rgbBlendOperation = .add
+            attachment.alphaBlendOperation = .add
+            attachment.sourceRGBBlendFactor = .sourceAlpha
+            attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
+            attachment.sourceAlphaBlendFactor = .one
+            attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        }
+    }
+
     /// Run the WPE preprocessor + the configured `WPEShaderCompiling` over
-    /// the given prepared pass. Used by the dispatcher's `default:` arm so
-    /// custom shaders fail with a precise, actionable error instead of the
-    /// generic `unsupportedShader` legacy path.
-    ///
-    /// Today the stub always reports `backendUnavailable` — callers should
-    /// surface that to the UI and fall back to a placeholder draw. When the
-    /// real translator lands, this will return a `WPEShaderCompileResult`
-    /// the dispatcher can build a `MTLRenderPipelineState` from.
+    /// the given prepared pass. Memoized per source hash.
     func compileCustomShader(
         for pass: WPEPreparedRenderPass
     ) throws -> WPEShaderCompileResult {
@@ -488,8 +654,13 @@ final class WPEMetalRenderExecutor {
                 reason: String(describing: error)
             )
         }
+        if let cached = translatedShaderCache[request.sourceHash] {
+            return cached
+        }
         do {
-            return try shaderCompiler.compile(request)
+            let result = try shaderCompiler.compile(request)
+            translatedShaderCache[request.sourceHash] = result
+            return result
         } catch let error as WPEShaderCompilerError {
             switch error {
             case .backendUnavailable(let reason),

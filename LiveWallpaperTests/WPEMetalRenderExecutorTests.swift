@@ -34,14 +34,14 @@ struct WPEMetalRenderExecutorTests {
         #expect(pixel.a >= 250)
     }
 
-    @Test("Custom shader routes through translator and surfaces unavailable backend")
-    func rejectsCustomShader() throws {
+    @Test("Custom shader without recognizable main surfaces a precise translator error")
+    func rejectsUntranslatableCustomShader() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let executor = try WPEMetalRenderExecutor(device: device)
         let pass = WPERenderPass(
             id: "1.0",
-            phase: .effect(file: "effects/custom/effect.json"),
-            shader: "effects/custom",
+            phase: .effect(file: "effects/broken/effect.json"),
+            shader: "effects/broken",
             source: .image("materials/base.png"),
             target: .scene,
             textures: [:],
@@ -58,7 +58,15 @@ struct WPEMetalRenderExecutorTests {
                 graphLayer: graphLayer(pass: pass),
                 passes: [WPEPreparedRenderPass(
                     pass: pass,
-                    shader: WPEShaderProgram(name: "effects/custom", vertexSource: "void main(){}", fragmentSource: "void main(){}", isBuiltin: false),
+                    shader: WPEShaderProgram(
+                        name: "effects/broken",
+                        vertexSource: "// no main",
+                        // Valid GLSL syntax-wise but no `void main()` — the
+                        // transpiler must surface a translationFailed
+                        // error rather than emit malformed MSL.
+                        fragmentSource: "uniform sampler2D g_Texture0;\n// missing main",
+                        isBuiltin: false
+                    ),
                     textureBindings: [:],
                     comboValues: [:],
                     uniformValues: [:]
@@ -66,22 +74,86 @@ struct WPEMetalRenderExecutorTests {
             )
         ])
 
-        // Phase 2D-A: custom shaders now flow through the translator. With
-        // the stub backend in place, any custom shader fails with a precise
-        // `shaderTranslatorUnavailable` instead of the legacy
-        // `unsupportedShader`. When the C++ backend lands, this test should
-        // be replaced with a positive assertion that the shader compiles.
         do {
             _ = try executor.render(pipeline: pipeline, size: CGSize(width: 4, height: 4), textures: [:])
-            #expect(Bool(false), "Custom shader render should throw")
+            #expect(Bool(false), "Untranslatable shader render should throw")
         } catch let error as WPEMetalRenderExecutorError {
             switch error {
-            case .shaderTranslatorUnavailable(let name, _):
-                #expect(name == "effects/custom")
+            case .shaderTranslatorUnavailable(let name, let reason):
+                #expect(name == "effects/broken")
+                #expect(reason.contains("main"))
             default:
                 #expect(Bool(false), "Expected .shaderTranslatorUnavailable, got \(error)")
             }
         }
+    }
+
+    @Test("Custom shader with valid GLSL is now translated and renders end-to-end")
+    func translatesAndRendersCustomShader() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let input = try makeRGBAInputTexture(device: device, bytes: Data([
+            0, 0, 255, 255,
+            0, 0, 255, 255,
+            0, 0, 255, 255,
+            0, 0, 255, 255
+        ]))
+        let pass = WPERenderPass(
+            id: "1.0",
+            phase: .effect(file: "effects/multiply_red/effect.json"),
+            shader: "effects/multiply_red",
+            source: .image("materials/base.png"),
+            target: .scene,
+            textures: [0: .image("materials/base.png")],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: graphLayer(pass: pass),
+                passes: [WPEPreparedRenderPass(
+                    pass: pass,
+                    shader: WPEShaderProgram(
+                        name: "effects/multiply_red",
+                        vertexSource: "// fullscreen quad: executor supplies the vertex stage",
+                        // Real-shape WPE-flavor fragment: sampler + varying
+                        // + gl_FragColor write. After preprocess + transpile
+                        // it becomes valid MSL the executor can dispatch.
+                        fragmentSource: """
+                        uniform sampler2D g_Texture0;
+                        varying vec2 v_TexCoord;
+                        void main() {
+                            vec4 c = texture(g_Texture0, v_TexCoord);
+                            gl_FragColor = vec4(c.r + 1.0, c.g, c.b, c.a);
+                        }
+                        """,
+                        isBuiltin: false
+                    ),
+                    textureBindings: [0: .image("materials/base.png")],
+                    comboValues: [:],
+                    uniformValues: [:]
+                )]
+            )
+        ])
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 2, height: 2),
+            textures: ["materials/base.png": input]
+        )
+        let pixel = try readPixel(output, x: 1, y: 1)
+
+        // Input was pure blue (0, 0, 255). Shader added 1.0 to red channel
+        // (saturated to 1.0) and kept blue at 255. Expect bright red+blue
+        // → magenta-ish pixel with full alpha.
+        #expect(pixel.r >= 250)
+        #expect(pixel.b >= 250)
+        #expect(pixel.a >= 250)
     }
 
     @Test("Copies sampled input texture to offscreen output")
