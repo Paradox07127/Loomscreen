@@ -75,7 +75,7 @@ enum WPEParticleDefinitionParser {
     }
 
     static func parse(dictionary json: [String: Any]) -> WPEParticleDefinition {
-        var def = WPEParticleDefinition.empty
+        let def = WPEParticleDefinition.empty
 
         let material = json["material"] as? String
         let maxCount = (json["maxcount"] as? Int)
