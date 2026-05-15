@@ -303,6 +303,13 @@ struct AtomicFileStore<Value: Codable> {
     }
 }
 
+/// Conditional Sendable: the store's collaborators (encoder, decoder,
+/// fileManager) are effectively immutable in our use, so a value-typed copy
+/// can safely cross actor boundaries — but only when the payload itself is
+/// safe to share. Narrower than blanket `@unchecked Sendable` because we
+/// don't want to grant Sendable to stores of non-Sendable payloads.
+extension AtomicFileStore: @unchecked Sendable where Value: Sendable {}
+
 // MARK: - Shared encoder configuration
 
 extension JSONEncoder {

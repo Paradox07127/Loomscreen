@@ -69,6 +69,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// See `WeatherReactiveService.preferenceObserver` — same pattern.
     @ObservationIgnored nonisolated(unsafe) private var dockVisibilityObserver: NSObjectProtocol?
     @ObservationIgnored private var globalShortcutManager: GlobalShortcutManager?
+    /// True between the first `.terminateLater` reply and the matching
+    /// `reply(toApplicationShouldTerminate:)`. Re-entrant termination
+    /// attempts skip the flush so we don't enqueue duplicate writes that
+    /// could outlive the app.
+    @ObservationIgnored private var isWaitingForTerminationFlush = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Logger.notice("Application starting", category: .startup)
@@ -153,6 +158,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     nonisolated func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
         true
+    }
+
+    /// Drains the async persistence actor before exit so the last UI commits
+    /// (typically a toggle the user flipped just before Cmd-Q) are durable
+    /// on disk. `.terminateLater` keeps AppKit from tearing the process
+    /// down until the flush task signals back.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !isWaitingForTerminationFlush else { return .terminateNow }
+        isWaitingForTerminationFlush = true
+        Task { @MainActor in
+            await SettingsManager.shared.flushPendingConfigurationWrites()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 
     // MARK: - Settings Window

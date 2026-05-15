@@ -21,6 +21,12 @@ final class WallpaperEffectsCoordinator {
     private let applyFrameRateLimit: @MainActor (FrameRateLimit, Screen) -> Void
     private let screenRefreshRate: @MainActor (CGDirectDisplayID) -> Int
 
+    /// Bumped each time `observeWeatherChanges()` registers a new observer.
+    /// The onChange callback short-circuits when its captured generation no
+    /// longer matches the latest value, so accidentally re-registering does
+    /// not cascade into stacked callbacks.
+    private var weatherTrackingGeneration: UInt64 = 0
+
     init(
         weatherService: WeatherReactiveService = WeatherReactiveService(),
         videoEffectsApplier: VideoEffectsApplicationService = VideoEffectsApplicationService(),
@@ -157,12 +163,15 @@ final class WallpaperEffectsCoordinator {
     }
 
     private func observeWeatherChanges() {
+        weatherTrackingGeneration &+= 1
+        let generation = weatherTrackingGeneration
         withObservationTracking {
             _ = weatherService.currentParticleEffect
             _ = weatherService.currentEffectAdjustments
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
-                guard let self else { return }
+                guard let self,
+                      self.weatherTrackingGeneration == generation else { return }
                 for screen in self.screensProvider() {
                     guard let config = self.configurationStore.get(for: screen.id),
                           config.effectConfig.weatherReactive else { continue }

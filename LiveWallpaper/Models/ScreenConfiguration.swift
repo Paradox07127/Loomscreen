@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-struct ScreenConfiguration: Codable, Equatable {
+struct ScreenConfiguration: Codable, Equatable, Sendable {
     /// Mutable so `ScreenManager.applyConfigurationToAllDisplays` can clone
     /// a template for every other screen without recomposing each field.
     var screenID: UInt32

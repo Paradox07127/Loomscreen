@@ -23,6 +23,21 @@ struct WallpaperSessionSummaryCache: Equatable {
     }
 }
 
+/// Equatable snapshot of the derived wallpaper-session state.
+///
+/// `markWallpaperSessionStateChanged()` and `notifyWallpaperSessionChanged()`
+/// used to drive three independent observable mutations on `ScreenManager`
+/// (version bump + summary-cache rebuild + Combine subject send), forcing
+/// SwiftUI consumers to re-evaluate three times per session change. Folding
+/// them into one `Equatable` struct lets us commit the new state in a single
+/// observable assignment: views invalidate at most once, and the equality
+/// guard skips the assignment entirely when nothing actually changed.
+struct WallpaperSessionState: Equatable {
+    var version: UInt64 = 0
+    var summaryCache: WallpaperSessionSummaryCache = WallpaperSessionSummaryCache()
+    var isAnyPlaying: Bool = false
+}
+
 struct ScreenManagerStartupOptions: Equatable {
     var restoreSavedWallpapers: Bool = true
     var startAutomation: Bool = true
@@ -45,8 +60,18 @@ final class ScreenManager {
     // MARK: - Properties
 
     private(set) var screens: [Screen] = []
-    private(set) var wallpaperSessionStateVersion: UInt64 = 0
-    private(set) var wallpaperSessionSummaryCache = WallpaperSessionSummaryCache()
+    /// Single observable snapshot of derived wallpaper-session state. Every
+    /// mutation flows through `commitWallpaperSessionState()`, which builds
+    /// a new value, compares it against the current snapshot, and assigns
+    /// only when the diff is real — at most one observation invalidation
+    /// per session change.
+    private(set) var wallpaperSessionState = WallpaperSessionState()
+    /// Backwards-compatible view onto the snapshot's version counter. The
+    /// underlying property is `wallpaperSessionState`, so reading this
+    /// publisher still observes one canonical signal.
+    var wallpaperSessionStateVersion: UInt64 { wallpaperSessionState.version }
+    /// Backwards-compatible view onto the snapshot's summary cache.
+    var wallpaperSessionSummaryCache: WallpaperSessionSummaryCache { wallpaperSessionState.summaryCache }
     /// Per-screen WPE import bookkeeping (last error + generation counter).
     /// Held as an observed property so SwiftUI views reading
     /// `screenManager.wpeImportError(for:)` re-render when imports succeed
@@ -213,6 +238,14 @@ final class ScreenManager {
     @ObservationIgnored private lazy var lockScreenSnapshotCoordinator = LockScreenSnapshotCoordinator { [weak self] in
         self?.captureDesktopSnapshotsForLockIfNeeded()
     }
+    /// Bumped each time `scheduleConsoleKeyTracking()` registers a new
+    /// observer. The onChange callback short-circuits when its captured
+    /// generation no longer matches the latest value, so accidentally
+    /// re-registering does not cascade into stacked callbacks.
+    @ObservationIgnored private var consoleKeyTrackingGeneration: UInt64 = 0
+    /// Same idempotency token as `consoleKeyTrackingGeneration`, applied to
+    /// `observeFullScreenChanges()`.
+    @ObservationIgnored private var fullScreenTrackingGeneration: UInt64 = 0
     // MARK: - Initialization
     init(startupOptions: ScreenManagerStartupOptions = ScreenManagerStartupOptions()) {
         displayRegistry = startupOptions.displayRegistry ?? DisplayRegistry()
@@ -339,13 +372,16 @@ final class ScreenManager {
     }
 
     private func scheduleConsoleKeyTracking() {
+        consoleKeyTrackingGeneration &+= 1
+        let generation = consoleKeyTrackingGeneration
         let snapshot = exclusiveRenderingCoordinator.isConsoleKeyWindow
         applyConsoleKeyState(isConsoleKey: snapshot)
         withObservationTracking {
             _ = exclusiveRenderingCoordinator.isConsoleKeyWindow
         } onChange: { [weak self] in
             Task { @MainActor in
-                guard let self else { return }
+                guard let self,
+                      self.consoleKeyTrackingGeneration == generation else { return }
                 self.applyConsoleKeyState(isConsoleKey: self.exclusiveRenderingCoordinator.isConsoleKeyWindow)
                 self.scheduleConsoleKeyTracking()
             }
@@ -360,11 +396,14 @@ final class ScreenManager {
     }
 
     private func observeFullScreenChanges() {
+        fullScreenTrackingGeneration &+= 1
+        let generation = fullScreenTrackingGeneration
         withObservationTracking {
             _ = fullScreenDetector.hiddenScreens
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
-                guard let self else { return }
+                guard let self,
+                      self.fullScreenTrackingGeneration == generation else { return }
                 self.handleFullScreenChange(self.fullScreenDetector.hiddenScreens)
                 self.observeFullScreenChanges()
             }
@@ -645,31 +684,51 @@ final class ScreenManager {
         persistence.primeDisplayNames(from: configuration)
     }
 
-    private func updatePlaybackState() {
-        let isAnyPlaying = screens.contains { $0.playbackController?.isPlaying ?? false }
+    /// Builds the next session-state snapshot from current screen state and
+    /// commits it iff something actually changed. The version counter is
+    /// incremented only on a real diff so consumers reading
+    /// `wallpaperSessionStateVersion` to force a re-evaluation pulse stop
+    /// receiving phantom pulses on no-op calls. Side-effects (Combine
+    /// subject forwarding, full-screen polling) likewise run only on a real
+    /// diff, except `includePollingRefresh` callers that need the polling
+    /// step regardless (screen-set changes update fallback policy even when
+    /// the playback derivative didn't move).
+    private func commitWallpaperSessionState(includePollingRefresh: Bool = false) {
+        var next = wallpaperSessionState
+        next.summaryCache = WallpaperSessionSummaryCache(
+            entries: screens.map { ($0.id, $0.wallpaperSessionSummary) }
+        )
+        next.isAnyPlaying = screens.contains { $0.playbackController?.isPlaying ?? false }
 
-        if playbackStateSubject.value != isAnyPlaying {
-            playbackStateSubject.send(isAnyPlaying)
+        let derivedChanged = next.summaryCache != wallpaperSessionState.summaryCache
+            || next.isAnyPlaying != wallpaperSessionState.isAnyPlaying
+        if derivedChanged {
+            next.version &+= 1
+            wallpaperSessionState = next
+            if playbackStateSubject.value != next.isAnyPlaying {
+                playbackStateSubject.send(next.isAnyPlaying)
+            }
+        }
+
+        if includePollingRefresh {
+            updateFullScreenFallbackPolling()
         }
     }
 
     private func markWallpaperSessionStateChanged() {
-        wallpaperSessionStateVersion &+= 1
-        refreshWallpaperSessionSummaryCache()
-        updatePlaybackState()
+        commitWallpaperSessionState()
     }
 
     private func notifyWallpaperSessionChanged() {
-        wallpaperSessionStateVersion &+= 1
-        refreshWallpaperSessionSummaryCache()
-        updatePlaybackState()
-        updateFullScreenFallbackPolling()
+        commitWallpaperSessionState(includePollingRefresh: true)
+    }
+
+    private func updatePlaybackState() {
+        commitWallpaperSessionState()
     }
 
     private func refreshWallpaperSessionSummaryCache() {
-        wallpaperSessionSummaryCache = WallpaperSessionSummaryCache(
-            entries: screens.map { ($0.id, $0.wallpaperSessionSummary) }
-        )
+        commitWallpaperSessionState()
     }
 
     func togglePlayback() {
