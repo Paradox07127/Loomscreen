@@ -20,6 +20,18 @@ final class SettingsManager {
     private let globalSettingsStore: AtomicFileStore<GlobalSettings>
     private let wallpaperBookmarksStore: AtomicFileStore<[WallpaperBookmark]>
 
+    /// Serial off-MainActor writer for `screenConfigStore`. Cache mutations
+    /// remain synchronous on MainActor; disk encode/fsync/rename are queued
+    /// to this actor so toggle/slider handlers return immediately instead of
+    /// blocking the UI for tens of milliseconds per write.
+    private let configurationPersistenceActor: WallpaperPersistenceActor
+
+    /// Monotonic counter assigned to every screen-configuration write or
+    /// delete so the persistence actor can drop submissions that were
+    /// superseded by a newer MainActor mutation while the prior task was
+    /// still in flight.
+    private var configurationWriteGeneration: UInt64 = 0
+
     private enum Keys {
         static let screenConfigurations = "screenConfigurations"
         static let globalSettings = "globalSettings"
@@ -41,9 +53,11 @@ final class SettingsManager {
     private static let currentMigrationVersion = 1
 
     init(directory: ConfigurationDirectory = ConfigurationDirectory()) {
-        self.screenConfigStore = AtomicFileStore(
+        let screenConfigStore = AtomicFileStore<[ScreenConfiguration]>(
             fileURL: directory.url(for: .screenConfigurations)
         )
+        self.screenConfigStore = screenConfigStore
+        self.configurationPersistenceActor = WallpaperPersistenceActor(store: screenConfigStore)
         self.globalSettingsStore = AtomicFileStore(
             fileURL: directory.url(for: .globalSettings)
         )
@@ -63,8 +77,6 @@ final class SettingsManager {
         } else {
             configs.append(configuration)
         }
-        // persistConfigurations owns the cache update — it only writes the
-        // cache after the disk write succeeds.
         persistConfigurations(configs)
     }
 
@@ -83,18 +95,51 @@ final class SettingsManager {
         loadConfigurations().first { $0.screenID == screenID }
     }
 
-    /// Persists the array and only updates the in-memory cache if the disk
-    /// write succeeds. This way a transient disk-full / permission error
-    /// doesn't silently desync cache from durable state.
+    /// Updates the in-memory cache synchronously so MainActor readers
+    /// (bindings, `getConfiguration`, etc.) observe the new value before
+    /// this function returns. Disk encode/fsync/rename is queued on the
+    /// persistence actor so the caller — typically a toggle/slider handler
+    /// — is not blocked by I/O. A failed disk write drops the cache *only*
+    /// when no newer write has since superseded it, so the next read still
+    /// reflects the most recently durable state without stomping on an
+    /// in-flight successor.
     private func persistConfigurations(_ configs: [ScreenConfiguration]) {
+        configurationWriteGeneration &+= 1
+        let generation = configurationWriteGeneration
+        cachedConfigurations = configs
+        Task { [weak self, configurationPersistenceActor] in
+            do {
+                try await configurationPersistenceActor.write(configs, generation: generation)
+            } catch {
+                await MainActor.run {
+                    guard let self,
+                          self.configurationWriteGeneration == generation else { return }
+                    Logger.error(
+                        "Failed to persist screen configurations: \(error.localizedDescription)",
+                        category: .settings
+                    )
+                    self.cachedConfigurations = nil
+                }
+            }
+        }
+    }
+
+    /// Awaits in-flight configuration writes. The persistence actor
+    /// guarantees that older submissions are dropped if a newer one has
+    /// already committed, so submitting a fresh write with the latest cache
+    /// and a higher generation drains the queue while leaving disk in the
+    /// most-recent UI state. Call at application termination or in test
+    /// teardown to enforce durability.
+    func flushPendingConfigurationWrites() async {
+        configurationWriteGeneration &+= 1
+        let generation = configurationWriteGeneration
         do {
-            try screenConfigStore.write(configs)
-            cachedConfigurations = configs
+            try await configurationPersistenceActor.write(loadConfigurations(), generation: generation)
         } catch {
-            Logger.error("Failed to persist screen configurations: \(error.localizedDescription)", category: .settings)
-            // Drop the cache so the next read goes back to disk (which
-            // still has the previous good version).
-            cachedConfigurations = nil
+            Logger.error(
+                "Final configuration flush failed: \(error.localizedDescription)",
+                category: .settings
+            )
         }
     }
     
@@ -222,8 +267,16 @@ final class SettingsManager {
         cachedGlobalSettings = nil
         cachedConfigurations = nil
 
-        // File-backed stores (large blobs).
-        screenConfigStore.delete()
+        // Route screen-config deletion through the same persistence actor
+        // and generation counter as writes, so a pending async write from
+        // before this Reset cannot resurrect the file after it lands.
+        configurationWriteGeneration &+= 1
+        let generation = configurationWriteGeneration
+        Task { [configurationPersistenceActor] in
+            await configurationPersistenceActor.delete(generation: generation)
+        }
+        // Global settings + bookmarks remain synchronous (low write frequency,
+        // no main-thread responsiveness concern).
         globalSettingsStore.delete()
         wallpaperBookmarksStore.delete()
 

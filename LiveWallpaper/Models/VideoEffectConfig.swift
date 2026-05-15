@@ -1,6 +1,6 @@
 import Foundation
 
-struct VideoEffectConfig: Codable, Equatable {
+struct VideoEffectConfig: Codable, Equatable, Sendable {
     var blurRadius: Double = 0
     var saturation: Double = 1.0
     var brightness: Double = 0

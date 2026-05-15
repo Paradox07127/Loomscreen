@@ -1,7 +1,7 @@
 import AVFoundation
 import SwiftUI
 
-enum VideoFitMode: String, Codable, CaseIterable, Identifiable {
+enum VideoFitMode: String, Codable, CaseIterable, Identifiable, Sendable {
     case aspectFill = "Fill"
     case aspectFit = "Fit"
     case stretch = "Stretch"
