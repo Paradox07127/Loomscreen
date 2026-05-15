@@ -69,7 +69,6 @@ final class ScreenManager {
     @ObservationIgnored private let playbackStateSubject = CurrentValueSubject<Bool, Never>(false)
     @ObservationIgnored private let fullScreenDetector: any FullScreenDetecting
     @ObservationIgnored private let playableVideoLoader: any PlayableVideoLoading
-    @ObservationIgnored private let videoEffectsApplier = VideoEffectsApplicationService()
     @ObservationIgnored private let restoresSavedWallpapersOnScreenRefresh: Bool
     @ObservationIgnored private let exclusiveRenderingCoordinator = ExclusiveRenderingCoordinator()
     @ObservationIgnored private var exclusiveRenderingObservation: NSObjectProtocol?
@@ -85,7 +84,7 @@ final class ScreenManager {
         powerPolicy: powerPolicy,
         playableVideoLoader: playableVideoLoader,
         applyVideoEffects: { [weak self] screen, config in
-            self?.applyVideoEffects(for: screen, config: config)
+            self?.effectsCoordinator.applyVideoEffects(for: screen, config: config)
         },
         refreshRateLookup: { [weak self] screenID in
             self?.getScreenRefreshRate(for: screenID) ?? 60
@@ -136,7 +135,29 @@ final class ScreenManager {
     @ObservationIgnored private var transitionRegistry: PlaybackTransitionRegistry {
         playbackCoordinator.transition
     }
-    @ObservationIgnored let weatherService = WeatherReactiveService()
+    /// Owns the CIFilter video-effects pipeline + weather-reactive monitor.
+    /// Lazy because the saveConfiguration / applyFrameRateLimit /
+    /// screenRefreshRate / screensProvider callbacks capture self.
+    @ObservationIgnored private lazy var effectsCoordinator = WallpaperEffectsCoordinator(
+        configurationStore: configurationStore,
+        screensProvider: { [weak self] in
+            self?.screens ?? []
+        },
+        saveConfiguration: { [weak self] config in
+            self?.saveConfiguration(config)
+        },
+        applyFrameRateLimit: { [weak self] limit, screen in
+            self?.applyFrameRateLimit(limit, to: screen)
+        },
+        screenRefreshRate: { [weak self] screenID in
+            self?.getScreenRefreshRate(for: screenID) ?? 60
+        }
+    )
+    /// Exposed for the WeatherLocation settings view, which reads
+    /// `currentParticleEffect` / `currentEffectAdjustments` directly and
+    /// triggers `refresh()` on user gestures. The actual instance is owned
+    /// by the effects coordinator.
+    var weatherService: WeatherReactiveService { effectsCoordinator.weatherService }
     @ObservationIgnored private lazy var lockScreenSnapshotCoordinator = LockScreenSnapshotCoordinator { [weak self] in
         self?.captureDesktopSnapshotsForLockIfNeeded()
     }
@@ -403,7 +424,7 @@ final class ScreenManager {
         // setVideo / playlist / schedule) sees the new value and short-circuits
         // before instantiating a player against a now-dead screen.
         bumpTransition(for: screen.id)
-        videoEffectsApplier.cancelInflight(for: screen.id)
+        effectsCoordinator.cancelInflight(for: screen.id)
         transitionRegistry.cancelAssetReadiness(for: screen.id)
         screen.resetRuntimeSession()
         powerPolicy.clearTracking(for: screen.id)
@@ -949,122 +970,30 @@ final class ScreenManager {
         )
     }
 
-    // MARK: - Video Effects
+    // MARK: - Video Effects / Weather-Reactive (delegates to coordinator)
 
     func updateEffectConfig(_ effectConfig: VideoEffectConfig, for screen: Screen) {
-        guard var config = configurationStore.get(for: screen.id) else { return }
-        config.effectConfig = effectConfig
-        saveConfiguration(config)
-        applyVideoEffects(for: screen, config: config)
+        effectsCoordinator.updateEffectConfig(effectConfig, for: screen)
     }
 
     func updateParticleEffect(_ effect: ParticleEffect, for screen: Screen) {
-        guard var config = configurationStore.get(for: screen.id) else { return }
-        config.particleEffect = effect
-        saveConfiguration(config)
-        applyParticleEffect(effect, density: config.effectConfig.particleDensity, to: screen)
+        effectsCoordinator.updateParticleEffect(effect, for: screen)
     }
 
     func updateParticleDensity(_ density: Double, for screen: Screen) {
-        guard var config = configurationStore.get(for: screen.id) else { return }
-        let clamped = min(max(density, 0.2), 3.0)
-        guard abs(clamped - config.effectConfig.particleDensity) > 0.001 else { return }
-        config.effectConfig.particleDensity = clamped
-        saveConfiguration(config)
-        screen.videoPlayer?.setParticleDensity(clamped)
+        effectsCoordinator.updateParticleDensity(density, for: screen)
     }
-
-    private func applyParticleEffect(_ effect: ParticleEffect, density: Double, to screen: Screen) {
-        screen.videoPlayer?.setParticleEffect(effect, density: density)
-    }
-
-    // MARK: - Weather-Reactive Effects
 
     func setWeatherReactive(_ enabled: Bool, for screen: Screen) {
-        guard var config = configurationStore.get(for: screen.id) else { return }
-        config.effectConfig.weatherReactive = enabled
-        saveConfiguration(config)
-        refreshWeatherMonitoringState()
-
-        if enabled {
-            applyWeatherEffects(for: screen)
-        } else {
-            applyParticleEffect(config.particleEffect, density: config.effectConfig.particleDensity, to: screen)
-            applyVideoEffects(for: screen, config: config)
-        }
+        effectsCoordinator.setWeatherReactive(enabled, for: screen)
     }
 
     func applyWeatherEffects(for screen: Screen) {
-        guard let config = configurationStore.get(for: screen.id),
-              config.effectConfig.weatherReactive else { return }
-
-        applyParticleEffect(
-            weatherService.currentParticleEffect,
-            density: config.effectConfig.particleDensity,
-            to: screen
-        )
-
-        let adj = weatherService.currentEffectAdjustments
-        var weatherConfig = config.effectConfig
-        weatherConfig.saturation = adj.saturation
-        weatherConfig.brightness = adj.brightness
-        weatherConfig.warmth = adj.warmth
-        weatherConfig.blurRadius = adj.blurRadius
-        weatherConfig.vignetteIntensity = adj.vignetteIntensity
-
-        var updatedConfig = config
-        updatedConfig.effectConfig = weatherConfig
-        applyVideoEffects(for: screen, config: updatedConfig)
+        effectsCoordinator.applyWeatherEffects(for: screen)
     }
 
     func startWeatherMonitoring() {
-        observeWeatherChanges()
-        refreshWeatherMonitoringState()
-    }
-
-    private func refreshWeatherMonitoringState() {
-        let activeScreenIDs = Set(screens.map(\.id))
-        let configurations = activeScreenIDs.compactMap { configurationStore.get(for: $0) }
-        if WeatherReactivePolicy.shouldMonitor(configurations: configurations, activeScreenIDs: activeScreenIDs) {
-            weatherService.startMonitoring()
-        } else {
-            weatherService.stopMonitoring()
-        }
-    }
-
-    private func observeWeatherChanges() {
-        withObservationTracking {
-            _ = weatherService.currentParticleEffect
-            _ = weatherService.currentEffectAdjustments
-        } onChange: { [weak self] in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                for screen in self.screens {
-                    guard let config = self.configurationStore.get(for: screen.id),
-                          config.effectConfig.weatherReactive else { continue }
-                    self.applyWeatherEffects(for: screen)
-                }
-                self.observeWeatherChanges()
-            }
-        }
-    }
-
-    private func applyVideoEffects(for screen: Screen, config: ScreenConfiguration) {
-        guard let player = screen.videoPlayer else {
-            Logger.warning("Cannot apply effects: no active player for screen \(screen.id)", category: .videoPlayer)
-            return
-        }
-
-        videoEffectsApplier.applyEffects(
-            to: player,
-            screenID: screen.id,
-            config: config,
-            screenRefreshRate: getScreenRefreshRate(for: screen.id),
-            noEffectsHandler: { [weak self, weak screen] in
-                guard let screen else { return }
-                self?.applyFrameRateLimit(config.frameRateLimit, to: screen)
-            }
-        )
+        effectsCoordinator.startWeatherMonitoring()
     }
 
     // MARK: - Wallpaper Type Switching
