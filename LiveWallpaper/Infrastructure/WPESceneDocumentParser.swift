@@ -43,6 +43,7 @@ enum WPESceneDocumentParser {
 
         let rawObjects: [[String: Any]] = (root["objects"] as? [[String: Any]]) ?? []
         var imageObjects: [WPESceneImageObject] = []
+        var particleObjects: [WPESceneParticleObject] = []
 
         for entry in rawObjects {
             let objectName = entry["name"] as? String ?? "?"
@@ -55,13 +56,23 @@ enum WPESceneDocumentParser {
             if resolution.primary == .image, let object = parseImageObject(entry, diagnostics: &diagnostics) {
                 imageObjects.append(object)
             }
+            // Phase 2D-K: keep particle metadata around for the runtime,
+            // even though the renderer still downgrades the object until
+            // the CPU emitter ships. The parsed record lets later phases
+            // pick up where parsing left off without rewalking scene.json.
+            if resolution.primary == .particle, let object = parseParticleObject(entry, diagnostics: &diagnostics) {
+                particleObjects.append(object)
+            }
 
-            var unsupportedKinds = resolution.candidates.filter { $0 != .image && $0 != .unknown }
-            if resolution.primary != .image && resolution.primary != .unknown && !unsupportedKinds.contains(resolution.primary) {
+            var unsupportedKinds = resolution.candidates.filter { $0 != .image && $0 != .unknown && $0 != .particle }
+            if resolution.primary != .image && resolution.primary != .particle && resolution.primary != .unknown && !unsupportedKinds.contains(resolution.primary) {
                 unsupportedKinds.append(resolution.primary)
             }
             for kind in unsupportedKinds {
                 diagnostics.append(.init(severity: .info, message: "\(kind.displayName) object \(objectName) is unsupported in Phase 2.0"))
+            }
+            if resolution.primary == .particle {
+                diagnostics.append(.init(severity: .info, message: "Particle object \(objectName) parsed; runtime emitter not yet implemented"))
             }
 
             if resolution.primary == .unknown {
@@ -88,7 +99,47 @@ enum WPESceneDocumentParser {
             camera: camera,
             general: general,
             imageObjects: imageObjects,
+            particleObjects: particleObjects,
             diagnostics: diagnostics
+        )
+    }
+
+    private static func parseParticleObject(
+        _ dict: [String: Any],
+        diagnostics: inout [WPESceneDiagnostic]
+    ) -> WPESceneParticleObject? {
+        // WPE writes particle objects with a `particle` key referencing the
+        // particles/*.json definition. Some scenes also wrap them under
+        // `controlpoint` / `instanceoverride`; we keep the model lean and
+        // just preserve the top-level metadata. Particles without a path
+        // are skipped — there's nothing to spawn from.
+        guard let path = dict["particle"] as? String, !path.isEmpty else {
+            diagnostics.append(.init(severity: .warning, message: "Particle object \(dict["name"] as? String ?? "?") has no particle file"))
+            return nil
+        }
+        let id = (dict["id"] as? String)
+            ?? (dict["id"] as? Int).map(String.init)
+            ?? (dict["name"] as? String)
+            ?? path
+        let name = (dict["name"] as? String) ?? id
+        let origin = parseVector3(dict["origin"]) ?? SIMD3<Double>(0, 0, 0)
+        let scale = parseVector3(dict["scale"]) ?? SIMD3<Double>(1, 1, 1)
+        let angles = parseVector3(dict["angles"]) ?? SIMD3<Double>(0, 0, 0)
+        let visible = parseBool(dict["visible"]) ?? true
+        let alpha = parseDouble(dict["alpha"]) ?? 1.0
+        let color = parseVector3(dict["color"]) ?? SIMD3<Double>(1, 1, 1)
+        let parallaxDepth = parseDouble(dict["parallaxDepth"]) ?? parseDouble(dict["parallaxdepth"]) ?? 0
+        return WPESceneParticleObject(
+            id: id,
+            name: name,
+            particleRelativePath: path,
+            origin: origin,
+            scale: scale,
+            angles: angles,
+            visible: visible,
+            alpha: alpha,
+            color: color,
+            parallaxDepth: parallaxDepth
         )
     }
 
