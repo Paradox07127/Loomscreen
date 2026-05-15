@@ -14,7 +14,7 @@ struct GeneralSettingsView: View {
     @State private var showInDock: Bool
     @State private var menuBarDensity: MenuBarDensity
 
-    @State private var showingResetAlert = false
+    @State private var pendingDestructive: PendingDestructive?
     @State private var showingValidationResults = false
     @State private var validationMessage = ""
 
@@ -67,14 +67,7 @@ struct GeneralSettingsView: View {
         // compact card layout) rather than by constraining overall width.
         .frame(minWidth: 500, minHeight: 400)
         .background(DesignTokens.Colors.pageBackground)
-        .alert("Reset Settings", isPresented: $showingResetAlert) {
-            Button("Cancel", role: .cancel) { }
-            Button("Reset All", role: .destructive) {
-                resetAllSettings()
-            }
-        } message: {
-            Text("This will reset all settings including screen configurations. This action cannot be undone.")
-        }
+        .confirmDestructive($pendingDestructive)
         .alert("Configuration Validation", isPresented: $showingValidationResults) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -583,7 +576,11 @@ struct GeneralSettingsView: View {
                     systemImage: "arrow.counterclockwise",
                     tint: .red,
                     isDestructive: true,
-                    action: { showingResetAlert = true }
+                    action: {
+                        pendingDestructive = PendingDestructive(.resetAllSettings) {
+                            resetAllSettings()
+                        }
+                    }
                 )
             }
         }

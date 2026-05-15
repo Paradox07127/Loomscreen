@@ -8,8 +8,6 @@ import AppKit
 struct WPECacheManagementView: View {
     @State private var stats: WPECacheStats?
     @State private var isLoading: Bool = true
-    @State private var showClearAllConfirm: Bool = false
-    @State private var pendingPurgeWorkshopID: String?
     @State private var lastFreedBytes: UInt64?
     @State private var errorMessage: String?
     @State private var pendingDestructive: PendingDestructive?
@@ -46,7 +44,7 @@ struct WPECacheManagementView: View {
                 Section {
                     HStack(spacing: 12) {
                         Button(role: .destructive) {
-                            showClearAllConfirm = true
+                            confirmClearAll()
                         } label: {
                             Label("Clear All", systemImage: "trash")
                         }
@@ -79,28 +77,6 @@ struct WPECacheManagementView: View {
             Task { await refreshStats() }
         }
         .confirmDestructive($pendingDestructive)
-        .alert("Clear all cached Wallpaper Engine projects?", isPresented: $showClearAllConfirm) {
-            Button("Cancel", role: .cancel) {}
-            Button("Clear All", role: .destructive) {
-                Task { await purgeAll() }
-            }
-        } message: {
-            Text("Workshop folders on disk are untouched; only LiveWallpaper's extracted copies are removed. Re-applying a wallpaper will re-extract on demand.")
-        }
-        .alert("Remove this cache entry?", isPresented: Binding(
-            get: { pendingPurgeWorkshopID != nil },
-            set: { if !$0 { pendingPurgeWorkshopID = nil } }
-        )) {
-            Button("Cancel", role: .cancel) { pendingPurgeWorkshopID = nil }
-            Button("Remove", role: .destructive) {
-                if let workshopID = pendingPurgeWorkshopID {
-                    Task { await purgeOne(workshopID) }
-                }
-                pendingPurgeWorkshopID = nil
-            }
-        } message: {
-            Text("The history entry stays — only extracted files for this project are removed.")
-        }
         .errorAlert("Cache Error", message: $errorMessage)
     }
 
@@ -150,7 +126,7 @@ struct WPECacheManagementView: View {
             }
             Spacer()
             Button(role: .destructive) {
-                pendingPurgeWorkshopID = entry.workshopID
+                confirmPurge(entry: entry)
             } label: {
                 Image(systemName: "trash")
             }
@@ -207,6 +183,30 @@ struct WPECacheManagementView: View {
             .clearUnusedWallpapers(itemCount: candidates.count, byteSize: size)
         ) {
             Task { await purgeOlderThan(days: days) }
+        }
+    }
+
+    /// Bulk-clear confirmation showing the current cache footprint so users
+    /// can see what they're freeing.
+    private func confirmClearAll() {
+        let entries = stats?.entries ?? []
+        let totalBytes = entries.reduce(UInt64(0)) { $0 + $1.sizeBytes }
+        let size = byteFormatter.string(fromByteCount: Int64(totalBytes))
+        pendingDestructive = PendingDestructive(
+            .clearAllWPECache(projectCount: entries.count, byteSize: size)
+        ) {
+            Task { await purgeAll() }
+        }
+    }
+
+    /// Single-entry purge confirmation that resolves the workshop ID to its
+    /// display title so the destructive sheet matches what's visible in the list.
+    private func confirmPurge(entry: WPECacheStats.Entry) {
+        let workshopID = entry.workshopID
+        pendingDestructive = PendingDestructive(
+            .removeWPECacheEntry(displayName: displayTitle(for: workshopID))
+        ) {
+            Task { await purgeOne(workshopID) }
         }
     }
 
