@@ -26,6 +26,12 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
     private var activeFolderURL: URL?
     private var sessionNonce: String?
     private var activeTasks: [ObjectIdentifier: ActiveTask] = [:]
+    /// Filenames already reported as missing for the current folder session.
+    /// Wallpaper Engine projects routinely reference voiceline / sprite
+    /// resources that were never packaged (the author shipped placeholders),
+    /// and the HTML side retries them on every loop tick. Logging each retry
+    /// at warning level spams the console; we log once and stay quiet after.
+    private var reportedMissingResources: Set<String> = []
 
     /// Updated each time `HTMLWallpaperView.loadSource(.folder)` swaps content.
     /// Setting `nil` (or any different folder) immediately cancels in-flight
@@ -36,6 +42,7 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
         set {
             if activeFolderURL != newValue {
                 cancelAllActiveTasks()
+                reportedMissingResources.removeAll()
             }
             activeFolderURL = newValue
             sessionNonce = newValue == nil ? nil : UUID().uuidString
@@ -123,7 +130,24 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
             } catch is CancellationError {
                 await delivery.fail(with: Self.makeError(.cancelled, "Request cancelled"))
             } catch {
-                Logger.warning("FolderScheme: \(fileURL.lastPathComponent) — \(error.localizedDescription)", category: .screenManager)
+                // Wallpaper Engine projects often reference assets that were
+                // never packaged; HTML retries them on every loop tick. Log
+                // each missing resource once at info level (this is normal
+                // web-content 404 behaviour, not an app failure) and keep
+                // anything else at warning so genuine I/O issues surface.
+                let isMissingFile = (error as NSError).domain == NSCocoaErrorDomain
+                    && ((error as NSError).code == NSFileReadNoSuchFileError
+                        || (error as NSError).code == NSFileNoSuchFileError)
+                if isMissingFile {
+                    await MainActor.run { [weak self] in
+                        guard let self else { return }
+                        if self.reportedMissingResources.insert(fileURL.lastPathComponent).inserted {
+                            Logger.info("FolderScheme: \(fileURL.lastPathComponent) not found in project (HTML 404 — wallpaper content issue, not app)", category: .screenManager)
+                        }
+                    }
+                } else {
+                    Logger.warning("FolderScheme: \(fileURL.lastPathComponent) — \(error.localizedDescription)", category: .screenManager)
+                }
                 await delivery.fail(with: error)
             }
 
@@ -295,11 +319,21 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
         if let utType = UTType(filenameExtension: ext), let mime = utType.preferredMIMEType {
             return mime
         }
-        // Fallbacks for things UTType sometimes misses.
+        // Fallbacks for things UTType sometimes misses. Wallpaper Engine projects
+        // are authored on Windows and routinely bundle Ogg/Vorbis audio for
+        // ambience loops; UTType on macOS does not always map "ogg" → audio/ogg.
         switch ext {
         case "js", "mjs": return "application/javascript"
         case "wasm":      return "application/wasm"
         case "json":      return "application/json"
+        case "ogg":       return "audio/ogg"
+        case "oga":       return "audio/ogg"
+        case "opus":      return "audio/ogg"
+        case "mp3":       return "audio/mpeg"
+        case "m4a":       return "audio/mp4"
+        case "wav":       return "audio/wav"
+        case "flac":      return "audio/flac"
+        case "webm":      return "audio/webm"
         case "atlas":     return "text/plain"
         case "skel":      return "application/octet-stream"
         default:          return "application/octet-stream"

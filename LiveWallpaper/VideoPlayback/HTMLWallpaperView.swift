@@ -122,12 +122,32 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         // 1) 隐藏滚动条 + 锁定 body overflow
         // 2) 给 root 加 `is-livewallpaper` class（用户 CSS / 站点适配可用）
         // 3) 预先建好两个 <style> 占位（用户 CSS 与基线 CSS），运行时只改 textContent
+        // 4) 在 physicalPixelLayout 模式下把 devicePixelRatio 锁到 1，匹配
+        //    Wallpaper Engine 在 Windows 上的运行假设（无 HiDPI），防止
+        //    PIXI / Three.js / 4K canvas 项目按 dpr=2 分配双倍 buffer 后
+        //    被 GPU 下采样回 device pixel，造成明显锯齿。
         let cssLiteral = jsStringLiteral(config?.customCSS ?? "")
         let isBrowsing = (config?.allowMouseInteraction ?? false) ? "true" : "false"
         let isMuted = (config?.muteAudio ?? false) ? "true" : "false"
+        let pinDevicePixelRatioToOne = (config?.physicalPixelLayout ?? false) ? "true" : "false"
 
         let baseline = """
         (function () {
+            // dpr 覆写必须在任何页面脚本之前生效。pageZoom = 1/backingScale
+            // 已经把 innerWidth/innerHeight 还原成物理像素数，但
+            // window.devicePixelRatio 仍是 macOS 默认的 backingScale（Retina=2）。
+            // PIXI / Three.js / 自适应 canvas 框架会读 dpr 决定 backing-store
+            // 缓冲区大小，结果分配两倍纹理后被 GPU 缩回 device pixel，
+            // 边缘出现下采样锯齿。锁回 1 以恢复 Windows 1:1 行为。
+            if (\(pinDevicePixelRatioToOne)) {
+                try {
+                    Object.defineProperty(window, 'devicePixelRatio', {
+                        configurable: true,
+                        get: function () { return 1; }
+                    });
+                } catch (e) { /* 某些站点已用 defineProperty 锁住，忽略 */ }
+            }
+
             function bootstrap() {
                 if (!document.documentElement) return;
                 document.documentElement.classList.add('is-livewallpaper');
@@ -255,6 +275,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             || (previous?.muteAudio != config.muteAudio)
             || (previous?.allowJavaScript != config.allowJavaScript)
             || (previous?.useEphemeralStorage != config.useEphemeralStorage)
+            || (previous?.physicalPixelLayout != config.physicalPixelLayout)
 
         if needsScriptRebuild {
             installBaselineUserScripts(for: config)

@@ -58,6 +58,17 @@ enum DesignTokens {
         static let metadataSpacing: CGFloat = 8
     }
 
+    /// Floor dimensions every sidebar-routed library page uses. Without this,
+    /// macOS 26 NavigationSplitView occasionally squeezes the detail column,
+    /// drives the sidebar list below its `navigationSplitViewColumnWidth`
+    /// minimum, and drops the upper sections (Displays + Library) out of view.
+    /// Workshop hit this first and pinned its own floor; promoting it here
+    /// keeps Bookmarks / Apple Aerials behaving the same way.
+    enum LibraryPage {
+        static let minWidth: CGFloat = 760
+        static let minHeight: CGFloat = 540
+    }
+
     enum GuidedLibrary {
         static let outerPadding: CGFloat = 40
         static let topSpacerHeight: CGFloat = 24

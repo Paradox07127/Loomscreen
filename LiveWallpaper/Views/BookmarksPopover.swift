@@ -23,6 +23,11 @@ struct BookmarksPopover: View {
         }
         .padding(14)
         .frame(width: 340)
+        // Cap popover height. macOS 26 `.popover` lets a child without an
+        // explicit height grow to fit the entire detail area, which overlaps
+        // the inspector and (when sidebar is collapsed) the dashboard column.
+        .frame(minHeight: 220, maxHeight: 480)
+        .presentationCompactAdaptation(.popover)
         .confirmDestructive($pendingDestructive)
     }
 
