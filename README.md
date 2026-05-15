@@ -6,7 +6,7 @@ A macOS menu bar application that plays video, HTML, Metal shader, and compatibl
 
 - **Multi-Type Wallpapers** — Video (MP4/MOV/AVI), HTML/Web (WKWebView), Metal shader (procedural GPU art), compatible Wallpaper Engine scenes (Workshop folder import; `scene.pkg` extraction when present)
 - **Multi-Display** — Independent configuration per screen
-- **Bookmarks** — Save any video / web page / shader once, re-apply to any display in one click (sidebar Library, inspector header, menu bar)
+- **Bookmarks** — Save any video / web page / shader once, re-apply to any display in one click (sidebar Library, inspector header)
 - **HTML Trust Model** — Untrusted remote URLs run with JavaScript disabled by default; one-click `Trust this site` to allow
 - **Apple Aerials** — Browse and apply Apple's downloaded aerial wallpapers (after one-time directory grant)
 - **Playlist & Scheduling** — Multi-video playlists with shuffle, drag-to-reorder, and time-of-day scheduling
