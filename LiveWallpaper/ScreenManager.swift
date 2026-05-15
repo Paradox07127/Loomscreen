@@ -53,7 +53,11 @@ final class ScreenManager {
     /// or fail — the original `lastWPEImportErrors` dict was on this
     /// `@Observable` class, and we must preserve that invalidation flow.
     private let wpeImportTracker = WPEImportTracker()
-    private(set) var bookmarkDisplayNames: [Data: String] = [:]
+    /// Display-name cache for security-scoped bookmarks. Held as an observed
+    /// property so views reading `screenManager.bookmarkDisplayName(for:)`
+    /// re-render when entries land — see WPEImportTracker for the same
+    /// pattern.
+    private let bookmarkDisplayNameCache = BookmarkDisplayNameCache()
 
     @ObservationIgnored private var cleanupTasks: Set<AnyCancellable> = []
     @ObservationIgnored private let displayRegistry: any DisplayRegistering
@@ -71,7 +75,6 @@ final class ScreenManager {
     @ObservationIgnored private let restoresSavedWallpapersOnScreenRefresh: Bool
     @ObservationIgnored private let exclusiveRenderingCoordinator = ExclusiveRenderingCoordinator()
     @ObservationIgnored private var exclusiveRenderingObservation: NSObjectProtocol?
-    @ObservationIgnored private var unresolvedBookmarkDisplayNames: Set<Data> = []
     /// Coordinates per-screen playback configuration mutations + transition
     /// tokens. Lazy because it captures `self` for the effect-application and
     /// refresh-rate-lookup callbacks; the stored properties used by those
@@ -533,7 +536,7 @@ final class ScreenManager {
     }
 
     func bookmarkDisplayName(for bookmarkData: Data) -> String? {
-        bookmarkDisplayNames[bookmarkData]
+        bookmarkDisplayNameCache.name(for: bookmarkData)
     }
 
     func currentVideoDisplayName(for screen: Screen) -> String? {
@@ -547,32 +550,11 @@ final class ScreenManager {
     }
 
     func recordBookmarkDisplayName(_ bookmarkData: Data, name: String?) {
-        guard !bookmarkData.isEmpty else { return }
-        guard let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !trimmed.isEmpty else {
-            bookmarkDisplayNames.removeValue(forKey: bookmarkData)
-            unresolvedBookmarkDisplayNames.insert(bookmarkData)
-            return
-        }
-
-        bookmarkDisplayNames[bookmarkData] = trimmed
-        unresolvedBookmarkDisplayNames.remove(bookmarkData)
+        bookmarkDisplayNameCache.record(bookmarkData, name: name)
     }
 
     private func primeBookmarkDisplayNames(from configuration: ScreenConfiguration) {
-        for bookmarkData in videoBookmarks(in: configuration) {
-            resolveBookmarkDisplayNameIfNeeded(bookmarkData)
-        }
-    }
-
-    private func resolveBookmarkDisplayNameIfNeeded(_ bookmarkData: Data) {
-        guard !bookmarkData.isEmpty,
-              bookmarkDisplayNames[bookmarkData] == nil,
-              !unresolvedBookmarkDisplayNames.contains(bookmarkData) else { return }
-        recordBookmarkDisplayName(
-            bookmarkData,
-            name: ResourceUtilities.resolveBookmarkName(bookmarkData)
-        )
+        bookmarkDisplayNameCache.prime(bookmarks: videoBookmarks(in: configuration))
     }
 
     private func videoBookmarks(in configuration: ScreenConfiguration) -> [Data] {

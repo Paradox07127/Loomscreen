@@ -1,0 +1,127 @@
+import Testing
+import Foundation
+import Observation
+@testable import LiveWallpaper
+
+/// Behavior tests for `BookmarkDisplayNameCache`. The cache is `@Observable`
+/// so SwiftUI views reading bookmark names through
+/// `ScreenManager.bookmarkDisplayName(for:)` re-render on record / resolve
+/// — the original dict lived on `@Observable ScreenManager` and we have to
+/// preserve that invalidation flow after extraction. These tests use
+/// `withObservationTracking` to assert that contract directly, plus the
+/// unresolved-set dedup that prevents redundant security-scoped URL walks.
+@Suite("BookmarkDisplayNameCache")
+@MainActor
+struct BookmarkDisplayNameCacheTests {
+    private let bookmarkA = Data("bookmark-A".utf8)
+    private let bookmarkB = Data("bookmark-B".utf8)
+
+    @Test("Round-trips records and reads names")
+    func recordRoundtrip() {
+        let cache = BookmarkDisplayNameCache()
+        #expect(cache.name(for: bookmarkA) == nil)
+        cache.record(bookmarkA, name: "wallpaper.mp4")
+        #expect(cache.name(for: bookmarkA) == "wallpaper.mp4")
+        #expect(cache.name(for: bookmarkB) == nil)
+    }
+
+    @Test("Whitespace / nil name clears the entry")
+    func whitespaceClearsEntry() {
+        let cache = BookmarkDisplayNameCache()
+        cache.record(bookmarkA, name: "video.mov")
+        cache.record(bookmarkA, name: "   ")
+        #expect(cache.name(for: bookmarkA) == nil)
+        cache.record(bookmarkA, name: "video.mov")
+        cache.record(bookmarkA, name: nil)
+        #expect(cache.name(for: bookmarkA) == nil)
+    }
+
+    @Test("Trims whitespace around the display name")
+    func trimsWhitespace() {
+        let cache = BookmarkDisplayNameCache()
+        cache.record(bookmarkA, name: "  trim-me.mp4  \n")
+        #expect(cache.name(for: bookmarkA) == "trim-me.mp4")
+    }
+
+    @Test("Empty Data is rejected — neither stored nor marked unresolved")
+    func emptyBookmarkRejected() {
+        let cache = BookmarkDisplayNameCache()
+        let counter = ChangeCounter()
+        withObservationTracking {
+            _ = cache.name(for: Data())
+        } onChange: {
+            counter.increment()
+        }
+        cache.record(Data(), name: "should-not-store")
+        #expect(cache.name(for: Data()) == nil)
+        // No mutation → no Observation callback.
+        #expect(counter.value == 0)
+    }
+
+    @Test("record invalidates Observation for SwiftUI re-render")
+    func recordInvalidatesObservation() {
+        let cache = BookmarkDisplayNameCache()
+        let counter = ChangeCounter()
+        withObservationTracking {
+            _ = cache.name(for: bookmarkA)
+        } onChange: {
+            counter.increment()
+        }
+        #expect(counter.value == 0)
+        cache.record(bookmarkA, name: "first.mp4")
+        #expect(counter.value == 1)
+    }
+
+    @Test("Clearing a known entry also invalidates Observation")
+    func clearInvalidatesObservation() {
+        let cache = BookmarkDisplayNameCache()
+        cache.record(bookmarkA, name: "video.mp4")
+        let counter = ChangeCounter()
+        withObservationTracking {
+            _ = cache.name(for: bookmarkA)
+        } onChange: {
+            counter.increment()
+        }
+        cache.record(bookmarkA, name: nil)
+        #expect(counter.value == 1)
+    }
+
+    @Test("resolveIfNeeded is idempotent — same bookmark resolved once")
+    func resolveIfNeededIsIdempotent() {
+        let cache = BookmarkDisplayNameCache()
+        // First call records nil (data isn't a real bookmark), which moves
+        // the entry into the unresolved set so subsequent calls short-circuit.
+        cache.resolveIfNeeded(bookmarkA)
+        #expect(cache.name(for: bookmarkA) == nil)
+        // After a manual record, resolveIfNeeded must not overwrite it.
+        cache.record(bookmarkA, name: "manual.mp4")
+        cache.resolveIfNeeded(bookmarkA)
+        #expect(cache.name(for: bookmarkA) == "manual.mp4")
+    }
+
+    @Test("prime(bookmarks:) skips empty entries and resolves the rest once")
+    func primeSkipsEmptyAndResolvesRest() {
+        let cache = BookmarkDisplayNameCache()
+        cache.record(bookmarkA, name: "kept.mp4")
+        cache.prime(bookmarks: [bookmarkA, bookmarkB, Data()])
+        // bookmarkA is preserved, bookmarkB resolved-as-failed, empty ignored.
+        #expect(cache.name(for: bookmarkA) == "kept.mp4")
+        #expect(cache.name(for: bookmarkB) == nil)
+    }
+}
+
+/// Same Sendable counter pattern used by `WPEImportTrackerTests` — Swift 6
+/// strict concurrency won't let us mutate a captured `var` from the
+/// non-isolated Observation `onChange:` closure.
+private final class ChangeCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _value = 0
+    var value: Int {
+        lock.lock(); defer { lock.unlock() }
+        return _value
+    }
+    func increment() {
+        lock.lock(); defer { lock.unlock() }
+        _value += 1
+    }
+}
