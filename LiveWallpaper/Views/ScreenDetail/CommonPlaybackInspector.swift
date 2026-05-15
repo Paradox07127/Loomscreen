@@ -102,16 +102,13 @@ struct CommonPlaybackInspector: View {
             iconColor: .blue,
             title: "Frame Rate"
         ) {
-            Picker("", selection: $frameRateLimit) {
+            Picker("", selection: frameRateBinding) {
                 ForEach(FrameRateLimit.allCases) { limit in
                     Text(limit.titleKey).tag(limit)
                 }
             }
             .labelsHidden()
             .frame(width: 86)
-            .onChange(of: frameRateLimit) { _, newValue in
-                screenManager.updateFrameRateLimit(newValue, for: screen)
-            }
             .accessibilityLabel(Text("Frame rate limit"))
             .accessibilityValue(Text(frameRateLimit.titleKey))
         }
@@ -125,19 +122,9 @@ struct CommonPlaybackInspector: View {
                         .foregroundStyle(.green)
                         .transition(.scale.combined(with: .opacity))
                 }
-                Toggle("", isOn: $syncToLockScreen)
+                Toggle("", isOn: syncToLockScreenBinding)
                     .labelsHidden()
                     .toggleStyle(.switch)
-                    .onChange(of: syncToLockScreen) { _, newValue in
-                        screenManager.updateSetAsDesktopPicture(newValue, for: screen)
-                        guard newValue else { return }
-                        screenManager.extractLockScreenFrame(for: screen)
-                        withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.25))) { lockScreenExtracted = true }
-                        Task {
-                            try? await Task.sleep(for: .seconds(2))
-                            withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.25))) { lockScreenExtracted = false }
-                        }
-                    }
                     .accessibilityLabel(Text("Set current frame as desktop picture"))
                     .accessibilityHint(Text("Captures the currently visible video frame and uses it as the macOS desktop picture"))
                     .help(Text("Apply the current video frame as the desktop picture"))
@@ -194,6 +181,39 @@ struct CommonPlaybackInspector: View {
                 guard muted != newValue else { return }
                 muted = newValue
                 screenManager.updateMuted(newValue, for: screen)
+            }
+        )
+    }
+
+    private var frameRateBinding: Binding<FrameRateLimit> {
+        Binding(
+            get: { frameRateLimit },
+            set: { newValue in
+                guard frameRateLimit != newValue else { return }
+                frameRateLimit = newValue
+                screenManager.updateFrameRateLimit(newValue, for: screen)
+            }
+        )
+    }
+
+    private var syncToLockScreenBinding: Binding<Bool> {
+        Binding(
+            get: { syncToLockScreen },
+            set: { newValue in
+                guard syncToLockScreen != newValue else { return }
+                syncToLockScreen = newValue
+                screenManager.updateSetAsDesktopPicture(newValue, for: screen)
+                guard newValue else { return }
+                screenManager.extractLockScreenFrame(for: screen)
+                withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.25))) {
+                    lockScreenExtracted = true
+                }
+                Task {
+                    try? await Task.sleep(for: .seconds(2))
+                    withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.25))) {
+                        lockScreenExtracted = false
+                    }
+                }
             }
         )
     }

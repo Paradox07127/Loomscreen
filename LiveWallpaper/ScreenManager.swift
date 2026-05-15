@@ -664,7 +664,6 @@ final class ScreenManager {
         refreshWallpaperSessionSummaryCache()
         updatePlaybackState()
         updateFullScreenFallbackPolling()
-        NotificationCenter.default.post(name: .screensRefreshed, object: nil)
     }
 
     private func refreshWallpaperSessionSummaryCache() {

@@ -37,7 +37,7 @@ struct ScreenDetailView: View {
 
     @ViewBuilder
     private var wallpaperTypePicker: some View {
-        Picker("Wallpaper Type", selection: $selectedWallpaperType) {
+        Picker("Wallpaper Type", selection: wallpaperTypeSelection) {
             ForEach(WallpaperType.allCases) { type in
                 Text(type.titleKey).tag(type)
             }
@@ -46,21 +46,33 @@ struct ScreenDetailView: View {
         .fixedSize(horizontal: true, vertical: false)
         .accessibilityLabel(Text("Wallpaper type"))
         .accessibilityHint(Text("Choose wallpaper type"))
-        .onChange(of: selectedWallpaperType) { _, newType in
-            Logger.info("Wallpaper type selected for screen \(screen.id): \(newType.rawValue)", category: .ui)
-            switch newType {
-            case .video:
-                screenManager.switchToVideoWallpaper(for: screen)
-            case .html:
-                screenManager.switchToHTMLWallpaper(for: screen)
-            case .metalShader, .scene:
-                break
-            }
-        }
     }
 
     private var wallpaperTypeToolbar: some View {
         wallpaperTypePicker
+    }
+
+    private var wallpaperTypeSelection: Binding<WallpaperType> {
+        Binding(
+            get: { selectedWallpaperType },
+            set: { newType in
+                guard selectedWallpaperType != newType else { return }
+                selectedWallpaperType = newType
+                handleWallpaperTypeSelection(newType)
+            }
+        )
+    }
+
+    private func handleWallpaperTypeSelection(_ newType: WallpaperType) {
+        Logger.info("Wallpaper type selected for screen \(screen.id): \(newType.rawValue)", category: .ui)
+        switch newType {
+        case .video:
+            screenManager.switchToVideoWallpaper(for: screen)
+        case .html:
+            screenManager.switchToHTMLWallpaper(for: screen)
+        case .metalShader, .scene:
+            break
+        }
     }
 
     @ViewBuilder
@@ -112,9 +124,25 @@ struct ScreenDetailView: View {
     }
 
     private var showsInspector: Bool {
-        !shouldShowGuideEmptyState
-            && hasConfigurableWallpaperSurface
-            && [WallpaperType.video, .html].contains(selectedWallpaperType)
+        guard !shouldShowGuideEmptyState, hasConfigurableWallpaperSurface else {
+            return false
+        }
+        switch selectedWallpaperType {
+        case .video:
+            return hasConfiguredVideoWallpaper
+        case .html:
+            return true
+        case .metalShader, .scene:
+            return false
+        }
+    }
+
+    private var hasConfiguredVideoWallpaper: Bool {
+        guard let config = screenManager.getConfiguration(for: screen),
+              config.wallpaperType == .video else {
+            return false
+        }
+        return config.hasConfiguredVideoSource
     }
 
     private var showsHeaderWallpaperActions: Bool {
@@ -294,30 +322,16 @@ struct ScreenDetailView: View {
             }
         }
         .confirmDestructive($pendingDestructive)
-        .onAppear {
-            // Defer the 14 @State writes inside `loadScreenConfiguration`
-            // to next main-actor tick so the first paint doesn't trip
-            // "Modifying state during view update" warnings. Same
-            // discipline used by the .onReceive handler below.
-            Task { @MainActor in loadScreenConfiguration() }
-        }
+        .onAppear { scheduleConfigurationLoad() }
         .onDisappear { cleanupPreviewPlayer() }
         .onChange(of: screen.id) {
             cleanupPreviewPlayer()
-            Task { @MainActor in loadScreenConfiguration() }
+            scheduleConfigurationLoad()
         }
         .onReceive(NotificationCenter.default.publisher(for: .wallpaperConfigurationDidChange)) { notification in
             guard let changedID = notification.userInfo?["screenID"] as? CGDirectDisplayID,
                   changedID == screen.id else { return }
-            // `wallpaperConfigurationDidChange` is posted synchronously inside
-            // `ScreenManager.saveConfiguration`, which can fire while SwiftUI
-            // is still reconciling this view. Pushing the reload onto the next
-            // main-actor tick prevents the cascade of "Modifying state during
-            // view update" warnings that previously caused WKWebView to drop
-            // media playback assertions a couple of seconds after load.
-            Task { @MainActor in
-                loadScreenConfiguration()
-            }
+            scheduleConfigurationLoad()
         }
         .alert("Error", isPresented: $showErrorAlert) {
             Button("OK", role: .cancel) { }
@@ -509,16 +523,13 @@ struct ScreenDetailView: View {
                                     ) {
                                         VStack(spacing: 8) {
                                             SettingRow(icon: "sparkles", iconColor: .purple, title: "Particles") {
-                                                Picker("", selection: $selectedParticleEffect) {
+                                                Picker("", selection: particleEffectBinding) {
                                                     ForEach(ParticleEffect.allCases) { effect in
                                                         Text(effect.titleKey).tag(effect)
                                                     }
                                                 }
                                                 .labelsHidden()
                                                 .frame(width: 86)
-                                                .onChange(of: selectedParticleEffect) { _, newValue in
-                                                    screenManager.updateParticleEffect(newValue, for: screen)
-                                                }
                                                 .accessibilityLabel(Text("Particle effect"))
                                                 .accessibilityValue(Text(selectedParticleEffect.titleKey))
                                                 .accessibilityHint(Text("Choose a particle overlay effect"))
@@ -528,12 +539,9 @@ struct ScreenDetailView: View {
                                             if selectedParticleEffect != .none {
                                                 SettingRow(icon: "circle.hexagongrid", iconColor: .purple, title: "Density") {
                                                     HStack(spacing: 8) {
-                                                        Slider(value: $particleDensity, in: 0.2...3.0)
+                                                        Slider(value: particleDensityBinding, in: 0.2...3.0)
                                                             .controlSize(.small)
                                                             .frame(width: 80)
-                                                            .onChange(of: particleDensity) { _, newValue in
-                                                                screenManager.updateParticleDensity(newValue, for: screen)
-                                                            }
                                                             .accessibilityLabel(Text("Particle density"))
                                                             .accessibilityValue(String(format: "%.1f×", particleDensity))
                                                         Text(String(format: "%.1f", particleDensity))
@@ -547,12 +555,9 @@ struct ScreenDetailView: View {
                                             Divider()
 
                                             SettingRow(icon: "cloud.sun", iconColor: .cyan, title: "Weather") {
-                                                Toggle("", isOn: $effectConfig.weatherReactive)
+                                                Toggle("", isOn: weatherReactiveBinding)
                                                     .labelsHidden()
                                                     .toggleStyle(.switch)
-                                                    .onChange(of: effectConfig.weatherReactive) { _, newValue in
-                                                        screenManager.setWeatherReactive(newValue, for: screen)
-                                                    }
                                                     .help(Text("Adjust effects based on real-time weather conditions"))
                                                     .accessibilityLabel(Text("Weather-reactive effects"))
                                                     .accessibilityHint(Text("Automatically adjust particles and color based on real-time weather"))
@@ -596,6 +601,39 @@ struct ScreenDetailView: View {
 
     private var inspectorPanelWidth: CGFloat {
         clampedInspectorWidth(CGFloat(liveInspectorWidth ?? inspectorWidth))
+    }
+
+    private var particleEffectBinding: Binding<ParticleEffect> {
+        Binding(
+            get: { selectedParticleEffect },
+            set: { newValue in
+                guard selectedParticleEffect != newValue else { return }
+                selectedParticleEffect = newValue
+                screenManager.updateParticleEffect(newValue, for: screen)
+            }
+        )
+    }
+
+    private var particleDensityBinding: Binding<Double> {
+        Binding(
+            get: { particleDensity },
+            set: { newValue in
+                guard abs(particleDensity - newValue) > 0.001 else { return }
+                particleDensity = newValue
+                screenManager.updateParticleDensity(newValue, for: screen)
+            }
+        )
+    }
+
+    private var weatherReactiveBinding: Binding<Bool> {
+        Binding(
+            get: { effectConfig.weatherReactive },
+            set: { newValue in
+                guard effectConfig.weatherReactive != newValue else { return }
+                effectConfig.weatherReactive = newValue
+                screenManager.setWeatherReactive(newValue, for: screen)
+            }
+        )
     }
 
     private func clampedInspectorWidth(_ width: CGFloat) -> CGFloat {
@@ -716,53 +754,73 @@ struct ScreenDetailView: View {
         previewController.startPlaybackPreview(from: url, syncTo: screen.videoPlayer?.player)
     }
 
+    private func scheduleConfigurationLoad() {
+        DispatchQueue.main.async {
+            Task { @MainActor in
+                loadScreenConfiguration()
+            }
+        }
+    }
+
     private func loadScreenConfiguration() {
-        lockScreenExtracted = false
+        if lockScreenExtracted { lockScreenExtracted = false }
 
         if let config = screenManager.getConfiguration(for: screen) {
-            if playbackSpeed != config.playbackSpeed { playbackSpeed = config.playbackSpeed }
-            if selectedFitMode != config.fitMode { selectedFitMode = config.fitMode }
-
-            selectedParticleEffect = config.particleEffect
-            effectConfig = config.effectConfig
-            particleDensity = config.effectConfig.particleDensity
-            setAsLockScreen = config.setAsLockScreen
-            videoMuted = config.muted
-            selectedFrameRateLimit = config.frameRateLimit
-            playlistBookmarks = config.playlistBookmarks ?? []
-            shufflePlaylist = config.shufflePlaylist
-            playlistRotationMinutes = config.playlistRotationMinutes
-            scheduleSlots = config.scheduleSlots ?? []
-            if let preset = config.shaderPreset { selectedShaderPreset = preset }
-            selectedWallpaperType = config.wallpaperType
-            selectedWallpaperMode = config.wallpaperMode
-            htmlSource = config.htmlSource
-            htmlConfig = config.htmlConfig ?? .default
-            hasPreviewSource = config.wallpaperType == .video && config.videoBookmarkData != nil
+            assignIfChanged(playbackSpeed, to: config.playbackSpeed) { playbackSpeed = $0 }
+            assignIfChanged(selectedFitMode, to: config.fitMode) { selectedFitMode = $0 }
+            assignIfChanged(selectedParticleEffect, to: config.particleEffect) { selectedParticleEffect = $0 }
+            assignIfChanged(effectConfig, to: config.effectConfig) { effectConfig = $0 }
+            assignIfChanged(particleDensity, to: config.effectConfig.particleDensity) { particleDensity = $0 }
+            assignIfChanged(setAsLockScreen, to: config.setAsLockScreen) { setAsLockScreen = $0 }
+            assignIfChanged(videoMuted, to: config.muted) { videoMuted = $0 }
+            assignIfChanged(selectedFrameRateLimit, to: config.frameRateLimit) { selectedFrameRateLimit = $0 }
+            assignIfChanged(playlistBookmarks, to: config.playlistBookmarks ?? []) { playlistBookmarks = $0 }
+            assignIfChanged(shufflePlaylist, to: config.shufflePlaylist) { shufflePlaylist = $0 }
+            assignIfChanged(playlistRotationMinutes, to: config.playlistRotationMinutes) { playlistRotationMinutes = $0 }
+            assignIfChanged(scheduleSlots, to: config.scheduleSlots ?? []) { scheduleSlots = $0 }
+            if let preset = config.shaderPreset {
+                assignIfChanged(selectedShaderPreset, to: preset) { selectedShaderPreset = $0 }
+            }
+            assignIfChanged(selectedWallpaperType, to: config.wallpaperType) { selectedWallpaperType = $0 }
+            assignIfChanged(selectedWallpaperMode, to: config.wallpaperMode) { selectedWallpaperMode = $0 }
+            assignIfChanged(htmlSource, to: config.htmlSource) { htmlSource = $0 }
+            assignIfChanged(htmlConfig, to: config.htmlConfig ?? .default) { htmlConfig = $0 }
+            assignIfChanged(hasPreviewSource, to: config.wallpaperType == .video && config.hasConfiguredVideoSource) {
+                hasPreviewSource = $0
+            }
             if config.wallpaperType != .video {
-                lastPreviewPosterBookmarkData = nil
+                assignIfChanged(lastPreviewPosterBookmarkData, to: nil) { lastPreviewPosterBookmarkData = $0 }
             }
             loadPreviewPosterIfNeeded()
         } else {
-            playbackSpeed = 1.0
-            selectedFitMode = .aspectFill
-            selectedParticleEffect = .none
-            effectConfig = .default
-            particleDensity = 1.0
-            setAsLockScreen = false
-            selectedFrameRateLimit = .fps60
-            playlistBookmarks = []
-            shufflePlaylist = false
-            playlistRotationMinutes = nil
-            scheduleSlots = []
-            selectedWallpaperType = .video
-            selectedWallpaperMode = .single
-            htmlSource = nil
-            htmlConfig = .default
-            hasPreviewSource = screen.videoPlayer?.videoURL != nil
-            lastPreviewPosterBookmarkData = nil
+            assignIfChanged(playbackSpeed, to: 1.0) { playbackSpeed = $0 }
+            assignIfChanged(selectedFitMode, to: .aspectFill) { selectedFitMode = $0 }
+            assignIfChanged(selectedParticleEffect, to: .none) { selectedParticleEffect = $0 }
+            assignIfChanged(effectConfig, to: .default) { effectConfig = $0 }
+            assignIfChanged(particleDensity, to: 1.0) { particleDensity = $0 }
+            assignIfChanged(setAsLockScreen, to: false) { setAsLockScreen = $0 }
+            assignIfChanged(selectedFrameRateLimit, to: .fps60) { selectedFrameRateLimit = $0 }
+            assignIfChanged(playlistBookmarks, to: []) { playlistBookmarks = $0 }
+            assignIfChanged(shufflePlaylist, to: false) { shufflePlaylist = $0 }
+            assignIfChanged(playlistRotationMinutes, to: nil) { playlistRotationMinutes = $0 }
+            assignIfChanged(scheduleSlots, to: []) { scheduleSlots = $0 }
+            assignIfChanged(selectedWallpaperType, to: .video) { selectedWallpaperType = $0 }
+            assignIfChanged(selectedWallpaperMode, to: .single) { selectedWallpaperMode = $0 }
+            assignIfChanged(htmlSource, to: nil) { htmlSource = $0 }
+            assignIfChanged(htmlConfig, to: .default) { htmlConfig = $0 }
+            assignIfChanged(hasPreviewSource, to: screen.videoPlayer?.videoURL != nil) { hasPreviewSource = $0 }
+            assignIfChanged(lastPreviewPosterBookmarkData, to: nil) { lastPreviewPosterBookmarkData = $0 }
             loadPreviewPosterIfNeeded()
         }
+    }
+
+    private func assignIfChanged<Value: Equatable>(
+        _ currentValue: Value,
+        to newValue: Value,
+        assign: (Value) -> Void
+    ) {
+        guard currentValue != newValue else { return }
+        assign(newValue)
     }
 
     private func cleanupPreviewPlayer() {
@@ -880,7 +938,9 @@ struct ScreenDetailView: View {
             return
         }
 
-        lastPreviewPosterBookmarkData = nil
+        if lastPreviewPosterBookmarkData != nil {
+            lastPreviewPosterBookmarkData = nil
+        }
         guard let url = screen.videoPlayer?.videoURL else { return }
         previewController.loadPoster(from: url, syncTime: screen.videoPlayer?.player?.currentTime())
     }

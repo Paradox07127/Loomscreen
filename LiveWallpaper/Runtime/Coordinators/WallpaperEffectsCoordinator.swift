@@ -42,14 +42,16 @@ final class WallpaperEffectsCoordinator {
     // MARK: - Public API (called from ScreenManager facade)
 
     func updateEffectConfig(_ effectConfig: VideoEffectConfig, for screen: Screen) {
-        guard var config = configurationStore.get(for: screen.id) else { return }
+        guard var config = configurationStore.get(for: screen.id),
+              config.effectConfig != effectConfig else { return }
         config.effectConfig = effectConfig
         saveConfiguration(config)
         applyVideoEffects(for: screen, config: config)
     }
 
     func updateParticleEffect(_ effect: ParticleEffect, for screen: Screen) {
-        guard var config = configurationStore.get(for: screen.id) else { return }
+        guard var config = configurationStore.get(for: screen.id),
+              config.particleEffect != effect else { return }
         config.particleEffect = effect
         saveConfiguration(config)
         applyParticleEffect(effect, density: config.effectConfig.particleDensity, to: screen)
@@ -65,7 +67,8 @@ final class WallpaperEffectsCoordinator {
     }
 
     func setWeatherReactive(_ enabled: Bool, for screen: Screen) {
-        guard var config = configurationStore.get(for: screen.id) else { return }
+        guard var config = configurationStore.get(for: screen.id),
+              config.effectConfig.weatherReactive != enabled else { return }
         config.effectConfig.weatherReactive = enabled
         saveConfiguration(config)
         refreshWeatherMonitoringState()

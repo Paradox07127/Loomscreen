@@ -1453,6 +1453,9 @@
         }
       }
     },
+    "Approximate" : {
+      "comment" : "Scene preflight tier label."
+    },
     "Are you sure you want to remove this video? This will delete all configuration for this screen." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -4549,6 +4552,18 @@
         }
       }
     },
+    "error.render.executor.shader_translator_unavailable" : {
+      "comment" : "Error shown when a custom WPE shader needs translation but the backend is not yet integrated.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "WPE shader '%1$@' needs the GLSL→MSL translator: %2$@"
+          }
+        }
+      }
+    },
     "error.render.executor.unsupported_shader" : {
       "comment" : "Error shown when the Metal renderer does not support a shader.",
       "extractionState" : "extracted_with_value",
@@ -7347,6 +7362,9 @@
         }
       }
     },
+    "Native" : {
+      "comment" : "Scene preflight tier label."
+    },
     "Needs deps" : {
       "localizations" : {
         "en" : {
@@ -7362,6 +7380,12 @@
           }
         }
       }
+    },
+    "Needs runtime systems" : {
+      "comment" : "Scene preflight tier label."
+    },
+    "Needs shader translation" : {
+      "comment" : "Scene preflight tier label."
     },
     "Network offline" : {
       "comment" : "Runtime error title."
@@ -13726,7 +13750,7 @@
       }
     },
     "Unsupported" : {
-      "comment" : "Wallpaper Engine scene capability tier.\nWorkshop library type filter.",
+      "comment" : "Scene preflight tier label.\nWallpaper Engine scene capability tier.\nWorkshop library type filter.",
       "localizations" : {
         "en" : {
           "stringUnit" : {

@@ -8,11 +8,11 @@ struct ColorAdjustmentsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(spacing: 12) {
-                effectSlider(title: "Blur", value: $effectConfig.blurRadius, in: 0...30, format: "%.0f")
-                effectSlider(title: "Brightness", value: $effectConfig.brightness, in: -0.5...0.5, format: "%.2f")
-                effectSlider(title: "Saturation", value: $effectConfig.saturation, in: 0...2, format: "%.1f")
-                effectSlider(title: "Warmth", value: $effectConfig.warmth, in: 2500...8000, format: "%.0f")
-                effectSlider(title: "Vignette", value: $effectConfig.vignetteIntensity, in: 0...5, format: "%.1f")
+                effectSlider(title: "Blur", value: effectBinding(\.blurRadius), in: 0...30, format: "%.0f")
+                effectSlider(title: "Brightness", value: effectBinding(\.brightness), in: -0.5...0.5, format: "%.2f")
+                effectSlider(title: "Saturation", value: effectBinding(\.saturation), in: 0...2, format: "%.1f")
+                effectSlider(title: "Warmth", value: effectBinding(\.warmth), in: 2500...8000, format: "%.0f")
+                effectSlider(title: "Vignette", value: effectBinding(\.vignetteIntensity), in: 0...5, format: "%.1f")
 
                 Divider()
 
@@ -21,7 +21,7 @@ struct ColorAdjustmentsView: View {
                         .font(.system(size: 13, weight: .medium))
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer()
-                    Toggle("", isOn: $effectConfig.autoTimeTint)
+                    Toggle("", isOn: effectBinding(\.autoTimeTint))
                         .labelsHidden()
                         .toggleStyle(.switch)
                         .help(Text("Automatically adjust color temperature by time of day"))
@@ -36,7 +36,7 @@ struct ColorAdjustmentsView: View {
                         .font(.system(size: 13, weight: .medium))
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer()
-                    Toggle("", isOn: $effectConfig.glassRainEffect)
+                    Toggle("", isOn: effectBinding(\.glassRainEffect))
                         .labelsHidden()
                         .toggleStyle(.switch)
                         .help(Text("Simulate rain drops hitting glass and refracting video (High GPU usage)"))
@@ -62,14 +62,24 @@ struct ColorAdjustmentsView: View {
                 }
             }
         }
-        .onChange(of: effectConfig) { _, _ in
-            screenManager.updateEffectConfig(effectConfig, for: screen)
-        }
     }
 
     private func resetEffects() {
         effectConfig = .default
         screenManager.updateEffectConfig(effectConfig, for: screen)
+    }
+
+    private func effectBinding<Value: Equatable>(
+        _ keyPath: WritableKeyPath<VideoEffectConfig, Value>
+    ) -> Binding<Value> {
+        Binding(
+            get: { effectConfig[keyPath: keyPath] },
+            set: { newValue in
+                guard effectConfig[keyPath: keyPath] != newValue else { return }
+                effectConfig[keyPath: keyPath] = newValue
+                screenManager.updateEffectConfig(effectConfig, for: screen)
+            }
+        )
     }
 
     private func effectSlider(

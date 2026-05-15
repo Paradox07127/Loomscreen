@@ -209,6 +209,16 @@ struct ScreenConfiguration: Codable, Equatable {
         activeWallpaper.activeVideoBookmarkData ?? savedVideoBookmarkData
     }
 
+    var hasConfiguredVideoSource: Bool {
+        if let bookmarkData = activeWallpaper.activeVideoBookmarkData, !bookmarkData.isEmpty {
+            return true
+        }
+        if let savedVideoBookmarkData, !savedVideoBookmarkData.isEmpty {
+            return true
+        }
+        return false
+    }
+
     var preferredVideoBookmarkData: Data? {
         videoBookmarkData
     }

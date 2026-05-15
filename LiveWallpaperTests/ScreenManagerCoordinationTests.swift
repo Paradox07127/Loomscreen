@@ -218,6 +218,51 @@ struct ScreenManagerCoordinationTests {
         }
     }
 
+    @Test("Re-applying the current effect config is a no-op (no notification)")
+    func updateEffectConfigWithSameValueIsNoOp() async throws {
+        try await Self.runWithSeededConfiguration { manager, screen in
+            let currentConfig = try #require(manager.getConfiguration(for: screen)?.effectConfig)
+            let capture = Self.attachConfigurationObserver()
+            defer { capture.detach() }
+
+            manager.updateEffectConfig(currentConfig, for: screen)
+            await Self.drainMainQueue()
+
+            #expect(capture.notifications.isEmpty)
+            #expect(manager.getConfiguration(for: screen)?.effectConfig == currentConfig)
+        }
+    }
+
+    @Test("Re-applying the current particle effect is a no-op (no notification)")
+    func updateParticleEffectWithSameValueIsNoOp() async throws {
+        try await Self.runWithSeededConfiguration { manager, screen in
+            let currentEffect = try #require(manager.getConfiguration(for: screen)?.particleEffect)
+            let capture = Self.attachConfigurationObserver()
+            defer { capture.detach() }
+
+            manager.updateParticleEffect(currentEffect, for: screen)
+            await Self.drainMainQueue()
+
+            #expect(capture.notifications.isEmpty)
+            #expect(manager.getConfiguration(for: screen)?.particleEffect == currentEffect)
+        }
+    }
+
+    @Test("Re-applying the current weather-reactive setting is a no-op (no notification)")
+    func setWeatherReactiveWithSameValueIsNoOp() async throws {
+        try await Self.runWithSeededConfiguration { manager, screen in
+            let currentValue = try #require(manager.getConfiguration(for: screen)?.effectConfig.weatherReactive)
+            let capture = Self.attachConfigurationObserver()
+            defer { capture.detach() }
+
+            manager.setWeatherReactive(currentValue, for: screen)
+            await Self.drainMainQueue()
+
+            #expect(capture.notifications.isEmpty)
+            #expect(manager.getConfiguration(for: screen)?.effectConfig.weatherReactive == currentValue)
+        }
+    }
+
     // MARK: - Wallpaper type lifecycle regressions
 
     @Test("Switching to video without a saved video leaves the active HTML session intact")
@@ -235,6 +280,27 @@ struct ScreenManagerCoordinationTests {
             #expect(session.cleanupCount == 0)
             #expect(Self.isSameSession(screen.runtimeSession, session))
             #expect(manager.getConfiguration(for: screen)?.wallpaperType == .html)
+            #expect(capture.notifications.isEmpty)
+        }
+    }
+
+    @Test("Updating video mode without a saved video leaves the active HTML session intact")
+    func updateWallpaperModeWithoutSavedVideoIsIgnored() async throws {
+        try await Self.runWithHTMLConfiguration { manager, screen in
+            let session = TestRuntimeSession(wallpaperType: .html)
+            screen.installRuntimeSession(session)
+
+            let capture = Self.attachConfigurationObserver()
+            defer { capture.detach() }
+
+            manager.updateWallpaperMode(.playlist, for: screen)
+            await Self.drainMainQueue()
+
+            let config = try #require(manager.getConfiguration(for: screen))
+            #expect(config.wallpaperType == .html)
+            #expect(config.wallpaperMode == .single)
+            #expect(session.cleanupCount == 0)
+            #expect(Self.isSameSession(screen.runtimeSession, session))
             #expect(capture.notifications.isEmpty)
         }
     }
@@ -386,6 +452,26 @@ struct ScreenManagerCoordinationTests {
             #expect(Self.isSameSession(screen.runtimeSession, session))
             #expect(capture.notifications.isEmpty)
             #expect(manager.getConfiguration(for: screen)?.wallpaperType == .html)
+        }
+    }
+
+    @Test("Re-applying the current HTML config is a no-op (no notification)")
+    func updateHTMLConfigWithSameValueIsNoOp() async throws {
+        try await Self.runWithHTMLConfiguration { manager, screen in
+            let session = TestRuntimeSession(wallpaperType: .html)
+            screen.installRuntimeSession(session)
+            let currentConfig = try #require(manager.getConfiguration(for: screen)?.htmlConfig)
+            let capture = Self.attachConfigurationObserver()
+            defer { capture.detach() }
+
+            manager.updateHTMLConfig(currentConfig, for: screen)
+            await Self.drainMainQueue()
+
+            #expect(capture.notifications.isEmpty)
+            #expect(session.cleanupCount == 0)
+            #expect(session.appliedHTMLConfigs.isEmpty)
+            #expect(Self.isSameSession(screen.runtimeSession, session))
+            #expect(manager.getConfiguration(for: screen)?.htmlConfig == currentConfig)
         }
     }
 
