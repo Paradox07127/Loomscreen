@@ -67,7 +67,12 @@ struct MenuBarContent: View {
         .animation(.snappy(duration: 0.14), value: activeOverlay)
         .onAppear { refreshGlobalToggles() }
         .onReceive(NotificationCenter.default.publisher(for: .menuBarDensityDidChange)) { _ in
-            density = SettingsManager.shared.loadGlobalSettings().menuBarDensity
+            // Defer the @State write so a density-change notification
+            // arriving during the popover's reconcile doesn't cause
+            // "Modifying state during view update".
+            Task { @MainActor in
+                density = SettingsManager.shared.loadGlobalSettings().menuBarDensity
+            }
         }
     }
 

@@ -123,10 +123,14 @@ struct WorkshopGalleryView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .workshopLibraryRootBookmarkDidChange)) { _ in
-            updateRootAccessState()
+            // Both handlers mutate @State (hasLibraryRoot / rootPathSummary
+            // and the selected-targets set). Defer to next main-actor tick
+            // so a notification arriving during SwiftUI's reconcile pass
+            // doesn't cascade into "Modifying state during view update".
+            Task { @MainActor in updateRootAccessState() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .screensRefreshed)) { _ in
-            selectInitialTargetIfNeeded()
+            Task { @MainActor in selectInitialTargetIfNeeded() }
         }
         .errorAlert("Library Error", message: $errorMessage)
         .confirmDestructive($pendingDestructive)

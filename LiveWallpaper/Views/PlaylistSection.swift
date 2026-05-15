@@ -97,14 +97,27 @@ struct PlaylistSection: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .onAppear { loadEntries() }
-        .onChange(of: screen.id) { loadEntries() }
-        .onChange(of: playlistBookmarks) { loadEntries() }
+        .onAppear {
+            // `loadEntries()` writes @State (entries) — defer to next
+            // main-actor tick so the first paint doesn't fire it inside
+            // body computation. Same pattern used by ScreenDetailView /
+            // HTMLSourceSection / WPESceneSection.
+            Task { @MainActor in loadEntries() }
+        }
+        .onChange(of: screen.id) {
+            Task { @MainActor in loadEntries() }
+        }
+        .onChange(of: playlistBookmarks) {
+            Task { @MainActor in loadEntries() }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .wallpaperConfigurationDidChange)) { notification in
-            if let changedID = notification.userInfo?["screenID"] as? CGDirectDisplayID,
-               changedID == screen.id {
-                loadEntries()
-            }
+            guard let changedID = notification.userInfo?["screenID"] as? CGDirectDisplayID,
+                  changedID == screen.id else { return }
+            // saveConfiguration → store.save → posts this notification
+            // synchronously. Loading entries here writes @State during
+            // SwiftUI's reconcile pass; deferring one tick removes the
+            // "Modifying state during view update" warnings.
+            Task { @MainActor in loadEntries() }
         }
         .confirmDestructive($pendingDestructive)
     }
