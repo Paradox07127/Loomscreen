@@ -193,6 +193,134 @@ struct WPEMetalRenderExecutorTests {
         #expect(pixel.a >= 250)
     }
 
+    @Test("Multi-pass custom shader reads previous-pass FBO via pass.binds")
+    func multiPassEffectChainsFBOsViaBinds() throws {
+        // Two-pass setup: pass 0 writes a custom shader output to an
+        // FBO; pass 1 reads that FBO via `binds[0]` and renders to scene.
+        // If the dispatcher honours `pass.binds`, the second pass sees
+        // the first pass's output and the test passes. Without that
+        // wiring the second pass would re-sample the original input.
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let input = try makeRGBAInputTexture(device: device, bytes: Data([
+            10, 10, 10, 255,
+            10, 10, 10, 255,
+            10, 10, 10, 255,
+            10, 10, 10, 255
+        ]))
+
+        let pass0 = WPERenderPass(
+            id: "pass0",
+            phase: .effect(file: "effects/two_pass/effect.json"),
+            shader: "effects/two_pass_first",
+            source: .image("materials/base.png"),
+            target: .fbo(name: "_rt_two_pass_intermediate"),
+            textures: [0: .image("materials/base.png")],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        // Second pass: reads the FBO from pass 0 via binds and writes
+        // to the scene output. The actual GLSL just samples slot 0 and
+        // adds a constant red, so we can detect end-to-end correctness.
+        let pass1 = WPERenderPass(
+            id: "pass1",
+            phase: .effect(file: "effects/two_pass/effect.json"),
+            shader: "effects/two_pass_second",
+            source: .image("materials/base.png"),
+            target: .scene,
+            textures: [:],
+            binds: [0: .fbo("_rt_two_pass_intermediate")],
+            constants: [:],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: WPERenderLayer(
+                    objectID: "layer",
+                    objectName: "Layer",
+                    imagePath: "materials/base.png",
+                    materialPath: nil,
+                    compositeA: "a",
+                    compositeB: "b",
+                    localFBOs: [WPERenderFBO(name: "_rt_two_pass_intermediate", scale: 1, format: "rgba8888", unique: false)],
+                    passes: []
+                ),
+                passes: [
+                    WPEPreparedRenderPass(
+                        pass: pass0,
+                        shader: WPEShaderProgram(
+                            name: "effects/two_pass_first",
+                            vertexSource: "// fullscreen vertex from executor",
+                            // First pass: amplify R channel by 25× → maps
+                            // gray (10) up to ≈250.
+                            fragmentSource: """
+                            uniform sampler2D g_Texture0;
+                            varying vec2 v_TexCoord;
+                            void main() {
+                                vec4 c = texture(g_Texture0, v_TexCoord);
+                                gl_FragColor = vec4(c.r * 25.0, c.g, c.b, c.a);
+                            }
+                            """,
+                            isBuiltin: false
+                        ),
+                        textureBindings: [0: .image("materials/base.png")],
+                        comboValues: [:],
+                        uniformValues: [:]
+                    ),
+                    WPEPreparedRenderPass(
+                        pass: pass1,
+                        shader: WPEShaderProgram(
+                            name: "effects/two_pass_second",
+                            vertexSource: "// fullscreen vertex",
+                            // Second pass samples slot 0 (which the
+                            // dispatcher must bind to the pass-0 FBO via
+                            // `binds`) and adds a green tint. If `binds`
+                            // were ignored, slot 0 would fall back to
+                            // pass.pass.source = the original gray image
+                            // and the red channel would stay near 10.
+                            fragmentSource: """
+                            uniform sampler2D g_Texture0;
+                            varying vec2 v_TexCoord;
+                            void main() {
+                                vec4 c = texture(g_Texture0, v_TexCoord);
+                                gl_FragColor = vec4(c.r, c.g + 1.0, c.b, c.a);
+                            }
+                            """,
+                            isBuiltin: false
+                        ),
+                        textureBindings: [:],
+                        comboValues: [:],
+                        uniformValues: [:]
+                    )
+                ]
+            )
+        ])
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 2, height: 2),
+            textures: ["materials/base.png": input]
+        )
+        let pixel = try readPixel(output, x: 1, y: 1)
+
+        // Pass 0 amplified R from 10 → ≈250 in the FBO.
+        // Pass 1 read the FBO (NOT the original) and added green.
+        // Final pixel: high red + high green + zero blue, full alpha.
+        #expect(pixel.r >= 200, "Multi-pass output should carry pass-0's amplified R; got \(pixel.r)")
+        #expect(pixel.g >= 200, "Pass-1 should contribute saturated green; got \(pixel.g)")
+        #expect(pixel.a >= 250)
+    }
+
     @Test("genericimage2 native MSL fragment renders texture with color tint")
     func genericImage2RendersWithTint() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())

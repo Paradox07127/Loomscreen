@@ -437,12 +437,17 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             // Single-input shaders: copy, genericimage2, genericparticle,
             // and every effect_* variant. The translator-driven custom
             // shader path also goes here — it always reads at least slot 0.
-            let reference = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
+            // Multi-pass effects (lightshafts, blur_precise_gaussian, …)
+            // express inter-pass texture references via `pass.binds`,
+            // resolving to FBO names that the executor produces during
+            // earlier passes — those don't need to be pre-loaded.
+            let reference = pass.pass.binds[0]
+                ?? pass.textureBindings[0]
+                ?? pass.pass.textures[0]
+                ?? pass.pass.source
             var refs: [WPETextureReference] = [reference]
-            // Translator may use additional slots; pre-load any that
-            // appear in the binding map.
             for slot in 1..<4 {
-                if let extra = pass.textureBindings[slot] ?? pass.pass.textures[slot] {
+                if let extra = pass.pass.binds[slot] ?? pass.textureBindings[slot] ?? pass.pass.textures[slot] {
                     refs.append(extra)
                 }
             }
