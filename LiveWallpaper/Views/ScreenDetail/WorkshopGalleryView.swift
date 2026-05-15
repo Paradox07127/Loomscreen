@@ -128,14 +128,7 @@ struct WorkshopGalleryView: View {
         .onReceive(NotificationCenter.default.publisher(for: .screensRefreshed)) { _ in
             selectInitialTargetIfNeeded()
         }
-        .alert("Library Error", isPresented: Binding(
-            get: { errorMessage != nil },
-            set: { if !$0 { errorMessage = nil } }
-        )) {
-            Button("OK", role: .cancel) { errorMessage = nil }
-        } message: {
-            Text(verbatim: errorMessage ?? "")
-        }
+        .errorAlert("Library Error", message: $errorMessage)
         .confirmDestructive($pendingDestructive)
     }
 

@@ -10,7 +10,6 @@ struct WPESceneSection: View {
 
     @State private var recentImports: [WPEHistoryEntry] = []
     @State private var selectedHistoryEntry: WPEHistoryEntry?
-    @State private var showImportErrorAlert = false
     @State private var showWorkshopGallery: Bool = false
     @State private var pendingDestructive: PendingDestructive?
 
@@ -41,26 +40,18 @@ struct WPESceneSection: View {
         .onReceive(NotificationCenter.default.publisher(for: .wpeHistoryDidChange)) { _ in
             reloadHistory()
         }
-        .onChange(of: screenManager.wpeImportError(for: screen)) { _, error in
-            showImportErrorAlert = (error != nil)
-        }
         .sheet(isPresented: $showWorkshopGallery) {
             WorkshopGalleryView(screen: screen)
                 .environment(screenManager)
         }
         .confirmDestructive($pendingDestructive)
-        .alert("Apply Failed", isPresented: $showImportErrorAlert, presenting: screenManager.wpeImportError(for: screen)) { _ in
-            Button("OK", role: .cancel) {
-                screenManager.clearWPEImportError(for: screen)
-            }
-        } message: { error in
-            VStack(alignment: .leading) {
-                Text(verbatim: error.localizedDescription)
-                if let suggestion = error.recoverySuggestion {
-                    Text(verbatim: suggestion).font(.caption)
-                }
-            }
-        }
+        .errorAlert(
+            "Apply Failed",
+            error: Binding<AppError?>(
+                get: { screenManager.wpeImportError(for: screen) },
+                set: { if $0 == nil { screenManager.clearWPEImportError(for: screen) } }
+            )
+        )
     }
 
     // MARK: - States

@@ -57,9 +57,9 @@ enum HTMLSource: Codable, Equatable, Sendable {
     var displayName: String {
         switch self {
         case .file(let bookmark):
-            return BookmarkNameResolver.lastPathComponent(from: bookmark) ?? "Local file"
+            return ResourceUtilities.resolveBookmarkName(bookmark) ?? "Local file"
         case .folder(let bookmark, let index):
-            let folderName = BookmarkNameResolver.lastPathComponent(from: bookmark) ?? "Folder"
+            let folderName = ResourceUtilities.resolveBookmarkName(bookmark) ?? "Folder"
             return "\(folderName)/\(index)"
         case .url(let url):
             return url.host ?? url.absoluteString

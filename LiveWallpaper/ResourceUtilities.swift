@@ -248,9 +248,11 @@ class ResourceUtilities {
 
     // MARK: - Bookmark Resolution
 
-    /// Resolves a bookmark to a display name.
-    static func resolveBookmarkName(_ data: Data) -> String? {
-        BookmarkNameResolver.lastPathComponent(from: data)
+    /// Resolves a bookmark to a display name (its `lastPathComponent`). Returns
+    /// `nil` if the bookmark is empty or the security-scoped URL can't resolve.
+    nonisolated static func resolveBookmarkName(_ data: Data) -> String? {
+        guard !data.isEmpty else { return nil }
+        return try? resolveBookmark(data).url.lastPathComponent
     }
 
     // MARK: - HTML Source Bookmarking

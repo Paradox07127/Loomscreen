@@ -101,14 +101,7 @@ struct WPECacheManagementView: View {
         } message: {
             Text("The history entry stays — only extracted files for this project are removed.")
         }
-        .alert("Cache Error", isPresented: Binding(
-            get: { errorMessage != nil },
-            set: { if !$0 { errorMessage = nil } }
-        )) {
-            Button("OK", role: .cancel) { errorMessage = nil }
-        } message: {
-            Text(errorMessage ?? "")
-        }
+        .errorAlert("Cache Error", message: $errorMessage)
     }
 
     // MARK: - Header / rows

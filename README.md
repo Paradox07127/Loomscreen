@@ -1,10 +1,10 @@
 # LiveWallpaper
 
-A macOS menu bar application that plays video, HTML, and Metal shader content as animated desktop wallpapers across multiple displays.
+A macOS menu bar application that plays video, HTML, Metal shader, and compatible Wallpaper Engine scene content as animated desktop wallpapers across multiple displays.
 
 ## Features
 
-- **Multi-Type Wallpapers** — Video (MP4/MOV/AVI), HTML/Web (WKWebView), Metal shader (procedural GPU art)
+- **Multi-Type Wallpapers** — Video (MP4/MOV/AVI), HTML/Web (WKWebView), Metal shader (procedural GPU art), compatible Wallpaper Engine scenes (Workshop folder import; `scene.pkg` extraction when present)
 - **Multi-Display** — Independent configuration per screen
 - **Bookmarks** — Save any video / web page / shader once, re-apply to any display in one click (sidebar Library, inspector header, menu bar)
 - **HTML Trust Model** — Untrusted remote URLs run with JavaScript disabled by default; one-click `Trust this site` to allow
