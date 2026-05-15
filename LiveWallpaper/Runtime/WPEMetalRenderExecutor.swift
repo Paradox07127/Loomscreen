@@ -516,6 +516,45 @@ final class WPEMetalRenderExecutor {
         var slots = [SIMD4<Float>](repeating: SIMD4<Float>(0, 0, 0, 0), count: WPEShaderTranspiler.uniformSlotMaximum)
         for u in layout {
             let value = pass.uniformValues[u.name] ?? pass.pass.constants[u.name]
+            // Array uniforms get one element per slot. We pull as many
+            // doubles as are available out of the constant value and
+            // zero-pad the rest. Audio spectrum uniforms feed in this way.
+            if let length = u.arrayLength {
+                let raw = Self.vectorValue(value, count: length)
+                for i in 0..<length {
+                    let v = raw.indices.contains(i) ? raw[i] : 0
+                    let slotIndex = u.slot + i
+                    guard slotIndex < slots.count else { break }
+                    switch u.glslType {
+                    case "vec2":
+                        let stride = 2
+                        slots[slotIndex] = SIMD4<Float>(
+                            raw.indices.contains(i * stride) ? raw[i * stride] : 0,
+                            raw.indices.contains(i * stride + 1) ? raw[i * stride + 1] : 0,
+                            0, 0
+                        )
+                    case "vec3":
+                        let stride = 3
+                        slots[slotIndex] = SIMD4<Float>(
+                            raw.indices.contains(i * stride) ? raw[i * stride] : 0,
+                            raw.indices.contains(i * stride + 1) ? raw[i * stride + 1] : 0,
+                            raw.indices.contains(i * stride + 2) ? raw[i * stride + 2] : 0,
+                            0
+                        )
+                    case "vec4":
+                        let stride = 4
+                        slots[slotIndex] = SIMD4<Float>(
+                            raw.indices.contains(i * stride) ? raw[i * stride] : 0,
+                            raw.indices.contains(i * stride + 1) ? raw[i * stride + 1] : 0,
+                            raw.indices.contains(i * stride + 2) ? raw[i * stride + 2] : 0,
+                            raw.indices.contains(i * stride + 3) ? raw[i * stride + 3] : 0
+                        )
+                    default:
+                        slots[slotIndex].x = v
+                    }
+                }
+                continue
+            }
             switch u.glslType {
             case "float", "int", "bool":
                 slots[u.slot].x = Self.scalarValue(value, default: 0)

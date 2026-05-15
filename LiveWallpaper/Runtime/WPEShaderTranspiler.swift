@@ -31,16 +31,20 @@ import Foundation
 /// remaining 20%; the dispatcher only knows about the protocol.
 struct WPEShaderTranspiler {
 
-    /// Each uniform occupies one float4 slot regardless of its declared
-    /// type. Packing rule (Swift mirrors this when filling the buffer):
+    /// Each uniform occupies one or more float4 slots. Packing rule
+    /// (Swift mirrors this when filling the buffer):
     ///
-    ///   float       → (x, 0, 0, 0)
-    ///   vec2        → (x, y, 0, 0)
-    ///   vec3        → (x, y, z, 0)
-    ///   vec4 / mat* → consecutive vec4s starting at the slot
+    ///   float            → (x, 0, 0, 0)
+    ///   vec2             → (x, y, 0, 0)
+    ///   vec3             → (x, y, z, 0)
+    ///   vec4             → (x, y, z, w)
+    ///   mat2/3/4         → consecutive vec4s starting at the slot
+    ///   float[N] etc.    → N slots, one element per slot, scalar in `.x`
     ///
-    /// `mat2`/`mat3`/`mat4` consume 2 / 3 / 4 slots respectively.
-    static let uniformSlotMaximum = 32
+    /// Cap is generous enough to fit the audio-bar family
+    /// (`g_AudioSpectrum64Left[64]` + `g_AudioSpectrum64Right[64]` =
+    /// 128 slots).
+    static let uniformSlotMaximum = 128
 
     /// Translate a preprocessed WPE fragment shader to MSL. Returns the
     /// MSL source and the inferred Metal parameter layout. Throws when the
@@ -137,13 +141,26 @@ struct WPEShaderTranspiler {
         )
 
         // Compute slot assignments mirroring the MSL packing emitted by
-        // `renderMSL`. Each uniform takes 1-4 slots (mat4 is 4) so the
-        // dispatcher can reproduce the layout from this list alone.
+        // `renderMSL`. Each uniform takes 1-4 slots (mat4 is 4); array
+        // uniforms take `arrayLength` slots so the dispatcher can write
+        // each element into its own scalar position without needing
+        // alignment trickery.
         var layout: [WPEUniformSlot] = []
         var nextSlot = 0
         for u in uniforms {
-            let slotCount = Self.slotCount(for: u.type)
-            layout.append(WPEUniformSlot(name: u.name, glslType: u.type, slot: nextSlot, slotCount: slotCount))
+            let slotCount: Int
+            if let len = u.arrayLength {
+                slotCount = len
+            } else {
+                slotCount = Self.slotCount(for: u.type)
+            }
+            layout.append(WPEUniformSlot(
+                name: u.name,
+                glslType: u.type,
+                slot: nextSlot,
+                slotCount: slotCount,
+                arrayLength: u.arrayLength
+            ))
             nextSlot += slotCount
         }
         guard nextSlot <= Self.uniformSlotMaximum else {
@@ -451,6 +468,39 @@ struct WPEShaderTranspiler {
         // referring to `g_TintColor` etc. as if they were native uniforms.
         var slotCursor = 0
         for u in uniforms {
+            // Array uniforms come first because their packing is element-
+            // per-slot regardless of underlying scalar/vec type — matches
+            // the dispatcher's pack path exactly.
+            if let arrayLength = u.arrayLength {
+                // Build a stack-allocated array and copy each element from
+                // the appropriate slot. MSL doesn't allow runtime indexing
+                // of `vec4.xyzw` components in all paths, so we keep one
+                // element per slot at the cost of a few extra bytes.
+                let elementType: String
+                switch u.type {
+                case "vec2": elementType = "float2"
+                case "vec3": elementType = "float3"
+                case "vec4": elementType = "float4"
+                case "int":  elementType = "int"
+                case "bool": elementType = "bool"
+                default:     elementType = "float"
+                }
+                out.append("    \(elementType) \(u.name)[\(arrayLength)];")
+                for i in 0..<arrayLength {
+                    let read: String
+                    switch elementType {
+                    case "float2": read = "u.vals[\(slotCursor + i)].xy"
+                    case "float3": read = "u.vals[\(slotCursor + i)].xyz"
+                    case "float4": read = "u.vals[\(slotCursor + i)]"
+                    case "int":    read = "int(u.vals[\(slotCursor + i)].x)"
+                    case "bool":   read = "u.vals[\(slotCursor + i)].x > 0.5"
+                    default:       read = "u.vals[\(slotCursor + i)].x"
+                    }
+                    out.append("    \(u.name)[\(i)] = \(read);")
+                }
+                slotCursor += arrayLength
+                continue
+            }
             let slots = Self.slotCount(for: u.type)
             switch u.type {
             case "float":
@@ -506,8 +556,17 @@ struct WPEShaderTranslationResult {
 struct WPEUniformSlot: Equatable {
     let name: String
     let glslType: String
-    let slot: Int       // first float4 index occupied
-    let slotCount: Int  // number of slots used (1-4)
+    let slot: Int           // first float4 index occupied
+    let slotCount: Int      // total number of slots used
+    let arrayLength: Int?   // present when the source declared an array
+
+    init(name: String, glslType: String, slot: Int, slotCount: Int, arrayLength: Int? = nil) {
+        self.name = name
+        self.glslType = glslType
+        self.slot = slot
+        self.slotCount = slotCount
+        self.arrayLength = arrayLength
+    }
 }
 
 struct WPESamplerDecl: Equatable {
@@ -530,25 +589,40 @@ struct WPESamplerDecl: Equatable {
 }
 
 struct WPEUniformDecl: Equatable {
-    let type: String       // GLSL type name as written in source
-    let name: String
-    let metalType: String  // Translated for use in the Metal struct
+    let type: String         // GLSL type name as written in source
+    let name: String         // Identifier without any `[N]` suffix
+    let metalType: String    // Translated for use in the Metal struct
+    /// When the declaration is `float foo[16];` this is `16`; otherwise nil.
+    let arrayLength: Int?
 
     static func parse(line: String) -> Self? {
         guard line.hasPrefix("uniform ") else { return nil }
         let body = String(line.dropFirst("uniform ".count))
         // Skip sampler2D — handled separately. (Sampler is detected first.)
         if body.hasPrefix("sampler") { return nil }
-        // Format: `<type> <name>;`
         let trimmed = body.trimmingCharacters(in: .whitespaces)
         guard let semicolon = trimmed.firstIndex(of: ";") else { return nil }
         let decl = trimmed[..<semicolon]
         let tokens = decl.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
         guard tokens.count >= 2 else { return nil }
         let type = tokens[0]
-        let name = tokens[1]
+        // `float g_AudioSpectrum32Left[32]` shows up as a single token because
+        // there's no space, but `float foo [32]` could too. Handle both.
+        let nameToken = tokens[1...].joined()
+        var name = nameToken
+        var arrayLength: Int?
+        if let bracket = name.firstIndex(of: "[") {
+            let core = String(name[..<bracket])
+            let after = name[name.index(after: bracket)...]
+            if let close = after.firstIndex(of: "]") {
+                let lengthString = String(after[..<close]).trimmingCharacters(in: .whitespaces)
+                arrayLength = Int(lengthString)
+            }
+            name = core
+        }
+        guard !name.isEmpty else { return nil }
         let metal = mapType(type)
-        return Self(type: type, name: name, metalType: metal)
+        return Self(type: type, name: name, metalType: metal, arrayLength: arrayLength)
     }
 
     static func mapType(_ glsl: String) -> String {

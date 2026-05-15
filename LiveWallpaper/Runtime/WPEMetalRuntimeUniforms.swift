@@ -11,20 +11,67 @@ struct WPEMetalRuntimeUniforms: Equatable, Sendable {
     let daytime: Double
     let brightness: Double
     let pointerPosition: SIMD2<Double>
+    /// Mono spectrum, length 64. Audio-reactive shaders consume 16/32/64
+    /// element slices via the resolution combo. Default zero — when the
+    /// scene's audio runtime feeds real FFT bins, replace it. Each bin
+    /// is a normalized 0…1 magnitude, ordered low frequency → high.
+    let audioSpectrum: [Double]
 
     static let zero = WPEMetalRuntimeUniforms(
         time: 0,
         daytime: 0,
         brightness: 1,
-        pointerPosition: SIMD2<Double>(0.5, 0.5)
+        pointerPosition: SIMD2<Double>(0.5, 0.5),
+        audioSpectrum: [Double](repeating: 0, count: 64)
     )
 
+    init(
+        time: Double,
+        daytime: Double,
+        brightness: Double,
+        pointerPosition: SIMD2<Double>,
+        audioSpectrum: [Double] = [Double](repeating: 0, count: 64)
+    ) {
+        self.time = time
+        self.daytime = daytime
+        self.brightness = brightness
+        self.pointerPosition = pointerPosition
+        // Pad/truncate so consumers can always pull the slice they need.
+        if audioSpectrum.count >= 64 {
+            self.audioSpectrum = Array(audioSpectrum.prefix(64))
+        } else {
+            var padded = audioSpectrum
+            padded.append(contentsOf: [Double](repeating: 0, count: 64 - audioSpectrum.count))
+            self.audioSpectrum = padded
+        }
+    }
+
     var uniformValues: [String: WPESceneShaderConstantValue] {
-        [
+        // Build the spectrum slices the audio-reactive shader family
+        // consumes. Same data, three resolutions — the shader's combo
+        // selects which one it samples; we publish all so the dispatcher
+        // hits whichever the translated MSL aliased.
+        let s64 = audioSpectrum
+        let s32 = stride(from: 0, to: 64, by: 2).map { (i: Int) -> Double in
+            (s64[i] + s64[i + 1]) * 0.5
+        }
+        let s16 = stride(from: 0, to: 32, by: 2).map { (i: Int) -> Double in
+            (s32[i] + s32[i + 1]) * 0.5
+        }
+        return [
             "g_Time": .number(time),
             "g_Daytime": .number(daytime),
             "g_Brightness": .number(brightness),
-            "g_PointerPosition": .vector([pointerPosition.x, pointerPosition.y])
+            "g_PointerPosition": .vector([pointerPosition.x, pointerPosition.y]),
+            // Audio runtime: same array fills both stereo channels until
+            // a per-channel runtime ships. Audio-reactive scenes will
+            // animate as silence when the source isn't producing audio.
+            "g_AudioSpectrum16Left": .vector(s16),
+            "g_AudioSpectrum16Right": .vector(s16),
+            "g_AudioSpectrum32Left": .vector(s32),
+            "g_AudioSpectrum32Right": .vector(s32),
+            "g_AudioSpectrum64Left": .vector(s64),
+            "g_AudioSpectrum64Right": .vector(s64)
         ]
     }
 }
