@@ -14947,8 +14947,12 @@
         }
       }
     },
+    "Workshop folder is unreachable: %@. Try again — your saved access remains." : {
+      "comment" : "Workshop library folder access error after a transient scan failure. The placeholder is the system detail. The saved bookmark is preserved so the user can retry."
+    },
     "Workshop folder is unreachable: %@. Try re-granting access." : {
       "comment" : "Workshop library folder access error. The placeholder is the system detail.",
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {

@@ -294,11 +294,17 @@ struct ScreenDetailView: View {
             }
         }
         .confirmDestructive($pendingDestructive)
-        .onAppear { loadScreenConfiguration() }
+        .onAppear {
+            // Defer the 14 @State writes inside `loadScreenConfiguration`
+            // to next main-actor tick so the first paint doesn't trip
+            // "Modifying state during view update" warnings. Same
+            // discipline used by the .onReceive handler below.
+            Task { @MainActor in loadScreenConfiguration() }
+        }
         .onDisappear { cleanupPreviewPlayer() }
         .onChange(of: screen.id) {
             cleanupPreviewPlayer()
-            loadScreenConfiguration()
+            Task { @MainActor in loadScreenConfiguration() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .wallpaperConfigurationDidChange)) { notification in
             guard let changedID = notification.userInfo?["screenID"] as? CGDirectDisplayID,

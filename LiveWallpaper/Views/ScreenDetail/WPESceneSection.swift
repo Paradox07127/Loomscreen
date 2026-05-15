@@ -32,13 +32,21 @@ struct WPESceneSection: View {
         // constraint cycle (`needs Update Constraints in Window pass …`).
         .animation(.default, value: recentImports.isEmpty)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onAppear { reloadHistory() }
+        .onAppear {
+            // `reloadHistory()` writes `recentImports` / `selectedHistoryEntry`
+            // @State — defer to next main-actor tick to keep the first paint
+            // out of the "Modifying state during view update" cascade. Same
+            // pattern as the .onReceive handlers below.
+            Task { @MainActor in reloadHistory() }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .wpeImportDidComplete)) { notification in
-            reloadHistory()
-            selectUnsupportedImportIfNeeded(from: notification)
+            Task { @MainActor in
+                reloadHistory()
+                selectUnsupportedImportIfNeeded(from: notification)
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .wpeHistoryDidChange)) { _ in
-            reloadHistory()
+            Task { @MainActor in reloadHistory() }
         }
         .sheet(isPresented: $showWorkshopGallery) {
             WorkshopGalleryView(screen: screen)

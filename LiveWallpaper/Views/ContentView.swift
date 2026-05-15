@@ -50,7 +50,11 @@ struct ContentView: View {
             selectedNavigation = .general
         }
         .onReceive(NotificationCenter.default.publisher(for: .screensRefreshed)) { _ in
-            selectDefaultDisplayIfNeeded()
+            // Posted synchronously from ScreenManager.refreshScreens
+            // during init / display reconfigure. Defer the @State write
+            // (selectedNavigation) to next tick so it doesn't fire inside
+            // SwiftUI's reconcile.
+            Task { @MainActor in selectDefaultDisplayIfNeeded() }
         }
         .onAppear {
             selectDefaultDisplayIfNeeded()
@@ -364,12 +368,24 @@ struct ScreenRow: View {
             }
         }
         .padding(.vertical, 2)
-        .onAppear { refreshEffectBadge() }
-        .onChange(of: screen.id) { refreshEffectBadge() }
+        .onAppear {
+            Task { @MainActor in refreshEffectBadge() }
+        }
+        .onChange(of: screen.id) {
+            Task { @MainActor in refreshEffectBadge() }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .wallpaperConfigurationDidChange)) { notification in
-            if let changedID = notification.userInfo?["screenID"] as? CGDirectDisplayID,
-               changedID == screen.id {
-                withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.2))) { refreshEffectBadge() }
+            guard let changedID = notification.userInfo?["screenID"] as? CGDirectDisplayID,
+                  changedID == screen.id else { return }
+            // The notification is posted synchronously from
+            // `WallpaperPersistenceCoordinator.save(_:)`. Deferring the
+            // @State mutation (hasEffectBadge) one tick avoids
+            // "Modifying state during view update" cascades — matches
+            // the pattern used elsewhere in the sidebar / detail views.
+            Task { @MainActor in
+                withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.2))) {
+                    refreshEffectBadge()
+                }
             }
         }
         .accessibilityElement(children: .combine)
