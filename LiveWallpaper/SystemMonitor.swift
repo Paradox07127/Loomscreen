@@ -75,13 +75,13 @@ final class SystemMonitor {
         let interval = updateInterval
         let initialSampleDelay = MonitoringStartPolicy.initialSampleDelay
         resourceUpdateCount = 0
-        updateTask = Task {
+        updateTask = Task { [weak self] in
             do {
                 try await Task.sleep(for: initialSampleDelay)
             } catch {
                 return
             }
-            self.updateResourceUsage()
+            await self?.sampleAndApply()
 
             while !Task.isCancelled {
                 do {
@@ -89,7 +89,7 @@ final class SystemMonitor {
                 } catch {
                     return
                 }
-                self.updateResourceUsage()
+                await self?.sampleAndApply()
             }
         }
     }
@@ -134,19 +134,103 @@ final class SystemMonitor {
 
     // MARK: - Update Loop
 
-    private func updateResourceUsage() {
+    /// Captures a full system snapshot off-MainActor and reapplies the
+    /// derived values back on MainActor with diff guards. The sampling code
+    /// itself only touches Mach/IOKit/VM-stat APIs that have no main-thread
+    /// requirement, so moving them off the main queue eliminates the
+    /// recurring 2-second main-thread spike from the previous design.
+    private func sampleAndApply() async {
         resourceUpdateCount += 1
-        cpuUsage = getAppCPUUsage()
-        systemCpuUsage = getSystemCPUUsage()
-        memoryUsage = getAppMemoryUsage()
-        systemMemoryUsage = getSystemMemoryUsage()
-        if MonitoringCadencePolicy.shouldSampleGPU(updateCount: resourceUpdateCount, cadence: gpuSampleCadence) {
-            gpuUsage = getGPUUsage()
+        let updateCount = resourceUpdateCount
+        let interval = updateInterval
+        let prev = HostCpuLoadSnapshot(value: prevHostCpuLoad)
+        let shouldSampleGPU = MonitoringCadencePolicy.shouldSampleGPU(
+            updateCount: updateCount,
+            cadence: gpuSampleCadence
+        )
+
+        let sample = await Task.detached(priority: .utility) { () -> SystemSample in
+            let cpuResult = SystemMonitor.sampleSystemCPUUsage(prev: prev.value)
+            return SystemSample(
+                cpuUsage: SystemMonitor.sampleAppCPUUsage(),
+                systemCpuUsage: cpuResult.usage,
+                newHostCpuLoad: HostCpuLoadSnapshot(value: cpuResult.newPrev),
+                memoryUsage: SystemMonitor.sampleAppMemoryUsage(),
+                systemMemoryUsage: SystemMonitor.sampleSystemMemoryUsage(),
+                gpuUsage: shouldSampleGPU ? SystemMonitor.sampleGPUUsage() : nil,
+                energyImpact: SystemMonitor.sampleEnergyImpact(updateInterval: interval),
+                thermalState: ProcessInfo.processInfo.thermalState
+            )
+        }.value
+
+        // `Task.detached` runs outside the monitor task's cancellation
+        // scope, so a sample that was already in flight when
+        // `stopMonitoring()` ran would otherwise still write back. Re-check
+        // here to keep one-shot late samples from reviving the published
+        // properties after the dashboard left the screen.
+        guard !Task.isCancelled else { return }
+        applySample(sample)
+    }
+
+    /// Reapplies a sample on MainActor with diff guards so views observing
+    /// individual properties (cpuUsage, gpuUsage, …) re-evaluate only when
+    /// the value materially changed. Per-property epsilons suppress the
+    /// constant micro-fluctuation that otherwise drove a re-render every
+    /// 2 seconds even when the dashboard was visually identical.
+    private func applySample(_ sample: SystemSample) {
+        if abs(cpuUsage - sample.cpuUsage) > Self.percentMaterialEpsilon {
+            cpuUsage = sample.cpuUsage
         }
-        energyImpact = getEnergyImpact()
-        thermalState = ProcessInfo.processInfo.thermalState
-        videoFPS = fpsCounter.fps
+        if let systemCpu = sample.systemCpuUsage,
+           abs(systemCpuUsage - systemCpu) > Self.percentMaterialEpsilon {
+            systemCpuUsage = systemCpu
+        }
+        prevHostCpuLoad = sample.newHostCpuLoad.value
+        if memoryUsage != sample.memoryUsage {
+            memoryUsage = sample.memoryUsage
+        }
+        if abs(systemMemoryUsage - sample.systemMemoryUsage) > Self.ratioMaterialEpsilon {
+            systemMemoryUsage = sample.systemMemoryUsage
+        }
+        if let gpu = sample.gpuUsage,
+           abs(gpuUsage - gpu) > Self.percentMaterialEpsilon {
+            gpuUsage = gpu
+        }
+        if abs(energyImpact - sample.energyImpact) > Self.energyMaterialEpsilon {
+            energyImpact = sample.energyImpact
+        }
+        if thermalState != sample.thermalState {
+            thermalState = sample.thermalState
+        }
+        let fps = fpsCounter.fps
+        if abs(videoFPS - fps) > Self.fpsMaterialEpsilon {
+            videoFPS = fps
+        }
         checkMemoryWarning()
+    }
+
+    // Material-change thresholds tuned for human perception, not raw
+    // precision — at a 2-second refresh rate, sub-percent CPU/GPU swings
+    // and sub-percent RAM jitter aren't readable, so writing them only
+    // churns the SwiftUI render loop without giving the user new info.
+    @ObservationIgnored private static let percentMaterialEpsilon: Double = 1.0
+    @ObservationIgnored private static let ratioMaterialEpsilon: Double = 0.01
+    @ObservationIgnored private static let energyMaterialEpsilon: Double = 0.1
+    @ObservationIgnored private static let fpsMaterialEpsilon: Double = 0.5
+
+    private struct HostCpuLoadSnapshot: @unchecked Sendable {
+        let value: host_cpu_load_info?
+    }
+
+    private struct SystemSample: @unchecked Sendable {
+        let cpuUsage: Double
+        let systemCpuUsage: Double?
+        let newHostCpuLoad: HostCpuLoadSnapshot
+        let memoryUsage: UInt64
+        let systemMemoryUsage: Double
+        let gpuUsage: Double?
+        let energyImpact: Double
+        let thermalState: ProcessInfo.ThermalState
     }
 
     private func checkMemoryWarning() {
@@ -166,7 +250,7 @@ final class SystemMonitor {
 
     // MARK: - CPU Usage
 
-    private func getAppCPUUsage() -> Double {
+    nonisolated private static func sampleAppCPUUsage() -> Double {
         var totalUsageOfCPU: Double = 0.0
         var threadsList: thread_act_array_t?
         var threadsCount = mach_msg_type_number_t(0)
@@ -200,7 +284,14 @@ final class SystemMonitor {
 
     // MARK: - System-wide CPU Usage
 
-    private func getSystemCPUUsage() -> Double {
+    /// Returns `(usage, newPrev)`. `usage` is `nil` when the host-statistics
+    /// call fails or returns a degenerate tick delta — callers keep the
+    /// previously observed value in that case. `newPrev` is the latest
+    /// `host_cpu_load_info` snapshot which the caller stores back on
+    /// MainActor for the next iteration's delta computation.
+    nonisolated private static func sampleSystemCPUUsage(
+        prev: host_cpu_load_info?
+    ) -> (usage: Double?, newPrev: host_cpu_load_info?) {
         var info = host_cpu_load_info()
         var size = mach_msg_type_number_t(MemoryLayout<host_cpu_load_info>.stride / MemoryLayout<integer_t>.size)
         let hostPort = mach_host_self()
@@ -211,10 +302,10 @@ final class SystemMonitor {
                 host_statistics(hostPort, HOST_CPU_LOAD_INFO, intPtr, &size)
             }
         }
-        guard result == KERN_SUCCESS else { return systemCpuUsage }
+        guard result == KERN_SUCCESS else { return (nil, prev) }
 
-        defer { prevHostCpuLoad = info }
-        guard let prev = prevHostCpuLoad else { return 0 }
+        let newPrev: host_cpu_load_info? = info
+        guard let prev else { return (0, newPrev) }
 
         let userDelta   = Double(info.cpu_ticks.0 &- prev.cpu_ticks.0)
         let systemDelta = Double(info.cpu_ticks.1 &- prev.cpu_ticks.1)
@@ -222,13 +313,13 @@ final class SystemMonitor {
         let niceDelta   = Double(info.cpu_ticks.3 &- prev.cpu_ticks.3)
         let busy = userDelta + systemDelta + niceDelta
         let total = busy + idleDelta
-        guard total > 0 else { return systemCpuUsage }
-        return min(100, max(0, busy / total * 100))
+        guard total > 0 else { return (nil, newPrev) }
+        return (min(100, max(0, busy / total * 100)), newPrev)
     }
 
     // MARK: - Memory Usage
 
-    private func getAppMemoryUsage() -> UInt64 {
+    nonisolated private static func sampleAppMemoryUsage() -> UInt64 {
         var info = task_vm_info_data_t()
         var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
 
@@ -240,7 +331,7 @@ final class SystemMonitor {
         return result == KERN_SUCCESS ? info.phys_footprint : 0
     }
 
-    private func getSystemMemoryUsage() -> Double {
+    nonisolated private static func sampleSystemMemoryUsage() -> Double {
         var pageSize: vm_size_t = 0
         let hostPort = mach_host_self()
         defer { mach_port_deallocate(mach_task_self_, hostPort) }
@@ -263,7 +354,7 @@ final class SystemMonitor {
 
     // MARK: - GPU Usage (via IOKit)
 
-    private func getGPUUsage() -> Double {
+    nonisolated private static func sampleGPUUsage() -> Double {
         var iterator: io_iterator_t = 0
         let matchDict = IOServiceMatching("IOAccelerator")
 
@@ -301,7 +392,7 @@ final class SystemMonitor {
 
     // MARK: - Energy Impact (via task_info)
 
-    private func getEnergyImpact() -> Double {
+    nonisolated private static func sampleEnergyImpact(updateInterval: TimeInterval) -> Double {
         var power = task_power_info_v2_data_t()
         var count = mach_msg_type_number_t(MemoryLayout<task_power_info_v2_data_t>.size / MemoryLayout<integer_t>.size)
 

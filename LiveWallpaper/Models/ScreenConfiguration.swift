@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-struct ScreenConfiguration: Codable, Equatable {
+struct ScreenConfiguration: Codable, Equatable, Sendable {
     /// Mutable so `ScreenManager.applyConfigurationToAllDisplays` can clone
     /// a template for every other screen without recomposing each field.
     var screenID: UInt32
@@ -207,6 +207,16 @@ struct ScreenConfiguration: Codable, Equatable {
 
     var videoBookmarkData: Data? {
         activeWallpaper.activeVideoBookmarkData ?? savedVideoBookmarkData
+    }
+
+    var hasConfiguredVideoSource: Bool {
+        if let bookmarkData = activeWallpaper.activeVideoBookmarkData, !bookmarkData.isEmpty {
+            return true
+        }
+        if let savedVideoBookmarkData, !savedVideoBookmarkData.isEmpty {
+            return true
+        }
+        return false
     }
 
     var preferredVideoBookmarkData: Data? {

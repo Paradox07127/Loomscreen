@@ -1,6 +1,6 @@
 import SwiftUI
 
-enum ParticleEffect: String, Codable, CaseIterable, Identifiable {
+enum ParticleEffect: String, Codable, CaseIterable, Identifiable, Sendable {
     case none = "None"
     case snow = "Snow"
     case rain = "Rain"

@@ -21,6 +21,12 @@ final class WallpaperEffectsCoordinator {
     private let applyFrameRateLimit: @MainActor (FrameRateLimit, Screen) -> Void
     private let screenRefreshRate: @MainActor (CGDirectDisplayID) -> Int
 
+    /// Bumped each time `observeWeatherChanges()` registers a new observer.
+    /// The onChange callback short-circuits when its captured generation no
+    /// longer matches the latest value, so accidentally re-registering does
+    /// not cascade into stacked callbacks.
+    private var weatherTrackingGeneration: UInt64 = 0
+
     init(
         weatherService: WeatherReactiveService = WeatherReactiveService(),
         videoEffectsApplier: VideoEffectsApplicationService = VideoEffectsApplicationService(),
@@ -42,14 +48,16 @@ final class WallpaperEffectsCoordinator {
     // MARK: - Public API (called from ScreenManager facade)
 
     func updateEffectConfig(_ effectConfig: VideoEffectConfig, for screen: Screen) {
-        guard var config = configurationStore.get(for: screen.id) else { return }
+        guard var config = configurationStore.get(for: screen.id),
+              config.effectConfig != effectConfig else { return }
         config.effectConfig = effectConfig
         saveConfiguration(config)
         applyVideoEffects(for: screen, config: config)
     }
 
     func updateParticleEffect(_ effect: ParticleEffect, for screen: Screen) {
-        guard var config = configurationStore.get(for: screen.id) else { return }
+        guard var config = configurationStore.get(for: screen.id),
+              config.particleEffect != effect else { return }
         config.particleEffect = effect
         saveConfiguration(config)
         applyParticleEffect(effect, density: config.effectConfig.particleDensity, to: screen)
@@ -65,7 +73,8 @@ final class WallpaperEffectsCoordinator {
     }
 
     func setWeatherReactive(_ enabled: Bool, for screen: Screen) {
-        guard var config = configurationStore.get(for: screen.id) else { return }
+        guard var config = configurationStore.get(for: screen.id),
+              config.effectConfig.weatherReactive != enabled else { return }
         config.effectConfig.weatherReactive = enabled
         saveConfiguration(config)
         refreshWeatherMonitoringState()
@@ -154,12 +163,15 @@ final class WallpaperEffectsCoordinator {
     }
 
     private func observeWeatherChanges() {
+        weatherTrackingGeneration &+= 1
+        let generation = weatherTrackingGeneration
         withObservationTracking {
             _ = weatherService.currentParticleEffect
             _ = weatherService.currentEffectAdjustments
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
-                guard let self else { return }
+                guard let self,
+                      self.weatherTrackingGeneration == generation else { return }
                 for screen in self.screensProvider() {
                     guard let config = self.configurationStore.get(for: screen.id),
                           config.effectConfig.weatherReactive else { continue }

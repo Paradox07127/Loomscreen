@@ -39,7 +39,7 @@ final class PlaybackCoordinator {
     private let releaseRuntimeSession: @MainActor (Screen) -> Void
     /// Hook into ScreenManager's full session-changed pipeline (state version
     /// bump + summary cache refresh + playback state push + full-screen
-    /// fallback re-evaluation + screensRefreshed notification).
+    /// fallback re-evaluation).
     private let notifyWallpaperSessionChanged: @MainActor () -> Void
 
     init(
@@ -475,11 +475,19 @@ final class PlaybackCoordinator {
 
     private func save(_ configuration: ScreenConfiguration) {
         configurationStore.save(configuration)
-        NotificationCenter.default.post(
-            name: .wallpaperConfigurationDidChange,
-            object: nil,
-            userInfo: ["screenID": configuration.screenID]
-        )
+        // Deferred one main-actor tick so the notification fires outside the
+        // SwiftUI reconcile pass that may have triggered this save (e.g. a
+        // toggle's `Binding.set`). The store's cache is already updated, so
+        // observers reading the configuration see the new value
+        // synchronously; only the redraw signal is delayed.
+        let screenID = configuration.screenID
+        Task { @MainActor in
+            NotificationCenter.default.post(
+                name: .wallpaperConfigurationDidChange,
+                object: nil,
+                userInfo: ["screenID": screenID]
+            )
+        }
     }
 
     private func applyPerformancePolicy(to screen: Screen) {
