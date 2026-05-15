@@ -43,6 +43,9 @@ enum WPESceneDocumentParser {
 
         let rawObjects: [[String: Any]] = (root["objects"] as? [[String: Any]]) ?? []
         var imageObjects: [WPESceneImageObject] = []
+        var particleObjects: [WPESceneParticleObject] = []
+        var textObjects: [WPESceneTextObject] = []
+        var soundObjects: [WPESceneSoundObject] = []
 
         for entry in rawObjects {
             let objectName = entry["name"] as? String ?? "?"
@@ -55,13 +58,48 @@ enum WPESceneDocumentParser {
             if resolution.primary == .image, let object = parseImageObject(entry, diagnostics: &diagnostics) {
                 imageObjects.append(object)
             }
+            // Phase 2D-K: keep particle metadata around for the runtime,
+            // even though the renderer still downgrades the object until
+            // the CPU emitter ships. The parsed record lets later phases
+            // pick up where parsing left off without rewalking scene.json.
+            if resolution.primary == .particle, let object = parseParticleObject(entry, diagnostics: &diagnostics) {
+                particleObjects.append(object)
+            }
+            // Phase 2D-N: text objects rasterize via CoreText into an
+            // image layer, so they go through their own parse path and
+            // still flow into the regular image-render flow.
+            if resolution.primary == .text, let object = parseTextObject(entry, diagnostics: &diagnostics) {
+                textObjects.append(object)
+            }
+            // Phase 2D-O: sound objects feed the AVAudioEngine playback
+            // path + FFT tap. We preserve them at the parse layer so
+            // the runtime can play any audio file the scene declares.
+            if resolution.primary == .sound, let object = parseSoundObject(entry, diagnostics: &diagnostics) {
+                soundObjects.append(object)
+            }
 
-            var unsupportedKinds = resolution.candidates.filter { $0 != .image && $0 != .unknown }
-            if resolution.primary != .image && resolution.primary != .unknown && !unsupportedKinds.contains(resolution.primary) {
+            var unsupportedKinds = resolution.candidates.filter {
+                $0 != .image && $0 != .unknown && $0 != .particle && $0 != .text && $0 != .sound
+            }
+            if resolution.primary != .image
+                && resolution.primary != .particle
+                && resolution.primary != .text
+                && resolution.primary != .sound
+                && resolution.primary != .unknown
+                && !unsupportedKinds.contains(resolution.primary) {
                 unsupportedKinds.append(resolution.primary)
             }
             for kind in unsupportedKinds {
                 diagnostics.append(.init(severity: .info, message: "\(kind.displayName) object \(objectName) is unsupported in Phase 2.0"))
+            }
+            if resolution.primary == .particle {
+                diagnostics.append(.init(severity: .info, message: "Particle object \(objectName) parsed; runtime emitter not yet implemented"))
+            }
+            if resolution.primary == .text {
+                diagnostics.append(.init(severity: .info, message: "Text object \(objectName) parsed; CoreText rasterizer renders static content"))
+            }
+            if resolution.primary == .sound {
+                diagnostics.append(.init(severity: .info, message: "Sound object \(objectName) parsed; AVAudioEngine playback runs at scene start"))
             }
 
             if resolution.primary == .unknown {
@@ -88,7 +126,182 @@ enum WPESceneDocumentParser {
             camera: camera,
             general: general,
             imageObjects: imageObjects,
+            particleObjects: particleObjects,
+            textObjects: textObjects,
+            soundObjects: soundObjects,
             diagnostics: diagnostics
+        )
+    }
+
+    private static func parseSoundObject(
+        _ dict: [String: Any],
+        diagnostics: inout [WPESceneDiagnostic]
+    ) -> WPESceneSoundObject? {
+        // WPE writes the `sound` field as either a single string or an
+        // array (multiple files for random/playlist mode). We accept
+        // both forms and normalize to an array.
+        var paths: [String] = []
+        if let single = dict["sound"] as? String, !single.isEmpty {
+            paths.append(single)
+        } else if let array = dict["sound"] as? [Any] {
+            for value in array {
+                if let s = value as? String, !s.isEmpty {
+                    paths.append(s)
+                }
+            }
+        }
+        guard !paths.isEmpty else {
+            diagnostics.append(.init(severity: .warning, message: "Sound object \(dict["name"] as? String ?? "?") has no sound files"))
+            return nil
+        }
+        let id = (dict["id"] as? String)
+            ?? (dict["id"] as? Int).map(String.init)
+            ?? (dict["name"] as? String)
+            ?? paths[0]
+        let name = (dict["name"] as? String) ?? id
+        let volume = unwrapDouble(dict["volume"]) ?? 1
+        let mode = (dict["playbackmode"] as? String) ?? "loop"
+        let startSilent = (dict["startsilent"] as? Bool) ?? false
+        return WPESceneSoundObject(
+            id: id,
+            name: name,
+            soundRelativePaths: paths,
+            volume: max(0, min(volume, 1)),
+            playbackMode: mode.lowercased(),
+            startSilent: startSilent
+        )
+    }
+
+    /// Phase 2D-N: text objects shape per the corpus. Many WPE properties
+    /// arrive wrapped as `{ "user": "...", "value": <actual> }` so the
+    /// editor can bind them to user-controlled sliders. We unwrap to the
+    /// runtime value here — SceneScript-driven `value` strings rasterize
+    /// as their initial content until the JS runtime ships.
+    private static func parseTextObject(
+        _ dict: [String: Any],
+        diagnostics: inout [WPESceneDiagnostic]
+    ) -> WPESceneTextObject? {
+        let raw = dict["text"]
+        let text: String?
+        var textScript: String? = nil
+        switch raw {
+        case let value as String:
+            text = value
+        case let nested as [String: Any]:
+            // Either `{value: "..."}` or `{script: "...", value: "..."}`.
+            text = (nested["value"] as? String) ?? (nested["text"] as? String)
+            // Phase 2D-P: capture the embedded JS so the runtime can
+            // tick it each frame. Initial `value` becomes the visible
+            // text until the first script update returns.
+            if let script = nested["script"] as? String, !script.isEmpty {
+                textScript = script
+            }
+        default:
+            text = nil
+        }
+        guard let text, !text.isEmpty else {
+            diagnostics.append(.init(severity: .warning, message: "Text object \(dict["name"] as? String ?? "?") has no resolvable text"))
+            return nil
+        }
+        let id = (dict["id"] as? String)
+            ?? (dict["id"] as? Int).map(String.init)
+            ?? (dict["name"] as? String)
+            ?? text
+        let name = (dict["name"] as? String) ?? id
+        let font = unwrapString(dict["font"])
+        let pointSize = unwrapDouble(dict["pointsize"]) ?? unwrapDouble(dict["fontsize"]) ?? 32
+        let color = unwrapVector3(dict["color"]) ?? SIMD3<Double>(1, 1, 1)
+        let alpha = unwrapDouble(dict["alpha"]) ?? 1
+        let origin = unwrapVector3(dict["origin"]) ?? SIMD3<Double>(0, 0, 0)
+        let scale = unwrapVector3(dict["scale"]) ?? SIMD3<Double>(1, 1, 1)
+        let visible = (dict["visible"] as? Bool) ?? true
+        let horiz = unwrapString(dict["horizontalalign"]) ?? "center"
+        let vert = unwrapString(dict["verticalalign"]) ?? "middle"
+        let maxWidth = unwrapDouble(dict["maxwidth"]) ?? unwrapDouble(dict["limitwidth"])
+        let parallaxDepth = unwrapDouble(dict["parallaxDepth"]) ?? unwrapDouble(dict["parallaxdepth"]) ?? 0
+
+        return WPESceneTextObject(
+            id: id,
+            name: name,
+            text: text,
+            textScript: textScript,
+            fontRelativePath: font,
+            pointSize: max(1, pointSize),
+            color: color,
+            alpha: max(0, min(alpha, 1)),
+            origin: origin,
+            scale: scale,
+            visible: visible,
+            horizontalAlignment: horiz.lowercased(),
+            verticalAlignment: vert.lowercased(),
+            maxWidth: maxWidth.map { max(1, $0) },
+            parallaxDepth: parallaxDepth
+        )
+    }
+
+    /// Unwrap WPE's `{ "user": "...", "value": <X> }` envelope, recursing
+    /// when the inner `value` is itself a property reference. Returns the
+    /// underlying scalar if any.
+    private static func unwrapDouble(_ raw: Any?) -> Double? {
+        if let value = WPEValueParser.double(raw) { return value }
+        if let dict = raw as? [String: Any] {
+            return unwrapDouble(dict["value"])
+        }
+        return nil
+    }
+
+    private static func unwrapVector3(_ raw: Any?) -> SIMD3<Double>? {
+        if let value = WPEValueParser.vector3(raw) { return value }
+        if let dict = raw as? [String: Any] {
+            return unwrapVector3(dict["value"])
+        }
+        return nil
+    }
+
+    private static func unwrapString(_ raw: Any?) -> String? {
+        if let s = raw as? String, !s.isEmpty { return s }
+        if let dict = raw as? [String: Any] {
+            return unwrapString(dict["value"])
+        }
+        return nil
+    }
+
+    private static func parseParticleObject(
+        _ dict: [String: Any],
+        diagnostics: inout [WPESceneDiagnostic]
+    ) -> WPESceneParticleObject? {
+        // WPE writes particle objects with a `particle` key referencing the
+        // particles/*.json definition. Some scenes also wrap them under
+        // `controlpoint` / `instanceoverride`; we keep the model lean and
+        // just preserve the top-level metadata. Particles without a path
+        // are skipped — there's nothing to spawn from.
+        guard let path = dict["particle"] as? String, !path.isEmpty else {
+            diagnostics.append(.init(severity: .warning, message: "Particle object \(dict["name"] as? String ?? "?") has no particle file"))
+            return nil
+        }
+        let id = (dict["id"] as? String)
+            ?? (dict["id"] as? Int).map(String.init)
+            ?? (dict["name"] as? String)
+            ?? path
+        let name = (dict["name"] as? String) ?? id
+        let origin = parseVector3(dict["origin"]) ?? SIMD3<Double>(0, 0, 0)
+        let scale = parseVector3(dict["scale"]) ?? SIMD3<Double>(1, 1, 1)
+        let angles = parseVector3(dict["angles"]) ?? SIMD3<Double>(0, 0, 0)
+        let visible = parseBool(dict["visible"]) ?? true
+        let alpha = parseDouble(dict["alpha"]) ?? 1.0
+        let color = parseVector3(dict["color"]) ?? SIMD3<Double>(1, 1, 1)
+        let parallaxDepth = parseDouble(dict["parallaxDepth"]) ?? parseDouble(dict["parallaxdepth"]) ?? 0
+        return WPESceneParticleObject(
+            id: id,
+            name: name,
+            particleRelativePath: path,
+            origin: origin,
+            scale: scale,
+            angles: angles,
+            visible: visible,
+            alpha: alpha,
+            color: color,
+            parallaxDepth: parallaxDepth
         )
     }
 

@@ -16,8 +16,26 @@ final class WPEMetalRenderExecutor {
     private let targetPool: WPEMetalRenderTargetPool
     private let depthCache: WPEMetalDepthStateCache
     private let pipelineCache: WPEMetalPipelineCache
+    /// Phase 2D-A: invoked when the dispatcher sees a non-built-in shader.
+    /// Default is the stub which fails loudly with `.backendUnavailable`;
+    /// production builds inject a real translator once the toolchain ships.
+    let shaderCompiler: WPEShaderCompiling
+    /// Phase 2D-H: memoize the per-shader compile across frames so we
+    /// don't re-translate every draw call.
+    private var translatedShaderCache: [String: WPEShaderCompileResult] = [:]
+    /// Phase 2D-H: cache MTLRenderPipelineState built from translated
+    /// shaders. Library + blend + format set is the key.
+    private var translatedPipelineCache: [TranslatedPipelineKey: MTLRenderPipelineState] = [:]
 
-    init(device: MTLDevice) throws {
+    private struct TranslatedPipelineKey: Hashable {
+        let libraryID: ObjectIdentifier
+        let fragmentName: String
+        let blendMode: String
+        let colorPixelFormat: UInt
+        let depthPixelFormat: UInt
+    }
+
+    init(device: MTLDevice, shaderCompiler: WPEShaderCompiling? = nil) throws {
         guard let queue = device.makeCommandQueue() else {
             throw WPEMetalRenderExecutorError.commandQueueUnavailable
         }
@@ -29,6 +47,10 @@ final class WPEMetalRenderExecutor {
         self.targetPool = WPEMetalRenderTargetPool(device: device)
         self.depthCache = WPEMetalDepthStateCache(device: device)
         self.pipelineCache = WPEMetalPipelineCache(device: device, library: library)
+        // Phase 2D-H: default to the Swift transpiler, falling back to the
+        // stub if a caller wants to opt out (tests). Production now goes
+        // through the real translator path.
+        self.shaderCompiler = shaderCompiler ?? WPESwiftShaderCompiler(device: device)
     }
 
     /// Phase 2E: lets `WPEMetalSceneRenderer` hand the executor's MTLDevice
@@ -95,6 +117,183 @@ final class WPEMetalRenderExecutor {
             throw WPEMetalRenderExecutorError.commandBufferFailed
         }
         return output
+    }
+
+    /// Phase 2D-L: render every alive particle system on top of the
+    /// supplied output texture. Each system contributes one instanced
+    /// draw call, so the per-frame overhead scales with the number of
+    /// emitters (typically 1-5) rather than total particle count.
+    /// Existing render output is loaded as the color attachment so we
+    /// composite over the layer/effect chain that built the frame.
+    func drawParticles(
+        systems: [WPEParticleSystem],
+        texturesByMaterial: [ObjectIdentifier: MTLTexture],
+        sceneSize: CGSize,
+        output: MTLTexture
+    ) throws {
+        let alive = systems.filter { $0.liveInstanceCount > 0 }
+        guard !alive.isEmpty else { return }
+        guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+            throw WPEMetalRenderExecutorError.commandBufferFailed
+        }
+        let descriptor = MTLRenderPassDescriptor()
+        descriptor.colorAttachments[0].texture = output
+        descriptor.colorAttachments[0].loadAction = .load
+        descriptor.colorAttachments[0].storeAction = .store
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
+            throw WPEMetalRenderExecutorError.commandBufferFailed
+        }
+
+        var projection = WPEParticleProjection(
+            sceneSize: SIMD4<Float>(
+                Float(max(sceneSize.width, 1)),
+                Float(max(sceneSize.height, 1)),
+                0, 0
+            )
+        )
+
+        for system in alive {
+            let texture = texturesByMaterial[ObjectIdentifier(system)]
+                ?? texturesByMaterial.values.first
+            let pipelineState = try particlePipelineState(
+                colorPixelFormat: output.pixelFormat
+            )
+            encoder.setRenderPipelineState(pipelineState)
+            encoder.setVertexBuffer(system.instanceBuffer, offset: 0, index: 1)
+            encoder.setVertexBytes(&projection, length: MemoryLayout<WPEParticleProjection>.stride, index: 2)
+            if let texture {
+                encoder.setFragmentTexture(texture, index: 0)
+            }
+            encoder.drawPrimitives(
+                type: .triangleStrip,
+                vertexStart: 0,
+                vertexCount: 4,
+                instanceCount: system.liveInstanceCount
+            )
+        }
+        encoder.endEncoding()
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()
+    }
+
+    /// Phase 2D-N: composite a list of pre-rasterized text overlays on
+    /// top of the supplied output texture. Each overlay is one quad
+    /// draw, sized in pixel space and projected via the scene's
+    /// orthogonal width/height. Reuses the layer pixel format so the
+    /// pipeline state is cached separately from particles.
+    func drawTextOverlays(
+        overlays: [WPETextOverlayDraw],
+        sceneSize: CGSize,
+        output: MTLTexture
+    ) throws {
+        guard !overlays.isEmpty else { return }
+        guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+            throw WPEMetalRenderExecutorError.commandBufferFailed
+        }
+        let descriptor = MTLRenderPassDescriptor()
+        descriptor.colorAttachments[0].texture = output
+        descriptor.colorAttachments[0].loadAction = .load
+        descriptor.colorAttachments[0].storeAction = .store
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
+            throw WPEMetalRenderExecutorError.commandBufferFailed
+        }
+        let state = try textOverlayPipelineState(colorPixelFormat: output.pixelFormat)
+        encoder.setRenderPipelineState(state)
+
+        for overlay in overlays {
+            var u = WPETextOverlayUniforms(
+                centerAndSize: SIMD4<Float>(
+                    Float(overlay.centerInScenePixels.x),
+                    Float(overlay.centerInScenePixels.y),
+                    Float(overlay.sizeInScenePixels.width),
+                    Float(overlay.sizeInScenePixels.height)
+                ),
+                sceneSize: SIMD4<Float>(
+                    Float(max(sceneSize.width, 1)),
+                    Float(max(sceneSize.height, 1)),
+                    0, 0
+                ),
+                color: SIMD4<Float>(
+                    overlay.tint.x,
+                    overlay.tint.y,
+                    overlay.tint.z,
+                    overlay.alpha
+                )
+            )
+            encoder.setFragmentTexture(overlay.texture, index: 0)
+            encoder.setVertexBytes(&u, length: MemoryLayout<WPETextOverlayUniforms>.stride, index: 0)
+            encoder.setFragmentBytes(&u, length: MemoryLayout<WPETextOverlayUniforms>.stride, index: 0)
+            encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+        }
+        encoder.endEncoding()
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()
+    }
+
+    private var textOverlayPipelineCache: [UInt: MTLRenderPipelineState] = [:]
+
+    private func textOverlayPipelineState(colorPixelFormat: MTLPixelFormat) throws -> MTLRenderPipelineState {
+        if let cached = textOverlayPipelineCache[colorPixelFormat.rawValue] {
+            return cached
+        }
+        guard let library = device.makeDefaultLibrary(),
+              let vertex = library.makeFunction(name: "wpe_text_overlay_vertex"),
+              let fragment = library.makeFunction(name: "wpe_text_overlay_fragment") else {
+            throw WPEMetalRenderExecutorError.pipelineUnavailable("wpe_text_overlay_fragment")
+        }
+        let descriptor = MTLRenderPipelineDescriptor()
+        descriptor.vertexFunction = vertex
+        descriptor.fragmentFunction = fragment
+        guard let attachment = descriptor.colorAttachments[0] else {
+            throw WPEMetalRenderExecutorError.pipelineUnavailable("wpe_text_overlay_fragment")
+        }
+        attachment.pixelFormat = colorPixelFormat
+        // Standard premultiplied translucent compositing. CoreText
+        // already produced premultiplied output so srcRGB = sourceRGB
+        // (no alpha multiply on top).
+        attachment.isBlendingEnabled = true
+        attachment.rgbBlendOperation = .add
+        attachment.alphaBlendOperation = .add
+        attachment.sourceRGBBlendFactor = .one
+        attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
+        attachment.sourceAlphaBlendFactor = .one
+        attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        let state = try device.makeRenderPipelineState(descriptor: descriptor)
+        textOverlayPipelineCache[colorPixelFormat.rawValue] = state
+        return state
+    }
+
+    private var particlePipelineCache: [UInt: MTLRenderPipelineState] = [:]
+
+    private func particlePipelineState(colorPixelFormat: MTLPixelFormat) throws -> MTLRenderPipelineState {
+        if let cached = particlePipelineCache[colorPixelFormat.rawValue] {
+            return cached
+        }
+        guard let library = device.makeDefaultLibrary(),
+              let vertex = library.makeFunction(name: "wpe_particle_vertex"),
+              let fragment = library.makeFunction(name: "wpe_particle_instanced_fragment") else {
+            throw WPEMetalRenderExecutorError.pipelineUnavailable("wpe_particle_instanced_fragment")
+        }
+        let descriptor = MTLRenderPipelineDescriptor()
+        descriptor.vertexFunction = vertex
+        descriptor.fragmentFunction = fragment
+        guard let attachment = descriptor.colorAttachments[0] else {
+            throw WPEMetalRenderExecutorError.pipelineUnavailable("wpe_particle_instanced_fragment")
+        }
+        attachment.pixelFormat = colorPixelFormat
+        // Particles render with translucent (premultiplied) blending —
+        // the fragment outputs premultiplied alpha so destination contents
+        // pass through where alpha is zero.
+        attachment.isBlendingEnabled = true
+        attachment.rgbBlendOperation = .add
+        attachment.alphaBlendOperation = .add
+        attachment.sourceRGBBlendFactor = .one
+        attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
+        attachment.sourceAlphaBlendFactor = .one
+        attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        let state = try device.makeRenderPipelineState(descriptor: descriptor)
+        particlePipelineCache[colorPixelFormat.rawValue] = state
+        return state
     }
 
     @MainActor
@@ -353,6 +552,70 @@ final class WPEMetalRenderExecutor {
         }
     }
 
+    /// Phase 2D-E: shared dispatch path for single-input effect built-ins
+    /// (opacity, scroll, pulse, iris, waterwaves). They all sample one
+    /// source texture and emit a transformed copy, so the only thing that
+    /// changes per-effect is the fragment name + the uniform struct.
+    func dispatchSingleSampleEffect<U>(
+        fragmentName: String,
+        pass: WPEPreparedRenderPass,
+        destination: (id: WPEMetalTargetID, texture: MTLTexture),
+        textures: [String: MTLTexture],
+        frameState: WPEMetalFrameState,
+        encoder: MTLRenderCommandEncoder,
+        depthPixelFormat: MTLPixelFormat,
+        uniforms: U
+    ) throws {
+        encoder.setRenderPipelineState(try renderPipeline(
+            fragmentName: fragmentName,
+            blendMode: pass.pass.blending,
+            colorPixelFormat: destination.texture.pixelFormat,
+            depthPixelFormat: depthPixelFormat
+        ))
+        let reference = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
+        let texture = try WPEMetalShaderInputs.resolve(
+            reference: reference,
+            textures: textures,
+            frameState: frameState,
+            currentTargetID: destination.id
+        )
+        encoder.setFragmentTexture(texture, index: 0)
+        var local = uniforms
+        encoder.setFragmentBytes(&local, length: MemoryLayout<U>.stride, index: 0)
+    }
+
+    /// Phase 2D-D: pack scene uniforms for the genericimage* built-ins.
+    /// The MSL fragment expects (color × g_Color × brightness, alpha mask
+    /// flag) so we resolve g_Color through the same sRGB→linear path as
+    /// `WPEMetalShaderInputs.colorVector(for:)` and combine with g_Alpha
+    /// + g_Brightness.
+    func genericImageUniforms(for pass: WPEPreparedRenderPass, hasMask: Bool) -> WPEGenericImageUniforms {
+        WPEGenericImageUniforms(
+            color: WPEMetalShaderInputs.colorVector(for: pass),
+            alphaMaskUV: SIMD4<Float>(
+                WPEMetalShaderInputs.floatScalar(named: ["g_Alpha", "u_Alpha", "alpha"], in: pass, default: 1),
+                WPEMetalShaderInputs.floatScalar(named: ["g_Brightness", "u_Brightness", "brightness"], in: pass, default: 1),
+                hasMask ? 1 : 0,
+                0
+            )
+        )
+    }
+
+    /// Phase 2D-D: per-particle uniform pack. Same color path as the image
+    /// fragments; the spectrum slot in `sizeAndAge` stays zero until the
+    /// audio runtime ships and feeds an FFT bin into the executor.
+    func genericParticleUniforms(for pass: WPEPreparedRenderPass) -> WPEGenericParticleUniforms {
+        WPEGenericParticleUniforms(
+            color: WPEMetalShaderInputs.colorVector(for: pass),
+            sizeAndAge: SIMD4<Float>(
+                WPEMetalShaderInputs.floatScalar(named: ["g_Alpha", "u_Alpha", "alpha"], in: pass, default: 1),
+                WPEMetalShaderInputs.floatScalar(named: ["g_Brightness", "u_Brightness", "brightness"], in: pass, default: 1),
+                0,
+                0
+            )
+        )
+    }
+
     private func passReadsCurrentTarget(_ pass: WPEPreparedRenderPass, targetID: WPEMetalTargetID) -> Bool {
         textureReferences(for: pass).contains { reference in
             switch (reference, targetID) {
@@ -372,5 +635,259 @@ final class WPEMetalRenderExecutor {
         references.append(contentsOf: pass.pass.binds.values)
         references.append(contentsOf: pass.textureBindings.values)
         return references
+    }
+
+    /// Build (or fetch from cache) an `MTLRenderPipelineState` for a
+    /// translated shader's fragment function. Keyed by library identity
+    /// + blend + formats so distinct render targets can share the
+    /// upstream library without re-creating Metal pipelines per frame.
+    func translatedPipelineState(
+        for result: WPEShaderCompileResult,
+        blendMode: String,
+        colorPixelFormat: MTLPixelFormat,
+        depthPixelFormat: MTLPixelFormat
+    ) throws -> MTLRenderPipelineState {
+        let key = TranslatedPipelineKey(
+            libraryID: ObjectIdentifier(result.library),
+            fragmentName: result.fragmentFunctionName,
+            blendMode: blendMode.lowercased(),
+            colorPixelFormat: colorPixelFormat.rawValue,
+            depthPixelFormat: depthPixelFormat.rawValue
+        )
+        if let cached = translatedPipelineCache[key] {
+            return cached
+        }
+        // Fall through to the standard pipeline cache path by passing the
+        // custom library + functions in directly. We can't re-use
+        // WPEMetalPipelineCache because that one is bound to the default
+        // library; instead we replicate the descriptor+blend setup.
+        guard let vertex = result.library.makeFunction(name: result.vertexFunctionName)
+            ?? device.makeDefaultLibrary()?.makeFunction(name: result.vertexFunctionName),
+              let fragment = result.library.makeFunction(name: result.fragmentFunctionName) else {
+            throw WPEMetalRenderExecutorError.pipelineUnavailable(result.fragmentFunctionName)
+        }
+        let descriptor = MTLRenderPipelineDescriptor()
+        descriptor.vertexFunction = vertex
+        descriptor.fragmentFunction = fragment
+        guard let colorAttachment = descriptor.colorAttachments[0] else {
+            throw WPEMetalRenderExecutorError.pipelineUnavailable(result.fragmentFunctionName)
+        }
+        colorAttachment.pixelFormat = colorPixelFormat
+        descriptor.depthAttachmentPixelFormat = depthPixelFormat
+        Self.applyBlendMode(blendMode.lowercased(), to: colorAttachment)
+        let state = try device.makeRenderPipelineState(descriptor: descriptor)
+        translatedPipelineCache[key] = state
+        return state
+    }
+
+    /// Phase 2D-H: pack a runtime uniform buffer matching the layout the
+    /// transpiler emitted (every uniform takes 1-4 float4 slots). Pulls
+    /// values from `pass.uniformValues` first (runtime-merged) then
+    /// `pass.pass.constants` (material defaults). Missing values default
+    /// to zero. The buffer is sized to the slot maximum so any future
+    /// shader that fits the cap binds against the same fixed layout.
+    func packTranslatedUniforms(
+        for pass: WPEPreparedRenderPass,
+        layout: [WPEUniformSlot]
+    ) -> [SIMD4<Float>] {
+        var slots = [SIMD4<Float>](repeating: SIMD4<Float>(0, 0, 0, 0), count: WPEShaderTranspiler.uniformSlotMaximum)
+        for u in layout {
+            let value = pass.uniformValues[u.name] ?? pass.pass.constants[u.name]
+            // Array uniforms get one element per slot. We pull as many
+            // doubles as are available out of the constant value and
+            // zero-pad the rest. Audio spectrum uniforms feed in this way.
+            if let length = u.arrayLength {
+                let raw = Self.vectorValue(value, count: length)
+                for i in 0..<length {
+                    let v = raw.indices.contains(i) ? raw[i] : 0
+                    let slotIndex = u.slot + i
+                    guard slotIndex < slots.count else { break }
+                    switch u.glslType {
+                    case "vec2":
+                        let stride = 2
+                        slots[slotIndex] = SIMD4<Float>(
+                            raw.indices.contains(i * stride) ? raw[i * stride] : 0,
+                            raw.indices.contains(i * stride + 1) ? raw[i * stride + 1] : 0,
+                            0, 0
+                        )
+                    case "vec3":
+                        let stride = 3
+                        slots[slotIndex] = SIMD4<Float>(
+                            raw.indices.contains(i * stride) ? raw[i * stride] : 0,
+                            raw.indices.contains(i * stride + 1) ? raw[i * stride + 1] : 0,
+                            raw.indices.contains(i * stride + 2) ? raw[i * stride + 2] : 0,
+                            0
+                        )
+                    case "vec4":
+                        let stride = 4
+                        slots[slotIndex] = SIMD4<Float>(
+                            raw.indices.contains(i * stride) ? raw[i * stride] : 0,
+                            raw.indices.contains(i * stride + 1) ? raw[i * stride + 1] : 0,
+                            raw.indices.contains(i * stride + 2) ? raw[i * stride + 2] : 0,
+                            raw.indices.contains(i * stride + 3) ? raw[i * stride + 3] : 0
+                        )
+                    default:
+                        slots[slotIndex].x = v
+                    }
+                }
+                continue
+            }
+            switch u.glslType {
+            case "float", "int", "bool":
+                slots[u.slot].x = Self.scalarValue(value, default: 0)
+            case "vec2":
+                let v = Self.vectorValue(value, count: 2)
+                slots[u.slot] = SIMD4<Float>(v[0], v[1], 0, 0)
+            case "vec3":
+                let v = Self.vectorValue(value, count: 3)
+                slots[u.slot] = SIMD4<Float>(v[0], v[1], v[2], 0)
+            case "vec4":
+                let v = Self.vectorValue(value, count: 4)
+                slots[u.slot] = SIMD4<Float>(v[0], v[1], v[2], v[3])
+            case "mat2":
+                let v = Self.vectorValue(value, count: 4)
+                slots[u.slot] = SIMD4<Float>(v[0], v[1], 0, 0)
+                slots[u.slot + 1] = SIMD4<Float>(v[2], v[3], 0, 0)
+            case "mat3":
+                let v = Self.vectorValue(value, count: 9)
+                slots[u.slot] = SIMD4<Float>(v[0], v[1], v[2], 0)
+                slots[u.slot + 1] = SIMD4<Float>(v[3], v[4], v[5], 0)
+                slots[u.slot + 2] = SIMD4<Float>(v[6], v[7], v[8], 0)
+            case "mat4":
+                let v = Self.vectorValue(value, count: 16)
+                slots[u.slot] = SIMD4<Float>(v[0], v[1], v[2], v[3])
+                slots[u.slot + 1] = SIMD4<Float>(v[4], v[5], v[6], v[7])
+                slots[u.slot + 2] = SIMD4<Float>(v[8], v[9], v[10], v[11])
+                slots[u.slot + 3] = SIMD4<Float>(v[12], v[13], v[14], v[15])
+            default:
+                slots[u.slot].x = Self.scalarValue(value, default: 0)
+            }
+        }
+        return slots
+    }
+
+    private static func scalarValue(_ value: WPESceneShaderConstantValue?, default fallback: Float) -> Float {
+        switch value {
+        case .number(let n): return Float(n)
+        case .vector(let v): return Float(v.first ?? Double(fallback))
+        case .bool(let b):   return b ? 1 : 0
+        case .string(let s): return Float(s) ?? fallback
+        case nil:            return fallback
+        }
+    }
+
+    private static func vectorValue(_ value: WPESceneShaderConstantValue?, count: Int) -> [Float] {
+        switch value {
+        case .vector(let v):
+            var out = v.map(Float.init)
+            while out.count < count { out.append(0) }
+            return out
+        case .number(let n):
+            var out = [Float](repeating: 0, count: count)
+            out[0] = Float(n)
+            return out
+        default:
+            return [Float](repeating: 0, count: count)
+        }
+    }
+
+    /// Mirrors WPEMetalPipelineCache.applyBlendMode so the translated
+    /// pipeline path uses the same blend arithmetic as built-ins.
+    private static func applyBlendMode(_ mode: String, to attachment: MTLRenderPipelineColorAttachmentDescriptor) {
+        switch mode {
+        case "disabled":
+            attachment.isBlendingEnabled = false
+        case "additive":
+            attachment.isBlendingEnabled = true
+            attachment.rgbBlendOperation = .add
+            attachment.alphaBlendOperation = .add
+            attachment.sourceRGBBlendFactor = .sourceAlpha
+            attachment.destinationRGBBlendFactor = .one
+            attachment.sourceAlphaBlendFactor = .one
+            attachment.destinationAlphaBlendFactor = .one
+        case "multiply":
+            attachment.isBlendingEnabled = true
+            attachment.rgbBlendOperation = .add
+            attachment.alphaBlendOperation = .add
+            attachment.sourceRGBBlendFactor = .destinationColor
+            attachment.destinationRGBBlendFactor = .zero
+            attachment.sourceAlphaBlendFactor = .zero
+            attachment.destinationAlphaBlendFactor = .one
+        case "translucent":
+            attachment.isBlendingEnabled = true
+            attachment.rgbBlendOperation = .add
+            attachment.alphaBlendOperation = .add
+            attachment.sourceRGBBlendFactor = .one
+            attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
+            attachment.sourceAlphaBlendFactor = .one
+            attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        default:
+            attachment.isBlendingEnabled = true
+            attachment.rgbBlendOperation = .add
+            attachment.alphaBlendOperation = .add
+            attachment.sourceRGBBlendFactor = .sourceAlpha
+            attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
+            attachment.sourceAlphaBlendFactor = .one
+            attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        }
+    }
+
+    /// Run the WPE preprocessor + the configured `WPEShaderCompiling` over
+    /// the given prepared pass. Memoized per source hash.
+    func compileCustomShader(
+        for pass: WPEPreparedRenderPass
+    ) throws -> WPEShaderCompileResult {
+        guard let program = pass.shader else {
+            throw WPEMetalRenderExecutorError.unsupportedShader(pass.pass.shader)
+        }
+        let processor = WPEShaderPreprocessor { _, _ in
+            // Pipeline-builder already inlined includes, so the per-stage
+            // pass shouldn't see new ones. Returning nil here leaves a
+            // residual `#include` line as a translator-time error rather
+            // than a silent miss.
+            nil
+        }
+        let request: WPEShaderCompileRequest
+        do {
+            request = try processor.process(
+                shaderName: program.name,
+                vertexSource: program.vertexSource,
+                fragmentSource: program.fragmentSource,
+                comboValues: pass.comboValues,
+                materialTextureBindings: Dictionary(
+                    uniqueKeysWithValues: pass.textureBindings.compactMap { (slot, ref) -> (Int, String)? in
+                        switch ref {
+                        case .image(let p), .asset(let p): return (slot, p)
+                        case .fbo(let n): return (slot, n)
+                        case .previous: return nil
+                        }
+                    }
+                )
+            )
+        } catch let error as WPEShaderCompilerError {
+            throw WPEMetalRenderExecutorError.shaderTranslatorUnavailable(
+                name: program.name,
+                reason: String(describing: error)
+            )
+        }
+        if let cached = translatedShaderCache[request.sourceHash] {
+            return cached
+        }
+        do {
+            let result = try shaderCompiler.compile(request)
+            translatedShaderCache[request.sourceHash] = result
+            return result
+        } catch let error as WPEShaderCompilerError {
+            switch error {
+            case .backendUnavailable(let reason),
+                 .glslPreprocessFailed(let reason),
+                 .translationFailed(let reason),
+                 .mslLibraryFailed(let reason):
+                throw WPEMetalRenderExecutorError.shaderTranslatorUnavailable(
+                    name: program.name,
+                    reason: reason
+                )
+            }
+        }
     }
 }
