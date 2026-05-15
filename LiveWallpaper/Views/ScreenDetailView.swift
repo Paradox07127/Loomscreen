@@ -15,13 +15,6 @@ struct ScreenDetailView: View {
     private var runtimeError: WallpaperRuntimeError? {
         screenManager.runtimeError(for: screen)
     }
-    private var applyToAllConfirmationMessage: LocalizedStringKey {
-        let others = max(0, screenManager.screens.count - 1)
-        if others == 1 {
-            return "This replaces the wallpaper on 1 other display with the same content and settings as this one."
-        }
-        return "This replaces the wallpaper on \(others) other displays with the same content and settings as this one."
-    }
 
     @ViewBuilder
     private var runtimeErrorBannerView: some View {
@@ -74,7 +67,7 @@ struct ScreenDetailView: View {
     private var applyToAllButton: some View {
         if canApplyToAllDisplays {
             Button {
-                showApplyToAllConfirm = true
+                requestApplyToAll()
             } label: {
                 Label("Apply to All", systemImage: "square.on.square")
             }
@@ -130,8 +123,7 @@ struct ScreenDetailView: View {
 
     @State private var showErrorAlert = false
     @State private var errorMessage: LocalizedStringKey = ""
-    @State private var showClearConfirm = false
-    @State private var showApplyToAllConfirm = false
+    @State private var pendingDestructive: PendingDestructive?
     @State private var previewController = InspectorPreviewController()
     @State private var hasPreviewSource = false
     @State private var lastPreviewPosterBookmarkData: Data?
@@ -301,17 +293,7 @@ struct ScreenDetailView: View {
                 wallpaperTypeToolbar
             }
         }
-        .confirmationDialog(
-            "Apply this wallpaper to every other display?",
-            isPresented: $showApplyToAllConfirm
-        ) {
-            Button("Apply to All Displays", role: .destructive) {
-                screenManager.applyConfigurationToAllDisplays(from: screen)
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(applyToAllConfirmationMessage)
-        }
+        .confirmDestructive($pendingDestructive)
         .onAppear { loadScreenConfiguration() }
         .onDisappear { cleanupPreviewPlayer() }
         .onChange(of: screen.id) {
@@ -334,18 +316,6 @@ struct ScreenDetailView: View {
         .alert("Error", isPresented: $showErrorAlert) {
             Button("OK", role: .cancel) { }
         } message: { Text(errorMessage) }
-        .confirmationDialog(
-            "Clear Current Wallpaper",
-            isPresented: $showClearConfirm,
-            titleVisibility: .visible
-        ) {
-            Button("Clear Current Wallpaper", role: .destructive) {
-                performClearWallpaper()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Only removes the current wallpaper from this display. It does not delete source files, bookmarks, or library items.")
-        }
         .dropDestination(for: URL.self) { urls, _ in
             handleDrop(urls: urls)
         } isTargeted: { targeted in
@@ -867,12 +837,25 @@ struct ScreenDetailView: View {
     }
 
     private func clearCurrentWallpaper() {
-        showClearConfirm = true
+        pendingDestructive = PendingDestructive(
+            .clearCurrentWallpaper(displayName: screen.name)
+        ) {
+            performClearWallpaper()
+        }
     }
 
     private func performClearWallpaper() {
         cleanupPreviewPlayer()
         screenManager.clearWallpaperForScreen(screen)
+    }
+
+    private func requestApplyToAll() {
+        let others = max(0, screenManager.screens.count - 1)
+        pendingDestructive = PendingDestructive(
+            .applyConfigurationToAllDisplays(otherCount: others)
+        ) {
+            screenManager.applyConfigurationToAllDisplays(from: screen)
+        }
     }
 
     private func loadPreviewPosterIfNeeded() {

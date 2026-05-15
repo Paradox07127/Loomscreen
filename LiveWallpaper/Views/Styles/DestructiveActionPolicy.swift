@@ -23,6 +23,11 @@ enum DestructiveAction: Identifiable, Equatable {
     case removeHistoryEntry(name: String)
     case clearAllShortcuts
     case resetShortcut(commandName: String)
+    case resetAllSettings
+    case clearAllWPECache(projectCount: Int, byteSize: String)
+    case removeWPECacheEntry(displayName: String)
+    case applyConfigurationToAllDisplays(otherCount: Int)
+    case clearCurrentWallpaper(displayName: String)
 
     var id: String {
         switch self {
@@ -38,6 +43,11 @@ enum DestructiveAction: Identifiable, Equatable {
         case .removeHistoryEntry(let n): return "removeHistoryEntry-\(n)"
         case .clearAllShortcuts: return "clearAllShortcuts"
         case .resetShortcut(let n): return "resetShortcut-\(n)"
+        case .resetAllSettings: return "resetAllSettings"
+        case .clearAllWPECache(let c, let b): return "clearAllWPECache-\(c)-\(b)"
+        case .removeWPECacheEntry(let n): return "removeWPECacheEntry-\(n)"
+        case .applyConfigurationToAllDisplays(let c): return "applyConfigurationToAllDisplays-\(c)"
+        case .clearCurrentWallpaper(let n): return "clearCurrentWallpaper-\(n)"
         }
     }
 
@@ -56,6 +66,11 @@ enum DestructiveAction: Identifiable, Equatable {
         case .removeHistoryEntry:        return "Remove from history?"
         case .clearAllShortcuts:         return "Reset all keyboard shortcuts?"
         case .resetShortcut:             return "Reset this shortcut?"
+        case .resetAllSettings:          return "Reset all settings?"
+        case .clearAllWPECache:          return "Clear all cached Wallpaper Engine projects?"
+        case .removeWPECacheEntry:       return "Remove this cache entry?"
+        case .applyConfigurationToAllDisplays: return "Apply this wallpaper to every other display?"
+        case .clearCurrentWallpaper:     return "Clear current wallpaper?"
         }
     }
 
@@ -88,6 +103,16 @@ enum DestructiveAction: Identifiable, Equatable {
             return "All custom keyboard shortcuts revert to the LiveWallpaper defaults."
         case .resetShortcut(let commandName):
             return "The shortcut for '\(commandName)' returns to its default key combination."
+        case .resetAllSettings:
+            return "All preferences, screen configurations, playlists, schedules, and bookmarks return to their defaults. This cannot be undone."
+        case .clearAllWPECache(let count, let byteSize):
+            return "Removes \(count) extracted project\(count == 1 ? "" : "s") · \(byteSize). Workshop folders on disk are untouched; re-applying a wallpaper will re-extract on demand."
+        case .removeWPECacheEntry(let displayName):
+            return "'\(displayName)' will be re-extracted next time you apply it. The history entry and original Workshop folder stay untouched."
+        case .applyConfigurationToAllDisplays(let count):
+            return "This replaces the wallpaper on \(count) other display\(count == 1 ? "" : "s") with the same content and settings as this one."
+        case .clearCurrentWallpaper(let displayName):
+            return "Only removes the current wallpaper from \(displayName). Source files, bookmarks, and library items are not deleted."
         }
     }
 
@@ -106,21 +131,26 @@ enum DestructiveAction: Identifiable, Equatable {
         case .removeHistoryEntry:        return "Remove"
         case .clearAllShortcuts:         return "Reset All"
         case .resetShortcut:             return "Reset"
+        case .resetAllSettings:          return "Reset All"
+        case .clearAllWPECache:          return "Clear All"
+        case .removeWPECacheEntry:       return "Remove"
+        case .applyConfigurationToAllDisplays: return "Apply to All Displays"
+        case .clearCurrentWallpaper:     return "Clear Wallpaper"
         }
     }
 
     var iconSystemName: String {
         switch self {
         case .removePlaylistItem, .deleteBookmark, .removeHistoryEntry,
-             .removeSceneHistory, .removeScheduleSlot:
+             .removeSceneHistory, .removeScheduleSlot, .removeWPECacheEntry:
             return "trash"
-        case .clearScene, .clearUnusedWallpapers:
+        case .clearScene, .clearUnusedWallpapers, .clearAllWPECache, .clearCurrentWallpaper:
             return "xmark.bin"
-        case .applyBookmarkToAll, .disableSchedule:
+        case .applyBookmarkToAll, .applyConfigurationToAllDisplays, .disableSchedule:
             return "exclamationmark.triangle"
         case .forgetWorkshopLibrary:
             return "folder.badge.minus"
-        case .clearAllShortcuts, .resetShortcut:
+        case .clearAllShortcuts, .resetShortcut, .resetAllSettings:
             return "arrow.uturn.backward.circle"
         }
     }
