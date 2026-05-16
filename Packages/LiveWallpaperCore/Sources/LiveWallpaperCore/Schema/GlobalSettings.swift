@@ -3,13 +3,13 @@ import Foundation
 /// Layout density for the MenuBar dropdown. Comfortable mirrors macOS system
 /// menus (default); Compact tightens padding + drops one type step so users
 /// on multi-display setups see more without scrolling.
-enum MenuBarDensity: String, Codable, CaseIterable, Identifiable {
+public enum MenuBarDensity: String, Codable, CaseIterable, Identifiable, Sendable {
     case comfortable
     case compact
 
-    var id: String { rawValue }
+    public var id: String { rawValue }
 
-    var titleKey: String {
+    public var titleKey: String {
         switch self {
         case .comfortable: return "Comfortable"
         case .compact:     return "Compact"
@@ -17,32 +17,32 @@ enum MenuBarDensity: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-struct GlobalSettings: Codable {
-    var globalPauseOnBattery: Bool
-    var preservePlaybackOnLock: Bool
-    var startOnLogin: Bool
-    var minimumBatteryLevel: Double?
-    var defaultFrameRateLimit: FrameRateLimit
-    var pauseOnFullScreen: Bool
+public struct GlobalSettings: Codable, Sendable {
+    public var globalPauseOnBattery: Bool
+    public var preservePlaybackOnLock: Bool
+    public var startOnLogin: Bool
+    public var minimumBatteryLevel: Double?
+    public var defaultFrameRateLimit: FrameRateLimit
+    public var pauseOnFullScreen: Bool
     /// When true, the app activation policy is `.regular` so the app shows
     /// in the Dock and Cmd+Tab list. When false (default), the app remains
     /// `.accessory` (menu-bar only). Toggled live; no relaunch required.
-    var showInDock: Bool
+    public var showInDock: Bool
     /// User preferences for the weather location pipeline. See
     /// `WeatherLocationPreference` for the full source-resolution chain.
-    var weatherLocation: WeatherLocationPreference
+    public var weatherLocation: WeatherLocationPreference
     /// User-customised global keyboard shortcuts. `nil` value means the
     /// shortcut is unbound; missing key means default binding still applies.
-    var globalShortcuts: [GlobalShortcutAction.RawAction: GlobalShortcutBinding?]
+    public var globalShortcuts: [GlobalShortcutAction.RawAction: GlobalShortcutBinding?]
     /// LRU of recently imported Wallpaper Engine projects (capped at 20 by
     /// `SettingsManager.recordWPEImport(_:)`). Most recent at index 0.
-    var recentWPEImports: [WPEHistoryEntry] = []
+    public var recentWPEImports: [WPEHistoryEntry] = []
     /// Density preference for the MenuBar dropdown. Defaults to comfortable
     /// (current behaviour); compact tightens padding for users on busy
     /// multi-display setups.
-    var menuBarDensity: MenuBarDensity = .comfortable
+    public var menuBarDensity: MenuBarDensity = .comfortable
 
-    init(
+    public init(
         // Default `false` so a freshly-installed or reset app plays its
         // wallpaper out of the box even when running on battery — power
         // savers can opt in via General Settings.
@@ -71,7 +71,7 @@ struct GlobalSettings: Codable {
         self.menuBarDensity = menuBarDensity
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         globalPauseOnBattery = try c.decodeIfPresent(Bool.self, forKey: .globalPauseOnBattery) ?? false
         preservePlaybackOnLock = try c.decodeIfPresent(Bool.self, forKey: .preservePlaybackOnLock) ?? false
