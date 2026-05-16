@@ -27,9 +27,31 @@ struct WebGLRainWallpaperTests {
 
         #expect(html.contains(videoURL))
         #expect(html.contains("getContext('webgl'"))
-        #expect(html.contains("waterCanvas"))
+        #expect(html.contains("function Raindrops"))
+        #expect(html.contains("function RainRenderer"))
         #expect(html.contains("Codrops RainEffect"))
+        #expect(html.contains("dropAlphaDataURL"))
+        #expect(html.contains("dropColorDataURL"))
+        #expect(html.contains("createDrop"))
+        #expect(html.contains("updateDroplets"))
+        #expect(html.contains("collisionRadius"))
+        #expect(html.contains("u_waterMap"))
+        #expect(html.contains("u_textureBg"))
+        #expect(html.contains("u_textureFg"))
         #expect(!html.contains("TODO"))
+    }
+
+    @Test(
+        "Bundled Codrops rain textures are available",
+        .enabled(if: WebGLRainAssets.rootURL != nil)
+    )
+    func bundledRainTexturesPresent() throws {
+        let rootURL = try #require(WebGLRainAssets.rootURL)
+
+        for fileName in WebGLRainAssets.expectedFiles {
+            let fileURL = rootURL.appendingPathComponent(fileName, isDirectory: false)
+            #expect(FileManager.default.fileExists(atPath: fileURL.path))
+        }
     }
 
     @Test("WebGL rain HTML wallpaper keeps the source video available for fallback")
