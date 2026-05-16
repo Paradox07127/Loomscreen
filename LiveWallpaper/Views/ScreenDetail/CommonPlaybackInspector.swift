@@ -17,6 +17,7 @@ struct CommonPlaybackInspector: View {
     var wallpaperType: WallpaperType
 
     @Environment(ScreenManager.self) private var screenManager
+    @Environment(\.featureCatalog) private var featureCatalog
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @Binding var muted: Bool
@@ -80,7 +81,7 @@ struct CommonPlaybackInspector: View {
     }
 
     private var showsSyncToLockScreenRow: Bool {
-        wallpaperType == .video
+        wallpaperType == .video && featureCatalog.isEnabled(.lockScreenSnapshots)
     }
 
     // MARK: - Rows

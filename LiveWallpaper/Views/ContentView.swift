@@ -187,6 +187,7 @@ enum Navigation: Hashable {
 struct Sidebar: View {
     @Binding var selection: Navigation?
     @Environment(ScreenManager.self) private var screenManager
+    @Environment(\.featureCatalog) private var featureCatalog
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isReloading = false
 
@@ -237,28 +238,34 @@ struct Sidebar: View {
                 NavigationLink(value: Navigation.appleAerials) {
                     Label("Apple Aerials", systemImage: "sparkles.tv")
                 }
-                NavigationLink(value: Navigation.workshop) {
-                    Label("Workshop Library", systemImage: "cube.transparent")
+                if featureCatalog.isEnabled(.wpeImport) {
+                    NavigationLink(value: Navigation.workshop) {
+                        Label("Workshop Library", systemImage: "cube.transparent")
+                    }
+                    .accessibilityHint(Text("Browse Wallpaper Engine workshop projects"))
                 }
-                .accessibilityHint(Text("Browse Wallpaper Engine workshop projects"))
 
                 #if DEBUG
-                NavigationLink(value: Navigation.developerTools) {
-                    Label("Developer Tools", systemImage: "wrench.and.screwdriver")
+                if featureCatalog.isEnabled(.developerTools) {
+                    NavigationLink(value: Navigation.developerTools) {
+                        Label("Developer Tools", systemImage: "wrench.and.screwdriver")
+                    }
+                    .accessibilityHint(Text("DEBUG-only: corpus playback test and diagnostics"))
                 }
-                .accessibilityHint(Text("DEBUG-only: corpus playback test and diagnostics"))
                 #endif
             }
 
-            Section(header: SidebarSectionHeader(title: "Dashboard", showsDivider: true) {
-                EmptyView()
-            }) {
-                SystemMonitorView()
-                    .padding(.vertical, 2)
-                    // Tight 4pt horizontal inset. Default List inset on macOS 26 drifts
-                    // with sidebar width, causing dashboard cards to misalign on resize.
-                    .listRowInsets(EdgeInsets(top: 2, leading: 4, bottom: 2, trailing: 4))
-                    .listRowBackground(Color.clear)
+            if featureCatalog.isEnabled(.systemMonitor) {
+                Section(header: SidebarSectionHeader(title: "Dashboard", showsDivider: true) {
+                    EmptyView()
+                }) {
+                    SystemMonitorView()
+                        .padding(.vertical, 2)
+                        // Tight 4pt horizontal inset. Default List inset on macOS 26 drifts
+                        // with sidebar width, causing dashboard cards to misalign on resize.
+                        .listRowInsets(EdgeInsets(top: 2, leading: 4, bottom: 2, trailing: 4))
+                        .listRowBackground(Color.clear)
+                }
             }
         }
         .listStyle(.sidebar)
