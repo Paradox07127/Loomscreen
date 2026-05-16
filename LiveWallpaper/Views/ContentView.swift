@@ -178,6 +178,9 @@ enum Navigation: Hashable {
     case appleAerials
     case bookmarks
     case workshop
+    #if DEBUG
+    case developerTools
+    #endif
 }
 
 // MARK: - Sidebar View
@@ -238,6 +241,13 @@ struct Sidebar: View {
                     Label("Workshop Library", systemImage: "cube.transparent")
                 }
                 .accessibilityHint(Text("Browse Wallpaper Engine workshop projects"))
+
+                #if DEBUG
+                NavigationLink(value: Navigation.developerTools) {
+                    Label("Developer Tools", systemImage: "wrench.and.screwdriver")
+                }
+                .accessibilityHint(Text("DEBUG-only: corpus playback test and diagnostics"))
+                #endif
             }
 
             Section(header: SidebarSectionHeader(title: "Dashboard", showsDivider: true) {
@@ -499,6 +509,12 @@ struct DetailContent: View {
             case .workshop:
                 WorkshopGalleryView(allowsTargetSelection: true)
                     .transition(.opacity)
+
+            #if DEBUG
+            case .developerTools:
+                DeveloperToolsView()
+                    .transition(.opacity)
+            #endif
 
             case .none:
                 EmptyStateView(
