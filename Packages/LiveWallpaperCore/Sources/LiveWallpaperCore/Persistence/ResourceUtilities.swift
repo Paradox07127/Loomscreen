@@ -3,29 +3,35 @@ import Foundation
 import UniformTypeIdentifiers
 
 @MainActor
-class ResourceUtilities {
-    struct BookmarkResolution {
-        let url: URL
-        let isStale: Bool
-        let isSecurityScoped: Bool
+public final class ResourceUtilities {
+    public struct BookmarkResolution {
+        public let url: URL
+        public let isStale: Bool
+        public let isSecurityScoped: Bool
+
+        public init(url: URL, isStale: Bool, isSecurityScoped: Bool) {
+            self.url = url
+            self.isStale = isStale
+            self.isSecurityScoped = isSecurityScoped
+        }
     }
 
     // MARK: - Security-Scoped Bookmarks
 
-    static let bookmarkCreationOptions: URL.BookmarkCreationOptions = [
+    public static let bookmarkCreationOptions: URL.BookmarkCreationOptions = [
         .withSecurityScope,
         .securityScopeAllowOnlyReadAccess
     ]
-    static let supportedVideoContentTypes: [UTType] = [
+    public static let supportedVideoContentTypes: [UTType] = [
         .movie,
         .video,
         .quickTimeMovie,
         .mpeg4Movie,
         .avi
     ]
-    static let supportedHTMLContentTypes: [UTType] = [.html]
+    public static let supportedHTMLContentTypes: [UTType] = [.html]
 
-    static func createBookmark(for url: URL) -> Data? {
+    public static func createBookmark(for url: URL) -> Data? {
         // Some URL sources need an active scope before bookmarkData can read metadata.
         let didStartScope = url.startAccessingSecurityScopedResource()
         defer {
@@ -55,7 +61,7 @@ class ResourceUtilities {
         return nil
     }
 
-    static func isSupportedVideoURL(_ url: URL) -> Bool {
+    public static func isSupportedVideoURL(_ url: URL) -> Bool {
         guard url.isFileURL, !isDirectory(url) else { return false }
         if let contentType = try? url.resourceValues(forKeys: [.contentTypeKey]).contentType,
            supportedVideoContentTypes.contains(where: { contentType.conforms(to: $0) }) {
@@ -64,7 +70,7 @@ class ResourceUtilities {
         return ["mp4", "m4v", "mov", "avi"].contains(url.pathExtension.lowercased())
     }
 
-    static func isSupportedHTMLResourceURL(_ url: URL) -> Bool {
+    public static func isSupportedHTMLResourceURL(_ url: URL) -> Bool {
         guard url.isFileURL else { return false }
         if isDirectory(url) {
             return true
@@ -81,7 +87,7 @@ class ResourceUtilities {
     /// service fails, copy the video into our Application Support container and
     /// bookmark that app-owned copy so the selected wallpaper still survives
     /// relaunch.
-    static func createVideoBookmark(
+    public static func createVideoBookmark(
         for url: URL,
         applicationSupportRootURL: URL? = nil,
         secureBookmarkCreator: (URL) -> Data? = { createBookmark(for: $0) },
@@ -125,7 +131,7 @@ class ResourceUtilities {
         deprecated,
         message: "Use SecurityScopedBookmarkResolver.shared.resolve(_:target:) instead — it observes bookmarkDataIsStale and refreshes the saved Data via a typed Target."
     )
-    nonisolated static func resolveBookmark(_ data: Data) throws -> BookmarkResolution {
+    public nonisolated static func resolveBookmark(_ data: Data) throws -> BookmarkResolution {
         var scopedStale = false
         do {
             let scopedURL = try URL(
@@ -168,7 +174,7 @@ class ResourceUtilities {
         }
     }
 
-    private static func createLocalBookmark(for url: URL) -> Data? {
+    public static func createLocalBookmark(for url: URL) -> Data? {
         do {
             return try url.bookmarkData(
                 options: [],
@@ -262,7 +268,7 @@ class ResourceUtilities {
 
     /// Resolves a bookmark to a display name (its `lastPathComponent`). Returns
     /// `nil` if the bookmark is empty or the security-scoped URL can't resolve.
-    nonisolated static func resolveBookmarkName(_ data: Data) -> String? {
+    public nonisolated static func resolveBookmarkName(_ data: Data) -> String? {
         guard !data.isEmpty else { return nil }
         guard case .success(let resolved) = SecurityScopedBookmarkResolver.shared.resolve(
             data,
@@ -276,14 +282,14 @@ class ResourceUtilities {
     /// Preserves a user's explicit File-mode choice as a file source.
     /// Users who need sibling assets should choose Folder mode so the whole
     /// directory is intentionally bookmarked.
-    static func htmlSourceFromPickedFile(_ fileURL: URL) -> HTMLSource? {
+    public static func htmlSourceFromPickedFile(_ fileURL: URL) -> HTMLSource? {
         if let fileBookmark = createBookmark(for: fileURL) {
             return .file(bookmarkData: fileBookmark)
         }
         return nil
     }
 
-    static func inferHTMLIndexFileName(from entries: [String]) -> String {
+    public static func inferHTMLIndexFileName(from entries: [String]) -> String {
         for standardName in ["index.html", "index.htm"] {
             if let entry = entries.first(where: { $0.lowercased() == standardName }) {
                 return entry
