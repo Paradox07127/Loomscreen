@@ -2,24 +2,24 @@ import Foundation
 import IOKit.ps
 import Combine
 
-final class PowerMonitor: @unchecked Sendable {
+public final class PowerMonitor: @unchecked Sendable {
     // MARK: - Singleton & Notifications
 
-    static let shared = PowerMonitor()
-    static let powerSourceDidChangeNotification = Notification.Name("com.livewallpaper.powerSourceDidChange")
+    public static let shared = PowerMonitor()
+    public static let powerSourceDidChangeNotification = Notification.Name("com.livewallpaper.powerSourceDidChange")
 
     // MARK: - Power Source Types
 
-    enum PowerSource: Equatable {
+    public enum PowerSource: Equatable, Sendable {
         case battery(level: Double)
         case external
 
-        var isOnBattery: Bool {
+        public var isOnBattery: Bool {
             if case .battery = self { return true }
             return false
         }
 
-        init(identifier: String) {
+        public init(identifier: String) {
             switch identifier {
             case kIOPMBatteryPowerKey:
                 self = .battery(level: PowerMonitor.getCurrentBatteryLevel())
@@ -37,11 +37,11 @@ final class PowerMonitor: @unchecked Sendable {
     private var runLoopSource: CFRunLoopSource?
     private var batteryCheckTimer: Timer?
 
-    var powerSourcePublisher: AnyPublisher<PowerSource, Never> {
+    public var powerSourcePublisher: AnyPublisher<PowerSource, Never> {
         powerSourceSubject.eraseToAnyPublisher()
     }
 
-    var currentPowerSource: PowerSource {
+    public var currentPowerSource: PowerSource {
         powerSourceSubject.value
     }
 
@@ -53,7 +53,7 @@ final class PowerMonitor: @unchecked Sendable {
         powerSourceSubject.send(PowerSource(identifier: source))
         setupPowerNotification()
     }
-    
+
     // MARK: - Power Monitoring Setup
 
     private func setupPowerNotification() {
@@ -111,7 +111,7 @@ final class PowerMonitor: @unchecked Sendable {
             ]
         )
     }
-    
+
     // MARK: - Battery Level Monitoring
 
     private static func getCurrentBatteryLevel() -> Double {
@@ -154,7 +154,7 @@ final class PowerMonitor: @unchecked Sendable {
         postPowerChangeNotification(oldSource: oldSource, newSource: newSource)
     }
 
-    func refreshPowerStatus() {
+    public func refreshPowerStatus() {
         guard let sourceString = IOPSGetProvidingPowerSourceType(nil)?.takeUnretainedValue() as? String else { return }
 
         let newSource = PowerSource(identifier: sourceString)
