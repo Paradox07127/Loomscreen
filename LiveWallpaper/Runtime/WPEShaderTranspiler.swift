@@ -284,12 +284,45 @@ struct WPEShaderTranspiler {
         // here in one pass.
         s = rewriteTextureCalls(s)
 
+        // GLSL's `inout T name` / `out T name` function-parameter qualifiers
+        // need to become Metal's `thread T& name`. The previous transpiler
+        // passed them through verbatim, so any helper using by-reference
+        // parameters (raymarch SDFs, normal accumulators, light pickers)
+        // failed Metal compilation with 'unknown type name inout'. Affects
+        // ~4 corpus scenes (lightshafts, tint, ps2_startup_screen, …).
+        s = rewriteReferenceParameters(s)
+
         // gl_FragCoord → custom binding. We won't support FragCoord-driven
         // shaders in the first pass — trip the compile error on use.
         // (The transpiler still emits the source; Metal's compiler will
         // reject `gl_FragCoord` and the executor surfaces translationFailed.)
 
         return s
+    }
+
+    /// Rewrite GLSL `inout T name` / `out T name` parameter qualifiers
+    /// to Metal's `thread T& name`. Type names supported: anything
+    /// matching `[A-Za-z_][A-Za-z0-9_]*(?:\d+x\d+)?` — scalars, vector
+    /// types (`float3` after the substitution pass), matrix types
+    /// (`float3x3`), and user struct names.
+    ///
+    /// `out vec4 wpe_fragColor;` / `out vec4 out_FragColor;` top-level
+    /// declarations are stripped earlier in `translateFragment(_:_:)`,
+    /// so what reaches this stage is always inside a parameter list.
+    /// The regex also requires the next character after the parameter
+    /// name to be `,` or `)` to avoid catching field declarations like
+    /// `out vec4 someField` that might survive inside a struct.
+    private static func rewriteReferenceParameters(_ source: String) -> String {
+        let pattern = #"\b(inout|out)\s+([A-Za-z_][A-Za-z0-9_]*(?:\d+x\d+)?)\s+([A-Za-z_][A-Za-z0-9_]*)(?=\s*[,)])"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return source
+        }
+        let range = NSRange(source.startIndex..., in: source)
+        return regex.stringByReplacingMatches(
+            in: source,
+            range: range,
+            withTemplate: "thread $2& $3"
+        )
     }
 
     /// Substring replacement that respects identifier boundaries. We
