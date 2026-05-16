@@ -3,17 +3,17 @@ import Foundation
 /// User-saved shortcut to a video / HTML / shader / WPE scene wallpaper,
 /// persisted globally so it survives app relaunch and can be applied to any
 /// screen on demand.
-struct WallpaperBookmark: Identifiable, Codable, Equatable {
-    let id: UUID
-    var label: String
-    let createdAt: Date
-    var content: WallpaperContent
-    var sourceDisplayName: String?
+public struct WallpaperBookmark: Identifiable, Codable, Equatable, Sendable {
+    public let id: UUID
+    public var label: String
+    public let createdAt: Date
+    public var content: WallpaperContent
+    public var sourceDisplayName: String?
     /// Optional Workshop metadata needed to restore WPE scene dependencies and
     /// source-folder access when a scene bookmark is applied later.
-    var wpeOrigin: WPEOrigin?
+    public var wpeOrigin: WPEOrigin?
 
-    init(
+    public init(
         label: String,
         content: WallpaperContent,
         id: UUID = UUID(),
@@ -29,10 +29,10 @@ struct WallpaperBookmark: Identifiable, Codable, Equatable {
         self.wpeOrigin = wpeOrigin
     }
 
-    var wallpaperType: WallpaperType { content.wallpaperType }
+    public var wallpaperType: WallpaperType { content.wallpaperType }
 
     /// Tells the row what icon and color to paint.
-    var iconName: String {
+    public var iconName: String {
         switch content {
         case .video: return "play.rectangle"
         case .html(let source, _): return source.iconName

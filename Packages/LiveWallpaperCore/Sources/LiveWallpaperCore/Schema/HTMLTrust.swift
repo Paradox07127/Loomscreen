@@ -5,12 +5,12 @@ import Foundation
 /// Web content trust follows browser origin rules: scheme + host + effective
 /// port. Trusting `https://example.com` must not grant JavaScript privileges to
 /// `http://example.com`, `https://example.com:8443`, or subdomains.
-struct TrustedHTMLOrigin: Hashable, Codable, Sendable, Comparable, CustomStringConvertible {
-    let scheme: String
-    let host: String
-    let port: Int
+public struct TrustedHTMLOrigin: Hashable, Codable, Sendable, Comparable, CustomStringConvertible {
+    public let scheme: String
+    public let host: String
+    public let port: Int
 
-    init?(url: URL) {
+    public init?(url: URL) {
         guard
             let rawScheme = url.scheme?.lowercased(),
             rawScheme == "http" || rawScheme == "https",
@@ -26,7 +26,7 @@ struct TrustedHTMLOrigin: Hashable, Codable, Sendable, Comparable, CustomStringC
 
     /// Accepts new persisted origin strings (`https://host:443`) plus legacy
     /// host-only values, which migrate to HTTPS on the default port.
-    init?(persistedValue: String) {
+    public init?(persistedValue: String) {
         let value = persistedValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return nil }
 
@@ -49,20 +49,20 @@ struct TrustedHTMLOrigin: Hashable, Codable, Sendable, Comparable, CustomStringC
         port = 443
     }
 
-    var rawValue: String {
+    public var rawValue: String {
         "\(scheme)://\(host):\(port)"
     }
 
-    var displayName: String {
+    public var displayName: String {
         if port == Self.defaultPort(for: scheme) {
             return "\(scheme)://\(host)"
         }
         return rawValue
     }
 
-    var description: String { rawValue }
+    public var description: String { rawValue }
 
-    var isSecure: Bool { scheme == "https" }
+    public var isSecure: Bool { scheme == "https" }
 
     private static func defaultPort(for scheme: String) -> Int? {
         switch scheme {
@@ -72,11 +72,11 @@ struct TrustedHTMLOrigin: Hashable, Codable, Sendable, Comparable, CustomStringC
         }
     }
 
-    static func < (lhs: TrustedHTMLOrigin, rhs: TrustedHTMLOrigin) -> Bool {
+    public static func < (lhs: TrustedHTMLOrigin, rhs: TrustedHTMLOrigin) -> Bool {
         lhs.rawValue < rhs.rawValue
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         let raw = try container.decode(String.self)
         guard let origin = TrustedHTMLOrigin(persistedValue: raw) else {
@@ -88,7 +88,7 @@ struct TrustedHTMLOrigin: Hashable, Codable, Sendable, Comparable, CustomStringC
         self = origin
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
         try container.encode(rawValue)
     }
@@ -97,7 +97,7 @@ struct TrustedHTMLOrigin: Hashable, Codable, Sendable, Comparable, CustomStringC
 /// Verdict of whether the running HTML wallpaper source is safe to give
 /// JavaScript + WebGPU privileges. UI shows a banner + builder downgrades
 /// untrusted remote URLs to JS-off regardless of HTMLConfig.allowJavaScript.
-enum HTMLTrust: Equatable {
+public enum HTMLTrust: Equatable, Sendable {
     /// Local file / folder / inline string — fully under user control.
     case localContent
     /// Remote URL whose origin is in TrustedHostStore.
@@ -106,7 +106,7 @@ enum HTMLTrust: Equatable {
     case untrustedRemote(origin: TrustedHTMLOrigin)
 
     /// Pure verdict — origin membership decided by caller.
-    static func evaluate(source: HTMLSource, trustedOrigins: Set<TrustedHTMLOrigin>) -> HTMLTrust {
+    public static func evaluate(source: HTMLSource, trustedOrigins: Set<TrustedHTMLOrigin>) -> HTMLTrust {
         switch source {
         case .file, .folder, .inline:
             return .localContent
@@ -120,13 +120,13 @@ enum HTMLTrust: Equatable {
 
     /// Compatibility shim for legacy host-only callers. Host values migrate to
     /// HTTPS default-port origins before comparison.
-    static func evaluate(source: HTMLSource, trustedHosts: Set<String>) -> HTMLTrust {
+    public static func evaluate(source: HTMLSource, trustedHosts: Set<String>) -> HTMLTrust {
         let origins = Set(trustedHosts.compactMap(TrustedHTMLOrigin.init(persistedValue:)))
         return evaluate(source: source, trustedOrigins: origins)
     }
 
     /// Effective JS gate: untrusted remote always forces JS off.
-    func effectiveAllowJavaScript(requested: Bool) -> Bool {
+    public func effectiveAllowJavaScript(requested: Bool) -> Bool {
         switch self {
         case .untrustedRemote: return false
         default: return requested
