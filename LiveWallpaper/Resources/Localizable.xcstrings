@@ -12798,7 +12798,15 @@
       }
     },
     "Some assets the scene needs aren't where the renderer expected them. The renderer ships built-in equivalents for the most common Wallpaper Engine framework files; if this scene needs something extra, an advanced option in the Workshop Library lets you link a Wallpaper Engine install. Otherwise, re-downloading the project in Steam usually fixes it." : {
-      "comment" : "Wallpaper Engine fallback warning body."
+      "comment" : "Wallpaper Engine fallback warning body.",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "场景所需的部分资源不在渲染器期待的位置。渲染器已为最常见的 Wallpaper Engine 框架文件内置了等效资源；如果该场景还需要其他文件，可在 Workshop 库的高级选项中关联 Wallpaper Engine 安装。否则，通常在 Steam 中重新下载该项目即可解决。"
+          }
+        }
+      }
     },
     "Some image layers couldn't be located inside the cache. The wallpaper may have been published partially or your cache is corrupted." : {
       "comment" : "Wallpaper Engine fallback warning body.",
