@@ -1,3 +1,4 @@
+import LiveWallpaperCore
 import Foundation
 import Observation
 import Darwin

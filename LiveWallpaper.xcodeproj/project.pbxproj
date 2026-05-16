@@ -10,6 +10,7 @@
 		0C9A00022D7350000033C48B /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0C9A00012D7350000033C48B /* AppIntents.framework */; };
 		0C9A00042D7350000033C48B /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0C9A00012D7350000033C48B /* AppIntents.framework */; };
 		0C9A00052D7350000033C48B /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0C9A00012D7350000033C48B /* AppIntents.framework */; };
+		0CA00000000000000000A003 /* LiveWallpaperCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0CA00000000000000000A002 /* LiveWallpaperCore */; };
 		0CABCDEF2D8000020000C48B /* WPEShaderToolchain.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0CABCDEF2D8000010000C48B /* WPEShaderToolchain.xcframework */; };
 /* End PBXBuildFile section */
 
@@ -63,6 +64,7 @@
 			files = (
 				0C9A00022D7350000033C48B /* AppIntents.framework in Frameworks */,
 				0CABCDEF2D8000020000C48B /* WPEShaderToolchain.xcframework in Frameworks */,
+				0CA00000000000000000A003 /* LiveWallpaperCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -135,6 +137,7 @@
 			);
 			name = LiveWallpaper;
 			packageProductDependencies = (
+				0CA00000000000000000A002 /* LiveWallpaperCore */,
 			);
 			productName = LiveWallpaper;
 			productReference = 0C322BEF2D6950480033C48B /* LiveWallpaper.app */;
@@ -219,6 +222,9 @@
 			);
 			mainGroup = 0C322BE62D6950480033C48B;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				0CA00000000000000000A001 /* XCLocalSwiftPackageReference "Packages/LiveWallpaperCore" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 0C322BF02D6950480033C48B /* Products */;
 			projectDirPath = "";
@@ -604,6 +610,20 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		0CA00000000000000000A001 /* XCLocalSwiftPackageReference "Packages/LiveWallpaperCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/LiveWallpaperCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		0CA00000000000000000A002 /* LiveWallpaperCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = LiveWallpaperCore;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 0C322BE72D6950480033C48B /* Project object */;
 }
