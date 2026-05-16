@@ -21,18 +21,19 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 GLSLANG_TAG="${GLSLANG_TAG:-15.4.0}"
-SPIRV_TOOLS_TAG="${SPIRV_TOOLS_TAG:-vulkan-sdk-1.3.296.0}"
-SPIRV_CROSS_TAG="${SPIRV_CROSS_TAG:-vulkan-sdk-1.3.296.0}"
+SPIRV_TOOLS_TAG="${SPIRV_TOOLS_TAG:-vulkan-sdk-1.4.313.0}"
+SPIRV_CROSS_TAG="${SPIRV_CROSS_TAG:-vulkan-sdk-1.4.313.0}"
 
 THIRD_PARTY_ROOT="$ROOT/ThirdParty"
 SOURCES_ROOT="$THIRD_PARTY_ROOT/sources"
 BUILD_ROOT="$THIRD_PARTY_ROOT/_build"
+INSTALL_ROOT="$THIRD_PARTY_ROOT/_install"
 OUT_XCFRAMEWORK="$THIRD_PARTY_ROOT/WPEShaderToolchain.xcframework"
 OUT_CHECKSUM="$THIRD_PARTY_ROOT/WPEShaderToolchain.xcframework.checksum"
 
 DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-14.0}"
 
-mkdir -p "$SOURCES_ROOT" "$BUILD_ROOT"
+mkdir -p "$SOURCES_ROOT" "$BUILD_ROOT" "$INSTALL_ROOT"
 
 echo "== Resolving dependencies =="
 
@@ -57,40 +58,46 @@ cmake -S "$SOURCES_ROOT/SPIRV-Tools" -B "$BUILD_ROOT/spirv-tools" \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_OSX_ARCHITECTURES=arm64 \
   -DCMAKE_OSX_DEPLOYMENT_TARGET="$DEPLOYMENT_TARGET" \
+  -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
   -DSPIRV_WERROR=OFF \
   -DSPIRV_SKIP_TESTS=ON \
   -DSPIRV_SKIP_EXECUTABLES=ON \
   -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
   -DBUILD_SHARED_LIBS=OFF
 cmake --build "$BUILD_ROOT/spirv-tools" -j
+cmake --install "$BUILD_ROOT/spirv-tools" --prefix "$INSTALL_ROOT"
 
 echo "== Building glslang (static, arm64, with SPIR-V output) =="
 cmake -S "$SOURCES_ROOT/glslang" -B "$BUILD_ROOT/glslang" \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_OSX_ARCHITECTURES=arm64 \
   -DCMAKE_OSX_DEPLOYMENT_TARGET="$DEPLOYMENT_TARGET" \
+  -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
   -DBUILD_SHARED_LIBS=OFF \
   -DENABLE_OPT=ON \
   -DALLOW_EXTERNAL_SPIRV_TOOLS=ON \
   -DGLSLANG_TESTS=OFF \
   -DENABLE_GLSLANG_BINARIES=OFF \
   -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-  -DCMAKE_PREFIX_PATH="$BUILD_ROOT/spirv-tools"
+  -DCMAKE_PREFIX_PATH="$INSTALL_ROOT"
 cmake --build "$BUILD_ROOT/glslang" -j
+cmake --install "$BUILD_ROOT/glslang" --prefix "$INSTALL_ROOT"
 
 echo "== Building SPIRV-Cross (static, arm64, MSL backend only) =="
 cmake -S "$SOURCES_ROOT/SPIRV-Cross" -B "$BUILD_ROOT/spirv-cross" \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_OSX_ARCHITECTURES=arm64 \
   -DCMAKE_OSX_DEPLOYMENT_TARGET="$DEPLOYMENT_TARGET" \
+  -DCMAKE_INSTALL_PREFIX="$INSTALL_ROOT" \
   -DSPIRV_CROSS_ENABLE_TESTS=OFF \
   -DSPIRV_CROSS_CLI=OFF \
   -DSPIRV_CROSS_ENABLE_HLSL=OFF \
-  -DSPIRV_CROSS_ENABLE_REFLECT=OFF \
+  -DSPIRV_CROSS_ENABLE_REFLECT=ON \
   -DSPIRV_CROSS_ENABLE_C_API=ON \
   -DBUILD_SHARED_LIBS=OFF \
   -DCMAKE_POSITION_INDEPENDENT_CODE=ON
 cmake --build "$BUILD_ROOT/spirv-cross" -j
+cmake --install "$BUILD_ROOT/spirv-cross" --prefix "$INSTALL_ROOT"
 
 echo "== Building LiveWallpaper bridge layer (Objective-C++) =="
 BRIDGE_SRC="$THIRD_PARTY_ROOT/bridge/wpe_shader_toolchain.cpp"
@@ -103,9 +110,8 @@ BRIDGE_OBJ="$BUILD_ROOT/bridge.o"
 clang++ \
   -std=c++17 -arch arm64 -mmacosx-version-min="$DEPLOYMENT_TARGET" \
   -O2 -fPIC \
-  -I "$SOURCES_ROOT/glslang" \
-  -I "$SOURCES_ROOT/SPIRV-Cross" \
-  -I "$BUILD_ROOT/glslang/include" \
+  -I "$INSTALL_ROOT/include" \
+  -I "$INSTALL_ROOT/include/spirv_cross" \
   -c "$BRIDGE_SRC" -o "$BRIDGE_OBJ"
 
 echo "== Combining static libs into single archive =="
