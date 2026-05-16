@@ -1,24 +1,64 @@
 import AppKit
 import Metal
 
+struct HTMLWallpaperCompatibilityResult {
+    let config: HTMLConfig
+    let trust: HTMLTrust
+    let enabledPhysicalPixelLayout: Bool
+}
+
+enum HTMLWallpaperCompatibilityPolicy {
+    static func runtimeConfig(
+        source: HTMLSource,
+        config: HTMLConfig,
+        trustedOrigins: Set<TrustedHTMLOrigin>
+    ) -> HTMLWallpaperCompatibilityResult {
+        let trust = HTMLTrust.evaluate(source: source, trustedOrigins: trustedOrigins)
+        var effective = config
+        effective.allowJavaScript = trust.effectiveAllowJavaScript(requested: config.allowJavaScript)
+
+        let shouldEnablePhysicalPixels = !effective.physicalPixelLayout
+            && looksLikeWallpaperEngineFolder(source)
+        if shouldEnablePhysicalPixels {
+            effective.physicalPixelLayout = true
+        }
+
+        return HTMLWallpaperCompatibilityResult(
+            config: effective,
+            trust: trust,
+            enabledPhysicalPixelLayout: shouldEnablePhysicalPixels
+        )
+    }
+
+    /// Wallpaper Engine workshop projects ship a `project.json` next to the
+    /// entry HTML; presence is a strong signal we should run them in
+    /// Windows-DIP mode.
+    static func looksLikeWallpaperEngineFolder(_ source: HTMLSource) -> Bool {
+        guard case .folder(let bookmarkData, _) = source else { return false }
+        guard let folderURL = try? ResourceUtilities.resolveBookmark(bookmarkData).url else { return false }
+        let didStart = folderURL.startAccessingSecurityScopedResource()
+        defer { if didStart { folderURL.stopAccessingSecurityScopedResource() } }
+        let manifest = folderURL.appendingPathComponent("project.json")
+        return FileManager.default.fileExists(atPath: manifest.path)
+    }
+}
+
 /// Builds non-video wallpaper sessions backed by a window.
 @MainActor
 final class AmbientWallpaperSessionBuilder {
     func makeHTMLSession(source: HTMLSource, config: HTMLConfig, frame: CGRect) -> AmbientWallpaperSession {
         let window = VideoWallpaperWindow(frame: frame)
 
-        // Untrusted remote URLs run with JS off no matter what config says.
-        let trust = HTMLTrust.evaluate(source: source, trustedOrigins: TrustedHostStore.shared.originSet)
-        var effective = config
-        effective.allowJavaScript = trust.effectiveAllowJavaScript(requested: config.allowJavaScript)
-        if case .untrustedRemote(let origin) = trust, config.allowJavaScript {
+        let compatibility = HTMLWallpaperCompatibilityPolicy.runtimeConfig(
+            source: source,
+            config: config,
+            trustedOrigins: TrustedHostStore.shared.originSet
+        )
+        let effective = compatibility.config
+        if case .untrustedRemote(let origin) = compatibility.trust, config.allowJavaScript {
             Logger.warning("HTML wallpaper: dropping JS for untrusted origin \(origin.rawValue)", category: .screenManager)
         }
-
-        // Auto-enable physical-pixel layout for Wallpaper Engine folders
-        // (detected by sibling project.json) so canvas coords match Windows DIP.
-        if !effective.physicalPixelLayout, Self.looksLikeWallpaperEngineFolder(source) {
-            effective.physicalPixelLayout = true
+        if compatibility.enabledPhysicalPixelLayout {
             Logger.info("HTML wallpaper: detected Wallpaper Engine project — enabling physical-pixel layout", category: .screenManager)
         }
 
@@ -44,18 +84,6 @@ final class AmbientWallpaperSessionBuilder {
         // 导致 "Click wallpaper to reveal desktop" 重新生效。
         window.setWallpaperMouseInteractionEnabled(config.allowMouseInteraction)
         return session
-    }
-
-    /// Wallpaper Engine workshop projects ship a `project.json` next to the
-    /// entry HTML; presence is a strong signal we should run them in
-    /// Windows-DIP mode.
-    private static func looksLikeWallpaperEngineFolder(_ source: HTMLSource) -> Bool {
-        guard case .folder(let bookmarkData, _) = source else { return false }
-        guard let folderURL = try? ResourceUtilities.resolveBookmark(bookmarkData).url else { return false }
-        let didStart = folderURL.startAccessingSecurityScopedResource()
-        defer { if didStart { folderURL.stopAccessingSecurityScopedResource() } }
-        let manifest = folderURL.appendingPathComponent("project.json")
-        return FileManager.default.fileExists(atPath: manifest.path)
     }
 
     func makeShaderSession(preset: MetalShaderPreset, frame: CGRect) -> AmbientWallpaperSession {
