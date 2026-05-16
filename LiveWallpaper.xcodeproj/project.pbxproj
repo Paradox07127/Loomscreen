@@ -11,6 +11,7 @@
 		0C9A00042D7350000033C48B /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0C9A00012D7350000033C48B /* AppIntents.framework */; };
 		0C9A00052D7350000033C48B /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0C9A00012D7350000033C48B /* AppIntents.framework */; };
 		0CA00000000000000000A003 /* LiveWallpaperCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0CA00000000000000000A002 /* LiveWallpaperCore */; };
+		0CA00000000000000000A103 /* LiveWallpaperVideoWeb in Frameworks */ = {isa = PBXBuildFile; productRef = 0CA00000000000000000A102 /* LiveWallpaperVideoWeb */; };
 		0CABCDEF2D8000020000C48B /* WPEShaderToolchain.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0CABCDEF2D8000010000C48B /* WPEShaderToolchain.xcframework */; };
 /* End PBXBuildFile section */
 
@@ -65,6 +66,7 @@
 				0C9A00022D7350000033C48B /* AppIntents.framework in Frameworks */,
 				0CABCDEF2D8000020000C48B /* WPEShaderToolchain.xcframework in Frameworks */,
 				0CA00000000000000000A003 /* LiveWallpaperCore in Frameworks */,
+				0CA00000000000000000A103 /* LiveWallpaperVideoWeb in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -138,6 +140,7 @@
 			name = LiveWallpaper;
 			packageProductDependencies = (
 				0CA00000000000000000A002 /* LiveWallpaperCore */,
+				0CA00000000000000000A102 /* LiveWallpaperVideoWeb */,
 			);
 			productName = LiveWallpaper;
 			productReference = 0C322BEF2D6950480033C48B /* LiveWallpaper.app */;
@@ -224,6 +227,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				0CA00000000000000000A001 /* XCLocalSwiftPackageReference "Packages/LiveWallpaperCore" */,
+				0CA00000000000000000A101 /* XCLocalSwiftPackageReference "Packages/LiveWallpaperVideoWeb" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 0C322BF02D6950480033C48B /* Products */;
@@ -616,12 +620,20 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/LiveWallpaperCore;
 		};
+		0CA00000000000000000A101 /* XCLocalSwiftPackageReference "Packages/LiveWallpaperVideoWeb" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/LiveWallpaperVideoWeb;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		0CA00000000000000000A002 /* LiveWallpaperCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = LiveWallpaperCore;
+		};
+		0CA00000000000000000A102 /* LiveWallpaperVideoWeb */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = LiveWallpaperVideoWeb;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
