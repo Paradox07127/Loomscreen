@@ -8,19 +8,19 @@ import Foundation
 ///
 /// info/debug stay on `os_log` only — the file is intentionally scoped to
 /// warning+ so it stays small and signal-dense.
-final class LogFileSink: @unchecked Sendable {
-    static let shared = LogFileSink()
+public final class LogFileSink: @unchecked Sendable {
+    public static let shared = LogFileSink()
 
     /// Public for the startup banner so users can easily find the log path.
     /// `nil` only if the Logs directory could not be created. Under the
     /// app sandbox this resolves to the container — see `tailCommandHint`
     /// for a copy-pastable `tail -f` line.
-    private(set) var fileURL: URL?
+    public private(set) var fileURL: URL?
 
     /// One-liner shell command users can paste to follow the log. Includes
     /// the resolved container path so sandbox redirection isn't a surprise.
     /// `nil` when no log file is available.
-    var tailCommandHint: String? {
+    public var tailCommandHint: String? {
         guard let url = fileURL else { return nil }
         let quoted = url.path.contains(" ") ? "\"\(url.path)\"" : url.path
         return "tail -f \(quoted)"
@@ -49,7 +49,7 @@ final class LogFileSink: @unchecked Sendable {
         }
     }
 
-    func record(
+    public func record(
         category: Logger.Category,
         level: Logger.Level,
         message: String,
