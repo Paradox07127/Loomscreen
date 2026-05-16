@@ -57,7 +57,16 @@ struct WPEShaderTranspiler {
         shaderName: String,
         preprocessedSource: String
     ) throws -> WPEShaderTranslationResult {
-        let lines = preprocessedSource.components(separatedBy: "\n")
+        // Pre-pass: scrub any `out (vec4|float4) (wpe_fragColor|out_FragColor);`
+        // declaration regardless of leading whitespace, layout(...) prefixes,
+        // or trailing comments. The line-by-line `hasPrefix` guard below
+        // catches the canonical prelude line, but Phase A.3 corpus runs
+        // surfaced cases where the declaration survived to MSL anyway — once
+        // we let through one variant, Metal rejects the whole shader with
+        // `unknown type name 'out'`. Make the scrub robust at the source-text
+        // level so any spelling reaches the line scan already neutralised.
+        let scrubbedSource = Self.scrubFragmentOutDeclarations(preprocessedSource)
+        let lines = scrubbedSource.components(separatedBy: "\n")
 
         var uniforms: [WPEUniformDecl] = []
         var samplers: [WPESamplerDecl] = []
@@ -351,6 +360,28 @@ struct WPEShaderTranspiler {
             in: source,
             range: range,
             withTemplate: "$1 $2"
+        )
+    }
+
+    /// Scrub WPE fragment `out` declarations (`out vec4 out_FragColor;` and
+    /// `out vec4 wpe_fragColor;`, plus their already-substituted `float4`
+    /// twins) from anywhere in the source. The line-by-line `hasPrefix`
+    /// guard in `translateFragment(_:_:)` catches the canonical prelude
+    /// line, but is brittle against trailing comments, `precision`
+    /// statements on the same line, or layout qualifiers — any of which can
+    /// drop the line into the body verbatim and surface as Metal's
+    /// `unknown type name 'out'`. This pass uses a multiline regex so the
+    /// declaration is killed regardless of surrounding text.
+    static func scrubFragmentOutDeclarations(_ source: String) -> String {
+        let pattern = #"out\s+(vec4|float4)\s+(wpe_fragColor|out_FragColor)\s*;\s*"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return source
+        }
+        let range = NSRange(source.startIndex..., in: source)
+        return regex.stringByReplacingMatches(
+            in: source,
+            range: range,
+            withTemplate: ""
         )
     }
 
