@@ -418,15 +418,16 @@ final class WPEMetalRenderExecutor {
         frameState.registerWrite(texture: destination.texture, targetID: destination.id)
     }
 
-    /// Breaks the `_rt_FullFrameBuffer` ↔ scene aliasing hazard. The
-    /// fbo-resolver redirects `.fbo("_rt_FullFrameBuffer")` to the scene
-    /// output texture when no explicit named-texture exists, which lets
-    /// post-process effects sample the composed scene. But if the SAME
-    /// pass also targets `.scene`, the read and write would collide on one
-    /// texture. Pre-encoding a snapshot into a pool-managed slot named
-    /// `_rt_FullFrameBuffer` resolves both sides: the resolver now finds
-    /// the snapshot in `latestNamedTextures` and never falls through to
-    /// the scene texture.
+    /// Breaks the `_rt_*` scene-alias hazard. The fbo-resolver redirects
+    /// scene-alias names (`_rt_FullFrameBuffer`, `_rt_HalfFrameBuffer`,
+    /// `_rt_EightBuffer*`, …) to the scene output texture when no
+    /// explicit named-texture exists, which lets post-process effects
+    /// sample the composed scene. But if the SAME pass also targets
+    /// `.scene`, the read and write would collide on one texture.
+    /// Pre-encoding a snapshot into a pool-managed slot named after the
+    /// alias resolves both sides: the resolver now finds the snapshot
+    /// in `latestNamedTextures` and never falls through to the scene
+    /// texture.
     private func snapshotFullFrameBufferIfAliasingScene(
         pass: WPEPreparedRenderPass,
         destinationTexture: MTLTexture,
@@ -435,12 +436,16 @@ final class WPEMetalRenderExecutor {
         commandBuffer: MTLCommandBuffer,
         frameState: inout WPEMetalFrameState
     ) throws {
-        let alias = "_rt_FullFrameBuffer"
-        guard targetID == .scene,
-              frameState.latestNamedTextures[alias] == nil,
-              textureReferences(for: pass).contains(.fbo(alias)) else {
-            return
+        guard targetID == .scene else { return }
+        let aliases = textureReferences(for: pass).compactMap { reference -> String? in
+            guard case .fbo(let name) = reference,
+                  WPEMetalShaderInputs.isSceneAliasName(name),
+                  frameState.latestNamedTextures[name] == nil else {
+                return nil
+            }
+            return name
         }
+        guard let alias = aliases.first else { return }
         let snapshot = try targetPool.texture(
             for: .fbo(name: alias),
             layer: layer,
