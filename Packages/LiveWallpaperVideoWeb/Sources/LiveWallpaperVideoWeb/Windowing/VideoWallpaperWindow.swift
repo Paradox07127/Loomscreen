@@ -1,6 +1,7 @@
 import AppKit
+import LiveWallpaperCore
 
-class VideoWallpaperWindow: NSWindow {
+public class VideoWallpaperWindow: NSWindow {
     private static let desktopWindowLevel = Int(CGWindowLevelForKey(.desktopWindow))
     private static let desktopIconWindowLevel = Int(CGWindowLevelForKey(.desktopIconWindow))
     private static let passiveWallpaperWindowLevel = desktopWindowLevel - 1
@@ -17,17 +18,17 @@ class VideoWallpaperWindow: NSWindow {
             : Self.passiveWallpaperWindowLevel
     }
 
-    init(frame: CGRect) {
+    public init(frame: CGRect) {
         super.init(
             contentRect: frame,
             styleMask: .borderless,
             backing: .buffered,
             defer: false
         )
-        
+
         configureWindow()
     }
-    
+
     private func configureWindow() {
         isOpaque = false
         backgroundColor = .clear
@@ -46,23 +47,23 @@ class VideoWallpaperWindow: NSWindow {
         setAccessibilitySubrole(.unknown)
         orderBack(nil)
     }
-    
+
     // MARK: - Window Behavior
     // 交互态需要成为 key window，否则 WKWebView 收不到键盘 / 焦点事件。
-    override var canBecomeKey: Bool { allowsWallpaperMouseInteraction }
-    override var canBecomeMain: Bool { allowsWallpaperMouseInteraction }
-    
-    override func setFrame(_ frameRect: NSRect, display flag: Bool) {
+    public override var canBecomeKey: Bool { allowsWallpaperMouseInteraction }
+    public override var canBecomeMain: Bool { allowsWallpaperMouseInteraction }
+
+    public override func setFrame(_ frameRect: NSRect, display flag: Bool) {
         guard frameRect.width > 0 && frameRect.height > 0 else {
             Logger.warning("Prevented setting invalid frame: \(frameRect)", category: .ui)
             return
         }
-        
+
         super.setFrame(frameRect, display: flag)
         level = NSWindow.Level(rawValue: wallpaperWindowLevel)
     }
-    
-    override func makeKeyAndOrderFront(_ sender: Any?) {
+
+    public override func makeKeyAndOrderFront(_ sender: Any?) {
         // 非交互态：保持壁纸语义，强制排到背后。
         // 交互态：放行真正的 key window 行为。
         if allowsWallpaperMouseInteraction {
@@ -71,8 +72,8 @@ class VideoWallpaperWindow: NSWindow {
             orderBack(nil)
         }
     }
-    
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+
+    public override func performKeyEquivalent(with event: NSEvent) -> Bool {
         // Prevent keyboard shortcuts from affecting the window
         false
     }
@@ -80,14 +81,14 @@ class VideoWallpaperWindow: NSWindow {
 
 // MARK: - Window Management Extensions
 extension VideoWallpaperWindow {
-    func ensureProperWindowLevel() {
+    public func ensureProperWindowLevel() {
         level = NSWindow.Level(rawValue: wallpaperWindowLevel)
         orderBack(nil)
         collectionBehavior = [.canJoinAllSpaces, .stationary]
         applyMouseInteractionPolicy()
     }
 
-    func setWallpaperMouseInteractionEnabled(_ enabled: Bool) {
+    public func setWallpaperMouseInteractionEnabled(_ enabled: Bool) {
         allowsWallpaperMouseInteraction = enabled
         applyMouseInteractionPolicy()
     }
@@ -95,7 +96,7 @@ extension VideoWallpaperWindow {
     /// Switches the window's color space when an HDR video is loaded so the
     /// composited output preserves the wider gamut. `nil` restores the
     /// system default (sRGB-tagged) for SDR sources.
-    func setExtendedDynamicRangeEnabled(_ enabled: Bool) {
+    public func setExtendedDynamicRangeEnabled(_ enabled: Bool) {
         colorSpace = enabled ? NSColorSpace.displayP3 : nil
     }
 
@@ -112,18 +113,18 @@ extension VideoWallpaperWindow {
         }
     }
 
-    func updateFrame(_ frame: CGRect, animate: Bool = false) {
+    public func updateFrame(_ frame: CGRect, animate: Bool = false) {
         guard !frame.isEmpty && frame.width > 0 && frame.height > 0 else {
             Logger.warning("Attempted to set invalid frame: \(frame)", category: .ui)
             return
         }
-        
+
         if NSEqualRects(self.frame, frame) {
             return
         }
 
         Logger.debug("Updating window frame from \(self.frame) to \(frame)", category: .ui)
-        
+
         if animate {
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.3
@@ -141,8 +142,8 @@ extension VideoWallpaperWindow {
             contentView.needsLayout = true
         }
     }
-    
-    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+
+    public override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
         frameRect
     }
 }
