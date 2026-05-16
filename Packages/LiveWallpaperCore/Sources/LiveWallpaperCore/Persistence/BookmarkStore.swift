@@ -4,27 +4,23 @@ import Observation
 /// Persistence seam — production binds to UserDefaults via SettingsManager,
 /// tests inject an in-memory implementation.
 @MainActor
-protocol BookmarkPersisting {
+public protocol BookmarkPersisting {
     func load() -> [WallpaperBookmark]
     func save(_ bookmarks: [WallpaperBookmark])
 }
 
-@MainActor
-struct SettingsManagerBookmarkPersistence: BookmarkPersisting {
-    func load() -> [WallpaperBookmark] { SettingsManager.shared.loadWallpaperBookmarks() }
-    func save(_ bookmarks: [WallpaperBookmark]) { SettingsManager.shared.saveWallpaperBookmarks(bookmarks) }
-}
-
 /// Single source of truth for the user's saved wallpaper shortcuts.
+///
+/// Core class — the SettingsManager-backed `.shared` singleton lives in
+/// `LiveWallpaper/Infrastructure/BookmarkStore+Shared.swift` because it
+/// reaches into the main-target SettingsManager.
 @MainActor
 @Observable
-final class BookmarkStore {
-    static let shared = BookmarkStore()
-
-    private(set) var bookmarks: [WallpaperBookmark]
+public final class BookmarkStore {
+    public private(set) var bookmarks: [WallpaperBookmark]
     @ObservationIgnored private let persistence: any BookmarkPersisting
 
-    init(persistence: any BookmarkPersisting = SettingsManagerBookmarkPersistence()) {
+    public init(persistence: any BookmarkPersisting) {
         self.persistence = persistence
         var loaded = persistence.load()
         var didMigrate = false
@@ -40,7 +36,7 @@ final class BookmarkStore {
 
     /// Append a new bookmark and persist immediately.
     @discardableResult
-    func add(
+    public func add(
         label: String,
         content: WallpaperContent,
         sourceDisplayName: String? = nil,
@@ -65,25 +61,25 @@ final class BookmarkStore {
         return bookmark
     }
 
-    func remove(_ id: UUID) {
+    public func remove(_ id: UUID) {
         let removedType = bookmarks.first(where: { $0.id == id })?.wallpaperType.rawValue ?? "Unknown"
         bookmarks.removeAll { $0.id == id }
         persist()
         Logger.info("Bookmark removed: type \(removedType), total \(bookmarks.count)", category: .ui)
     }
 
-    func resetAfterSettingsCleared() {
+    public func resetAfterSettingsCleared() {
         bookmarks.removeAll()
     }
 
     /// Re-reads the persistence layer and replaces the in-memory list.
     /// Used after Import Configuration restores `WallpaperBookmarks.v1`
     /// from a backup bundle.
-    func reload() {
+    public func reload() {
         bookmarks = persistence.load()
     }
 
-    func rename(_ id: UUID, to newLabel: String) {
+    public func rename(_ id: UUID, to newLabel: String) {
         let trimmed = newLabel.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty,
               let index = bookmarks.firstIndex(where: { $0.id == id }) else { return }
@@ -94,15 +90,15 @@ final class BookmarkStore {
 
     /// True when an equivalent content is already saved (so UI can disable
     /// the "Save" button instead of producing duplicates).
-    func contains(_ content: WallpaperContent) -> Bool {
+    public func contains(_ content: WallpaperContent) -> Bool {
         bookmarks.contains { $0.content == content }
     }
 
-    func containsWPEBookmark(workshopID: String) -> Bool {
+    public func containsWPEBookmark(workshopID: String) -> Bool {
         bookmarks.contains { Self.matchesWPEBookmark($0, workshopID: workshopID) }
     }
 
-    func removeWPEBookmarks(workshopID: String) {
+    public func removeWPEBookmarks(workshopID: String) {
         let removedCount = bookmarks.filter { Self.matchesWPEBookmark($0, workshopID: workshopID) }.count
         guard removedCount > 0 else { return }
 
@@ -123,7 +119,7 @@ final class BookmarkStore {
     }
 
     /// Friendly fallback label derived from the content itself.
-    static func defaultLabel(for content: WallpaperContent, sourceDisplayName: String? = nil) -> String {
+    public static func defaultLabel(for content: WallpaperContent, sourceDisplayName: String? = nil) -> String {
         switch content {
         case .video:
             if let trimmed = sourceDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -140,7 +136,7 @@ final class BookmarkStore {
         }
     }
 
-    static func nonResolvingSourceDisplayName(for content: WallpaperContent) -> String? {
+    public static func nonResolvingSourceDisplayName(for content: WallpaperContent) -> String? {
         switch content {
         case .video:
             return nil
@@ -153,7 +149,7 @@ final class BookmarkStore {
         }
     }
 
-    static func defaultSourceDisplayName(for content: WallpaperContent) -> String? {
+    public static func defaultSourceDisplayName(for content: WallpaperContent) -> String? {
         switch content {
         case .video(let bookmarkData):
             return ResourceUtilities.resolveBookmarkName(bookmarkData)
