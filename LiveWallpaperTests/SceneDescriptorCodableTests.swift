@@ -229,7 +229,7 @@ struct SceneDescriptorCodableTests {
             resourceLocation: .cache
         )
 
-        config.reconcileWPEOrigin()
+        WPEOriginReconciler().reconcile(&config, event: .userReplacedActiveWallpaper(previous: nil))
 
         #expect(config.wpeOrigin != nil)
     }
@@ -254,7 +254,7 @@ struct SceneDescriptorCodableTests {
             resourceLocation: .cache
         )
 
-        config.reconcileWPEOrigin()
+        WPEOriginReconciler().reconcile(&config, event: .userReplacedActiveWallpaper(previous: nil))
 
         #expect(config.wpeOrigin == nil)
     }

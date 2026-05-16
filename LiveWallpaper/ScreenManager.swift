@@ -45,6 +45,15 @@ struct ScreenManagerStartupOptions: Equatable {
     var fullScreenDetector: (any FullScreenDetecting)? = nil
     var playableVideoLoader: (any PlayableVideoLoading)? = nil
     var displayRegistry: (any DisplayRegistering)? = nil
+    /// SKU-driven feature toggles. The Lite app target injects
+    /// `FeatureCatalog(capabilities: .lite)`; everything else defaults to
+    /// the full Pro catalogue so legacy entry points keep current behaviour.
+    var featureCatalog: FeatureCatalog = FeatureCatalog(capabilities: .pro)
+    /// Strategy used to keep `ScreenConfiguration.wpeOrigin` in sync with
+    /// the active wallpaper. Defaults to the full Pro behaviour so the
+    /// monolithic app retains its current bookmark-matching semantics; Lite
+    /// will swap in `PreservingOriginReconciler` once Phase 4 splits ProWPE.
+    var originReconciler: any OriginReconciler = WPEOriginReconciler()
 
     // Reference-typed protocol fields are not synthesizable for Equatable.
     // Compare only the value-typed boolean configuration; injected dependencies
@@ -52,6 +61,7 @@ struct ScreenManagerStartupOptions: Equatable {
     static func == (lhs: ScreenManagerStartupOptions, rhs: ScreenManagerStartupOptions) -> Bool {
         lhs.restoreSavedWallpapers == rhs.restoreSavedWallpapers
             && lhs.startAutomation == rhs.startAutomation
+            && lhs.featureCatalog == rhs.featureCatalog
     }
 }
 
@@ -86,6 +96,8 @@ final class ScreenManager {
 
     @ObservationIgnored private var cleanupTasks: Set<AnyCancellable> = []
     @ObservationIgnored private let displayRegistry: any DisplayRegistering
+    @ObservationIgnored let featureCatalog: FeatureCatalog
+    @ObservationIgnored let originReconciler: any OriginReconciler
     @ObservationIgnored private let configurationStore = WallpaperConfigurationStore()
     @ObservationIgnored private let ambientSessionBuilder = AmbientWallpaperSessionBuilder()
     @ObservationIgnored private let automationCoordinator = WallpaperAutomationCoordinator()
@@ -129,7 +141,8 @@ final class ScreenManager {
         },
         reportRuntimeError: { [weak self] screenID, error in
             self?.setTransientRuntimeError(error, for: screenID)
-        }
+        },
+        originReconciler: originReconciler
     )
     /// Lazy because the `saveConfiguration` / `restoreWallpaperSession`
     /// callbacks capture `self` (matches `playbackCoordinator`'s pattern).
@@ -214,7 +227,8 @@ final class ScreenManager {
         },
         notifyWallpaperSessionChanged: { [weak self] in
             self?.notifyWallpaperSessionChanged()
-        }
+        },
+        originReconciler: originReconciler
     )
     /// Owns the CIFilter video-effects pipeline + weather-reactive monitor.
     /// Lazy because the saveConfiguration / applyFrameRateLimit /
@@ -253,6 +267,8 @@ final class ScreenManager {
     // MARK: - Initialization
     init(startupOptions: ScreenManagerStartupOptions = ScreenManagerStartupOptions()) {
         displayRegistry = startupOptions.displayRegistry ?? DisplayRegistry()
+        featureCatalog = startupOptions.featureCatalog
+        originReconciler = startupOptions.originReconciler
         powerMonitor = startupOptions.powerMonitor ?? PowerMonitor.shared
         fullScreenDetector = startupOptions.fullScreenDetector ?? FullScreenDetector()
         playableVideoLoader = startupOptions.playableVideoLoader ?? PlayableVideoLoader()
@@ -1350,11 +1366,15 @@ final class ScreenManager {
     // MARK: - Metal Shader Wallpaper
 
     func setShaderWallpaper(preset: MetalShaderPreset, for screen: Screen) {
+        let previousContent = configurationStore.get(for: screen.id)?.activeWallpaper
         var config = configurationStore.get(for: screen.id) ?? ScreenConfiguration(
             screenID: screen.id, wallpaper: .metalShader(preset)
         )
         config.setShaderWallpaper(preset)
-        config.reconcileWPEOrigin()
+        originReconciler.reconcile(
+            &config,
+            event: .userReplacedActiveWallpaper(previous: previousContent)
+        )
         saveConfiguration(config)
 
         restoreWallpaperSession(for: screen, configuration: config, preservingState: false)

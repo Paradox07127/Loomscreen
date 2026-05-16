@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct ScreenDetailView: View {
     var screen: Screen
     @Environment(ScreenManager.self) private var screenManager
+    @Environment(\.featureCatalog) private var featureCatalog
 
     @State private var playbackSpeed: Double = 1.0
     @State private var selectedFitMode: VideoFitMode = .aspectFill
@@ -39,7 +40,7 @@ struct ScreenDetailView: View {
     @ViewBuilder
     private var wallpaperTypePicker: some View {
         Picker("Wallpaper Type", selection: wallpaperTypeSelection) {
-            ForEach(WallpaperType.allCases) { type in
+            ForEach(featureCatalog.capabilities.selectableWallpaperTypes) { type in
                 Text(type.titleKey).tag(type)
             }
         }
