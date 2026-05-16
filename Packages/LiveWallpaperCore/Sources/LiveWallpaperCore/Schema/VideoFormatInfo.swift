@@ -4,13 +4,13 @@ import Foundation
 /// Lightweight, Equatable snapshot of a video file's format characteristics.
 /// Populated by `PlayableVideoLoader.detectFormat(at:)`. Drives UI badges
 /// (ProRes / HDR / 4K) and unlocks the EDR rendering path for HDR sources.
-struct VideoFormatInfo: Equatable, Hashable, Sendable {
-    let codecFourCC: String?
-    let isHDR: Bool
-    let resolution: CGSize?
-    let frameRate: Double?
+public struct VideoFormatInfo: Equatable, Hashable, Sendable {
+    public let codecFourCC: String?
+    public let isHDR: Bool
+    public let resolution: CGSize?
+    public let frameRate: Double?
 
-    init(
+    public init(
         codecFourCC: String? = nil,
         isHDR: Bool = false,
         resolution: CGSize? = nil,
@@ -24,24 +24,24 @@ struct VideoFormatInfo: Equatable, Hashable, Sendable {
 }
 
 extension VideoFormatInfo {
-    var isProRes: Bool {
+    public var isProRes: Bool {
         guard let codec = codecFourCC?.lowercased() else { return false }
         return ["apch", "apcn", "apcs", "apco", "ap4h", "ap4x"].contains(codec)
     }
 
-    var is4K: Bool {
+    public var is4K: Bool {
         guard let size = resolution else { return false }
         return max(size.width, size.height) >= 3840
     }
 
-    var is8K: Bool {
+    public var is8K: Bool {
         guard let size = resolution else { return false }
         return max(size.width, size.height) >= 7680
     }
 
     /// Ordered list of badges to display, longest-edge resolution first so
     /// "4K HDR ProRes" reads naturally.
-    var badges: [String] {
+    public var badges: [String] {
         var result: [String] = []
         if is8K {
             result.append("8K")

@@ -1,10 +1,15 @@
 import CoreGraphics
 
-struct VideoSpanRenderConfiguration: Equatable, Sendable {
-    let canvasFrame: CGRect
-    let screenFrame: CGRect
+public struct VideoSpanRenderConfiguration: Equatable, Sendable {
+    public let canvasFrame: CGRect
+    public let screenFrame: CGRect
 
-    var canvasFrameInScreenCoordinates: CGRect {
+    public init(canvasFrame: CGRect, screenFrame: CGRect) {
+        self.canvasFrame = canvasFrame
+        self.screenFrame = screenFrame
+    }
+
+    public var canvasFrameInScreenCoordinates: CGRect {
         CGRect(
             x: canvasFrame.minX - screenFrame.minX,
             y: canvasFrame.minY - screenFrame.minY,
@@ -14,13 +19,18 @@ struct VideoSpanRenderConfiguration: Equatable, Sendable {
     }
 }
 
-enum VideoSpanLayout {
-    struct Entry: Equatable, Sendable {
-        let screenID: CGDirectDisplayID
-        let frame: CGRect
+public enum VideoSpanLayout {
+    public struct Entry: Equatable, Sendable {
+        public let screenID: CGDirectDisplayID
+        public let frame: CGRect
+
+        public init(screenID: CGDirectDisplayID, frame: CGRect) {
+            self.screenID = screenID
+            self.frame = frame
+        }
     }
 
-    static func renderConfigurations(
+    public static func renderConfigurations(
         for entries: [Entry]
     ) -> [CGDirectDisplayID: VideoSpanRenderConfiguration] {
         let validEntries = entries.filter { !$0.frame.isEmpty }
