@@ -250,7 +250,139 @@ void wpe_shader_free_reflection(wpe_shader_reflection_result *result) {
 }
 
 const char *wpe_shader_toolchain_version(void) {
-    return "1.0.0 (glslang+SPIRV-Cross, pin via Scripts/build_spirv_cross_xcframework.sh)";
+    return "1.1.0 (glslang+SPIRV-Cross, pair compile, pin via Scripts/build_spirv_cross_xcframework.sh)";
+}
+
+int wpe_shader_compile_pair_to_msl(
+    const char *vertex_glsl,
+    const char *fragment_glsl,
+    char      **out_msl,
+    char      **out_diag
+) {
+    if (!fragment_glsl || !out_msl) {
+        writeDiag(out_diag, "wpe_shader_compile_pair_to_msl: null required argument");
+        return 1;
+    }
+
+    glslang::InitializeProcess();
+
+    // Use gl_VertexID-based fullscreen quad — matches the existing
+    // wpe_fullscreen_vertex pattern (no vertex attribute buffers needed,
+    // the renderer just issues a 4-vertex draw). SPIRV-Cross emits this
+    // as `vertex ... fn(uint vertexID [[vertex_id]])`, which is wire-
+    // compatible with how the executor invokes the pipeline.
+    const char *vertSource = (vertex_glsl && vertex_glsl[0] != '\0') ? vertex_glsl :
+        "#version 410 core\n"
+        "out vec2 v_TexCoord;\n"
+        "void main() {\n"
+        "    vec2 pos; vec2 uv;\n"
+        "    switch (gl_VertexID) {\n"
+        "        case 0:  pos = vec2(-1.0, -1.0); uv = vec2(0.0, 1.0); break;\n"
+        "        case 1:  pos = vec2( 1.0, -1.0); uv = vec2(1.0, 1.0); break;\n"
+        "        case 2:  pos = vec2(-1.0,  1.0); uv = vec2(0.0, 0.0); break;\n"
+        "        default: pos = vec2( 1.0,  1.0); uv = vec2(1.0, 0.0); break;\n"
+        "    }\n"
+        "    gl_Position = vec4(pos, 0.0, 1.0);\n"
+        "    v_TexCoord = uv;\n"
+        "}\n";
+
+    glslang::TShader vertex(EShLangVertex);
+    glslang::TShader fragment(EShLangFragment);
+    vertex.setStrings(&vertSource, 1);
+    fragment.setStrings(&fragment_glsl, 1);
+
+    vertex.setEnvInput(glslang::EShSourceGlsl,   EShLangVertex,   glslang::EShClientOpenGL, 410);
+    vertex.setEnvClient(glslang::EShClientOpenGL, glslang::EShTargetOpenGL_450);
+    vertex.setEnvTarget(glslang::EShTargetSpv,    glslang::EShTargetSpv_1_0);
+    fragment.setEnvInput(glslang::EShSourceGlsl, EShLangFragment, glslang::EShClientOpenGL, 410);
+    fragment.setEnvClient(glslang::EShClientOpenGL, glslang::EShTargetOpenGL_450);
+    fragment.setEnvTarget(glslang::EShTargetSpv,   glslang::EShTargetSpv_1_0);
+
+    vertex.setAutoMapLocations(true);
+    vertex.setAutoMapBindings(true);
+    fragment.setAutoMapLocations(true);
+    fragment.setAutoMapBindings(true);
+
+    EShMessages messages = static_cast<EShMessages>(EShMsgSpvRules);
+    bool vertOK = vertex.parse(&kDefaultResources, 410, false, messages);
+    bool fragOK = fragment.parse(&kDefaultResources, 410, false, messages);
+    if (!vertOK || !fragOK) {
+        std::string diag = "glslang parse failed:\n";
+        diag += vertex.getInfoLog();
+        diag += fragment.getInfoLog();
+        writeDiag(out_diag, diag);
+        glslang::FinalizeProcess();
+        return 2;
+    }
+
+    glslang::TProgram program;
+    program.addShader(&vertex);
+    program.addShader(&fragment);
+    if (!program.link(messages)) {
+        writeDiag(out_diag, std::string("glslang link failed: ") + program.getInfoLog());
+        glslang::FinalizeProcess();
+        return 3;
+    }
+    if (!program.mapIO()) {
+        writeDiag(out_diag, std::string("glslang mapIO failed: ") + program.getInfoLog());
+        glslang::FinalizeProcess();
+        return 3;
+    }
+
+    std::vector<uint32_t> vertSpirv;
+    std::vector<uint32_t> fragSpirv;
+    glslang::GlslangToSpv(*program.getIntermediate(EShLangVertex),   vertSpirv);
+    glslang::GlslangToSpv(*program.getIntermediate(EShLangFragment), fragSpirv);
+    glslang::FinalizeProcess();
+
+    try {
+        // Vertex stage: translate, rename entry point to `wpe_spv_vert`.
+        spirv_cross::CompilerMSL vCompiler(vertSpirv.data(), vertSpirv.size());
+        spirv_cross::CompilerMSL::Options vOpts;
+        vOpts.platform = spirv_cross::CompilerMSL::Options::macOS;
+        vOpts.msl_version = spirv_cross::CompilerMSL::Options::make_msl_version(3, 0);
+        vCompiler.set_msl_options(vOpts);
+        vCompiler.rename_entry_point("main", "wpe_spv_vert", spv::ExecutionModelVertex);
+        std::string vMsl = vCompiler.compile();
+
+        // Fragment stage: translate, rename entry point to `wpe_spv_frag`.
+        spirv_cross::CompilerMSL fCompiler(fragSpirv.data(), fragSpirv.size());
+        spirv_cross::CompilerMSL::Options fOpts = vOpts;
+        fCompiler.set_msl_options(fOpts);
+        fCompiler.rename_entry_point("main", "wpe_spv_frag", spv::ExecutionModelFragment);
+        std::string fMsl = fCompiler.compile();
+
+        // Concatenate. Strip the duplicate header pragmas/includes from
+        // the second source so the combined output compiles cleanly as
+        // one MSL unit. The headers are deterministic for SPIRV-Cross's
+        // MSL backend so simple string searches are safe.
+        auto stripLeadingHeaders = [](std::string &src) {
+            const char *needles[] = {
+                "#pragma clang diagnostic ignored",
+                "#include <metal_stdlib>",
+                "#include <simd/simd.h>",
+                "using namespace metal;"
+            };
+            for (const char *n : needles) {
+                size_t pos = src.find(n);
+                if (pos == std::string::npos) continue;
+                size_t lineEnd = src.find('\n', pos);
+                if (lineEnd == std::string::npos) lineEnd = src.size();
+                src.erase(pos, lineEnd - pos + 1);
+            }
+        };
+        stripLeadingHeaders(fMsl);
+
+        std::string combined = vMsl + "\n\n// ---- fragment stage ----\n" + fMsl;
+        *out_msl = dupString(combined);
+        return 0;
+    } catch (const std::exception &e) {
+        writeDiag(out_diag, std::string("SPIRV-Cross failed: ") + e.what());
+        return 4;
+    } catch (...) {
+        writeDiag(out_diag, "SPIRV-Cross failed: unknown error");
+        return 5;
+    }
 }
 
 } // extern "C"

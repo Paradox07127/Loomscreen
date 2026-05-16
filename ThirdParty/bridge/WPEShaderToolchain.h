@@ -68,6 +68,21 @@ int wpe_shader_reflect_spirv(
 
 void wpe_shader_free_reflection(wpe_shader_reflection_result *result);
 
+// One-shot: compile vertex + fragment GLSL together via glslang, then
+// translate BOTH stages to MSL with renamed entry points
+// (`wpe_spv_vert` / `wpe_spv_frag`). The combined source can be passed
+// to `MTLDevice.makeLibrary` as one unit; both entry points are then
+// pulled into the same pipeline. Solves the stage_in compatibility gap:
+// vertex outputs are guaranteed to match fragment inputs because they
+// were linked together at SPIR-V time. Caller owns `*out_msl`, releases
+// with `free`. On failure returns non-zero and fills `*out_diag`.
+int wpe_shader_compile_pair_to_msl(
+    const char *vertex_glsl,
+    const char *fragment_glsl,
+    char      **out_msl,
+    char      **out_diag
+);
+
 // Library version. Bumps whenever a pinned upstream tag changes — Swift
 // can log this for cache invalidation when the toolchain bumps.
 const char *wpe_shader_toolchain_version(void);

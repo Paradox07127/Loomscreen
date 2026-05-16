@@ -62,71 +62,58 @@ struct WPESPIRVShaderCompiler: WPEShaderCompiling {
 
     #if canImport(WPEShaderToolchain)
     private func compileViaToolchain(_ request: WPEShaderCompileRequest) throws -> WPEShaderCompileResult {
-        // 1. GLSL → SPIR-V via glslang.
-        var spirvBuffer: UnsafeMutablePointer<UInt32>?
-        var spirvCount: Int = 0
+        // 1. Pair-compile: glslang links vertex+fragment as one program so
+        // their stage_in/out shapes match by construction. SPIRV-Cross then
+        // emits both stages into one combined MSL source with renamed
+        // entry points (`wpe_spv_vert` / `wpe_spv_frag`). The bridge's
+        // default vertex uses `gl_VertexID` — no attribute buffers
+        // needed, wire-compatible with the executor's draw setup.
+        var mslPtr: UnsafeMutablePointer<CChar>?
         var diag: UnsafeMutablePointer<CChar>?
-        let glslResult = request.processedVertexSource.withCString { vertexC in
+        let pairResult = request.processedVertexSource.withCString { vertexC in
             request.processedFragmentSource.withCString { fragmentC in
-                wpe_shader_glsl_to_spirv(vertexC, fragmentC, &spirvBuffer, &spirvCount, &diag)
+                wpe_shader_compile_pair_to_msl(vertexC, fragmentC, &mslPtr, &diag)
             }
         }
-        guard glslResult == 0, let spirv = spirvBuffer else {
+        guard pairResult == 0, let mslChars = mslPtr else {
             let message = Self.consumeDiag(diag)
             throw WPEShaderCompilerError.glslPreprocessFailed(
-                "glslang failed for '\(request.shaderName)': \(message)"
-            )
-        }
-        defer { wpe_shader_free_spirv(spirvBuffer) }
-
-        // 2. SPIR-V → MSL via SPIRV-Cross.
-        var mslPtr: UnsafeMutablePointer<CChar>?
-        diag = nil
-        let mslResult = wpe_shader_spirv_to_msl(spirv, spirvCount, &mslPtr, &diag)
-        guard mslResult == 0, let mslChars = mslPtr else {
-            let message = Self.consumeDiag(diag)
-            throw WPEShaderCompilerError.translationFailed(
-                "SPIRV-Cross failed for '\(request.shaderName)': \(message)"
+                "glslang/SPIRV-Cross pair-compile failed for '\(request.shaderName)': \(message)"
             )
         }
         let mslSource = String(cString: mslChars)
         free(mslChars)
 
-        // 3. Reflection → uniform / sampler layout.
-        var reflection = wpe_shader_reflection_result()
+        // 2. Reflection for uniform / sampler layout. Run on the fragment
+        // SPIR-V only — uniforms/samplers are defined there for our
+        // shader shape. Compile the fragment SPIR-V separately for this.
+        var spirvBuffer: UnsafeMutablePointer<UInt32>?
+        var spirvCount: Int = 0
         diag = nil
-        let reflectionResult = wpe_shader_reflect_spirv(spirv, spirvCount, &reflection, &diag)
-        guard reflectionResult == 0 else {
-            let message = Self.consumeDiag(diag)
-            throw WPEShaderCompilerError.translationFailed(
-                "SPIRV-Cross reflection failed for '\(request.shaderName)': \(message)"
-            )
+        let reflectGlslResult = request.processedVertexSource.withCString { vertexC in
+            request.processedFragmentSource.withCString { fragmentC in
+                wpe_shader_glsl_to_spirv(vertexC, fragmentC, &spirvBuffer, &spirvCount, &diag)
+            }
         }
-        defer { wpe_shader_free_reflection(&reflection) }
-
-        let uniformLayout = Self.buildUniformLayout(reflection: reflection)
-        let samplerNames = Self.buildSamplerNames(reflection: reflection)
-
-        // 4. Stage-in compatibility gate — SPIRV-Cross emits MSL with
-        // `[[user(locnN)]]` attribute layout. Our renderer pairs every
-        // fragment with the fixed `wpe_fullscreen_vertex` from the
-        // executor's default library, which only outputs `position` +
-        // `uv` (no `[[user(locnN)]]` attributes). If the SPIRV-Cross MSL
-        // expects ANY `[[user(locn...)]]` input, the pipeline build will
-        // fail at link time with "Fragment input(s) mismatching vertex
-        // shader output". Throw here so the wrapper's outer fallback
-        // catches it and re-tries via the Swift transpiler, which
-        // generates a vertex-compatible stage_in struct.
-        //
-        // This is a band-aid until the bridge also emits a matching
-        // vertex shader from the same SPIR-V module (the proper fix).
-        if mslSource.contains("[[user(locn") {
-            throw WPEShaderCompilerError.translationFailed(
-                "SPIRV-Cross stage_in incompatible with fixed wpe_fullscreen_vertex for '\(request.shaderName)' — falling through to Swift transpiler"
-            )
+        var uniformLayout: [WPEUniformSlot] = []
+        var samplerNames: [String] = []
+        if reflectGlslResult == 0, let spirv = spirvBuffer {
+            defer { wpe_shader_free_spirv(spirvBuffer) }
+            var reflection = wpe_shader_reflection_result()
+            var refDiag: UnsafeMutablePointer<CChar>?
+            if wpe_shader_reflect_spirv(spirv, spirvCount, &reflection, &refDiag) == 0 {
+                uniformLayout = Self.buildUniformLayout(reflection: reflection)
+                samplerNames = Self.buildSamplerNames(reflection: reflection)
+                wpe_shader_free_reflection(&reflection)
+            } else {
+                _ = Self.consumeDiag(refDiag)
+            }
+        } else {
+            _ = Self.consumeDiag(diag)
         }
 
-        // 5. MTLLibrary from the emitted MSL.
+        // 3. MTLLibrary from the combined MSL source. Both stages compile
+        // as one unit; the pipeline picks `wpe_spv_vert` + `wpe_spv_frag`.
         let library: MTLLibrary
         do {
             let options = MTLCompileOptions()
@@ -140,8 +127,8 @@ struct WPESPIRVShaderCompiler: WPEShaderCompiling {
 
         return WPEShaderCompileResult(
             library: library,
-            vertexFunctionName: "wpe_fullscreen_vertex",
-            fragmentFunctionName: "main0",
+            vertexFunctionName: "wpe_spv_vert",
+            fragmentFunctionName: "wpe_spv_frag",
             mslSource: mslSource,
             diagnostics: [],
             uniformLayout: uniformLayout,
