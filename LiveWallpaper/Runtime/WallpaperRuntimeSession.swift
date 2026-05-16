@@ -164,6 +164,7 @@ final class VideoWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackCon
         let frame = oldPlayer.currentWindowFrame
         let fitMode = oldPlayer.currentFitMode
         let muted = oldPlayer.isMuted
+        let volume = oldPlayer.audioVolume
         let speed = Double(oldPlayer.player?.defaultRate ?? 1)
         let frameRateLimit = oldPlayer.requestedFrameRateLimit
         let shouldAutoplay = oldPlayer.isPlaying || oldPlayer.shouldAutoplayWhenReady
@@ -172,6 +173,7 @@ final class VideoWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackCon
 
         let replacement = WallpaperVideoPlayer(url: url, frame: frame, fitMode: fitMode)
         attachErrorHandler(to: replacement)
+        replacement.setVolume(volume)
         replacement.setMuted(muted)
         replacement.setPlaybackSpeed(speed)
         if frameRateLimit > 0 {

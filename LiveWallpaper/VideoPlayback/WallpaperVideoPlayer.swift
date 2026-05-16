@@ -30,6 +30,8 @@ final class WallpaperVideoPlayer {
     var videoURL: URL?
     /// Whether audio tracks are disabled at the AVPlayerItem level.
     private(set) var isMuted: Bool = true
+    /// User-controlled output level applied when audio is not muted.
+    private(set) var audioVolume: Double = 1.0
     private(set) var shouldAutoplayWhenReady = true
     private(set) var requestedFrameRateLimit: Float = 0
     private(set) var runtimeError: WallpaperRuntimeError?
@@ -57,6 +59,7 @@ final class WallpaperVideoPlayer {
     private var templatePlayerItem: AVPlayerItem?
     /// Buffered until asset loading creates the container view.
     private var pendingParticleEffect: (ParticleEffect, Double)?
+    private var pendingSpanRenderConfiguration: VideoSpanRenderConfiguration?
     private var cleanupTasks = Set<AnyCancellable>()
     private var loadingTask: Task<Void, Never>?
     private var frameRateLimitTask: Task<Void, Never>?
@@ -101,16 +104,23 @@ final class WallpaperVideoPlayer {
     private func setupPlayer(with url: URL) {
         Logger.debug("Setting up player with URL: \(url.lastPathComponent)", category: .videoPlayer)
         accessToken = url.startAccessingSecurityScopedResource()
-        guard accessToken else {
-            let error = NSError(
-                domain: "WallpaperVideoPlayer",
-                code: 2,
-                userInfo: [NSLocalizedDescriptionKey: "Failed to access security scoped resource"]
+        if !accessToken {
+            guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else {
+                let error = NSError(
+                    domain: "WallpaperVideoPlayer",
+                    code: 2,
+                    userInfo: [NSLocalizedDescriptionKey: "Failed to access security scoped resource"]
+                )
+                Logger.error("Failed to access security scoped resource: \(url.lastPathComponent)", category: .videoPlayer)
+                Logger.error("WallpaperVideoPlayer init error: \(error.localizedDescription)", category: .videoPlayer)
+                reportError(.fileAccessDenied(url))
+                return
+            }
+
+            Logger.debug(
+                "Using directly accessible video file without security scope: \(url.lastPathComponent)",
+                category: .videoPlayer
             )
-            Logger.error("Failed to access security scoped resource: \(url.lastPathComponent)", category: .videoPlayer)
-            Logger.error("WallpaperVideoPlayer init error: \(error.localizedDescription)", category: .videoPlayer)
-            reportError(.fileAccessDenied(url))
-            return
         }
 
         loadingTask = Task { [weak self] in
@@ -187,7 +197,8 @@ final class WallpaperVideoPlayer {
         let queuePlayer = AVQueuePlayer()
         queuePlayer.actionAtItemEnd = .none
         queuePlayer.automaticallyWaitsToMinimizeStalling = true
-        queuePlayer.volume = isMuted ? 0 : 1
+        queuePlayer.preventsDisplaySleepDuringVideoPlayback = false
+        queuePlayer.volume = isMuted ? 0 : Float(audioVolume)
         queuePlayer.isMuted = isMuted
         self.player = queuePlayer
         self.templatePlayerItem = playerItem
@@ -199,6 +210,7 @@ final class WallpaperVideoPlayer {
         containerView.fitMode = fitMode
         videoWindow.contentView = containerView
         containerView.setPlayer(player)
+        containerView.setSpanRenderConfiguration(pendingSpanRenderConfiguration)
 
         videoWindow.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)) - 1)
         videoWindow.orderBack(nil)
@@ -377,10 +389,15 @@ final class WallpaperVideoPlayer {
     func pause() {
         shouldAutoplayWhenReady = false
         hasRequestedPlaybackStart = false
-        guard let player = player, player.timeControlStatus == .playing else { return }
+        guard let player else { return }
+        let wasActive = isPlaying || player.timeControlStatus != .paused
         player.pause()
-        isPlaying = false
-        Logger.debug("Video playback paused", category: .videoPlayer)
+        if isPlaying {
+            isPlaying = false
+        }
+        if wasActive {
+            Logger.debug("Video playback paused", category: .videoPlayer)
+        }
     }
 
     func setPlaybackSpeed(_ speed: Double) {
@@ -396,10 +413,14 @@ final class WallpaperVideoPlayer {
         guard isMuted != muted else { return }
         isMuted = muted
 
-        guard let player else { return }
         applyAudioPolicyToQueueItems()
-        player.isMuted = muted
-        player.volume = muted ? 0 : 1
+    }
+
+    func setVolume(_ volume: Double) {
+        let clampedVolume = Self.clampedVolume(volume)
+        guard abs(audioVolume - clampedVolume) > 0.001 else { return }
+        audioVolume = clampedVolume
+        updatePlayerAudioOutput()
     }
 
     private func applyAudioPolicyToQueueItems() {
@@ -413,8 +434,13 @@ final class WallpaperVideoPlayer {
         for item in player.items() where item !== player.currentItem {
             applyAudioPolicy(to: item)
         }
+        updatePlayerAudioOutput()
+    }
+
+    private func updatePlayerAudioOutput() {
+        guard let player else { return }
         player.isMuted = isMuted
-        player.volume = isMuted ? 0 : 1
+        player.volume = isMuted ? 0 : Float(audioVolume)
     }
 
     private func applyAudioPolicy(to playerItem: AVPlayerItem) {
@@ -422,6 +448,11 @@ final class WallpaperVideoPlayer {
         for track in playerItem.tracks where track.assetTrack?.mediaType == .audio {
             track.isEnabled = enable
         }
+    }
+
+    private static func clampedVolume(_ value: Double) -> Double {
+        guard value.isFinite else { return 1.0 }
+        return min(max(value, 0), 1)
     }
 
     private func installQueueItemMaintenanceObserver() {
@@ -441,6 +472,11 @@ final class WallpaperVideoPlayer {
         guard mode != fitMode else { return }
         fitMode = mode
         videoView?.fitMode = mode
+    }
+
+    func setSpanRenderConfiguration(_ configuration: VideoSpanRenderConfiguration?) {
+        pendingSpanRenderConfiguration = configuration
+        videoView?.setSpanRenderConfiguration(configuration)
     }
 
     func setParticleEffect(_ effect: ParticleEffect, density: Double = 1.0) {

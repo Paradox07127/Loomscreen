@@ -8,6 +8,7 @@ struct ScreenDetailView: View {
 
     @State private var playbackSpeed: Double = 1.0
     @State private var selectedFitMode: VideoFitMode = .aspectFill
+    @State private var selectedVideoDisplayMode: VideoDisplayMode = .perDisplay
     @State private var isLoading: Bool = false
     private var wallpaperSessionSummary: WallpaperSessionSummary {
         screenManager.wallpaperSummary(for: screen)
@@ -172,6 +173,7 @@ struct ScreenDetailView: View {
 
     @State private var isDraggingOver = false
     @State private var videoMuted: Bool = true
+    @State private var videoVolume: Double = 1.0
     @State private var lockScreenExtracted: Bool = false
     @State private var particleDensity: Double = 1.0
     @State private var selectedFrameRateLimit: FrameRateLimit = .fps60
@@ -439,6 +441,8 @@ struct ScreenDetailView: View {
                             screen: screen,
                             wallpaperType: selectedWallpaperType,
                             muted: $videoMuted,
+                            videoVolume: $videoVolume,
+                            videoDisplayMode: $selectedVideoDisplayMode,
                             frameRateLimit: $selectedFrameRateLimit,
                             syncToLockScreen: $setAsLockScreen,
                             htmlConfig: selectedWallpaperType == .html ? $htmlConfig : nil
@@ -768,11 +772,13 @@ struct ScreenDetailView: View {
         if let config = screenManager.getConfiguration(for: screen) {
             assignIfChanged(playbackSpeed, to: config.playbackSpeed) { playbackSpeed = $0 }
             assignIfChanged(selectedFitMode, to: config.fitMode) { selectedFitMode = $0 }
+            assignIfChanged(selectedVideoDisplayMode, to: config.videoDisplayMode) { selectedVideoDisplayMode = $0 }
             assignIfChanged(selectedParticleEffect, to: config.particleEffect) { selectedParticleEffect = $0 }
             assignIfChanged(effectConfig, to: config.effectConfig) { effectConfig = $0 }
             assignIfChanged(particleDensity, to: config.effectConfig.particleDensity) { particleDensity = $0 }
             assignIfChanged(setAsLockScreen, to: config.setAsLockScreen) { setAsLockScreen = $0 }
             assignIfChanged(videoMuted, to: config.muted) { videoMuted = $0 }
+            assignIfChanged(videoVolume, to: config.videoVolume) { videoVolume = $0 }
             assignIfChanged(selectedFrameRateLimit, to: config.frameRateLimit) { selectedFrameRateLimit = $0 }
             assignIfChanged(playlistBookmarks, to: config.playlistBookmarks ?? []) { playlistBookmarks = $0 }
             assignIfChanged(shufflePlaylist, to: config.shufflePlaylist) { shufflePlaylist = $0 }
@@ -795,10 +801,13 @@ struct ScreenDetailView: View {
         } else {
             assignIfChanged(playbackSpeed, to: 1.0) { playbackSpeed = $0 }
             assignIfChanged(selectedFitMode, to: .aspectFill) { selectedFitMode = $0 }
+            assignIfChanged(selectedVideoDisplayMode, to: .perDisplay) { selectedVideoDisplayMode = $0 }
             assignIfChanged(selectedParticleEffect, to: .none) { selectedParticleEffect = $0 }
             assignIfChanged(effectConfig, to: .default) { effectConfig = $0 }
             assignIfChanged(particleDensity, to: 1.0) { particleDensity = $0 }
             assignIfChanged(setAsLockScreen, to: false) { setAsLockScreen = $0 }
+            assignIfChanged(videoMuted, to: true) { videoMuted = $0 }
+            assignIfChanged(videoVolume, to: 1.0) { videoVolume = $0 }
             assignIfChanged(selectedFrameRateLimit, to: .fps60) { selectedFrameRateLimit = $0 }
             assignIfChanged(playlistBookmarks, to: []) { playlistBookmarks = $0 }
             assignIfChanged(shufflePlaylist, to: false) { shufflePlaylist = $0 }

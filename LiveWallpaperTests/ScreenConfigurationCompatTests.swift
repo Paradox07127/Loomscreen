@@ -36,6 +36,40 @@ struct ScreenConfigurationCompatTests {
         #expect(config.fitMode == .aspectFit)
     }
 
+    @Test("Decoding a legacy ScreenConfiguration without videoVolume defaults to full volume")
+    func decodeLegacyConfigurationWithoutVideoVolume() throws {
+        let baselineConfig = ScreenConfiguration(
+            screenID: 12_345,
+            wallpaper: .video(bookmarkData: Data([0xAA, 0xBB])),
+            savedVideoBookmarkData: Data([0xAA, 0xBB])
+        )
+        let baseline = try JSONEncoder().encode(baselineConfig)
+        var dict = try #require(JSONSerialization.jsonObject(with: baseline) as? [String: Any])
+        dict.removeValue(forKey: "videoVolume")
+        let stripped = try JSONSerialization.data(withJSONObject: dict, options: .sortedKeys)
+
+        let config = try JSONDecoder().decode(ScreenConfiguration.self, from: stripped)
+
+        #expect(config.videoVolume == 1.0)
+    }
+
+    @Test("Decoding a legacy ScreenConfiguration without videoDisplayMode defaults to per-display")
+    func decodeLegacyConfigurationWithoutVideoDisplayMode() throws {
+        let baselineConfig = ScreenConfiguration(
+            screenID: 12_345,
+            wallpaper: .video(bookmarkData: Data([0xAA, 0xBB])),
+            savedVideoBookmarkData: Data([0xAA, 0xBB])
+        )
+        let baseline = try JSONEncoder().encode(baselineConfig)
+        var dict = try #require(JSONSerialization.jsonObject(with: baseline) as? [String: Any])
+        dict.removeValue(forKey: "videoDisplayMode")
+        let stripped = try JSONSerialization.data(withJSONObject: dict, options: .sortedKeys)
+
+        let config = try JSONDecoder().decode(ScreenConfiguration.self, from: stripped)
+
+        #expect(config.videoDisplayMode == .perDisplay)
+    }
+
     @Test("Round-tripping a configuration with wpeOrigin preserves every field")
     func roundTripsWPEOriginThroughCodable() throws {
         let origin = WPEOrigin(

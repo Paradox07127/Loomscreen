@@ -14,6 +14,7 @@ final class InspectorPreviewController {
     private(set) var lastError: String?
 
     @ObservationIgnored private var playerObserver: AnyCancellable?
+    @ObservationIgnored private var itemStatusObserver: AnyCancellable?
     @ObservationIgnored private var positionTask: Task<Void, Never>?
     @ObservationIgnored private var posterTask: Task<Void, Never>?
     @ObservationIgnored private var securityScopedURL: URL?
@@ -99,6 +100,7 @@ final class InspectorPreviewController {
             sync(to: wallpaperPlayer)
         }
 
+        configureItemStatusObserver(playerItem)
         configurePlayerObserver(previewPlayer)
         startPositionUpdates(for: previewPlayer)
         previewPlayer.play()
@@ -142,6 +144,18 @@ final class InspectorPreviewController {
             }
     }
 
+    private func configureItemStatusObserver(_ playerItem: AVPlayerItem) {
+        itemStatusObserver = playerItem.publisher(for: \.status)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self, weak playerItem] status in
+                guard status == .failed else { return }
+                guard let self else { return }
+                self.lastError = playerItem?.error?.localizedDescription ?? "The preview could not be played."
+                self.cleanupPlayer()
+                self.isLoading = false
+            }
+    }
+
     private func startPositionUpdates(for player: AVPlayer) {
         positionTask?.cancel()
         positionTask = Task { [weak self, weak player] in
@@ -169,6 +183,8 @@ final class InspectorPreviewController {
     private func cleanupPlayer() {
         playerObserver?.cancel()
         playerObserver = nil
+        itemStatusObserver?.cancel()
+        itemStatusObserver = nil
         positionTask?.cancel()
         positionTask = nil
         player?.pause()
@@ -204,4 +220,3 @@ final class InspectorPreviewController {
         return value
     }
 }
-
