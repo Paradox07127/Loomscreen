@@ -42,10 +42,21 @@ enum WPEMetalShaderInputs {
             return texture
 
         case .fbo(let name):
-            guard let texture = frameState.latestNamedTextures[name] else {
-                throw WPEMetalRenderExecutorError.missingTexture(reference)
+            if let texture = frameState.latestNamedTextures[name] {
+                return texture
             }
-            return texture
+            // WPE runtime aliases `_rt_FullFrameBuffer` to "whatever the
+            // scene currently contains" — workshop post-process effects
+            // (water ripple, blur, audio bars, …) bind this as their input
+            // source without any explicit pass writing to it. Without the
+            // redirect, 22 of 57 scenes in the Phase A.3 corpus baseline
+            // failed here with missingTexture. Falls back to the scene
+            // output texture (always allocated) so the effect samples the
+            // composed scene.
+            if name == "_rt_FullFrameBuffer" {
+                return frameState.latestSceneTexture ?? frameState.output
+            }
+            throw WPEMetalRenderExecutorError.missingTexture(reference)
 
         case .previous:
             guard let texture = frameState.latestTexture(for: currentTargetID) else {
