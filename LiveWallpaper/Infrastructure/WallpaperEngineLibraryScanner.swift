@@ -70,17 +70,15 @@ final class WallpaperEngineLibraryScanner: @unchecked Sendable {
         alreadyImportedWorkshopIDs: Set<String>,
         fileManager: FileManager
     ) throws -> [DiscoveredProject] {
-        var isStale = false
         let rootURL: URL
-        do {
-            rootURL = try URL(
-                resolvingBookmarkData: rootBookmarkData,
-                options: .withSecurityScope,
-                relativeTo: nil,
-                bookmarkDataIsStale: &isStale
-            )
-        } catch {
-            throw ScanError.rootInaccessible(error.localizedDescription)
+        switch SecurityScopedBookmarkResolver.shared.resolve(
+            rootBookmarkData,
+            target: .workshopLibraryRoot
+        ) {
+        case .success(let resolved):
+            rootURL = resolved.url
+        case .failure(let failure):
+            throw ScanError.rootInaccessible(failure.errorDescription ?? "Unknown bookmark failure")
         }
 
         let didStartScope = rootURL.startAccessingSecurityScopedResource()
