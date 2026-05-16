@@ -222,4 +222,76 @@ struct WPEShaderTranspilerTests {
             )
         }
     }
+
+    @Test("Strips GLSL 'in' parameter qualifiers so MSL accepts helper signatures")
+    func stripsInParameterQualifier() throws {
+        // Mirrors the failing shape from `effects/blendgradient` (workshop
+        // 3479521040): every helper signature uses `in T name` and Metal
+        // rejects the declaration with `unknown type name 'in'`. Once the
+        // qualifier is stripped, the helper compiles and the downstream
+        // `result = B;`, `min(A, B)`, etc. body references resolve.
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        in vec2 v_TexCoord;
+        float3 ApplyBlending(const int blendMode, in float3 A, in float3 B, in float opacity) {
+            float3 result = B;
+            if (blendMode == 1) { result = A; }
+            return mix(A, result, opacity);
+        }
+        void main() {
+            vec4 c = texture(g_Texture0, v_TexCoord);
+            gl_FragColor = vec4(ApplyBlending(0, c.rgb, c.rgb, 1.0), 1.0);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "blend-in-quals",
+            preprocessedSource: source
+        )
+        // Stripping the qualifier means MSL sees `float3 A` etc., not
+        // `in float3 A`. The whole-string check is enough — we don't need
+        // to enumerate every helper.
+        #expect(!result.mslSource.contains("in float3 A"))
+        #expect(!result.mslSource.contains("in float3 B"))
+        #expect(!result.mslSource.contains("in float opacity"))
+        #expect(result.mslSource.contains("float3 A"))
+        // Existing `inout/out` rewrite is untouched — the new pass must not
+        // double-strip a parameter that the prior rule already rewrote.
+        #expect(!result.mslSource.contains("thread in"))
+
+        // Confirm Metal accepts the translated MSL end-to-end.
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("In-qualifier strip leaves top-level vertex inputs untouched")
+    func inQualifierIgnoresTopLevelInputs() throws {
+        // Top-level `in vec2 v_TexCoord;` must survive — the transpiler
+        // lifts those into the stage_in struct downstream. Only parameter
+        // lists (lookahead `[,)]`) are targeted.
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        in vec2 v_TexCoord;
+        in vec3 v_Normal;
+        void main() {
+            gl_FragColor = texture(g_Texture0, v_TexCoord) * vec4(v_Normal, 1.0);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "in-top-level",
+            preprocessedSource: source
+        )
+        // The varyings should appear in the WPEStageIn struct, not as
+        // leftover `in vec2 v_TexCoord;` lines.
+        #expect(result.mslSource.contains("WPEStageIn"))
+        #expect(!result.mslSource.contains("in vec2 v_TexCoord;"))
+
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
 }
