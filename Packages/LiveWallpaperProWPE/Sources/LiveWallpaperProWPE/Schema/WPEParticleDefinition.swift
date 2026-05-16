@@ -8,42 +8,61 @@ import Foundation
 /// later phases. The runtime can render any system that fits this
 /// schema; missing fields fall back to sensible defaults so a partial
 /// match doesn't drop the entire emitter.
-struct WPEParticleDefinition: Equatable, Sendable {
-    /// Path to the material this system's particles render with
-    /// (relative to the scene cache root). The material's first pass's
-    /// first texture supplies the sprite atlas.
-    let materialRelativePath: String?
-    /// Hard cap on alive particles per frame. WPE emitters honor this
-    /// strictly — over the cap, new spawns get dropped.
-    let maxCount: Int
-    /// Particles per second.
-    let rate: Double
-    /// Seconds before the first particle spawns (matches WPE's
-    /// `starttime`). Useful for staggered effects.
-    let startDelay: Double
-    /// Per-particle lifetime range, in seconds. Spawn picks uniformly.
-    let lifetimeMin: Double
-    let lifetimeMax: Double
-    /// Per-particle base size in pixels. Min/max for uniform-random spawn.
-    let sizeMin: Double
-    let sizeMax: Double
-    /// Initial position offset relative to the scene object's origin,
-    /// expressed in the same pixel-space coordinates as the scene.
-    let originOffset: SIMD3<Double>
-    /// Emitter shape parameters. Sphere/box dispersal radius.
-    let dispersalMin: Double
-    let dispersalMax: Double
-    /// Velocity range. Each component sampled independently.
-    let velocityMin: SIMD3<Double>
-    let velocityMax: SIMD3<Double>
-    /// Per-particle tint range, encoded as 0…255 RGB (WPE's wire format).
-    let colorMin: SIMD3<Double>
-    let colorMax: SIMD3<Double>
-    /// Linear alpha-fade-in time before the particle reaches full opacity.
-    /// Combined with lifetime to compute a fade-out tail.
-    let fadeInSeconds: Double
+public struct WPEParticleDefinition: Equatable, Sendable {
+    public let materialRelativePath: String?
+    public let maxCount: Int
+    public let rate: Double
+    public let startDelay: Double
+    public let lifetimeMin: Double
+    public let lifetimeMax: Double
+    public let sizeMin: Double
+    public let sizeMax: Double
+    public let originOffset: SIMD3<Double>
+    public let dispersalMin: Double
+    public let dispersalMax: Double
+    public let velocityMin: SIMD3<Double>
+    public let velocityMax: SIMD3<Double>
+    public let colorMin: SIMD3<Double>
+    public let colorMax: SIMD3<Double>
+    public let fadeInSeconds: Double
 
-    static let empty = WPEParticleDefinition(
+    public init(
+        materialRelativePath: String?,
+        maxCount: Int,
+        rate: Double,
+        startDelay: Double,
+        lifetimeMin: Double,
+        lifetimeMax: Double,
+        sizeMin: Double,
+        sizeMax: Double,
+        originOffset: SIMD3<Double>,
+        dispersalMin: Double,
+        dispersalMax: Double,
+        velocityMin: SIMD3<Double>,
+        velocityMax: SIMD3<Double>,
+        colorMin: SIMD3<Double>,
+        colorMax: SIMD3<Double>,
+        fadeInSeconds: Double
+    ) {
+        self.materialRelativePath = materialRelativePath
+        self.maxCount = maxCount
+        self.rate = rate
+        self.startDelay = startDelay
+        self.lifetimeMin = lifetimeMin
+        self.lifetimeMax = lifetimeMax
+        self.sizeMin = sizeMin
+        self.sizeMax = sizeMax
+        self.originOffset = originOffset
+        self.dispersalMin = dispersalMin
+        self.dispersalMax = dispersalMax
+        self.velocityMin = velocityMin
+        self.velocityMax = velocityMax
+        self.colorMin = colorMin
+        self.colorMax = colorMax
+        self.fadeInSeconds = fadeInSeconds
+    }
+
+    public static let empty = WPEParticleDefinition(
         materialRelativePath: nil,
         maxCount: 0,
         rate: 0,
@@ -66,15 +85,15 @@ struct WPEParticleDefinition: Equatable, Sendable {
 /// Pure-function parser. Tolerant: missing keys fall back to defaults so
 /// we get a working emitter from any well-formed particle JSON. Returns
 /// nil only when the input isn't a JSON object at all.
-enum WPEParticleDefinitionParser {
-    static func parse(data: Data) -> WPEParticleDefinition? {
+public enum WPEParticleDefinitionParser {
+    public static func parse(data: Data) -> WPEParticleDefinition? {
         guard let json = try? JSONSerialization.jsonObject(with: data, options: [.allowFragments]) as? [String: Any] else {
             return nil
         }
         return parse(dictionary: json)
     }
 
-    static func parse(dictionary json: [String: Any]) -> WPEParticleDefinition {
+    public static func parse(dictionary json: [String: Any]) -> WPEParticleDefinition {
         let def = WPEParticleDefinition.empty
 
         let material = json["material"] as? String
