@@ -5044,6 +5044,23 @@
         }
       }
     },
+    "error.scene.load_diagnostic.file_missing.with_path" : {
+      "comment" : "Diagnostic shown when a scene layer references a missing file. First placeholder is the layer name, second is the missing relative path.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "A file required by the '%1$@' layer is missing: %2$@."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "图层'%1$@'所需的文件缺失：%2$@。"
+          }
+        }
+      }
+    },
     "error.scene.load_diagnostic.legacy_unsupported_texture" : {
       "comment" : "Diagnostic shown when a scene image layer uses a legacy unsupported texture format.",
       "extractionState" : "extracted_with_value",
@@ -10910,6 +10927,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "渲染器诊断：能力 %1$@。%2$@"
+          }
+        }
+      }
+    },
+    "Renderer diagnostics: capability %@. %@. %@" : {
+      "comment" : "A11y label for renderer diagnostics in DEBUG builds. Placeholders are capability tier, diagnostic text, and resolver summary.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Renderer diagnostics: capability %1$@. %2$@. %3$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "渲染器诊断：能力 %1$@。%2$@。%3$@"
           }
         }
       }

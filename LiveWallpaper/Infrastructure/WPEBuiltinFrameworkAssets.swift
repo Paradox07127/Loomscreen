@@ -9,13 +9,18 @@ import Foundation
 /// - `materials/effects/refractnormal.png`
 /// - `materials/effects/waterflowphase.png`
 /// - `materials/effects/waterripplenormal.png`
+/// - `materials/util/black.png`
+/// - `materials/util/clouds_256.png`
 /// - `materials/util/composelayer.json`
 /// - `materials/util/effectcomposebackground.json`
+/// - `materials/util/flatnormal.png`
 /// - `materials/util/fullscreenlayer.json`
+/// - `materials/util/noise.png`
 /// - `materials/util/solidlayer.json`
 /// - `materials/util/solidlayer_depthtest.json`
 /// - `materials/util/solidlayer_instance.json`
 /// - `materials/util/solidlayer_instance_4.json`
+/// - `materials/util/white.png`
 /// - `models/util/composelayer.json`
 /// - `models/util/fullscreenlayer.json`
 /// - `models/util/projectlayer.json`
@@ -57,13 +62,18 @@ enum WPEBuiltinFrameworkAssets {
         "materials/effects/refractnormal.png",
         "materials/effects/waterflowphase.png",
         "materials/effects/waterripplenormal.png",
+        "materials/util/black.png",
+        "materials/util/clouds_256.png",
         "materials/util/composelayer.json",
         "materials/util/effectcomposebackground.json",
+        "materials/util/flatnormal.png",
         "materials/util/fullscreenlayer.json",
+        "materials/util/noise.png",
         "materials/util/solidlayer.json",
         "materials/util/solidlayer_depthtest.json",
         "materials/util/solidlayer_instance.json",
         "materials/util/solidlayer_instance_4.json",
+        "materials/util/white.png",
         "models/util/composelayer.json",
         "models/util/fullscreenlayer.json",
         "models/util/projectlayer.json",

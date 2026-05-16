@@ -245,6 +245,12 @@ struct WPESceneDetailView: View {
         // hid the error text from screen readers entirely (gemini audit).
         let diagnosticText = session?.sceneRenderer?.loadDiagnostics?.errorDescription
             ?? "All declared layers decoded cleanly."
+        #if DEBUG
+        let resolutionSnapshot = session?.sceneRenderer?.resolutionDiagnostics
+        let resolutionA11y = resolutionSnapshot.map(Self.resolutionSummaryText)
+            ?? "No resource resolution events recorded."
+        #endif
+
         VStack(alignment: .leading, spacing: 6) {
             Text("Renderer Diagnostics")
                 .font(.caption.bold())
@@ -256,13 +262,80 @@ struct WPESceneDetailView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(4)
                 .textSelection(.enabled)
+            #if DEBUG
+            resolutionDiagnosticsSection(snapshot: resolutionSnapshot)
+            #endif
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
         .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
         .accessibilityElement(children: .combine)
+        #if DEBUG
+        .accessibilityLabel(Text("Renderer diagnostics: capability \(descriptor.capabilityTier.localizedLabel). \(diagnosticText). \(resolutionA11y)", comment: "A11y label for renderer diagnostics in DEBUG builds. Placeholders are capability tier, diagnostic text, and resolver summary."))
+        #else
         .accessibilityLabel(Text("Renderer diagnostics: capability \(descriptor.capabilityTier.localizedLabel). \(diagnosticText)", comment: "A11y label for renderer diagnostics. Placeholders are capability tier and diagnostic text."))
+        #endif
     }
+
+    #if DEBUG
+    @ViewBuilder
+    private func resolutionDiagnosticsSection(snapshot: WPEResolutionDiagnosticsSnapshot?) -> some View {
+        Divider()
+            .padding(.vertical, 2)
+        Text(verbatim: "Resource Resolution")
+            .font(.caption.bold())
+        if let snapshot {
+            Text(verbatim: Self.resolutionSummaryText(snapshot))
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+
+            let misses = Array(snapshot.missedRefs.prefix(20))
+            if misses.isEmpty {
+                Text(verbatim: "Misses: none")
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(verbatim: "Misses:")
+                    ForEach(Array(misses.enumerated()), id: \.offset) { pair in
+                        let event = pair.element
+                        Text(verbatim: "\(event.ref): \(event.finalOutcome.debugLabel)")
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    if snapshot.missedRefs.count > misses.count {
+                        Text(verbatim: "+\(snapshot.missedRefs.count - misses.count) more")
+                    }
+                }
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+            }
+        } else {
+            Text(verbatim: "No resource resolution events recorded.")
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private static func resolutionSummaryText(_ snapshot: WPEResolutionDiagnosticsSnapshot) -> String {
+        let counts = snapshot.resolvedByOrigin
+        let dependencyCount = counts.reduce(0) { partial, entry in
+            if case .dependency = entry.key { return partial + entry.value }
+            return partial
+        }
+        var parts = [
+            "scene: \(counts[.scene, default: 0])",
+            "builtin: \(counts[.builtin, default: 0])",
+            "engineAssets: \(counts[.engineAssets, default: 0])"
+        ]
+        if dependencyCount > 0 {
+            parts.append("dependency: \(dependencyCount)")
+        }
+        return "Events: \(snapshot.events.count), resolved: \(snapshot.resolvedCount), \(parts.joined(separator: ", "))"
+    }
+    #endif
 
     private var statusPill: some View {
         HStack(spacing: 6) {

@@ -211,18 +211,81 @@ def make_waterflow_phase(out_path: Path) -> None:
     write_png_grayscale(out_path, pixels)
 
 
+def make_clouds_256(out_path: Path) -> None:
+    """Tileable 256x256 RGB cloud-noise lookup used by atmospheric shaders.
+    WPE's reference is a 256x256 RGB PNG; the shaders care about local
+    variance + tileability, not exact spectrum, so a seeded multi-octave
+    Perlin variant in [0,255] is a clean-room equivalent."""
+    noise = GradientNoise(seed=0xC10D)
+    field = tileable_octave_noise(noise, 256, 256, frequency=3.0, octaves=6, persistence=0.55)
+    rows: list[list[tuple[int, int, int]]] = []
+    for row in field:
+        out_row: list[tuple[int, int, int]] = []
+        for cell in row:
+            value = int(round((cell * 0.5 + 0.5) * 255))
+            value = max(0, min(255, value))
+            out_row.append((value, value, value))
+        rows.append(out_row)
+    write_png_rgb(out_path, rows)
+
+
+def make_solid_rgb(out_path: Path, width: int, height: int, rgb: tuple[int, int, int]) -> None:
+    """Single-colour PNG. WPE ships 32x32 white/black and 16x16 flatnormal —
+    dimensions reproduced so any code that probes image size sees the same
+    canonical values."""
+    pixel = (rgb[0] & 0xFF, rgb[1] & 0xFF, rgb[2] & 0xFF)
+    rows = [[pixel for _ in range(width)] for _ in range(height)]
+    write_png_rgb(out_path, rows)
+
+
+def make_noise_256(out_path: Path) -> None:
+    """256x256 grayscale-encoded noise lookup. WPE ships RGBA but corpus
+    shaders sample a single channel; an RGB tile with R=G=B is bit-identical
+    on the sampling sites we know about."""
+    noise = GradientNoise(seed=0x0157E)
+    field = tileable_octave_noise(noise, 256, 256, frequency=12.0, octaves=4, persistence=0.5)
+    rows: list[list[tuple[int, int, int]]] = []
+    for row in field:
+        out_row: list[tuple[int, int, int]] = []
+        for cell in row:
+            value = int(round((cell * 0.5 + 0.5) * 255))
+            value = max(0, min(255, value))
+            out_row.append((value, value, value))
+        rows.append(out_row)
+    write_png_rgb(out_path, rows)
+
+
 def main():
     here = Path(__file__).resolve().parent
-    out_dir = here.parent / "LiveWallpaper" / "Resources" / "wpe-builtins.bundle" / "materials" / "effects"
-    out_dir.mkdir(parents=True, exist_ok=True)
+    bundle_root = here.parent / "LiveWallpaper" / "Resources" / "wpe-builtins.bundle"
+    effects_dir = bundle_root / "materials" / "effects"
+    util_dir = bundle_root / "materials" / "util"
+    effects_dir.mkdir(parents=True, exist_ok=True)
+    util_dir.mkdir(parents=True, exist_ok=True)
 
-    make_water_ripple_normal(out_dir / "waterripplenormal.png")
-    make_refract_normal(out_dir / "refractnormal.png")
-    make_waterflow_phase(out_dir / "waterflowphase.png")
+    make_water_ripple_normal(effects_dir / "waterripplenormal.png")
+    make_refract_normal(effects_dir / "refractnormal.png")
+    make_waterflow_phase(effects_dir / "waterflowphase.png")
+    make_clouds_256(util_dir / "clouds_256.png")
+    make_noise_256(util_dir / "noise.png")
+    make_solid_rgb(util_dir / "white.png", 32, 32, (255, 255, 255))
+    make_solid_rgb(util_dir / "black.png", 32, 32, (0, 0, 0))
+    # Neutral tangent-space normal: (0.5, 0.5, 1.0) → (128, 128, 255).
+    make_solid_rgb(util_dir / "flatnormal.png", 16, 16, (128, 128, 255))
+
     print("Generated:")
-    for name in ("waterripplenormal.png", "refractnormal.png", "waterflowphase.png"):
-        p = out_dir / name
-        print(f"  {p}  ({p.stat().st_size:,} bytes)")
+    for name in (
+        "materials/effects/waterripplenormal.png",
+        "materials/effects/refractnormal.png",
+        "materials/effects/waterflowphase.png",
+        "materials/util/clouds_256.png",
+        "materials/util/noise.png",
+        "materials/util/white.png",
+        "materials/util/black.png",
+        "materials/util/flatnormal.png",
+    ):
+        p = bundle_root / name
+        print(f"  {p.relative_to(bundle_root)}  ({p.stat().st_size:,} bytes)")
 
 
 if __name__ == "__main__":
