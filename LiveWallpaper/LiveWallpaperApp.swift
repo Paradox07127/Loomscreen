@@ -77,6 +77,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Logger.notice("Application starting", category: .startup)
+        if let hint = LogFileSink.shared.tailCommandHint {
+            // Print as a notice so the next-most-recent line in Console.app
+            // gives maintainers a copy-pastable follow command without
+            // having to guess the sandbox container path.
+            Logger.notice("Tail the runtime log → \(hint)", category: .startup)
+        }
 
         // 把 tracker rule list 提前编译进 WKContentRuleListStore，
         // 后续 HTML 壁纸首次启用过滤时直接 lookUp，省掉同步编译开销。

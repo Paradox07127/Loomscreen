@@ -16,6 +16,7 @@ final class Logger {
         case startup = "Startup"
         case lifecycle = "Lifecycle"
         case memory = "Memory"
+        case wpeResolver = "WPEResolver"
 
         static let subsystem = "com.livewallpaper"
 
@@ -78,6 +79,19 @@ final class Logger {
             level: level.osLogType,
             "\(level.prefix, privacy: .public) [\(fileName, privacy: .public):\(line, privacy: .public)] \(function, privacy: .public) - \(body, privacy: .public)"
         )
+        LogFileSink.shared.record(
+            category: category,
+            level: level,
+            message: body,
+            file: file,
+            line: line
+        )
+    }
+
+    /// Persistent log file path users can `tail -f`. `nil` only if the
+    /// `~/Library/Logs/LiveWallpaper/` directory could not be created.
+    static var persistentLogFileURL: URL? {
+        LogFileSink.shared.fileURL
     }
 
     // MARK: - Convenience Methods

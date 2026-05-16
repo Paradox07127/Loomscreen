@@ -555,7 +555,10 @@ private struct WPEShaderSourceLoader: Sendable {
         if name == "previous" {
             return .previous
         }
-        if name.hasPrefix("_rt_") || name.hasPrefix("_alias_") {
+        // Mirrors WPERenderGraphBuilder.textureReference(_:ownerPath:): any
+        // `_`-prefixed name is a runtime FBO declared in effect.json fbos[],
+        // not an on-disk asset.
+        if name.hasPrefix("_") {
             return .fbo(name)
         }
         return .asset(name)
@@ -640,10 +643,40 @@ private struct WPEShaderSourceLoader: Sendable {
             #endif
             """
         case "common_blending.h":
+            // Clean-room ApplyBlending implementation. WPE's reference selects
+            // by compile-time `#if BLENDMODE == N`; we use a runtime switch so
+            // the constant-folded result is the same for shaders that bake
+            // the mode in. Mode numbers follow the Photoshop ordering common
+            // to corpus shaders; unknown modes fall back to the source colour
+            // alpha-blended in (Capability: Degraded — exact mode parity is
+            // Phase 5 work).
             return """
             #ifndef LIVEWALLPAPER_WPE_COMMON_BLENDING_H
             #define LIVEWALLPAPER_WPE_COMMON_BLENDING_H
             #define wpe_common_blending_included 1
+
+            // No `in` qualifier on parameters — it's GLSL-default (and thus
+            // optional) but the MSL backend rejects it as an unknown type
+            // name when the transpiler forwards this header verbatim.
+            vec3 ApplyBlending(int blendMode, vec3 A, vec3 B, float opacity) {
+                vec3 result = B;
+                if (blendMode == 2)      { result = min(A, B); }                                     // Darken
+                else if (blendMode == 3) { result = max(A, B); }                                     // Lighten
+                else if (blendMode == 4) { result = A * B; }                                          // Multiply
+                else if (blendMode == 5) { result = vec3(1.0) - (vec3(1.0) - A) * (vec3(1.0) - B); } // Screen
+                else if (blendMode == 6) { result = A + B; }                                          // LinearDodge / Add
+                else if (blendMode == 7) { result = max(vec3(0.0), A - B); }                         // Subtract
+                else if (blendMode == 8) { result = vec3(1.0) - abs(vec3(1.0) - B - A); }            // Difference
+                return mix(A, result, opacity);
+            }
+
+            float ApplyBlendingAlpha(int blendMode, float a, float b, float opacity) {
+                // Most blend modes leave alpha unmodified; the source alpha
+                // gates how much of the blended colour shows through. The
+                // `blendMode` argument is accepted but currently ignored — a
+                // mode-specific alpha policy is Phase 5 work.
+                return mix(a, max(a, b), opacity);
+            }
             #endif
             """
         case "common_composite.h":

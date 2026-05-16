@@ -80,6 +80,7 @@ private final class FakeSceneRenderer: WPESceneRenderer {
     var renderGraph: WPERenderGraph?
     var renderPipeline: WPEPreparedRenderPipeline?
     var hasPresentedFrame = false
+    var resolutionDiagnostics = WPEResolutionDiagnosticsSnapshot(events: [])
     var previewSnapshot: NSImage?
     var nsView: NSView { view }
 

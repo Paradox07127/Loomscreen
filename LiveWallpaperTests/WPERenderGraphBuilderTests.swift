@@ -262,6 +262,57 @@ struct WPERenderGraphBuilderTests {
         #expect(graph.layers.first?.parallaxDepth == 0.2)
     }
 
+    @Test("Underscore-prefixed texture refs route through .fbo regardless of suffix")
+    func underscorePrefixTexturesRouteToFBO() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPERenderGraphBuilderTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        try writeJSON(["material": "materials/layer.json"], to: root.appendingPathComponent("models/layer.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "compose",
+                // Workshop bokeh_blur uses non-`_rt_` names like `_downscaled1`
+                // for its scratch FBOs; we must still classify these as runtime
+                // buffers, not on-disk assets.
+                "textures": ["_downscaled1", "_alias_x", "_rt_FullFrameBuffer"]
+            ]]
+        ], to: root.appendingPathComponent("materials/layer.json"))
+
+        let object = WPESceneImageObject(
+            id: "hero",
+            name: "Hero",
+            imageRelativePath: "models/layer.json",
+            materialRelativePath: nil,
+            origin: SIMD3<Double>(0, 0, 0),
+            scale: SIMD3<Double>(1, 1, 1),
+            angles: SIMD3<Double>(0, 0, 0),
+            visible: true,
+            alpha: 1,
+            color: SIMD3<Double>(1, 1, 1),
+            brightness: 1,
+            blendMode: .normal,
+            alignment: .center,
+            size: nil,
+            effects: [],
+            animationLayers: [],
+            parallaxDepth: 0
+        )
+        let document = WPESceneDocument(
+            camera: .defaultCamera,
+            general: .defaultGeneral,
+            imageObjects: [object],
+            diagnostics: []
+        )
+
+        let graph = try WPERenderGraphBuilder(cacheRootURL: root).build(document: document)
+        let pass = try #require(graph.layers.first?.passes.first)
+        #expect(pass.textures[0] == .fbo("_downscaled1"))
+        #expect(pass.textures[1] == .fbo("_alias_x"))
+        #expect(pass.textures[2] == .fbo("_rt_FullFrameBuffer"))
+    }
+
     private func writeJSON(_ object: Any, to url: URL) throws {
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(),

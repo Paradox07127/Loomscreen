@@ -12,6 +12,10 @@ protocol WPESceneRenderer: AnyObject, WallpaperPerformanceConfigurable {
     var renderGraph: WPERenderGraph? { get }
     var renderPipeline: WPEPreparedRenderPipeline? { get }
     var hasPresentedFrame: Bool { get }
+    /// Per-load snapshot of every asset resolution attempt the renderer
+    /// made. Phase A.2 control-variable instrumentation: callers use this
+    /// to tell apart pipeline failures from "asset missing" cases.
+    var resolutionDiagnostics: WPEResolutionDiagnosticsSnapshot { get }
     /// Static thumbnail of the most recent rendered frame. `nil` until a
     /// frame has been produced. Used by the inspector card to show a
     /// preview without driving a second live render loop.

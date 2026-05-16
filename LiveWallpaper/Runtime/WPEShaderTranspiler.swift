@@ -41,10 +41,13 @@ struct WPEShaderTranspiler {
     ///   mat2/3/4         → consecutive vec4s starting at the slot
     ///   float[N] etc.    → N slots, one element per slot, scalar in `.x`
     ///
-    /// Cap is generous enough to fit the audio-bar family
-    /// (`g_AudioSpectrum64Left[64]` + `g_AudioSpectrum64Right[64]` =
-    /// 128 slots).
-    static let uniformSlotMaximum = 128
+    /// Cap sized for workshop audio-bar visualizers like
+    /// `Simple_Audio_Bars` (245 slots = stereo 64-bucket spectra + per-bar
+    /// state + color palettes). 256 slots × 16 bytes = 4 KB, the inline
+    /// upper bound for `setFragmentBytes` on macOS — if a future shader
+    /// asks for more, the binding in `WPEMetalShaderDispatcher` needs to
+    /// switch to `setFragmentBuffer` first.
+    static let uniformSlotMaximum = 256
 
     /// Translate a preprocessed WPE fragment shader to MSL. Returns the
     /// MSL source and the inferred Metal parameter layout. Throws when the
@@ -74,13 +77,15 @@ struct WPEShaderTranspiler {
             if trimmed.hasPrefix("#version") || trimmed.hasPrefix("#extension") {
                 continue
             }
-            // The Swift-side preprocessor may have rewritten gl_FragColor
-            // by injecting an `out vec4 wpe_fragColor;` line. We undo that
-            // here — the transpiler emits the equivalent under Metal's
-            // function-return convention. Leaving the GLSL `out` line in
-            // would crash the Metal compiler.
+            // The shader prelude emits `out vec4 out_FragColor;` (the WPE
+            // convention) and the gl_FragColor preprocessor pass emits
+            // `out vec4 wpe_fragColor;`. Both are GLSL-only; MSL has no
+            // top-level `out` so we strip them here. The body rewrites in
+            // `translateMain(_:)` redirect the variable to a return value.
             if trimmed.hasPrefix("out vec4 wpe_fragColor")
-                || trimmed.hasPrefix("out float4 wpe_fragColor") {
+                || trimmed.hasPrefix("out float4 wpe_fragColor")
+                || trimmed.hasPrefix("out vec4 out_FragColor")
+                || trimmed.hasPrefix("out float4 out_FragColor") {
                 continue
             }
             if let sampler = WPESamplerDecl.parse(line: trimmed) {
@@ -218,19 +223,23 @@ struct WPEShaderTranspiler {
         var inner = String(source[openBrace.upperBound..<closeBrace.lowerBound])
         inner = applySubstitutions(inner)
 
-        // Replace fragment-color writes with a stash variable. Accept both
-        // the original `gl_FragColor` and the preprocessor's intermediate
-        // `wpe_fragColor` so the transpiler is robust regardless of
-        // whether the preprocessor's GLSL fixup ran. Append a final return
-        // statement.
+        // Replace fragment-color writes with a stash variable. Accept all
+        // three names that show up in WPE shaders: the GLSL-builtin
+        // `gl_FragColor`, the preprocessor's `wpe_fragColor` rewrite, and
+        // the shader-prelude declaration `out_FragColor`. Append a final
+        // return statement.
         let usesGLOut = inner.contains("gl_FragColor")
         let usesWPEOut = inner.contains("wpe_fragColor")
-        if usesGLOut || usesWPEOut {
+        let usesOutFragColor = inner.contains("out_FragColor")
+        if usesGLOut || usesWPEOut || usesOutFragColor {
             if usesGLOut {
                 inner = inner.replacingOccurrences(of: "gl_FragColor", with: "out_color")
             }
             if usesWPEOut {
                 inner = inner.replacingOccurrences(of: "wpe_fragColor", with: "out_color")
+            }
+            if usesOutFragColor {
+                inner = inner.replacingOccurrences(of: "out_FragColor", with: "out_color")
             }
             inner = "float4 out_color = float4(0.0);\n"
                 + inner
