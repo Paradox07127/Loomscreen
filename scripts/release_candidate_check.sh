@@ -55,4 +55,28 @@ scripts/audit.sh static
 echo "== Diff whitespace check =="
 git diff --check
 
+echo "== Bookmark resolver audit =="
+# Every security-scoped bookmark resolve should go through
+# SecurityScopedBookmarkResolver (which observes bookmarkDataIsStale and
+# persists the refresh). Bare URL(resolvingBookmarkData:) calls drop
+# the stale flag and were the root cause of "user must re-grant after
+# every restart" — see .claude/plan/settings-persistence-audit.md.
+#
+# Currently soft-warning while Phase 3 migrates the remaining 9 call
+# sites. Once those are gone, drop the `|| true` and `>&2 ... continue`
+# branch so this fails the build (tracked in Phase 6 of the plan).
+BOOKMARK_OFFENDERS=$(
+  rg -l 'resolvingBookmarkData' LiveWallpaper \
+    --type swift \
+    --glob '!LiveWallpaper/Infrastructure/SecurityScopedBookmarkResolver.swift' \
+    --glob '!LiveWallpaper/ResourceUtilities.swift' \
+  || true
+)
+if [[ -n "$BOOKMARK_OFFENDERS" ]]; then
+  COUNT=$(echo "$BOOKMARK_OFFENDERS" | wc -l | tr -d ' ')
+  echo "WARNING: $COUNT files still resolve bookmarks outside SecurityScopedBookmarkResolver:" >&2
+  echo "$BOOKMARK_OFFENDERS" | sed 's/^/  - /' >&2
+  echo "Migrate to SecurityScopedBookmarkResolver.shared.resolve(_:target:) — see .claude/plan/settings-persistence-audit.md." >&2
+fi
+
 echo "Release candidate checks passed."
