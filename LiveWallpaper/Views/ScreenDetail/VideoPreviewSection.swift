@@ -1,3 +1,4 @@
+import LiveWallpaperCore
 import AVKit
 import SwiftUI
 
