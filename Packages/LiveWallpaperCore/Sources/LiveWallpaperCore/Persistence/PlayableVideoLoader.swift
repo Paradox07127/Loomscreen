@@ -2,18 +2,24 @@ import AVFoundation
 import CoreMedia
 import Foundation
 
-struct PlayableVideoLoader: PlayableVideoLoading, Sendable {
-    init() {}
+/// Validates and probes video assets prior to handing them to the player.
+public protocol PlayableVideoLoading: Sendable {
+    func validatePlayableVideo(at url: URL) async throws
+    func detectFormat(at url: URL) async throws -> VideoFormatInfo
+}
 
-    func validatePlayableVideo(at url: URL) async throws {
+public struct PlayableVideoLoader: PlayableVideoLoading, Sendable {
+    public init() {}
+
+    public func validatePlayableVideo(at url: URL) async throws {
         try await Self.validatePlayableVideo(at: url)
     }
 
-    func detectFormat(at url: URL) async throws -> VideoFormatInfo {
+    public func detectFormat(at url: URL) async throws -> VideoFormatInfo {
         try await Self.detectFormat(at: url)
     }
 
-    static func validatePlayableVideo(at url: URL) async throws {
+    public static func validatePlayableVideo(at url: URL) async throws {
         let didStartScope = url.startAccessingSecurityScopedResource()
         defer {
             if didStartScope {
@@ -35,7 +41,7 @@ struct PlayableVideoLoader: PlayableVideoLoading, Sendable {
     /// first video track. Returns an empty `VideoFormatInfo` when the asset is
     /// readable but has no usable video track. Errors from track loading
     /// propagate to the caller.
-    static func detectFormat(at url: URL) async throws -> VideoFormatInfo {
+    public static func detectFormat(at url: URL) async throws -> VideoFormatInfo {
         let didStartScope = url.startAccessingSecurityScopedResource()
         defer {
             if didStartScope {
