@@ -1,7 +1,6 @@
 #if DEBUG
 import SwiftUI
 import AppKit
-import UniformTypeIdentifiers
 
 /// DEBUG-only Phase A.3 corpus playback test menu. Streams a
 /// `WPECorpusPlaybackHarness` run, surfaces per-scene outcomes in a table,
@@ -238,20 +237,42 @@ struct DeveloperToolsView: View {
 
     private func exportReport() {
         guard let report = lastReport else { return }
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [.json]
-        panel.nameFieldStringValue = defaultExportName(for: report)
-        panel.title = "Export Corpus Playback Report"
-        panel.canCreateDirectories = true
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        // Write into our app container instead of an NSSavePanel-picked
+        // location. The app is sandboxed with only the read-only variant
+        // of user-selected-files entitlement, so writing to ~/Desktop or
+        // ~/Downloads fails with NSFileWriteNoPermissionError. The
+        // container path needs no entitlement, and we open Finder right
+        // at the file so the maintainer doesn't have to chase the path.
+        let fileManager = FileManager.default
+        let supportRoot: URL
+        do {
+            supportRoot = try fileManager.url(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: true
+            )
+        } catch {
+            startupError = "Export failed: cannot locate Application Support — \(error.localizedDescription)"
+            Logger.error("WPE corpus playback export: cannot locate Application Support — \(error.localizedDescription)", category: .screenManager)
+            return
+        }
+        let exportDirectory = supportRoot
+            .appendingPathComponent("LiveWallpaper", isDirectory: true)
+            .appendingPathComponent("corpus-reports", isDirectory: true)
+        let fileURL = exportDirectory.appendingPathComponent(defaultExportName(for: report))
 
         do {
+            try fileManager.createDirectory(at: exportDirectory, withIntermediateDirectories: true)
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             encoder.dateEncodingStrategy = .iso8601
             let data = try encoder.encode(report)
-            try data.write(to: url, options: .atomic)
-            Logger.info("WPE corpus playback report exported to \(url.path)", category: .screenManager)
+            try data.write(to: fileURL, options: .atomic)
+            Logger.info("WPE corpus playback report exported to \(fileURL.path)", category: .screenManager)
+            startupError = nil
+            NSWorkspace.shared.activateFileViewerSelecting([fileURL])
         } catch {
             startupError = "Export failed: \(error.localizedDescription)"
             Logger.error("WPE corpus playback report export failed: \(error.localizedDescription)", category: .screenManager)
