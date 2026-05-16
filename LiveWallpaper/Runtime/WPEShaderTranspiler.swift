@@ -292,6 +292,16 @@ struct WPEShaderTranspiler {
         // ~4 corpus scenes (lightshafts, tint, ps2_startup_screen, …).
         s = rewriteReferenceParameters(s)
 
+        // GLSL's `in T name` parameter qualifier is the default pass-by-value
+        // form and has no MSL keyword equivalent — it must be stripped or
+        // Metal rejects the declaration with `unknown type name 'in'`. Hit
+        // every helper signature in effects/blendgradient + related blend
+        // shaders (≥9 corpus scenes ran into this on `ApplyBlending`,
+        // `ApplyBlendingAlpha`, `mixSoftLight`, etc.), and the cascading
+        // "undeclared identifier" errors for `A`, `B`, `result`, `opacity`
+        // were all downstream of the failed function declaration.
+        s = stripInParameterQualifier(s)
+
         // gl_FragCoord → custom binding. We won't support FragCoord-driven
         // shaders in the first pass — trip the compile error on use.
         // (The transpiler still emits the source; Metal's compiler will
@@ -322,6 +332,25 @@ struct WPEShaderTranspiler {
             in: source,
             range: range,
             withTemplate: "thread $2& $3"
+        )
+    }
+
+    /// Strip GLSL's `in T name` parameter qualifier (MSL has no equivalent —
+    /// `in` is the implicit default). Runs AFTER `rewriteReferenceParameters`
+    /// so `inout` matches `\b(inout|out)\b` and is consumed before this pass
+    /// can mistakenly slice off its `in` prefix. The lookahead `[,)]` keeps
+    /// the regex out of vertex-shader top-level `in vec3 a_Position;`
+    /// declarations and struct field lines that end in `;`.
+    private static func stripInParameterQualifier(_ source: String) -> String {
+        let pattern = #"\bin\s+([A-Za-z_][A-Za-z0-9_]*(?:\d+x\d+)?)\s+([A-Za-z_][A-Za-z0-9_]*)(?=\s*[,)])"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return source
+        }
+        let range = NSRange(source.startIndex..., in: source)
+        return regex.stringByReplacingMatches(
+            in: source,
+            range: range,
+            withTemplate: "$1 $2"
         )
     }
 
