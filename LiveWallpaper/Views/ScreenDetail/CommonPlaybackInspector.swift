@@ -19,6 +19,8 @@ struct CommonPlaybackInspector: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @Binding var muted: Bool
+    @Binding var videoVolume: Double
+    @Binding var videoDisplayMode: VideoDisplayMode
     @Binding var frameRateLimit: FrameRateLimit
     @Binding var syncToLockScreen: Bool
     /// Optional binding present only when `wallpaperType == .html`. Drives
@@ -42,6 +44,10 @@ struct CommonPlaybackInspector: View {
                     if showsFrameRateRow {
                         Divider()
                         frameRateRow
+                    }
+                    if showsVideoDisplayModeRow {
+                        Divider()
+                        videoDisplayModeRow
                     }
                     if showsSyncToLockScreenRow {
                         Divider()
@@ -68,6 +74,10 @@ struct CommonPlaybackInspector: View {
         }
     }
 
+    private var showsVideoDisplayModeRow: Bool {
+        wallpaperType == .video && screenManager.screens.count > 1
+    }
+
     private var showsSyncToLockScreenRow: Bool {
         wallpaperType == .video
     }
@@ -85,14 +95,29 @@ struct CommonPlaybackInspector: View {
                 ? LocalizedStringKey("Muted (default)")
                 : LocalizedStringKey("Routed through system output")
         ) {
-            Toggle("", isOn: Binding(
-                get: { !mutedBinding.wrappedValue },
-                set: { mutedBinding.wrappedValue = !$0 }
-            ))
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .accessibilityLabel(Text("Audio"))
-                .accessibilityHint(Text("When off, audio tracks are disabled entirely so macOS does not engage the audio engine"))
+            HStack(spacing: 8) {
+                if wallpaperType == .video {
+                    Slider(value: videoVolumeBinding, in: 0...1)
+                        .controlSize(.small)
+                        .frame(width: 82)
+                        .accessibilityLabel(Text("Audio"))
+                        .accessibilityValue(Text(verbatim: "\(videoVolumePercent)%"))
+
+                    Text(verbatim: "\(videoVolumePercent)%")
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 36, alignment: .trailing)
+                }
+
+                Toggle("", isOn: Binding(
+                    get: { !mutedBinding.wrappedValue },
+                    set: { mutedBinding.wrappedValue = !$0 }
+                ))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .accessibilityLabel(Text("Audio"))
+                    .accessibilityHint(Text("When off, audio tracks are disabled entirely so macOS does not engage the audio engine"))
+            }
         }
     }
 
@@ -111,6 +136,27 @@ struct CommonPlaybackInspector: View {
             .frame(width: 86)
             .accessibilityLabel(Text("Frame rate limit"))
             .accessibilityValue(Text(frameRateLimit.titleKey))
+        }
+    }
+
+    private var videoDisplayModeRow: some View {
+        SettingRow(
+            icon: "rectangle.on.rectangle",
+            iconColor: videoDisplayMode == .spanAllDisplays ? .blue : .secondary,
+            title: "Display Layout",
+            subtitle: videoDisplayMode.descriptionKey
+        ) {
+            Picker("", selection: videoDisplayModeBinding) {
+                ForEach(VideoDisplayMode.allCases) { mode in
+                    Text(mode.titleKey).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 148)
+            .accessibilityLabel(Text("Video display layout"))
+            .accessibilityValue(Text(videoDisplayMode.titleKey))
+            .help(Text("Span uses all connected displays as one virtual video canvas"))
         }
     }
 
@@ -185,6 +231,27 @@ struct CommonPlaybackInspector: View {
         )
     }
 
+    private var videoVolumeBinding: Binding<Double> {
+        Binding(
+            get: { videoVolume },
+            set: { newValue in
+                let clampedValue = Self.clampedVolume(newValue)
+                guard abs(videoVolume - clampedValue) > 0.001 else { return }
+                videoVolume = clampedValue
+                screenManager.updateVideoVolume(clampedValue, for: screen)
+            }
+        )
+    }
+
+    private var videoVolumePercent: Int {
+        Int((Self.clampedVolume(videoVolume) * 100).rounded())
+    }
+
+    private static func clampedVolume(_ value: Double) -> Double {
+        guard value.isFinite else { return 1.0 }
+        return min(max(value, 0), 1)
+    }
+
     private var frameRateBinding: Binding<FrameRateLimit> {
         Binding(
             get: { frameRateLimit },
@@ -192,6 +259,17 @@ struct CommonPlaybackInspector: View {
                 guard frameRateLimit != newValue else { return }
                 frameRateLimit = newValue
                 screenManager.updateFrameRateLimit(newValue, for: screen)
+            }
+        )
+    }
+
+    private var videoDisplayModeBinding: Binding<VideoDisplayMode> {
+        Binding(
+            get: { videoDisplayMode },
+            set: { newValue in
+                guard videoDisplayMode != newValue else { return }
+                videoDisplayMode = newValue
+                screenManager.updateVideoDisplayMode(newValue, for: screen)
             }
         )
     }

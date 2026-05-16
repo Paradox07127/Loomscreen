@@ -635,6 +635,62 @@ struct WallpaperVideoPlayerStartupPolicyTests {
 
         #expect(player.requestedFrameRateLimit == 30)
     }
+
+    @Test("Existing local files without security scope are treated as media, not permission failures")
+    func localFileWithoutSecurityScopeDoesNotReportAccessDenied() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LiveWallpaper-local-access-\(UUID().uuidString).mp4")
+        try Data([0x00, 0x01, 0x02]).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let player = WallpaperVideoPlayer(
+            url: url,
+            frame: CGRect(x: 0, y: 0, width: 16, height: 16)
+        )
+        defer { player.cleanup() }
+
+        if case .fileAccessDenied(url) = player.runtimeError {
+            Issue.record("Existing app-owned video copies should continue to media validation, not fail as sandbox-denied: \(url.path)")
+        }
+    }
+
+    @Test("Pause does not depend on AVPlayer already being in the playing state")
+    func pauseIsNotGatedOnPlayingTimeControlStatus() throws {
+        let source = try Self.readSourceFile("LiveWallpaper/VideoPlayback/WallpaperVideoPlayer.swift")
+
+        #expect(!source.contains("timeControlStatus == .playing else { return }"))
+    }
+
+    @Test("Wallpaper playback does not keep the display awake")
+    func wallpaperPlaybackDisablesDisplaySleepPrevention() throws {
+        let source = try Self.readSourceFile("LiveWallpaper/VideoPlayback/WallpaperVideoPlayer.swift")
+
+        #expect(source.contains("preventsDisplaySleepDuringVideoPlayback = false"))
+    }
+
+    @Test("Video preview surfaces controller errors in the preview UI")
+    func videoPreviewSurfacesControllerErrors() throws {
+        let source = try Self.readSourceFile("LiveWallpaper/Views/ScreenDetail/VideoPreviewSection.swift")
+
+        #expect(source.contains("previewController.lastError"))
+    }
+
+    private static func readSourceFile(_ relativePath: String) throws -> String {
+        let bases = [
+            URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent(),
+            URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        ]
+
+        guard let url = bases
+            .lazy
+            .map({ $0.appendingPathComponent(relativePath) })
+            .first(where: { FileManager.default.fileExists(atPath: $0.path) })
+        else {
+            Issue.record("Could not locate \(relativePath)")
+            return ""
+        }
+        return try String(contentsOf: url, encoding: .utf8)
+    }
 }
 
 @Suite("Monitoring cadence policy")

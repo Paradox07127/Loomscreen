@@ -12,6 +12,7 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
     var savedHTMLConfig: HTMLConfig?
     var playbackSpeed: Double
     var fitMode: VideoFitMode
+    var videoDisplayMode: VideoDisplayMode = .perDisplay
     var frameRateLimit: FrameRateLimit
 
     var particleEffect: ParticleEffect
@@ -26,6 +27,9 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
     var wallpaperMode: WallpaperMode = .single
     /// Muted by default so wallpaper videos do not take over audio output.
     var muted: Bool = true
+    /// Per-screen video output level. `muted` stays separate so unmute can
+    /// restore the user's previous level instead of jumping to full volume.
+    var videoVolume: Double = 1.0
     /// Wallpaper Engine workshop origin metadata, set when the active wallpaper
     /// was imported from a `~/Documents/Live Wallpapers/<appid>/<wid>/` project.
     /// Cleared automatically when the user replaces the wallpaper with non-WPE
@@ -40,6 +44,7 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
         case savedHTMLConfig
         case playbackSpeed
         case fitMode
+        case videoDisplayMode
         case frameRateLimit
         case particleEffect
         case effectConfig
@@ -51,6 +56,7 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
         case setAsLockScreen
         case wallpaperMode
         case muted
+        case videoVolume
         case wpeOrigin
 
         case videoBookmarkData
@@ -64,6 +70,7 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
         wallpaper: WallpaperContent,
         playbackSpeed: Double = 1.0,
         fitMode: VideoFitMode = .aspectFill,
+        videoDisplayMode: VideoDisplayMode = .perDisplay,
         frameRateLimit: FrameRateLimit = .fps60,
         particleEffect: ParticleEffect = .none,
         effectConfig: VideoEffectConfig = .default,
@@ -84,6 +91,7 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
         }
         self.playbackSpeed = playbackSpeed
         self.fitMode = fitMode
+        self.videoDisplayMode = videoDisplayMode
         self.frameRateLimit = frameRateLimit
         self.particleEffect = particleEffect
         self.effectConfig = effectConfig
@@ -250,6 +258,7 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
         screenID = try c.decode(UInt32.self, forKey: .screenID)
         playbackSpeed = try c.decodeIfPresent(Double.self, forKey: .playbackSpeed) ?? 1.0
         fitMode = try c.decodeIfPresent(VideoFitMode.self, forKey: .fitMode) ?? .aspectFill
+        videoDisplayMode = try c.decodeIfPresent(VideoDisplayMode.self, forKey: .videoDisplayMode) ?? .perDisplay
         // Legacy per-screen power settings now live in GlobalSettings.
         frameRateLimit = try c.decodeIfPresent(FrameRateLimit.self, forKey: .frameRateLimit) ?? .fps60
         particleEffect = try c.decodeIfPresent(ParticleEffect.self, forKey: .particleEffect) ?? .none
@@ -261,6 +270,9 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
         playlistCursorIndex = try c.decodeIfPresent(Int.self, forKey: .playlistCursorIndex)
         setAsLockScreen = try c.decodeIfPresent(Bool.self, forKey: .setAsLockScreen) ?? false
         muted = try c.decodeIfPresent(Bool.self, forKey: .muted) ?? true
+        videoVolume = Self.clampedVideoVolume(
+            try c.decodeIfPresent(Double.self, forKey: .videoVolume) ?? 1.0
+        )
 
         if let storedMode = try c.decodeIfPresent(WallpaperMode.self, forKey: .wallpaperMode) {
             wallpaperMode = storedMode
@@ -362,6 +374,7 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
         try c.encodeIfPresent(savedHTMLConfig, forKey: .savedHTMLConfig)
         try c.encode(playbackSpeed, forKey: .playbackSpeed)
         try c.encode(fitMode, forKey: .fitMode)
+        try c.encode(videoDisplayMode, forKey: .videoDisplayMode)
         try c.encode(frameRateLimit, forKey: .frameRateLimit)
         try c.encode(particleEffect, forKey: .particleEffect)
         try c.encode(effectConfig, forKey: .effectConfig)
@@ -373,7 +386,13 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
         try c.encode(setAsLockScreen, forKey: .setAsLockScreen)
         try c.encode(wallpaperMode, forKey: .wallpaperMode)
         try c.encode(muted, forKey: .muted)
+        try c.encode(videoVolume, forKey: .videoVolume)
         try c.encodeIfPresent(wpeOrigin, forKey: .wpeOrigin)
+    }
+
+    private static func clampedVideoVolume(_ value: Double) -> Double {
+        guard value.isFinite else { return 1.0 }
+        return min(max(value, 0), 1)
     }
 
     mutating func setHTMLWallpaper(source: HTMLSource, config: HTMLConfig = .default) {
