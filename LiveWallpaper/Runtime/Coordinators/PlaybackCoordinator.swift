@@ -45,6 +45,9 @@ final class PlaybackCoordinator {
     /// Hook for async validation / setup failures that happen before a
     /// `VideoWallpaperSession` exists to publish its own runtime error.
     private let reportRuntimeError: @MainActor (CGDirectDisplayID, WallpaperRuntimeError?) -> Void
+    /// Strategy for keeping `ScreenConfiguration.wpeOrigin` consistent with
+    /// the active wallpaper. Injected so Lite can swap in a no-op variant.
+    private let originReconciler: any OriginReconciler
 
     init(
         configurationStore: WallpaperConfigurationStore,
@@ -58,7 +61,8 @@ final class PlaybackCoordinator {
         markSessionStateChanged: @MainActor @escaping () -> Void,
         releaseRuntimeSession: @MainActor @escaping (Screen) -> Void,
         notifyWallpaperSessionChanged: @MainActor @escaping () -> Void,
-        reportRuntimeError: @MainActor @escaping (CGDirectDisplayID, WallpaperRuntimeError?) -> Void = { _, _ in }
+        reportRuntimeError: @MainActor @escaping (CGDirectDisplayID, WallpaperRuntimeError?) -> Void = { _, _ in },
+        originReconciler: any OriginReconciler
     ) {
         self.configurationStore = configurationStore
         self.powerMonitor = powerMonitor
@@ -72,6 +76,7 @@ final class PlaybackCoordinator {
         self.releaseRuntimeSession = releaseRuntimeSession
         self.notifyWallpaperSessionChanged = notifyWallpaperSessionChanged
         self.reportRuntimeError = reportRuntimeError
+        self.originReconciler = originReconciler
     }
 
     // MARK: - Configuration setters
@@ -301,6 +306,7 @@ final class PlaybackCoordinator {
         let existing = configurationStore.get(for: screen.id)
         let isSameURL = Self.bookmarkResolves(to: url, bookmark: existing?.videoBookmarkData)
 
+        let previousContent = existing?.activeWallpaper
         var configuration: ScreenConfiguration
         if var prior = existing {
             prior.replacePrimaryVideo(bookmarkData: bookmarkData)
@@ -308,7 +314,10 @@ final class PlaybackCoordinator {
         } else {
             configuration = ScreenConfiguration(screenID: screen.id, videoBookmarkData: bookmarkData)
         }
-        configuration.reconcileWPEOrigin()
+        originReconciler.reconcile(
+            &configuration,
+            event: .userReplacedActiveWallpaper(previous: previousContent)
+        )
 
         if isSameURL, screen.videoPlayer != nil {
             configurationStore.save(configuration)

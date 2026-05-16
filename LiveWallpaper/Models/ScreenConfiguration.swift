@@ -473,45 +473,6 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
         }
     }
 
-    /// Clears `wpeOrigin` when the active wallpaper no longer points inside
-    /// the WPE cache. Called by `ScreenManager` whenever the user mutates the
-    /// active wallpaper (`setVideo` / `setHTMLWallpaper` / `setShaderWallpaper`)
-    /// so the WPE badge stops claiming ownership of non-WPE content.
-    /// Plan §A11: switching to Shader is treated as a transient state — the
-    /// origin is preserved so switching back to Video/HTML restores the badge.
-    mutating func reconcileWPEOrigin() {
-        guard let origin = wpeOrigin else { return }
-        guard origin.resourceLocation != .unsupported else {
-            wpeOrigin = nil
-            return
-        }
-
-        switch activeWallpaper {
-        case .video(let bookmarkData):
-            if !WPEOrigin.matchesBookmark(bookmarkData, origin: origin) {
-                wpeOrigin = nil
-            }
-        case .html(let source, _):
-            guard case .folder(let bookmarkData, _) = source,
-                  WPEOrigin.matchesBookmark(bookmarkData, origin: origin) else {
-                wpeOrigin = nil
-                return
-            }
-        case .metalShader:
-            return
-        case .scene(let descriptor):
-            // Scene content is cache-backed and identified by workshopID +
-            // cacheRelativePath. Drop the origin only if either side disagrees
-            // with the persisted descriptor (e.g. user re-imported a different
-            // workshop project in-place).
-            guard origin.workshopID == descriptor.workshopID,
-                  origin.cacheRelativePath == descriptor.cacheRelativePath else {
-                wpeOrigin = nil
-                return
-            }
-        }
-    }
-
     /// Refreshes the bookmark currently driving playback.
     func withUpdatedActiveBookmark(_ bookmarkData: Data) -> ScreenConfiguration {
         var copy = self

@@ -18,19 +18,22 @@ final class HTMLWallpaperCoordinator {
     private let saveConfiguration: @MainActor (ScreenConfiguration) -> Void
     private let restoreWallpaperSession: @MainActor (Screen, ScreenConfiguration, Bool) -> Void
     private let notifyWallpaperSessionChanged: @MainActor () -> Void
+    private let originReconciler: any OriginReconciler
 
     init(
         configurationStore: WallpaperConfigurationStore,
         screensProvider: @MainActor @escaping () -> [Screen],
         saveConfiguration: @MainActor @escaping (ScreenConfiguration) -> Void,
         restoreWallpaperSession: @MainActor @escaping (Screen, ScreenConfiguration, Bool) -> Void,
-        notifyWallpaperSessionChanged: @MainActor @escaping () -> Void
+        notifyWallpaperSessionChanged: @MainActor @escaping () -> Void,
+        originReconciler: any OriginReconciler
     ) {
         self.configurationStore = configurationStore
         self.screensProvider = screensProvider
         self.saveConfiguration = saveConfiguration
         self.restoreWallpaperSession = restoreWallpaperSession
         self.notifyWallpaperSessionChanged = notifyWallpaperSessionChanged
+        self.originReconciler = originReconciler
     }
 
     // MARK: - Multi-instance diagnostics
@@ -112,8 +115,12 @@ final class HTMLWallpaperCoordinator {
             return
         }
 
+        let previousContent = configurationStore.get(for: screen.id)?.activeWallpaper
         configuration.setHTMLWallpaper(source: source, config: config)
-        configuration.reconcileWPEOrigin()
+        originReconciler.reconcile(
+            &configuration,
+            event: .userReplacedActiveWallpaper(previous: previousContent)
+        )
         saveConfiguration(configuration)
 
         restoreWallpaperSession(screen, configuration, false)

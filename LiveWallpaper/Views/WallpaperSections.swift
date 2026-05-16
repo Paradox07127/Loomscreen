@@ -6,10 +6,11 @@ struct WallpaperTypePicker: View {
     var screen: Screen
     @Binding var selectedWallpaperType: WallpaperType
     @Environment(ScreenManager.self) private var screenManager
+    @Environment(\.featureCatalog) private var featureCatalog
 
     var body: some View {
         Picker("Wallpaper Type", selection: $selectedWallpaperType) {
-            ForEach(WallpaperType.allCases) { type in
+            ForEach(featureCatalog.capabilities.selectableWallpaperTypes) { type in
                 Label(type.titleKey, systemImage: type.iconName).tag(type)
             }
         }

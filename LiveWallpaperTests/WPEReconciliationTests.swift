@@ -4,18 +4,21 @@ import Testing
 
 /// Phase 1.x test gap closure for plan §A4/A5/A11/A14.
 /// Day 1-6 acceptance verifies these via end-to-end flows; this suite locks
-/// the underlying contract on `ScreenConfiguration.reconcileWPEOrigin()` and
-/// `WPEOrigin.matchesBookmark` so future refactors stay honest.
+/// the underlying contract on `WPEOriginReconciler` and `WPEOrigin.matchesBookmark`
+/// so future refactors stay honest. (Phase 0 of the Lite/Pro split moved the
+/// reconciliation logic from `ScreenConfiguration.reconcileWPEOrigin()` into
+/// the injectable `OriginReconciler` protocol; the underlying matching
+/// semantics here are unchanged.)
 @Suite("WPE reconcile + matchesBookmark contract") @MainActor
 struct WPEReconciliationTests {
 
-    // MARK: - reconcileWPEOrigin
+    // MARK: - WPEOriginReconciler
 
     @Test("Reconcile is a no-op when wpeOrigin is already nil")
     func reconcileNoopWhenOriginAbsent() {
         var config = makeConfiguration(activeWallpaper: .video(bookmarkData: Data([0x01])))
         config.wpeOrigin = nil
-        config.reconcileWPEOrigin()
+        WPEOriginReconciler().reconcile(&config, event: .userReplacedActiveWallpaper(previous: nil))
         #expect(config.wpeOrigin == nil)
     }
 
@@ -23,7 +26,7 @@ struct WPEReconciliationTests {
     func reconcileClearsWhenCachePathMissing() {
         var config = makeConfiguration(activeWallpaper: .video(bookmarkData: Data([0x01])))
         config.wpeOrigin = makeOrigin(workshopID: "111", cacheRelativePath: nil)
-        config.reconcileWPEOrigin()
+        WPEOriginReconciler().reconcile(&config, event: .userReplacedActiveWallpaper(previous: nil))
         #expect(config.wpeOrigin == nil)
     }
 
@@ -54,7 +57,7 @@ struct WPEReconciliationTests {
         ))
         config.wpeOrigin = origin
 
-        config.reconcileWPEOrigin()
+        WPEOriginReconciler().reconcile(&config, event: .userReplacedActiveWallpaper(previous: nil))
 
         #expect(config.wpeOrigin == origin)
     }
@@ -64,7 +67,7 @@ struct WPEReconciliationTests {
         var config = makeConfiguration(activeWallpaper: .metalShader(.waves))
         let origin = makeOrigin(workshopID: "222", cacheRelativePath: "wpe-cache/222")
         config.wpeOrigin = origin
-        config.reconcileWPEOrigin()
+        WPEOriginReconciler().reconcile(&config, event: .userReplacedActiveWallpaper(previous: nil))
         #expect(config.wpeOrigin == origin, "Shader switch is transient; switching back to Video/HTML must restore the badge.")
     }
 
@@ -73,7 +76,7 @@ struct WPEReconciliationTests {
         // Synthetic bookmark that won't resolve to the WPE cache directory.
         var config = makeConfiguration(activeWallpaper: .video(bookmarkData: Data("non-wpe".utf8)))
         config.wpeOrigin = makeOrigin(workshopID: "333", cacheRelativePath: "wpe-cache/333")
-        config.reconcileWPEOrigin()
+        WPEOriginReconciler().reconcile(&config, event: .userReplacedActiveWallpaper(previous: nil))
         #expect(config.wpeOrigin == nil)
     }
 
@@ -81,7 +84,7 @@ struct WPEReconciliationTests {
     func reconcileClearsWhenHTMLNotFolder() {
         var config = makeConfiguration(activeWallpaper: .html(source: .url(URL(string: "https://example.com")!), config: .default))
         config.wpeOrigin = makeOrigin(workshopID: "444", cacheRelativePath: "wpe-cache/444")
-        config.reconcileWPEOrigin()
+        WPEOriginReconciler().reconcile(&config, event: .userReplacedActiveWallpaper(previous: nil))
         #expect(config.wpeOrigin == nil)
     }
 
@@ -92,7 +95,7 @@ struct WPEReconciliationTests {
             config: .default
         ))
         config.wpeOrigin = makeOrigin(workshopID: "555", cacheRelativePath: "wpe-cache/555")
-        config.reconcileWPEOrigin()
+        WPEOriginReconciler().reconcile(&config, event: .userReplacedActiveWallpaper(previous: nil))
         #expect(config.wpeOrigin == nil)
     }
 

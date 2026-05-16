@@ -415,7 +415,8 @@ struct ScreenManagerCoordinationTests {
                 releaseCount += 1
                 target.resetRuntimeSession()
             },
-            notifyWallpaperSessionChanged: {}
+            notifyWallpaperSessionChanged: {},
+            originReconciler: PreservingOriginReconciler()
         )
         defer { coordinator.transition.cancelAssetReadiness(for: screen.id) }
 
@@ -464,7 +465,8 @@ struct ScreenManagerCoordinationTests {
             screensProvider: { [screen] },
             markSessionStateChanged: {},
             releaseRuntimeSession: { target in target.resetRuntimeSession() },
-            notifyWallpaperSessionChanged: {}
+            notifyWallpaperSessionChanged: {},
+            originReconciler: PreservingOriginReconciler()
         )
         defer { coordinator.transition.cancelAssetReadiness(for: screen.id) }
 
