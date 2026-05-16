@@ -1,40 +1,40 @@
 import CoreGraphics
 import Foundation
 
-struct ScreenConfiguration: Codable, Equatable, Sendable {
+public struct ScreenConfiguration: Codable, Equatable, Sendable {
     /// Mutable so `ScreenManager.applyConfigurationToAllDisplays` can clone
     /// a template for every other screen without recomposing each field.
-    var screenID: UInt32
-    var activeWallpaper: WallpaperContent
-    var savedVideoBookmarkData: Data?
+    public var screenID: UInt32
+    public var activeWallpaper: WallpaperContent
+    public var savedVideoBookmarkData: Data?
     /// Last applied HTML source — restored on type switch back to HTML.
-    var savedHTMLSource: HTMLSource?
-    var savedHTMLConfig: HTMLConfig?
-    var playbackSpeed: Double
-    var fitMode: VideoFitMode
-    var videoDisplayMode: VideoDisplayMode = .perDisplay
-    var frameRateLimit: FrameRateLimit
+    public var savedHTMLSource: HTMLSource?
+    public var savedHTMLConfig: HTMLConfig?
+    public var playbackSpeed: Double
+    public var fitMode: VideoFitMode
+    public var videoDisplayMode: VideoDisplayMode = .perDisplay
+    public var frameRateLimit: FrameRateLimit
 
-    var particleEffect: ParticleEffect
-    var effectConfig: VideoEffectConfig
-    var scheduleSlots: [ScheduleSlot]?
-    var playlistBookmarks: [Data]?
-    var shufflePlaylist: Bool
-    var playlistRotationMinutes: Int?
+    public var particleEffect: ParticleEffect
+    public var effectConfig: VideoEffectConfig
+    public var scheduleSlots: [ScheduleSlot]?
+    public var playlistBookmarks: [Data]?
+    public var shufflePlaylist: Bool
+    public var playlistRotationMinutes: Int?
     /// Cursor in `[savedVideoBookmarkData] + playlistBookmarks`.
-    var playlistCursorIndex: Int?
-    var setAsLockScreen: Bool
-    var wallpaperMode: WallpaperMode = .single
+    public var playlistCursorIndex: Int?
+    public var setAsLockScreen: Bool
+    public var wallpaperMode: WallpaperMode = .single
     /// Muted by default so wallpaper videos do not take over audio output.
-    var muted: Bool = true
+    public var muted: Bool = true
     /// Per-screen video output level. `muted` stays separate so unmute can
     /// restore the user's previous level instead of jumping to full volume.
-    var videoVolume: Double = 1.0
+    public var videoVolume: Double = 1.0
     /// Wallpaper Engine workshop origin metadata, set when the active wallpaper
     /// was imported from a `~/Documents/Live Wallpapers/<appid>/<wid>/` project.
     /// Cleared automatically when the user replaces the wallpaper with non-WPE
     /// content via the standard pickers.
-    var wpeOrigin: WPEOrigin?
+    public var wpeOrigin: WPEOrigin?
 
     private enum CodingKeys: String, CodingKey {
         case screenID
@@ -65,7 +65,7 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
         case shaderPreset
     }
 
-    init(
+    public init(
         screenID: CGDirectDisplayID,
         wallpaper: WallpaperContent,
         playbackSpeed: Double = 1.0,
@@ -103,7 +103,7 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
         self.setAsLockScreen = setAsLockScreen
     }
 
-    init(
+    public init(
         screenID: CGDirectDisplayID,
         videoBookmarkData: Data,
         playbackSpeed: Double = 1.0,
@@ -136,7 +136,7 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
         )
     }
 
-    init(
+    public init(
         screenID: CGDirectDisplayID,
         videoBookmarkData: Data,
         playbackSpeed: Double = 1.0,
@@ -209,15 +209,15 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
         }
     }
 
-    var wallpaperType: WallpaperType {
+    public var wallpaperType: WallpaperType {
         activeWallpaper.wallpaperType
     }
 
-    var videoBookmarkData: Data? {
+    public var videoBookmarkData: Data? {
         activeWallpaper.activeVideoBookmarkData ?? savedVideoBookmarkData
     }
 
-    var hasConfiguredVideoSource: Bool {
+    public var hasConfiguredVideoSource: Bool {
         if let bookmarkData = activeWallpaper.activeVideoBookmarkData, !bookmarkData.isEmpty {
             return true
         }
@@ -227,20 +227,20 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
         return false
     }
 
-    var preferredVideoBookmarkData: Data? {
+    public var preferredVideoBookmarkData: Data? {
         videoBookmarkData
     }
 
-    var htmlSource: HTMLSource? {
+    public var htmlSource: HTMLSource? {
         activeWallpaper.htmlSource
     }
 
-    var htmlConfig: HTMLConfig? {
+    public var htmlConfig: HTMLConfig? {
         activeWallpaper.htmlConfig
     }
 
     /// Textual HTML payload, if the source is URL or inline HTML.
-    var htmlContent: String? {
+    public var htmlContent: String? {
         guard let source = activeWallpaper.htmlSource else { return nil }
         switch source {
         case .url(let url): return url.absoluteString
@@ -249,11 +249,11 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
         }
     }
 
-    var shaderPreset: MetalShaderPreset? {
+    public var shaderPreset: MetalShaderPreset? {
         activeWallpaper.shaderPreset
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         screenID = try c.decode(UInt32.self, forKey: .screenID)
         playbackSpeed = try c.decodeIfPresent(Double.self, forKey: .playbackSpeed) ?? 1.0
@@ -353,9 +353,9 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
               origin.originalType == .scene,
               origin.resourceLocation == .cache,
               let cacheRelativePath = origin.cacheRelativePath,
-              WPEPathSafety.isSafeCacheRelativePath(cacheRelativePath),
+              isSafeCacheRelativePath(cacheRelativePath),
               let entryFile = origin.entryFile,
-              WPEPathSafety.isSafeRelativePath(entryFile) else {
+              isSafeRelativePath(entryFile) else {
             return nil
         }
         return SceneDescriptor(
@@ -367,7 +367,24 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
         )
     }
 
-    func encode(to encoder: Encoder) throws {
+    // Inlined predicates so the Core init doesn't pull in WPEPathSafety
+    // (which still lives in the main target's Infrastructure/ folder and
+    // is destined for LiveWallpaperProWPE in Phase 4).
+    private static func isSafeCacheRelativePath(_ path: String) -> Bool {
+        path.hasPrefix("wpe-cache/")
+            && !path.contains("\\")
+            && !path.contains("..")
+            && !path.contains("//")
+    }
+
+    private static func isSafeRelativePath(_ value: String) -> Bool {
+        !value.isEmpty
+            && !value.hasPrefix("/")
+            && !value.contains("..")
+            && value != "."
+    }
+
+    public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(screenID, forKey: .screenID)
         try c.encode(activeWallpaper, forKey: .activeWallpaper)
@@ -397,7 +414,7 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
         return min(max(value, 0), 1)
     }
 
-    mutating func setHTMLWallpaper(source: HTMLSource, config: HTMLConfig = .default) {
+    public mutating func setHTMLWallpaper(source: HTMLSource, config: HTMLConfig = .default) {
         preserveCurrentVideoBookmarkIfNeeded()
         if source.isRestorableHTMLSource {
             savedHTMLSource = source
@@ -407,24 +424,24 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
     }
 
     /// Legacy URL/raw-HTML bridge.
-    mutating func setHTMLWallpaper(_ content: String) {
+    public mutating func setHTMLWallpaper(_ content: String) {
         setHTMLWallpaper(source: HTMLSource(legacyString: content), config: .default)
     }
 
-    mutating func updateHTMLConfig(_ config: HTMLConfig) {
+    public mutating func updateHTMLConfig(_ config: HTMLConfig) {
         guard case .html(let source, _) = activeWallpaper else { return }
         savedHTMLConfig = config
         activeWallpaper = .html(source: source, config: config)
     }
 
-    mutating func setShaderWallpaper(_ preset: MetalShaderPreset) {
+    public mutating func setShaderWallpaper(_ preset: MetalShaderPreset) {
         preserveCurrentVideoBookmarkIfNeeded()
         preserveCurrentHTMLIfNeeded()
         activeWallpaper = .metalShader(preset)
     }
 
     @discardableResult
-    mutating func activateSavedVideoWallpaper() -> Bool {
+    public mutating func activateSavedVideoWallpaper() -> Bool {
         guard let bookmarkData = savedVideoBookmarkData ?? activeWallpaper.activeVideoBookmarkData else {
             return false
         }
@@ -438,7 +455,7 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
 
     /// Restore the previously applied HTML source after a type swap.
     @discardableResult
-    mutating func activateSavedHTMLWallpaper() -> Bool {
+    public mutating func activateSavedHTMLWallpaper() -> Bool {
         guard let source = savedHTMLSource else { return false }
         let config = savedHTMLConfig ?? .default
         preserveCurrentVideoBookmarkIfNeeded()
@@ -447,7 +464,7 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
     }
 
     /// Swap primary video while preserving per-screen settings + saved HTML.
-    mutating func replacePrimaryVideo(bookmarkData: Data) {
+    public mutating func replacePrimaryVideo(bookmarkData: Data) {
         preserveCurrentHTMLIfNeeded()
         savedVideoBookmarkData = bookmarkData
         activeWallpaper = .video(bookmarkData: bookmarkData)
@@ -456,7 +473,7 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
     }
 
     /// Activates a schedule slot without replacing the saved primary video.
-    mutating func applyScheduledBookmark(_ bookmarkData: Data) {
+    public mutating func applyScheduledBookmark(_ bookmarkData: Data) {
         activeWallpaper = .video(bookmarkData: bookmarkData)
     }
 
@@ -474,7 +491,7 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
     }
 
     /// Refreshes the bookmark currently driving playback.
-    func withUpdatedActiveBookmark(_ bookmarkData: Data) -> ScreenConfiguration {
+    public func withUpdatedActiveBookmark(_ bookmarkData: Data) -> ScreenConfiguration {
         var copy = self
         let oldActive = copy.activeWallpaper.activeVideoBookmarkData
 
