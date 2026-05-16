@@ -1,7 +1,9 @@
 import SwiftUI
 
-struct DestructiveControlTint: ViewModifier {
-    func body(content: Content) -> some View {
+public struct DestructiveControlTint: ViewModifier {
+    public init() {}
+
+    public func body(content: Content) -> some View {
         content
             .foregroundStyle(Color.red)
             .tint(Color.red)
@@ -14,7 +16,7 @@ struct DestructiveControlTint: ViewModifier {
 }
 
 extension View {
-    func destructiveControlTint() -> some View {
+    public func destructiveControlTint() -> some View {
         modifier(DestructiveControlTint())
     }
 }

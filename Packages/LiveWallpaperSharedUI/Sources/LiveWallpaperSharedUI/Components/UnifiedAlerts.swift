@@ -5,25 +5,15 @@ import SwiftUI
 /// settings / cache / library / scene-import surface. Pairs with
 /// `DestructiveActionPolicy.confirmDestructive` so the codebase has exactly
 /// one error-display modifier and one destructive-confirm modifier.
-///
-/// Two surfaces:
-///
-/// - `errorAlert(_:message:)` — drives presentation off an optional `String?`
-///   binding. Use when the call site already builds the message itself
-///   (validation summary, import/export failures, etc.). Dismiss clears the
-///   binding back to `nil`.
-/// - `errorAlert(_:error:)` — drives presentation off an optional `Error?`
-///   binding and renders `localizedDescription` plus `recoverySuggestion`
-///   (when the error conforms to `LocalizedError`).
 extension View {
-    func errorAlert(
+    public func errorAlert(
         _ title: LocalizedStringKey,
         message: Binding<String?>
     ) -> some View {
         modifier(StringErrorAlertModifier(title: title, message: message))
     }
 
-    func errorAlert<E: Error>(
+    public func errorAlert<E: Error>(
         _ title: LocalizedStringKey,
         error: Binding<E?>
     ) -> some View {
