@@ -1,12 +1,18 @@
+import LiveWallpaperSharedUI
 import SwiftUI
 
-struct RAMScopePicker: View {
+public struct RAMScopePicker: View {
     @Binding var selection: String
-    var maxWidth: CGFloat?
+    public var maxWidth: CGFloat?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    var body: some View {
+    public init(selection: Binding<String>, maxWidth: CGFloat? = nil) {
+        self._selection = selection
+        self.maxWidth = maxWidth
+    }
+
+    public var body: some View {
         HStack(spacing: 0) {
             scopeButton(label: "All", value: "system")
             scopeButton(label: "App", value: "app")
