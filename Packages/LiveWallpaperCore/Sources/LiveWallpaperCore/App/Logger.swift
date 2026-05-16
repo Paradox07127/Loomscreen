@@ -1,10 +1,10 @@
 import Foundation
 import os
 
-final class Logger {
+public final class Logger {
     // MARK: - Log Categories
 
-    enum Category: String, CaseIterable {
+    public enum Category: String, CaseIterable, Sendable {
         case general = "General"
         case screenManager = "ScreenManager"
         case videoPlayer = "VideoPlayer"
@@ -18,7 +18,7 @@ final class Logger {
         case memory = "Memory"
         case wpeResolver = "WPEResolver"
 
-        static let subsystem = "com.livewallpaper"
+        public static let subsystem = "com.livewallpaper"
 
         /// Backing `os.Logger` for this category, lazily created and cached.
         /// `os.Logger` is a thin wrapper but caching avoids the per-call
@@ -30,10 +30,10 @@ final class Logger {
 
     // MARK: - Log Levels
 
-    enum Level {
+    public enum Level: Sendable {
         case debug, info, notice, warning, error, fault
 
-        var prefix: String {
+        public var prefix: String {
             switch self {
             case .debug:    return "🔍"
             case .info:     return "ℹ️"
@@ -61,7 +61,7 @@ final class Logger {
     /// `@autoclosure` defers string interpolation; the message is only
     /// evaluated when this level is actually being logged.
 
-    static func log(
+    public static func log(
         _ message: @autoclosure () -> String,
         category: Category,
         level: Level = .info,
@@ -90,53 +90,53 @@ final class Logger {
 
     /// Persistent log file path users can `tail -f`. `nil` only if the
     /// `~/Library/Logs/LiveWallpaper/` directory could not be created.
-    static var persistentLogFileURL: URL? {
+    public static var persistentLogFileURL: URL? {
         LogFileSink.shared.fileURL
     }
 
     // MARK: - Convenience Methods
 
 
-    static func debug(_ message: @autoclosure () -> String, category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
+    public static func debug(_ message: @autoclosure () -> String, category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
         #if DEBUG
         log(message(), category: category, level: .debug, file: file, function: function, line: line)
         #endif
     }
 
 
-    static func info(_ message: @autoclosure () -> String, category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
+    public static func info(_ message: @autoclosure () -> String, category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
         log(message(), category: category, level: .info, file: file, function: function, line: line)
     }
 
 
-    static func notice(_ message: @autoclosure () -> String, category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
+    public static func notice(_ message: @autoclosure () -> String, category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
         log(message(), category: category, level: .notice, file: file, function: function, line: line)
     }
 
 
-    static func warning(_ message: @autoclosure () -> String, category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
+    public static func warning(_ message: @autoclosure () -> String, category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
         log(message(), category: category, level: .warning, file: file, function: function, line: line)
     }
 
 
-    static func error(_ message: @autoclosure () -> String, category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
+    public static func error(_ message: @autoclosure () -> String, category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
         log(message(), category: category, level: .error, file: file, function: function, line: line)
     }
 
 
-    static func fault(_ message: @autoclosure () -> String, category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
+    public static func fault(_ message: @autoclosure () -> String, category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
         log(message(), category: category, level: .fault, file: file, function: function, line: line)
     }
 
     // MARK: - Lifecycle Logging
 
-    static func functionStart(category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
+    public static func functionStart(category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
         #if DEBUG
         log("Started", category: category, level: .debug, file: file, function: function, line: line)
         #endif
     }
 
-    static func functionEnd(category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
+    public static func functionEnd(category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
         #if DEBUG
         log("Finished", category: category, level: .debug, file: file, function: function, line: line)
         #endif
@@ -144,15 +144,15 @@ final class Logger {
 
     // MARK: - Domain-Specific Logging
 
-    static func videoLoaded(url: URL, screenID: UInt32, file: String = #file, function: String = #function, line: Int = #line) {
+    public static func videoLoaded(url: URL, screenID: UInt32, file: String = #file, function: String = #function, line: Int = #line) {
         log("Video loaded: \(url.lastPathComponent) for screen \(screenID)", category: .videoPlayer, level: .info, file: file, function: function, line: line)
     }
 
-    static func screensDetected(_ count: Int, file: String = #file, function: String = #function, line: Int = #line) {
+    public static func screensDetected(_ count: Int, file: String = #file, function: String = #function, line: Int = #line) {
         log("Detected \(count) screens", category: .screenManager, level: .notice, file: file, function: function, line: line)
     }
 
-    static func powerSourceChanged(isOnBattery: Bool, level: Double?, file: String = #file, function: String = #function, line: Int = #line) {
+    public static func powerSourceChanged(isOnBattery: Bool, level: Double?, file: String = #file, function: String = #function, line: Int = #line) {
         let source = isOnBattery ? "battery" : "AC power"
         var message = "Power source changed to \(source)"
         if let level = level, isOnBattery {
@@ -161,14 +161,14 @@ final class Logger {
         log(message, category: .powerMonitor, level: .notice, file: file, function: function, line: line)
     }
 
-    static func settingsChanged(setting: String, value: Any, file: String = #file, function: String = #function, line: Int = #line) {
+    public static func settingsChanged(setting: String, value: Any, file: String = #file, function: String = #function, line: Int = #line) {
         log("Setting changed: \(setting) = \(value)", category: .settings, level: .info, file: file, function: function, line: line)
     }
 }
 
 // MARK: - Performance Measuring
 
-class PerformanceTimer {
+public class PerformanceTimer {
     private let startTime: CFAbsoluteTime
     private let description: String
     private let category: Logger.Category
@@ -176,7 +176,7 @@ class PerformanceTimer {
     private let function: String
     private let line: Int
 
-    init(description: String, category: Logger.Category = .performance, file: String = #file, function: String = #function, line: Int = #line) {
+    public init(description: String, category: Logger.Category = .performance, file: String = #file, function: String = #function, line: Int = #line) {
         self.startTime = CFAbsoluteTimeGetCurrent()
         self.description = description
         self.category = category
@@ -186,7 +186,7 @@ class PerformanceTimer {
         Logger.debug("⏱ \(description) - Started", category: category, file: file, function: function, line: line)
     }
 
-    func checkpoint(_ label: String) {
+    public func checkpoint(_ label: String) {
         let elapsed = CFAbsoluteTimeGetCurrent() - startTime
         Logger.debug("⏱ \(description) - Checkpoint '\(label)' at \(String(format: "%.4f", elapsed))s",
                    category: category, file: file, function: function, line: line)
