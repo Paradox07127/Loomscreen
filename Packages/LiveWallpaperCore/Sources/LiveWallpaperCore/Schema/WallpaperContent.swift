@@ -1,12 +1,12 @@
 import Foundation
 
-enum WallpaperContent: Equatable, Sendable {
+public enum WallpaperContent: Equatable, Sendable {
     case video(bookmarkData: Data)
     case html(source: HTMLSource, config: HTMLConfig)
     case metalShader(MetalShaderPreset)
     case scene(SceneDescriptor)
 
-    var wallpaperType: WallpaperType {
+    public var wallpaperType: WallpaperType {
         switch self {
         case .video:
             return .video
@@ -19,27 +19,27 @@ enum WallpaperContent: Equatable, Sendable {
         }
     }
 
-    var activeVideoBookmarkData: Data? {
+    public var activeVideoBookmarkData: Data? {
         guard case .video(let bookmarkData) = self else { return nil }
         return bookmarkData
     }
 
-    var htmlSource: HTMLSource? {
+    public var htmlSource: HTMLSource? {
         guard case .html(let source, _) = self else { return nil }
         return source
     }
 
-    var htmlConfig: HTMLConfig? {
+    public var htmlConfig: HTMLConfig? {
         guard case .html(_, let config) = self else { return nil }
         return config
     }
 
-    var shaderPreset: MetalShaderPreset? {
+    public var shaderPreset: MetalShaderPreset? {
         guard case .metalShader(let preset) = self else { return nil }
         return preset
     }
 
-    var sceneDescriptor: SceneDescriptor? {
+    public var sceneDescriptor: SceneDescriptor? {
         guard case .scene(let descriptor) = self else { return nil }
         return descriptor
     }
@@ -70,7 +70,7 @@ extension WallpaperContent: Codable {
         case descriptor
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
 
         if let videoNested = try? container.nestedContainer(keyedBy: VideoCodingKeys.self, forKey: .video) {
@@ -112,7 +112,7 @@ extension WallpaperContent: Codable {
         )
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
         case .video(let bookmarkData):
