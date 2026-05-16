@@ -10,6 +10,7 @@
 		0C9A00022D7350000033C48B /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0C9A00012D7350000033C48B /* AppIntents.framework */; };
 		0C9A00042D7350000033C48B /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0C9A00012D7350000033C48B /* AppIntents.framework */; };
 		0C9A00052D7350000033C48B /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0C9A00012D7350000033C48B /* AppIntents.framework */; };
+		0CABCDEF2D8000020000C48B /* WPEShaderToolchain.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0CABCDEF2D8000010000C48B /* WPEShaderToolchain.xcframework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -34,6 +35,7 @@
 		0C322C002D6950490033C48B /* LiveWallpaperTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LiveWallpaperTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		0C322C0A2D6950490033C48B /* LiveWallpaperUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LiveWallpaperUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		0C9A00012D7350000033C48B /* AppIntents.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppIntents.framework; path = System/Library/Frameworks/AppIntents.framework; sourceTree = SDKROOT; };
+		0CABCDEF2D8000010000C48B /* WPEShaderToolchain.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = WPEShaderToolchain.xcframework; path = ThirdParty/WPEShaderToolchain.xcframework; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -60,6 +62,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				0C9A00022D7350000033C48B /* AppIntents.framework in Frameworks */,
+				0CABCDEF2D8000020000C48B /* WPEShaderToolchain.xcframework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -107,6 +110,7 @@
 			isa = PBXGroup;
 			children = (
 				0C9A00012D7350000033C48B /* AppIntents.framework */,
+				0CABCDEF2D8000010000C48B /* WPEShaderToolchain.xcframework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -419,6 +423,8 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
+				CLANG_CXX_LIBRARY = "libc++";
 				CODE_SIGN_ENTITLEMENTS = LiveWallpaper/LiveWallpaper.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -439,6 +445,10 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lc++",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = Taijia.LiveWallpaper;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -452,6 +462,8 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
+				CLANG_CXX_LIBRARY = "libc++";
 				CODE_SIGN_ENTITLEMENTS = LiveWallpaper/LiveWallpaper.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -473,6 +485,10 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lc++",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = Taijia.LiveWallpaper;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
