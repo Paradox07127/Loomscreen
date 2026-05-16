@@ -95,6 +95,7 @@ final class ScreenManager {
     @ObservationIgnored private let fullScreenDetector: any FullScreenDetecting
     @ObservationIgnored private let playableVideoLoader: any PlayableVideoLoading
     @ObservationIgnored private let restoresSavedWallpapersOnScreenRefresh: Bool
+    @ObservationIgnored private var transientRuntimeErrors: [CGDirectDisplayID: WallpaperRuntimeError] = [:]
     @ObservationIgnored private let exclusiveRenderingCoordinator = ExclusiveRenderingCoordinator()
     @ObservationIgnored private var exclusiveRenderingObservation: NSObjectProtocol?
     /// Coordinates per-screen playback configuration mutations + transition
@@ -125,6 +126,9 @@ final class ScreenManager {
         },
         notifyWallpaperSessionChanged: { [weak self] in
             self?.notifyWallpaperSessionChanged()
+        },
+        reportRuntimeError: { [weak self] screenID, error in
+            self?.setTransientRuntimeError(error, for: screenID)
         }
     )
     /// Lazy because the `saveConfiguration` / `restoreWallpaperSession`
@@ -341,6 +345,7 @@ final class ScreenManager {
                 screen.updateRuntimeFrame(to: screen.frame)
             }
         }
+        playbackCoordinator.refreshVideoRendering()
     }
     
     private func setupMemoryMonitoring() {
@@ -517,7 +522,9 @@ final class ScreenManager {
         bumpTransition(for: screen.id)
         effectsCoordinator.cancelInflight(for: screen.id)
         transitionRegistry.cancelAssetReadiness(for: screen.id)
+        setTransientRuntimeError(nil, for: screen.id)
         screen.resetRuntimeSession()
+        playbackCoordinator.refreshVideoAudioLeadership()
         powerPolicy.clearTracking(for: screen.id)
     }
 
@@ -631,7 +638,22 @@ final class ScreenManager {
     /// the banner when the session reports a new state.
     func runtimeError(for screen: Screen) -> WallpaperRuntimeError? {
         _ = wallpaperSessionStateVersion
-        return screen.runtimeSession?.runtimeError
+        return transientRuntimeErrors[screen.id] ?? screen.runtimeSession?.runtimeError
+    }
+
+    private func setTransientRuntimeError(_ error: WallpaperRuntimeError?, for screenID: CGDirectDisplayID) {
+        let didChange: Bool
+        if let error {
+            didChange = transientRuntimeErrors[screenID] != error
+            transientRuntimeErrors[screenID] = error
+        } else {
+            didChange = transientRuntimeErrors.removeValue(forKey: screenID) != nil
+        }
+        guard didChange else { return }
+
+        var next = wallpaperSessionState
+        next.version &+= 1
+        wallpaperSessionState = next
     }
 
     func retryRuntimeSession(for screen: Screen) {
@@ -975,6 +997,69 @@ final class ScreenManager {
 
     func updateMuted(_ muted: Bool, for screen: Screen) {
         playbackCoordinator.updateMuted(muted, for: screen)
+    }
+
+    func updateVideoVolume(_ volume: Double, for screen: Screen) {
+        playbackCoordinator.updateVideoVolume(volume, for: screen)
+    }
+
+    func updateVideoDisplayMode(_ mode: VideoDisplayMode, for screen: Screen) {
+        guard var sourceConfiguration = configurationStore.get(for: screen.id),
+              sourceConfiguration.wallpaperType == .video,
+              sourceConfiguration.hasConfiguredVideoSource else { return }
+
+        switch mode {
+        case .perDisplay:
+            let sourceBookmark = sourceConfiguration.videoBookmarkData
+            var changed = false
+
+            for target in screens {
+                guard var targetConfiguration = configurationStore.get(for: target.id),
+                      targetConfiguration.wallpaperType == .video,
+                      targetConfiguration.videoDisplayMode == .spanAllDisplays else { continue }
+
+                if let sourceBookmark,
+                   targetConfiguration.videoBookmarkData != sourceBookmark {
+                    continue
+                }
+
+                targetConfiguration.videoDisplayMode = .perDisplay
+                saveConfiguration(targetConfiguration)
+                restoreWallpaperSession(for: target, configuration: targetConfiguration, preservingState: true)
+                changed = true
+            }
+
+            if changed {
+                notifyWallpaperSessionChanged()
+            } else {
+                playbackCoordinator.updateVideoDisplayMode(mode, for: screen)
+            }
+
+        case .spanAllDisplays:
+            guard screens.count > 1 else {
+                playbackCoordinator.updateVideoDisplayMode(.perDisplay, for: screen)
+                return
+            }
+
+            sourceConfiguration.videoDisplayMode = .spanAllDisplays
+            for target in screens {
+                var copy = sourceConfiguration
+                copy.screenID = target.id
+
+                if target.id != screen.id {
+                    releaseRuntimeSession(target)
+                }
+
+                saveConfiguration(copy)
+                restoreWallpaperSession(
+                    for: target,
+                    configuration: copy,
+                    preservingState: target.id == screen.id
+                )
+                Logger.info("Span Video: copied configuration from screen \(screen.id) → \(target.id)", category: .screenManager)
+            }
+            notifyWallpaperSessionChanged()
+        }
     }
 
     func updateFitMode(_ fitMode: VideoFitMode, for screen: Screen) {

@@ -94,6 +94,14 @@ struct MenuBarBehaviorTests {
         }
     }
 
+    @Test("MenuBarContent exposes video volume without opening a panel")
+    func menuBarContentExposesVideoVolumeControl() throws {
+        let source = try readMenuBarSource()
+
+        #expect(source.contains("Slider("))
+        #expect(source.contains("updateVideoVolume"))
+    }
+
     private func withIsolatedGlobalSettings(_ body: () throws -> Void) rethrows {
         let defaults = UserDefaults.standard
         let keys = [
@@ -140,6 +148,24 @@ struct MenuBarBehaviorTests {
             importedAt: Date(timeIntervalSince1970: 0),
             lastUsedAt: lastUsedAt
         )
+    }
+
+    private func readMenuBarSource() throws -> String {
+        let relative = "LiveWallpaper/Views/MenuBarContent.swift"
+        let bases = [
+            URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent(),
+            URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        ]
+
+        guard let source = bases
+            .lazy
+            .map({ $0.appendingPathComponent(relative) })
+            .first(where: { FileManager.default.fileExists(atPath: $0.path) })
+        else {
+            Issue.record("Could not locate \(relative); fix the test path resolver")
+            return ""
+        }
+        return try String(contentsOf: source, encoding: .utf8)
     }
 }
 

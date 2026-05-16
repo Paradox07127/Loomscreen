@@ -118,20 +118,25 @@ struct VideoPreviewSection: View {
         }
     }
 
+    @ViewBuilder
     private var unloadedPreview: some View {
+        let errorMessage = previewController.lastError
         VStack(spacing: 14) {
-            Image(systemName: previewController.isLoading ? "hourglass" : "photo")
+            Image(systemName: errorMessage == nil ? (previewController.isLoading ? "hourglass" : "photo") : "exclamationmark.triangle")
                 .font(.system(size: 36))
-                .foregroundStyle(.secondary)
-            Text(previewController.isLoading ? "Loading preview..." : "Preview paused")
+                .foregroundStyle(errorMessage == nil ? Color.secondary : Color.orange)
+            Text(errorMessage ?? (previewController.isLoading ? "Loading preview..." : "Preview paused"))
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Button("Load Preview", action: startPreview)
+                .foregroundStyle(errorMessage == nil ? Color.secondary : Color.primary)
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+            Button(errorMessage == nil ? "Load Preview" : "Retry Preview", action: startPreview)
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
-                .accessibilityLabel(Text("Load preview"))
+                .accessibilityLabel(Text(errorMessage == nil ? "Load preview" : "Retry preview"))
                 .accessibilityHint(Text("Starts a temporary video preview for this settings panel"))
         }
+        .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(NSColor.windowBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 16))

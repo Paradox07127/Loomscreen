@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import Foundation
 
 /// Owns per-screen playback configuration mutations + the
@@ -41,6 +42,9 @@ final class PlaybackCoordinator {
     /// bump + summary cache refresh + playback state push + full-screen
     /// fallback re-evaluation).
     private let notifyWallpaperSessionChanged: @MainActor () -> Void
+    /// Hook for async validation / setup failures that happen before a
+    /// `VideoWallpaperSession` exists to publish its own runtime error.
+    private let reportRuntimeError: @MainActor (CGDirectDisplayID, WallpaperRuntimeError?) -> Void
 
     init(
         configurationStore: WallpaperConfigurationStore,
@@ -53,7 +57,8 @@ final class PlaybackCoordinator {
         screensProvider: @MainActor @escaping () -> [Screen],
         markSessionStateChanged: @MainActor @escaping () -> Void,
         releaseRuntimeSession: @MainActor @escaping (Screen) -> Void,
-        notifyWallpaperSessionChanged: @MainActor @escaping () -> Void
+        notifyWallpaperSessionChanged: @MainActor @escaping () -> Void,
+        reportRuntimeError: @MainActor @escaping (CGDirectDisplayID, WallpaperRuntimeError?) -> Void = { _, _ in }
     ) {
         self.configurationStore = configurationStore
         self.powerMonitor = powerMonitor
@@ -66,6 +71,7 @@ final class PlaybackCoordinator {
         self.markSessionStateChanged = markSessionStateChanged
         self.releaseRuntimeSession = releaseRuntimeSession
         self.notifyWallpaperSessionChanged = notifyWallpaperSessionChanged
+        self.reportRuntimeError = reportRuntimeError
     }
 
     // MARK: - Configuration setters
@@ -87,7 +93,36 @@ final class PlaybackCoordinator {
 
         configuration.muted = muted
         save(configuration)
-        screen.videoPlayer?.setMuted(muted)
+        syncVideoAudioLeadership()
+    }
+
+    func updateVideoVolume(_ volume: Double, for screen: Screen) {
+        guard var configuration = configurationStore.get(for: screen.id) else { return }
+        let clampedVolume = Self.clampedVideoVolume(volume)
+        guard abs(configuration.videoVolume - clampedVolume) > 0.001 else { return }
+
+        configuration.videoVolume = clampedVolume
+        save(configuration)
+        syncVideoAudioLeadership()
+    }
+
+    func refreshVideoAudioLeadership() {
+        syncVideoAudioLeadership()
+        applyVideoSpanLayout()
+    }
+
+    func refreshVideoRendering() {
+        syncVideoAudioLeadership()
+        applyVideoSpanLayout()
+    }
+
+    func updateVideoDisplayMode(_ mode: VideoDisplayMode, for screen: Screen) {
+        guard var configuration = configurationStore.get(for: screen.id),
+              configuration.videoDisplayMode != mode else { return }
+
+        configuration.videoDisplayMode = mode
+        save(configuration)
+        applyVideoSpanLayout()
     }
 
     func updateFitMode(_ fitMode: VideoFitMode, for screen: Screen) {
@@ -278,12 +313,14 @@ final class PlaybackCoordinator {
         if isSameURL, screen.videoPlayer != nil {
             configurationStore.save(configuration)
             applyConfiguration(configuration, to: screen, preservingState: true)
+            reportRuntimeError(screen.id, nil)
             return
         }
 
         let screenID = screen.id
         let generation = transition.bumpTransition(for: screenID)
         let videoLoader = playableVideoLoader
+        reportRuntimeError(screenID, nil)
         Task {
             do {
                 try await videoLoader.validatePlayableVideo(at: url)
@@ -301,11 +338,15 @@ final class PlaybackCoordinator {
                         }
                         return
                     }
+                    self.reportRuntimeError(screenID, nil)
                     self.setupVideoPlayback(url: url, screen: liveScreen)
                 }
             } catch {
+                let runtimeError = Self.runtimeError(from: error, url: url)
+                let message = error.localizedDescription
                 await MainActor.run {
-                    Logger.error("Failed to setup video: \(error.localizedDescription)", category: .screenManager)
+                    self.reportRuntimeError(screenID, runtimeError)
+                    Logger.error("Failed to setup video: \(message)", category: .screenManager)
                 }
             }
         }
@@ -378,7 +419,8 @@ final class PlaybackCoordinator {
         preservingState: Bool
     ) {
         let existingPlayer = screen.videoPlayer
-        let needsNewPlayer = existingPlayer == nil || existingPlayer?.videoURL != url
+        let needsNewPlayer = existingPlayer == nil ||
+            Self.videoAudioURLKey(for: existingPlayer?.videoURL) != Self.videoAudioURLKey(for: url)
 
         if !needsNewPlayer, let player = existingPlayer {
             let currentTime = preservingState ? player.player?.currentTime() : .zero
@@ -429,11 +471,16 @@ final class PlaybackCoordinator {
             screen.installRuntimeSession(session)
             notifyWallpaperSessionChanged()
 
+            player.setVolume(configuration.videoVolume)
+            player.setMuted(configuration.muted)
             player.setPlaybackSpeed(configuration.playbackSpeed)
             applyConfigurationWhenAssetReady(player: player, screen: screen, configuration: configuration)
             applyStartupPlaybackPolicy(to: player, for: screen)
         }
 
+        reportRuntimeError(screen.id, nil)
+        syncVideoAudioLeadership()
+        applyVideoSpanLayout()
         applyPerformancePolicy(to: screen)
     }
 
@@ -447,8 +494,9 @@ final class PlaybackCoordinator {
             fitMode: configuration?.fitMode ?? .aspectFill
         )
 
-        if let stored = configuration?.muted {
-            player.setMuted(stored)
+        if let configuration {
+            player.setVolume(configuration.videoVolume)
+            player.setMuted(configuration.muted)
         }
 
         guard let liveScreen = screensProvider().first(where: { $0.id == screen.id }) else {
@@ -466,6 +514,8 @@ final class PlaybackCoordinator {
             applyConfigurationWhenAssetReady(player: player, screen: liveScreen, configuration: configuration)
         }
 
+        syncVideoAudioLeadership()
+        applyVideoSpanLayout()
         applyStartupPlaybackPolicy(to: player, for: liveScreen)
         Logger.info("Video player setup complete for screen \(screen.id)", category: .screenManager)
         notifyWallpaperSessionChanged()
@@ -502,8 +552,107 @@ final class PlaybackCoordinator {
         screen.runtimeSession?.applyPerformanceProfile(profile)
     }
 
+    private static func clampedVideoVolume(_ value: Double) -> Double {
+        guard value.isFinite else { return 1.0 }
+        return min(max(value, 0), 1)
+    }
+
+    private func syncVideoAudioLeadership() {
+        let screens = screensProvider()
+        let entries = screens.compactMap { screen -> VideoAudioLeadershipPolicy.Entry? in
+            guard let player = screen.videoPlayer,
+                  let configuration = configurationStore.get(for: screen.id),
+                  configuration.wallpaperType == .video else { return nil }
+            return VideoAudioLeadershipPolicy.Entry(
+                screenID: screen.id,
+                urlKey: Self.videoAudioURLKey(for: player.videoURL),
+                userMuted: configuration.muted
+            )
+        }
+        let effectiveMutedStates = VideoAudioLeadershipPolicy.effectiveMutedStates(for: entries)
+
+        for screen in screens {
+            guard let player = screen.videoPlayer,
+                  let configuration = configurationStore.get(for: screen.id),
+                  configuration.wallpaperType == .video else { continue }
+            player.setVolume(configuration.videoVolume)
+            player.setMuted(effectiveMutedStates[screen.id] ?? configuration.muted)
+        }
+    }
+
+    private func applyVideoSpanLayout() {
+        let screens = screensProvider()
+        let candidates = screens.compactMap { screen -> (screen: Screen, player: WallpaperVideoPlayer, urlKey: String)? in
+            guard let player = screen.videoPlayer,
+                  let configuration = configurationStore.get(for: screen.id),
+                  configuration.wallpaperType == .video,
+                  configuration.videoDisplayMode == .spanAllDisplays,
+                  let urlKey = Self.videoAudioURLKey(for: player.videoURL) else {
+                return nil
+            }
+            return (screen, player, urlKey)
+        }
+
+        let groups = Dictionary(grouping: candidates) { $0.urlKey }
+        var spannedScreenIDs = Set<CGDirectDisplayID>()
+
+        for group in groups.values where group.count > 1 {
+            let renderConfigurations = VideoSpanLayout.renderConfigurations(
+                for: group.map { item in
+                    VideoSpanLayout.Entry(screenID: item.screen.id, frame: item.screen.frame)
+                }
+            )
+            guard !renderConfigurations.isEmpty else { continue }
+
+            synchronizeSpanGroupPlaybackTimes(group)
+
+            for item in group {
+                item.player.setSpanRenderConfiguration(renderConfigurations[item.screen.id])
+                spannedScreenIDs.insert(item.screen.id)
+            }
+        }
+
+        for screen in screens where !spannedScreenIDs.contains(screen.id) {
+            screen.videoPlayer?.setSpanRenderConfiguration(nil)
+        }
+    }
+
+    private func synchronizeSpanGroupPlaybackTimes(
+        _ group: [(screen: Screen, player: WallpaperVideoPlayer, urlKey: String)]
+    ) {
+        guard group.count > 1,
+              let leaderPlayer = group.first?.player.player else { return }
+
+        let leaderTime = leaderPlayer.currentTime()
+        guard leaderTime.isValid else { return }
+
+        for item in group.dropFirst() {
+            guard let followerPlayer = item.player.player else { continue }
+            let delta = CMTimeGetSeconds(CMTimeSubtract(followerPlayer.currentTime(), leaderTime))
+            guard delta.isFinite, abs(delta) > 0.20 else { continue }
+            followerPlayer.seek(to: leaderTime, toleranceBefore: .zero, toleranceAfter: .zero)
+        }
+    }
+
+    private static func videoAudioURLKey(for url: URL?) -> String? {
+        guard let url else { return nil }
+        return url.standardizedFileURL.resolvingSymlinksInPath().path(percentEncoded: false)
+    }
+
+    private static func runtimeError(from error: Error, url: URL) -> WallpaperRuntimeError {
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorNotConnectedToInternet {
+            return .networkOffline
+        }
+        if nsError.domain == NSCocoaErrorDomain, nsError.code == NSFileReadNoPermissionError {
+            return .fileAccessDenied(url)
+        }
+        return .mediaNotPlayable(url, code: nsError.code)
+    }
+
     private static func bookmarkResolves(to url: URL, bookmark: Data?) -> Bool {
         guard let bookmark else { return false }
-        return (try? ResourceUtilities.resolveBookmark(bookmark).url) == url
+        guard let resolvedURL = try? ResourceUtilities.resolveBookmark(bookmark).url else { return false }
+        return videoAudioURLKey(for: resolvedURL) == videoAudioURLKey(for: url)
     }
 }

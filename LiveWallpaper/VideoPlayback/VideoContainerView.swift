@@ -71,6 +71,7 @@ class VideoContainerView: NSView {
     private let playerHostView: PlayerHostView
     private let particleOverlayView: ParticleOverlayView
     private var currentPlayer: AVPlayer?
+    private var spanRenderConfiguration: VideoSpanRenderConfiguration?
 
     var fitMode: VideoFitMode = .aspectFill {
         didSet {
@@ -84,9 +85,9 @@ class VideoContainerView: NSView {
     override init(frame frameRect: NSRect) {
         let localBounds = NSRect(origin: .zero, size: frameRect.size)
         playerHostView = PlayerHostView(frame: localBounds)
-        playerHostView.autoresizingMask = [.width, .height]
+        playerHostView.autoresizingMask = []
         particleOverlayView = ParticleOverlayView(frame: localBounds)
-        particleOverlayView.autoresizingMask = [.width, .height]
+        particleOverlayView.autoresizingMask = []
 
         super.init(frame: frameRect)
         setupView()
@@ -126,6 +127,12 @@ class VideoContainerView: NSView {
         playerHostView.setExtendedDynamicRangeEnabled(enabled)
     }
 
+    func setSpanRenderConfiguration(_ configuration: VideoSpanRenderConfiguration?) {
+        guard spanRenderConfiguration != configuration else { return }
+        spanRenderConfiguration = configuration
+        needsLayout = true
+    }
+
     // MARK: - Public API — Particles
 
     func setParticleEffect(_ effect: ParticleEffect, density: Double) {
@@ -137,7 +144,17 @@ class VideoContainerView: NSView {
     }
 
     // MARK: - Layout
-    // Subviews resize via autoresizing masks; no manual frame propagation.
+
+    override func layout() {
+        super.layout()
+
+        if let spanRenderConfiguration {
+            playerHostView.frame = spanRenderConfiguration.canvasFrameInScreenCoordinates
+        } else {
+            playerHostView.frame = bounds
+        }
+        particleOverlayView.frame = bounds
+    }
 
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
