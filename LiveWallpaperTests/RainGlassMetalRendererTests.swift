@@ -49,6 +49,26 @@ struct RainGlassMetalRendererTests {
         #expect(output.extent == CGRect(x: 0, y: 0, width: 96, height: 64))
     }
 
+    @Test("Renderer output carries the source color signal")
+    func rendererOutputCarriesSourceColorSignal() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else { return }
+        let renderer = try #require(RainGlassMetalRenderer(device: device))
+        let input = CIImage(color: CIColor(red: 0.9, green: 0.15, blue: 0.1, alpha: 1))
+            .cropped(to: CGRect(x: 0, y: 0, width: 64, height: 64))
+
+        let output = try #require(renderer.render(inputImage: input, time: 0.25, width: 64, height: 64))
+        let bytes = renderBytes(output, width: 64, height: 64)
+
+        var redTotal = 0
+        var blueTotal = 0
+        for i in stride(from: 0, to: bytes.count, by: 4) {
+            redTotal += Int(bytes[i])
+            blueTotal += Int(bytes[i + 2])
+        }
+
+        #expect(redTotal > blueTotal * 2)
+    }
+
     @Test("Water map carries alpha, thickness, and non-neutral refraction")
     func waterMapCarriesDropSignals() throws {
         guard let device = MTLCreateSystemDefaultDevice() else { return }
@@ -85,6 +105,19 @@ struct RainGlassMetalRendererTests {
             bytesPerRow: texture.width * 4,
             from: MTLRegionMake2D(0, 0, texture.width, texture.height),
             mipmapLevel: 0
+        )
+        return bytes
+    }
+
+    private func renderBytes(_ image: CIImage, width: Int, height: Int) -> [UInt8] {
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        CIContext().render(
+            image,
+            toBitmap: &bytes,
+            rowBytes: width * 4,
+            bounds: CGRect(x: 0, y: 0, width: width, height: height),
+            format: .RGBA8,
+            colorSpace: CGColorSpaceCreateDeviceRGB()
         )
         return bytes
     }

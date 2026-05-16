@@ -126,7 +126,7 @@ final class RainGlassMetalRenderer: @unchecked Sendable {
         self.sourcePool = RainGlassTexturePool(
             device: device,
             inFlightTextureCount: Self.inFlightTextureCount,
-            usage: [.shaderRead, .renderTarget]
+            usage: [.shaderRead, .shaderWrite, .renderTarget]
         )
         self.waterMapPool = RainGlassTexturePool(
             device: device,
