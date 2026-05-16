@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import Foundation
 
 /// End-to-end Wallpaper Engine workshop import. Reads `project.json`, routes
@@ -608,3 +609,4 @@ private func scenePackageEntryNames(
 private func sortedPreflightFeatureFlags(_ flags: Set<WPESceneFeatureFlag>) -> [WPESceneFeatureFlag] {
     flags.sorted { $0.rawValue < $1.rawValue }
 }
+#endif

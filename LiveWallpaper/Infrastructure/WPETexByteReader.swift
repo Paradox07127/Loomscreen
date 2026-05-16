@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import Foundation
 
 /// Lightweight cursor over an immutable `Data` slice. Used by the `.tex`
@@ -88,3 +89,4 @@ struct WPETexByteReader {
         }
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import Foundation
 
 struct WPEAssetMount: Equatable, Sendable {
@@ -9,3 +10,4 @@ struct WPEAssetMount: Equatable, Sendable {
         self.rootURL = rootURL.standardizedFileURL.resolvingSymlinksInPath()
     }
 }
+#endif

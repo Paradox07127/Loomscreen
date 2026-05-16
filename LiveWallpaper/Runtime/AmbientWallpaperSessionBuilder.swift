@@ -99,6 +99,7 @@ final class AmbientWallpaperSessionBuilder {
         return AmbientWallpaperSession(window: window, wallpaperType: .metalShader, performanceTarget: metalView)
     }
 
+    #if !LITE_BUILD
     /// Builds a scene wallpaper session.
     /// Returns nil when the descriptor's cache directory cannot be located —
     /// caller falls back to the not-configured Scene tab placeholder rather
@@ -184,5 +185,6 @@ final class AmbientWallpaperSessionBuilder {
         session.startLoadIfNeeded()
         return session
     }
+    #endif
 
 }

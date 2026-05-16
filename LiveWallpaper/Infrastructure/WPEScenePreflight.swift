@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import Foundation
 
 /// Pre-render capability gate for a single scene project. Reads the parsed
@@ -100,3 +101,4 @@ struct WPEScenePreflightResult: Equatable, Sendable {
 }
 
 // WPEScenePreflightTier was moved to LiveWallpaperCore/Schema/WPEScenePreflightTier.swift.
+#endif

@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import Metal
 
 /// Color-space intent for a Metal texture upload. Phase 2A H3 introduces this
@@ -127,3 +128,4 @@ enum WPEMetalTextureFormatMapper {
         }
     }
 }
+#endif

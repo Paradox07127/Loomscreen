@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import Foundation
 
 /// Read-only inventory of a Wallpaper Engine corpus directory (e.g. a Steam
@@ -382,3 +383,4 @@ private struct ReportBuilder {
         )
     }
 }
+#endif

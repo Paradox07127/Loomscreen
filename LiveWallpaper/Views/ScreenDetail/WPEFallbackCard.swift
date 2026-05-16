@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import SwiftUI
 import AppKit
 
@@ -336,3 +337,4 @@ extension FallbackReason {
         }
     }
 }
+#endif

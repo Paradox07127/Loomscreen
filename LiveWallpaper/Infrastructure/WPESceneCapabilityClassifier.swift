@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import Foundation
 
 /// Resource-availability gate run at scene import time. Resolves every
@@ -76,3 +77,4 @@ struct WPESceneCapabilityClassifier: Sendable {
         return (try? resolver.resolveExistingFileURL(relativePath: relativePath)) != nil
     }
 }
+#endif

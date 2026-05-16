@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import SwiftUI
 
 /// Glass-capsule banner on top of the Video / HTML inspector that signals
@@ -29,3 +30,4 @@ struct WPEOriginBadge: View {
         .accessibilityHint(Text("Tap to manage in the Scene tab"))
     }
 }
+#endif

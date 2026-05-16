@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import Foundation
 
 enum WPEResolutionOrigin: Hashable, Sendable {
@@ -96,3 +97,4 @@ final class WPEResolutionTracer: @unchecked Sendable {
         lock.unlock()
     }
 }
+#endif

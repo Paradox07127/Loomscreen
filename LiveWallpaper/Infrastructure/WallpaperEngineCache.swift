@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import Foundation
 import CryptoKit
 
@@ -427,3 +428,4 @@ struct WPECacheStats: Sendable, Equatable {
     let totalBytes: UInt64
     let entries: [Entry]
 }
+#endif

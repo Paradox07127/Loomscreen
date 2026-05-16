@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import SwiftUI
 import AppKit
 
@@ -275,3 +276,4 @@ private struct KeyCaptureMonitor: NSViewRepresentable {
         }
     }
 }
+#endif

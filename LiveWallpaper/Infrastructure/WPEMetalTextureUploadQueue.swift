@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import Foundation
 
 /// Bounded off-main upload lane for Metal texture work. WPE scenes routinely
@@ -48,3 +49,4 @@ final class WPEMetalTextureUploadQueue: @unchecked Sendable {
         }
     }
 }
+#endif

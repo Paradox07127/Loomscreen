@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import AppKit
 import Foundation
 import Metal
@@ -626,4 +627,5 @@ final class WPECorpusPlaybackHarness {
         return error.localizedDescription
     }
 }
+#endif
 #endif

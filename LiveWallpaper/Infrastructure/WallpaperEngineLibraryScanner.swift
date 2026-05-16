@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import Foundation
 
 /// Scans a user-granted Steam Workshop root (e.g. `~/Documents/Live Wallpapers/431960/`)
@@ -151,3 +152,4 @@ final class WallpaperEngineLibraryScanner: @unchecked Sendable {
         }
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import Foundation
 import Metal
 
@@ -45,3 +46,4 @@ final class WPETexAnimatedTextureSource: WPEDynamicTextureSource {
         // `cleanup()` / `reload()` releases the underlying textures.
     }
 }
+#endif

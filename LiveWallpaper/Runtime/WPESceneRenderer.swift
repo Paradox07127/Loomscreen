@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import AppKit
 
 /// Renderer-agnostic boundary the scene wallpaper pipeline talks to.
@@ -26,3 +27,4 @@ protocol WPESceneRenderer: AnyObject, WallpaperPerformanceConfigurable {
     func setThrottled(_ throttled: Bool)
     func cleanup()
 }
+#endif

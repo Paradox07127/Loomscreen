@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import Accelerate
 import AVFoundation
 import Foundation
@@ -192,3 +193,4 @@ final class WPESoundRuntime: @unchecked Sendable {
         spectrumLock.unlock()
     }
 }
+#endif

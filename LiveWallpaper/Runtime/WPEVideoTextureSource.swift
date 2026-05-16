@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import AVFoundation
 import CoreMedia
 import CoreVideo
@@ -305,3 +306,4 @@ private extension NSLock {
         return try body()
     }
 }
+#endif

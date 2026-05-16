@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import CoreGraphics
 import Foundation
 
@@ -208,3 +209,4 @@ struct WPEMultiRootResourceResolver: Sendable {
         return (String(parts[1]), parts.dropFirst(2).joined(separator: "/"))
     }
 }
+#endif

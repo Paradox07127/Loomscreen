@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import Foundation
 
 /// App-bundled clean-room equivalents of the small Wallpaper Engine framework
@@ -81,3 +82,4 @@ enum WPEBuiltinFrameworkAssets {
         "models/util/solidlayer_depthtest.json"
     ]
 }
+#endif

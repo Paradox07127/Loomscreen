@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import SwiftUI
 import AppKit
 
@@ -138,3 +139,4 @@ struct WPEHistoryRow: View {
         }
     }
 }
+#endif

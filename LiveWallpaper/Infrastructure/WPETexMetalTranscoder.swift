@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import Foundation
 import Metal
 
@@ -36,3 +37,4 @@ enum WPETexMetalTranscoder {
         throw WPETexDecodeError.metalUnavailable(format: format)
     }
 }
+#endif

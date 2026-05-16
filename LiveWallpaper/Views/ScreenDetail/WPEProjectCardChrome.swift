@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import SwiftUI
 
 extension View {
@@ -34,3 +35,4 @@ private struct WPEProjectCardChrome: ViewModifier {
             .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isHovering)
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import CoreGraphics
 import Foundation
 import Metal
@@ -103,3 +104,4 @@ final class WPEMetalDepthStateCache {
         }
     }
 }
+#endif

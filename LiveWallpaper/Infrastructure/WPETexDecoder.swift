@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import CoreGraphics
 import Compression
 import Foundation
@@ -783,3 +784,4 @@ private extension Array {
         indices.contains(index) ? self[index] : nil
     }
 }
+#endif

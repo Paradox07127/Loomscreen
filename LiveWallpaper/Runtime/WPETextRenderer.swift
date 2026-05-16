@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import AppKit
 import CoreGraphics
 import CoreText
@@ -241,3 +242,4 @@ final class WPETextRenderer {
         cacheOrder.removeAll(keepingCapacity: false)
     }
 }
+#endif

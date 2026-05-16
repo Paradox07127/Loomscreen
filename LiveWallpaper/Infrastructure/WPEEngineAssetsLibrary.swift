@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import AppKit
 import Foundation
 import Observation
@@ -242,3 +243,4 @@ extension WPEEngineAssetsLibrary {
         return exists && isDirectory.boolValue
     }
 }
+#endif

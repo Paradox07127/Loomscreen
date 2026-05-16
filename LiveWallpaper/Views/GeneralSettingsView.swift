@@ -52,6 +52,7 @@ struct GeneralSettingsView: View {
             generalTab
                 .tabItem { Label("General", systemImage: "gearshape") }
 
+            #if !LITE_BUILD
             if featureCatalog.isEnabled(.globalShortcuts) {
                 ShortcutsSettingsView()
                     .tabItem { Label("Shortcuts", systemImage: "command") }
@@ -66,6 +67,7 @@ struct GeneralSettingsView: View {
                 WPECacheManagementView()
                     .tabItem { Label("Cache", systemImage: "internaldrive") }
             }
+            #endif
 
             aboutTab
                 .tabItem { Label("About", systemImage: "info.circle") }

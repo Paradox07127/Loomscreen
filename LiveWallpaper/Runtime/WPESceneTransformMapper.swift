@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import CoreGraphics
 import Foundation
 
@@ -45,3 +46,4 @@ enum WPESceneTransformMapper {
         }
     }
 }
+#endif

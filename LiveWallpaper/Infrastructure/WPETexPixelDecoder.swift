@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import Foundation
 
 /// CPU pixel-decode paths for the uncompressed `.tex` formats. Block-
@@ -88,3 +89,4 @@ enum WPETexPixelDecoder {
         return DecodedRGBAImage(width: width, height: height, pixels: rgba)
     }
 }
+#endif

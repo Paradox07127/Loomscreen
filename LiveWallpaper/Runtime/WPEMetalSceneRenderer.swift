@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import AppKit
 import MetalKit
 
@@ -1054,3 +1055,4 @@ private extension WPETextureReference {
         }
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 #if DEBUG
 import SwiftUI
 import AppKit
@@ -326,4 +327,5 @@ struct DeveloperToolsView: View {
         return lines.isEmpty ? entry.title : lines.joined(separator: "\n")
     }
 }
+#endif
 #endif

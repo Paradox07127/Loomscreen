@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import SwiftUI
 import AppKit
 
@@ -1185,3 +1186,4 @@ private struct WorkshopToolbarButtonStyle: ButtonStyle {
         }
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import AppKit
 import Foundation
 
@@ -24,3 +25,4 @@ enum WPEFolderPicker {
         return liveWallpapers
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import CoreGraphics
 import Foundation
 
@@ -360,3 +361,4 @@ final class WallpaperAutomationOrchestrator {
         config.activeWallpaper = .video(bookmarkData: refreshed)
     }
 }
+#endif
