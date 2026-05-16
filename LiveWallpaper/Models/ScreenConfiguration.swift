@@ -85,7 +85,7 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
         self.screenID = screenID
         self.activeWallpaper = wallpaper
         self.savedVideoBookmarkData = savedVideoBookmarkData ?? wallpaper.activeVideoBookmarkData
-        if case .html(let source, let config) = wallpaper {
+        if case .html(let source, let config) = wallpaper, source.isRestorableHTMLSource {
             self.savedHTMLSource = source
             self.savedHTMLConfig = config
         }
@@ -245,7 +245,7 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
         switch source {
         case .url(let url): return url.absoluteString
         case .inline(let raw): return raw
-        case .file, .folder: return nil
+        case .file, .folder, .webGLRainVideo: return nil
         }
     }
 
@@ -295,7 +295,9 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
             savedVideoBookmarkData = try c.decodeIfPresent(Data.self, forKey: .savedVideoBookmarkData)
                 ?? decodedWallpaper.activeVideoBookmarkData
             // Backfill saved HTML if absent but currently HTML.
-            if savedHTMLSource == nil, case .html(let source, let config) = decodedWallpaper {
+            if savedHTMLSource == nil,
+               case .html(let source, let config) = decodedWallpaper,
+               source.isRestorableHTMLSource {
                 savedHTMLSource = source
                 savedHTMLConfig = config
             }
@@ -397,9 +399,17 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
 
     mutating func setHTMLWallpaper(source: HTMLSource, config: HTMLConfig = .default) {
         preserveCurrentVideoBookmarkIfNeeded()
-        savedHTMLSource = source
-        savedHTMLConfig = config
+        if source.isRestorableHTMLSource {
+            savedHTMLSource = source
+            savedHTMLConfig = config
+        }
         activeWallpaper = .html(source: source, config: config)
+    }
+
+    mutating func setTransientWebGLRainWallpaper(bookmarkData: Data, config: HTMLConfig) {
+        preserveCurrentVideoBookmarkIfNeeded()
+        savedVideoBookmarkData = bookmarkData
+        activeWallpaper = .html(source: .webGLRainVideo(bookmarkData: bookmarkData), config: config)
     }
 
     /// Legacy URL/raw-HTML bridge.
@@ -464,6 +474,7 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
 
     private mutating func preserveCurrentHTMLIfNeeded() {
         if case .html(let source, let config) = activeWallpaper {
+            if case .webGLRainVideo = source { return }
             savedHTMLSource = source
             savedHTMLConfig = config
         }

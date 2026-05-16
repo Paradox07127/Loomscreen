@@ -15,7 +15,7 @@ struct VideoEffectConfig: Codable, Equatable, Sendable {
 
     var hasActiveEffect: Bool {
         blurRadius > 0 || saturation != 1.0 || brightness != 0 ||
-        warmth != 6500 || vignetteIntensity > 0 || autoTimeTint || weatherReactive || glassRainEffect
+        warmth != 6500 || vignetteIntensity > 0 || autoTimeTint || weatherReactive
     }
 
     init(from decoder: Decoder) throws {
