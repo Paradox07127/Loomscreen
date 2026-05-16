@@ -14,7 +14,7 @@ struct SecurityScopedBookmarkResolverTests {
             resolveData: { _ in (Self.fixtureURL, false) },
             refreshData: { _ in Self.refreshedData }
         )
-        let target = SecurityScopedBookmarkResolver.Target(label: "test") { _ in }
+        let target = SecurityScopedBookmarkResolver.Target(label: "test")
 
         let result = resolver.resolve(nil, target: target)
         guard case .failure(.missing) = result else {
@@ -60,6 +60,7 @@ struct SecurityScopedBookmarkResolverTests {
             return
         }
         #expect(resolved.didRefresh == true)
+        #expect(resolved.bookmarkData == Self.refreshedData, "must return refreshed data to in-process callers")
         #expect(capture.snapshot == [Self.refreshedData])
     }
 
@@ -80,6 +81,7 @@ struct SecurityScopedBookmarkResolverTests {
         }
         #expect(resolved.url == Self.fixtureURL)
         #expect(resolved.bookmarkData == Self.originalData, "must return current data for grace use")
+        #expect(resolved.didRefresh == false, "refresh that threw must not flip didRefresh")
         #expect(capture.snapshot.isEmpty, "failed refresh must not invoke save")
     }
 
@@ -144,11 +146,11 @@ private final class SaveCapture: @unchecked Sendable {
         return saved
     }
 
-    var save: @Sendable (Data) -> Void {
-        { [weak self] data in
+    var save: @Sendable (_ original: Data, _ refreshed: Data) -> Void {
+        { [weak self] _, refreshed in
             guard let self else { return }
             self.lock.lock()
-            self.saved.append(data)
+            self.saved.append(refreshed)
             self.lock.unlock()
         }
     }

@@ -23,9 +23,24 @@ struct SecurityScopedBookmarkResolver: Sendable {
     /// recreates the bookmark. Closure is `@Sendable` so the resolver can
     /// be called from any isolation; typed targets that need MainActor
     /// access dispatch internally.
+    ///
+    /// The closure receives BOTH the original (stale) bookmark Data and
+    /// the freshly recreated Data. Typed targets must compare-and-swap
+    /// against the currently stored value before writing — if the user
+    /// cleared or re-granted the bookmark between resolve and save, the
+    /// stored value will differ and the late save must be a no-op so it
+    /// can't resurrect a stale grant.
     struct Target: Sendable {
         let label: String
-        let save: @Sendable (Data) -> Void
+        let save: @Sendable (_ original: Data, _ refreshed: Data) -> Void
+
+        init(
+            label: String,
+            save: @escaping @Sendable (_ original: Data, _ refreshed: Data) -> Void = { _, _ in }
+        ) {
+            self.label = label
+            self.save = save
+        }
     }
 
     /// Successful resolution result. `didRefresh` distinguishes a healthy
@@ -97,10 +112,12 @@ struct SecurityScopedBookmarkResolver: Sendable {
         // exit. Refresh failure isn't fatal: the URL is still good for THIS
         // run via Apple's grace, so we return the existing data and let the
         // next launch surface re-grant if it really cannot recover.
+        var refreshedData: Data?
         Self.withScopedAccess(url) { _ in
             do {
                 let fresh = try refreshData(url)
-                target.save(fresh)
+                refreshedData = fresh
+                target.save(data, fresh)
                 Logger.info(
                     "[bookmark/\(target.label)] was stale; refreshed in place",
                     category: .fileAccess
@@ -113,11 +130,15 @@ struct SecurityScopedBookmarkResolver: Sendable {
             }
         }
 
-        // Re-derive resolved data: if refresh succeeded, target.save has the
-        // new value; we still return the input bookmarkData here because
-        // typed targets dispatch save asynchronously and we don't block on
-        // it. The next resolve will pick up the refreshed bookmark.
-        return .success(Resolved(url: url, bookmarkData: data, didRefresh: true))
+        // Return the refreshed bookmark so in-process callers that copy
+        // `bookmarkData` into their own state (e.g. `DiscoveredProject`)
+        // don't continue circulating the stale blob and burn another grace
+        // use. Falls back to the input on refresh failure.
+        return .success(Resolved(
+            url: url,
+            bookmarkData: refreshedData ?? data,
+            didRefresh: refreshedData != nil
+        ))
     }
 
     /// Runs `work` with security scope started; the stop call is balanced
@@ -170,9 +191,16 @@ extension SecurityScopedBookmarkResolver.Target {
     /// Workshop library root — the user-granted `~/Documents/Live Wallpapers/<appid>/`
     /// folder scanned for WPE projects.
     static var workshopLibraryRoot: Self {
-        Self(label: "workshopLibraryRoot") { data in
+        Self(label: "workshopLibraryRoot") { original, refreshed in
             Task { @MainActor in
-                SettingsManager.shared.saveWorkshopLibraryRootBookmark(data)
+                guard SettingsManager.shared.loadWorkshopLibraryRootBookmark() == original else {
+                    Logger.info(
+                        "[bookmark/workshopLibraryRoot] skipped stale refresh save — stored bookmark changed between resolve and save",
+                        category: .fileAccess
+                    )
+                    return
+                }
+                SettingsManager.shared.saveWorkshopLibraryRootBookmark(refreshed)
             }
         }
     }
@@ -180,18 +208,32 @@ extension SecurityScopedBookmarkResolver.Target {
     /// Wallpaper Engine install root — the directory containing `assets/`
     /// the user authorised so the renderer can fall back to engine builtins.
     static var wpeEngineAssets: Self {
-        Self(label: "wpeEngineAssets") { data in
+        Self(label: "wpeEngineAssets") { original, refreshed in
             Task { @MainActor in
-                SettingsManager.shared.saveWPEEngineAssetsBookmark(data)
+                guard SettingsManager.shared.loadWPEEngineAssetsBookmark() == original else {
+                    Logger.info(
+                        "[bookmark/wpeEngineAssets] skipped stale refresh save — stored bookmark changed between resolve and save",
+                        category: .fileAccess
+                    )
+                    return
+                }
+                SettingsManager.shared.saveWPEEngineAssetsBookmark(refreshed)
             }
         }
     }
 
     /// Apple Aerials wallpaper library directory.
     static var aerialsDirectory: Self {
-        Self(label: "aerialsDirectory") { data in
+        Self(label: "aerialsDirectory") { original, refreshed in
             Task { @MainActor in
-                SettingsManager.shared.saveAerialsDirectoryBookmark(data)
+                guard SettingsManager.shared.loadAerialsDirectoryBookmark() == original else {
+                    Logger.info(
+                        "[bookmark/aerialsDirectory] skipped stale refresh save — stored bookmark changed between resolve and save",
+                        category: .fileAccess
+                    )
+                    return
+                }
+                SettingsManager.shared.saveAerialsDirectoryBookmark(refreshed)
             }
         }
     }
@@ -201,6 +243,6 @@ extension SecurityScopedBookmarkResolver.Target {
     /// Future regressions where someone forgets to plumb a typed target
     /// should be flagged in review.
     static var transient: Self {
-        Self(label: "transient") { _ in }
+        Self(label: "transient")
     }
 }

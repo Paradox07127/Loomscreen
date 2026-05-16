@@ -71,12 +71,18 @@ final class WallpaperEngineLibraryScanner: @unchecked Sendable {
         fileManager: FileManager
     ) throws -> [DiscoveredProject] {
         let rootURL: URL
+        let effectiveRootBookmarkData: Data
         switch SecurityScopedBookmarkResolver.shared.resolve(
             rootBookmarkData,
             target: .workshopLibraryRoot
         ) {
         case .success(let resolved):
             rootURL = resolved.url
+            // Carry the refreshed bookmark (if the resolver auto-refreshed a
+            // stale one) into every DiscoveredProject so the gallery's
+            // follow-up apply/prepare doesn't re-resolve the original stale
+            // blob and burn another grace use.
+            effectiveRootBookmarkData = resolved.bookmarkData
         case .failure(let failure):
             throw ScanError.rootInaccessible(failure.errorDescription ?? "Unknown bookmark failure")
         }
@@ -118,7 +124,7 @@ final class WallpaperEngineLibraryScanner: @unchecked Sendable {
                 folderURL: child,
                 previewURL: previewURL,
                 importedAlready: alreadyImportedWorkshopIDs.contains(project.workshopID),
-                libraryRootBookmarkData: rootBookmarkData,
+                libraryRootBookmarkData: effectiveRootBookmarkData,
                 dependencyWorkshopIDs: project.dependencyWorkshopIDs,
                 requiresWindowsPlugin: project.requiresWindowsPlugin,
                 hasScenePackage: fileManager.fileExists(
