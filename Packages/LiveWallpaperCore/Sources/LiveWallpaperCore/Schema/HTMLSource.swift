@@ -1,7 +1,7 @@
 import Foundation
 
 /// Persisted source for an HTML wallpaper.
-enum HTMLSource: Codable, Equatable, Sendable {
+public enum HTMLSource: Codable, Equatable, Sendable {
     case file(bookmarkData: Data)
     case folder(bookmarkData: Data, indexFileName: String)
     case url(URL)
@@ -11,7 +11,7 @@ enum HTMLSource: Codable, Equatable, Sendable {
     /// (`WallpaperContent.html(String)`). Recognized URL schemes become
     /// `.url`; everything else falls back to `.inline` because raw file
     /// paths cannot be re-resolved without a bookmark.
-    init(legacyString: String) {
+    public init(legacyString: String) {
         let trimmed = legacyString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             self = .inline("")
@@ -29,7 +29,7 @@ enum HTMLSource: Codable, Equatable, Sendable {
     /// User-typed string from the inspector / menu bar URL field. Auto-prefixes
     /// `https://` when no scheme is supplied so users can type "example.com".
     /// Returns `nil` for empty input.
-    init?(userInput: String) {
+    public init?(userInput: String) {
         let trimmed = userInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         // Only HTTP(S) URLs are accepted as `.url`. `file://` schemes are
@@ -54,7 +54,7 @@ enum HTMLSource: Codable, Equatable, Sendable {
         self = .inline(trimmed)
     }
 
-    var displayName: String {
+    public var displayName: String {
         switch self {
         case .file(let bookmark):
             return ResourceUtilities.resolveBookmarkName(bookmark) ?? "Local file"
@@ -69,7 +69,7 @@ enum HTMLSource: Codable, Equatable, Sendable {
     }
 
     /// SF Symbol used to represent this source in inspector and menu bar.
-    var iconName: String {
+    public var iconName: String {
         switch self {
         case .file: return "doc.richtext"
         case .folder: return "folder"
@@ -80,7 +80,7 @@ enum HTMLSource: Codable, Equatable, Sendable {
 
     /// `true` when the underlying transport is HTTP (insecure). Inspector
     /// shows a warning banner when this is true.
-    var isInsecureURL: Bool {
+    public var isInsecureURL: Bool {
         if case .url(let url) = self {
             return url.scheme?.lowercased() == "http"
         }
@@ -89,14 +89,14 @@ enum HTMLSource: Codable, Equatable, Sendable {
 
     /// True for user-selected HTML sources that should be restored when the
     /// user switches back from video/shader modes.
-    var isRestorableHTMLSource: Bool {
+    public var isRestorableHTMLSource: Bool {
         true
     }
 
     /// Stable identity used to detect the same source running on multiple
     /// screens (multi-instance audio + GPU avoidance). Equatable already
     /// gives us comparison; this gives us a Dictionary key.
-    var diagnosticSignature: String {
+    public var diagnosticSignature: String {
         switch self {
         case .file(let data):
             return "file:" + data.base64EncodedString()
