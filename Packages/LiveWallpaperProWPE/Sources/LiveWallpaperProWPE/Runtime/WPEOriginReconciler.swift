@@ -1,12 +1,13 @@
 import Foundation
+import LiveWallpaperCore
 
 /// Pro reconciler — replays the previous `ScreenConfiguration.reconcileWPEOrigin()`
 /// behaviour using bookmark matching from `WPEOrigin+Behavior`.
 ///
-/// Stays in the main target because it depends on
-/// `WPEOrigin.matchesBookmark(_:origin:)` from
-/// `Models/WPEOrigin+Behavior.swift`, which calls into `WPEPathSafety`.
-/// Phase 4 moves both files into LiveWallpaperProWPE.
+/// Lives in LiveWallpaperProWPE because it depends on
+/// `WPEOrigin.matchesBookmark(_:origin:)` which calls into `WPEPathSafety` —
+/// both Pro-side. Lite installs `PreservingOriginReconciler` (from Core)
+/// instead.
 public struct WPEOriginReconciler: OriginReconciler {
     public init() {}
 
