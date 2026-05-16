@@ -84,16 +84,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Logger.notice("Tail the runtime log → \(hint)", category: .startup)
         }
 
-        // 把 tracker rule list 提前编译进 WKContentRuleListStore，
-        // 后续 HTML 壁纸首次启用过滤时直接 lookUp，省掉同步编译开销。
-        HTMLWallpaperView.precompileTrackerRules()
-
         let startupPlan = AppStartupPlan(
             runtimeOptions: runtimeOptions,
             onboardingCompleted: UserDefaults.standard.bool(forKey: "Onboarding.Completed")
         )
         let manager = ScreenManager(startupOptions: startupPlan.screenManagerOptions)
         screenManager = manager
+
+        // Tracker-rule precompile is a Pro-side warmup — it pays for itself
+        // only when HTML tracker-blocking is reachable. The rule list still
+        // compiles lazily on first use, so skipping this preserves
+        // functionality and saves ~tens of ms at cold start.
+        if manager.featureCatalog.isEnabled(.html) {
+            HTMLWallpaperView.precompileTrackerRules()
+        }
 
         if startupPlan.refreshScreensAfterManagerCreation {
             manager.refreshScreens()
@@ -111,7 +115,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         applyDockVisibility()
         observeDockVisibilityChanges()
 
-        if !runtimeOptions.isTesting {
+        if !runtimeOptions.isTesting,
+           manager.featureCatalog.isEnabled(.globalShortcuts) {
             globalShortcutManager = GlobalShortcutManager(screenManager: manager)
             globalShortcutManager?.start()
         }
