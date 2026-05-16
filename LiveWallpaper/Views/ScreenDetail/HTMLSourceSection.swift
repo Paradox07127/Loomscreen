@@ -401,9 +401,6 @@ struct HTMLSourceSection: View {
         case .inline(let html):
             if selectedKind != .url { selectedKind = .url }
             if urlInput != html { urlInput = html }
-        case .webGLRainVideo:
-            if selectedKind != .file { selectedKind = .file }
-            if !urlInput.isEmpty { urlInput = "" }
         }
     }
 

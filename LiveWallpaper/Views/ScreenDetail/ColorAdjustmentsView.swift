@@ -32,21 +32,6 @@ struct ColorAdjustmentsView: View {
                 Divider()
 
                 HStack {
-                    Text("WebGL rain glass")
-                        .font(.system(size: 13, weight: .medium))
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer()
-                    Toggle("", isOn: webGLRainBinding)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .help(Text("Render refractive rain drops through WebGL over the current video"))
-                        .accessibilityLabel(Text("WebGL rain glass"))
-                        .accessibilityHint(Text("Switches the current video into the WebGL rain renderer"))
-                }
-
-                Divider()
-
-                HStack {
                     Spacer()
                     Button(action: resetEffects) {
                         Label("Reset to Default", systemImage: "arrow.counterclockwise")
@@ -67,22 +52,6 @@ struct ColorAdjustmentsView: View {
     private func resetEffects() {
         effectConfig = .default
         screenManager.updateEffectConfig(effectConfig, for: screen)
-        if screenManager.isWebGLRainWallpaperActive(for: screen) {
-            screenManager.switchToVideoWallpaper(for: screen)
-        }
-    }
-
-    private var webGLRainBinding: Binding<Bool> {
-        Binding(
-            get: { screenManager.isWebGLRainWallpaperActive(for: screen) },
-            set: { enabled in
-                if enabled {
-                    screenManager.setWebGLRainWallpaper(for: screen)
-                } else {
-                    screenManager.switchToVideoWallpaper(for: screen)
-                }
-            }
-        )
     }
 
     private func effectBinding<Value: Equatable>(
