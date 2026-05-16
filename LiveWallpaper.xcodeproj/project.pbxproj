@@ -12,6 +12,9 @@
 		0C9A00052D7350000033C48B /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0C9A00012D7350000033C48B /* AppIntents.framework */; };
 		0CA00000000000000000A003 /* LiveWallpaperCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0CA00000000000000000A002 /* LiveWallpaperCore */; };
 		0CA00000000000000000A103 /* LiveWallpaperVideoWeb in Frameworks */ = {isa = PBXBuildFile; productRef = 0CA00000000000000000A102 /* LiveWallpaperVideoWeb */; };
+		0CA00000000000000000A203 /* LiveWallpaperSharedUI in Frameworks */ = {isa = PBXBuildFile; productRef = 0CA00000000000000000A202 /* LiveWallpaperSharedUI */; };
+		0CA00000000000000000A303 /* LiveWallpaperProWPE in Frameworks */ = {isa = PBXBuildFile; productRef = 0CA00000000000000000A302 /* LiveWallpaperProWPE */; };
+		0CA00000000000000000A403 /* LiveWallpaperProFeatures in Frameworks */ = {isa = PBXBuildFile; productRef = 0CA00000000000000000A402 /* LiveWallpaperProFeatures */; };
 		0CABCDEF2D8000020000C48B /* WPEShaderToolchain.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0CABCDEF2D8000010000C48B /* WPEShaderToolchain.xcframework */; };
 /* End PBXBuildFile section */
 
@@ -67,6 +70,9 @@
 				0CABCDEF2D8000020000C48B /* WPEShaderToolchain.xcframework in Frameworks */,
 				0CA00000000000000000A003 /* LiveWallpaperCore in Frameworks */,
 				0CA00000000000000000A103 /* LiveWallpaperVideoWeb in Frameworks */,
+				0CA00000000000000000A203 /* LiveWallpaperSharedUI in Frameworks */,
+				0CA00000000000000000A303 /* LiveWallpaperProWPE in Frameworks */,
+				0CA00000000000000000A403 /* LiveWallpaperProFeatures in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -141,6 +147,9 @@
 			packageProductDependencies = (
 				0CA00000000000000000A002 /* LiveWallpaperCore */,
 				0CA00000000000000000A102 /* LiveWallpaperVideoWeb */,
+				0CA00000000000000000A202 /* LiveWallpaperSharedUI */,
+				0CA00000000000000000A302 /* LiveWallpaperProWPE */,
+				0CA00000000000000000A402 /* LiveWallpaperProFeatures */,
 			);
 			productName = LiveWallpaper;
 			productReference = 0C322BEF2D6950480033C48B /* LiveWallpaper.app */;
@@ -228,6 +237,9 @@
 			packageReferences = (
 				0CA00000000000000000A001 /* XCLocalSwiftPackageReference "Packages/LiveWallpaperCore" */,
 				0CA00000000000000000A101 /* XCLocalSwiftPackageReference "Packages/LiveWallpaperVideoWeb" */,
+				0CA00000000000000000A201 /* XCLocalSwiftPackageReference "Packages/LiveWallpaperSharedUI" */,
+				0CA00000000000000000A301 /* XCLocalSwiftPackageReference "Packages/LiveWallpaperProWPE" */,
+				0CA00000000000000000A401 /* XCLocalSwiftPackageReference "Packages/LiveWallpaperProFeatures" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 0C322BF02D6950480033C48B /* Products */;
@@ -624,6 +636,18 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/LiveWallpaperVideoWeb;
 		};
+		0CA00000000000000000A201 /* XCLocalSwiftPackageReference "Packages/LiveWallpaperSharedUI" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/LiveWallpaperSharedUI;
+		};
+		0CA00000000000000000A301 /* XCLocalSwiftPackageReference "Packages/LiveWallpaperProWPE" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/LiveWallpaperProWPE;
+		};
+		0CA00000000000000000A401 /* XCLocalSwiftPackageReference "Packages/LiveWallpaperProFeatures" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/LiveWallpaperProFeatures;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -634,6 +658,18 @@
 		0CA00000000000000000A102 /* LiveWallpaperVideoWeb */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = LiveWallpaperVideoWeb;
+		};
+		0CA00000000000000000A202 /* LiveWallpaperSharedUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = LiveWallpaperSharedUI;
+		};
+		0CA00000000000000000A302 /* LiveWallpaperProWPE */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = LiveWallpaperProWPE;
+		};
+		0CA00000000000000000A402 /* LiveWallpaperProFeatures */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = LiveWallpaperProFeatures;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

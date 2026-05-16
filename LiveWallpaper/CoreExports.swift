@@ -11,3 +11,6 @@
 // packages it actually needs directly.
 @_exported import LiveWallpaperCore
 @_exported import LiveWallpaperVideoWeb
+@_exported import LiveWallpaperSharedUI
+@_exported import LiveWallpaperProWPE
+@_exported import LiveWallpaperProFeatures
