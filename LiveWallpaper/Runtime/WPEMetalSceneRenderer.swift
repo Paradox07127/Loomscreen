@@ -854,12 +854,37 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
 
     private func shouldTryTexturePayload(_ path: String) -> Bool {
         let extensionName = (path as NSString).pathExtension.lowercased()
-        return extensionName.isEmpty || extensionName == "json" || extensionName == "tex"
+        // Anything that's not a recognised raw-image extension is treated as a
+        // candidate for the .tex container path — including the explicit `.tex`
+        // / `.json` cases AND the "garbage trailing component" case (e.g.
+        // `image.com-600@5@f`), which `NSString.pathExtension` reports as a
+        // non-empty extension even though no actual extension exists.
+        return !Self.knownRawImageExtensions.contains(extensionName)
     }
 
-    private func textureCandidates(for path: String) -> [String] {
-        let extensionName = (path as NSString).pathExtension
-        guard extensionName.isEmpty else {
+    /// Raster image extensions that `WPETextureLoader` can load via ImageIO
+    /// without going through the `.tex` container. Path lookups ending in one
+    /// of these are taken at face value; anything else (including names that
+    /// merely *look* like they end in an extension because they contain a dot)
+    /// goes through the materials/-prefix fallback below.
+    static let knownRawImageExtensions: Set<String> = [
+        "png", "jpg", "jpeg", "tga", "dds", "bmp", "gif", "webp"
+    ]
+
+    /// Visible to `@testable` test suites that probe the candidate generator
+    /// without spinning up a full renderer fixture. Keep it `internal`, not
+    /// public — the dispatch path goes through `makeTextureResource`.
+    func textureCandidates(for path: String) -> [String] {
+        let extensionName = (path as NSString).pathExtension.lowercased()
+        // Trust the path verbatim only when the trailing component is one of
+        // the actual image / tex extensions we recognise. Workshop assets
+        // routinely have dots inside the basename — `uhdpaper.com-600@5@f`,
+        // `91VDetfVuOL._UF1000,1000_QL80_DpWeblab_`, `pngfind.com-...` — and
+        // the prior `extensionName.isEmpty` heuristic mis-classified them as
+        // "already has an extension", returning `[path]` only and skipping the
+        // `materials/` prefix fallback that would have found the actual file.
+        if !extensionName.isEmpty,
+           Self.knownRawImageExtensions.contains(extensionName) || extensionName == "tex" || extensionName == "json" {
             return [path]
         }
 
