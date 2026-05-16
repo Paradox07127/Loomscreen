@@ -899,7 +899,14 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             // `masks/<hash>`, `particle/halo_2`, `util/white` miss the scene
             // cache (file lives at `materials/masks/<hash>.tex`) and the
             // engine-root fallback (file lives at `assets/materials/...`).
-            let anchoredPrefixes = ["materials/", "effects/", "models/", "shaders/", "fonts/", "scripts/", "particles/", "sounds/", "scenes/"]
+            //
+            // `effects/` looks anchored but isn't — WPE stores effect assets
+            // under `<root>/materials/effects/`, not at the top of `<root>/`.
+            // Including it here caused 36 scenes in the corpus to miss
+            // `effects/waterripplenormal` / `effects/waterflowphase` because
+            // the materials/-prefix fallback was skipped. (Removed in the
+            // bug fix that landed after PR #54.)
+            let anchoredPrefixes = ["materials/", "models/", "shaders/", "fonts/", "scripts/", "particles/", "sounds/", "scenes/"]
             if anchoredPrefixes.contains(where: path.hasPrefix) {
                 return [
                     path,
