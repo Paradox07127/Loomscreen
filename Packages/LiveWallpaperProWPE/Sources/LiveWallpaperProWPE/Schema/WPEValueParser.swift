@@ -1,7 +1,7 @@
 import Foundation
 
-enum WPEValueParser {
-    static func comboMap(_ raw: Any?, boolAsNumber: Bool = false) -> [String: Int] {
+public enum WPEValueParser {
+    public static func comboMap(_ raw: Any?, boolAsNumber: Bool = false) -> [String: Int] {
         guard let dict = raw as? [String: Any] else { return [:] }
         var result: [String: Int] = [:]
         for (key, value) in dict {
@@ -12,7 +12,7 @@ enum WPEValueParser {
         return result
     }
 
-    static func shaderConstants(
+    public static func shaderConstants(
         _ raw: Any?,
         boolAsNumber: Bool = false
     ) -> [String: WPESceneShaderConstantValue] {
@@ -26,7 +26,7 @@ enum WPEValueParser {
         return result
     }
 
-    static func shaderConstant(
+    public static func shaderConstant(
         _ raw: Any?,
         boolAsNumber: Bool = false
     ) -> WPESceneShaderConstantValue? {
@@ -45,7 +45,7 @@ enum WPEValueParser {
         return nil
     }
 
-    static func numberVector(
+    public static func numberVector(
         _ raw: Any?,
         boolAsNumber: Bool = false,
         minimumCount: Int = 2
@@ -62,7 +62,7 @@ enum WPEValueParser {
         return nil
     }
 
-    static func vector3(_ raw: Any?, boolAsNumber: Bool = false) -> SIMD3<Double>? {
+    public static func vector3(_ raw: Any?, boolAsNumber: Bool = false) -> SIMD3<Double>? {
         if let values = numberVector(raw, boolAsNumber: boolAsNumber) {
             let z = values.count >= 3 ? values[2] : 0
             return SIMD3<Double>(values[0], values[1], z)
@@ -77,7 +77,7 @@ enum WPEValueParser {
         return nil
     }
 
-    static func double(_ raw: Any?, boolAsNumber: Bool = false) -> Double? {
+    public static func double(_ raw: Any?, boolAsNumber: Bool = false) -> Double? {
         if boolAsNumber, let bool = raw as? Bool {
             return bool ? 1 : 0
         }
@@ -96,7 +96,7 @@ enum WPEValueParser {
         return nil
     }
 
-    static func int(_ raw: Any?, boolAsNumber: Bool = false) -> Int? {
+    public static func int(_ raw: Any?, boolAsNumber: Bool = false) -> Int? {
         if boolAsNumber, let bool = raw as? Bool {
             return bool ? 1 : 0
         }
@@ -112,7 +112,7 @@ enum WPEValueParser {
         return nil
     }
 
-    static func bool(_ raw: Any?) -> Bool? {
+    public static func bool(_ raw: Any?) -> Bool? {
         if let bool = raw as? Bool {
             return bool
         }
