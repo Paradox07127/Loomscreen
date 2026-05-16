@@ -1,7 +1,7 @@
 import Foundation
 
-enum WPEPathSafety {
-    static func isSafePathComponent(_ value: String) -> Bool {
+public enum WPEPathSafety {
+    public static func isSafePathComponent(_ value: String) -> Bool {
         !value.isEmpty
             && value != "."
             && value != ".."
@@ -10,18 +10,18 @@ enum WPEPathSafety {
             && !value.contains("..")
     }
 
-    static func isSafeWorkshopID(_ value: String) -> Bool {
+    public static func isSafeWorkshopID(_ value: String) -> Bool {
         isSafePathComponent(value)
     }
 
-    static func isSafeRelativePath(_ value: String) -> Bool {
+    public static func isSafeRelativePath(_ value: String) -> Bool {
         !value.isEmpty
             && !value.hasPrefix("/")
             && !value.contains("..")
             && value != "."
     }
 
-    static func isStrictSafeRelativePath(_ value: String) -> Bool {
+    public static func isStrictSafeRelativePath(_ value: String) -> Bool {
         let components = value.split(separator: "/", omittingEmptySubsequences: false)
         return !value.isEmpty
             && !value.hasPrefix("/")
@@ -31,25 +31,25 @@ enum WPEPathSafety {
             && !components.contains("")
     }
 
-    static func isSafeCacheRelativePath(_ path: String) -> Bool {
+    public static func isSafeCacheRelativePath(_ path: String) -> Bool {
         path.hasPrefix("wpe-cache/")
             && !path.contains("\\")
             && !path.contains("..")
             && !path.contains("//")
     }
 
-    static func contains(_ child: URL, in parent: URL) -> Bool {
+    public static func contains(_ child: URL, in parent: URL) -> Bool {
         let childPath = normalizedPath(child.path(percentEncoded: false))
         let parentPath = normalizedPath(parent.path(percentEncoded: false))
         return childPath == parentPath || childPath.hasPrefix(parentPath + "/")
     }
 
-    static func resourceURL(root: URL, relativePath: String) -> URL? {
+    public static func resourceURL(root: URL, relativePath: String) -> URL? {
         guard isSafeRelativePath(relativePath) else { return nil }
         return containedResourceURL(root: root, relativePath: relativePath)
     }
 
-    static func strictResourceURL(root: URL, relativePath: String) -> URL? {
+    public static func strictResourceURL(root: URL, relativePath: String) -> URL? {
         guard isStrictSafeRelativePath(relativePath) else { return nil }
         return containedResourceURL(root: root, relativePath: relativePath)
     }
@@ -64,7 +64,7 @@ enum WPEPathSafety {
         return url
     }
 
-    static func resolveSecurityScopedBookmark(_ data: Data) -> URL? {
+    public static func resolveSecurityScopedBookmark(_ data: Data) -> URL? {
         var isStale = false
         return try? URL(
             resolvingBookmarkData: data,
@@ -74,7 +74,7 @@ enum WPEPathSafety {
         )
     }
 
-    static func defaultApplicationSupportRoot(fileManager: FileManager) -> URL? {
+    public static func defaultApplicationSupportRoot(fileManager: FileManager) -> URL? {
         if let applicationSupport = try? fileManager.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
