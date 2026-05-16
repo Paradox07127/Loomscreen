@@ -113,7 +113,8 @@ struct ConfigurationPorterTests {
         // Write a 17 MB file of zero bytes — over the 16 MB cap.
         let destination = directory.appendingPathComponent("huge.lwconfig")
         let chunk = Data(repeating: 0, count: 1024 * 1024)
-        try FileManager.default.createFile(atPath: destination.path(percentEncoded: false), contents: nil)
+        let created = FileManager.default.createFile(atPath: destination.path(percentEncoded: false), contents: nil)
+        #expect(created)
         let handle = try FileHandle(forWritingTo: destination)
         for _ in 0..<17 {
             try handle.write(contentsOf: chunk)

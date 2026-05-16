@@ -412,36 +412,32 @@ final class SettingsManager {
         for screenID: CGDirectDisplayID,
         configuration: ScreenConfiguration
     ) -> Bool {
-        do {
-            let resolution = try ResourceUtilities.resolveBookmark(bookmarkData)
-            let url = resolution.url
+        switch SecurityScopedBookmarkResolver.shared.resolve(bookmarkData, target: .transient) {
+        case .success(let resolved):
+            let url = resolved.url
+            if resolved.didRefresh {
+                let updatedConfig = configuration.withUpdatedActiveBookmark(resolved.bookmarkData)
+                saveConfiguration(updatedConfig)
+                Logger.info("Refreshed stale bookmark for screen \(screenID)", category: .fileAccess)
+            }
 
             let canAccess = url.startAccessingSecurityScopedResource()
-            if resolution.isStale && resolution.isSecurityScoped && canAccess {
-                Logger.warning("Stale bookmark detected for screen \(screenID), refreshing", category: .fileAccess)
-                let bookmarkOptions: URL.BookmarkCreationOptions = [.withSecurityScope, .securityScopeAllowOnlyReadAccess]
-                let noKeys: Set<URLResourceKey>? = nil
-                let noRelative: URL? = nil
-                if let updatedBookmark = try? url.bookmarkData(
-                    options: bookmarkOptions,
-                    includingResourceValuesForKeys: noKeys,
-                    relativeTo: noRelative
-                ) {
-                    let updatedConfig = configuration.withUpdatedActiveBookmark(updatedBookmark)
-                    saveConfiguration(updatedConfig)
-                    Logger.info("Refreshed stale bookmark for screen \(screenID)", category: .fileAccess)
+            defer {
+                if canAccess {
+                    url.stopAccessingSecurityScopedResource()
                 }
             }
-            if canAccess {
-                url.stopAccessingSecurityScopedResource()
-            } else if FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) {
-                return true
-            } else {
+            guard canAccess else {
+                if FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) {
+                    return true
+                }
                 Logger.error("Cannot access file for screen \(screenID)", category: .fileAccess)
+                return false
             }
-            return canAccess
-        } catch {
-            Logger.error("Failed to resolve bookmark for screen \(screenID): \(error.localizedDescription)", category: .fileAccess)
+            return true
+
+        case .failure(let failure):
+            Logger.error("Failed to resolve bookmark for screen \(screenID): \(failure.localizedDescription)", category: .fileAccess)
             return false
         }
     }
@@ -471,9 +467,9 @@ final class SettingsManager {
         indexFileName: String?,
         for screenID: CGDirectDisplayID
     ) -> Bool {
-        do {
-            let resolution = try ResourceUtilities.resolveBookmark(bookmarkData)
-            let url = resolution.url
+        switch SecurityScopedBookmarkResolver.shared.resolve(bookmarkData, target: .transient) {
+        case .success(let resolved):
+            let url = resolved.url
 
             let canAccess = url.startAccessingSecurityScopedResource()
             defer {
@@ -492,16 +488,22 @@ final class SettingsManager {
                     Logger.error("Invalid HTML folder index name for screen \(screenID): \(indexFileName)", category: .fileAccess)
                     return false
                 }
-                let indexURL = try FolderURLSchemeHandler.resolvedFileURL(
-                    for: requestURL,
-                    inside: url
-                )
-                return FileManager.default.fileExists(atPath: indexURL.path(percentEncoded: false))
+                do {
+                    let indexURL = try FolderURLSchemeHandler.resolvedFileURL(
+                        for: requestURL,
+                        inside: url
+                    )
+                    return FileManager.default.fileExists(atPath: indexURL.path(percentEncoded: false))
+                } catch {
+                    Logger.error("Failed to resolve HTML folder index for screen \(screenID): \(error.localizedDescription)", category: .fileAccess)
+                    return false
+                }
             }
 
             return FileManager.default.fileExists(atPath: url.path(percentEncoded: false))
-        } catch {
-            Logger.error("Failed to resolve local HTML bookmark for screen \(screenID): \(error.localizedDescription)", category: .fileAccess)
+
+        case .failure(let failure):
+            Logger.error("Failed to resolve local HTML bookmark for screen \(screenID): \(failure.localizedDescription)", category: .fileAccess)
             return false
         }
     }

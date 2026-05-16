@@ -161,13 +161,24 @@ extension SecurityScopedBookmarkResolver {
     static let live = SecurityScopedBookmarkResolver(
         resolveData: { data in
             var isStale = false
-            let url = try URL(
-                resolvingBookmarkData: data,
-                options: .withSecurityScope,
-                relativeTo: nil,
-                bookmarkDataIsStale: &isStale
-            )
-            return (url, isStale)
+            do {
+                let url = try URL(
+                    resolvingBookmarkData: data,
+                    options: .withSecurityScope,
+                    relativeTo: nil,
+                    bookmarkDataIsStale: &isStale
+                )
+                return (url, isStale)
+            } catch {
+                var plainStale = false
+                let url = try URL(
+                    resolvingBookmarkData: data,
+                    options: [],
+                    relativeTo: nil,
+                    bookmarkDataIsStale: &plainStale
+                )
+                return (url, plainStale)
+            }
         },
         refreshData: { url in
             try url.bookmarkData(

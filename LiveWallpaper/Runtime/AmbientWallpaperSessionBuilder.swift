@@ -35,7 +35,11 @@ enum HTMLWallpaperCompatibilityPolicy {
     /// Windows-DIP mode.
     static func looksLikeWallpaperEngineFolder(_ source: HTMLSource) -> Bool {
         guard case .folder(let bookmarkData, _) = source else { return false }
-        guard let folderURL = try? ResourceUtilities.resolveBookmark(bookmarkData).url else { return false }
+        guard case .success(let resolved) = SecurityScopedBookmarkResolver.shared.resolve(
+            bookmarkData,
+            target: .transient
+        ) else { return false }
+        let folderURL = resolved.url
         let didStart = folderURL.startAccessingSecurityScopedResource()
         defer { if didStart { folderURL.stopAccessingSecurityScopedResource() } }
         let manifest = folderURL.appendingPathComponent("project.json")
