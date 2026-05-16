@@ -107,7 +107,26 @@ struct WPESPIRVShaderCompiler: WPEShaderCompiling {
         let uniformLayout = Self.buildUniformLayout(reflection: reflection)
         let samplerNames = Self.buildSamplerNames(reflection: reflection)
 
-        // 4. MTLLibrary from the emitted MSL.
+        // 4. Stage-in compatibility gate — SPIRV-Cross emits MSL with
+        // `[[user(locnN)]]` attribute layout. Our renderer pairs every
+        // fragment with the fixed `wpe_fullscreen_vertex` from the
+        // executor's default library, which only outputs `position` +
+        // `uv` (no `[[user(locnN)]]` attributes). If the SPIRV-Cross MSL
+        // expects ANY `[[user(locn...)]]` input, the pipeline build will
+        // fail at link time with "Fragment input(s) mismatching vertex
+        // shader output". Throw here so the wrapper's outer fallback
+        // catches it and re-tries via the Swift transpiler, which
+        // generates a vertex-compatible stage_in struct.
+        //
+        // This is a band-aid until the bridge also emits a matching
+        // vertex shader from the same SPIR-V module (the proper fix).
+        if mslSource.contains("[[user(locn") {
+            throw WPEShaderCompilerError.translationFailed(
+                "SPIRV-Cross stage_in incompatible with fixed wpe_fullscreen_vertex for '\(request.shaderName)' — falling through to Swift transpiler"
+            )
+        }
+
+        // 5. MTLLibrary from the emitted MSL.
         let library: MTLLibrary
         do {
             let options = MTLCompileOptions()
