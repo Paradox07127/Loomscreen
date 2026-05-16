@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// macOS-style collapsible section with a whole-row tappable header.
-struct CollapsibleSection<Content: View>: View {
+public struct CollapsibleSection<Content: View>: View {
     let title: LocalizedStringKey
     let systemImage: String
     @Binding var isExpanded: Bool
@@ -9,7 +9,19 @@ struct CollapsibleSection<Content: View>: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    var body: some View {
+    public init(
+        title: LocalizedStringKey,
+        systemImage: String,
+        isExpanded: Binding<Bool>,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.title = title
+        self.systemImage = systemImage
+        self._isExpanded = isExpanded
+        self.content = content
+    }
+
+    public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
                 withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.28))) {
