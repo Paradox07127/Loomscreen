@@ -67,7 +67,7 @@ int wpe_shader_glsl_to_spirv(
 
     glslang::InitializeProcess();
 
-    const char *vertSource = vertex_glsl ? vertex_glsl :
+    const char *vertSource = (vertex_glsl && vertex_glsl[0] != '\0') ? vertex_glsl :
         "#version 410 core\n"
         "layout(location = 0) in vec3 a_Position;\n"
         "layout(location = 1) in vec2 a_TexCoord;\n"
