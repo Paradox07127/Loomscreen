@@ -10,3 +10,4 @@
 // app-glue layer, this file disappears and each app target imports the
 // packages it actually needs directly.
 @_exported import LiveWallpaperCore
+@_exported import LiveWallpaperVideoWeb
