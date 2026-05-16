@@ -4,55 +4,57 @@ import Observation
 import Darwin
 import IOKit
 
-struct MonitoringReferenceCounter {
+public struct MonitoringReferenceCounter {
     private var count = 0
 
-    mutating func start() -> Bool {
+    public init() {}
+
+    public mutating func start() -> Bool {
         count += 1
         return count == 1
     }
 
-    mutating func stop() -> Bool {
+    public mutating func stop() -> Bool {
         guard count > 0 else { return false }
         count -= 1
         return count == 0
     }
 }
 
-enum EstimatedFrameTickPolicy {
+public enum EstimatedFrameTickPolicy {
     private static let fallbackFPS = 30.0
 
-    static func tickCount(forFrameRate frameRate: Double, interval: TimeInterval) -> Int {
+    public static func tickCount(forFrameRate frameRate: Double, interval: TimeInterval) -> Int {
         let effectiveFPS = frameRate > 0 ? frameRate : fallbackFPS
         return max(1, Int((effectiveFPS * interval).rounded()))
     }
 }
 
-enum MonitoringCadencePolicy {
-    static func shouldSampleGPU(updateCount: Int, cadence: Int) -> Bool {
+public enum MonitoringCadencePolicy {
+    public static func shouldSampleGPU(updateCount: Int, cadence: Int) -> Bool {
         guard cadence > 1, updateCount > 1 else { return true }
         return updateCount % cadence == 0
     }
 }
 
-enum MonitoringStartPolicy {
-    static let initialSampleDelay: Duration = .milliseconds(350)
+public enum MonitoringStartPolicy {
+    public static let initialSampleDelay: Duration = .milliseconds(350)
 }
 
 @MainActor @Observable
-final class SystemMonitor {
-    static let shared = SystemMonitor()
+public final class SystemMonitor {
+    public static let shared = SystemMonitor()
 
-    private(set) var cpuUsage: Double = 0
-    private(set) var systemCpuUsage: Double = 0
-    private(set) var memoryUsage: UInt64 = 0
-    private(set) var totalMemory: UInt64 = 0
-    private(set) var isMemoryLow: Bool = false
-    private(set) var systemMemoryUsage: Double = 0
-    private(set) var gpuUsage: Double = 0
-    private(set) var energyImpact: Double = 0
-    private(set) var thermalState: ProcessInfo.ThermalState = .nominal
-    private(set) var videoFPS: Double = 0
+    public private(set) var cpuUsage: Double = 0
+    public private(set) var systemCpuUsage: Double = 0
+    public private(set) var memoryUsage: UInt64 = 0
+    public private(set) var totalMemory: UInt64 = 0
+    public private(set) var isMemoryLow: Bool = false
+    public private(set) var systemMemoryUsage: Double = 0
+    public private(set) var gpuUsage: Double = 0
+    public private(set) var energyImpact: Double = 0
+    public private(set) var thermalState: ProcessInfo.ThermalState = .nominal
+    public private(set) var videoFPS: Double = 0
 
     // MARK: - Configuration
 
@@ -71,7 +73,7 @@ final class SystemMonitor {
 
     // MARK: - Public Methods
 
-    func startMonitoring() {
+    public func startMonitoring() {
         guard references.start() else { return }
         let interval = updateInterval
         let initialSampleDelay = MonitoringStartPolicy.initialSampleDelay
@@ -95,30 +97,30 @@ final class SystemMonitor {
         }
     }
 
-    func stopMonitoring() {
+    public func stopMonitoring() {
         guard references.stop() else { return }
         updateTask?.cancel()
         updateTask = nil
     }
 
     /// Call this from real render loops to track actual FPS.
-    func tickFrame() {
+    public func tickFrame() {
         fpsCounter.tick()
     }
 
     /// AVPlayer does not expose rendered-frame callbacks here; record an estimate.
-    func tickEstimatedFrames(_ count: Int) {
+    public func tickEstimatedFrames(_ count: Int) {
         fpsCounter.tick(count: count)
     }
 
-    func formattedMemoryUsage() -> String { FormatUtils.formatBytes(memoryUsage) }
-    func formattedTotalMemory() -> String { FormatUtils.formatBytes(totalMemory) }
-    func memoryPercentage() -> Double {
+    public func formattedMemoryUsage() -> String { FormatUtils.formatBytes(memoryUsage) }
+    public func formattedTotalMemory() -> String { FormatUtils.formatBytes(totalMemory) }
+    public func memoryPercentage() -> Double {
         guard totalMemory > 0 else { return 0 }
         return Double(memoryUsage) / Double(totalMemory) * 100.0
     }
 
-    var thermalStateDescription: String {
+    public var thermalStateDescription: String {
         switch thermalState {
         case .nominal:
             return String(localized: "Normal", defaultValue: "Normal", comment: "Thermal state label.")
@@ -285,11 +287,6 @@ final class SystemMonitor {
 
     // MARK: - System-wide CPU Usage
 
-    /// Returns `(usage, newPrev)`. `usage` is `nil` when the host-statistics
-    /// call fails or returns a degenerate tick delta — callers keep the
-    /// previously observed value in that case. `newPrev` is the latest
-    /// `host_cpu_load_info` snapshot which the caller stores back on
-    /// MainActor for the next iteration's delta computation.
     nonisolated private static func sampleSystemCPUUsage(
         prev: host_cpu_load_info?
     ) -> (usage: Double?, newPrev: host_cpu_load_info?) {
