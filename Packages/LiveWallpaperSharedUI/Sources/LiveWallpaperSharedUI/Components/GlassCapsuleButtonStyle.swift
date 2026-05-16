@@ -1,13 +1,25 @@
 import SwiftUI
 
 /// Reusable glass-capsule button style for detail controls.
-struct GlassCapsuleButtonStyle: ButtonStyle {
-    var tint: Color = .accentColor
-    var fontSize: CGFloat = 12
-    var horizontalPadding: CGFloat = 10
-    var verticalPadding: CGFloat = 5
+public struct GlassCapsuleButtonStyle: ButtonStyle {
+    public var tint: Color = .accentColor
+    public var fontSize: CGFloat = 12
+    public var horizontalPadding: CGFloat = 10
+    public var verticalPadding: CGFloat = 5
 
-    func makeBody(configuration: Configuration) -> some View {
+    public init(
+        tint: Color = .accentColor,
+        fontSize: CGFloat = 12,
+        horizontalPadding: CGFloat = 10,
+        verticalPadding: CGFloat = 5
+    ) {
+        self.tint = tint
+        self.fontSize = fontSize
+        self.horizontalPadding = horizontalPadding
+        self.verticalPadding = verticalPadding
+    }
+
+    public func makeBody(configuration: Configuration) -> some View {
         StyledLabel(
             configuration: configuration,
             tint: tint,
