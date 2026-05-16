@@ -647,6 +647,15 @@ private struct WPEShaderSourceLoader: Sendable {
     private func builtinInclude(named name: String) -> String? {
         switch name {
         case "common.h":
+            // Phase 1.5: Add minimal WPE-runtime helpers our transpiler
+            // could not synthesise. `mod(x, y)` is a GLSL intrinsic Metal
+            // doesn't ship at global scope — corpus shader
+            // `ps2_startup_screen` invokes it directly. `rotateVec2` is a
+            // WPE-runtime helper several effects (cloudmotion, swing,
+            // lens_flare) call without defining locally. Both are
+            // implemented as constexpr-friendly inline functions so the
+            // GLSL preprocessor + Metal compiler can fold uses at the
+            // call site without losing precision.
             return """
             #ifndef LIVEWALLPAPER_WPE_COMMON_H
             #define LIVEWALLPAPER_WPE_COMMON_H
@@ -654,6 +663,21 @@ private struct WPEShaderSourceLoader: Sendable {
             #ifndef texSample2D
             #define texSample2D texture
             #endif
+            #ifndef mod
+            #define mod(x, y) ((x) - (y) * floor((x) / (y)))
+            #endif
+
+            vec2 rotateVec2(vec2 v, float angle) {
+                float c = cos(angle);
+                float s = sin(angle);
+                return vec2(c * v.x - s * v.y, s * v.x + c * v.y);
+            }
+
+            vec3 rotateVec3AroundAxis(vec3 v, vec3 axis, float angle) {
+                float c = cos(angle);
+                float s = sin(angle);
+                return v * c + cross(axis, v) * s + axis * dot(axis, v) * (1.0 - c);
+            }
             #endif
             """
         case "common_blur.h":
@@ -675,6 +699,23 @@ private struct WPEShaderSourceLoader: Sendable {
             #ifndef LIVEWALLPAPER_WPE_COMMON_BLENDING_H
             #define LIVEWALLPAPER_WPE_COMMON_BLENDING_H
             #define wpe_common_blending_included 1
+
+            // Named blend-mode constants WPE workshop shaders pass to
+            // ApplyBlending. Values match Photoshop ordering and our
+            // implementation's runtime switch below. Workshops invoke
+            // ApplyBlending(BlendLinearDodge, A, B, opacity) — without
+            // these the transpiler emits 'undeclared identifier
+            // BlendLinearDodge' for the corpus vhs / sine_wave_circle
+            // shaders.
+            #define BlendNormal 0
+            #define BlendDarken 2
+            #define BlendLighten 3
+            #define BlendMultiply 4
+            #define BlendScreen 5
+            #define BlendLinearDodge 6
+            #define BlendAdd 6
+            #define BlendSubtract 7
+            #define BlendDifference 8
 
             // No `in` qualifier on parameters — it's GLSL-default (and thus
             // optional) but the MSL backend rejects it as an unknown type

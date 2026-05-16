@@ -45,15 +45,20 @@ enum WPEMetalShaderInputs {
             if let texture = frameState.latestNamedTextures[name] {
                 return texture
             }
-            // WPE runtime aliases `_rt_FullFrameBuffer` to "whatever the
+            // WPE runtime aliases several `_rt_*` names to "whatever the
             // scene currently contains" — workshop post-process effects
-            // (water ripple, blur, audio bars, …) bind this as their input
-            // source without any explicit pass writing to it. Without the
-            // redirect, 22 of 57 scenes in the Phase A.3 corpus baseline
-            // failed here with missingTexture. Falls back to the scene
-            // output texture (always allocated) so the effect samples the
-            // composed scene.
-            if name == "_rt_FullFrameBuffer" {
+            // bind these as input sources without any pass explicitly
+            // writing to them. The Phase A.3 baseline had 22 scenes
+            // failing on `_rt_FullFrameBuffer` alone; 3 more failed on
+            // `_rt_EightBuffer2` etc. WPE's intent for the downscaled
+            // variants is a half / quarter / eighth-resolution copy of
+            // the scene — until we implement proper mip generation the
+            // best-available fallback is the full-resolution scene
+            // texture. Effects that depend on the actual downscale (e.g.
+            // bloom kernels expecting blurry low-frequency content) will
+            // still over-sample, but the scene will draw something
+            // recognisable instead of crashing with `missingTexture`.
+            if Self.isSceneAliasName(name) {
                 return frameState.latestSceneTexture ?? frameState.output
             }
             throw WPEMetalRenderExecutorError.missingTexture(reference)
@@ -63,6 +68,28 @@ enum WPEMetalShaderInputs {
                 throw WPEMetalRenderExecutorError.missingTexture(reference)
             }
             return texture
+        }
+    }
+
+    /// True for `_rt_*` names that WPE's runtime aliases to the live scene
+    /// texture rather than a discrete FBO allocation. Used by the resolver
+    /// fallback when no explicit named-texture is registered. The
+    /// downscaled variants (`Half` / `Quarter` / `Eight`) intentionally
+    /// fall through to the same full-resolution scene texture — better
+    /// than throwing `missingTexture`, with the trade-off that bloom-like
+    /// effects expecting blur from downscale won't get it until proper
+    /// mip generation lands.
+    static func isSceneAliasName(_ name: String) -> Bool {
+        switch name {
+        case "_rt_FullFrameBuffer",
+             "_rt_HalfFrameBuffer",
+             "_rt_QuarterFrameBuffer",
+             "_rt_imageLayerComposite":
+            return true
+        default:
+            return name.hasPrefix("_rt_EightBuffer")
+                || name.hasPrefix("_rt_Mip")
+                || name.hasPrefix("_rt_downscaled")
         }
     }
 
