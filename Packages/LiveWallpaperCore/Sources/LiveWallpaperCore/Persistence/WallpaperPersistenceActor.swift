@@ -9,21 +9,21 @@ import Foundation
 /// ever moves forward — the most-recent UI commit wins, and stale writes
 /// can't resurrect superseded state (including deletes from a Reset
 /// settings flow).
-actor WallpaperPersistenceActor {
+public actor WallpaperPersistenceActor {
     private let store: AtomicFileStore<[ScreenConfiguration]>
     private var latestGeneration: UInt64 = 0
 
-    init(store: AtomicFileStore<[ScreenConfiguration]>) {
+    public init(store: AtomicFileStore<[ScreenConfiguration]>) {
         self.store = store
     }
 
-    func write(_ configs: [ScreenConfiguration], generation: UInt64) throws {
+    public func write(_ configs: [ScreenConfiguration], generation: UInt64) throws {
         guard generation >= latestGeneration else { return }
         latestGeneration = generation
         try store.write(configs)
     }
 
-    func delete(generation: UInt64) {
+    public func delete(generation: UInt64) {
         guard generation >= latestGeneration else { return }
         latestGeneration = generation
         store.delete()
