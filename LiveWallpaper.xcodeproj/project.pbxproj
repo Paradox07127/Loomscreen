@@ -16,6 +16,11 @@
 		0CA00000000000000000A303 /* LiveWallpaperProWPE in Frameworks */ = {isa = PBXBuildFile; productRef = 0CA00000000000000000A302 /* LiveWallpaperProWPE */; };
 		0CA00000000000000000A403 /* LiveWallpaperProFeatures in Frameworks */ = {isa = PBXBuildFile; productRef = 0CA00000000000000000A402 /* LiveWallpaperProFeatures */; };
 		0CABCDEF2D8000020000C48B /* WPEShaderToolchain.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0CABCDEF2D8000010000C48B /* WPEShaderToolchain.xcframework */; };
+		0CA00000000000000000B010 /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0C9A00012D7350000033C48B /* AppIntents.framework */; };
+		0CA00000000000000000B011 /* LiveWallpaperCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0CA00000000000000000B020 /* LiveWallpaperCore */; };
+		0CA00000000000000000B012 /* LiveWallpaperVideoWeb in Frameworks */ = {isa = PBXBuildFile; productRef = 0CA00000000000000000B021 /* LiveWallpaperVideoWeb */; };
+		0CA00000000000000000B013 /* LiveWallpaperSharedUI in Frameworks */ = {isa = PBXBuildFile; productRef = 0CA00000000000000000B022 /* LiveWallpaperSharedUI */; };
+		0CA00000000000000000B014 /* LiveWallpaperProFeatures in Frameworks */ = {isa = PBXBuildFile; productRef = 0CA00000000000000000B023 /* LiveWallpaperProFeatures */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -39,6 +44,7 @@
 		0C322BEF2D6950480033C48B /* LiveWallpaper.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LiveWallpaper.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		0C322C002D6950490033C48B /* LiveWallpaperTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LiveWallpaperTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		0C322C0A2D6950490033C48B /* LiveWallpaperUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LiveWallpaperUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		0CA00000000000000000B000 /* LiveWallpaperLite.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LiveWallpaperLite.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		0C9A00012D7350000033C48B /* AppIntents.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppIntents.framework; path = System/Library/Frameworks/AppIntents.framework; sourceTree = SDKROOT; };
 		0CABCDEF2D8000010000C48B /* WPEShaderToolchain.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = WPEShaderToolchain.xcframework; path = ThirdParty/WPEShaderToolchain.xcframework; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -92,6 +98,18 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		0CA00000000000000000B003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0CA00000000000000000B010 /* AppIntents.framework in Frameworks */,
+				0CA00000000000000000B011 /* LiveWallpaperCore in Frameworks */,
+				0CA00000000000000000B012 /* LiveWallpaperVideoWeb in Frameworks */,
+				0CA00000000000000000B013 /* LiveWallpaperSharedUI in Frameworks */,
+				0CA00000000000000000B014 /* LiveWallpaperProFeatures in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -110,6 +128,7 @@
 			isa = PBXGroup;
 			children = (
 				0C322BEF2D6950480033C48B /* LiveWallpaper.app */,
+				0CA00000000000000000B000 /* LiveWallpaperLite.app */,
 				0C322C002D6950490033C48B /* LiveWallpaperTests.xctest */,
 				0C322C0A2D6950490033C48B /* LiveWallpaperUITests.xctest */,
 			);
@@ -201,6 +220,32 @@
 			productReference = 0C322C0A2D6950490033C48B /* LiveWallpaperUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		0CA00000000000000000B001 /* LiveWallpaperLite */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0CA00000000000000000B005 /* Build configuration list for PBXNativeTarget "LiveWallpaperLite" */;
+			buildPhases = (
+				0CA00000000000000000B002 /* Sources */,
+				0CA00000000000000000B003 /* Frameworks */,
+				0CA00000000000000000B004 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				0C322BF12D6950480033C48B /* LiveWallpaper */,
+			);
+			name = LiveWallpaperLite;
+			packageProductDependencies = (
+				0CA00000000000000000B020 /* LiveWallpaperCore */,
+				0CA00000000000000000B021 /* LiveWallpaperVideoWeb */,
+				0CA00000000000000000B022 /* LiveWallpaperSharedUI */,
+				0CA00000000000000000B023 /* LiveWallpaperProFeatures */,
+			);
+			productName = LiveWallpaperLite;
+			productReference = 0CA00000000000000000B000 /* LiveWallpaperLite.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -221,6 +266,9 @@
 					0C322C092D6950490033C48B = {
 						CreatedOnToolsVersion = 16.2;
 						TestTargetID = 0C322BEE2D6950480033C48B;
+					};
+					0CA00000000000000000B001 = {
+						CreatedOnToolsVersion = 16.2;
 					};
 				};
 			};
@@ -247,6 +295,7 @@
 			projectRoot = "";
 			targets = (
 				0C322BEE2D6950480033C48B /* LiveWallpaper */,
+				0CA00000000000000000B001 /* LiveWallpaperLite */,
 				0C322BFF2D6950490033C48B /* LiveWallpaperTests */,
 				0C322C092D6950490033C48B /* LiveWallpaperUITests */,
 			);
@@ -275,6 +324,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		0CA00000000000000000B004 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -293,6 +349,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		0C322C062D6950490033C48B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		0CA00000000000000000B002 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -586,6 +649,87 @@
 			};
 			name = Release;
 		};
+		0CA00000000000000000B006 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
+				CLANG_CXX_LIBRARY = "libc++";
+				CODE_SIGN_ENTITLEMENTS = LiveWallpaper/LiveWallpaper.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_ASSET_PATHS = "\"LiveWallpaper/Preview Content\"";
+				DEVELOPMENT_TEAM = FWJP4B62U7;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readonly;
+				ENABLE_FILE_ACCESS_MOVIES_FOLDER = readonly;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LiveWallpaperInfo.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lc++",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = Taijia.LiveWallpaperLite;
+				PRODUCT_NAME = LiveWallpaperLite;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) LITE_BUILD";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		0CA00000000000000000B007 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++17";
+				CLANG_CXX_LIBRARY = "libc++";
+				CODE_SIGN_ENTITLEMENTS = LiveWallpaper/LiveWallpaper.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_ASSET_PATHS = "\"LiveWallpaper/Preview Content\"";
+				DEVELOPMENT_TEAM = FWJP4B62U7;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readonly;
+				ENABLE_FILE_ACCESS_MOVIES_FOLDER = readonly;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LiveWallpaperInfo.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lc++",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = Taijia.LiveWallpaperLite;
+				PRODUCT_NAME = LiveWallpaperLite;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) LITE_BUILD";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -621,6 +765,15 @@
 			buildConfigurations = (
 				0C322C1B2D6950490033C48B /* Debug */,
 				0C322C1C2D6950490033C48B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		0CA00000000000000000B005 /* Build configuration list for PBXNativeTarget "LiveWallpaperLite" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0CA00000000000000000B006 /* Debug */,
+				0CA00000000000000000B007 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -668,6 +821,22 @@
 			productName = LiveWallpaperProWPE;
 		};
 		0CA00000000000000000A402 /* LiveWallpaperProFeatures */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = LiveWallpaperProFeatures;
+		};
+		0CA00000000000000000B020 /* LiveWallpaperCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = LiveWallpaperCore;
+		};
+		0CA00000000000000000B021 /* LiveWallpaperVideoWeb */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = LiveWallpaperVideoWeb;
+		};
+		0CA00000000000000000B022 /* LiveWallpaperSharedUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = LiveWallpaperSharedUI;
+		};
+		0CA00000000000000000B023 /* LiveWallpaperProFeatures */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = LiveWallpaperProFeatures;
 		};
