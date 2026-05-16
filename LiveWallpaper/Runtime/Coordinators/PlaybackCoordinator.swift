@@ -360,8 +360,25 @@ final class PlaybackCoordinator {
                 ])
             }
 
-            let resolution = try ResourceUtilities.resolveBookmark(bookmarkData)
-            let url = resolution.url
+            let resolved: SecurityScopedBookmarkResolver.Resolved
+            switch SecurityScopedBookmarkResolver.shared.resolve(bookmarkData, target: .transient) {
+            case .success(let value):
+                resolved = value
+            case .failure(let failure):
+                throw NSError(domain: "ScreenManager", code: 404, userInfo: [
+                    NSLocalizedDescriptionKey: failure.localizedDescription
+                ])
+            }
+
+            let url = resolved.url
+            let effectiveConfiguration: ScreenConfiguration
+            if resolved.didRefresh {
+                let updatedConfig = configuration.withUpdatedActiveBookmark(resolved.bookmarkData)
+                save(updatedConfig)
+                effectiveConfiguration = updatedConfig
+            } else {
+                effectiveConfiguration = configuration
+            }
 
             guard url.startAccessingSecurityScopedResource() else {
                 guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else {
@@ -371,30 +388,16 @@ final class PlaybackCoordinator {
                 }
                 return applyConfigurationForAccessibleURL(
                     url,
-                    configuration: configuration,
+                    configuration: effectiveConfiguration,
                     screen: screen,
                     preservingState: preservingState
                 )
             }
             defer { url.stopAccessingSecurityScopedResource() }
 
-            if resolution.isStale && resolution.isSecurityScoped {
-                do {
-                    let updatedBookmarkData = try url.bookmarkData(
-                        options: [.withSecurityScope, .securityScopeAllowOnlyReadAccess],
-                        includingResourceValuesForKeys: nil,
-                        relativeTo: nil
-                    )
-                    let updatedConfig = configuration.withUpdatedActiveBookmark(updatedBookmarkData)
-                    save(updatedConfig)
-                } catch {
-                    Logger.error("Failed to update stale bookmark: \(error.localizedDescription)", category: .fileAccess)
-                }
-            }
-
             applyConfigurationForAccessibleURL(
                 url,
-                configuration: configuration,
+                configuration: effectiveConfiguration,
                 screen: screen,
                 preservingState: preservingState
             )
@@ -652,7 +655,10 @@ final class PlaybackCoordinator {
 
     private static func bookmarkResolves(to url: URL, bookmark: Data?) -> Bool {
         guard let bookmark else { return false }
-        guard let resolvedURL = try? ResourceUtilities.resolveBookmark(bookmark).url else { return false }
-        return videoAudioURLKey(for: resolvedURL) == videoAudioURLKey(for: url)
+        guard case .success(let resolved) = SecurityScopedBookmarkResolver.shared.resolve(
+            bookmark,
+            target: .transient
+        ) else { return false }
+        return videoAudioURLKey(for: resolved.url) == videoAudioURLKey(for: url)
     }
 }

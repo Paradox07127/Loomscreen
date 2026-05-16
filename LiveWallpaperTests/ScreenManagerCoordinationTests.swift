@@ -262,7 +262,7 @@ struct ScreenManagerCoordinationTests {
     @Test("Re-applying the current weather-reactive setting is a no-op (no notification)")
     func setWeatherReactiveWithSameValueIsNoOp() async throws {
         try await Self.runWithSeededConfiguration { manager, screen in
-            let currentValue = try #require(manager.getConfiguration(for: screen)?.effectConfig.weatherReactive)
+            let currentValue = try #require(manager.getConfiguration(for: screen)?.effectConfig.weatherReactive as Bool?)
             let capture = Self.attachConfigurationObserver()
             defer { capture.detach() }
 
