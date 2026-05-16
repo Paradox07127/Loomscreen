@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import AppKit
 import SwiftUI
 
@@ -628,3 +629,4 @@ private struct MetalSnapshotPreview: View {
             .transition(.opacity)
     }
 }
+#endif

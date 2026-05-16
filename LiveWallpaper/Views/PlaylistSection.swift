@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
@@ -422,3 +423,4 @@ private struct PlaylistRow: View {
         return Color.clear
     }
 }
+#endif

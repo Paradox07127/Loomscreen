@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import SwiftUI
 import AppKit
 
@@ -242,3 +243,4 @@ struct WPECacheManagementView: View {
         return f
     }
 }
+#endif

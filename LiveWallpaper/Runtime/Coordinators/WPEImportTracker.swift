@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import CoreGraphics
 import Foundation
 import Observation
@@ -48,3 +49,4 @@ final class WPEImportTracker {
         generations[screenID] == generation
     }
 }
+#endif

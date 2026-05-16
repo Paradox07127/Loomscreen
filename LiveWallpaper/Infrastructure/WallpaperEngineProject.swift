@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import Foundation
 
 /// Typed model of a Wallpaper Engine `project.json` manifest.
@@ -224,3 +225,4 @@ private extension KeyedDecodingContainer {
 
     private struct Empty: Decodable { init(from decoder: Decoder) throws {} }
 }
+#endif

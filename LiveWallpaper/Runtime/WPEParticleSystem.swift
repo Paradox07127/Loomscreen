@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import Foundation
 import Metal
 import simd
@@ -205,3 +206,4 @@ final class WPEParticleSystem {
         )
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import CoreGraphics
 import Foundation
 
@@ -214,3 +215,4 @@ final class WPEImportCoordinator {
         return true
     }
 }
+#endif

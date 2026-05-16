@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import Foundation
 import Metal
 import simd
@@ -203,3 +204,4 @@ private extension Array {
         indices.contains(index) ? self[index] : nil
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import CoreGraphics
 import Foundation
 import ImageIO
@@ -309,3 +310,4 @@ struct SceneResourceResolver: Sendable {
         return resolved
     }
 }
+#endif

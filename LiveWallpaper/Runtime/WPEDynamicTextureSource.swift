@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import Foundation
 import Metal
 
@@ -12,3 +13,4 @@ protocol WPEDynamicTextureSource: AnyObject {
     func applyPerformanceProfile(_ profile: WallpaperPerformanceProfile)
     func invalidate()
 }
+#endif

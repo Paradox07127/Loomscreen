@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import AppKit
 
 /// Adapter that exposes a WPE scene renderer to
@@ -152,3 +153,4 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
         }
     }
 }
+#endif

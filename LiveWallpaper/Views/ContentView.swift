@@ -514,13 +514,21 @@ struct DetailContent: View {
                     .transition(.opacity)
 
             case .workshop:
+                #if !LITE_BUILD
                 WorkshopGalleryView(allowsTargetSelection: true)
                     .transition(.opacity)
+                #else
+                EmptyView()
+                #endif
 
             #if DEBUG
             case .developerTools:
+                #if !LITE_BUILD
                 DeveloperToolsView()
                     .transition(.opacity)
+                #else
+                EmptyView()
+                #endif
             #endif
 
             case .none:

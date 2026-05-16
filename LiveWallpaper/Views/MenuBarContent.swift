@@ -143,9 +143,17 @@ struct MenuBarContent: View {
                         videoVolume: videoVolumeBinding(for: screen),
                         density: density,
                         openAction: { invokeOpenScreenSettings(screen.id) },
-                        previousAction: { screenManager.regressPlaylist(for: screen) },
+                        previousAction: {
+                            #if !LITE_BUILD
+                            screenManager.regressPlaylist(for: screen)
+                            #endif
+                        },
                         playbackAction: { togglePlayback(for: screen) },
-                        nextAction: { screenManager.advancePlaylist(for: screen) }
+                        nextAction: {
+                            #if !LITE_BUILD
+                            screenManager.advancePlaylist(for: screen)
+                            #endif
+                        }
                     )
                 }
             }

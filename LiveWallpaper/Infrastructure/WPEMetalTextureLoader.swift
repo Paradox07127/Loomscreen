@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import CoreGraphics
 import Metal
 import MetalKit
@@ -174,3 +175,4 @@ struct WPEMetalTextureLoader {
         throw WPEMetalTextureLoaderError.malformedPayload("missing row-stride information")
     }
 }
+#endif

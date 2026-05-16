@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import Foundation
 import Metal
 
@@ -60,3 +61,4 @@ struct WPESwiftShaderCompiler: WPEShaderCompiling {
         )
     }
 }
+#endif

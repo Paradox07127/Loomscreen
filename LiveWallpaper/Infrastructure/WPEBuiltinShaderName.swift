@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import Foundation
 
 enum WPEBuiltinShaderName {
@@ -143,3 +144,4 @@ enum WPEBuiltinShaderName {
         return false
     }
 }
+#endif

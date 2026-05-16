@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import Foundation
 
 struct WPERenderGraphBuilder: Sendable {
@@ -466,3 +467,4 @@ private struct WPEMaterialPass {
         )
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import AppKit
 import Foundation
 import QuartzCore
@@ -239,3 +240,4 @@ private extension SIMD2 where Scalar == Double {
         )
     }
 }
+#endif

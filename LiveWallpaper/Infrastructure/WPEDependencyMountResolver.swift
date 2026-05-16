@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import Foundation
 
 /// Resolves declared Wallpaper Engine workshop dependency IDs into concrete
@@ -98,3 +99,4 @@ struct WPEDependencyMountResolver {
     }
 
 }
+#endif

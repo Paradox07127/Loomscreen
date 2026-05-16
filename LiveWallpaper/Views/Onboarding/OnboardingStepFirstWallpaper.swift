@@ -55,10 +55,12 @@ struct OnboardingStepFirstWallpaper: View {
         }
         .onAppear { configureInitialStage() }
         .onDisappear { previewController.cleanup() }
+        #if !LITE_BUILD
         .sheet(isPresented: $showWorkshopGallery, onDismiss: handleWorkshopGalleryDismiss) {
             WorkshopGalleryView(screens: workshopGalleryTargetScreens)
                 .environment(screenManager)
         }
+        #endif
         .sheet(isPresented: $showHTMLSheet) {
             HTMLPickerSheet(
                 onCancel: { showHTMLSheet = false },
@@ -430,6 +432,9 @@ struct OnboardingStepFirstWallpaper: View {
     }
 
     private func chooseWPEFolder() {
+        #if LITE_BUILD
+        return
+        #else
         guard let url = WPEFolderPicker.chooseImportFolder() else { return }
 
         let targets = screenManager.screens.filter { selectedScreenIDs.contains($0.id) }
@@ -467,6 +472,7 @@ struct OnboardingStepFirstWallpaper: View {
                 )
             }
         }
+        #endif
     }
 
     private func handleWorkshopGalleryDismiss() {

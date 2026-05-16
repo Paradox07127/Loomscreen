@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import CoreGraphics
 import Foundation
 import Metal
@@ -262,3 +263,4 @@ struct WPETextOverlayDraw {
     let tint: SIMD3<Float>
     let alpha: Float
 }
+#endif

@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import SwiftUI
 import AppKit
 import ImageIO
@@ -329,3 +330,4 @@ private final class AspectFillAnimatedImageView: NSView {
         }
     }
 }
+#endif

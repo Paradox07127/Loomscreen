@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import Foundation
 import JavaScriptCore
 
@@ -177,3 +178,4 @@ final class WPESceneScriptInstance {
 enum WPESceneScriptError: Error, Equatable {
     case contextUnavailable
 }
+#endif

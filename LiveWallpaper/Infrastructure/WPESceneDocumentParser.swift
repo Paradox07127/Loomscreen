@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import CoreGraphics
 import Foundation
 
@@ -566,3 +567,4 @@ enum WPESceneDocumentParser {
         WPEValueParser.bool(raw)
     }
 }
+#endif

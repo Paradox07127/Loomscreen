@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import AppKit
 import Metal
 
@@ -76,3 +77,4 @@ final class WPEMetalTextureSnapshotter: @unchecked Sendable {
         )
     }
 }
+#endif

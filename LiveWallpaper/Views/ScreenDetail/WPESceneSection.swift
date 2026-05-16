@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import SwiftUI
 
 /// Top-level Scene tab content. Drives the Wallpaper Engine project flow:
@@ -306,3 +307,4 @@ struct WPESceneSection: View {
         }
     }
 }
+#endif

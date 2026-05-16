@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import CryptoKit
 import Foundation
 
@@ -378,3 +379,4 @@ private func stripPrefix(_ string: String, prefix: String) -> String? {
     guard string.hasPrefix(prefix) else { return nil }
     return String(string.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
 }
+#endif

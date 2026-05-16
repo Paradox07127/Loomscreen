@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import CoreGraphics
 import Foundation
 import Metal
@@ -95,3 +96,4 @@ struct WPEMetalDepthTextureKey: Hashable {
     let width: Int
     let height: Int
 }
+#endif

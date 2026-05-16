@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import Foundation
 
 struct WPERenderPipelineBuilder: Sendable {
@@ -793,3 +794,4 @@ private struct WPEShaderSourceLoader: Sendable {
         }
     }
 }
+#endif

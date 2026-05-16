@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import Foundation
 
 /// Pure-Swift WPE-flavor GLSL → Metal Shading Language transpiler.
@@ -782,3 +783,4 @@ struct WPEVaryingDecl: Equatable {
         return Self(type: tokens[0], name: tokens[1], metalType: WPEUniformDecl.mapType(tokens[0]))
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import SwiftUI
 import MapKit
 import AppKit
@@ -235,3 +236,4 @@ final class LocationCompleterModel: NSObject, ObservableObject, MKLocalSearchCom
         }
     }
 }
+#endif

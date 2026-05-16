@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import Foundation
 
 /// Prepared, renderer-facing WPE pipeline.
@@ -110,3 +111,4 @@ enum WPERenderPipelineError: Error, Equatable, LocalizedError, Sendable {
         }
     }
 }
+#endif
