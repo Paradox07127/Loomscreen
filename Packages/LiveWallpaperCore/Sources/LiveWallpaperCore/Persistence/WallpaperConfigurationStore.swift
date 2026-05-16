@@ -1,18 +1,35 @@
 import Foundation
 import CoreGraphics
 
-/// Centralized per-screen wallpaper configuration store.
-/// Owns the in-memory cache and delegates persistence to `SettingsManager`.
+/// Persistence seam — production wires this through SettingsManager,
+/// tests inject in-memory stores.
 @MainActor
-final class WallpaperConfigurationStore {
-    private var cache: [CGDirectDisplayID: ScreenConfiguration] = [:]
+public protocol ScreenConfigurationPersisting {
+    func getConfiguration(for screenID: CGDirectDisplayID) -> ScreenConfiguration?
+    func saveConfiguration(_ configuration: ScreenConfiguration)
+    func cleanSettingsForScreen(_ screenID: CGDirectDisplayID)
+    func loadConfigurations() -> [ScreenConfiguration]
+    func replaceAllConfigurations(_ configurations: [ScreenConfiguration])
+}
 
-    func get(for screenID: CGDirectDisplayID) -> ScreenConfiguration? {
+/// Centralized per-screen wallpaper configuration store.
+/// Owns the in-memory cache; delegates persistence through the injected
+/// protocol so Core stays free of the SettingsManager (UserDefaults) layer.
+@MainActor
+public final class WallpaperConfigurationStore {
+    private var cache: [CGDirectDisplayID: ScreenConfiguration] = [:]
+    private let persistence: any ScreenConfigurationPersisting
+
+    public init(persistence: any ScreenConfigurationPersisting) {
+        self.persistence = persistence
+    }
+
+    public func get(for screenID: CGDirectDisplayID) -> ScreenConfiguration? {
         if let cached = cache[screenID] {
             return cached
         }
 
-        guard let configuration = SettingsManager.shared.getConfiguration(for: screenID) else {
+        guard let configuration = persistence.getConfiguration(for: screenID) else {
             return nil
         }
 
@@ -20,33 +37,33 @@ final class WallpaperConfigurationStore {
         return configuration
     }
 
-    func save(_ config: ScreenConfiguration) {
+    public func save(_ config: ScreenConfiguration) {
         cache[config.screenID] = config
-        SettingsManager.shared.saveConfiguration(config)
+        persistence.saveConfiguration(config)
     }
 
-    func remove(for screenID: CGDirectDisplayID) {
+    public func remove(for screenID: CGDirectDisplayID) {
         cache.removeValue(forKey: screenID)
-        SettingsManager.shared.cleanSettingsForScreen(screenID)
+        persistence.cleanSettingsForScreen(screenID)
     }
 
-    func clearCache() {
+    public func clearCache() {
         cache.removeAll()
     }
 
-    func allScreenIDs() -> [CGDirectDisplayID] {
+    public func allScreenIDs() -> [CGDirectDisplayID] {
         loadAll().map(\.screenID)
     }
 
-    func loadAll() -> [ScreenConfiguration] {
-        let configs = SettingsManager.shared.loadConfigurations()
+    public func loadAll() -> [ScreenConfiguration] {
+        let configs = persistence.loadConfigurations()
         cache = Dictionary(uniqueKeysWithValues: configs.map { ($0.screenID, $0) })
         return configs
     }
 
-    func pruneInvalidVideoConfigurations(using validator: (CGDirectDisplayID) -> Bool) -> [CGDirectDisplayID] {
+    public func pruneInvalidVideoConfigurations(using validator: (CGDirectDisplayID) -> Bool) -> [CGDirectDisplayID] {
         // Snapshot IDs first; validation may refresh stale bookmarks.
-        let candidateVideoIDs = SettingsManager.shared
+        let candidateVideoIDs = persistence
             .loadConfigurations()
             .filter { $0.wallpaperType == .video }
             .map(\.screenID)
@@ -62,7 +79,7 @@ final class WallpaperConfigurationStore {
         }
 
         // Re-read so bookmark refreshes survive the rewrite.
-        let postValidationConfigs = SettingsManager.shared.loadConfigurations()
+        let postValidationConfigs = persistence.loadConfigurations()
 
         let pruned = Self.removingInvalidVideoConfigurations(
             from: postValidationConfigs,
@@ -70,14 +87,14 @@ final class WallpaperConfigurationStore {
         )
 
         cache = Dictionary(uniqueKeysWithValues: pruned.map { ($0.screenID, $0) })
-        SettingsManager.shared.replaceAllConfigurations(pruned)
+        persistence.replaceAllConfigurations(pruned)
 
         return Array(invalidVideoIDs)
     }
 
-    func pruneInvalidResourceConfigurations(using validator: (CGDirectDisplayID) -> Bool) -> [CGDirectDisplayID] {
+    public func pruneInvalidResourceConfigurations(using validator: (CGDirectDisplayID) -> Bool) -> [CGDirectDisplayID] {
         // Snapshot IDs first; validation may refresh stale bookmarks.
-        let candidateIDs = SettingsManager.shared
+        let candidateIDs = persistence
             .loadConfigurations()
             .filter(Self.requiresResourceValidation)
             .map(\.screenID)
@@ -89,19 +106,19 @@ final class WallpaperConfigurationStore {
             return []
         }
 
-        let postValidationConfigs = SettingsManager.shared.loadConfigurations()
+        let postValidationConfigs = persistence.loadConfigurations()
         let pruned = Self.removingInvalidResourceConfigurations(
             from: postValidationConfigs,
             invalidScreenIDs: invalidIDs
         )
 
         cache = Dictionary(uniqueKeysWithValues: pruned.map { ($0.screenID, $0) })
-        SettingsManager.shared.replaceAllConfigurations(pruned)
+        persistence.replaceAllConfigurations(pruned)
 
         return Array(invalidIDs)
     }
 
-    nonisolated static func removingInvalidVideoConfigurations(
+    public nonisolated static func removingInvalidVideoConfigurations(
         from configs: [ScreenConfiguration],
         invalidScreenIDs: Set<CGDirectDisplayID>
     ) -> [ScreenConfiguration] {
@@ -110,7 +127,7 @@ final class WallpaperConfigurationStore {
         }
     }
 
-    nonisolated static func removingInvalidResourceConfigurations(
+    public nonisolated static func removingInvalidResourceConfigurations(
         from configs: [ScreenConfiguration],
         invalidScreenIDs: Set<CGDirectDisplayID>
     ) -> [ScreenConfiguration] {
