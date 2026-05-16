@@ -80,6 +80,20 @@ struct ProductCapabilities: Sendable, Equatable {
     var selectableWallpaperTypes: [WallpaperType] {
         WallpaperType.allCases.filter { canRender($0) }
     }
+
+    /// Filtered list of automation modes exposed to the WallpaperMode picker.
+    /// `.single` is always available; `.playlist` and `.schedule` require
+    /// the corresponding features. Lite collapses the picker to a single
+    /// option when both automation features are disabled.
+    var selectableWallpaperModes: [WallpaperMode] {
+        WallpaperMode.allCases.filter { mode in
+            switch mode {
+            case .single:   return true
+            case .playlist: return enabledFeatures.contains(.playlists)
+            case .schedule: return enabledFeatures.contains(.scheduleAutomation)
+            }
+        }
+    }
 }
 
 /// Lightweight wrapper distributed through SwiftUI environment so any view

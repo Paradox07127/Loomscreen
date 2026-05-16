@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct GeneralSettingsView: View {
     @Environment(ScreenManager.self) private var screenManager
+    @Environment(\.featureCatalog) private var featureCatalog
     @AppStorage(AppLanguagePreference.storageKey) private var appLanguageRawValue = AppLanguagePreference.system.rawValue
     @State private var globalPauseOnBattery: Bool
     @State private var startOnLogin: Bool
@@ -50,14 +51,20 @@ struct GeneralSettingsView: View {
             generalTab
                 .tabItem { Label("General", systemImage: "gearshape") }
 
-            ShortcutsSettingsView()
-                .tabItem { Label("Shortcuts", systemImage: "command") }
+            if featureCatalog.isEnabled(.globalShortcuts) {
+                ShortcutsSettingsView()
+                    .tabItem { Label("Shortcuts", systemImage: "command") }
+            }
 
-            WeatherLocationSettingsView()
-                .tabItem { Label("Weather", systemImage: "cloud.sun") }
+            if featureCatalog.isEnabled(.weatherReactive) {
+                WeatherLocationSettingsView()
+                    .tabItem { Label("Weather", systemImage: "cloud.sun") }
+            }
 
-            WPECacheManagementView()
-                .tabItem { Label("Cache", systemImage: "internaldrive") }
+            if featureCatalog.isEnabled(.wpeImport) {
+                WPECacheManagementView()
+                    .tabItem { Label("Cache", systemImage: "internaldrive") }
+            }
 
             aboutTab
                 .tabItem { Label("About", systemImage: "info.circle") }

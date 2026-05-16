@@ -214,20 +214,22 @@ struct ScreenDetailView: View {
                             ScreenDetailLoadingView()
                         } else if hasPreviewSource || previewController.hasPreviewContent {
                             VStack(spacing: 16) {
-                                if let origin = wpeOrigin {
+                                if let origin = wpeOrigin, featureCatalog.isEnabled(.wpeImport) {
                                     WPEOriginBadge(origin: origin) {
                                         selectedWallpaperType = .scene
                                     }
                                 }
-                                VideoPreviewSection(
-                                    previewController: previewController,
-                                    hasPreviewSource: hasPreviewSource,
-                                    selectedFitMode: selectedFitMode,
-                                    startPreview: setupPreviewPlayer
-                                )
-                                .aspectRatio(16/9, contentMode: .fit)
-                                .frame(maxWidth: .infinity)
-                                .shadow(color: Color.black.opacity(0.18), radius: 12, x: 0, y: 4)
+                                if featureCatalog.isEnabled(.inspectorPreview) {
+                                    VideoPreviewSection(
+                                        previewController: previewController,
+                                        hasPreviewSource: hasPreviewSource,
+                                        selectedFitMode: selectedFitMode,
+                                        startPreview: setupPreviewPlayer
+                                    )
+                                    .aspectRatio(16/9, contentMode: .fit)
+                                    .frame(maxWidth: .infinity)
+                                    .shadow(color: Color.black.opacity(0.18), radius: 12, x: 0, y: 4)
+                                }
 
                                 VStack(spacing: 10) {
                                     HStack(spacing: 8) {
@@ -274,7 +276,7 @@ struct ScreenDetailView: View {
                         }
                     } else if selectedWallpaperType == .html {
                         VStack(spacing: 16) {
-                            if let origin = wpeOrigin {
+                            if let origin = wpeOrigin, featureCatalog.isEnabled(.wpeImport) {
                                 WPEOriginBadge(origin: origin) {
                                     selectedWallpaperType = .scene
                                 }
@@ -286,10 +288,12 @@ struct ScreenDetailView: View {
                             )
                         }
                         .padding(24)
-                    } else if selectedWallpaperType == .metalShader {
+                    } else if selectedWallpaperType == .metalShader,
+                              featureCatalog.isEnabled(.metalShader) {
                         ShaderWallpaperSection(screen: screen, selectedShaderPreset: $selectedShaderPreset)
                             .padding(24)
-                    } else if selectedWallpaperType == .scene {
+                    } else if selectedWallpaperType == .scene,
+                              featureCatalog.isEnabled(.scene) {
                         WPESceneSection(screen: screen)
                     }
                 }
@@ -457,10 +461,11 @@ struct ScreenDetailView: View {
                             )
                         }
 
-                        if selectedWallpaperType == .video {
+                        if selectedWallpaperType == .video,
+                           featureCatalog.capabilities.selectableWallpaperModes.count > 1 {
                             VStack(spacing: 16) {
                                 HStack(spacing: 0) {
-                                    ForEach(WallpaperMode.allCases) { mode in
+                                    ForEach(featureCatalog.capabilities.selectableWallpaperModes) { mode in
                                         Button {
                                             withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.18))) {
                                                 selectedWallpaperMode = mode
@@ -484,7 +489,8 @@ struct ScreenDetailView: View {
                                 .padding(2)
                                 .glassEffect(.regular.interactive(), in: .capsule)
 
-                                if selectedWallpaperMode == .playlist {
+                                if selectedWallpaperMode == .playlist,
+                                   featureCatalog.isEnabled(.playlists) {
                                     GroupBox {
                                         CollapsibleSection(
                                             title: "Playlist",
@@ -507,7 +513,8 @@ struct ScreenDetailView: View {
                                     ))
                                 }
 
-                                if selectedWallpaperMode == .schedule {
+                                if selectedWallpaperMode == .schedule,
+                                   featureCatalog.isEnabled(.scheduleAutomation) {
                                     GroupBox {
                                         CollapsibleSection(
                                             title: "Schedule",
@@ -528,6 +535,7 @@ struct ScreenDetailView: View {
                                     ))
                                 }
 
+                                if featureCatalog.isEnabled(.videoEffects) {
                                 GroupBox {
                                     CollapsibleSection(
                                         title: "Environment",
@@ -597,6 +605,7 @@ struct ScreenDetailView: View {
                                     }
                                 }
                                 .groupBoxStyle(ContainerGroupBoxStyle())
+                                } // end videoEffects gate
                             }
                         }
                     }
