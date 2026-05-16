@@ -574,6 +574,13 @@ struct WPETexDecoder: Sendable {
     /// branch still needs source-frame decoding work and isn't part of
     /// this bridge.
     private func bridgeEncodedImagePayload(_ parsed: ParsedTex) throws -> WPETexTexturePayload {
+        // Encoded multi-frame TEXB blocks would need per-frame ImageIO
+        // decode + animation-track stitching; bailing here keeps the
+        // diagnostic precise rather than silently flattening an animation
+        // to its first frame.
+        guard !parsed.hasAnimationFrames else {
+            throw WPETexDecodeError.unsupportedAnimation
+        }
         guard let mip = parsed.bitmap.largestMipmap else {
             throw WPETexDecodeError.missingBitmapBlock
         }
@@ -610,18 +617,26 @@ struct WPETexDecoder: Sendable {
         )
     }
 
-    /// Renders a `CGImage` into a non-premultiplied RGBA8 byte buffer using
-    /// `CGContext`. Outputs `kCGImageAlphaLast` to match the `R, G, B, A`
-    /// channel order Metal's `rgba8Unorm_srgb` expects.
+    /// Renders a `CGImage` into straight-alpha, sRGB-encoded RGBA8 bytes
+    /// suitable for upload as `MTLPixelFormat.rgba8Unorm_srgb`.
+    ///
+    /// CoreGraphics 8-bit RGBA bitmap contexts only support premultiplied
+    /// or opaque alpha, so we draw into a premultiplied target and
+    /// unpremultiply in place. The destination color space is pinned to
+    /// sRGB so the rendered bytes don't depend on the device's display
+    /// profile — Metal's sRGB sampler then applies the expected
+    /// sRGB→linear decode at sample time.
     private func rasterizeRGBA8(from image: CGImage, mipmap: Int) throws -> DecodedRGBAImage {
         let width = image.width
         let height = image.height
-        guard width > 0, height > 0 else {
+        guard width > 0, height > 0,
+              width <= Int.max / 4,
+              height <= Int.max / max(width * 4, 1) else {
             throw WPETexDecodeError.invalidDimensions(width: width, height: height)
         }
         let bytesPerRow = width * 4
         var buffer = Data(count: bytesPerRow * height)
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
         let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
         let drew = buffer.withUnsafeMutableBytes { rawBuffer -> Bool in
             guard let base = rawBuffer.baseAddress else { return false }
@@ -643,7 +658,36 @@ struct WPETexDecoder: Sendable {
         guard drew else {
             throw WPETexDecodeError.decodeFailed(mipmap: mipmap, detail: "CGContext allocation or draw failed for encoded payload")
         }
+        unpremultiplyAlphaLast(&buffer)
         return DecodedRGBAImage(width: width, height: height, pixels: buffer)
+    }
+
+    /// Reverses `CGImageAlphaInfo.premultipliedLast` in place so semi-
+    /// transparent pixels are emitted as straight-alpha RGBA8. WPE
+    /// shaders (`genericimage` family, blend modes) expect non-
+    /// premultiplied samples and apply their own alpha math; without
+    /// this pass, semi-transparent edges double-multiply and render too
+    /// dark.
+    private func unpremultiplyAlphaLast(_ buffer: inout Data) {
+        buffer.withUnsafeMutableBytes { rawBuffer in
+            let bytes = rawBuffer.bindMemory(to: UInt8.self)
+            guard let base = bytes.baseAddress else { return }
+            var offset = 0
+            while offset + 3 < bytes.count {
+                let alpha = Int(base[offset + 3])
+                if alpha == 0 {
+                    base[offset]     = 0
+                    base[offset + 1] = 0
+                    base[offset + 2] = 0
+                } else if alpha < 255 {
+                    let halfAlpha = alpha / 2
+                    base[offset]     = UInt8(min(255, (Int(base[offset])     * 255 + halfAlpha) / alpha))
+                    base[offset + 1] = UInt8(min(255, (Int(base[offset + 1]) * 255 + halfAlpha) / alpha))
+                    base[offset + 2] = UInt8(min(255, (Int(base[offset + 2]) * 255 + halfAlpha) / alpha))
+                }
+                offset += 4
+            }
+        }
     }
 
     private func normalizedBytes(

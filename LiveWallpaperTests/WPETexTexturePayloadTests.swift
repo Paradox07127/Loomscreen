@@ -37,6 +37,52 @@ struct WPETexTexturePayloadTests {
         #expect(firstPixel[3] == 0xFF, "A channel should be 0xFF for the solid-red fixture")
     }
 
+    @Test("Bridges semi-transparent TEXB-encoded PNG as straight alpha")
+    func bridgesSemiTransparentEncodedPNGAsStraightAlpha() throws {
+        // 50% alpha red. CGContext draws into a premultiplied target, then
+        // the bridge unpremultiplies in place. The exported bytes should
+        // expose straight-alpha RGBA — R ≈ 0xFF (full red), A == 0x80 —
+        // so WPE shaders that do their own alpha math don't end up
+        // double-multiplying the colour at semi-transparent edges.
+        let png = try makeSolidColorPNG(width: 4, height: 4, red: 255, green: 0, blue: 0, alpha: 128)
+        let tex = makeImage(
+            width: 4,
+            height: 4,
+            formatCode: WPETexFormat.rgba8888.rawValue,
+            payload: png,
+            sourceImageFormatCode: 0
+        )
+
+        let extracted = try WPETexDecoder().extractTexturePayload(data: tex).get()
+        let mip = try #require(extracted.largestMipmap)
+        let firstPixel = Array(mip.bytes.prefix(4))
+        // Round-trip through premultiply → unpremultiply tolerates ±1 LSB.
+        #expect(firstPixel[0] >= 0xFE, "R should round-trip near 0xFF (got \(firstPixel[0])); double-premultiply would emit ~0x80")
+        #expect(firstPixel[3] == 0x80, "A should preserve 0x80 unchanged")
+    }
+
+    @Test("Rejects encoded TEXB animation tracks with .unsupportedAnimation")
+    func rejectsEncodedAnimationFrames() throws {
+        // Two-frame encoded TEXB animation. The bridge can't reproduce the
+        // animation timing yet, so it must surface a precise diagnostic
+        // instead of silently flattening to a single first frame.
+        let png = try makeSolidColorPNG(width: 2, height: 2, red: 0, green: 0, blue: 255, alpha: 255)
+        let tex = makeAnimatedImage(
+            width: 2,
+            height: 2,
+            formatCode: WPETexFormat.rgba8888.rawValue,
+            framePayloads: [png, png],
+            sourceImageFormatCode: 0
+        )
+
+        let result = WPETexDecoder().extractTexturePayload(data: tex)
+        guard case .failure(let error) = result else {
+            Issue.record("Expected .failure, got \(result)")
+            return
+        }
+        #expect(error == .unsupportedAnimation, "Encoded animation tracks should raise unsupportedAnimation, got: \(error)")
+    }
+
     @Test("Extracts raw RGBA8888 mip payload without creating CGImage")
     func extractsRGBA8888Payload() throws {
         let payload = Data(repeating: 0xaa, count: 4 * 4 * 4)
@@ -90,6 +136,39 @@ struct WPETexTexturePayloadTests {
         #expect(video.bytes == mp4)
         #expect(extracted.animationTrack == nil)
         #expect(extracted.mipmaps.isEmpty)
+    }
+
+    private func makeAnimatedImage(
+        width: Int,
+        height: Int,
+        formatCode: Int,
+        framePayloads: [Data],
+        sourceImageFormatCode: Int
+    ) -> Data {
+        var buffer = Data()
+        appendMagic(&buffer, magic: "TEXV0005")
+        appendMagic(&buffer, magic: "TEXI0001")
+        appendInt32(&buffer, Int32(formatCode))
+        appendUInt32(&buffer, 0)
+        appendInt32(&buffer, Int32(width))
+        appendInt32(&buffer, Int32(height))
+        appendInt32(&buffer, Int32(width))
+        appendInt32(&buffer, Int32(height))
+        appendInt32(&buffer, 0)
+
+        appendMagic(&buffer, magic: "TEXB0003")
+        appendInt32(&buffer, Int32(framePayloads.count))
+        appendInt32(&buffer, Int32(sourceImageFormatCode))
+        for payload in framePayloads {
+            appendInt32(&buffer, 1)
+            appendInt32(&buffer, Int32(width))
+            appendInt32(&buffer, Int32(height))
+            appendUInt32(&buffer, 0)
+            appendUInt32(&buffer, UInt32(payload.count))
+            appendUInt32(&buffer, UInt32(payload.count))
+            buffer.append(payload)
+        }
+        return buffer
     }
 
     private func makeImage(
