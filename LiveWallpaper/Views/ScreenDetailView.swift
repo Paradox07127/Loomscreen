@@ -448,6 +448,14 @@ struct ScreenDetailView: View {
                             htmlConfig: selectedWallpaperType == .html ? $htmlConfig : nil
                         )
 
+                        if selectedWallpaperType == .html {
+                            HTMLRenderingDiagnosticsInspector(
+                                screen: screen,
+                                source: htmlSource,
+                                config: htmlConfig
+                            )
+                        }
+
                         if selectedWallpaperType == .video {
                             VStack(spacing: 16) {
                                 HStack(spacing: 0) {
