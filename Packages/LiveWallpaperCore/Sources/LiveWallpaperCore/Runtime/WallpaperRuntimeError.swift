@@ -3,14 +3,14 @@ import Foundation
 /// User-visible runtime errors raised by a wallpaper session.
 /// Surfaced through `WallpaperRuntimeSession.runtimeError` and rendered by
 /// `RuntimeErrorBanner` in screen-detail UI so failures stop being silent.
-enum WallpaperRuntimeError: Error, Equatable, Sendable {
+public enum WallpaperRuntimeError: Error, Equatable, Sendable {
     case fileAccessDenied(URL)
     case mediaNotPlayable(URL, code: Int?)
     case webNavigationFailed(URL, code: Int?, description: String)
     case networkOffline
     case sandboxRevoked
 
-    var userMessage: String {
+    public var userMessage: String {
         switch self {
         case .fileAccessDenied(let url):
             return String(localized: "Cannot access \(url.lastPathComponent). Re-pick the source to restore permission.", comment: "Runtime error message. The placeholder is a file name.")
@@ -31,7 +31,7 @@ enum WallpaperRuntimeError: Error, Equatable, Sendable {
         }
     }
 
-    var canRetry: Bool {
+    public var canRetry: Bool {
         switch self {
         case .fileAccessDenied, .sandboxRevoked:
             return false
@@ -40,11 +40,11 @@ enum WallpaperRuntimeError: Error, Equatable, Sendable {
         }
     }
 
-    enum Severity { case error, warning, info }
+    public enum Severity: Sendable { case error, warning, info }
 
     /// Visual severity for the banner. `error` is unrecoverable without user
     /// action; `warning` is recoverable; `info` is a degraded-mode notice.
-    var severity: Severity {
+    public var severity: Severity {
         switch self {
         case .fileAccessDenied, .sandboxRevoked, .mediaNotPlayable:
             return .error
@@ -56,7 +56,7 @@ enum WallpaperRuntimeError: Error, Equatable, Sendable {
     }
 
     /// Short, actionable headline shown in the banner (one line).
-    var title: String {
+    public var title: String {
         switch self {
         case .fileAccessDenied(let url):
             return String(localized: "Cannot access \(url.lastPathComponent)", comment: "Runtime error title. The placeholder is the file name.")
@@ -73,7 +73,7 @@ enum WallpaperRuntimeError: Error, Equatable, Sendable {
 
     /// Middle-truncated path / URL providing exactly the actionable detail.
     /// Falls back to nil for errors with no associated path.
-    var subtitlePath: String? {
+    public var subtitlePath: String? {
         switch self {
         case .fileAccessDenied(let url),
              .mediaNotPlayable(let url, _):
@@ -86,7 +86,7 @@ enum WallpaperRuntimeError: Error, Equatable, Sendable {
     }
 
     /// VoiceOver consumers see the full, un-truncated path.
-    var accessibilityDetail: String {
+    public var accessibilityDetail: String {
         switch self {
         case .fileAccessDenied(let url),
              .mediaNotPlayable(let url, _):

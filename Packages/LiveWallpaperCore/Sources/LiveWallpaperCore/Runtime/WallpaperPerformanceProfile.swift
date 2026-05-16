@@ -4,11 +4,11 @@ import Foundation
 /// Only two states: normal animation (`.quality`) or frozen/paused (`.suspended`).
 /// Battery handling is a pause (`.suspended`), not degraded animation —
 /// see `WallpaperPolicyEngine.performanceProfile`.
-enum WallpaperPerformanceProfile: Equatable {
+public enum WallpaperPerformanceProfile: Equatable, Sendable {
     case quality
     case suspended
 
-    var shaderFramesPerSecond: Int {
+    public var shaderFramesPerSecond: Int {
         switch self {
         case .quality:
             return 30
@@ -17,4 +17,3 @@ enum WallpaperPerformanceProfile: Equatable {
         }
     }
 }
-
