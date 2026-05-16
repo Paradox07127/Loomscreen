@@ -139,6 +139,7 @@ struct MenuBarContent: View {
                         showsStatusDot: screenManager.wallpaperSummary(for: screen).activity != .inactive,
                         supportsPlayback: screenManager.wallpaperSummary(for: screen).supportsPlaybackControl,
                         canStepPlaylist: canStepPlaylist(for: screen),
+                        videoVolume: videoVolumeBinding(for: screen),
                         density: density,
                         openAction: { invokeOpenScreenSettings(screen.id) },
                         previousAction: { screenManager.regressPlaylist(for: screen) },
@@ -359,6 +360,22 @@ struct MenuBarContent: View {
         return 1 + (config.playlistBookmarks ?? []).count > 1
     }
 
+    private func videoVolumeBinding(for screen: Screen) -> Binding<Double>? {
+        guard let config = screenManager.getConfiguration(for: screen),
+              config.wallpaperType == .video,
+              config.hasConfiguredVideoSource else { return nil }
+
+        return Binding(
+            get: {
+                screenManager.getConfiguration(for: screen)?.videoVolume ?? config.videoVolume
+            },
+            set: { newValue in
+                let clampedValue = min(max(newValue, 0), 1)
+                screenManager.updateVideoVolume(clampedValue, for: screen)
+            }
+        )
+    }
+
     private func togglePlayback(for screen: Screen) {
         guard let playback = screen.playbackController else { return }
         PlaybackToggle.toggle(playback)
@@ -530,6 +547,7 @@ private struct MenuBarDisplayRow: View {
     let showsStatusDot: Bool
     let supportsPlayback: Bool
     let canStepPlaylist: Bool
+    let videoVolume: Binding<Double>?
     let density: MenuBarDensity
     let openAction: () -> Void
     let previousAction: () -> Void
@@ -541,72 +559,113 @@ private struct MenuBarDisplayRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 8) {
-            Button(action: openAction) {
-                HStack(spacing: 8) {
-                    Image(systemName: iconName)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(iconTint)
-                        .frame(width: 22, height: 22)
-                        .readableGlass(radius: 8, tint: iconTint)
+        VStack(spacing: 7) {
+            HStack(spacing: 8) {
+                Button(action: openAction) {
+                    HStack(spacing: 8) {
+                        Image(systemName: iconName)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(iconTint)
+                            .frame(width: 22, height: 22)
+                            .readableGlass(radius: 8, tint: iconTint)
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(verbatim: title)
-                            .font(.system(size: 11, weight: .semibold))
-                            .lineLimit(1)
-                        Text(verbatim: subtitle)
-                            .font(.system(size: 9))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(verbatim: title)
+                                .font(.system(size: 11, weight: .semibold))
+                                .lineLimit(1)
+                            Text(verbatim: subtitle)
+                                .font(.system(size: 9))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                        Circle()
+                            .fill(iconTint)
+                            .frame(width: 5, height: 5)
+                            .opacity(showsStatusDot ? 1 : 0)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                    Circle()
-                        .fill(iconTint)
-                        .frame(width: 5, height: 5)
-                        .opacity(showsStatusDot ? 1 : 0)
+                    .contentShape(Rectangle())
                 }
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .help(Text("Open display settings"))
+
+                HStack(spacing: 4) {
+                    IconControlButton(
+                        systemImage: "chevron.left",
+                        isEnabled: supportsPlayback && canStepPlaylist,
+                        action: previousAction,
+                        accessibilityLabel: "Previous wallpaper"
+                    )
+
+                    IconControlButton(
+                        systemImage: isPlaying ? "pause.fill" : "play.fill",
+                        isEnabled: supportsPlayback,
+                        action: playbackAction,
+                        accessibilityLabel: isPlaying ? "Pause wallpaper" : "Play wallpaper",
+                        isProminent: true
+                    )
+
+                    IconControlButton(
+                        systemImage: "chevron.right",
+                        isEnabled: supportsPlayback && canStepPlaylist,
+                        action: nextAction,
+                        accessibilityLabel: "Next wallpaper"
+                    )
+
+                    IconControlButton(
+                        systemImage: "arrow.up.right",
+                        isEnabled: true,
+                        action: openAction,
+                        accessibilityLabel: "Open display settings"
+                    )
+                }
             }
-            .buttonStyle(.plain)
-            .help(Text("Open display settings"))
 
-            HStack(spacing: 4) {
-                IconControlButton(
-                    systemImage: "chevron.left",
-                    isEnabled: supportsPlayback && canStepPlaylist,
-                    action: previousAction,
-                    accessibilityLabel: "Previous wallpaper"
-                )
+            if let videoVolume {
+                HStack(spacing: 7) {
+                    Image(systemName: volumeIcon(for: videoVolume.wrappedValue))
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 22)
+                        .accessibilityHidden(true)
 
-                IconControlButton(
-                    systemImage: isPlaying ? "pause.fill" : "play.fill",
-                    isEnabled: supportsPlayback,
-                    action: playbackAction,
-                    accessibilityLabel: isPlaying ? "Pause wallpaper" : "Play wallpaper",
-                    isProminent: true
-                )
+                    Slider(
+                        value: videoVolume,
+                        in: 0...1
+                    )
+                        .controlSize(.mini)
+                        .accessibilityLabel(Text("Video volume"))
+                        .accessibilityValue(Text("\(volumePercent(videoVolume.wrappedValue)) percent"))
 
-                IconControlButton(
-                    systemImage: "chevron.right",
-                    isEnabled: supportsPlayback && canStepPlaylist,
-                    action: nextAction,
-                    accessibilityLabel: "Next wallpaper"
-                )
-
-                IconControlButton(
-                    systemImage: "arrow.up.right",
-                    isEnabled: true,
-                    action: openAction,
-                    accessibilityLabel: "Open display settings"
-                )
+                    Text(verbatim: "\(volumePercent(videoVolume.wrappedValue))%")
+                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 34, alignment: .trailing)
+                }
+                .frame(maxWidth: .infinity)
             }
         }
         .padding(.horizontal, metrics.rowPaddingHorizontal)
         .padding(.vertical, metrics.rowPaddingVertical)
         .frame(maxWidth: .infinity)
         .readableGlass(radius: 12, tint: iconTint, interactive: true)
+    }
+
+    private func volumePercent(_ value: Double) -> Int {
+        Int((min(max(value, 0), 1) * 100).rounded())
+    }
+
+    private func volumeIcon(for value: Double) -> String {
+        switch value {
+        case ..<0.01:
+            return "speaker.slash.fill"
+        case ..<0.5:
+            return "speaker.wave.1.fill"
+        default:
+            return "speaker.wave.2.fill"
+        }
     }
 }
 

@@ -176,6 +176,17 @@ struct ScreenManagerCoordinationTests {
         }
     }
 
+    @Test("updateVideoVolume mutates configuration and posts a change notification")
+    func updateVideoVolumeForwardsThroughCoordinator() async throws {
+        try await Self.runWithSeededConfiguration { manager, screen in
+            let target = 0.42
+            try await Self.expectChange(notificationFor: screen) {
+                manager.updateVideoVolume(target, for: screen)
+            }
+            #expect(manager.getConfiguration(for: screen)?.videoVolume == target)
+        }
+    }
+
     @Test("updateFitMode mutates configuration and posts a change notification")
     func updateFitModeForwardsThroughCoordinator() async throws {
         try await Self.runWithSeededConfiguration { manager, screen in
@@ -413,7 +424,111 @@ struct ScreenManagerCoordinationTests {
         let currentPlayer = try #require(screen.videoPlayer)
         #expect(releaseCount == 1)
         #expect(currentPlayer !== oldPlayer)
-        #expect(currentPlayer.videoURL == second.url)
+        #expect(Self.canonicalFilePath(currentPlayer.videoURL) == Self.canonicalFilePath(second.url))
+    }
+
+    @Test("Applying a config to the existing video player syncs audio settings")
+    func applyConfigurationSyncsAudioSettingsToExistingPlayer() throws {
+        guard let screen = NSScreen.screens.first.map(Screen.init(nsScreen:)) else {
+            Issue.record("No NSScreen available for PlaybackCoordinator audio sync test")
+            return
+        }
+
+        let originalConfigurations = SettingsManager.shared.loadConfigurations()
+        defer { SettingsManager.shared.replaceAllConfigurations(originalConfigurations) }
+
+        let fixture = try Self.makeTemporaryVideoBookmark(prefix: "audio-sync")
+        defer { try? FileManager.default.removeItem(at: fixture.url) }
+
+        var configuration = ScreenConfiguration(screenID: screen.id, videoBookmarkData: fixture.bookmark)
+        configuration.muted = true
+        configuration.videoVolume = 0.35
+        SettingsManager.shared.replaceAllConfigurations([configuration])
+        let store = WallpaperConfigurationStore()
+        _ = store.loadAll()
+
+        let player = WallpaperVideoPlayer(url: fixture.url, frame: screen.frame, loadImmediately: false)
+        player.setMuted(false)
+        player.setVolume(0.9)
+        screen.installRuntimeSession(VideoWallpaperSession(player: player))
+        defer { screen.resetRuntimeSession() }
+
+        let coordinator = PlaybackCoordinator(
+            configurationStore: store,
+            powerMonitor: FakePowerMonitor(),
+            fullScreenDetector: FakeFullScreenDetector(),
+            powerPolicy: PowerPolicyController(),
+            playableVideoLoader: FakePlayableVideoLoader(),
+            applyVideoEffects: { _, _ in },
+            refreshRateLookup: { _ in 60 },
+            screensProvider: { [screen] },
+            markSessionStateChanged: {},
+            releaseRuntimeSession: { target in target.resetRuntimeSession() },
+            notifyWallpaperSessionChanged: {}
+        )
+        defer { coordinator.transition.cancelAssetReadiness(for: screen.id) }
+
+        coordinator.applyConfiguration(configuration, to: screen, preservingState: true)
+
+        let currentPlayer = try #require(screen.videoPlayer)
+        #expect(currentPlayer === player)
+        #expect(currentPlayer.isMuted)
+        #expect(currentPlayer.audioVolume == 0.35)
+    }
+
+    @Test("Duplicate video audio leadership keeps only the first unmuted screen audible")
+    func duplicateVideoAudioLeadershipKeepsSingleAudibleScreen() {
+        let entries = [
+            VideoAudioLeadershipPolicy.Entry(screenID: 1, urlKey: "/wallpapers/shared.mp4", userMuted: false),
+            VideoAudioLeadershipPolicy.Entry(screenID: 2, urlKey: "/wallpapers/shared.mp4", userMuted: false),
+            VideoAudioLeadershipPolicy.Entry(screenID: 3, urlKey: "/wallpapers/other.mp4", userMuted: false),
+            VideoAudioLeadershipPolicy.Entry(screenID: 4, urlKey: "/wallpapers/shared.mp4", userMuted: true)
+        ]
+
+        let effective = VideoAudioLeadershipPolicy.effectiveMutedStates(for: entries)
+
+        #expect(effective[1] == false)
+        #expect(effective[2] == true)
+        #expect(effective[3] == false)
+        #expect(effective[4] == true)
+    }
+
+    @Test("Video validation failure is surfaced as a runtime error for the screen")
+    func setVideoValidationFailureSurfacesRuntimeError() async throws {
+        guard let screen = NSScreen.screens.first.map(Screen.init(nsScreen:)) else {
+            Issue.record("No NSScreen available for video validation error test")
+            return
+        }
+        let originalConfigurations = SettingsManager.shared.loadConfigurations()
+        defer { SettingsManager.shared.replaceAllConfigurations(originalConfigurations) }
+
+        let fixture = try Self.makeTemporaryVideoBookmark(prefix: "validation-error")
+        defer {
+            try? FileManager.default.removeItem(at: fixture.url)
+            screen.resetRuntimeSession()
+        }
+
+        let manager = ScreenManager(startupOptions: ScreenManagerStartupOptions(
+            restoreSavedWallpapers: false,
+            startAutomation: false,
+            powerMonitor: FakePowerMonitor(),
+            fullScreenDetector: FakeFullScreenDetector(),
+            playableVideoLoader: FakePlayableVideoLoader(validationError: .validationFailed),
+            displayRegistry: FakeDisplayRegistry(screens: [screen])
+        ))
+
+        manager.setVideo(url: fixture.url, bookmarkData: fixture.bookmark, for: screen)
+
+        for _ in 0..<20 where manager.runtimeError(for: screen) == nil {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        let error = try #require(manager.runtimeError(for: screen))
+        guard case .mediaNotPlayable(let url, _) = error else {
+            Issue.record("Expected mediaNotPlayable, got \(error)")
+            return
+        }
+        #expect(url == fixture.url)
     }
 
     @Test("Updating live HTML config hot-applies ordinary toggles without rebuilding the session")
@@ -590,6 +705,10 @@ struct ScreenManagerCoordinationTests {
             return next
         }
         return options[0]
+    }
+
+    private static func canonicalFilePath(_ url: URL?) -> String? {
+        url?.standardizedFileURL.resolvingSymlinksInPath().path(percentEncoded: false)
     }
 
     /// Boots a `ScreenManager` with the four protocol fakes, ensures a
