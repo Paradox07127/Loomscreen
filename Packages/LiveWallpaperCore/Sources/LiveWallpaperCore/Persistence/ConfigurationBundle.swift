@@ -12,9 +12,9 @@ import UniformTypeIdentifiers
 ///   confirmation dialog.
 /// - The three payload blobs are optional so a user can hand-edit the file
 ///   to ship only a subset (e.g., bookmarks-only backups).
-struct ConfigurationBundle: Codable {
-    static let currentSchemaVersion = 1
-    static let fileExtension = "lwconfig"
+public struct ConfigurationBundle: Codable, Sendable {
+    public static let currentSchemaVersion = 1
+    public static let fileExtension = "lwconfig"
 
     /// Custom UTType registered via `UTExportedTypeDeclarations` in
     /// `LiveWallpaperInfo.plist`. Conforms to `public.json` so file panels
@@ -24,22 +24,22 @@ struct ConfigurationBundle: Codable {
     /// Falls back to `.json` only if the Info.plist registration somehow
     /// failed to load — exists purely so unit tests can run without the
     /// full app bundle context.
-    static let contentType: UTType = {
+    public static let contentType: UTType = {
         if let registered = UTType("com.taijia.livewallpaper.config") {
             return registered
         }
         return .json
     }()
 
-    var schemaVersion: Int
-    var appBundleID: String
-    var appVersion: String?
-    var exportedAt: Date
-    var screenConfigurations: [ScreenConfiguration]?
-    var globalSettings: GlobalSettings?
-    var wallpaperBookmarks: [WallpaperBookmark]?
+    public var schemaVersion: Int
+    public var appBundleID: String
+    public var appVersion: String?
+    public var exportedAt: Date
+    public var screenConfigurations: [ScreenConfiguration]?
+    public var globalSettings: GlobalSettings?
+    public var wallpaperBookmarks: [WallpaperBookmark]?
 
-    init(
+    public init(
         schemaVersion: Int = ConfigurationBundle.currentSchemaVersion,
         appBundleID: String = Bundle.main.bundleIdentifier ?? "Taijia.LiveWallpaper",
         appVersion: String? = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
