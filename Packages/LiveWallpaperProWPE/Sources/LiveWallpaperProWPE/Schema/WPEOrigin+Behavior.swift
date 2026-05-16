@@ -1,12 +1,15 @@
 import Foundation
+import LiveWallpaperCore
 
 /// Bookmark-resolution + path-matching helpers for `WPEOrigin`.
 ///
-/// Lives in a separate file so the schema (`WPEOrigin.swift`) stays free of
-/// `WPEPathSafety` and the App Support / FileManager surface. Phase 4 moves
-/// this extension into the ProWPE package; Lite must not link it.
+/// Lives in the LiveWallpaperProWPE package so the schema
+/// (`LiveWallpaperCore/Schema/WPEOrigin.swift`) stays free of
+/// `WPEPathSafety` and the App Support / FileManager surface. Lite must
+/// not link this package; Pro receives it as part of the renderer + import
+/// pipeline bundle.
 extension WPEOrigin {
-    var sourcePreviewURL: URL? {
+    public var sourcePreviewURL: URL? {
         guard let previewFileName,
               let sourceFolder = WPEPathSafety.resolveSecurityScopedBookmark(sourceFolderBookmark) else {
             return nil
@@ -14,7 +17,7 @@ extension WPEOrigin {
         return WPEPathSafety.resourceURL(root: sourceFolder, relativePath: previewFileName)
     }
 
-    var sourceEntryURL: URL? {
+    public var sourceEntryURL: URL? {
         guard let entryFile,
               let sourceFolder = WPEPathSafety.resolveSecurityScopedBookmark(sourceFolderBookmark) else {
             return nil
@@ -27,7 +30,7 @@ extension WPEOrigin {
     /// `WPEOriginReconciler` to clear `wpeOrigin` when the user replaces
     /// the wallpaper with non-WPE content via the standard Video / HTML
     /// pickers.
-    static func matchesBookmark(_ bookmarkData: Data, origin: WPEOrigin) -> Bool {
+    public static func matchesBookmark(_ bookmarkData: Data, origin: WPEOrigin) -> Bool {
         switch origin.resourceLocation {
         case .cache:
             return matchesCacheBookmark(bookmarkData, origin: origin)
