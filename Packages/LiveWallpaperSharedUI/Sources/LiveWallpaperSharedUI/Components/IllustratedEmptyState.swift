@@ -4,16 +4,16 @@ import SwiftUI
 /// + up to two actions. Replaces inline empty/error placeholders that drifted
 /// across `EmptyStateGuideView`, `WPEFallbackCard`, `ScreenDetailPlaceholderViews`,
 /// `WorkshopGalleryView` and `WeatherLocationSettingsView`.
-struct IllustratedEmptyState: View {
-    let symbol: String
-    let title: LocalizedStringKey
-    let message: LocalizedStringKey
-    var symbolColor: Color = .secondary
-    var primary: ButtonAction? = nil
-    var secondary: ButtonAction? = nil
-    var variant: Variant = .standard
+public struct IllustratedEmptyState: View {
+    public let symbol: String
+    public let title: LocalizedStringKey
+    public let message: LocalizedStringKey
+    public var symbolColor: Color = .secondary
+    public var primary: ButtonAction? = nil
+    public var secondary: ButtonAction? = nil
+    public var variant: Variant = .standard
 
-    enum Variant {
+    public enum Variant {
         case standard
         /// Renders the dashed drop-target border permanently so the affordance
         /// is discoverable without dragging anything onto the area first.
@@ -22,19 +22,37 @@ struct IllustratedEmptyState: View {
         case compact
     }
 
-    struct ButtonAction {
-        let title: LocalizedStringKey
-        let role: ButtonRole?
-        let action: () -> Void
+    public struct ButtonAction {
+        public let title: LocalizedStringKey
+        public let role: ButtonRole?
+        public let action: () -> Void
 
-        init(_ title: LocalizedStringKey, role: ButtonRole? = nil, action: @escaping () -> Void) {
+        public init(_ title: LocalizedStringKey, role: ButtonRole? = nil, action: @escaping () -> Void) {
             self.title = title
             self.role = role
             self.action = action
         }
     }
 
-    var body: some View {
+    public init(
+        symbol: String,
+        title: LocalizedStringKey,
+        message: LocalizedStringKey,
+        symbolColor: Color = .secondary,
+        primary: ButtonAction? = nil,
+        secondary: ButtonAction? = nil,
+        variant: Variant = .standard
+    ) {
+        self.symbol = symbol
+        self.title = title
+        self.message = message
+        self.symbolColor = symbolColor
+        self.primary = primary
+        self.secondary = secondary
+        self.variant = variant
+    }
+
+    public var body: some View {
         VStack(spacing: spacing) {
             Image(systemName: symbol)
                 .font(.system(size: iconSize, weight: .regular))
@@ -122,7 +140,7 @@ struct IllustratedEmptyState: View {
 
     private var messageFont: Font {
         switch variant {
-        case .standard, .dropTarget: return .subheadline
+        case .standard, .dropTarget: return .footnote
         case .compact: return .footnote
         }
     }
