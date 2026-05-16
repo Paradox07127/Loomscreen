@@ -663,13 +663,14 @@ struct WorkshopGalleryView: View {
         _ project: WallpaperEngineLibraryScanner.DiscoveredProject,
         screen: Screen
     ) async -> ScreenManager.WPEProjectApplyOutcome {
-        var isStale = false
-        guard let rootURL = try? URL(
-            resolvingBookmarkData: project.libraryRootBookmarkData,
-            options: .withSecurityScope,
-            relativeTo: nil,
-            bookmarkDataIsStale: &isStale
-        ) else {
+        let rootURL: URL
+        switch SecurityScopedBookmarkResolver.shared.resolve(
+            project.libraryRootBookmarkData,
+            target: .workshopLibraryRoot
+        ) {
+        case .success(let resolved):
+            rootURL = resolved.url
+        case .failure:
             return .rejected(reason: "Workshop folder access expired. Re-grant library access.")
         }
 
@@ -690,13 +691,14 @@ struct WorkshopGalleryView: View {
     private func prepareWithLibraryAccess(
         _ project: WallpaperEngineLibraryScanner.DiscoveredProject
     ) async -> ScreenManager.WPEProjectPreparationOutcome {
-        var isStale = false
-        guard let rootURL = try? URL(
-            resolvingBookmarkData: project.libraryRootBookmarkData,
-            options: .withSecurityScope,
-            relativeTo: nil,
-            bookmarkDataIsStale: &isStale
-        ) else {
+        let rootURL: URL
+        switch SecurityScopedBookmarkResolver.shared.resolve(
+            project.libraryRootBookmarkData,
+            target: .workshopLibraryRoot
+        ) {
+        case .success(let resolved):
+            rootURL = resolved.url
+        case .failure:
             return .rejected(reason: "Workshop folder access expired. Re-grant library access.")
         }
 
@@ -819,16 +821,14 @@ struct WorkshopGalleryView: View {
     }
 
     private func resolveWorkshopRootURL() -> URL? {
-        guard let bookmark = SettingsManager.shared.loadWorkshopLibraryRootBookmark() else {
+        let bookmark = SettingsManager.shared.loadWorkshopLibraryRootBookmark()
+        guard case .success(let resolved) = SecurityScopedBookmarkResolver.shared.resolve(
+            bookmark,
+            target: .workshopLibraryRoot
+        ) else {
             return nil
         }
-        var isStale = false
-        return try? URL(
-            resolvingBookmarkData: bookmark,
-            options: .withSecurityScope,
-            relativeTo: nil,
-            bookmarkDataIsStale: &isStale
-        )
+        return resolved.url
     }
 
     private func importErrorMessage(_ error: AppError) -> String {

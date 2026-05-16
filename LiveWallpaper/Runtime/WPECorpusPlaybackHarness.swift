@@ -144,10 +144,14 @@ final class WPECorpusPlaybackHarness {
         // loop — every per-scene `ensureExtracted` re-reads the source pkg
         // off the user's library.
         let libraryRoot: URL
-        do {
-            libraryRoot = try Self.resolveLibraryRoot(bookmarkData: rootBookmarkData)
-        } catch {
-            let message = Self.describe(error)
+        switch SecurityScopedBookmarkResolver.shared.resolve(
+            rootBookmarkData,
+            target: .workshopLibraryRoot
+        ) {
+        case .success(let resolved):
+            libraryRoot = resolved.url
+        case .failure(let failure):
+            let message = failure.errorDescription ?? "Workshop bookmark resolution failed"
             Logger.error("WPE corpus playback could not resolve library root: \(message)", category: .screenManager)
             progress(.failedToStart(message))
             return
@@ -477,16 +481,6 @@ final class WPECorpusPlaybackHarness {
             elapsedSeconds: Date().timeIntervalSince(startedAt),
             failureMessage: failureMessage,
             resolution: .empty
-        )
-    }
-
-    private static func resolveLibraryRoot(bookmarkData: Data) throws -> URL {
-        var isStale = false
-        return try URL(
-            resolvingBookmarkData: bookmarkData,
-            options: .withSecurityScope,
-            relativeTo: nil,
-            bookmarkDataIsStale: &isStale
         )
     }
 
