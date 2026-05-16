@@ -1,11 +1,11 @@
 import SwiftUI
 
-enum HTMLSourceKind: String, CaseIterable, Identifiable {
+public enum HTMLSourceKind: String, CaseIterable, Identifiable, Sendable {
     case url, file, folder
 
-    var id: String { rawValue }
+    public var id: String { rawValue }
 
-    var labelKey: LocalizedStringKey {
+    public var labelKey: LocalizedStringKey {
         switch self {
         case .url: return "URL"
         case .file: return "File"
@@ -13,7 +13,7 @@ enum HTMLSourceKind: String, CaseIterable, Identifiable {
         }
     }
 
-    var icon: String {
+    public var icon: String {
         switch self {
         case .url: return "globe"
         case .file: return "doc.richtext"
