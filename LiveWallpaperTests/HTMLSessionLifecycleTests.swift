@@ -231,6 +231,58 @@ struct FolderURLSchemeHandlerLifecycleTests {
     }
 }
 
+@Suite("HTML wallpaper runtime scripts")
+struct HTMLWallpaperRuntimeScriptTests {
+    @Test("Physical-pixel script can hot-patch loaded pages")
+    func physicalPixelScriptHotPatchesLoadedPages() {
+        let script = HTMLWallpaperRuntimeScript.physicalPixelState(enabled: true, backingScale: 2)
+
+        #expect(script.contains("__liveWallpaperPhysicalPixelLayout"))
+        #expect(script.contains("get: function () { return 1; }"))
+        #expect(script.contains("dispatchEvent(new Event('resize'))"))
+    }
+
+    @Test("Wallpaper Engine general properties script sends fps")
+    func wallpaperEngineGeneralPropertiesScriptSendsFPS() {
+        let script = HTMLWallpaperRuntimeScript.wallpaperEngineGeneralProperties(fps: 1)
+
+        #expect(script.contains("applyGeneralProperties"))
+        #expect(script.contains("\"fps\":1"))
+    }
+}
+
+@Suite("HTML wallpaper compatibility policy")
+struct HTMLWallpaperCompatibilityPolicyTests {
+    @Test("Wallpaper Engine folders keep physical-pixel layout during hot config updates")
+    func wallpaperEngineFolderKeepsPhysicalPixelLayout() throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LWCompatibility-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+
+        try Data("<html></html>".utf8).write(to: folder.appendingPathComponent("index.html"))
+        try Data("{}".utf8).write(to: folder.appendingPathComponent("project.json"))
+        let bookmark = try folder.bookmarkData(
+            options: [],
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
+
+        var updated = HTMLConfig.default
+        updated.customCSS = "html { background: black; }"
+
+        let result = HTMLWallpaperCompatibilityPolicy.runtimeConfig(
+            source: .folder(bookmarkData: bookmark, indexFileName: "index.html"),
+            config: updated,
+            trustedOrigins: Set<TrustedHTMLOrigin>()
+        )
+
+        #expect(result.config.physicalPixelLayout)
+        #expect(result.enabledPhysicalPixelLayout)
+        #expect(result.config.customCSS == updated.customCSS)
+    }
+}
+
 /// Local fake — duplicating the type from `HTMLSchemeIsolationTests` keeps each
 /// suite self-contained and avoids cross-file coupling between unrelated tests.
 private final class FakeURLSchemeTask: NSObject, WKURLSchemeTask, @unchecked Sendable {

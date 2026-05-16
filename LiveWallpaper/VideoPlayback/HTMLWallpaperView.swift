@@ -28,6 +28,52 @@ final class HTMLWebView: WKWebView {
     }
 }
 
+enum HTMLWallpaperRuntimeScript {
+    static func physicalPixelState(enabled: Bool, backingScale: CGFloat) -> String {
+        let scale = max(Double(backingScale), 1.0)
+        let scaleLiteral = String(format: "%.6f", locale: Locale(identifier: "en_US_POSIX"), scale)
+        let dprGetter = enabled
+            ? "get: function () { return 1; }"
+            : "get: function () { return window.__liveWallpaperNativeDevicePixelRatio || \(scaleLiteral); }"
+
+        return """
+        (function () {
+            window.__liveWallpaperNativeDevicePixelRatio = \(scaleLiteral);
+            window.__liveWallpaperPhysicalPixelLayout = \(enabled ? "true" : "false");
+            try {
+                Object.defineProperty(window, 'devicePixelRatio', {
+                    configurable: true,
+                    \(dprGetter)
+                });
+            } catch (e) {}
+            try { window.dispatchEvent(new Event('resize')); } catch (e) {}
+            try {
+                if (window.visualViewport) {
+                    window.visualViewport.dispatchEvent(new Event('resize'));
+                }
+            } catch (e) {}
+        })();
+        """
+    }
+
+    static func wallpaperEngineGeneralProperties(fps: Int) -> String {
+        let clampedFPS = min(max(fps, 1), 240)
+        return """
+        (function () {
+            var properties = {"fps":\(clampedFPS)};
+            var listener = window.wallpaperPropertyListener;
+            if (listener && typeof listener.applyGeneralProperties === 'function') {
+                try {
+                    listener.applyGeneralProperties(properties);
+                } catch (error) {
+                    console.error('LiveWallpaper failed to apply Wallpaper Engine general properties', error);
+                }
+            }
+        })();
+        """
+    }
+}
+
 /// WKWebView-backed HTML wallpaper host.
 @MainActor
 final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
@@ -57,6 +103,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     private var consecutiveFailureCount: Int = 0
     private var pendingRetryTask: Task<Void, Never>?
     private var isCleaningUp = false
+    private var mediaPlaybackSuspended = false
 
     /// Forwarded to the owning `AmbientWallpaperSession` so failures surface as
     /// `RuntimeErrorBanner` and can be retried from the screen-detail UI.
@@ -129,24 +176,16 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         let cssLiteral = jsStringLiteral(config?.customCSS ?? "")
         let isBrowsing = (config?.allowMouseInteraction ?? false) ? "true" : "false"
         let isMuted = (config?.muteAudio ?? false) ? "true" : "false"
-        let pinDevicePixelRatioToOne = (config?.physicalPixelLayout ?? false) ? "true" : "false"
+        let physicalPixelBootstrap = (config?.physicalPixelLayout ?? false)
+            ? HTMLWallpaperRuntimeScript.physicalPixelState(
+                enabled: true,
+                backingScale: effectiveBackingScaleFactor
+            )
+            : ""
 
         let baseline = """
         (function () {
-            // dpr 覆写必须在任何页面脚本之前生效。pageZoom = 1/backingScale
-            // 已经把 innerWidth/innerHeight 还原成物理像素数，但
-            // window.devicePixelRatio 仍是 macOS 默认的 backingScale（Retina=2）。
-            // PIXI / Three.js / 自适应 canvas 框架会读 dpr 决定 backing-store
-            // 缓冲区大小，结果分配两倍纹理后被 GPU 缩回 device pixel，
-            // 边缘出现下采样锯齿。锁回 1 以恢复 Windows 1:1 行为。
-            if (\(pinDevicePixelRatioToOne)) {
-                try {
-                    Object.defineProperty(window, 'devicePixelRatio', {
-                        configurable: true,
-                        get: function () { return 1; }
-                    });
-                } catch (e) { /* 某些站点已用 defineProperty 锁住，忽略 */ }
-            }
+            \(physicalPixelBootstrap)
 
             function bootstrap() {
                 if (!document.documentElement) return;
@@ -334,6 +373,13 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             """)
         }
 
+        if previous?.physicalPixelLayout != current.physicalPixelLayout {
+            statements.append(HTMLWallpaperRuntimeScript.physicalPixelState(
+                enabled: current.physicalPixelLayout,
+                backingScale: effectiveBackingScaleFactor
+            ))
+        }
+
         guard !statements.isEmpty else { return }
         webView.evaluateJavaScript(statements.joined(separator: "\n"), completionHandler: nil)
     }
@@ -466,7 +512,16 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
 
     private func setMediaPlaybackSuspended(_ suspended: Bool) {
         guard !isCleaningUp else { return }
+        mediaPlaybackSuspended = suspended
         webView.setAllMediaPlaybackSuspended(suspended) {}
+        notifyWallpaperEngineGeneralProperties(fps: suspended ? 1 : 60)
+    }
+
+    private func notifyWallpaperEngineGeneralProperties(fps: Int) {
+        webView.evaluateJavaScript(
+            HTMLWallpaperRuntimeScript.wallpaperEngineGeneralProperties(fps: fps),
+            completionHandler: nil
+        )
     }
 
     private func reportError(_ error: WallpaperRuntimeError) {
@@ -599,11 +654,13 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
         applyPhysicalPixelZoom()
+        applyPhysicalPixelRuntimeStateIfNeeded()
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         applyPhysicalPixelZoom()
+        applyPhysicalPixelRuntimeStateIfNeeded()
     }
 
     // MARK: - Physical-pixel layout (WPE compatibility)
@@ -616,7 +673,8 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     /// while bringing innerWidth back up to the physical-pixel count.
     private func applyPhysicalPixelZoom() {
         let enabled = lastAppliedConfig?.physicalPixelLayout ?? false
-        guard enabled, let scale = webView.window?.backingScaleFactor, scale > 0 else {
+        let scale = effectiveBackingScaleFactor
+        guard enabled, scale > 0 else {
             if webView.pageZoom != 1.0 { webView.pageZoom = 1.0 }
             return
         }
@@ -625,6 +683,24 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             Logger.info("HTML wallpaper pageZoom → \(target) (backingScale=\(scale))", category: .screenManager)
             webView.pageZoom = target
         }
+    }
+
+    private var effectiveBackingScaleFactor: CGFloat {
+        webView.window?.backingScaleFactor
+            ?? window?.backingScaleFactor
+            ?? NSScreen.main?.backingScaleFactor
+            ?? 1
+    }
+
+    private func applyPhysicalPixelRuntimeStateIfNeeded() {
+        guard lastAppliedConfig?.physicalPixelLayout == true else { return }
+        webView.evaluateJavaScript(
+            HTMLWallpaperRuntimeScript.physicalPixelState(
+                enabled: true,
+                backingScale: effectiveBackingScaleFactor
+            ),
+            completionHandler: nil
+        )
     }
 
     // MARK: - Cleanup
@@ -776,6 +852,7 @@ extension HTMLWallpaperView: WKNavigationDelegate {
         })();
         """
         webView.evaluateJavaScript(nudge, completionHandler: nil)
+        notifyWallpaperEngineGeneralProperties(fps: mediaPlaybackSuspended ? 1 : 60)
     }
 
     /// Server-side / authentication failures.

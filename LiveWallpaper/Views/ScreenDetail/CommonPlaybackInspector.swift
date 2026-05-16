@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Shared playback / privacy controls that sit above the type-specific
 /// inspector panel (video / HTML / shader / scene). The component is the
@@ -314,5 +315,158 @@ struct CommonPlaybackInspector: View {
                 screenManager.updateHTMLConfig(next, for: screen)
             }
         )
+    }
+}
+
+struct HTMLRenderingDiagnosticsInspector: View {
+    var screen: Screen
+    var source: HTMLSource?
+    var config: HTMLConfig
+
+    @AppStorage("Inspector.HTMLRenderingExpanded") private var isExpanded = true
+
+    var body: some View {
+        GroupBox {
+            CollapsibleSection(
+                title: "HTML Rendering",
+                systemImage: "ruler",
+                isExpanded: $isExpanded
+            ) {
+                let diagnostics = HTMLRenderingDiagnostics(
+                    screen: screen,
+                    source: source,
+                    config: config
+                )
+
+                VStack(spacing: 6) {
+                    diagnosticRow("Measurement", diagnostics.measurementText)
+                    diagnosticRow("Screen points", diagnostics.pointSizeText)
+                    diagnosticRow("Backing pixels", diagnostics.backingPixelSizeText)
+                    diagnosticRow("Scale", diagnostics.scaleText)
+                    diagnosticRow("HTML viewport", diagnostics.viewportText)
+                    diagnosticRow("DPR", diagnostics.devicePixelRatioText)
+                    diagnosticRow("Mode", diagnostics.modeText)
+                }
+                .help(Text("Screen points come from the live content view when available. Backing pixels use AppKit's convertToBacking path."))
+            }
+        }
+        .groupBoxStyle(ContainerGroupBoxStyle())
+    }
+
+    private func diagnosticRow(_ title: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(verbatim: title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            Text(verbatim: value)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.primary)
+                .multilineTextAlignment(.trailing)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+    }
+}
+
+@MainActor
+private struct HTMLRenderingDiagnostics {
+    let measurementText: String
+    let pointSizeText: String
+    let backingPixelSizeText: String
+    let scaleText: String
+    let viewportText: String
+    let devicePixelRatioText: String
+    let modeText: String
+
+    init(screen: Screen, source: HTMLSource?, config: HTMLConfig) {
+        let geometry = Self.currentGeometry(for: screen)
+        let scaleX = geometry.pointSize.width > 0
+            ? geometry.backingPixelSize.width / geometry.pointSize.width
+            : screen.nsScreen.backingScaleFactor
+        let scaleY = geometry.pointSize.height > 0
+            ? geometry.backingPixelSize.height / geometry.pointSize.height
+            : screen.nsScreen.backingScaleFactor
+        let usesPhysicalPixels = Self.effectivePhysicalPixelLayout(source: source, config: config)
+        let viewportSize = usesPhysicalPixels ? geometry.backingPixelSize : geometry.pointSize
+
+        measurementText = geometry.usesLiveView ? "Live view" : "Screen frame"
+        pointSizeText = Self.pointSizeText(geometry.pointSize)
+        backingPixelSizeText = Self.pixelSizeText(geometry.backingPixelSize)
+        scaleText = Self.scalePairText(x: scaleX, y: scaleY, suffix: true)
+        viewportText = Self.cssViewportText(viewportSize)
+        devicePixelRatioText = usesPhysicalPixels
+            ? "1 (pinned)"
+            : "\(Self.scalePairText(x: scaleX, y: scaleY, suffix: false)) (native)"
+        modeText = if usesPhysicalPixels {
+            config.physicalPixelLayout ? "Physical pixels" : "Physical pixels (auto)"
+        } else {
+            "CSS points"
+        }
+    }
+
+    private static func currentGeometry(for screen: Screen) -> (
+        pointSize: CGSize,
+        backingPixelSize: CGSize,
+        usesLiveView: Bool
+    ) {
+        if let contentView = screen.activeWallpaperWindow?.contentView {
+            let bounds = contentView.bounds
+            if bounds.width > 0, bounds.height > 0 {
+                return (bounds.size, contentView.convertToBacking(bounds).size, true)
+            }
+        }
+
+        let pointSize = screen.frame.size
+        let scale = screen.nsScreen.backingScaleFactor
+        return (
+            pointSize,
+            CGSize(width: pointSize.width * scale, height: pointSize.height * scale),
+            false
+        )
+    }
+
+    private static func effectivePhysicalPixelLayout(source: HTMLSource?, config: HTMLConfig) -> Bool {
+        guard !config.physicalPixelLayout, let source else {
+            return config.physicalPixelLayout
+        }
+        return HTMLWallpaperCompatibilityPolicy.looksLikeWallpaperEngineFolder(source)
+    }
+
+    private static func pointSizeText(_ size: CGSize) -> String {
+        "\(pointLengthText(size.width))×\(pointLengthText(size.height)) pt"
+    }
+
+    private static func pixelSizeText(_ size: CGSize) -> String {
+        "\(Int(size.width.rounded()))×\(Int(size.height.rounded())) px"
+    }
+
+    private static func cssViewportText(_ size: CGSize) -> String {
+        "\(Int(size.width.rounded()))×\(Int(size.height.rounded())) CSS px"
+    }
+
+    private static func scalePairText(x: CGFloat, y: CGFloat, suffix: Bool) -> String {
+        let xText = scaleValueText(x)
+        let text: String
+        if abs(x - y) < 0.005 {
+            text = xText
+        } else {
+            text = "\(xText) / \(scaleValueText(y))"
+        }
+        return suffix ? "\(text)×" : text
+    }
+
+    private static func pointLengthText(_ value: CGFloat) -> String {
+        if abs(value.rounded() - value) < 0.05 {
+            return "\(Int(value.rounded()))"
+        }
+        return String(format: "%.1f", locale: Locale(identifier: "en_US_POSIX"), Double(value))
+    }
+
+    private static func scaleValueText(_ value: CGFloat) -> String {
+        if abs(value.rounded() - value) < 0.005 {
+            return "\(Int(value.rounded()))"
+        }
+        return String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), Double(value))
     }
 }
