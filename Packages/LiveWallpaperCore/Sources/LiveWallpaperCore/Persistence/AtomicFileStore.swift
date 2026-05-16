@@ -20,11 +20,11 @@ import Foundation
 /// The store is thread-confined to its actor (typically MainActor) by the
 /// caller; the disk I/O itself is synchronous so callers can reason about
 /// when a save has hit the filesystem.
-struct AtomicFileStore<Value: Codable> {
-    enum StoreError: Error, CustomStringConvertible {
+public struct AtomicFileStore<Value: Codable> {
+    public enum StoreError: Error, CustomStringConvertible {
         case writeFailed(underlying: Error)
 
-        var description: String {
+        public var description: String {
             switch self {
             case .writeFailed(let error):
                 return "AtomicFileStore: write failed — \(error.localizedDescription)"
@@ -36,19 +36,19 @@ struct AtomicFileStore<Value: Codable> {
     /// magnitude above any plausible LiveWallpaper config size, so we'd
     /// rather refuse to decode than block MainActor for seconds on a
     /// malicious or truncated file.
-    static var maxReasonableFileSize: Int { 64 * 1024 * 1024 }
+    public static var maxReasonableFileSize: Int { 64 * 1024 * 1024 }
 
-    let fileURL: URL
-    let backupURL: URL
-    let tempURL: URL
-    let lockURL: URL
+    public let fileURL: URL
+    public let backupURL: URL
+    public let tempURL: URL
+    public let lockURL: URL
 
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
     private let fileManager: FileManager
     private let category: Logger.Category
 
-    init(
+    public init(
         fileURL: URL,
         encoder: JSONEncoder = .configurationEncoder(),
         decoder: JSONDecoder = JSONDecoder(),
@@ -67,14 +67,14 @@ struct AtomicFileStore<Value: Codable> {
 
     /// True if a primary or backup payload exists on disk. Used by the
     /// migration path to decide whether to seed from `UserDefaults`.
-    var hasPersistedValue: Bool {
+    public var hasPersistedValue: Bool {
         fileExists(fileURL) || fileExists(backupURL)
     }
 
     /// Reads the current payload, transparently falling back to the backup
     /// file when the primary is missing or corrupt. Returns `nil` only when
     /// both files are absent or undecodable.
-    func read() -> Value? {
+    public func read() -> Value? {
         if let value = decode(from: fileURL) {
             return value
         }
@@ -107,7 +107,7 @@ struct AtomicFileStore<Value: Codable> {
     /// Throws `StoreError.writeFailed` on any unrecoverable filesystem
     /// error — every path through this function wraps the underlying error
     /// so callers can treat it as a single failure type.
-    func write(_ value: Value) throws {
+    public func write(_ value: Value) throws {
         do {
             try ensureDirectoryExists()
         } catch {
@@ -135,7 +135,7 @@ struct AtomicFileStore<Value: Codable> {
     /// Writes raw bytes — used by migration paths that already have a JSON
     /// blob in `UserDefaults` and want to seed the file store without a
     /// decode/encode round-trip.
-    func writeRaw(_ data: Data) throws {
+    public func writeRaw(_ data: Data) throws {
         do {
             try ensureDirectoryExists()
         } catch {
@@ -151,7 +151,7 @@ struct AtomicFileStore<Value: Codable> {
 
     /// Removes the primary, backup, lock, and any stale tmp files. Used by
     /// the global "clean all settings" path.
-    func delete() {
+    public func delete() {
         for url in [fileURL, backupURL, tempURL, lockURL] where fileExists(url) {
             do {
                 try fileManager.removeItem(at: url)
@@ -316,7 +316,7 @@ extension JSONEncoder {
     /// `outputFormatting` is set to `.sortedKeys` so byte-equality holds
     /// across writes — this is what makes test fixtures stable and the
     /// migration path safe to re-run.
-    static func configurationEncoder() -> JSONEncoder {
+    public static func configurationEncoder() -> JSONEncoder {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         return encoder
