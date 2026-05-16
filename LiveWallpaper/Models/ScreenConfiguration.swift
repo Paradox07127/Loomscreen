@@ -245,7 +245,7 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
         switch source {
         case .url(let url): return url.absoluteString
         case .inline(let raw): return raw
-        case .file, .folder, .webGLRainVideo: return nil
+        case .file, .folder: return nil
         }
     }
 
@@ -406,12 +406,6 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
         activeWallpaper = .html(source: source, config: config)
     }
 
-    mutating func setTransientWebGLRainWallpaper(bookmarkData: Data, config: HTMLConfig) {
-        preserveCurrentVideoBookmarkIfNeeded()
-        savedVideoBookmarkData = bookmarkData
-        activeWallpaper = .html(source: .webGLRainVideo(bookmarkData: bookmarkData), config: config)
-    }
-
     /// Legacy URL/raw-HTML bridge.
     mutating func setHTMLWallpaper(_ content: String) {
         setHTMLWallpaper(source: HTMLSource(legacyString: content), config: .default)
@@ -474,7 +468,6 @@ struct ScreenConfiguration: Codable, Equatable, Sendable {
 
     private mutating func preserveCurrentHTMLIfNeeded() {
         if case .html(let source, let config) = activeWallpaper {
-            if case .webGLRainVideo = source { return }
             savedHTMLSource = source
             savedHTMLConfig = config
         }
