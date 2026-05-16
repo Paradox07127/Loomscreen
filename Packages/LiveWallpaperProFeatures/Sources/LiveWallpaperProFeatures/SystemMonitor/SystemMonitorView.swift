@@ -1,10 +1,13 @@
 import LiveWallpaperCore
+import LiveWallpaperSharedUI
 import SwiftUI
 
-struct SystemMonitorView: View {
+public struct SystemMonitorView: View {
     private var monitor = SystemMonitor.shared
     @State private var powerSource: PowerMonitor.PowerSource = PowerMonitor.shared.currentPowerSource
     @AppStorage("Dashboard.RAMScope") private var ramScopeRaw: String = "system"
+
+    public init() {}
 
     private var ramPercent: Double {
         ramScopeRaw == "app" ? monitor.memoryPercentage() : monitor.systemMemoryUsage * 100
@@ -23,7 +26,7 @@ struct SystemMonitorView: View {
         return Text("Sys: \(FormatUtils.formatBytes(usedBytes)) / \(monitor.formattedTotalMemory())", comment: "Dashboard system memory detail. Placeholders are used and total memory.")
     }
 
-    var body: some View {
+    public var body: some View {
         VStack(spacing: 8) {
             RAMScopePicker(selection: $ramScopeRaw)
 
@@ -172,8 +175,6 @@ struct MiniGaugeCard: View {
                     .font(.system(.caption2, design: .rounded).weight(.bold))
             }
             .offset(y: 18)
-            // Round gauge has a fixed footprint; cap Dynamic Type so the label
-            // does not overflow the 54pt circle at accessibility sizes.
             .dynamicTypeSize(...DynamicTypeSize.large)
         }
         .frame(width: 54, height: 54)
@@ -222,8 +223,6 @@ struct PowerStatusCard: View {
                     .font(.system(.caption2, design: .rounded).weight(.bold))
             }
             .offset(y: 18)
-            // Round gauge has a fixed footprint; cap Dynamic Type so the label
-            // does not overflow the 54pt circle at accessibility sizes.
             .dynamicTypeSize(...DynamicTypeSize.large)
         }
         .frame(width: 54, height: 54)
