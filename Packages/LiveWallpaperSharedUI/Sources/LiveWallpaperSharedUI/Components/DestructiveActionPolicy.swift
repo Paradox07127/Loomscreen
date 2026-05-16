@@ -10,7 +10,7 @@ import SwiftUI
 ///
 /// Attach with `.confirmDestructive($action, perform:)` and trigger by writing
 /// a `DestructiveAction` value into the binding.
-enum DestructiveAction: Identifiable, Equatable {
+public enum DestructiveAction: Identifiable, Equatable {
     case removePlaylistItem(isLast: Bool, displayName: String)
     case clearScene(sceneName: String, displayName: String)
     case removeSceneHistory(sceneName: String)
@@ -30,7 +30,7 @@ enum DestructiveAction: Identifiable, Equatable {
     case applyConfigurationToAllDisplays(otherCount: Int)
     case clearCurrentWallpaper(displayName: String)
 
-    var id: String {
+    public var id: String {
         switch self {
         case .removePlaylistItem(let isLast, let name): return "removePlaylistItem-\(isLast)-\(name)"
         case .clearScene(let s, let d): return "clearScene-\(s)-\(d)"
@@ -53,7 +53,7 @@ enum DestructiveAction: Identifiable, Equatable {
         }
     }
 
-    var title: LocalizedStringKey {
+    public var title: LocalizedStringKey {
         switch self {
         case .removePlaylistItem(let isLast, _):
             return isLast ? "Remove the last playlist item?" : "Remove this playlist item?"
@@ -77,8 +77,7 @@ enum DestructiveAction: Identifiable, Equatable {
         }
     }
 
-    /// Subtitle should mention: what gets removed → what side-effect → what's recoverable.
-    var message: String {
+    public var message: String {
         switch self {
         case .removePlaylistItem(let isLast, let displayName):
             return isLast
@@ -121,7 +120,7 @@ enum DestructiveAction: Identifiable, Equatable {
         }
     }
 
-    var destructiveButtonTitle: LocalizedStringKey {
+    public var destructiveButtonTitle: LocalizedStringKey {
         switch self {
         case .removePlaylistItem(let isLast, _):
             return isLast ? "Remove & Clear" : "Remove"
@@ -144,20 +143,15 @@ enum DestructiveAction: Identifiable, Equatable {
         case .clearCurrentWallpaper:     return "Clear Wallpaper"
         }
     }
-
 }
 
 /// Bundles a `DestructiveAction` with the closure to invoke on confirmation.
-/// Pattern: each callsite builds one of these and assigns it to its
-/// `@State pending: PendingDestructive?`. The view's `.confirmDestructive`
-/// modifier surfaces the native macOS alert and invokes `perform()` on
-/// confirm.
-struct PendingDestructive: Identifiable {
-    let id = UUID()
-    let action: DestructiveAction
-    let perform: () -> Void
+public struct PendingDestructive: Identifiable {
+    public let id = UUID()
+    public let action: DestructiveAction
+    public let perform: () -> Void
 
-    init(_ action: DestructiveAction, perform: @escaping () -> Void) {
+    public init(_ action: DestructiveAction, perform: @escaping () -> Void) {
         self.action = action
         self.perform = perform
     }
@@ -169,7 +163,7 @@ extension View {
     /// the Liquid Glass material — we get the platform look for free,
     /// keep HIG-perfect button placement / destructive tint / keyboard
     /// shortcuts, and stop drifting from system theme refreshes.
-    func confirmDestructive(_ pending: Binding<PendingDestructive?>) -> some View {
+    public func confirmDestructive(_ pending: Binding<PendingDestructive?>) -> some View {
         modifier(DestructiveConfirmationModifier(pending: pending))
     }
 }
