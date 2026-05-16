@@ -10,7 +10,6 @@ struct FilterParameters: Sendable {
     let warmth: Double
     let vignetteIntensity: Double
     let autoTimeTint: Bool
-    let glassRainEffect: Bool
 
     init(from config: VideoEffectConfig) {
         self.blurRadius = config.blurRadius
@@ -19,7 +18,6 @@ struct FilterParameters: Sendable {
         self.warmth = config.warmth
         self.vignetteIntensity = config.vignetteIntensity
         self.autoTimeTint = config.autoTimeTint
-        self.glassRainEffect = config.glassRainEffect
     }
 }
 
@@ -66,14 +64,6 @@ final class VideoEffectsManager {
                 image = f.outputImage ?? image
             }
             
-            if params.glassRainEffect {
-                let rainFilter = RainGlassFilter()
-                rainFilter.inputImage = image
-                rainFilter.inputTime = NSNumber(value: parameters.compositionTime.seconds)
-                rainFilter.inputResolution = CIVector(x: sourceExtent.width, y: sourceExtent.height)
-                image = rainFilter.outputImage ?? image
-            }
-
             if params.saturation != 1.0 || params.brightness != 0, let f = CIFilter(name: "CIColorControls") {
                 f.setValue(image, forKey: kCIInputImageKey)
                 f.setValue(params.saturation, forKey: kCIInputSaturationKey)

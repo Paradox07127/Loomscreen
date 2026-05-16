@@ -81,6 +81,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     // MARK: - Properties
     private let webView: HTMLWebView
     private let folderHandler: FolderURLSchemeHandler
+    private let rainVideoHandler: RainVideoURLSchemeHandler
     private var allowMouseInteraction = false
     private var compiledTrackerRuleList: WKContentRuleList?
     private var hasTrackerRulesAttached = false
@@ -125,7 +126,10 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         // schemes cannot be added after WKWebView init.
         let handler = FolderURLSchemeHandler()
         configuration.setURLSchemeHandler(handler, forURLScheme: FolderURLSchemeHandler.scheme)
+        let rainHandler = RainVideoURLSchemeHandler()
+        configuration.setURLSchemeHandler(rainHandler, forURLScheme: RainVideoURLSchemeHandler.scheme)
         self.folderHandler = handler
+        self.rainVideoHandler = rainHandler
         self.currentDataStoreIsEphemeral = initialEphemeral
         self.pendingEphemeral = initialEphemeral
 
@@ -405,6 +409,11 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             updateWallpaperEnginePropertyBridge(for: nil)
             folderHandler.folderURL = nil
         }
+        if case .webGLRainVideo = source {
+            // videoURL is set below — do not clear here.
+        } else {
+            rainVideoHandler.videoURL = nil
+        }
 
         switch source {
         case .file(let bookmarkData):
@@ -441,6 +450,17 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             webView.load(URLRequest(url: url))
         case .inline(let html):
             webView.loadHTMLString(html, baseURL: nil)
+        case .webGLRainVideo(let bookmarkData):
+            guard let videoURL = HTMLWallpaperView.resolveBookmark(bookmarkData) else {
+                reportError(.sandboxRevoked)
+                return
+            }
+            activeSecurityScopedURL = videoURL
+            rainVideoHandler.videoURL = videoURL
+            webView.loadHTMLString(
+                WebGLRainHTMLTemplate.html(videoURL: RainVideoURLSchemeHandler.currentVideoURL.absoluteString),
+                baseURL: RainVideoURLSchemeHandler.currentVideoURL
+            )
         }
     }
 
@@ -719,6 +739,8 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             webView.configuration.userContentController.remove(list)
             hasTrackerRulesAttached = false
         }
+        folderHandler.folderURL = nil
+        rainVideoHandler.videoURL = nil
         stopActiveSecurityScope()
     }
 
@@ -802,7 +824,8 @@ extension HTMLWallpaperView: WKNavigationDelegate {
             if let url = navigationAction.request.url,
                HTMLWallpaperView.isAllowedRemoteURL(url)
                 || url.isFileURL
-                || url.scheme?.lowercased() == FolderURLSchemeHandler.scheme {
+                || url.scheme?.lowercased() == FolderURLSchemeHandler.scheme
+                || url.scheme?.lowercased() == RainVideoURLSchemeHandler.scheme {
                 decisionHandler(.allow)
             } else {
                 decisionHandler(.cancel)

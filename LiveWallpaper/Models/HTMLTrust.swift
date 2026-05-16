@@ -108,7 +108,7 @@ enum HTMLTrust: Equatable {
     /// Pure verdict — origin membership decided by caller.
     static func evaluate(source: HTMLSource, trustedOrigins: Set<TrustedHTMLOrigin>) -> HTMLTrust {
         switch source {
-        case .file, .folder, .inline:
+        case .file, .folder, .inline, .webGLRainVideo:
             return .localContent
         case .url(let url):
             guard let origin = TrustedHTMLOrigin(url: url) else {

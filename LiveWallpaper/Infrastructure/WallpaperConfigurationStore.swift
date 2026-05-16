@@ -134,6 +134,7 @@ final class WallpaperConfigurationStore {
         case .html(let source, _):
             if case .file = source { return true }
             if case .folder = source { return true }
+            if case .webGLRainVideo = source { return true }
             return false
         case .metalShader:
             return false
