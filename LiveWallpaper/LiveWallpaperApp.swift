@@ -39,10 +39,19 @@ struct AppStartupPlan: Equatable {
     let showSettingsOnLaunch: Bool
 
     init(runtimeOptions: AppRuntimeOptions, onboardingCompleted: Bool) {
+        #if LITE_BUILD
+        screenManagerOptions = ScreenManagerStartupOptions(
+            restoreSavedWallpapers: runtimeOptions.shouldRestoreSavedWallpapers,
+            startAutomation: runtimeOptions.shouldStartAutomation,
+            featureCatalog: FeatureCatalog(capabilities: .lite),
+            originReconciler: PreservingOriginReconciler()
+        )
+        #else
         screenManagerOptions = ScreenManagerStartupOptions(
             restoreSavedWallpapers: runtimeOptions.shouldRestoreSavedWallpapers,
             startAutomation: runtimeOptions.shouldStartAutomation
         )
+        #endif
         refreshScreensAfterManagerCreation = false
         reloadWallpapersAfterLaunch = false
         showOnboarding = runtimeOptions.shouldShowOnboarding && !onboardingCompleted
