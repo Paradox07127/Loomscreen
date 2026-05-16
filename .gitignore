@@ -124,6 +124,8 @@ docs/*
 !docs/legal/**
 !docs/qa/
 !docs/qa/**
+!docs/engineering/
+!docs/engineering/**
 !docs/superpowers/
 docs/superpowers/*
 !docs/superpowers/plans/
