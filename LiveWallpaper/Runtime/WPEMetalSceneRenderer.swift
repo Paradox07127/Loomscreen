@@ -199,12 +199,19 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
     }
 
     private func performLoad() async throws {
+        // Cancellation checkpoints at phase boundaries let unstructured
+        // callers (e.g. the DEBUG corpus-playback harness) actually abort
+        // a long load instead of waiting for it to run to completion. The
+        // production scene-session path is fire-and-forget so these are
+        // benign there.
         onProgress?("Reading scene")
+        try Task.checkCancellation()
         let entryURL = try entryResolver.resolveExistingFileURL(relativePath: descriptor.entryFile)
         let document = try await Task.detached(priority: .userInitiated) {
             let data = try Data(contentsOf: entryURL)
             return try WPESceneDocumentParser.parse(data: data)
         }.value
+        try Task.checkCancellation()
 
         onProgress?("Building render graph")
         let cacheRoot = cacheRootURL
@@ -217,6 +224,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
                 engineAssetsRootURL: engineRoot
             ).build(document: document)
         }.value
+        try Task.checkCancellation()
 
         onProgress?("Preparing render pipeline")
         let pipeline = try await Task.detached(priority: .userInitiated) {
@@ -225,6 +233,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
                 engineAssetsRootURL: engineRoot
             ).build(graph: graph)
         }.value
+        try Task.checkCancellation()
 
         renderGraph = graph
         renderPipeline = pipeline
@@ -236,15 +245,19 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
 
         onProgress?("Loading textures")
         try await loadTextures(for: pipeline)
+        try Task.checkCancellation()
 
         onProgress?("Loading particle systems")
         await loadParticleSystems(from: document)
+        try Task.checkCancellation()
 
         onProgress?("Loading text overlays")
         loadTextOverlays(from: document)
+        try Task.checkCancellation()
 
         onProgress?("Starting audio runtime")
         startSoundRuntime(from: document)
+        try Task.checkCancellation()
 
         onProgress?("Rendering scene")
         outputTexture = try renderCurrentFrame()
@@ -616,6 +629,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         dynamicTextureSources = [:]
 
         for layer in pipeline.layers {
+            try Task.checkCancellation()
             if layer.passes.isEmpty {
                 try await loadTexture(
                     reference: .image(layer.graphLayer.imagePath),
@@ -625,6 +639,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             }
             for preparedPass in layer.passes {
                 for reference in requiredTextureReferences(for: preparedPass) {
+                    try Task.checkCancellation()
                     try await loadTexture(
                         reference: reference,
                         layerName: layer.graphLayer.objectName
