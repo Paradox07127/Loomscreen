@@ -8,37 +8,37 @@ import Foundation
 /// in `WPEOrigin+Behavior.swift` (Phase 4 target: ProWPE package). Keeping
 /// the struct itself dependency-free lets Lite carry the persisted record
 /// round-trip without linking `WPEPathSafety`.
-struct WPEOrigin: Codable, Equatable, Sendable {
-    let workshopID: String
-    let title: String
+public struct WPEOrigin: Codable, Equatable, Sendable {
+    public let workshopID: String
+    public let title: String
     /// Original WPE category (preserved even when runtime maps to .video / .html).
-    let originalType: WPEType
+    public let originalType: WPEType
     /// Security-scoped bookmark to the source `~/Documents/Live Wallpapers/<appid>/<wid>/` folder.
-    let sourceFolderBookmark: Data
+    public let sourceFolderBookmark: Data
     /// Path under the WPE cache root, e.g. `wpe-cache/3351072238`.
     /// Nil for source-folder-backed web imports and unsupported types.
-    var cacheRelativePath: String?
+    public var cacheRelativePath: String?
     /// Preview filename inside the source folder (preview.gif / .jpg / .png).
-    let previewFileName: String?
+    public let previewFileName: String?
     /// Entry file from `project.json` (`video.mp4`, `index.html`, `scene.json`, ...).
-    let entryFile: String?
+    public let entryFile: String?
     /// Explicit runtime backing. Avoids overloading `cacheRelativePath == nil`.
-    let resourceLocation: WPEResourceLocation
+    public let resourceLocation: WPEResourceLocation
     /// Workshop IDs declared by `project.json`; runtime uses these to mount
     /// dependency roots for safe cross-package asset references.
-    var dependencyWorkshopIDs: [String]
+    public var dependencyWorkshopIDs: [String]
     /// Workshop IDs the project declares as dependencies that are NOT
     /// currently available in our cache. Empty unless we successfully
     /// classified the project as unsupported because of missing deps.
     /// Persisted so the fallback card can reproduce the same hint after
     /// app relaunch without re-parsing `project.json`.
-    var missingDependencyIDs: [String]
+    public var missingDependencyIDs: [String]
     /// True when the source folder ships a Windows `.dll` plugin under
     /// `bin/`. Such projects can never run on macOS; the inspector shows
     /// a permanent "won't run" badge instead of a generic error.
-    var requiresWindowsPlugin: Bool
+    public var requiresWindowsPlugin: Bool
 
-    init(
+    public init(
         workshopID: String,
         title: String,
         originalType: WPEType,
@@ -81,7 +81,7 @@ struct WPEOrigin: Codable, Equatable, Sendable {
         case requiresWindowsPlugin
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         workshopID = try container.decode(String.self, forKey: .workshopID)
         title = try container.decode(String.self, forKey: .title)
@@ -99,14 +99,14 @@ struct WPEOrigin: Codable, Equatable, Sendable {
         requiresWindowsPlugin = (try? container.decodeIfPresent(Bool.self, forKey: .requiresWindowsPlugin)) ?? false
     }
 
-    var localizedDisplayTypeName: String {
+    public var localizedDisplayTypeName: String {
         originalType.localizedDisplayName
     }
 
     /// Pure-data default resolver — only inspects `originalType` and the
     /// presence of `cacheRelativePath`. Kept on the schema struct because
     /// both inits need it; never touches `WPEPathSafety`.
-    static func defaultResourceLocation(
+    public static func defaultResourceLocation(
         originalType: WPEType,
         cacheRelativePath: String?
     ) -> WPEResourceLocation {
@@ -121,21 +121,21 @@ struct WPEOrigin: Codable, Equatable, Sendable {
 }
 
 /// Runtime backing for a Wallpaper Engine import.
-enum WPEResourceLocation: String, Codable, Equatable, Sendable {
+public enum WPEResourceLocation: String, Codable, Equatable, Sendable {
     case cache
     case sourceFolder
     case unsupported
 }
 
 /// WPE workshop project category, decoded from `project.json`'s `type` field.
-enum WPEType: String, Codable, Equatable, Sendable {
+public enum WPEType: String, Codable, Equatable, Sendable {
     case video
     case web
     case scene
     case application
     case unknown
 
-    init(rawWPEValue raw: String?) {
+    public init(rawWPEValue raw: String?) {
         switch raw?.lowercased() {
         case "video":       self = .video
         case "web":         self = .web
@@ -145,7 +145,7 @@ enum WPEType: String, Codable, Equatable, Sendable {
         }
     }
 
-    var localizedDisplayName: String {
+    public var localizedDisplayName: String {
         switch self {
         case .video:
             return String(localized: "Video", defaultValue: "Video", comment: "Wallpaper Engine project type.")

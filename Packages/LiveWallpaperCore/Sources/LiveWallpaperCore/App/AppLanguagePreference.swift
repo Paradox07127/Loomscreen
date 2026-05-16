@@ -1,16 +1,16 @@
 import Foundation
 import SwiftUI
 
-enum AppLanguagePreference: String, CaseIterable, Identifiable {
+public enum AppLanguagePreference: String, CaseIterable, Identifiable, Sendable {
     case system
     case english = "en"
     case simplifiedChinese = "zh-Hans"
 
-    static let storageKey = "AppLanguage.Preference"
+    public static let storageKey = "AppLanguage.Preference"
 
-    var id: String { rawValue }
+    public var id: String { rawValue }
 
-    var localeIdentifier: String? {
+    public var localeIdentifier: String? {
         switch self {
         case .system:
             return nil
@@ -19,11 +19,11 @@ enum AppLanguagePreference: String, CaseIterable, Identifiable {
         }
     }
 
-    var locale: Locale {
+    public var locale: Locale {
         localeIdentifier.map(Locale.init(identifier:)) ?? .autoupdatingCurrent
     }
 
-    var titleKey: LocalizedStringKey {
+    public var titleKey: LocalizedStringKey {
         switch self {
         case .system:
             return "Follow System"
@@ -34,14 +34,14 @@ enum AppLanguagePreference: String, CaseIterable, Identifiable {
         }
     }
 
-    static var current: AppLanguagePreference {
+    public static var current: AppLanguagePreference {
         guard let rawValue = UserDefaults.standard.string(forKey: storageKey) else {
             return .system
         }
         return AppLanguagePreference(rawValue: rawValue) ?? .system
     }
 
-    static func save(_ preference: AppLanguagePreference) {
+    public static func save(_ preference: AppLanguagePreference) {
         if preference == .system {
             UserDefaults.standard.removeObject(forKey: storageKey)
         } else {
@@ -50,16 +50,16 @@ enum AppLanguagePreference: String, CaseIterable, Identifiable {
     }
 }
 
-struct AppLanguageScope<Content: View>: View {
+public struct AppLanguageScope<Content: View>: View {
     @AppStorage(AppLanguagePreference.storageKey) private var rawPreference = AppLanguagePreference.system.rawValue
 
     private let content: Content
 
-    init(@ViewBuilder content: () -> Content) {
+    public init(@ViewBuilder content: () -> Content) {
         self.content = content()
     }
 
-    var body: some View {
+    public var body: some View {
         content.environment(\.locale, preference.locale)
     }
 
@@ -69,7 +69,7 @@ struct AppLanguageScope<Content: View>: View {
 }
 
 extension View {
-    func appLanguageScoped() -> some View {
+    public func appLanguageScoped() -> some View {
         AppLanguageScope {
             self
         }
