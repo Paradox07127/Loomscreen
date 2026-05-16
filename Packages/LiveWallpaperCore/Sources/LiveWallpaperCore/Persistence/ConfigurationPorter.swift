@@ -1,8 +1,12 @@
 import Foundation
 
-/// Exports the user's current configuration to a `.lwconfig` JSON file and
-/// imports it back. Stateless — all reads/writes go through `SettingsManager`
-/// so the rest of the app sees a single source of truth.
+/// Stateless encode / decode helpers for the `.lwconfig` JSON bundle format.
+///
+/// The main target supplies thin wrappers in
+/// `LiveWallpaper/Infrastructure/ConfigurationPorter+SettingsBridge.swift`
+/// that read SettingsManager into a bundle (`currentBundle()`) and apply a
+/// decoded bundle back through SettingsManager + BookmarkStore.shared
+/// (`apply(_:)`). The Core surface stays free of either.
 ///
 /// Limitations the UI must communicate:
 /// - Security-scoped bookmarks (video files, HTML folders, the Workshop
@@ -11,14 +15,14 @@ import Foundation
 ///   reselect the actual files. This is a macOS-level constraint, not a
 ///   bug in the porter.
 @MainActor
-enum ConfigurationPorter {
-    enum ImportError: Error, LocalizedError {
+public enum ConfigurationPorter {
+    public enum ImportError: Error, LocalizedError {
         case invalidFile(reason: String)
         case fileTooLarge(bytes: Int)
         case unsupportedSchemaVersion(found: Int, supported: Int)
         case bundleMismatch(expected: String, found: String)
 
-        var errorDescription: String? {
+        public var errorDescription: String? {
             switch self {
             case .invalidFile(let reason):
                 return String(
@@ -48,35 +52,24 @@ enum ConfigurationPorter {
     /// with large playlists; anything bigger is either malicious or not
     /// actually a config bundle. Keeps `decode` from blocking MainActor for
     /// seconds on a hostile file.
-    static let maxImportFileSize: Int = 16 * 1024 * 1024
-
-    /// Snapshots the current state into a `ConfigurationBundle`. Reads run
-    /// through `SettingsManager` so caches stay consistent.
-    static func currentBundle() -> ConfigurationBundle {
-        let manager = SettingsManager.shared
-        return ConfigurationBundle(
-            screenConfigurations: manager.loadConfigurations(),
-            globalSettings: manager.loadGlobalSettings(),
-            wallpaperBookmarks: manager.loadWallpaperBookmarks()
-        )
-    }
+    public static let maxImportFileSize: Int = 16 * 1024 * 1024
 
     /// Encodes the bundle to pretty-printed JSON so users who open the file
     /// in a text editor see readable content. `sortedKeys` keeps diffs
     /// stable between exports.
-    static func encode(_ bundle: ConfigurationBundle) throws -> Data {
+    public static func encode(_ bundle: ConfigurationBundle) throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
         return try encoder.encode(bundle)
     }
 
-    /// Writes the bundle to `destination` atomically. Returns the URL on
+    /// Writes a bundle to `destination` atomically. Returns the URL on
     /// success. The caller is responsible for security-scoped resource
     /// access if `destination` was returned by `NSSavePanel`.
     @discardableResult
-    static func export(to destination: URL) throws -> URL {
-        let data = try encode(currentBundle())
+    public static func export(_ bundle: ConfigurationBundle, to destination: URL) throws -> URL {
+        let data = try encode(bundle)
         try data.write(to: destination, options: [.atomic])
         Logger.info(
             "Configuration exported to \(destination.lastPathComponent) (\(data.count) bytes)",
@@ -88,7 +81,7 @@ enum ConfigurationPorter {
     /// Decodes (but does NOT apply) a bundle for preview / dialog purposes.
     /// Enforces a size cap so a hostile or accidental enormous file can't
     /// freeze MainActor while we read it.
-    static func decode(from source: URL) throws -> ConfigurationBundle {
+    public static func decode(from source: URL) throws -> ConfigurationBundle {
         // Cheap size check before reading the bytes.
         if let size = try? source.resourceValues(forKeys: [.fileSizeKey]).fileSize,
            size > maxImportFileSize {
@@ -143,49 +136,23 @@ enum ConfigurationPorter {
     /// section through its own localized format string so we never have to
     /// build a sentence with manual `joined(separator:)` (which would break
     /// RTL languages and prevent translators from reordering phrases).
-    struct ApplySummary: Sendable {
-        var displayCount: Int?
-        var bookmarkCount: Int?
-        var didRestoreGlobalSettings: Bool
+    public struct ApplySummary: Sendable {
+        public var displayCount: Int?
+        public var bookmarkCount: Int?
+        public var didRestoreGlobalSettings: Bool
 
-        var isEmpty: Bool {
+        public init(displayCount: Int? = nil, bookmarkCount: Int? = nil, didRestoreGlobalSettings: Bool = false) {
+            self.displayCount = displayCount
+            self.bookmarkCount = bookmarkCount
+            self.didRestoreGlobalSettings = didRestoreGlobalSettings
+        }
+
+        public var isEmpty: Bool {
             displayCount == nil && bookmarkCount == nil && !didRestoreGlobalSettings
         }
     }
 
-    /// Applies a decoded bundle. Each section is independently optional so
-    /// partial exports work. Returns a structured summary so the UI can
-    /// render a fully localized success message without string surgery.
-    @discardableResult
-    static func apply(_ bundle: ConfigurationBundle) -> ApplySummary {
-        let manager = SettingsManager.shared
-        var summary = ApplySummary(displayCount: nil, bookmarkCount: nil, didRestoreGlobalSettings: false)
-
-        if let configurations = bundle.screenConfigurations {
-            manager.replaceAllConfigurations(configurations)
-            summary.displayCount = configurations.count
-        }
-
-        if let global = bundle.globalSettings {
-            manager.saveGlobalSettings(global)
-            summary.didRestoreGlobalSettings = true
-        }
-
-        if let bookmarks = bundle.wallpaperBookmarks {
-            manager.saveWallpaperBookmarks(bookmarks)
-            BookmarkStore.shared.reload()
-            summary.bookmarkCount = bookmarks.count
-        }
-
-        Logger.info(
-            "Configuration import applied (displays=\(summary.displayCount ?? 0), global=\(summary.didRestoreGlobalSettings), bookmarks=\(summary.bookmarkCount ?? 0))",
-            category: .settings
-        )
-
-        return summary
-    }
-
-    static func suggestedExportFileName(now: Date = Date()) -> String {
+    public static func suggestedExportFileName(now: Date = Date()) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withYear, .withMonth, .withDay]
         let stamp = formatter.string(from: now).replacingOccurrences(of: "-", with: "")
