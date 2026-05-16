@@ -438,6 +438,10 @@
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/ThirdParty",
+				);
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LiveWallpaperInfo.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -478,6 +482,10 @@
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/ThirdParty",
+				);
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LiveWallpaperInfo.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
