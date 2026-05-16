@@ -966,10 +966,13 @@ struct ScreenDetailView: View {
         if let config = screenManager.getConfiguration(for: screen),
            config.wallpaperType == .video,
            let bookmarkData = config.videoBookmarkData {
-            guard let resolution = try? ResourceUtilities.resolveBookmark(bookmarkData) else { return nil }
-            let url = resolution.url
-            if resolution.isStale, let refreshed = ResourceUtilities.createVideoBookmark(for: url) {
-                screenManager.replaceActiveBookmark(refreshed, for: screen)
+            guard case .success(let resolved) = SecurityScopedBookmarkResolver.shared.resolve(
+                bookmarkData,
+                target: .transient
+            ) else { return nil }
+            let url = resolved.url
+            if resolved.didRefresh {
+                screenManager.replaceActiveBookmark(resolved.bookmarkData, for: screen)
             }
             return url
         }

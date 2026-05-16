@@ -187,8 +187,13 @@ final class WallpaperAutomationOrchestrator {
         guard cursor < combined.count else { return }
         let targetBookmark = combined[cursor]
 
-        guard let url = try? ResourceUtilities.resolveBookmark(targetBookmark).url else { return }
-        recordBookmarkDisplayName(targetBookmark, url.lastPathComponent)
+        guard case .success(let resolved) = SecurityScopedBookmarkResolver.shared.resolve(
+            targetBookmark,
+            target: .transient
+        ) else { return }
+        let url = resolved.url
+        let resolvedBookmark = resolved.bookmarkData
+        recordBookmarkDisplayName(resolvedBookmark, url.lastPathComponent)
 
         let screenID = screen.id
         let generation = bumpTransition(screenID)
@@ -203,7 +208,10 @@ final class WallpaperAutomationOrchestrator {
                           let liveScreen = self.screensProvider().first(where: { $0.id == screenID }),
                           var liveConfig = self.configurationStore.get(for: screenID) else { return }
                     liveConfig.playlistCursorIndex = cursor
-                    liveConfig.activeWallpaper = .video(bookmarkData: targetBookmark)
+                    liveConfig.activeWallpaper = .video(bookmarkData: resolvedBookmark)
+                    if resolved.didRefresh {
+                        self.replacePlaylistBookmark(in: &liveConfig, cursor: cursor, bookmarkData: resolvedBookmark)
+                    }
                     self.saveConfiguration(liveConfig)
                     Logger.info("Playlist: \(label) to \(url.lastPathComponent) (cursor \(cursor)) for screen \(screenID)", category: .screenManager)
                     self.releaseRuntimeSession(liveScreen)
@@ -262,8 +270,13 @@ final class WallpaperAutomationOrchestrator {
         for screen: Screen,
         mutate: @escaping (inout ScreenConfiguration) -> Void
     ) {
-        guard let url = try? ResourceUtilities.resolveBookmark(bookmark).url else { return }
-        recordBookmarkDisplayName(bookmark, url.lastPathComponent)
+        guard case .success(let resolved) = SecurityScopedBookmarkResolver.shared.resolve(
+            bookmark,
+            target: .transient
+        ) else { return }
+        let url = resolved.url
+        let resolvedBookmark = resolved.bookmarkData
+        recordBookmarkDisplayName(resolvedBookmark, url.lastPathComponent)
 
         let screenID = screen.id
         let generation = bumpTransition(screenID)
@@ -279,6 +292,9 @@ final class WallpaperAutomationOrchestrator {
                           var liveConfig = self.configurationStore.get(for: screenID) else { return }
                     Logger.info("Schedule: \(logLabel) for screen \(screenID)", category: .screenManager)
                     mutate(&liveConfig)
+                    if resolved.didRefresh {
+                        self.replaceScheduledBookmark(in: &liveConfig, original: bookmark, refreshed: resolvedBookmark)
+                    }
                     self.saveConfiguration(liveConfig)
                     self.releaseRuntimeSession(liveScreen)
                     self.setupVideoPlayback(url, liveScreen)
@@ -309,5 +325,38 @@ final class WallpaperAutomationOrchestrator {
                 self?.advancePlaylist(for: screen)
             }
         )
+    }
+
+    private func replacePlaylistBookmark(
+        in config: inout ScreenConfiguration,
+        cursor: Int,
+        bookmarkData: Data
+    ) {
+        if cursor == 0 {
+            config.savedVideoBookmarkData = bookmarkData
+        } else if var additional = config.playlistBookmarks,
+                  additional.indices.contains(cursor - 1) {
+            additional[cursor - 1] = bookmarkData
+            config.playlistBookmarks = additional
+        }
+    }
+
+    private func replaceScheduledBookmark(
+        in config: inout ScreenConfiguration,
+        original: Data,
+        refreshed: Data
+    ) {
+        if config.savedVideoBookmarkData == original {
+            config.savedVideoBookmarkData = refreshed
+        }
+
+        if var slots = config.scheduleSlots {
+            for index in slots.indices where slots[index].videoBookmarkData == original {
+                slots[index].videoBookmarkData = refreshed
+            }
+            config.scheduleSlots = slots
+        }
+
+        config.activeWallpaper = .video(bookmarkData: refreshed)
     }
 }
