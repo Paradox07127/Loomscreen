@@ -584,6 +584,16 @@ private struct WPEShaderSourceLoader: Sendable {
     }
 
     private func shaderPrelude(comboValues: [String: Int], stage: WPEShaderStage) -> String {
+        // GLSL math-constant macros that WPE workshop shaders rely on.
+        // Neither GLSL nor Metal expose them as identifiers, so we replace
+        // them at the preprocessor stage before transpilation runs. Values
+        // match `<math.h>` to keep parity with desktop WPE builds.
+        //
+        // `atan2` is intentionally NOT redefined: the previous `#define atan2
+        // atan` collapsed two-argument calls to Metal's single-argument
+        // `atan`, breaking every workshop shader that uses polar coordinates.
+        // Metal has a native `atan2(y, x)` that the transpilation pipeline
+        // passes through unchanged, so the macro is unnecessary.
         var lines = [
             "// LiveWallpaper WPE shader prelude",
             "#define GLSL 1",
@@ -597,12 +607,23 @@ private struct WPEShaderSourceLoader: Sendable {
             "#define texture2D texture",
             "#define ddx dFdx",
             "#define ddy dFdy",
-            "#define atan2 atan",
             "#define fmod(x, y) ((x) - (y) * trunc((x) / (y)))",
             "#define CAST2(x) (vec2(x))",
             "#define CAST3(x) (vec3(x))",
             "#define CAST4(x) (vec4(x))",
-            "#define CAST3X3(x) (mat3(x))"
+            "#define CAST3X3(x) (mat3(x))",
+            "#ifndef M_PI",
+            "#define M_PI 3.14159265358979323846",
+            "#endif",
+            "#ifndef M_PI_2",
+            "#define M_PI_2 1.57079632679489661923",
+            "#endif",
+            "#ifndef M_PI_4",
+            "#define M_PI_4 0.78539816339744830962",
+            "#endif",
+            "#ifndef M_E",
+            "#define M_E 2.71828182845904523536",
+            "#endif"
         ]
         switch stage {
         case .vertex:
