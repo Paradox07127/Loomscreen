@@ -50,7 +50,21 @@ final class WPEMetalRenderExecutor {
         // Phase 2D-H: default to the Swift transpiler, falling back to the
         // stub if a caller wants to opt out (tests). Production now goes
         // through the real translator path.
-        self.shaderCompiler = shaderCompiler ?? WPESwiftShaderCompiler(device: device)
+        //
+        // Phase 2b seam: when the vendored glslang+SPIRV-Cross XCFramework
+        // is linked (see `WPESPIRVShaderCompiler.isToolchainAvailable()`),
+        // prefer it and use the Swift transpiler as a fall-through. Builds
+        // without the framework keep the existing behaviour because the
+        // toolchain check returns false statically — no runtime cost.
+        self.shaderCompiler = shaderCompiler ?? Self.preferredCompiler(device: device)
+    }
+
+    private static func preferredCompiler(device: MTLDevice) -> any WPEShaderCompiling {
+        let swiftTranspiler = WPESwiftShaderCompiler(device: device)
+        if WPESPIRVShaderCompiler.isToolchainAvailable() {
+            return WPESPIRVShaderCompiler(device: device, fallback: swiftTranspiler)
+        }
+        return swiftTranspiler
     }
 
     /// Phase 2E: lets `WPEMetalSceneRenderer` hand the executor's MTLDevice
