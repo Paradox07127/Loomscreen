@@ -4,11 +4,11 @@ import Observation
 
 /// Detects when a full-screen app covers a display.
 @MainActor @Observable
-final class FullScreenDetector {
+public final class FullScreenDetector {
 
     // MARK: - Observed State
 
-    private(set) var hiddenScreens: [CGDirectDisplayID: Bool] = [:]
+    public private(set) var hiddenScreens: [CGDirectDisplayID: Bool] = [:]
 
     // MARK: - Private Properties
 
@@ -18,7 +18,7 @@ final class FullScreenDetector {
 
     // MARK: - Initialization
 
-    init(pollInterval: TimeInterval = 30.0) {
+    public init(pollInterval: TimeInterval = 30.0) {
         self.pollInterval = pollInterval
         setupNotifications()
         checkFullScreenState()
@@ -42,11 +42,11 @@ final class FullScreenDetector {
             .store(in: &cancellables)
     }
 
-    var isFallbackPollingEnabled: Bool {
+    public var isFallbackPollingEnabled: Bool {
         pollTimer != nil
     }
 
-    func setFallbackPollingEnabled(_ enabled: Bool) {
+    public func setFallbackPollingEnabled(_ enabled: Bool) {
         if enabled {
             startPollingIfNeeded()
             checkFullScreenState()
@@ -68,7 +68,7 @@ final class FullScreenDetector {
         pollTimer = nil
     }
 
-    func stop() {
+    public func stop() {
         stopPolling()
         cancellables.removeAll()
     }
@@ -154,11 +154,11 @@ final class FullScreenDetector {
 
     // MARK: - Public API
 
-    func isDesktopHidden(for screenID: CGDirectDisplayID) -> Bool {
+    public func isDesktopHidden(for screenID: CGDirectDisplayID) -> Bool {
         hiddenScreens[screenID] ?? false
     }
 
-    func checkNow() {
+    public func checkNow() {
         checkFullScreenState()
     }
 }
