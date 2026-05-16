@@ -345,6 +345,21 @@ final class WPEMetalRenderExecutor {
             avoiding: readsCurrentTarget ? previousTextureForTarget : nil
         )
 
+        // _rt_FullFrameBuffer ↔ scene aliasing hazard: when the pass targets
+        // .scene AND samples _rt_FullFrameBuffer (which our resolver redirects
+        // to the scene texture), Metal would read and write the same texture
+        // in one encoder. Snapshot the current scene into a dedicated pool
+        // slot before encoding so the resolver finds an explicit texture in
+        // `latestNamedTextures` and the redirect never fires.
+        try snapshotFullFrameBufferIfAliasingScene(
+            pass: pass,
+            destinationTexture: destination.texture,
+            targetID: targetID,
+            layer: layer,
+            commandBuffer: commandBuffer,
+            frameState: &frameState
+        )
+
         // Phase 2C audit fix: when ping-pong allocates a fresh secondary
         // texture for `.previous`, copy the prior contents in so blend /
         // cull / depth-rejected fragments do not see uninitialised memory.
@@ -401,6 +416,42 @@ final class WPEMetalRenderExecutor {
 
         encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
         frameState.registerWrite(texture: destination.texture, targetID: destination.id)
+    }
+
+    /// Breaks the `_rt_FullFrameBuffer` ↔ scene aliasing hazard. The
+    /// fbo-resolver redirects `.fbo("_rt_FullFrameBuffer")` to the scene
+    /// output texture when no explicit named-texture exists, which lets
+    /// post-process effects sample the composed scene. But if the SAME
+    /// pass also targets `.scene`, the read and write would collide on one
+    /// texture. Pre-encoding a snapshot into a pool-managed slot named
+    /// `_rt_FullFrameBuffer` resolves both sides: the resolver now finds
+    /// the snapshot in `latestNamedTextures` and never falls through to
+    /// the scene texture.
+    private func snapshotFullFrameBufferIfAliasingScene(
+        pass: WPEPreparedRenderPass,
+        destinationTexture: MTLTexture,
+        targetID: WPEMetalTargetID,
+        layer: WPERenderLayer,
+        commandBuffer: MTLCommandBuffer,
+        frameState: inout WPEMetalFrameState
+    ) throws {
+        let alias = "_rt_FullFrameBuffer"
+        guard targetID == .scene,
+              frameState.latestNamedTextures[alias] == nil,
+              textureReferences(for: pass).contains(.fbo(alias)) else {
+            return
+        }
+        let snapshot = try targetPool.texture(
+            for: .fbo(name: alias),
+            layer: layer,
+            sceneSize: frameState.sceneSize,
+            avoiding: destinationTexture
+        )
+        if let source = frameState.latestSceneTexture {
+            try copyTexture(source, to: snapshot, commandBuffer: commandBuffer)
+            frameState.markInitialized(snapshot)
+        }
+        frameState.latestNamedTextures[alias] = snapshot
     }
 
     /// Phase 2C audit fix: blit-copies a prior physical texture into the
