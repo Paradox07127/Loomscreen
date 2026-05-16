@@ -7,11 +7,13 @@ import Combine
 /// `PlaybackTransitionRegistry`. Intentionally not actor-isolated because
 /// the registry's MainActor isolation already serialises access, and the
 /// nonisolated cancellation lets `deinit` clean up safely.
-final class AssetReadinessWork {
-    var frameRateSubscription: AnyCancellable?
-    var fallbackTask: Task<Void, Never>?
+public final class AssetReadinessWork {
+    public var frameRateSubscription: AnyCancellable?
+    public var fallbackTask: Task<Void, Never>?
 
-    func cancel() {
+    public init() {}
+
+    public func cancel() {
         frameRateSubscription?.cancel()
         frameRateSubscription = nil
         fallbackTask?.cancel()
@@ -31,22 +33,24 @@ final class AssetReadinessWork {
 /// state at a time to a coordinator) on a low-risk surface before tackling
 /// the full playback API surface.
 @MainActor
-final class PlaybackTransitionRegistry {
+public final class PlaybackTransitionRegistry {
     private var generationByScreen: [CGDirectDisplayID: Int] = [:]
     private var assetReadinessByScreen: [CGDirectDisplayID: AssetReadinessWork] = [:]
 
+    public init() {}
+
     @discardableResult
-    func bumpTransition(for screenID: CGDirectDisplayID) -> Int {
+    public func bumpTransition(for screenID: CGDirectDisplayID) -> Int {
         let next = (generationByScreen[screenID] ?? 0) &+ 1
         generationByScreen[screenID] = next
         return next
     }
 
-    func isCurrentTransition(_ generation: Int, for screenID: CGDirectDisplayID) -> Bool {
+    public func isCurrentTransition(_ generation: Int, for screenID: CGDirectDisplayID) -> Bool {
         generationByScreen[screenID] == generation
     }
 
-    func cancelAssetReadiness(for screenID: CGDirectDisplayID) {
+    public func cancelAssetReadiness(for screenID: CGDirectDisplayID) {
         assetReadinessByScreen[screenID]?.cancel()
         assetReadinessByScreen[screenID] = nil
     }
@@ -55,7 +59,7 @@ final class PlaybackTransitionRegistry {
     /// in-flight work first. Returns the freshly stored value so callers can
     /// hold a reference for `clearAssetReadinessIfMatch`.
     @discardableResult
-    func setAssetReadiness(_ work: AssetReadinessWork, for screenID: CGDirectDisplayID) -> AssetReadinessWork {
+    public func setAssetReadiness(_ work: AssetReadinessWork, for screenID: CGDirectDisplayID) -> AssetReadinessWork {
         assetReadinessByScreen[screenID]?.cancel()
         assetReadinessByScreen[screenID] = work
         return work
@@ -64,7 +68,7 @@ final class PlaybackTransitionRegistry {
     /// Used when an asset-readiness callback finishes naturally — only
     /// removes the slot if the same work instance is still installed (a
     /// later transition may have replaced it).
-    func clearAssetReadinessIfMatch(_ work: AssetReadinessWork, for screenID: CGDirectDisplayID) {
+    public func clearAssetReadinessIfMatch(_ work: AssetReadinessWork, for screenID: CGDirectDisplayID) {
         if assetReadinessByScreen[screenID] === work {
             assetReadinessByScreen[screenID] = nil
         }
