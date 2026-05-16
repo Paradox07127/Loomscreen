@@ -268,6 +268,8 @@ class RainGlassFilter: CIFilter, @unchecked Sendable {
     @objc dynamic var inputTime: NSNumber = 0.0
     @objc dynamic var inputResolution: CIVector = CIVector(x: 1920, y: 1080)
 
+    private static let maximumRenderDimension = 16_384
+
     private static let renderer: RainGlassMetalRenderer? = {
         guard let device = MTLCreateSystemDefaultDevice() else {
             Logger.error("RainGlassFilter: Metal is unavailable", category: .videoPlayer)
@@ -276,19 +278,42 @@ class RainGlassFilter: CIFilter, @unchecked Sendable {
         return RainGlassMetalRenderer(device: device)
     }()
 
+    static func renderDimensions(inputResolution: CIVector, inputExtent: CGRect) -> (width: Int, height: Int)? {
+        guard let width = renderDimension(preferred: inputResolution.x, fallback: inputExtent.width),
+              let height = renderDimension(preferred: inputResolution.y, fallback: inputExtent.height)
+        else {
+            return nil
+        }
+        return (width, height)
+    }
+
+    private static func renderDimension(preferred: CGFloat, fallback: CGFloat) -> Int? {
+        sanitizedDimension(preferred) ?? sanitizedDimension(fallback)
+    }
+
+    private static func sanitizedDimension(_ value: CGFloat) -> Int? {
+        guard value.isFinite else { return nil }
+        let rounded = value.rounded()
+        guard rounded >= 1, rounded <= CGFloat(maximumRenderDimension) else { return nil }
+        return Int(rounded)
+    }
+
     override var outputImage: CIImage? {
         guard let inputImage else { return nil }
         guard let renderer = Self.renderer else { return inputImage }
 
-        let extent = inputImage.extent
-        let width = max(Int(inputResolution.x.rounded()), Int(extent.width.rounded()), 1)
-        let height = max(Int(inputResolution.y.rounded()), Int(extent.height.rounded()), 1)
+        guard let dimensions = Self.renderDimensions(
+            inputResolution: inputResolution,
+            inputExtent: inputImage.extent
+        ) else {
+            return inputImage
+        }
 
         return renderer.render(
             inputImage: inputImage,
             time: inputTime.floatValue,
-            width: width,
-            height: height
+            width: dimensions.width,
+            height: dimensions.height
         ) ?? inputImage
     }
 }

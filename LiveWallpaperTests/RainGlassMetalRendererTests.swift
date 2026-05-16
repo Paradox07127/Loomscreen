@@ -11,6 +11,32 @@ struct RainGlassMetalRendererTests {
         #expect(RainGlassMetalRenderer.inFlightTextureCount == 3)
     }
 
+    @Test("Filter dimensions ignore infinite clamped input extent")
+    func filterDimensionsIgnoreInfiniteClampedExtent() throws {
+        let input = CIImage(color: CIColor(red: 0.2, green: 0.4, blue: 0.8, alpha: 1))
+            .cropped(to: CGRect(x: 0, y: 0, width: 96, height: 64))
+            .clampedToExtent()
+
+        let dimensions = try #require(RainGlassFilter.renderDimensions(
+            inputResolution: CIVector(x: 96, y: 64),
+            inputExtent: input.extent
+        ))
+
+        #expect(dimensions.width == 96)
+        #expect(dimensions.height == 64)
+    }
+
+    @Test("Filter dimensions fall back to finite extent when resolution is invalid")
+    func filterDimensionsFallBackToFiniteExtent() throws {
+        let dimensions = try #require(RainGlassFilter.renderDimensions(
+            inputResolution: CIVector(x: .infinity, y: .nan),
+            inputExtent: CGRect(x: 0, y: 0, width: 320, height: 180)
+        ))
+
+        #expect(dimensions.width == 320)
+        #expect(dimensions.height == 180)
+    }
+
     @Test("Renderer returns an image cropped to the requested extent")
     func rendererReturnsRequestedExtent() throws {
         guard let device = MTLCreateSystemDefaultDevice() else { return }
