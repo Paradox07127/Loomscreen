@@ -1,9 +1,41 @@
+import CoreGraphics
 import Foundation
+import ImageIO
 import Testing
+import UniformTypeIdentifiers
 @testable import LiveWallpaper
 
 @Suite("WPETexDecoder texture payload extraction")
 struct WPETexTexturePayloadTests {
+
+    @Test("Bridges TEXB-encoded PNG payload to RGBA8888 for Metal upload")
+    func bridgesEncodedPNGPayloadToRGBA8888() throws {
+        // Synthesise a 4×4 solid-red PNG, wrap it as a WPE .tex file whose
+        // TEXB block declares an encoded image payload. Before the bridge
+        // this returned .unsupportedFormat(code: 0) — the failure mode
+        // that blocked ~80% of workshop scenes in the Phase A.3 corpus
+        // baseline.
+        let png = try makeSolidColorPNG(width: 4, height: 4, red: 255, green: 0, blue: 0, alpha: 255)
+        let tex = makeImage(
+            width: 4,
+            height: 4,
+            formatCode: WPETexFormat.rgba8888.rawValue,
+            payload: png,
+            sourceImageFormatCode: 0
+        )
+
+        let extracted = try WPETexDecoder().extractTexturePayload(data: tex).get()
+
+        #expect(extracted.info.format == .rgba8888)
+        let mip = try #require(extracted.largestMipmap)
+        #expect(mip.width == 4)
+        #expect(mip.height == 4)
+        #expect(mip.bytes.count == 4 * 4 * 4)
+        // First pixel should be opaque red after rasterisation.
+        let firstPixel = Array(mip.bytes.prefix(4))
+        #expect(firstPixel[0] == 0xFF, "R channel should be 0xFF for the solid-red fixture")
+        #expect(firstPixel[3] == 0xFF, "A channel should be 0xFF for the solid-red fixture")
+    }
 
     @Test("Extracts raw RGBA8888 mip payload without creating CGImage")
     func extractsRGBA8888Payload() throws {
@@ -66,7 +98,8 @@ struct WPETexTexturePayloadTests {
         formatCode: Int,
         payload: Data,
         isLZ4Compressed: Bool = false,
-        decompressedByteCount: Int? = nil
+        decompressedByteCount: Int? = nil,
+        sourceImageFormatCode: Int = -1
     ) -> Data {
         var buffer = Data()
         appendMagic(&buffer, magic: "TEXV0005")
@@ -81,7 +114,7 @@ struct WPETexTexturePayloadTests {
 
         appendMagic(&buffer, magic: "TEXB0003")
         appendInt32(&buffer, 1)
-        appendInt32(&buffer, -1)
+        appendInt32(&buffer, Int32(sourceImageFormatCode))
         appendInt32(&buffer, 1)
         appendInt32(&buffer, Int32(width))
         appendInt32(&buffer, Int32(height))
@@ -90,6 +123,58 @@ struct WPETexTexturePayloadTests {
         appendUInt32(&buffer, UInt32(payload.count))
         buffer.append(payload)
         return buffer
+    }
+
+    private func makeSolidColorPNG(
+        width: Int,
+        height: Int,
+        red: UInt8,
+        green: UInt8,
+        blue: UInt8,
+        alpha: UInt8
+    ) throws -> Data {
+        let bytesPerPixel = 4
+        let bytesPerRow = width * bytesPerPixel
+        var pixels = Data(count: bytesPerRow * height)
+        pixels.withUnsafeMutableBytes { buffer in
+            guard let base = buffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
+            for y in 0..<height {
+                for x in 0..<width {
+                    let offset = y * bytesPerRow + x * bytesPerPixel
+                    base[offset]     = red
+                    base[offset + 1] = green
+                    base[offset + 2] = blue
+                    base[offset + 3] = alpha
+                }
+            }
+        }
+
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+        let context = pixels.withUnsafeMutableBytes { buffer -> CGContext? in
+            guard let base = buffer.baseAddress else { return nil }
+            return CGContext(
+                data: base,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: bytesPerRow,
+                space: colorSpace,
+                bitmapInfo: bitmapInfo.rawValue
+            )
+        }
+        guard let context, let cgImage = context.makeImage() else {
+            throw NSError(domain: "WPETexTexturePayloadTests", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not synthesise CGImage fixture"])
+        }
+        let output = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(output, UTType.png.identifier as CFString, 1, nil) else {
+            throw NSError(domain: "WPETexTexturePayloadTests", code: 2, userInfo: [NSLocalizedDescriptionKey: "Could not create PNG destination"])
+        }
+        CGImageDestinationAddImage(destination, cgImage, nil)
+        guard CGImageDestinationFinalize(destination) else {
+            throw NSError(domain: "WPETexTexturePayloadTests", code: 3, userInfo: [NSLocalizedDescriptionKey: "PNG finalisation failed"])
+        }
+        return output as Data
     }
 
     private func mp4HeaderPayload() -> Data {

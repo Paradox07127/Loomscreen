@@ -60,8 +60,16 @@ struct WPETexDecoder: Sendable {
                 ))
             }
 
-            guard !parsed.bitmap.usesEncodedImagePayload else {
-                throw WPETexDecodeError.unsupportedFormat(code: parsed.info.textureFormatCode)
+            // WPE TEXB v3+ frequently ships the source image (PNG/JPEG)
+            // verbatim inside the bitmap block instead of decompressed
+            // pixels. Previously we bailed here with .unsupportedFormat,
+            // which is what the corpus baseline reported as "code: 0" for
+            // ~80% of workshop scenes. Now we decode the encoded payload
+            // through ImageIO into RGBA8 bytes and continue the Metal
+            // upload path as if the TEX had shipped raw RGBA8888.
+            if parsed.bitmap.usesEncodedImagePayload {
+                let bridgedPayload = try bridgeEncodedImagePayload(parsed)
+                return .success(bridgedPayload)
             }
 
             let firstFrameMipmaps = try normalizedTextureMipmaps(
@@ -548,6 +556,94 @@ struct WPETexDecoder: Sendable {
             throw WPETexDecodeError.decodeFailed(mipmap: mipmap, detail: "ImageIO could not decode encoded mip payload")
         }
         return image
+    }
+
+    /// Converts a TEXB-encoded image payload (PNG/JPEG bytes wrapped inside
+    /// a WPE `.tex` file) into a synthetic `WPETexTexturePayload` shaped like
+    /// raw RGBA8888 so the existing Metal upload path can consume it without
+    /// branching on encoded-vs-raw at every call site.
+    ///
+    /// The first mip's payload is inflated (LZ4 if the TEXB block flagged
+    /// it as compressed), then decoded through ImageIO and rasterised into
+    /// a known RGBA8 byte order via a `CGContext`. The synthesised
+    /// `WPETexInfo` overrides `format` to `.rgba8888` so downstream
+    /// `WPEMetalTextureFormatMapper.mapping(for:...)` picks
+    /// `rgba8Unorm_srgb`.
+    ///
+    /// Animation frame tracks intentionally drop here — the WPE animation
+    /// branch still needs source-frame decoding work and isn't part of
+    /// this bridge.
+    private func bridgeEncodedImagePayload(_ parsed: ParsedTex) throws -> WPETexTexturePayload {
+        guard let mip = parsed.bitmap.largestMipmap else {
+            throw WPETexDecodeError.missingBitmapBlock
+        }
+        let payloadBytes = try inflateIfNeeded(
+            payload: mip.payload,
+            expectedByteCount: nil,
+            decompressedByteCount: mip.decompressedByteCount,
+            isCompressed: mip.isCompressed,
+            mipmap: mip.index
+        )
+        let image = try makeEncodedCGImage(from: payloadBytes, mipmap: mip.index)
+        let rgba = try rasterizeRGBA8(from: image, mipmap: mip.index)
+
+        let bridgedInfo = WPETexInfo(
+            containerVersion: parsed.info.containerVersion,
+            infoVersion: parsed.info.infoVersion,
+            width: rgba.width,
+            height: rgba.height,
+            textureFormatCode: WPETexFormat.rgba8888.rawValue,
+            format: .rgba8888,
+            mipmapCount: 1,
+            flags: parsed.info.flags
+        )
+        let bridgedMipmap = WPETexTextureMipmap(
+            index: 0,
+            width: rgba.width,
+            height: rgba.height,
+            bytes: rgba.pixels
+        )
+        return WPETexTexturePayload(
+            info: bridgedInfo,
+            mipmaps: [bridgedMipmap],
+            hasAnimationFrames: false
+        )
+    }
+
+    /// Renders a `CGImage` into a non-premultiplied RGBA8 byte buffer using
+    /// `CGContext`. Outputs `kCGImageAlphaLast` to match the `R, G, B, A`
+    /// channel order Metal's `rgba8Unorm_srgb` expects.
+    private func rasterizeRGBA8(from image: CGImage, mipmap: Int) throws -> DecodedRGBAImage {
+        let width = image.width
+        let height = image.height
+        guard width > 0, height > 0 else {
+            throw WPETexDecodeError.invalidDimensions(width: width, height: height)
+        }
+        let bytesPerRow = width * 4
+        var buffer = Data(count: bytesPerRow * height)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+        let drew = buffer.withUnsafeMutableBytes { rawBuffer -> Bool in
+            guard let base = rawBuffer.baseAddress else { return false }
+            guard let context = CGContext(
+                data: base,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: bytesPerRow,
+                space: colorSpace,
+                bitmapInfo: bitmapInfo.rawValue
+            ) else {
+                return false
+            }
+            context.clear(CGRect(x: 0, y: 0, width: width, height: height))
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard drew else {
+            throw WPETexDecodeError.decodeFailed(mipmap: mipmap, detail: "CGContext allocation or draw failed for encoded payload")
+        }
+        return DecodedRGBAImage(width: width, height: height, pixels: buffer)
     }
 
     private func normalizedBytes(
