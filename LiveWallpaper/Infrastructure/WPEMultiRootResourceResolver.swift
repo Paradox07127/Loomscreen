@@ -15,14 +15,17 @@ struct WPEMultiRootResourceResolver: Sendable {
     /// the rare scene that references files outside our built-in inventory
     /// without ever shadowing a project's own files.
     private let engineAssetsResolver: SceneResourceResolver?
+    private let tracer: WPEResolutionTracer?
 
     init(
         primaryRootURL: URL,
         dependencyMounts: [WPEAssetMount],
-        engineAssetsRootURL: URL? = nil
+        engineAssetsRootURL: URL? = nil,
+        tracer: WPEResolutionTracer? = nil,
+        builtinRootURL: URL? = WPEBuiltinFrameworkAssets.rootURL
     ) {
         self.primary = SceneResourceResolver(cacheRootURL: primaryRootURL)
-        self.builtinResolver = WPEBuiltinFrameworkAssets.makeResolver()
+        self.builtinResolver = builtinRootURL.map { SceneResourceResolver(cacheRootURL: $0) }
         self.engineAssetsResolver = engineAssetsRootURL.map {
             SceneResourceResolver(
                 cacheRootURL: $0.appendingPathComponent("assets", isDirectory: true)
@@ -33,14 +36,14 @@ struct WPEMultiRootResourceResolver: Sendable {
             mounts[mount.workshopID] = SceneResourceResolver(cacheRootURL: mount.rootURL)
         }
         self.dependencyMounts = mounts
+        self.tracer = tracer
     }
 
     func resolveImage(relativePath: String) throws -> CGImage {
         if let dependency = dependencyReference(relativePath) {
-            guard let resolver = dependencyMounts[dependency.workshopID] else {
-                throw SceneResourceResolver.ResolveError.pathEscape
+            return try resolveDependency(relativePath: relativePath, dependency: dependency) { resolver, path in
+                try resolver.resolveImage(relativePath: path)
             }
-            return try resolver.resolveImage(relativePath: dependency.childPath)
         }
         return try resolveWithFallbacks(relativePath: relativePath) { resolver, path in
             try resolver.resolveImage(relativePath: path)
@@ -49,10 +52,9 @@ struct WPEMultiRootResourceResolver: Sendable {
 
     func resolveExistingFileURL(relativePath: String) throws -> URL {
         if let dependency = dependencyReference(relativePath) {
-            guard let resolver = dependencyMounts[dependency.workshopID] else {
-                throw SceneResourceResolver.ResolveError.pathEscape
+            return try resolveDependency(relativePath: relativePath, dependency: dependency) { resolver, path in
+                try resolver.resolveExistingFileURL(relativePath: path)
             }
-            return try resolver.resolveExistingFileURL(relativePath: dependency.childPath)
         }
         return try resolveWithFallbacks(relativePath: relativePath) { resolver, path in
             try resolver.resolveExistingFileURL(relativePath: path)
@@ -61,10 +63,9 @@ struct WPEMultiRootResourceResolver: Sendable {
 
     func resolveTexturePayload(relativePath: String) throws -> WPETexTexturePayload {
         if let dependency = dependencyReference(relativePath) {
-            guard let resolver = dependencyMounts[dependency.workshopID] else {
-                throw SceneResourceResolver.ResolveError.pathEscape
+            return try resolveDependency(relativePath: relativePath, dependency: dependency) { resolver, path in
+                try resolver.resolveTexturePayload(relativePath: path)
             }
-            return try resolver.resolveTexturePayload(relativePath: dependency.childPath)
         }
         return try resolveWithFallbacks(relativePath: relativePath) { resolver, path in
             try resolver.resolveTexturePayload(relativePath: path)
@@ -76,29 +77,128 @@ struct WPEMultiRootResourceResolver: Sendable {
     /// resolver. Other `ResolveError` cases (`.pathEscape`,
     /// `.materialUnresolved`, `.texture`, …) propagate without retry —
     /// another root can't fix a malformed path or a project's broken JSON
-    /// chain.
+    /// chain. Every attempt is forwarded to the optional tracer.
     private func resolveWithFallbacks<T>(
         relativePath: String,
         _ resolve: (SceneResourceResolver, String) throws -> T
     ) throws -> T {
+        var attempts: [WPEResolutionAttempt] = []
+
         do {
-            return try resolve(primary, relativePath)
+            let value = try resolve(primary, relativePath)
+            attempts.append(WPEResolutionAttempt(origin: .scene, outcome: .resolved))
+            record(relativePath: relativePath, attempts: attempts, finalOutcome: .resolved)
+            return value
         } catch SceneResourceResolver.ResolveError.fileMissing {
-            // Continue to the built-in resolver below.
+            attempts.append(WPEResolutionAttempt(origin: .scene, outcome: .fileMissing))
+        } catch {
+            let outcome = WPEResolutionOutcome.otherError("\(error)")
+            attempts.append(WPEResolutionAttempt(origin: .scene, outcome: outcome))
+            record(relativePath: relativePath, attempts: attempts, finalOutcome: outcome)
+            throw error
         }
 
         if let builtinResolver {
             do {
-                return try resolve(builtinResolver, relativePath)
+                let value = try resolve(builtinResolver, relativePath)
+                attempts.append(WPEResolutionAttempt(origin: .builtin, outcome: .resolved))
+                record(relativePath: relativePath, attempts: attempts, finalOutcome: .resolved)
+                return value
             } catch SceneResourceResolver.ResolveError.fileMissing {
-                // Continue to the optional engine-assets resolver below.
+                attempts.append(WPEResolutionAttempt(origin: .builtin, outcome: .fileMissing))
+            } catch {
+                let outcome = WPEResolutionOutcome.otherError("\(error)")
+                attempts.append(WPEResolutionAttempt(origin: .builtin, outcome: outcome))
+                record(relativePath: relativePath, attempts: attempts, finalOutcome: outcome)
+                throw error
             }
         }
 
         guard let engineAssetsResolver else {
+            record(relativePath: relativePath, attempts: attempts, finalOutcome: .fileMissing)
             throw SceneResourceResolver.ResolveError.fileMissing
         }
-        return try resolve(engineAssetsResolver, relativePath)
+
+        do {
+            let value = try resolve(engineAssetsResolver, relativePath)
+            attempts.append(WPEResolutionAttempt(origin: .engineAssets, outcome: .resolved))
+            record(relativePath: relativePath, attempts: attempts, finalOutcome: .resolved)
+            return value
+        } catch SceneResourceResolver.ResolveError.fileMissing {
+            attempts.append(WPEResolutionAttempt(origin: .engineAssets, outcome: .fileMissing))
+            record(relativePath: relativePath, attempts: attempts, finalOutcome: .fileMissing)
+            throw SceneResourceResolver.ResolveError.fileMissing
+        } catch {
+            let outcome = WPEResolutionOutcome.otherError("\(error)")
+            attempts.append(WPEResolutionAttempt(origin: .engineAssets, outcome: outcome))
+            record(relativePath: relativePath, attempts: attempts, finalOutcome: outcome)
+            throw error
+        }
+    }
+
+    private func resolveDependency<T>(
+        relativePath: String,
+        dependency: (workshopID: String, childPath: String),
+        _ resolve: (SceneResourceResolver, String) throws -> T
+    ) throws -> T {
+        let origin = WPEResolutionOrigin.dependency(dependency.workshopID)
+        guard let resolver = dependencyMounts[dependency.workshopID] else {
+            let error = SceneResourceResolver.ResolveError.pathEscape
+            let outcome = WPEResolutionOutcome.otherError("\(error)")
+            record(
+                relativePath: relativePath,
+                attempts: [WPEResolutionAttempt(origin: origin, outcome: outcome)],
+                finalOutcome: outcome
+            )
+            throw error
+        }
+
+        do {
+            let value = try resolve(resolver, dependency.childPath)
+            record(
+                relativePath: relativePath,
+                attempts: [WPEResolutionAttempt(origin: origin, outcome: .resolved)],
+                finalOutcome: .resolved
+            )
+            return value
+        } catch SceneResourceResolver.ResolveError.fileMissing {
+            record(
+                relativePath: relativePath,
+                attempts: [WPEResolutionAttempt(origin: origin, outcome: .fileMissing)],
+                finalOutcome: .fileMissing
+            )
+            throw SceneResourceResolver.ResolveError.fileMissing
+        } catch {
+            let outcome = WPEResolutionOutcome.otherError("\(error)")
+            record(
+                relativePath: relativePath,
+                attempts: [WPEResolutionAttempt(origin: origin, outcome: outcome)],
+                finalOutcome: outcome
+            )
+            throw error
+        }
+    }
+
+    private func record(
+        relativePath: String,
+        attempts: [WPEResolutionAttempt],
+        finalOutcome: WPEResolutionOutcome
+    ) {
+        guard let tracer else { return }
+        let event = WPEResolutionEvent(ref: relativePath, attempts: attempts, finalOutcome: finalOutcome)
+        tracer.record(event)
+        emitVerboseLog(event)
+    }
+
+    private func emitVerboseLog(_ event: WPEResolutionEvent) {
+        guard UserDefaults.standard.bool(forKey: "wpeVerboseResolverLogging") else { return }
+        let chain = event.attempts
+            .map { "\($0.origin.debugLabel)=\($0.outcome.debugLabel)" }
+            .joined(separator: " -> ")
+        Logger.debug(
+            "resolve '\(event.ref)': \(chain); final=\(event.finalOutcome.debugLabel)",
+            category: .wpeResolver
+        )
     }
 
     private func dependencyReference(_ relativePath: String) -> (workshopID: String, childPath: String)? {

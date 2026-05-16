@@ -35,6 +35,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
     nonisolated(unsafe) private var activeEngineAssetsRootURL: URL?
     private let entryResolver: SceneResourceResolver
     private let resourceResolver: WPEMultiRootResourceResolver
+    private let resolutionTracer: WPEResolutionTracer
     private let mtkView: MTKView
     private let executor: WPEMetalRenderExecutor
     private let textureLoader: WPEMetalTextureLoader
@@ -85,6 +86,9 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
     /// and cleared by `cleanup()`.
     var previewSnapshot: NSImage? { cachedSnapshot }
     var onProgress: (@MainActor (String) -> Void)?
+    var resolutionDiagnostics: WPEResolutionDiagnosticsSnapshot {
+        resolutionTracer.snapshot()
+    }
 
     init(
         descriptor: SceneDescriptor,
@@ -106,6 +110,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         // partially-initialized instance — opening the scope first would
         // leak that reference count until process exit. Audited by codex.
         let executor = try WPEMetalRenderExecutor(device: device)
+        let resolutionTracer = WPEResolutionTracer()
         // Open the security scope once for the renderer's lifetime; balanced
         // by `cleanup()` / `deinit`. Tracking the URL that actually started
         // a scope means we won't try to stop one that never opened.
@@ -115,8 +120,10 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         self.resourceResolver = WPEMultiRootResourceResolver(
             primaryRootURL: cacheRootURL,
             dependencyMounts: dependencyMounts,
-            engineAssetsRootURL: engineAssetsRootURL
+            engineAssetsRootURL: engineAssetsRootURL,
+            tracer: resolutionTracer
         )
+        self.resolutionTracer = resolutionTracer
         self.executor = executor
         self.textureLoader = WPEMetalTextureLoader(device: device)
         self.mtkView = MTKView(frame: frame, device: device)
@@ -154,7 +161,40 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             // shader, missing texture, …) instead of "All declared layers
             // decoded cleanly."
             loadDiagnostics = diagnostic(for: error)
+            logSceneFailureDiagnostics(error: error)
             throw error
+        }
+    }
+
+    /// Dumps the resolved/missed resource tally to the persistent log so
+    /// maintainers can `tail ~/Library/Logs/LiveWallpaper/runtime.log` and
+    /// diagnose without having the DEBUG inspector window open.
+    private func logSceneFailureDiagnostics(error: Error) {
+        let snapshot = resolutionTracer.snapshot()
+        let workshopID = descriptor.workshopID
+        Logger.error(
+            "Scene \(workshopID) failed: \(error)",
+            category: .screenManager
+        )
+        let counts = snapshot.resolvedByOrigin
+        let dependencyCount = counts.reduce(0) { partial, entry in
+            if case .dependency = entry.key { return partial + entry.value }
+            return partial
+        }
+        Logger.warning(
+            "Scene \(workshopID) resolution summary — events:\(snapshot.events.count) resolved:\(snapshot.resolvedCount) scene:\(counts[.scene, default: 0]) builtin:\(counts[.builtin, default: 0]) engineAssets:\(counts[.engineAssets, default: 0]) dependency:\(dependencyCount)",
+            category: .screenManager
+        )
+        let missed = snapshot.missedRefs
+        if !missed.isEmpty {
+            let summary = missed.prefix(40)
+                .map { "\($0.ref) → \($0.finalOutcome.debugLabel)" }
+                .joined(separator: " | ")
+            let suffix = missed.count > 40 ? " | +\(missed.count - 40) more" : ""
+            Logger.warning(
+                "Scene \(workshopID) misses (top 40 of \(missed.count)): \(summary)\(suffix)",
+                category: .screenManager
+            )
         }
     }
 
@@ -448,6 +488,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         renderGraph = nil
         renderPipeline = nil
         loadDiagnostics = nil
+        resolutionTracer.reset()
         releaseDynamicTextureSources()
         particleSystems.removeAll(keepingCapacity: false)
         particleTextures.removeAll(keepingCapacity: false)
@@ -517,6 +558,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         soundRuntime = nil
         lastRuntimeUniforms = nil
         cachedSnapshot = nil
+        resolutionTracer.reset()
         executor.releaseTransientResources()
         stopEngineAssetsAccessIfNeeded()
     }
@@ -827,8 +869,36 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             ]
         }
 
+        // WPE runtime-buffer names (`_rt_*`, `_alias_*`, `_downscaled1`, …)
+        // should be intercepted earlier in the graph builder and routed via
+        // `.fbo(_)`, but guard here so an upstream leak doesn't manifest as
+        // a confusing `materials/_downscaled1.png: fileMissing` diagnostic.
+        if path.hasPrefix("_") {
+            return [path]
+        }
+
         if path.contains("/") {
+            // WPE convention: texture refs inside material `textures: [...]`
+            // arrays are relative to `materials/` unless they already include
+            // a known top-level subtree. Without this normalization, refs like
+            // `masks/<hash>`, `particle/halo_2`, `util/white` miss the scene
+            // cache (file lives at `materials/masks/<hash>.tex`) and the
+            // engine-root fallback (file lives at `assets/materials/...`).
+            let anchoredPrefixes = ["materials/", "effects/", "models/", "shaders/", "fonts/", "scripts/", "particles/", "sounds/", "scenes/"]
+            if anchoredPrefixes.contains(where: path.hasPrefix) {
+                return [
+                    path,
+                    "\(path).tex",
+                    "\(path).png",
+                    "\(path).jpg",
+                    "\(path).jpeg"
+                ]
+            }
             return [
+                "materials/\(path).tex",
+                "materials/\(path).png",
+                "materials/\(path).jpg",
+                "materials/\(path).jpeg",
                 path,
                 "\(path).tex",
                 "\(path).png",

@@ -125,11 +125,11 @@ enum SceneLoadDiagnostic: Equatable, Sendable {
                 defaultValue: "The image format used by '\(layer)' is no longer supported.",
                 comment: "Diagnostic shown when a scene image layer uses a legacy unsupported texture format."
             )
-        case .fileMissing(let layer, _):
+        case .fileMissing(let layer, let path):
             return String(
-                localized: "error.scene.load_diagnostic.file_missing",
-                defaultValue: "A file required by the '\(layer)' layer is missing.",
-                comment: "Diagnostic shown when a scene layer references a missing file."
+                localized: "error.scene.load_diagnostic.file_missing.with_path",
+                defaultValue: "A file required by the '\(layer)' layer is missing: \(path).",
+                comment: "Diagnostic shown when a scene layer references a missing file. First placeholder is the layer name, second is the missing relative path."
             )
         case .crossPackageReference(let layer, _):
             return String(

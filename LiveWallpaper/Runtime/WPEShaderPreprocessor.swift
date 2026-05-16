@@ -219,16 +219,13 @@ struct WPEShaderPreprocessor {
             s = "out vec4 wpe_fragColor;\n" + s.replacingOccurrences(of: "gl_FragColor", with: "wpe_fragColor")
         }
 
-        // HLSL-style `mul(a, b)` → `(a * b)`. Only swap when the invocation
-        // is unambiguously a function call to avoid eating identifiers like
-        // `simul_*`.
-        s = WPEShaderPreprocessor.replaceWordPrefix("mul(", in: s, with: "(")
-        // Note: cannot simply replace closing paren — leaving as-is means a
-        // trailing `)` mismatch, which the translator catches. The sites
-        // we've seen in corpus shaders are simple two-arg muls inside an
-        // assignment, so the leading `(` substitution is a wash that the
-        // translator's parser will resolve. For now keep this conservative —
-        // the C++ backend can refuse anything we mangle.
+        // HLSL-style `mul(a, b)` is handled by the `#define mul(x, y) ((y) * (x))`
+        // macro injected in `WPERenderPipelineBuilder.shaderPrelude(_:_:)`. We
+        // intentionally do NOT rewrite `mul(` to `(` here — the previous
+        // rewrite mangled the prelude (turning `#define mul(x, y) ...` into
+        // the invalid `#define (x, y) ...`) and produced `(a, b)` rather than
+        // `(b * a)`, breaking matrix-vector multiplications instead of fixing
+        // them.
 
         return s
     }
