@@ -277,10 +277,19 @@ final class ScreenManager {
         Logger.notice("ScreenManager initializing", category: .screenManager)
         setupPowerMonitoring()
         setupScreenObservers()
-        setupMemoryMonitoring()
+        if featureCatalog.isEnabled(.systemMonitor) {
+            setupMemoryMonitoring()
+        }
         setupFullScreenDetection()
-        setupExclusiveRenderingCoordinator()
-        _ = lockScreenSnapshotCoordinator
+        // Exclusive-rendering coordinator only matters when scene wallpapers
+        // can run — Lite skips it entirely to avoid the foreground-watcher.
+        if featureCatalog.isEnabled(.scene) {
+            setupExclusiveRenderingCoordinator()
+        }
+        // Lock-screen capture pipeline is Pro-only.
+        if featureCatalog.isEnabled(.lockScreenSnapshots) {
+            _ = lockScreenSnapshotCoordinator
+        }
 
         NotificationCenter.default.publisher(for: WallpaperVideoPlayer.didChangePlaybackStateNotification)
             .sink { [weak self] _ in
@@ -294,8 +303,15 @@ final class ScreenManager {
         // was a contributor to the launch-time GPU spike.
         refreshScreens()
         if startupOptions.startAutomation {
-            automationOrchestrator.startMonitoring()
-            startWeatherMonitoring()
+            // Automation (playlist + schedule) and weather monitor are
+            // independent Pro features; skip each only when its capability
+            // is off so a future SKU can enable one without the other.
+            if featureCatalog.isEnabled(.playlists) || featureCatalog.isEnabled(.scheduleAutomation) {
+                automationOrchestrator.startMonitoring()
+            }
+            if featureCatalog.isEnabled(.weatherReactive) {
+                startWeatherMonitoring()
+            }
         }
         Logger.notice("ScreenManager initialization complete", category: .screenManager)
     }
