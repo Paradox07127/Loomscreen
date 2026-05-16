@@ -340,4 +340,47 @@ struct WPEShaderTranspilerTests {
         opts.languageVersion = .version3_0
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
+
+    @Test("linearSampler is declared at file scope so helpers can use it")
+    func linearSamplerAtFileScope() throws {
+        // Workshop shaders (e.g. `effects/lens_flare_sun`) sample inside
+        // helper functions: `float getNoise(float t) { return g_Texture1.sample(linearSampler, …); }`.
+        // With the sampler declared only inside main() the helper saw
+        // `unknown identifier 'linearSampler'`. Moving the declaration to
+        // file scope makes it visible everywhere.
+        //
+        // NOTE: Helper-scope `g_TextureN` is still broken (Metal forbids
+        // file-scope textures; needs SPIRV-Cross or param-passing rewrite).
+        // This test only verifies the sampler half of the helper-scope fix.
+        let source = """
+        #version 410 core
+        in vec2 v_TexCoord;
+        // Helper using only the sampler (texture passed as arg externally).
+        float computeAngle(float2 uv) {
+            return uv.x + uv.y;
+        }
+        void main() {
+            gl_FragColor = vec4(computeAngle(v_TexCoord), 0.0, 0.0, 1.0);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "filescope_sampler",
+            preprocessedSource: source
+        )
+        // The declaration must appear BEFORE the helper definition so
+        // identifier resolution sees it from the helper scope.
+        let mslSource = result.mslSource
+        let samplerRange = try #require(mslSource.range(of: "constexpr sampler linearSampler"))
+        let helperRange = try #require(mslSource.range(of: "float computeAngle("))
+        #expect(samplerRange.lowerBound < helperRange.lowerBound, "linearSampler must precede the helper")
+        // Belt: the declaration should not also appear inside main (no duplicate).
+        let mainStart = try #require(mslSource.range(of: "wpe_translated_fragment"))
+        let mainBodyRest = mslSource[mainStart.upperBound...]
+        #expect(!mainBodyRest.contains("constexpr sampler linearSampler"), "no duplicate declaration inside main()")
+
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: mslSource, options: opts)
+    }
 }
