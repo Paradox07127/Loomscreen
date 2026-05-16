@@ -280,20 +280,8 @@ struct WPECorpusReport: Equatable, Sendable {
     }
 }
 
-/// Per-scene capability bits — driven by the JSON content, not the renderer's
-/// current ability to handle them. The preflight classifier consumes this to
-/// decide which tier the scene gets.
-enum WPESceneFeatureFlag: String, Codable, Hashable, Sendable {
-    case customShaderSource
-    case particleObject
-    case textObject
-    case soundObject
-    case lightObject
-    case animationLayer
-    case imageEffect
-    case unknownObject
-    case windowsPlugin
-}
+// WPESceneFeatureFlag was moved to LiveWallpaperCore/Schema/WPEScenePreflightTier.swift
+// (lives alongside its sibling tier enum since SceneDescriptor carries both).
 
 struct WPESceneFeatureSet: Equatable, Sendable {
     private(set) var flags: Set<WPESceneFeatureFlag> = []

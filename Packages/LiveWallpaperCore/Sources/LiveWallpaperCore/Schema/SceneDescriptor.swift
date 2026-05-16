@@ -9,27 +9,27 @@ import Foundation
 /// (e.g. `wpe-cache/<workshopID>`); both the import service and the runtime
 /// resolver re-validate the path before joining it onto the application
 /// support directory, so a malformed persisted blob can never escape root.
-struct SceneDescriptor: Codable, Equatable, Sendable {
-    let workshopID: String
+public struct SceneDescriptor: Codable, Equatable, Sendable {
+    public let workshopID: String
     /// Path beneath `Application Support/LiveWallpaper/` — must satisfy
     /// `WPEPathSafety.isSafeCacheRelativePath`.
-    let cacheRelativePath: String
+    public let cacheRelativePath: String
     /// Entry filename inside the cache root, e.g. `scene.json`.
-    let entryFile: String
+    public let entryFile: String
     /// Best-effort runtime capability assessment from the import flow.
-    let capabilityTier: SceneCapabilityTier
+    public let capabilityTier: SceneCapabilityTier
     /// Declared Workshop dependencies that may be mounted as sibling cache or
     /// source roots at runtime.
-    let dependencyWorkshopIDs: [String]
+    public let dependencyWorkshopIDs: [String]
     /// Preflight tier from `WPEScenePreflight`. Optional so historical
     /// descriptors persisted before preflight existed still decode.
-    let preflightTier: WPEScenePreflightTier?
+    public let preflightTier: WPEScenePreflightTier?
     /// Per-scene feature declarations from preflight. Sorted set kept as a
     /// `[String]` on disk for forward-compatibility — unknown future flags
     /// round-trip without the decoder rejecting the blob.
-    let preflightFeatureFlags: [WPESceneFeatureFlag]
+    public let preflightFeatureFlags: [WPESceneFeatureFlag]
 
-    init(
+    public init(
         workshopID: String,
         cacheRelativePath: String,
         entryFile: String,
@@ -57,7 +57,7 @@ struct SceneDescriptor: Codable, Equatable, Sendable {
         case preflightFeatureFlags
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         workshopID = try c.decode(String.self, forKey: .workshopID)
         cacheRelativePath = try c.decode(String.self, forKey: .cacheRelativePath)
@@ -72,7 +72,7 @@ struct SceneDescriptor: Codable, Equatable, Sendable {
         preflightFeatureFlags = rawFlags.compactMap(WPESceneFeatureFlag.init(rawValue:))
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(workshopID, forKey: .workshopID)
         try c.encode(cacheRelativePath, forKey: .cacheRelativePath)
@@ -89,7 +89,7 @@ struct SceneDescriptor: Codable, Equatable, Sendable {
 /// Phase 2.0 capability gate. Computed by the import service after parsing
 /// `scene.json`; persisted so the runtime can short-circuit obviously
 /// degraded scenes without re-walking the JSON.
-enum SceneCapabilityTier: String, Codable, Equatable, Sendable {
+public enum SceneCapabilityTier: String, Codable, Equatable, Sendable {
     /// All declared objects render via the image-only pipeline.
     case imageOnly
     /// Some objects are renderable but at least one is missing assets or
@@ -98,7 +98,7 @@ enum SceneCapabilityTier: String, Codable, Equatable, Sendable {
     /// No object can render — UI must fall back to the placeholder card.
     case unsupported
 
-    var localizedLabel: String {
+    public var localizedLabel: String {
         switch self {
         case .imageOnly:
             return String(localized: "Image-only", defaultValue: "Image-only", comment: "Wallpaper Engine scene capability tier.")
