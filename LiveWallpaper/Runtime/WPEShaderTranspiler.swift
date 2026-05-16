@@ -517,6 +517,19 @@ struct WPEShaderTranspiler {
             out.append("")
         }
 
+        // Shared sampler at file scope so helper functions (declared above
+        // `main()`) can use it without each helper needing the sampler as
+        // an explicit parameter. WPE shaders routinely sample inside their
+        // helpers — `getNoise(float t) { return g_Texture1.sample(linearSampler, …); }`
+        // — and the previous local declaration left every such helper with
+        // `unknown identifier 'linearSampler'`. MSL allows `constexpr sampler`
+        // at file scope, so this is the cheapest fix that unblocks the
+        // sampler half of the helper-scope problem. Helper-scope `g_TextureN`
+        // still fails until SPIRV-Cross lands (file-scope textures are not
+        // legal in MSL).
+        out.append("constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);")
+        out.append("")
+
         // Helpers (transpiled).
         if !helpers.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             out.append(helpers)
@@ -536,7 +549,6 @@ struct WPEShaderTranspiler {
         }
         signature.append(") {")
         out.append(signature.joined(separator: "\n"))
-        out.append("    constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);")
 
         // For each sampler in the original source, alias the declared
         // name (e.g. `g_Texture0`) to the corresponding `texN` parameter
