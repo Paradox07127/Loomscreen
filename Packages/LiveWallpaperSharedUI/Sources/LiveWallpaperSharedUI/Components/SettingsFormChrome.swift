@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 
 extension View {
-    func settingsFormChrome(minWidth: CGFloat? = nil, minHeight: CGFloat? = nil) -> some View {
+    public func settingsFormChrome(minWidth: CGFloat? = nil, minHeight: CGFloat? = nil) -> some View {
         modifier(SettingsFormChrome(minWidth: minWidth, minHeight: minHeight))
     }
 }
