@@ -1,13 +1,13 @@
 import Foundation
 
 /// Runtime-ready wallpaper definition derived from persisted configuration.
-enum WallpaperSessionDefinition: Equatable {
+public enum WallpaperSessionDefinition: Equatable, Sendable {
     case video(bookmarkData: Data)
     case html(HTMLSource, HTMLConfig)
     case metalShader(MetalShaderPreset)
     case scene(SceneDescriptor)
 
-    init?(configuration: ScreenConfiguration) {
+    public init?(configuration: ScreenConfiguration) {
         switch configuration.activeWallpaper {
         case .video(let bookmarkData):
             guard !bookmarkData.isEmpty else { return nil }
@@ -30,7 +30,7 @@ enum WallpaperSessionDefinition: Equatable {
         }
     }
 
-    func displayName(using bookmarkNameResolver: (Data) -> String?) -> String? {
+    public func displayName(using bookmarkNameResolver: (Data) -> String?) -> String? {
         switch self {
         case .video(let bookmarkData):
             return bookmarkNameResolver(bookmarkData)
