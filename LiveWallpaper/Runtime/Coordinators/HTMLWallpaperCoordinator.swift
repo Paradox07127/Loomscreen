@@ -84,9 +84,11 @@ final class HTMLWallpaperCoordinator {
             Logger.info("Multi-instance HTML wallpaper: muting screen \(screen.id) (audio leader is another screen running same source)", category: .screenManager)
         }
 
-        let trust = HTMLTrust.evaluate(source: source, trustedOrigins: TrustedHostStore.shared.originSet)
-        effectiveConfig.allowJavaScript = trust.effectiveAllowJavaScript(requested: config.allowJavaScript)
-        return effectiveConfig
+        return HTMLWallpaperCompatibilityPolicy.runtimeConfig(
+            source: source,
+            config: effectiveConfig,
+            trustedOrigins: TrustedHostStore.shared.originSet
+        ).config
     }
 
     // MARK: - Public setters
