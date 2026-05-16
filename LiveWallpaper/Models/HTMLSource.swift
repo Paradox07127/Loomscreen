@@ -6,6 +6,7 @@ enum HTMLSource: Codable, Equatable, Sendable {
     case folder(bookmarkData: Data, indexFileName: String)
     case url(URL)
     case inline(String)
+    case webGLRainVideo(bookmarkData: Data)
 
     /// Heuristic constructor used when migrating legacy persisted data
     /// (`WallpaperContent.html(String)`). Recognized URL schemes become
@@ -65,6 +66,8 @@ enum HTMLSource: Codable, Equatable, Sendable {
             return url.host ?? url.absoluteString
         case .inline:
             return "Inline HTML"
+        case .webGLRainVideo:
+            return "WebGL rain glass"
         }
     }
 
@@ -75,6 +78,7 @@ enum HTMLSource: Codable, Equatable, Sendable {
         case .folder: return "folder"
         case .url: return "globe"
         case .inline: return "chevron.left.forwardslash.chevron.right"
+        case .webGLRainVideo: return "drop.fill"
         }
     }
 
@@ -85,6 +89,14 @@ enum HTMLSource: Codable, Equatable, Sendable {
             return url.scheme?.lowercased() == "http"
         }
         return false
+    }
+
+    /// True for user-selected HTML sources that should be restored when the
+    /// user switches back from video/shader modes. The WebGL rain renderer is
+    /// a transient video presentation mode, not a user-authored HTML source.
+    var isRestorableHTMLSource: Bool {
+        if case .webGLRainVideo = self { return false }
+        return true
     }
 
     /// Stable identity used to detect the same source running on multiple
@@ -100,6 +112,8 @@ enum HTMLSource: Codable, Equatable, Sendable {
             return "url:" + url.absoluteString
         case .inline(let html):
             return "inline:" + String(html.hashValue)
+        case .webGLRainVideo(let data):
+            return "webgl-rain-video:" + data.base64EncodedString()
         }
     }
 }

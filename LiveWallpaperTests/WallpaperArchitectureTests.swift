@@ -325,35 +325,6 @@ struct EstimatedFrameTickPolicyTests {
     }
 }
 
-@Suite("Rain glass texture pool")
-struct RainGlassTexturePoolTests {
-    @Test("Pool reuses a bounded ring for matching dimensions")
-    func poolReusesMatchingTextures() throws {
-        guard let device = MTLCreateSystemDefaultDevice() else { return }
-        let pool = RainGlassTexturePool(device: device, inFlightTextureCount: 2)
-
-        let first = try #require(pool.nextTexture(width: 64, height: 64))
-        let second = try #require(pool.nextTexture(width: 64, height: 64))
-        let third = try #require(pool.nextTexture(width: 64, height: 64))
-
-        #expect(ObjectIdentifier(first as AnyObject) != ObjectIdentifier(second as AnyObject))
-        #expect(ObjectIdentifier(first as AnyObject) == ObjectIdentifier(third as AnyObject))
-    }
-
-    @Test("Pool rebuilds when render dimensions change")
-    func poolRebuildsForNewDimensions() throws {
-        guard let device = MTLCreateSystemDefaultDevice() else { return }
-        let pool = RainGlassTexturePool(device: device, inFlightTextureCount: 2)
-
-        let first = try #require(pool.nextTexture(width: 64, height: 64))
-        let resized = try #require(pool.nextTexture(width: 128, height: 64))
-
-        #expect(first.width == 64)
-        #expect(resized.width == 128)
-        #expect(resized.height == 64)
-    }
-}
-
 @Suite("Aerial thumbnail cache key")
 struct AerialThumbnailCacheKeyTests {
     @Test("Key includes path so same file names in different folders stay separate")
@@ -799,11 +770,15 @@ struct WallpaperConfigurationStoreInvalidConfigTests {
                 wallpaper: .html(source: .file(bookmarkData: Data([0x02])), config: .default)
             ),
             ScreenConfiguration(screenID: 3, videoBookmarkData: Data(), wallpaperType: .metalShader, shaderPreset: .aurora),
+            ScreenConfiguration(
+                screenID: 4,
+                wallpaper: .html(source: .webGLRainVideo(bookmarkData: Data([0x04])), config: .default)
+            ),
         ]
 
         let pruned = WallpaperConfigurationStore.removingInvalidResourceConfigurations(
             from: configs,
-            invalidScreenIDs: [1, 2, 3]
+            invalidScreenIDs: [1, 2, 3, 4]
         )
 
         #expect(pruned.count == 1)

@@ -639,6 +639,14 @@ struct VideoEffectConfigTests {
         #expect(!config.hasActiveEffect)
     }
 
+    @Test("Legacy glass rain flag does NOT trigger hasActiveEffect")
+    func legacyGlassRainFlagIsNotAColorEffect() {
+        var config = VideoEffectConfig.default
+        config.glassRainEffect = true
+
+        #expect(!config.hasActiveEffect)
+    }
+
     @Test("Legacy JSON without particleDensity decodes to 1.0")
     func legacyJsonDefaultsParticleDensityToOne() throws {
         // Old configs persisted before the field existed.
