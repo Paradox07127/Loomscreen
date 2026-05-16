@@ -3,14 +3,20 @@ import SwiftUI
 /// Inspector row pairing an icon-prefixed title with a trailing control,
 /// using the native `LabeledContent` layout so spacing and alignment match
 /// macOS System Settings out of the box.
-struct SettingRow<Content: View>: View {
+public struct SettingRow<Content: View>: View {
     let icon: String
     let iconColor: Color
     let title: LocalizedStringKey
     let subtitle: LocalizedStringKey?
     let content: Content
 
-    init(icon: String, iconColor: Color = .accentColor, title: LocalizedStringKey, subtitle: LocalizedStringKey? = nil, @ViewBuilder content: () -> Content) {
+    public init(
+        icon: String,
+        iconColor: Color = .accentColor,
+        title: LocalizedStringKey,
+        subtitle: LocalizedStringKey? = nil,
+        @ViewBuilder content: () -> Content
+    ) {
         self.icon = icon
         self.iconColor = iconColor
         self.title = title
@@ -18,7 +24,7 @@ struct SettingRow<Content: View>: View {
         self.content = content()
     }
 
-    var body: some View {
+    public var body: some View {
         HStack(alignment: .center, spacing: 10) {
             ZStack {
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
