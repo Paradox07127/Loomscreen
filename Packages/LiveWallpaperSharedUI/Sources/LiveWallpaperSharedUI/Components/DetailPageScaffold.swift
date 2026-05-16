@@ -1,12 +1,12 @@
 import SwiftUI
 import AppKit
 
-struct DetailPageScaffold<Header: View, Content: View>: View {
-    let showsHeader: Bool
+public struct DetailPageScaffold<Header: View, Content: View>: View {
+    public let showsHeader: Bool
     private let header: Header
     private let content: Content
 
-    init(
+    public init(
         showsHeader: Bool = true,
         @ViewBuilder header: () -> Header,
         @ViewBuilder content: () -> Content
@@ -16,7 +16,7 @@ struct DetailPageScaffold<Header: View, Content: View>: View {
         self.content = content()
     }
 
-    var body: some View {
+    public var body: some View {
         VStack(spacing: 0) {
             if showsHeader {
                 header
@@ -27,24 +27,18 @@ struct DetailPageScaffold<Header: View, Content: View>: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(DesignTokens.Colors.pageBackground)
-        // Anchor every detail page to a floor that comfortably fits the
-        // shared header bar plus a 760×540 content area. macOS 26
-        // NavigationSplitView lets the detail column collapse below the
-        // sidebar's declared minimum when this is missing, which manifests
-        // as the sidebar Displays/Library sections being pushed out of view
-        // and the SystemMonitorView appearing pinned to the toolbar.
         .frame(minWidth: DesignTokens.LibraryPage.minWidth, minHeight: DesignTokens.LibraryPage.minHeight)
     }
 }
 
-struct DetailHeaderBar<Title: View, Metadata: View, Actions: View>: View {
-    let systemImage: String
-    let tint: Color
+public struct DetailHeaderBar<Title: View, Metadata: View, Actions: View>: View {
+    public let systemImage: String
+    public let tint: Color
     private let title: Title
     private let metadata: Metadata
     private let actions: Actions
 
-    init(
+    public init(
         systemImage: String,
         tint: Color = .accentColor,
         @ViewBuilder title: () -> Title,
@@ -58,7 +52,7 @@ struct DetailHeaderBar<Title: View, Metadata: View, Actions: View>: View {
         self.actions = actions()
     }
 
-    var body: some View {
+    public var body: some View {
         HStack(alignment: .center, spacing: DesignTokens.DetailHeader.contentSpacing) {
             ZStack {
                 Circle()
@@ -94,14 +88,14 @@ struct DetailHeaderBar<Title: View, Metadata: View, Actions: View>: View {
     }
 }
 
-struct GuidedLibrarySurface<Content: View>: View {
+public struct GuidedLibrarySurface<Content: View>: View {
     private let content: Content
 
-    init(@ViewBuilder content: () -> Content) {
+    public init(@ViewBuilder content: () -> Content) {
         self.content = content()
     }
 
-    var body: some View {
+    public var body: some View {
         content
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
