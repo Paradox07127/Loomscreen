@@ -113,6 +113,18 @@ class ResourceUtilities {
         return localBookmark
     }
 
+    /// Legacy bookmark resolver. Returns staleness as data without persisting
+    /// a refresh, so 11+ historical call sites silently dropped the flag and
+    /// caused user-granted folder access to invalidate after a single Apple
+    /// grace use. New code MUST route through `SecurityScopedBookmarkResolver`
+    /// with a typed `Target` so the refreshed Data is written back to its
+    /// owning store. Existing callers are being migrated incrementally; the
+    /// deprecation warning identifies the remaining work.
+    @available(
+        *,
+        deprecated,
+        message: "Use SecurityScopedBookmarkResolver.shared.resolve(_:target:) instead — it observes bookmarkDataIsStale and refreshes the saved Data via a typed Target."
+    )
     nonisolated static func resolveBookmark(_ data: Data) throws -> BookmarkResolution {
         var scopedStale = false
         do {
