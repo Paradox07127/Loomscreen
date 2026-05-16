@@ -248,18 +248,12 @@ struct WPEShaderTranspilerTests {
             shaderName: "blend-in-quals",
             preprocessedSource: source
         )
-        // Stripping the qualifier means MSL sees `float3 A` etc., not
-        // `in float3 A`. The whole-string check is enough — we don't need
-        // to enumerate every helper.
         #expect(!result.mslSource.contains("in float3 A"))
         #expect(!result.mslSource.contains("in float3 B"))
         #expect(!result.mslSource.contains("in float opacity"))
         #expect(result.mslSource.contains("float3 A"))
-        // Existing `inout/out` rewrite is untouched — the new pass must not
-        // double-strip a parameter that the prior rule already rewrote.
         #expect(!result.mslSource.contains("thread in"))
 
-        // Confirm Metal accepts the translated MSL end-to-end.
         let device = try #require(MTLCreateSystemDefaultDevice())
         let opts = MTLCompileOptions()
         opts.languageVersion = .version3_0
@@ -268,9 +262,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("In-qualifier strip leaves top-level vertex inputs untouched")
     func inQualifierIgnoresTopLevelInputs() throws {
-        // Top-level `in vec2 v_TexCoord;` must survive — the transpiler
-        // lifts those into the stage_in struct downstream. Only parameter
-        // lists (lookahead `[,)]`) are targeted.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -284,10 +275,65 @@ struct WPEShaderTranspilerTests {
             shaderName: "in-top-level",
             preprocessedSource: source
         )
-        // The varyings should appear in the WPEStageIn struct, not as
-        // leftover `in vec2 v_TexCoord;` lines.
         #expect(result.mslSource.contains("WPEStageIn"))
         #expect(!result.mslSource.contains("in vec2 v_TexCoord;"))
+
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("Fragment out_FragColor scrub catches all variants")
+    func fragmentOutScrubCatchesAllVariants() {
+        // Canonical prelude line — must be killed.
+        #expect(WPEShaderTranspiler.scrubFragmentOutDeclarations("out vec4 out_FragColor;").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        // Already-substituted float4 form (downstream of vec4→float4 pass).
+        #expect(WPEShaderTranspiler.scrubFragmentOutDeclarations("out float4 out_FragColor;").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        // Preprocessor-injected wpe_fragColor twin.
+        #expect(WPEShaderTranspiler.scrubFragmentOutDeclarations("out vec4 wpe_fragColor;").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        // Two statements on one line (the brittle case the prefix guard misses).
+        let mixed = WPEShaderTranspiler.scrubFragmentOutDeclarations("precision highp float; out vec4 out_FragColor;")
+        #expect(!mixed.contains("out_FragColor"))
+        #expect(mixed.contains("precision highp float"))
+        // Trailing comment.
+        let withComment = WPEShaderTranspiler.scrubFragmentOutDeclarations("out vec4 out_FragColor; // injected by prelude\n#define M_PI 3.14")
+        #expect(!withComment.contains("out_FragColor"))
+        #expect(withComment.contains("#define M_PI"))
+        // Don't murder unrelated `out` parameter qualifiers in function signatures.
+        let unrelated = "void foo(out float3 col) { col = float3(0); }"
+        #expect(WPEShaderTranspiler.scrubFragmentOutDeclarations(unrelated) == unrelated)
+    }
+
+    @Test("End-to-end: shader with prelude out_FragColor compiles cleanly")
+    func endToEndPreludeOutFragColor() throws {
+        // Mirrors what a WPE workshop fragment looks like coming out of
+        // `WPERenderPipelineBuilder.shaderPrelude(stage: .fragment)`: the
+        // declaration sits below the macro defines, and the body uses
+        // `out_FragColor` as its colour sink.
+        let source = """
+        // LiveWallpaper WPE shader prelude
+        #define GLSL 1
+        #define mul(x, y) ((y) * (x))
+        #define CAST3(x) (vec3(x))
+        out vec4 out_FragColor;
+        #define varying in
+
+        uniform sampler2D g_Texture0;
+        in vec2 v_TexCoord;
+        void main() {
+            out_FragColor = texture(g_Texture0, v_TexCoord);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "out_fragcolor_smoke",
+            preprocessedSource: source
+        )
+        // The top-level declaration must be gone — Metal rejects bare `out`.
+        #expect(!result.mslSource.contains("out float4 out_FragColor"))
+        #expect(!result.mslSource.contains("out vec4 out_FragColor"))
+        // Body's reference is rewritten to the local stash variable.
+        #expect(result.mslSource.contains("out_color"))
 
         let device = try #require(MTLCreateSystemDefaultDevice())
         let opts = MTLCompileOptions()
