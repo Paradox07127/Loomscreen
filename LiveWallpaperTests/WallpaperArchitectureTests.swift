@@ -770,15 +770,11 @@ struct WallpaperConfigurationStoreInvalidConfigTests {
                 wallpaper: .html(source: .file(bookmarkData: Data([0x02])), config: .default)
             ),
             ScreenConfiguration(screenID: 3, videoBookmarkData: Data(), wallpaperType: .metalShader, shaderPreset: .aurora),
-            ScreenConfiguration(
-                screenID: 4,
-                wallpaper: .html(source: .webGLRainVideo(bookmarkData: Data([0x04])), config: .default)
-            ),
         ]
 
         let pruned = WallpaperConfigurationStore.removingInvalidResourceConfigurations(
             from: configs,
-            invalidScreenIDs: [1, 2, 3, 4]
+            invalidScreenIDs: [1, 2, 3]
         )
 
         #expect(pruned.count == 1)

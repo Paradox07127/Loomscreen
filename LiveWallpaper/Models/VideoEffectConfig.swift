@@ -9,7 +9,6 @@ struct VideoEffectConfig: Codable, Equatable, Sendable {
     var autoTimeTint: Bool = false
     var weatherReactive: Bool = false
     var particleDensity: Double = 1.0
-    var glassRainEffect: Bool = false
 
     static let `default` = VideoEffectConfig()
 
@@ -28,7 +27,6 @@ struct VideoEffectConfig: Codable, Equatable, Sendable {
         autoTimeTint = try container.decodeIfPresent(Bool.self, forKey: .autoTimeTint) ?? false
         weatherReactive = try container.decodeIfPresent(Bool.self, forKey: .weatherReactive) ?? false
         particleDensity = try container.decodeIfPresent(Double.self, forKey: .particleDensity) ?? 1.0
-        glassRainEffect = try container.decodeIfPresent(Bool.self, forKey: .glassRainEffect) ?? false
     }
 
     init() {}

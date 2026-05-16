@@ -457,8 +457,6 @@ final class SettingsManager {
             return validateLocalHTMLBookmark(bookmarkData, indexFileName: nil, for: screenID)
         case .folder(let bookmarkData, let indexFileName):
             return validateLocalHTMLBookmark(bookmarkData, indexFileName: indexFileName, for: screenID)
-        case .webGLRainVideo(let bookmarkData):
-            return validateLocalHTMLBookmark(bookmarkData, indexFileName: nil, for: screenID)
         }
     }
 

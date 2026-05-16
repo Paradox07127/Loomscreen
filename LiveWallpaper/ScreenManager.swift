@@ -1323,17 +1323,6 @@ final class ScreenManager {
 
     // MARK: - HTML Wallpaper (delegates to HTMLWallpaperCoordinator)
 
-    nonisolated static let webGLRainHTMLConfig = HTMLConfig(
-        allowJavaScript: true,
-        allowMouseInteraction: false,
-        blockTrackers: false,
-        customCSS: nil,
-        muteAudio: true,
-        physicalPixelLayout: false,
-        useEphemeralStorage: true,
-        maxRetries: 3
-    )
-
     func htmlSourceMultiplicity() -> [String: [CGDirectDisplayID]] {
         htmlCoordinator.sourceMultiplicity()
     }
@@ -1352,37 +1341,6 @@ final class ScreenManager {
 
     func setHTMLWallpaper(url: String, for screen: Screen) {
         htmlCoordinator.setWallpaper(url: url, for: screen)
-    }
-
-    func setWebGLRainWallpaper(for screen: Screen) {
-        guard var config = configurationStore.get(for: screen.id),
-              let bookmarkData = config.activeWallpaper.activeVideoBookmarkData ?? config.preferredVideoBookmarkData else {
-            Logger.warning("Cannot enable WebGL rain: no video bookmark for screen \(screen.id)", category: .screenManager)
-            return
-        }
-
-        let source = HTMLSource.webGLRainVideo(bookmarkData: bookmarkData)
-        if case .html(let currentSource, let currentConfig) = config.activeWallpaper,
-           currentSource == source,
-           currentConfig == Self.webGLRainHTMLConfig,
-           screen.runtimeSession?.wallpaperType == .html {
-            Logger.info("WebGL rain wallpaper already active for screen \(screen.id); keeping existing WKWebView session", category: .screenManager)
-            return
-        }
-
-        config.setTransientWebGLRainWallpaper(bookmarkData: bookmarkData, config: Self.webGLRainHTMLConfig)
-        config.reconcileWPEOrigin()
-        saveConfiguration(config)
-        restoreWallpaperSession(for: screen, configuration: config, preservingState: false)
-    }
-
-    func isWebGLRainWallpaperActive(for screen: Screen) -> Bool {
-        guard let config = configurationStore.get(for: screen.id),
-              case .html(let source, _) = config.activeWallpaper,
-              case .webGLRainVideo = source else {
-            return false
-        }
-        return true
     }
 
     func updateHTMLConfig(_ config: HTMLConfig, for screen: Screen) {
