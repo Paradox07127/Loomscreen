@@ -264,7 +264,11 @@ class ResourceUtilities {
     /// `nil` if the bookmark is empty or the security-scoped URL can't resolve.
     nonisolated static func resolveBookmarkName(_ data: Data) -> String? {
         guard !data.isEmpty else { return nil }
-        return try? resolveBookmark(data).url.lastPathComponent
+        guard case .success(let resolved) = SecurityScopedBookmarkResolver.shared.resolve(
+            data,
+            target: .transient
+        ) else { return nil }
+        return resolved.url.lastPathComponent
     }
 
     // MARK: - HTML Source Bookmarking
