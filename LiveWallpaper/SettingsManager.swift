@@ -264,8 +264,16 @@ final class SettingsManager {
     }
 
     func cleanAllSettings(applyLoginSetting: Bool = true) {
-        cachedGlobalSettings = nil
-        cachedConfigurations = nil
+        // Seed caches with "loaded, empty" instead of nil. The async disk
+        // delete below races against any reader that fires between this
+        // function returning and the actor draining; if the cache were
+        // nil, a reader's `loadConfigurations()` would fall through to a
+        // disk read that still sees the pre-delete file and resurrect
+        // the configs into the cache. Holding `[]` and `defaults` short-
+        // circuits that read while preserving the "already loaded"
+        // contract used elsewhere.
+        cachedGlobalSettings = GlobalSettings()
+        cachedConfigurations = []
 
         // Route screen-config deletion through the same persistence actor
         // and generation counter as writes, so a pending async write from
