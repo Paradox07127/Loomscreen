@@ -17,28 +17,48 @@ struct MacOSCompatibilityPolicyTests {
             contentsOf: repoRoot.appendingPathComponent("LiveWallpaper.xcodeproj/project.pbxproj"),
             encoding: .utf8
         )
-        #expect(!project.contains("MACOSX_DEPLOYMENT_TARGET = 26.0;"))
-        #expect(project.contains("MACOSX_DEPLOYMENT_TARGET = 14.0;"))
+        let projectTargets = project
+            .matches(of: /MACOSX_DEPLOYMENT_TARGET = ([^;]+);/)
+            .map { String($0.output.1) }
+        #expect(!projectTargets.isEmpty)
+        #expect(
+            Set(projectTargets) == ["14.0"],
+            Comment(rawValue: "pbxproj has non-14.0 deployment targets: \(Set(projectTargets).sorted())")
+        )
 
-        let sharedUI = try packageManifest("LiveWallpaperSharedUI")
-        let proFeatures = try packageManifest("LiveWallpaperProFeatures")
-        #expect(sharedUI.contains("platforms: [.macOS(.v14)]"))
-        #expect(proFeatures.contains("platforms: [.macOS(.v14)]"))
+        for (name, manifest) in try allPackageManifests() {
+            #expect(
+                manifest.contains("platforms: [.macOS(.v14)]"),
+                Comment(rawValue: "\(name) does not declare platforms: [.macOS(.v14)]")
+            )
+        }
     }
 
     @Test("Liquid Glass APIs stay inside AdaptiveGlass")
     func liquidGlassAPIsAreCentralized() throws {
         let allowed = "Packages/LiveWallpaperSharedUI/Sources/LiveWallpaperSharedUI/Components/AdaptiveGlass.swift"
         let needles = [
+            // Direct modifier and container forms.
             "GlassEffectContainer",
             ".glassEffect(",
+            ".glassEffectID(",
+            ".glassEffectUnion(",
+            ".glassEffectTransition(",
+            "DefaultGlassEffectShape",
+            // Button styles, including both static and initializer-call forms.
             ".buttonStyle(.glass)",
+            ".buttonStyle(.glass(",
             ".buttonStyle(.glassProminent)",
+            "GlassButtonStyle",
+            "GlassProminentButtonStyle",
             // Bare Glass-literal expressions used outside .glassEffect(...) —
             // e.g. ternaries selecting between two Glass values stored separately.
             // These are also macOS 26-only and must not survive the migration.
             "Glass.regular",
+            "Glass.clear",
+            "Glass.identity",
             ".regular.tint(",
+            ".regular.interactive(",
         ]
 
         let offenders = try swiftFiles()
@@ -57,27 +77,63 @@ struct MacOSCompatibilityPolicyTests {
 
     // MARK: - Helpers
 
-    /// Strip single-line `// …` comments so explanatory notes like
-    /// `// macOS 26 Liquid Glass` don't false-positive against our needle list.
-    /// String literals containing `//` are rare in this codebase and would only
-    /// cause a *more* conservative reading, never a false negative.
+    /// Strip `// …` line comments so explanatory notes like
+    /// `// macOS 26 Liquid Glass` don't false-positive. String literals are
+    /// tracked so a `"//"` inside a string doesn't prematurely cut the line.
     private func stripLineComments(_ source: String) -> String {
         source
             .split(separator: "\n", omittingEmptySubsequences: false)
             .map { line -> Substring in
-                if let commentRange = line.range(of: "//") {
-                    return line[line.startIndex..<commentRange.lowerBound]
-                }
-                return line
+                guard let commentStart = lineCommentStart(in: line) else { return line }
+                return line[line.startIndex..<commentStart]
             }
             .joined(separator: "\n")
     }
 
-    private func packageManifest(_ packageName: String) throws -> String {
-        try String(
-            contentsOf: repoRoot.appendingPathComponent("Packages/\(packageName)/Package.swift"),
-            encoding: .utf8
+    /// Walks a single line, skipping over string literals, and returns the
+    /// index of the first `//` that begins a real line comment (not one nested
+    /// inside a `"…"`).
+    private func lineCommentStart(in line: Substring) -> Substring.Index? {
+        var inString = false
+        var escaped = false
+        var index = line.startIndex
+        while index < line.endIndex {
+            let character = line[index]
+            if escaped {
+                escaped = false
+            } else if inString && character == "\\" {
+                escaped = true
+            } else if character == "\"" {
+                inString.toggle()
+            } else if !inString && character == "/" {
+                let next = line.index(after: index)
+                if next < line.endIndex && line[next] == "/" {
+                    return index
+                }
+            }
+            index = line.index(after: index)
+        }
+        return nil
+    }
+
+    private func allPackageManifests() throws -> [(name: String, contents: String)] {
+        let packagesRoot = repoRoot.appendingPathComponent("Packages")
+        let manager = FileManager.default
+        let entries = try manager.contentsOfDirectory(
+            at: packagesRoot,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
         )
+        return try entries
+            .filter {
+                (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+            }
+            .compactMap { dir -> (String, String)? in
+                let manifest = dir.appendingPathComponent("Package.swift")
+                guard manager.fileExists(atPath: manifest.path) else { return nil }
+                let contents = try String(contentsOf: manifest, encoding: .utf8)
+                return (dir.lastPathComponent, contents)
+            }
     }
 
     private func swiftFiles() throws -> [URL] {
@@ -96,6 +152,8 @@ struct MacOSCompatibilityPolicyTests {
             else { return [] }
             var collected: [URL] = []
             for case let url as URL in enumerator where url.pathExtension == "swift" {
+                let isRegular = (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) ?? false
+                guard isRegular else { continue }
                 collected.append(url)
             }
             return collected
