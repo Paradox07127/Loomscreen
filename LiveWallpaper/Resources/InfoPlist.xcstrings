@@ -25,12 +25,12 @@
         "en" : {
           "stringUnit" : {
             "state" : "new",
-            "value" : "LiveWallpaper"
+            "value" : "LiveWallpaperLite"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
-            "state" : "translated",
+            "state" : "needs_review",
             "value" : "LiveWallpaper"
           }
         }

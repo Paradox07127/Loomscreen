@@ -49,7 +49,7 @@ public struct ProductCapabilities: Sendable, Equatable {
 
     public static let lite = ProductCapabilities(
         sku: .lite,
-        enabledFeatures: [.video, .html, .appleAerials]
+        enabledFeatures: [.video, .html, .appleAerials, .systemMonitor]
     )
 
     public static let pro = ProductCapabilities(

@@ -24,7 +24,7 @@ struct LiteSKUSmokeTests {
         #expect(capabilities.enabledFeatures.contains(.appleAerials))
         #expect(!capabilities.enabledFeatures.contains(.scheduleAutomation))
         #expect(!capabilities.enabledFeatures.contains(.playlists))
-        #expect(!capabilities.enabledFeatures.contains(.systemMonitor))
+        #expect(capabilities.enabledFeatures.contains(.systemMonitor))
         #expect(!capabilities.enabledFeatures.contains(.globalShortcuts))
         #expect(!capabilities.enabledFeatures.contains(.lockScreenSnapshots))
         #expect(!capabilities.enabledFeatures.contains(.inspectorPreview))
