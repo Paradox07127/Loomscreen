@@ -1,9 +1,11 @@
+import LiveWallpaperCore
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
 struct OnboardingStepFirstWallpaper: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.featureCatalog) private var featureCatalog
     let nextStep: () -> Void
     let skip: () -> Void
 
@@ -15,6 +17,13 @@ struct OnboardingStepFirstWallpaper: View {
     /// already has a Wallpaper Engine library, jump straight to the
     /// Workshop Gallery instead of presenting a single-folder picker.
     @State private var wpeFolderExists = false
+
+    /// True when the WPE entry point is both feature-enabled (Pro) and a
+    /// Steam folder was detected on disk. Lite never reaches this state,
+    /// so the Video card stays "featured" in its absence.
+    private var wpeFeaturable: Bool {
+        featureCatalog.isEnabled(.wpeImport) && wpeFolderExists
+    }
     /// Stage machine for the picker flow. Single-screen environments skip
     /// `.screenSelection` entirely; video / HTML pickers route through
     /// `.livePreview` so the user can confirm before applying.
@@ -185,7 +194,7 @@ struct OnboardingStepFirstWallpaper: View {
                     iconTint: .blue,
                     title: "Choose Your Video",
                     subtitle: "Pick an MP4 or MOV from your Mac.",
-                    isFeatured: !wpeFolderExists,
+                    isFeatured: !wpeFeaturable,
                     isLoading: false,
                     action: chooseVideoFile
                 )
@@ -203,25 +212,27 @@ struct OnboardingStepFirstWallpaper: View {
                 .keyboardShortcut("2", modifiers: [])
             }
 
-            sectionHeader("From Steam")
-            OnboardingOptionCard(
-                icon: "cube.transparent",
-                iconTint: .orange,
-                title: wpeFolderExists ? "Browse Workshop Library" : "Apply from Wallpaper Engine",
-                subtitle: wpeFolderExists
-                    ? "We found your Steam folder. Browse Video, Web, and compatible Scene projects."
-                    : "Use a Steam Workshop project folder. Scene support varies.",
-                isFeatured: wpeFolderExists,
-                isLoading: false,
-                action: {
-                    if wpeFolderExists {
-                        showWorkshopGallery = true
-                    } else {
-                        chooseWPEFolder()
+            if featureCatalog.isEnabled(.wpeImport) {
+                sectionHeader("From Steam")
+                OnboardingOptionCard(
+                    icon: "cube.transparent",
+                    iconTint: .orange,
+                    title: wpeFolderExists ? "Browse Workshop Library" : "Apply from Wallpaper Engine",
+                    subtitle: wpeFolderExists
+                        ? "We found your Steam folder. Browse Video, Web, and compatible Scene projects."
+                        : "Use a Steam Workshop project folder. Scene support varies.",
+                    isFeatured: wpeFolderExists,
+                    isLoading: false,
+                    action: {
+                        if wpeFolderExists {
+                            showWorkshopGallery = true
+                        } else {
+                            chooseWPEFolder()
+                        }
                     }
-                }
-            )
-            .keyboardShortcut("3", modifiers: [])
+                )
+                .keyboardShortcut("3", modifiers: [])
+            }
 
             sectionHeader("Built-in")
             OnboardingOptionCard(
@@ -233,7 +244,7 @@ struct OnboardingStepFirstWallpaper: View {
                 isLoading: isRequestingAerials,
                 action: chooseAerials
             )
-            .keyboardShortcut("4", modifiers: [])
+            .keyboardShortcut(featureCatalog.isEnabled(.wpeImport) ? "4" : "3", modifiers: [])
 
             OnboardingOptionCard(
                 icon: "arrow.right.circle",
@@ -244,7 +255,7 @@ struct OnboardingStepFirstWallpaper: View {
                 isLoading: false,
                 action: skip
             )
-            .keyboardShortcut("5", modifiers: [])
+            .keyboardShortcut(featureCatalog.isEnabled(.wpeImport) ? "5" : "4", modifiers: [])
             .padding(.top, 4)
 
             if let inlineError {

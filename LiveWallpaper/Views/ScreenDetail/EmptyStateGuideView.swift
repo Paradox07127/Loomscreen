@@ -1,10 +1,10 @@
+import LiveWallpaperCore
 import SwiftUI
 
 /// First-impression card grid shown on a display that has no saved
-/// configuration. Mirrors the toolbar's segmented control 1:1 — exactly
-/// four cards (Video / HTML / Shader / Scene) so users build a single
-/// mental model for "wallpaper type" instead of competing
-/// type-vs-source vocabularies.
+/// configuration. Mirrors the toolbar's segmented control 1:1 — the
+/// Shader and Scene cards are gated by `featureCatalog` so Lite users
+/// see only the wallpaper types their SKU can actually render.
 ///
 /// Once any card is clicked the screen leaves this guide:
 /// the Video card opens the file picker; the other three flip the
@@ -16,6 +16,7 @@ struct EmptyStateGuideView: View {
     let onChooseScene: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.featureCatalog) private var featureCatalog
 
     var body: some View {
         ScrollView {
@@ -30,7 +31,7 @@ struct EmptyStateGuideView: View {
                         icon: "film",
                         iconTint: .blue,
                         title: "Video",
-                        subtitle: "MP4 / MOV, playlists, and schedules.",
+                        subtitle: videoSubtitle,
                         accessibilityLabel: "Video wallpaper type",
                         actionTitle: "Pick Video…",
                         actionSystemImage: "folder",
@@ -48,27 +49,31 @@ struct EmptyStateGuideView: View {
                         action: onChooseHTML
                     )
 
-                    GuideCard(
-                        icon: "wand.and.stars",
-                        iconTint: .orange,
-                        title: "Shader",
-                        subtitle: "Built-in animated GPU shaders.",
-                        accessibilityLabel: "Shader wallpaper type",
-                        actionTitle: "Use Shader",
-                        actionSystemImage: "arrow.right",
-                        action: onChooseShader
-                    )
+                    if featureCatalog.isEnabled(.metalShader) {
+                        GuideCard(
+                            icon: "wand.and.stars",
+                            iconTint: .orange,
+                            title: "Shader",
+                            subtitle: "Built-in animated GPU shaders.",
+                            accessibilityLabel: "Shader wallpaper type",
+                            actionTitle: "Use Shader",
+                            actionSystemImage: "arrow.right",
+                            action: onChooseShader
+                        )
+                    }
 
-                    GuideCard(
-                        icon: "cube.transparent",
-                        iconTint: .purple,
-                        title: "Scene",
-                        subtitle: "Wallpaper Engine scene imports.",
-                        accessibilityLabel: "Scene wallpaper type",
-                        actionTitle: "Use Scene",
-                        actionSystemImage: "arrow.right",
-                        action: onChooseScene
-                    )
+                    if featureCatalog.isEnabled(.scene) {
+                        GuideCard(
+                            icon: "cube.transparent",
+                            iconTint: .purple,
+                            title: "Scene",
+                            subtitle: "Wallpaper Engine scene imports.",
+                            accessibilityLabel: "Scene wallpaper type",
+                            actionTitle: "Use Scene",
+                            actionSystemImage: "arrow.right",
+                            action: onChooseScene
+                        )
+                    }
                 }
                 .padding(.horizontal, 4)
 
@@ -80,6 +85,14 @@ struct EmptyStateGuideView: View {
             .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var videoSubtitle: LocalizedStringKey {
+        // Lite collapses the playlist/schedule chrome, so its subtitle
+        // doesn't promise automation features that aren't there.
+        featureCatalog.isEnabled(.playlists) || featureCatalog.isEnabled(.scheduleAutomation)
+            ? "MP4 / MOV, playlists, and schedules."
+            : "MP4 / MOV from your Mac."
     }
 
     private var header: some View {
