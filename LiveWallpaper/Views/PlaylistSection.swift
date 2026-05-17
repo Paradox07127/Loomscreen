@@ -336,7 +336,7 @@ private struct PlaylistRow: View {
                     Image(systemName: "circle.fill")
                         .font(.system(size: 8))
                         .foregroundStyle(.green)
-                        .symbolEffect(.pulse, options: .repeat(.continuous), isActive: true)
+                        .symbolEffect(.pulse, options: .repeating, isActive: true)
                 } else if entry.isPrimary {
                     Image(systemName: "star.fill")
                         .font(.system(size: 9))

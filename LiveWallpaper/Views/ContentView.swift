@@ -198,10 +198,19 @@ struct Sidebar: View {
                 bottomPadding: DesignTokens.Sidebar.displayHeaderBottomPadding
             ) {
                 Button(action: reloadWallpapers) {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.secondary)
-                        .symbolEffect(.rotate, options: .repeat(.continuous), isActive: isReloading)
+                    Group {
+                        if #available(macOS 15.0, *) {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .symbolEffect(.rotate, options: .repeat(.continuous), isActive: isReloading)
+                        } else {
+                            // macOS 14 has no .rotate; substitute .pulse so the
+                            // button still indicates ongoing reload activity.
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .symbolEffect(.pulse, options: .repeating, isActive: isReloading)
+                        }
+                    }
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
                 .help(Text("Reload all wallpapers"))
@@ -371,7 +380,7 @@ struct ScreenRow: View {
                             Image(systemName: "circle.fill")
                                 .font(.system(size: 6))
                                 .foregroundStyle(statusColor(for: summary))
-                                .symbolEffect(.pulse, options: .repeat(.continuous), isActive: summary.activity == .active)
+                                .symbolEffect(.pulse, options: .repeating, isActive: summary.activity == .active)
 
                             Text(statusText(for: summary))
                                 .font(.caption)
