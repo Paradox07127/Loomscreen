@@ -110,7 +110,12 @@ final class VideoEffectsManager {
         params: FilterParameters,
         frameDuration: CMTime
     ) async throws -> AVVideoComposition {
-        let composition = try await AVVideoComposition(
+        // Use AVMutableVideoComposition's CIFilter initializer directly so
+        // setting frameDuration is the documented mutation path. The
+        // AVVideoComposition counterpart returns an immutable composition with
+        // private instructions; mutateing a copy of it via mutableCopy() is
+        // unsupported and can drop the frame-rate override on macOS 14/15.
+        let mutable = try await AVMutableVideoComposition(
             asset: asset,
             applyingCIFiltersWithHandler: { request in
                 let sourceExtent = request.sourceImage.extent
@@ -118,12 +123,6 @@ final class VideoEffectsManager {
                 request.finish(with: filtered.cropped(to: sourceExtent), context: nil)
             }
         )
-
-        // AVVideoComposition is immutable; the only way to override frameDuration
-        // without the macOS 26 Configuration initializer is to mutate a copy.
-        guard let mutable = composition.mutableCopy() as? AVMutableVideoComposition else {
-            return composition
-        }
         mutable.frameDuration = frameDuration
         return mutable
     }

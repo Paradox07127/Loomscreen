@@ -872,32 +872,24 @@ private struct ReadableGlassSurface: ViewModifier {
         colorScheme == .dark ? 0.22 : 0.08
     }
 
-    @ViewBuilder
     func body(content: Content) -> some View {
-        if #available(macOS 26.0, *) {
-            // Native Liquid Glass alone is too soft against a live wallpaper
-            // background. Re-apply the menu bar's explicit edge + drop shadow
-            // on top so the surface stays readable.
-            content
-                .adaptiveGlassSurface(
-                    .roundedRectangle(radius),
-                    tint: tint,
-                    interactive: interactive
-                )
-                .overlay {
+        // The menu bar floats over a live wallpaper, so even on macOS 26 the
+        // native glass needs an explicit edge + drop shadow for readability.
+        // On 14/15 the wrapper provides the stroke via its fallback chrome, so
+        // here we only contribute the shadow (and an extra edge on 26 since
+        // glass on its own lacks one).
+        content
+            .adaptiveGlassSurface(
+                .roundedRectangle(radius),
+                tint: tint,
+                interactive: interactive
+            )
+            .overlay {
+                if #available(macOS 26.0, *) {
                     RoundedRectangle(cornerRadius: radius, style: .continuous)
                         .strokeBorder(Color.primary.opacity(edgeOpacity), lineWidth: 0.6)
                 }
-                .shadow(color: Color.black.opacity(shadowOpacity), radius: 5, y: 1)
-        } else {
-            // The adaptive fallback already includes stroke + shadow; no extra
-            // chrome needed.
-            content
-                .adaptiveGlassSurface(
-                    .roundedRectangle(radius),
-                    tint: tint,
-                    interactive: interactive
-                )
-        }
+            }
+            .shadow(color: Color.black.opacity(shadowOpacity), radius: 5, y: 1)
     }
 }
