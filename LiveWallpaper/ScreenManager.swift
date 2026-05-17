@@ -106,9 +106,7 @@ final class ScreenManager {
     @ObservationIgnored let originReconciler: any OriginReconciler
     @ObservationIgnored private let configurationStore = WallpaperConfigurationStore()
     @ObservationIgnored private let ambientSessionBuilder = AmbientWallpaperSessionBuilder()
-    #if !LITE_BUILD
     @ObservationIgnored private let automationCoordinator = WallpaperAutomationCoordinator()
-    #endif
     @ObservationIgnored private let powerPolicy = PowerPolicyController()
     @ObservationIgnored private let powerMonitor: any PowerMonitoring
     @ObservationIgnored private let playbackStateSubject = CurrentValueSubject<Bool, Never>(false)
@@ -130,9 +128,7 @@ final class ScreenManager {
         powerPolicy: powerPolicy,
         playableVideoLoader: playableVideoLoader,
         applyVideoEffects: { [weak self] screen, config in
-            #if !LITE_BUILD
             self?.effectsCoordinator.applyVideoEffects(for: screen, config: config)
-            #endif
         },
         refreshRateLookup: { [weak self] screenID in
             self?.getScreenRefreshRate(for: screenID) ?? 60
@@ -189,7 +185,6 @@ final class ScreenManager {
     @ObservationIgnored private var transitionRegistry: PlaybackTransitionRegistry {
         playbackCoordinator.transition
     }
-    #if !LITE_BUILD
     /// Owns playlist + schedule automation, including the
     /// `WallpaperAutomationCoordinator.start(...)` wiring. Lazy because
     /// many of the callbacks (saveConfiguration, releaseRuntimeSession,
@@ -223,7 +218,6 @@ final class ScreenManager {
             self?.isCurrentTransition(generation, for: screenID) ?? false
         }
     )
-    #endif
     /// Owns HTML wallpaper management (setters + multi-instance audio-leader
     /// + trust evaluation). Lazy because the saveConfiguration /
     /// restoreWallpaperSession / notifyWallpaperSessionChanged callbacks
@@ -244,7 +238,6 @@ final class ScreenManager {
         },
         originReconciler: originReconciler
     )
-    #if !LITE_BUILD
     /// Owns the CIFilter video-effects pipeline + weather-reactive monitor.
     /// Lazy because the saveConfiguration / applyFrameRateLimit /
     /// screenRefreshRate / screensProvider callbacks capture self.
@@ -268,7 +261,6 @@ final class ScreenManager {
     /// triggers `refresh()` on user gestures. The actual instance is owned
     /// by the effects coordinator.
     var weatherService: WeatherReactiveService { effectsCoordinator.weatherService }
-    #endif
     @ObservationIgnored private lazy var lockScreenSnapshotCoordinator = LockScreenSnapshotCoordinator { [weak self] in
         self?.captureDesktopSnapshotsForLockIfNeeded()
     }
@@ -322,14 +314,12 @@ final class ScreenManager {
             // Automation (playlist + schedule) and weather monitor are
             // independent Pro features; skip each only when its capability
             // is off so a future SKU can enable one without the other.
-            #if !LITE_BUILD
             if featureCatalog.isEnabled(.playlists) || featureCatalog.isEnabled(.scheduleAutomation) {
                 automationOrchestrator.startMonitoring()
             }
             if featureCatalog.isEnabled(.weatherReactive) {
                 startWeatherMonitoring()
             }
-            #endif
         }
         Logger.notice("ScreenManager initialization complete", category: .screenManager)
     }
@@ -572,9 +562,7 @@ final class ScreenManager {
         // setVideo / playlist / schedule) sees the new value and short-circuits
         // before instantiating a player against a now-dead screen.
         bumpTransition(for: screen.id)
-        #if !LITE_BUILD
         effectsCoordinator.cancelInflight(for: screen.id)
-        #endif
         transitionRegistry.cancelAssetReadiness(for: screen.id)
         setTransientRuntimeError(nil, for: screen.id)
         screen.resetRuntimeSession()
@@ -1221,7 +1209,6 @@ final class ScreenManager {
         )
     }
 
-    #if !LITE_BUILD
     // MARK: - Video Effects / Weather-Reactive (delegates to coordinator)
 
     func updateEffectConfig(_ effectConfig: VideoEffectConfig, for screen: Screen) {
@@ -1247,7 +1234,6 @@ final class ScreenManager {
     func startWeatherMonitoring() {
         effectsCoordinator.startWeatherMonitoring()
     }
-    #endif
 
     // MARK: - Wallpaper Type Switching
 
@@ -1439,7 +1425,6 @@ final class ScreenManager {
         return rate
     }
     
-    #if !LITE_BUILD
     // MARK: - Playlist + Schedule (delegates to WallpaperAutomationOrchestrator)
 
     func updatePlaylistBookmarks(_ bookmarks: [Data], for screen: Screen) {
@@ -1489,5 +1474,4 @@ final class ScreenManager {
     func updatePlaylistRotationMinutes(_ minutes: Int?, for screen: Screen) {
         automationOrchestrator.updatePlaylistRotationMinutes(minutes, for: screen)
     }
-    #endif
 }

@@ -1,4 +1,3 @@
-#if !LITE_BUILD
 import AppKit
 import Foundation
 import Observation
@@ -183,4 +182,3 @@ final class WallpaperEffectsCoordinator {
         }
     }
 }
-#endif

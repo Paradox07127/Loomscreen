@@ -77,9 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @ObservationIgnored private var onboardingWindowController: NSWindowController?
     /// See `WeatherReactiveService.preferenceObserver` — same pattern.
     @ObservationIgnored nonisolated(unsafe) private var dockVisibilityObserver: NSObjectProtocol?
-    #if !LITE_BUILD
     @ObservationIgnored private var globalShortcutManager: GlobalShortcutManager?
-    #endif
     /// True between the first `.terminateLater` reply and the matching
     /// `reply(toApplicationShouldTerminate:)`. Re-entrant termination
     /// attempts skip the flush so we don't enqueue duplicate writes that
@@ -126,13 +124,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         applyDockVisibility()
         observeDockVisibilityChanges()
 
-        #if !LITE_BUILD
         if !runtimeOptions.isTesting,
            manager.featureCatalog.isEnabled(.globalShortcuts) {
             globalShortcutManager = GlobalShortcutManager(screenManager: manager)
             globalShortcutManager?.start()
         }
-        #endif
 
         Logger.notice("Application startup complete", category: .startup)
 

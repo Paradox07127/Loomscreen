@@ -478,9 +478,7 @@ struct ScreenDetailView: View {
                                             withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.18))) {
                                                 selectedWallpaperMode = mode
                                             }
-                                            #if !LITE_BUILD
                                             screenManager.updateWallpaperMode(mode, for: screen)
-                                            #endif
                                         } label: {
                                             Text(mode.labelKey)
                                                 .font(.system(size: 12, weight: selectedWallpaperMode == mode ? .semibold : .regular))
@@ -499,7 +497,6 @@ struct ScreenDetailView: View {
                                 .padding(2)
                                 .glassEffect(.regular.interactive(), in: .capsule)
 
-                                #if !LITE_BUILD
                                 if selectedWallpaperMode == .playlist,
                                    featureCatalog.isEnabled(.playlists) {
                                     GroupBox {
@@ -545,9 +542,7 @@ struct ScreenDetailView: View {
                                         removal: .opacity
                                     ))
                                 }
-                                #endif
 
-                                #if !LITE_BUILD
                                 if featureCatalog.isEnabled(.videoEffects) {
                                 GroupBox {
                                     CollapsibleSection(
@@ -619,7 +614,6 @@ struct ScreenDetailView: View {
                                 }
                                 .groupBoxStyle(ContainerGroupBoxStyle())
                                 } // end videoEffects gate
-                                #endif
                             }
                         }
                     }
@@ -639,7 +633,6 @@ struct ScreenDetailView: View {
         clampedInspectorWidth(CGFloat(liveInspectorWidth ?? inspectorWidth))
     }
 
-    #if !LITE_BUILD
     private var particleEffectBinding: Binding<ParticleEffect> {
         Binding(
             get: { selectedParticleEffect },
@@ -672,7 +665,6 @@ struct ScreenDetailView: View {
             }
         )
     }
-    #endif
 
     private func clampedInspectorWidth(_ width: CGFloat) -> CGFloat {
         min(max(width, DesignTokens.Inspector.minWidth), DesignTokens.Inspector.maxWidth)
@@ -997,11 +989,9 @@ struct ScreenDetailView: View {
                 target: .transient
             ) else { return nil }
             let url = resolved.url
-            #if !LITE_BUILD
             if resolved.didRefresh {
                 screenManager.replaceActiveBookmark(resolved.bookmarkData, for: screen)
             }
-            #endif
             return url
         }
 

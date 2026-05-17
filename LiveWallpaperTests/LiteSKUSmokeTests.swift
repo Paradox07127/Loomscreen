@@ -11,24 +11,33 @@ import Testing
 @Suite("Lite SKU smoke tests") @MainActor
 struct LiteSKUSmokeTests {
 
-    @Test("ProductCapabilities.lite exposes only the Lite wallpaper types and modes")
+    @Test("ProductCapabilities.lite drops only the heavy GPU pipelines")
     func liteCatalogSurfaceArea() {
         let capabilities = ProductCapabilities.lite
         #expect(capabilities.sku == .lite)
+        // Wallpaper types: video + html only (no shader, no scene)
         #expect(capabilities.selectableWallpaperTypes == [.video, .html])
-        #expect(capabilities.selectableWallpaperModes == [.single])
         #expect(capabilities.canRender(.video))
         #expect(capabilities.canRender(.html))
         #expect(!capabilities.canRender(.metalShader))
         #expect(!capabilities.canRender(.scene))
+        // Automation, playlists, schedule — same as Pro for video/html
+        #expect(capabilities.selectableWallpaperModes.contains(.single))
+        #expect(capabilities.selectableWallpaperModes.contains(.playlist))
+        #expect(capabilities.selectableWallpaperModes.contains(.schedule))
+        // Video / web feature surface mirrors Pro
         #expect(capabilities.enabledFeatures.contains(.appleAerials))
-        #expect(!capabilities.enabledFeatures.contains(.scheduleAutomation))
-        #expect(!capabilities.enabledFeatures.contains(.playlists))
+        #expect(capabilities.enabledFeatures.contains(.scheduleAutomation))
+        #expect(capabilities.enabledFeatures.contains(.playlists))
         #expect(capabilities.enabledFeatures.contains(.systemMonitor))
-        #expect(!capabilities.enabledFeatures.contains(.globalShortcuts))
-        #expect(!capabilities.enabledFeatures.contains(.lockScreenSnapshots))
-        #expect(!capabilities.enabledFeatures.contains(.inspectorPreview))
+        #expect(capabilities.enabledFeatures.contains(.globalShortcuts))
+        #expect(capabilities.enabledFeatures.contains(.lockScreenSnapshots))
+        #expect(capabilities.enabledFeatures.contains(.inspectorPreview))
+        #expect(capabilities.enabledFeatures.contains(.videoEffects))
+        #expect(capabilities.enabledFeatures.contains(.weatherReactive))
+        // Only Pro-exclusive features
         #expect(!capabilities.enabledFeatures.contains(.wpeImport))
+        #expect(!capabilities.enabledFeatures.contains(.developerTools))
     }
 
     @Test("ProductCapabilities.pro keeps every feature on")
@@ -80,13 +89,16 @@ struct LiteSKUSmokeTests {
             originReconciler: PreservingOriginReconciler()
         ))
 
-        // Lite has neither playlists nor scheduleAutomation, so the automation
-        // orchestrator's monitor must remain dormant. The flag is internal so
-        // we settle for the catalogue/sku invariant here; the actual gating
-        // lives in ScreenManager.init.
-        #expect(!manager.featureCatalog.isEnabled(.playlists))
-        #expect(!manager.featureCatalog.isEnabled(.scheduleAutomation))
-        #expect(!manager.featureCatalog.isEnabled(.weatherReactive))
+        // Lite mirrors Pro for the video/HTML feature set, so playlists,
+        // scheduleAutomation, and weatherReactive are all enabled — only the
+        // heavy GPU pipelines (.scene, .metalShader) and Pro-exclusive
+        // chrome (.wpeImport, .developerTools) drop out.
+        #expect(manager.featureCatalog.isEnabled(.playlists))
+        #expect(manager.featureCatalog.isEnabled(.scheduleAutomation))
+        #expect(manager.featureCatalog.isEnabled(.weatherReactive))
+        #expect(!manager.featureCatalog.isEnabled(.scene))
+        #expect(!manager.featureCatalog.isEnabled(.metalShader))
+        #expect(!manager.featureCatalog.isEnabled(.wpeImport))
     }
 
     private static func makeScreen() -> Screen? {

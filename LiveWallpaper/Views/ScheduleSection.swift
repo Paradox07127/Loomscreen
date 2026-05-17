@@ -1,4 +1,3 @@
-#if !LITE_BUILD
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
@@ -517,4 +516,3 @@ struct ScheduleTimelineBar: View {
         .accessibilityLabel(Text("Schedule timeline, \(slots.count) slots, currently \(currentHour):00, active slot: \(activeSlotLabel)"))
     }
 }
-#endif

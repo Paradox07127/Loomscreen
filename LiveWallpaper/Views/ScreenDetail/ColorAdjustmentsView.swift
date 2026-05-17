@@ -1,4 +1,3 @@
-#if !LITE_BUILD
 import SwiftUI
 
 struct ColorAdjustmentsView: View {
@@ -91,4 +90,3 @@ struct ColorAdjustmentsView: View {
         }
     }
 }
-#endif
