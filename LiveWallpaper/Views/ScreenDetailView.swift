@@ -465,6 +465,11 @@ struct ScreenDetailView: View {
                         )
 
                         if selectedWallpaperType == .html {
+                            HTMLOptionsInspector(
+                                screen: screen,
+                                config: $htmlConfig
+                            )
+
                             HTMLRenderingDiagnosticsInspector(
                                 screen: screen,
                                 source: htmlSource,

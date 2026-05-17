@@ -195,11 +195,12 @@ struct MenuBarContent: View {
             Button(action: invokeManageWindow) {
                 HStack(spacing: 7) {
                     Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 13, weight: .semibold))
                     Text("Manage")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold))
                         .lineLimit(1)
                 }
-                .frame(maxWidth: .infinity, minHeight: 24)
+                .frame(maxWidth: .infinity)
             }
             .adaptiveGlassButton(.prominent)
             .controlSize(.large)
@@ -341,6 +342,18 @@ struct MenuBarContent: View {
         return 1 + (config.playlistBookmarks ?? []).count > 1
     }
 
+    /// Effective-audio binding: stays in sync with the inspector's audio
+    /// row (which keeps `muted` and `videoVolume` as separate states).
+    /// The menubar slider treats audio as a single continuous control:
+    ///
+    ///   - reading  → 0 when muted, otherwise the stored volume
+    ///   - writing 0   → mute on (volume is left intact so unmuting later
+    ///                   restores the prior level)
+    ///   - writing >0  → unmute (if needed) and set the volume
+    ///
+    /// This keeps the two surfaces visually consistent even though they
+    /// use different gesture semantics (preview side has a 10% mute
+    /// dead-zone; menubar is a simple 0…1 ramp).
     private func videoVolumeBinding(for screen: Screen) -> Binding<Double>? {
         guard let config = screenManager.getConfiguration(for: screen),
               config.wallpaperType == .video,
@@ -348,10 +361,23 @@ struct MenuBarContent: View {
 
         return Binding(
             get: {
-                screenManager.getConfiguration(for: screen)?.videoVolume ?? config.videoVolume
+                let current = screenManager.getConfiguration(for: screen) ?? config
+                return current.muted ? 0 : current.videoVolume
             },
             set: { newValue in
                 let clampedValue = min(max(newValue, 0), 1)
+                let current = screenManager.getConfiguration(for: screen) ?? config
+
+                if clampedValue <= 0.001 {
+                    if !current.muted {
+                        screenManager.updateMuted(true, for: screen)
+                    }
+                    return
+                }
+
+                if current.muted {
+                    screenManager.updateMuted(false, for: screen)
+                }
                 screenManager.updateVideoVolume(clampedValue, for: screen)
             }
         )
@@ -707,26 +733,58 @@ private struct DisplayIconTile: View {
 private struct VolumeControlRow: View {
     let videoVolume: Binding<Double>
 
+    /// Local mirror of the upstream binding. The icon and the percent text
+    /// read from this @State during a drag so they re-render on every
+    /// continuous Slider commit — relying on the upstream binding alone
+    /// left them stuck at the pre-drag value because the binding setter
+    /// hops through `screenManager → configurationStore → observation`
+    /// before the view's getter re-resolves.
+    ///
+    /// `onChange` re-syncs from the upstream binding so external writes
+    /// (preview-pane slider, mute toggle, persisted state on reopen) keep
+    /// the menubar slider in lockstep.
+    @State private var liveValue: Double = 0
+
     var body: some View {
         HStack(spacing: 7) {
-            Image(systemName: volumeIcon(for: videoVolume.wrappedValue))
+            Image(systemName: volumeIcon(for: liveValue))
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .frame(width: 22)
                 .accessibilityHidden(true)
 
-            Slider(value: videoVolume, in: 0...1)
+            Slider(value: liveBinding, in: 0...1)
                 .controlSize(.mini)
                 .tint(.secondary)
                 .accessibilityLabel(Text("Video volume"))
-                .accessibilityValue(Text("\(volumePercent(videoVolume.wrappedValue)) percent"))
+                .accessibilityValue(Text("\(volumePercent(liveValue)) percent"))
 
-            Text(verbatim: "\(volumePercent(videoVolume.wrappedValue))%")
+            Text(verbatim: "\(volumePercent(liveValue))%")
                 .font(.system(size: 9, weight: .semibold, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .frame(width: 34, alignment: .trailing)
+                .monospacedDigit()
         }
         .frame(maxWidth: .infinity)
+        .onAppear { liveValue = videoVolume.wrappedValue }
+        .onChange(of: videoVolume.wrappedValue) { _, newValue in
+            // Only adopt external writes — `abs(diff) > epsilon` skips the
+            // self-echo from our own setter so a drag isn't pulled back to
+            // the round-tripped value mid-gesture.
+            if abs(liveValue - newValue) > 0.001 {
+                liveValue = newValue
+            }
+        }
+    }
+
+    private var liveBinding: Binding<Double> {
+        Binding(
+            get: { liveValue },
+            set: { newValue in
+                liveValue = newValue
+                videoVolume.wrappedValue = newValue
+            }
+        )
     }
 
     private func volumePercent(_ value: Double) -> Int {

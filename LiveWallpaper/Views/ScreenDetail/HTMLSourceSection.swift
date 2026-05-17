@@ -13,8 +13,6 @@ struct HTMLSourceSection: View {
 
     @State private var selectedKind: HTMLSourceKind = .url
     @State private var urlInput: String = ""
-    @State private var customCSSExpanded: Bool = false
-    @State private var draftCustomCSS: String = ""
 
     var body: some View {
         GroupBox {
@@ -32,14 +30,6 @@ struct HTMLSourceSection: View {
                 }
                 if let source { trustBanner(for: source) }
                 if let source { multiInstanceBanner(for: source) }
-
-                Divider()
-
-                togglesGrid
-
-                Divider()
-
-                customCSSDisclosure
             }
             .padding(14)
         }
@@ -224,119 +214,12 @@ struct HTMLSourceSection: View {
         return "HTTP origins cannot be trusted for JavaScript. Use HTTPS when possible."
     }
 
-    // MARK: - Toggles
-
-    private var togglesGrid: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label("JavaScript", systemImage: "curlybraces")
-                Spacer()
-                Toggle("", isOn: Binding(
-                    get: { config.allowJavaScript },
-                    set: { newValue in
-                        config.allowJavaScript = newValue
-                        commitConfig()
-                    }
-                ))
-                .labelsHidden()
-                .accessibilityLabel(Text("JavaScript"))
-                .toggleStyle(.switch)
-                .controlSize(.small)
-            }
-            HStack {
-                Label("Mouse Interaction", systemImage: "cursorarrow.click")
-                Spacer()
-                Toggle("", isOn: Binding(
-                    get: { config.allowMouseInteraction },
-                    set: { newValue in
-                        config.allowMouseInteraction = newValue
-                        commitConfig()
-                    }
-                ))
-                .labelsHidden()
-                .accessibilityLabel(Text("Mouse Interaction"))
-                .toggleStyle(.switch)
-                .controlSize(.small)
-            }
-            Text(config.allowMouseInteraction
-                 ? "Clicks and scrolls reach the wallpaper. Desktop icons are hidden behind the page while this is on."
-                 : "Clicks fall through to the desktop, so Finder icons and the Dock stay usable.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-
-            // "Mute Audio" / "Block Trackers" moved to CommonPlaybackInspector
-            // (Playback & Privacy section) so the controls share a stable
-            // physical position with the equivalent video toggles.
-
-            HStack {
-                Label("Physical-pixel layout", systemImage: "rectangle.split.2x1")
-                Spacer()
-                Toggle("", isOn: Binding(
-                    get: { config.physicalPixelLayout },
-                    set: { newValue in
-                        config.physicalPixelLayout = newValue
-                        commitConfig()
-                    }
-                ))
-                .labelsHidden()
-                .accessibilityLabel(Text("Physical-pixel layout"))
-                .toggleStyle(.switch)
-                .controlSize(.small)
-            }
-            Text("Maps window.innerWidth to physical pixels (Wallpaper Engine compatibility). Auto-enabled for folders containing project.json.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    // MARK: - Custom CSS
-
-    private var customCSSDisclosure: some View {
-        DisclosureGroup(isExpanded: $customCSSExpanded) {
-            VStack(alignment: .leading, spacing: 8) {
-                TextEditor(text: $draftCustomCSS)
-                    .font(.system(size: 11, design: .monospaced))
-                    .frame(minHeight: 90, maxHeight: 160)
-                    .scrollContentBackground(.hidden)
-                    .background(Color.black.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
-                HStack {
-                    Spacer()
-                    Button("Apply CSS") {
-                        config.customCSS = draftCustomCSS.isEmpty ? nil : draftCustomCSS
-                        commitConfig()
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(draftCustomCSS == (config.customCSS ?? ""))
-                }
-            }
-            .padding(.top, 4)
-        } label: {
-            Label("Custom CSS", systemImage: "paintbrush")
-                .font(.subheadline)
-        }
-        .onAppear { scheduleCustomCSSDraftSync(config.customCSS) }
-        .onChange(of: config.customCSS) { _, newValue in
-            scheduleCustomCSSDraftSync(newValue)
-        }
-    }
-
     // MARK: - Actions
 
     private func scheduleBindingSync() {
         DispatchQueue.main.async {
             Task { @MainActor in
                 syncFromBinding()
-            }
-        }
-    }
-
-    private func scheduleCustomCSSDraftSync(_ customCSS: String?) {
-        DispatchQueue.main.async {
-            Task { @MainActor in
-                let nextValue = customCSS ?? ""
-                if draftCustomCSS != nextValue {
-                    draftCustomCSS = nextValue
-                }
             }
         }
     }
@@ -427,5 +310,193 @@ struct HTMLSourceSection: View {
             return firstHTML
         }
         return "index.html"
+    }
+}
+
+/// HTML-side analog of the Video inspector groups: lives in the right-hand
+/// inspector column, slots in directly under `CommonPlaybackInspector` so
+/// "Playback & Privacy" → "HTML Options" form the same vertical rhythm
+/// Video's panel has with Particles / Color & Filters / Environment.
+///
+/// The source picker (URL / File / Folder) stays in the main panel on the
+/// left — only the *option* toggles move here, mirroring how Video keeps
+/// its display-mode picker on the left and inspector toggles on the right.
+struct HTMLOptionsInspector: View {
+    var screen: Screen
+    @Binding var config: HTMLConfig
+
+    @Environment(ScreenManager.self) private var screenManager
+    @AppStorage("Inspector.HTMLOptionsExpanded") private var isExpanded = true
+    @State private var customCSSPresented: Bool = false
+    @State private var draftCustomCSS: String = ""
+
+    var body: some View {
+        GroupBox {
+            CollapsibleSection(
+                title: "HTML Options",
+                systemImage: "globe",
+                isExpanded: $isExpanded
+            ) {
+                VStack(spacing: 8) {
+                    javaScriptRow
+                    Divider()
+                    mouseInteractionRow
+                    Divider()
+                    physicalPixelRow
+                    Divider()
+                    customCSSRow
+                }
+            }
+        }
+        .groupBoxStyle(ContainerGroupBoxStyle())
+    }
+
+    // MARK: - Rows
+
+    private var javaScriptRow: some View {
+        SettingRow(
+            icon: "curlybraces",
+            iconColor: .orange,
+            title: "JavaScript"
+        ) {
+            Toggle("", isOn: Binding(
+                get: { config.allowJavaScript },
+                set: { newValue in
+                    config.allowJavaScript = newValue
+                    commitConfig()
+                }
+            ))
+            .labelsHidden()
+            .accessibilityLabel(Text("JavaScript"))
+            .toggleStyle(.switch)
+            .controlSize(.small)
+        }
+    }
+
+    private var mouseInteractionRow: some View {
+        SettingRow(
+            icon: "cursorarrow.click",
+            iconColor: .blue,
+            title: "Mouse Interaction",
+            subtitle: config.allowMouseInteraction
+                ? "Clicks and scrolls reach the wallpaper. Desktop icons are hidden while this is on."
+                : "Clicks fall through to the desktop, so Finder icons and the Dock stay usable."
+        ) {
+            Toggle("", isOn: Binding(
+                get: { config.allowMouseInteraction },
+                set: { newValue in
+                    config.allowMouseInteraction = newValue
+                    commitConfig()
+                }
+            ))
+            .labelsHidden()
+            .accessibilityLabel(Text("Mouse Interaction"))
+            .toggleStyle(.switch)
+            .controlSize(.small)
+        }
+    }
+
+    private var physicalPixelRow: some View {
+        SettingRow(
+            icon: "rectangle.split.2x1",
+            iconColor: .indigo,
+            title: "Physical-pixel layout",
+            subtitle: "Maps window.innerWidth to physical pixels (Wallpaper Engine compatibility). Auto-enabled for folders containing project.json."
+        ) {
+            Toggle("", isOn: Binding(
+                get: { config.physicalPixelLayout },
+                set: { newValue in
+                    config.physicalPixelLayout = newValue
+                    commitConfig()
+                }
+            ))
+            .labelsHidden()
+            .accessibilityLabel(Text("Physical-pixel layout"))
+            .toggleStyle(.switch)
+            .controlSize(.small)
+        }
+    }
+
+    /// Custom CSS row — the editor itself opens in a popover instead of
+    /// expanding inline so the inspector list stays compact while the user
+    /// still gets a comfortable multi-line editing surface.
+    private var customCSSRow: some View {
+        SettingRow(
+            icon: "paintbrush",
+            iconColor: .pink,
+            title: "Custom CSS",
+            subtitle: (config.customCSS?.isEmpty == false)
+                ? "Applied — open to review or edit."
+                : "Inject site-specific styles after the page loads."
+        ) {
+            Button {
+                customCSSPresented = true
+            } label: {
+                Text("Edit…")
+            }
+            .controlSize(.small)
+            .popover(isPresented: $customCSSPresented, arrowEdge: .leading) {
+                customCSSEditor
+            }
+        }
+        .onAppear { scheduleCustomCSSDraftSync(config.customCSS) }
+        .onChange(of: config.customCSS) { _, newValue in
+            scheduleCustomCSSDraftSync(newValue)
+        }
+    }
+
+    private var customCSSEditor: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Custom CSS", systemImage: "paintbrush")
+                .font(.headline)
+
+            TextEditor(text: $draftCustomCSS)
+                .font(.system(size: 11, design: .monospaced))
+                .frame(width: 380, height: 200)
+                .scrollContentBackground(.hidden)
+                .background(Color.black.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+
+            HStack {
+                Button("Reset") {
+                    draftCustomCSS = config.customCSS ?? ""
+                }
+                .controlSize(.small)
+                .disabled(draftCustomCSS == (config.customCSS ?? ""))
+
+                Spacer()
+
+                Button("Close") { customCSSPresented = false }
+                    .controlSize(.small)
+                    .keyboardShortcut(.cancelAction)
+
+                Button("Apply") {
+                    config.customCSS = draftCustomCSS.isEmpty ? nil : draftCustomCSS
+                    commitConfig()
+                    customCSSPresented = false
+                }
+                .controlSize(.small)
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(draftCustomCSS == (config.customCSS ?? ""))
+            }
+        }
+        .padding(14)
+    }
+
+    // MARK: - Helpers
+
+    private func commitConfig() {
+        screenManager.updateHTMLConfig(config, for: screen)
+    }
+
+    private func scheduleCustomCSSDraftSync(_ customCSS: String?) {
+        DispatchQueue.main.async {
+            Task { @MainActor in
+                let nextValue = customCSS ?? ""
+                if draftCustomCSS != nextValue {
+                    draftCustomCSS = nextValue
+                }
+            }
+        }
     }
 }
