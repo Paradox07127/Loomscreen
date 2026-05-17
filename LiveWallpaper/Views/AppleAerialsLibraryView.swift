@@ -75,11 +75,12 @@ struct AppleAerialsLibraryView: View {
                     Button {
                         Task { await library.refresh() }
                     } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
+                        Image(systemName: "arrow.clockwise")
                     }
                     .buttonStyle(.glass)
                     .controlSize(.regular)
-                    .help(Text("Refresh"))
+                    .help(Text("Refresh — rescan the Aerials library for new content"))
+                    .accessibilityLabel(Text("Refresh Aerials library"))
                     .disabled(library.isScanning)
 
                     Button {

@@ -158,10 +158,12 @@ struct WPESceneSection: View {
                 Button {
                     selectedHistoryEntry = nil
                 } label: {
-                    Label("Back to library", systemImage: "chevron.left")
+                    Image(systemName: "chevron.left")
                 }
                 .buttonStyle(.glass)
                 .controlSize(.regular)
+                .help(Text("Back to library"))
+                .accessibilityLabel(Text("Back to library"))
                 .accessibilityHint(Text("Return to the recent Workshop projects grid"))
                 Spacer()
             }
