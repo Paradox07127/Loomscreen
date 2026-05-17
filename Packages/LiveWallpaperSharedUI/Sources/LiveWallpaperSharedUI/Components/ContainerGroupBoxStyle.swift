@@ -10,6 +10,6 @@ public struct ContainerGroupBoxStyle: GroupBoxStyle {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .glassEffect(.regular, in: .rect(cornerRadius: 12))
+        .adaptiveGlassSurface(.roundedRectangle(12))
     }
 }
