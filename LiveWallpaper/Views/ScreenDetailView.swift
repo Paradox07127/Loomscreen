@@ -88,7 +88,7 @@ struct ScreenDetailView: View {
             .help(Text("Apply to All — copy this display's wallpaper and settings to every other display"))
             .accessibilityLabel(Text("Apply to all displays"))
             .accessibilityHint(Text("Copies the current wallpaper and settings to every other connected display"))
-            .buttonStyle(.glass)
+            .adaptiveGlassButton(.regular)
             .controlSize(.regular)
         }
     }
@@ -405,7 +405,7 @@ struct ScreenDetailView: View {
                     } label: {
                         Image(systemName: "bookmark.fill")
                     }
-                    .buttonStyle(.glass)
+                    .adaptiveGlassButton(.regular)
                     .controlSize(.regular)
                     .help(Text("Bookmarks — saved video / HTML / shader shortcuts"))
                     .accessibilityLabel(Text("Bookmarks"))
@@ -422,7 +422,7 @@ struct ScreenDetailView: View {
                                 } label: {
                                     Image(systemName: "folder.badge.plus")
                                 }
-                                .buttonStyle(.glassProminent)
+                                .adaptiveGlassButton(.prominent)
                                 .controlSize(.regular)
                                 .help(Text("Select Video — choose a video file for this display"))
                                 .accessibilityLabel(Text("Select video"))
@@ -434,7 +434,7 @@ struct ScreenDetailView: View {
                             } label: {
                                 Image(systemName: "trash")
                             }
-                            .buttonStyle(.glass)
+                            .adaptiveGlassButton(.regular)
                             .destructiveControlTint()
                             .controlSize(.regular)
                             .help(Text("Clear Wallpaper — remove the current wallpaper without deleting source files"))
@@ -451,7 +451,7 @@ struct ScreenDetailView: View {
     private var inspectorPanel: some View {
         if showsInspector {
             ScrollView {
-                GlassEffectContainer(spacing: 16) {
+                AdaptiveGlassContainer(spacing: 16) {
                     VStack(spacing: 16) {
                         CommonPlaybackInspector(
                             screen: screen,
@@ -498,7 +498,7 @@ struct ScreenDetailView: View {
                                     }
                                 }
                                 .padding(2)
-                                .glassEffect(.regular.interactive(), in: .capsule)
+                                .adaptiveGlassSurface(.capsule, interactive: true)
 
                                 if selectedWallpaperMode == .playlist,
                                    featureCatalog.isEnabled(.playlists) {

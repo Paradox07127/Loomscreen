@@ -552,13 +552,13 @@ struct EmptyStateView: View {
     let message: LocalizedStringKey
 
     var body: some View {
-        GlassEffectContainer(spacing: 12) {
+        AdaptiveGlassContainer(spacing: 12) {
             VStack(spacing: 20) {
                 Image(systemName: icon)
                     .font(.system(size: 48))
                     .foregroundStyle(.secondary.opacity(0.7))
                     .frame(width: 80, height: 80)
-                    .glassEffect(.regular, in: .circle)
+                    .adaptiveGlassSurface(.circle)
                     .contentTransition(.symbolEffect(.replace))
 
                 Text(title)
@@ -572,7 +572,7 @@ struct EmptyStateView: View {
                     .frame(maxWidth: 300)
             }
             .padding(32)
-            .glassEffect(.regular, in: .rect(cornerRadius: 20))
+            .adaptiveGlassSurface(.roundedRectangle(20))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

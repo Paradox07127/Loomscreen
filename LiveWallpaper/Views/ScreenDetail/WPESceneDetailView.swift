@@ -31,7 +31,7 @@ struct WPESceneDetailView: View {
         }
         .padding(24)
         .frame(maxWidth: 560)
-        .glassEffect(.regular, in: .rect(cornerRadius: 24))
+        .adaptiveGlassSurface(.roundedRectangle(24))
         .shadow(color: .black.opacity(0.18), radius: 8, y: 4)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text("\(origin.title). Scene wallpaper. \(stateAccessibilityText)", comment: "A11y label for a Wallpaper Engine scene detail card. Placeholders are scene title and state."))
@@ -364,7 +364,7 @@ struct WPESceneDetailView: View {
             } label: {
                 Label("Clear Scene", systemImage: "xmark.circle")
             }
-            .buttonStyle(.glass)
+            .adaptiveGlassButton(.regular)
             .destructiveControlTint()
             .controlSize(.regular)
             .accessibilityHint(Text("Removes the scene wallpaper from this display"))

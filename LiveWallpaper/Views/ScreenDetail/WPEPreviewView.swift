@@ -74,7 +74,7 @@ struct WPEPreviewView: View {
             } label: {
                 Label("Retry", systemImage: "arrow.clockwise")
             }
-            .buttonStyle(.glass)
+            .adaptiveGlassButton(.regular)
             .controlSize(.small)
             .accessibilityHint(Text("Re-attempt to load this preview"))
         }

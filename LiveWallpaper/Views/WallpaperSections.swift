@@ -44,7 +44,7 @@ struct ShaderWallpaperSection: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                GlassEffectContainer(spacing: 10) {
+                AdaptiveGlassContainer(spacing: 10) {
                     HStack(spacing: 10) {
                         ForEach(MetalShaderPreset.allCases) { preset in
                             Button {
@@ -57,11 +57,10 @@ struct ShaderWallpaperSection: View {
                                     Image(systemName: preset.iconName)
                                         .font(.title2)
                                         .frame(width: 44, height: 44)
-                                        .glassEffect(
-                                            selectedShaderPreset == preset
-                                                ? .regular.tint(Color.accentColor.opacity(0.35)).interactive()
-                                                : .regular.interactive(),
-                                            in: .circle
+                                        .adaptiveGlassSurface(
+                                            .circle,
+                                            tint: selectedShaderPreset == preset ? Color.accentColor : nil,
+                                            interactive: true
                                         )
                                     Text(preset.titleKey)
                                         .font(.caption2)
