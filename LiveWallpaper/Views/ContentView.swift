@@ -206,7 +206,7 @@ struct Sidebar: View {
                             // macOS 14 has no .rotate; substitute .pulse so the
                             // button still indicates ongoing reload activity.
                             Image(systemName: "arrow.triangle.2.circlepath")
-                                .symbolEffect(.pulse, options: .repeating, isActive: isReloading)
+                                .symbolEffect(.pulse, options: .continuouslyRepeating, isActive: isReloading)
                         }
                     }
                     .font(.system(size: 10, weight: .bold))
@@ -380,7 +380,7 @@ struct ScreenRow: View {
                             Image(systemName: "circle.fill")
                                 .font(.system(size: 6))
                                 .foregroundStyle(statusColor(for: summary))
-                                .symbolEffect(.pulse, options: .repeating, isActive: summary.activity == .active)
+                                .symbolEffect(.pulse, options: .continuouslyRepeating, isActive: summary.activity == .active)
 
                             Text(statusText(for: summary))
                                 .font(.caption)

@@ -59,7 +59,17 @@ private struct AdaptiveGlassSurfaceModifier: ViewModifier {
     private var increaseContrast: Bool { colorSchemeContrast == .increased }
 
     private var tintOpacity: Double { colorScheme == .dark ? 0.20 : 0.11 }
-    private var fallbackTintOpacity: Double { colorScheme == .dark ? 0.22 : 0.14 }
+
+    /// Boost the fallback tint opacity for interactive surfaces so that small
+    /// circular / capsule selection targets (40-44pt) read clearly even against
+    /// a busy wallpaper backdrop. Non-interactive surfaces keep the calmer value.
+    private var fallbackTintOpacity: Double {
+        if interactive {
+            return colorScheme == .dark ? 0.30 : 0.20
+        }
+        return colorScheme == .dark ? 0.22 : 0.14
+    }
+
     private var baseStrokeOpacity: Double {
         let base = colorScheme == .dark ? 0.32 : 0.22
         return increaseContrast ? min(base + 0.20, 0.6) : base
@@ -68,7 +78,6 @@ private struct AdaptiveGlassSurfaceModifier: ViewModifier {
         let base = colorScheme == .dark ? 0.18 : 0.13
         return increaseContrast ? min(base + 0.20, 0.5) : base
     }
-    private var shadowOpacity: Double { colorScheme == .dark ? 0.22 : 0.08 }
 
     @ViewBuilder
     func body(content: Content) -> some View {
@@ -135,11 +144,12 @@ private struct AdaptiveGlassSurfaceModifier: ViewModifier {
             .overlay {
                 shape.strokeBorder(strokeColor, lineWidth: strokeWidth)
             }
-            .shadow(
-                color: Color.black.opacity(reduceTransparency ? 0 : shadowOpacity),
-                radius: 5,
-                y: 1
-            )
+            // Match native `.glassEffect(in: shape)` hit-area shaping: tap
+            // targets are bounded to the visible glass shape, not the underlying
+            // rectangular frame. Content is NOT clipped here (native glass also
+            // does not clip), so callers that draw content past the shape edges
+            // keep the same behavior on both paths.
+            .contentShape(shape)
     }
 }
 

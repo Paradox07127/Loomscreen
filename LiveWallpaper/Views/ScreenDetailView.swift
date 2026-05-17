@@ -388,7 +388,7 @@ struct ScreenDetailView: View {
                             Image(systemName: "circle.fill")
                                 .font(.system(size: 6))
                                 .foregroundStyle(sessionStatusColor)
-                                .symbolEffect(.pulse, options: .repeating, isActive: wallpaperSessionSummary.activity == .active)
+                                .symbolEffect(.pulse, options: .continuouslyRepeating, isActive: wallpaperSessionSummary.activity == .active)
                             Text(sessionStatusText)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -706,13 +706,13 @@ struct ScreenDetailView: View {
                     Group {
                         if #available(macOS 15.0, *) {
                             Image(systemName: "arrow.down.doc.fill")
-                                .symbolEffect(.bounce, options: .repeating)
+                                .symbolEffect(.bounce, options: .repeat(.continuous))
                         } else {
                             // macOS 14: .bounce cannot repeat indefinitely.
                             // Substitute .pulse so the affordance still draws
                             // the eye while a drag is in progress.
                             Image(systemName: "arrow.down.doc.fill")
-                                .symbolEffect(.pulse, options: .repeating)
+                                .symbolEffect(.pulse, options: .continuouslyRepeating)
                         }
                     }
                     .font(.system(size: 32, weight: .semibold))
