@@ -92,11 +92,10 @@ struct FitModeButton: View {
                     .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(isSelected ? Color.accentColor : .secondary)
                     .frame(width: 40, height: 40)
-                    .glassEffect(
-                        isSelected
-                            ? .regular.tint(Color.accentColor.opacity(0.30)).interactive()
-                            : .regular.interactive(),
-                        in: .circle
+                    .adaptiveGlassSurface(
+                        .circle,
+                        tint: isSelected ? Color.accentColor : nil,
+                        interactive: true
                     )
                             Text(mode.titleKey)
                                 .font(.system(size: 12, weight: isSelected ? .medium : .regular))

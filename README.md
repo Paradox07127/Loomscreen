@@ -16,15 +16,15 @@ A macOS menu bar application that plays video, HTML, Metal shader, and compatibl
 - **Power Aware** — Pause on battery, full-screen app detection, lock-screen frame capture
 - **Playback Control** — Speed (0.5x-2.0x), frame rate limiting, fit modes (Fill/Fit/Stretch), per-screen mute
 - **System Monitoring** — System-wide CPU/GPU/memory/thermal + per-app metrics, estimated render FPS
-- **Liquid Glass UI** — macOS 26 native design system
+- **Adaptive macOS UI** — native Liquid Glass on macOS 26, material-based fallbacks on macOS 14 and 15. The highest-fidelity path is the default on every supported OS; no per-user configuration.
 - **Swift 6 Strict Concurrency** — Compile-time data race safety
-- **546 Unit Tests** — Policies, decoders, bookmarks, HTML trust, schedule, playlist, WPE import/rendering, and release regressions
+- **669 Unit Tests** — Policies, decoders, bookmarks, HTML trust, schedule, playlist, WPE import/rendering, macOS compatibility policy, and release regressions
 - **Zero Dependencies** — Pure Apple-native frameworks
 
 ## Requirements
 
-- macOS 26.0 (Tahoe) or later
-- Apple Silicon recommended
+- macOS 14.0 (Sonoma) or later
+- **Apple Silicon Mac required.** Intel Macs are not supported.
 - Xcode 16.2+ (for building)
 
 ## Getting Started

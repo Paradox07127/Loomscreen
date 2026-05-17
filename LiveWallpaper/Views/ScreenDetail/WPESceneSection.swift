@@ -84,7 +84,7 @@ struct WPESceneSection: View {
                 } label: {
                     Label("Apply Project Folder…", systemImage: "folder.badge.plus")
                 }
-                .buttonStyle(.glassProminent)
+                .adaptiveGlassButton(.prominent)
                 .controlSize(.large)
                 .accessibilityHint(Text("Opens a folder chooser to apply a Wallpaper Engine project"))
 
@@ -93,7 +93,7 @@ struct WPESceneSection: View {
                 } label: {
                     Label("Browse Workshop Library…", systemImage: "books.vertical")
                 }
-                .buttonStyle(.glass)
+                .adaptiveGlassButton(.regular)
                 .controlSize(.regular)
                 .accessibilityHint(Text("Discover Workshop projects under your Steam library"))
             }
@@ -119,7 +119,7 @@ struct WPESceneSection: View {
                     } label: {
                         Label("Browse Library…", systemImage: "books.vertical")
                     }
-                    .buttonStyle(.glass)
+                    .adaptiveGlassButton(.regular)
                     .controlSize(.regular)
                     .accessibilityHint(Text("Discover Workshop projects from your Steam Workshop folder"))
 
@@ -128,7 +128,7 @@ struct WPESceneSection: View {
                     } label: {
                         Label("Apply Project…", systemImage: "plus")
                     }
-                    .buttonStyle(.glass)
+                    .adaptiveGlassButton(.regular)
                     .controlSize(.regular)
                 }
 
@@ -160,7 +160,7 @@ struct WPESceneSection: View {
                 } label: {
                     Image(systemName: "chevron.left")
                 }
-                .buttonStyle(.glass)
+                .adaptiveGlassButton(.regular)
                 .controlSize(.regular)
                 .help(Text("Back to library"))
                 .accessibilityLabel(Text("Back to library"))
@@ -199,7 +199,7 @@ struct WPESceneSection: View {
                     } label: {
                         Label("Browse Library…", systemImage: "books.vertical")
                     }
-                    .buttonStyle(.glass)
+                    .adaptiveGlassButton(.regular)
                     .controlSize(.regular)
                     Spacer()
                     Button {
@@ -207,7 +207,7 @@ struct WPESceneSection: View {
                     } label: {
                         Label("Apply Project…", systemImage: "plus")
                     }
-                    .buttonStyle(.glass)
+                    .adaptiveGlassButton(.regular)
                     .controlSize(.regular)
                 }
                 WPESceneDetailView(

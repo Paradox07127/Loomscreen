@@ -23,7 +23,7 @@ struct WPEOriginBadge: View {
             .font(.system(size: 13, weight: .medium))
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .glassEffect(.regular.interactive(), in: .capsule)
+            .adaptiveGlassSurface(.capsule, interactive: true)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text("Wallpaper from Wallpaper Engine: \(origin.title)"))

@@ -38,7 +38,7 @@ struct ScreenDetailEmptyStateView: View {
                     Label("Select Video File", systemImage: "plus.circle.fill")
                         .font(.headline)
                 }
-                .buttonStyle(.glassProminent)
+                .adaptiveGlassButton(.prominent)
                 .controlSize(.large)
                 .padding(.top, 10)
                 .accessibilityLabel(Text("Select video file"))

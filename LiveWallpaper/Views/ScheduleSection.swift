@@ -298,7 +298,7 @@ struct ScheduleSlotRow: View {
                 Image(systemName: "circle.fill")
                     .font(.system(size: 8))
                     .foregroundStyle(isActive ? Color.green : Color.gray.opacity(0.3))
-                    .symbolEffect(.pulse, options: .repeat(.continuous), isActive: isActive)
+                    .symbolEffect(.pulse, options: .continuouslyRepeating, isActive: isActive)
                     .animation(.smooth(duration: 0.3), value: isActive)
 
                 // Slot label + time (tap to edit)

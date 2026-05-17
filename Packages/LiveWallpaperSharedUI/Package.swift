@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "LiveWallpaperSharedUI",
-    platforms: [.macOS("26.0")],
+    platforms: [.macOS(.v14)],
     products: [
         .library(name: "LiveWallpaperSharedUI", targets: ["LiveWallpaperSharedUI"])
     ],

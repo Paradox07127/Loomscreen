@@ -41,7 +41,7 @@ struct MenuBarContent: View {
     }
 
     var body: some View {
-        GlassEffectContainer(spacing: metrics.componentSpacing) {
+        AdaptiveGlassContainer(spacing: metrics.componentSpacing) {
             VStack(alignment: .leading, spacing: metrics.componentSpacing) {
                 header
                 sectionLabel("DISPLAYS")
@@ -864,10 +864,6 @@ private struct ReadableGlassSurface: ViewModifier {
 
     @Environment(\.colorScheme) private var colorScheme
 
-    private var tintOpacity: Double {
-        colorScheme == .dark ? 0.20 : 0.11
-    }
-
     private var edgeOpacity: Double {
         colorScheme == .dark ? 0.18 : 0.13
     }
@@ -876,30 +872,23 @@ private struct ReadableGlassSurface: ViewModifier {
         colorScheme == .dark ? 0.22 : 0.08
     }
 
-    @ViewBuilder
     func body(content: Content) -> some View {
-        if interactive {
-            decorated(
-                content.glassEffect(
-                    .regular.tint(tint.opacity(tintOpacity)).interactive(),
-                    in: .rect(cornerRadius: radius)
-                )
+        // The menu bar floats over a live wallpaper, so even on macOS 26 the
+        // native glass needs an explicit edge + drop shadow for readability.
+        // On 14/15 the wrapper provides the stroke via its fallback chrome, so
+        // here we only contribute the shadow (and an extra edge on 26 since
+        // glass on its own lacks one).
+        content
+            .adaptiveGlassSurface(
+                .roundedRectangle(radius),
+                tint: tint,
+                interactive: interactive
             )
-        } else {
-            decorated(
-                content.glassEffect(
-                    .regular.tint(tint.opacity(tintOpacity)),
-                    in: .rect(cornerRadius: radius)
-                )
-            )
-        }
-    }
-
-    private func decorated<V: View>(_ view: V) -> some View {
-        view
             .overlay {
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(edgeOpacity), lineWidth: 0.6)
+                if #available(macOS 26.0, *) {
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(edgeOpacity), lineWidth: 0.6)
+                }
             }
             .shadow(color: Color.black.opacity(shadowOpacity), radius: 5, y: 1)
     }

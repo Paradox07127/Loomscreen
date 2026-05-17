@@ -45,10 +45,7 @@ public struct GlassCapsuleButtonStyle: ButtonStyle {
                 .foregroundStyle(effectiveTint)
                 .padding(.horizontal, horizontalPadding)
                 .padding(.vertical, verticalPadding)
-                .glassEffect(
-                    .regular.tint(effectiveTint.opacity(isEnabled ? 0.15 : 0.06)).interactive(),
-                    in: .capsule
-                )
+                .adaptiveGlassSurface(.capsule, tint: effectiveTint, interactive: true)
                 .opacity(isEnabled ? (configuration.isPressed ? 0.7 : 1.0) : 0.45)
         }
     }

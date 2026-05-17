@@ -198,10 +198,19 @@ struct Sidebar: View {
                 bottomPadding: DesignTokens.Sidebar.displayHeaderBottomPadding
             ) {
                 Button(action: reloadWallpapers) {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.secondary)
-                        .symbolEffect(.rotate, options: .repeat(.continuous), isActive: isReloading)
+                    Group {
+                        if #available(macOS 15.0, *) {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .symbolEffect(.rotate, options: .repeat(.continuous), isActive: isReloading)
+                        } else {
+                            // macOS 14 has no .rotate; substitute .pulse so the
+                            // button still indicates ongoing reload activity.
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .symbolEffect(.pulse, options: .continuouslyRepeating, isActive: isReloading)
+                        }
+                    }
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
                 .help(Text("Reload all wallpapers"))
@@ -371,7 +380,7 @@ struct ScreenRow: View {
                             Image(systemName: "circle.fill")
                                 .font(.system(size: 6))
                                 .foregroundStyle(statusColor(for: summary))
-                                .symbolEffect(.pulse, options: .repeat(.continuous), isActive: summary.activity == .active)
+                                .symbolEffect(.pulse, options: .continuouslyRepeating, isActive: summary.activity == .active)
 
                             Text(statusText(for: summary))
                                 .font(.caption)
@@ -552,13 +561,13 @@ struct EmptyStateView: View {
     let message: LocalizedStringKey
 
     var body: some View {
-        GlassEffectContainer(spacing: 12) {
+        AdaptiveGlassContainer(spacing: 12) {
             VStack(spacing: 20) {
                 Image(systemName: icon)
                     .font(.system(size: 48))
                     .foregroundStyle(.secondary.opacity(0.7))
                     .frame(width: 80, height: 80)
-                    .glassEffect(.regular, in: .circle)
+                    .adaptiveGlassSurface(.circle)
                     .contentTransition(.symbolEffect(.replace))
 
                 Text(title)
@@ -572,7 +581,7 @@ struct EmptyStateView: View {
                     .frame(maxWidth: 300)
             }
             .padding(32)
-            .glassEffect(.regular, in: .rect(cornerRadius: 20))
+            .adaptiveGlassSurface(.roundedRectangle(20))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

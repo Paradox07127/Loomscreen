@@ -25,7 +25,7 @@ private struct WPEProjectCardChrome: ViewModifier {
     func body(content: Content) -> some View {
         content
             .frame(width: 160, height: 240)
-            .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 16))
+            .adaptiveGlassSurface(.roundedRectangle(16), interactive: true)
             .scaleEffect(isHovering ? 1.02 : 1.0)
             .shadow(
                 color: Color.black.opacity(isHovering ? 0.18 : 0.06),

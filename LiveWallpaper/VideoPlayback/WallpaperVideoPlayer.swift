@@ -605,20 +605,40 @@ final class WallpaperVideoPlayer {
                 let displayed = naturalSize.applying(transform)
                 let renderSize = CGSize(width: abs(displayed.width), height: abs(displayed.height))
 
-                var layerInstrConfig = AVVideoCompositionLayerInstruction.Configuration(assetTrack: videoTrack)
-                layerInstrConfig.setTransform(transform, at: .zero)
+                let frameDuration = CMTime(value: 1, timescale: CMTimeScale(targetFPS))
+                let composition: AVVideoComposition
 
-                var instrConfig = AVVideoCompositionInstruction.Configuration()
-                instrConfig.timeRange = CMTimeRange(start: .zero, duration: duration)
-                instrConfig.layerInstructions = [AVVideoCompositionLayerInstruction(configuration: layerInstrConfig)]
+                if #available(macOS 26.0, *) {
+                    var layerInstrConfig = AVVideoCompositionLayerInstruction.Configuration(assetTrack: videoTrack)
+                    layerInstrConfig.setTransform(transform, at: .zero)
 
-                var compositionConfig = AVVideoComposition.Configuration()
-                compositionConfig.frameDuration = CMTime(value: 1, timescale: CMTimeScale(targetFPS))
-                compositionConfig.renderSize = renderSize
-                compositionConfig.instructions = [AVVideoCompositionInstruction(configuration: instrConfig)]
-                compositionConfig.sourceTrackIDForFrameTiming = videoTrack.trackID
+                    var instrConfig = AVVideoCompositionInstruction.Configuration()
+                    instrConfig.timeRange = CMTimeRange(start: .zero, duration: duration)
+                    instrConfig.layerInstructions = [AVVideoCompositionLayerInstruction(configuration: layerInstrConfig)]
 
-                let composition = AVVideoComposition(configuration: compositionConfig)
+                    var compositionConfig = AVVideoComposition.Configuration()
+                    compositionConfig.frameDuration = frameDuration
+                    compositionConfig.renderSize = renderSize
+                    compositionConfig.instructions = [AVVideoCompositionInstruction(configuration: instrConfig)]
+                    compositionConfig.sourceTrackIDForFrameTiming = videoTrack.trackID
+
+                    composition = AVVideoComposition(configuration: compositionConfig)
+                } else {
+                    let layerInstr = AVMutableVideoCompositionLayerInstruction(assetTrack: videoTrack)
+                    layerInstr.setTransform(transform, at: .zero)
+
+                    let instr = AVMutableVideoCompositionInstruction()
+                    instr.timeRange = CMTimeRange(start: .zero, duration: duration)
+                    instr.layerInstructions = [layerInstr]
+
+                    let mutableComposition = AVMutableVideoComposition()
+                    mutableComposition.frameDuration = frameDuration
+                    mutableComposition.renderSize = renderSize
+                    mutableComposition.instructions = [instr]
+                    mutableComposition.sourceTrackIDForFrameTiming = videoTrack.trackID
+
+                    composition = mutableComposition
+                }
 
                 await MainActor.run { [weak self] in
                     guard let self else { return }

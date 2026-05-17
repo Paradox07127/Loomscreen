@@ -77,7 +77,7 @@ struct AppleAerialsLibraryView: View {
                     } label: {
                         Image(systemName: "arrow.clockwise")
                     }
-                    .buttonStyle(.glass)
+                    .adaptiveGlassButton(.regular)
                     .controlSize(.regular)
                     .help(Text("Refresh — rescan the Aerials library for new content"))
                     .accessibilityLabel(Text("Refresh Aerials library"))
@@ -88,7 +88,7 @@ struct AppleAerialsLibraryView: View {
                     } label: {
                         Image(systemName: "xmark.circle")
                     }
-                    .buttonStyle(.glass)
+                    .adaptiveGlassButton(.regular)
                     .destructiveControlTint()
                     .controlSize(.regular)
                     .help(Text("Disconnect Aerials library"))

@@ -139,6 +139,34 @@ When mirroring config into many local `@State` props, prefer the
 [`ScreenDetailView.swift`](LiveWallpaper/Views/ScreenDetailView.swift)
 over unconditional assignment.
 
+### 9. Adaptive Liquid Glass — wrapper-only
+
+macOS 26 Liquid Glass APIs (`GlassEffectContainer`, `.glassEffect(...)`,
+`.buttonStyle(.glass)`, `.buttonStyle(.glassProminent)`, bare `Glass`
+literals such as `.regular.tint(...).interactive()`) **must stay
+centralized in
+[`AdaptiveGlass.swift`](Packages/LiveWallpaperSharedUI/Sources/LiveWallpaperSharedUI/Components/AdaptiveGlass.swift)**.
+App views call:
+
+- `AdaptiveGlassContainer(spacing:)`
+- `.adaptiveGlassSurface(shape, tint:, interactive:)`
+- `.adaptiveGlassButton(prominence)`
+
+The wrapper places `if #available(macOS 26.0, *)` first so the native
+Liquid Glass path is the default; macOS 14/15 fall through to a tinted
+material + stroke + `contentShape` fallback that carries the semantic
+tint forward and honors `accessibilityReduceTransparency` /
+`colorSchemeContrast`. `MacOSCompatibilityPolicyTests` enforces the
+"wrapper-only" rule and fails the build on any direct Liquid Glass
+reference outside `AdaptiveGlass.swift`.
+
+For macOS 15+ symbol-effect cadence, use
+`SymbolEffectOptions.continuouslyRepeating` (in
+[`SymbolEffectOptions+Compatibility.swift`](Packages/LiveWallpaperSharedUI/Sources/LiveWallpaperSharedUI/Components/SymbolEffectOptions+Compatibility.swift))
+instead of `.repeating` so users on Sequoia and later keep the smoother
+`repeat(.continuous)` behavior — `.repeating` alone maps to a periodic
+cadence on macOS 15+.
+
 ## Parallel-session coordination
 
 Multiple Claude sessions run on different worktrees under
