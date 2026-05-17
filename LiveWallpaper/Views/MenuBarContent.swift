@@ -1,19 +1,22 @@
 import LiveWallpaperCore
 import SwiftUI
 import AppKit
+import os
 
 /// MenuBarExtra window content.
 struct MenuBarContent: View {
+    private static let signposter = OSSignposter(
+        subsystem: "com.taijia.LiveWallpaper",
+        category: "MenuBar"
+    )
+
     let openSettings: () -> Void
     let openSettingsForScreen: (CGDirectDisplayID) -> Void
 
     @Environment(ScreenManager.self) private var screenManager
     @Environment(\.dismiss) private var dismiss
 
-    @State private var globalPauseOnBattery: Bool = SettingsManager.shared.loadGlobalSettings().globalPauseOnBattery
-    @State private var globalPauseOnFullScreen: Bool = SettingsManager.shared.loadGlobalSettings().pauseOnFullScreen
     @State private var density: MenuBarDensity = SettingsManager.shared.loadGlobalSettings().menuBarDensity
-    @State private var activeOverlay: MenuBarOverlay?
 
     private var metrics: MenuBarControlCenterMetrics.Resolved {
         MenuBarControlCenterMetrics.resolved(for: density)
@@ -29,44 +32,33 @@ struct MenuBarContent: View {
         screenManager.wallpaperOverviewStatus == .notConfigured
     }
 
-    private var overviewSubtitle: String {
-        switch screenManager.wallpaperOverviewStatus {
-        case .notConfigured:
-            return "No wallpaper configured"
-        case .active:
-            return "\(screenManager.screens.count) displays active"
-        case .paused:
-            return "\(screenManager.screens.count) displays paused"
-        }
+    var body: some View {
+        // Wrap each body evaluation with an OSSignpost interval so the
+        // "first few clicks don't respond" symptom can be traced in
+        // Instruments → System Trace, filtered by subsystem
+        // `com.taijia.LiveWallpaper` + category `MenuBar`.
+        let id = Self.signposter.makeSignpostID()
+        let interval = Self.signposter.beginInterval("MenuBarBody", id: id)
+        defer { Self.signposter.endInterval("MenuBarBody", interval) }
+        return content
     }
 
-    var body: some View {
+    private var content: some View {
         AdaptiveGlassContainer(spacing: metrics.componentSpacing) {
             VStack(alignment: .leading, spacing: metrics.componentSpacing) {
                 header
                 sectionLabel("DISPLAYS")
                 displays
-                sectionLabel("SETTINGS")
-                allDisplayActions
                 usageStrip
                 footer
             }
             .padding(metrics.outerPadding)
             .frame(width: metrics.popoverWidth)
         }
-        .overlay {
-            if activeOverlay != nil {
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture { activeOverlay = nil }
-                    .transition(.opacity)
-            }
+        .modifier(MenuBarOuterShell())
+        .onAppear {
+            Logger.debug("MenuBar popover appeared", category: .startup)
         }
-        .overlay(alignment: .bottomTrailing) {
-            activeOverlayContent
-        }
-        .animation(.snappy(duration: 0.14), value: activeOverlay)
-        .onAppear { refreshGlobalToggles() }
         .onReceive(NotificationCenter.default.publisher(for: .menuBarDensityDidChange)) { _ in
             // Defer the @State write so a density-change notification
             // arriving during the popover's reconcile doesn't cause
@@ -79,36 +71,49 @@ struct MenuBarContent: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            Image(systemName: "play.rectangle.fill")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 24, height: 24)
-                .readableGlass(radius: 8, tint: Color.accentColor)
-                .accessibilityHidden(true)
+            AppTile()
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text("LiveWallpaper")
-                    .font(.system(size: 13, weight: .semibold))
-                    .lineLimit(1)
-                Text(verbatim: overviewSubtitle)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-
-            Spacer(minLength: 6)
+            Text("LiveWallpaper")
+                .font(.system(size: 14, weight: .semibold))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
             Button {
-                screenManager.setWallpapersEnabled(!isWallpaperEnabled)
+                Logger.debug("MenuBar action: reload tapped", category: .startup)
+                screenManager.reloadAllScreens()
             } label: {
-                PowerTogglePill(isOn: isWallpaperEnabled)
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 11, weight: .semibold))
             }
-            .buttonStyle(.plain)
+            .adaptiveGlassButton(.regular)
+            .controlSize(.small)
+            .help(Text("Reload all wallpapers"))
+            .accessibilityLabel(Text("Reload all wallpapers"))
+
+            Toggle("", isOn: Binding(
+                get: { isWallpaperEnabled },
+                set: { enabled in
+                    // Equality guard (CLAUDE.md §8): the custom ZStack toggle
+                    // can replay the current value during animation; an
+                    // unconditional setter would re-enter `setWallpapersEnabled`
+                    // and the persistence chain it triggers.
+                    guard enabled != isWallpaperEnabled else { return }
+                    Logger.debug("MenuBar action: master switch \(enabled ? "on" : "off")", category: .startup)
+                    screenManager.setWallpapersEnabled(enabled)
+                }
+            ))
+            .toggleStyle(InlineLabelSwitchStyle())
+            .labelsHidden()
             .disabled(isWallpaperSwitchDisabled)
-            .help(isWallpaperEnabled ? Text("Turn off wallpapers") : Text("Turn on wallpapers"))
-            .accessibilityLabel(Text("Wallpapers"))
+            // The custom toggle style draws "On"/"Off" inside the track as
+            // a visual cue, not a label — collapse the children so VoiceOver
+            // reads it as a single switch element with the value we set
+            // explicitly below, not a button containing the literal text.
+            .accessibilityElement(children: .ignore)
+            .help(Text("LiveWallpaper system on/off — keeps the app running in the background"))
+            .accessibilityLabel(Text("LiveWallpaper system"))
             .accessibilityValue(isWallpaperEnabled ? Text("On") : Text("Off"))
+            .accessibilityAddTraits(.isButton)
         }
         .frame(maxWidth: .infinity)
     }
@@ -128,60 +133,36 @@ struct MenuBarContent: View {
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 40, alignment: .center)
-                    .readableGlass(radius: 10, tint: .secondary)
+                    .adaptiveGlassSurface(.roundedRectangle(10))
             } else {
                 ForEach(screenManager.screens, id: \.id) { screen in
+                    let summary = screenManager.wallpaperSummary(for: screen)
+                    let visualState = displayVisualState(for: summary.activity)
+
                     MenuBarDisplayRow(
                         title: screen.name,
-                        subtitle: displaySubtitle(for: screen),
-                        iconName: displayIconName(for: screen),
-                        iconTint: displayIconColor(for: screen),
-                        isPlaying: screenManager.wallpaperSummary(for: screen).activity == .active,
-                        showsStatusDot: screenManager.wallpaperSummary(for: screen).activity != .inactive,
-                        supportsPlayback: screenManager.wallpaperSummary(for: screen).supportsPlaybackControl,
+                        subtitle: displaySubtitleAttributed(for: screen, summary: summary),
+                        subtitleAccessibilityText: displaySubtitleText(for: screen, summary: summary),
+                        iconName: displayIconName(for: summary.wallpaperType),
+                        visualState: visualState,
+                        isPlaying: summary.activity == .active,
+                        supportsPlayback: summary.supportsPlaybackControl,
                         canStepPlaylist: canStepPlaylist(for: screen),
                         videoVolume: videoVolumeBinding(for: screen),
                         density: density,
                         openAction: { invokeOpenScreenSettings(screen.id) },
-                        previousAction: { screenManager.regressPlaylist(for: screen) },
+                        previousAction: {
+                            Logger.debug("MenuBar action: previous wallpaper tapped", category: .startup)
+                            screenManager.regressPlaylist(for: screen)
+                        },
                         playbackAction: { togglePlayback(for: screen) },
-                        nextAction: { screenManager.advancePlaylist(for: screen) }
+                        nextAction: {
+                            Logger.debug("MenuBar action: next wallpaper tapped", category: .startup)
+                            screenManager.advancePlaylist(for: screen)
+                        }
                     )
                 }
             }
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private var allDisplayActions: some View {
-        HStack(spacing: metrics.controlSpacing) {
-            MenuBarControlButton(
-                title: screenManager.wallpaperOverviewStatus == .active ? "Pause All" : "Play All",
-                systemImage: screenManager.wallpaperOverviewStatus == .active ? "pause.fill" : "play.fill",
-                tint: .accentColor,
-                isProminent: true,
-                isEnabled: screenManager.hasControllableWallpaperSessions,
-                action: { screenManager.togglePlayback() }
-            )
-
-            MenuBarControlButton(
-                title: "Battery",
-                systemImage: globalPauseOnBattery ? "battery.50" : "battery.100",
-                tint: globalPauseOnBattery ? .orange : .secondary,
-                isProminent: globalPauseOnBattery,
-                action: {
-                    globalPauseOnBattery.toggle()
-                    commitGlobalToggles()
-                }
-            )
-
-            MenuBarControlButton(
-                title: "Mute",
-                systemImage: isGlobalMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",
-                tint: isGlobalMuted ? .orange : .secondary,
-                isProminent: isGlobalMuted,
-                action: { toggleGlobalMute() }
-            )
         }
         .frame(maxWidth: .infinity)
     }
@@ -211,121 +192,120 @@ struct MenuBarContent: View {
 
     private var footer: some View {
         HStack(spacing: metrics.controlSpacing) {
-            Button(action: invokeAddWallpaperWindow) {
-                MenuBarFooterLabel(title: "Add Wallpaper", systemImage: "plus")
+            Button(action: invokeManageWindow) {
+                HStack(spacing: 7) {
+                    Image(systemName: "slider.horizontal.3")
+                    Text("Manage")
+                        .font(.system(size: 12, weight: .semibold))
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, minHeight: 24)
             }
-            .buttonStyle(.plain)
+            .adaptiveGlassButton(.prominent)
+            .controlSize(.large)
             .frame(maxWidth: .infinity)
-            .help(Text("Add Wallpaper"))
-            .accessibilityLabel(Text("Add Wallpaper"))
+            .help(Text("Manage — open the LiveWallpaper settings window"))
+            .accessibilityLabel(Text("Manage wallpapers"))
 
-            Button(action: invokeOpenSettings) {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 12, weight: .semibold))
-                    .frame(width: 34, height: 34)
-                    .readableGlass(radius: 11, tint: .secondary, interactive: true)
-            }
-            .buttonStyle(.plain)
-            .help(Text("Settings"))
-            .accessibilityLabel(Text("Settings"))
+            MenuBarFooterUtility(
+                systemImage: "gearshape",
+                role: .neutral,
+                action: invokeOpenSettings,
+                help: "Settings",
+                accessibilityLabel: "Open Settings"
+            )
 
-            Button {
-                toggleOverlay(.more)
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 12, weight: .semibold))
-                    .frame(width: 34, height: 34)
-                    .readableGlass(radius: 11, tint: .secondary, interactive: true)
-            }
-            .buttonStyle(.plain)
-            .help(Text("More"))
-            .accessibilityLabel(Text("More"))
-
-            Button(action: invokeQuit) {
-                MenuBarQuitButton()
-            }
-            .buttonStyle(.plain)
-            .help(Text("Quit LiveWallpaper"))
-            .accessibilityLabel(Text("Quit LiveWallpaper"))
+            MenuBarFooterUtility(
+                systemImage: "power",
+                role: .destructiveGlyph,
+                action: invokeQuit,
+                help: "Quit LiveWallpaper",
+                accessibilityLabel: "Quit LiveWallpaper"
+            )
         }
         .frame(maxWidth: .infinity)
     }
 
-    @ViewBuilder
-    private var activeOverlayContent: some View {
-        if let overlay = activeOverlay {
-            MenuBarInlineOverlayPanel {
-                switch overlay {
-                case .more:
-                    MenuBarOverlayButton(
-                        title: "Reload Wallpapers",
-                        systemImage: "arrow.clockwise",
-                        action: { deferMenuBarAction { screenManager.reloadAllScreens() } }
-                    )
-                    MenuBarOverlayButton(
-                        title: globalPauseOnFullScreen ? "Disable Full-Screen Pause" : "Enable Full-Screen Pause",
-                        systemImage: "macwindow",
-                        action: {
-                            globalPauseOnFullScreen.toggle()
-                            activeOverlay = nil
-                            commitGlobalToggles()
-                        }
-                    )
-                    Divider()
-                    MenuBarOverlayButton(
-                        title: "About LiveWallpaper",
-                        systemImage: "info.circle",
-                        action: {
-                            activeOverlay = nil
-                            NSApp.orderFrontStandardAboutPanel(nil)
-                        }
-                    )
-                }
-            }
-            .padding(.trailing, metrics.outerPadding)
-            .padding(.bottom, metrics.overlayBottomPadding)
-            .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .bottomTrailing)))
-            .zIndex(10)
+    private func displaySubtitleAttributed(
+        for screen: Screen,
+        summary: WallpaperSessionSummary
+    ) -> AttributedString {
+        let source = displaySource(for: screen, summary: summary)
+
+        guard let typeText = wallpaperTypeText(for: summary.wallpaperType) else {
+            return AttributedString(source.isEmpty ? "Not configured" : source)
         }
+
+        var attributed = AttributedString(typeText)
+        attributed.font = Font.system(size: 10, weight: .semibold)
+        attributed.foregroundColor = Color.primary
+
+        if !source.isEmpty {
+            // Separator approximates `.tertiary` foreground style — AttributedString
+            // cannot bind to a HierarchicalShapeStyle directly, so reduce opacity
+            // on top of `.secondary` to mimic the visual weight.
+            var separator = AttributedString(" · ")
+            separator.foregroundColor = Color.secondary.opacity(0.65)
+            attributed.append(separator)
+
+            var sourceText = AttributedString(source)
+            sourceText.font = Font.system(size: 10)
+            sourceText.foregroundColor = Color.secondary
+            attributed.append(sourceText)
+        }
+
+        return attributed
     }
 
-    private var isGlobalMuted: Bool {
-        let configurations = SettingsManager.shared.loadConfigurations()
-        guard !configurations.isEmpty else { return false }
-        return configurations.allSatisfy(\.muted)
+    private func displaySubtitleText(
+        for screen: Screen,
+        summary: WallpaperSessionSummary
+    ) -> String {
+        let source = displaySource(for: screen, summary: summary)
+
+        guard let typeText = wallpaperTypeText(for: summary.wallpaperType) else {
+            return source.isEmpty ? "Not configured" : source
+        }
+
+        guard !source.isEmpty else { return typeText }
+        return "\(typeText), \(source)"
     }
 
-    private func displaySubtitle(for screen: Screen) -> String {
-        let summary = screenManager.wallpaperSummary(for: screen)
+    private func displaySource(for screen: Screen, summary: WallpaperSessionSummary) -> String {
+        if summary.wallpaperType == .video,
+           let name = screenManager.currentVideoDisplayName(for: screen),
+           !name.isEmpty {
+            return name
+        }
+
+        if let name = screenManager.wallpaperDisplayName(for: screen), !name.isEmpty {
+            return name
+        }
+
         if let message = summary.subtitle, !message.isEmpty {
             return message
         }
 
-        if summary.wallpaperType == .video,
-           let name = screenManager.currentVideoDisplayName(for: screen) {
-            return name
-        }
+        return ""
+    }
 
-        if let name = screenManager.wallpaperDisplayName(for: screen) {
-            return name
-        }
-
-        switch summary.wallpaperType {
-        case .html:
-            return "HTML wallpaper"
-        case .metalShader:
-            return "Shader wallpaper"
-        case .scene:
-            return "Scene wallpaper"
+    private func wallpaperTypeText(for type: WallpaperType?) -> String? {
+        switch type {
         case .video:
-            return "Video wallpaper"
+            return "Video"
+        case .html:
+            return "Web"
+        case .metalShader:
+            return "Shader"
+        case .scene:
+            return "Scene"
         case nil:
-            return "Not configured"
+            return nil
         }
     }
 
-    private func displayIconName(for screen: Screen) -> String {
-        switch screenManager.wallpaperSummary(for: screen).wallpaperType {
+    private func displayIconName(for type: WallpaperType?) -> String {
+        switch type {
         case .html:
             return "globe"
         case .metalShader:
@@ -339,14 +319,14 @@ struct MenuBarContent: View {
         }
     }
 
-    private func displayIconColor(for screen: Screen) -> Color {
-        switch screenManager.wallpaperSummary(for: screen).activity {
+    private func displayVisualState(for activity: WallpaperSessionActivity) -> DisplayVisualState {
+        switch activity {
         case .active:
-            return .green
+            return .active
         case .paused:
-            return .orange
+            return .paused
         case .inactive:
-            return .secondary
+            return .inactive
         }
     }
 
@@ -378,24 +358,13 @@ struct MenuBarContent: View {
     }
 
     private func togglePlayback(for screen: Screen) {
+        Logger.debug("MenuBar action: row playback tapped", category: .startup)
         guard let playback = screen.playbackController else { return }
         PlaybackToggle.toggle(playback)
     }
 
-    private func toggleOverlay(_ overlay: MenuBarOverlay) {
-        activeOverlay = activeOverlay == overlay ? nil : overlay
-    }
-
-    private func deferMenuBarAction(_ action: @escaping @MainActor () -> Void) {
-        activeOverlay = nil
-        Task { @MainActor in
-            await Task.yield()
-            action()
-        }
-    }
-
-    private func invokeAddWallpaperWindow() {
-        activeOverlay = nil
+    private func invokeManageWindow() {
+        Logger.debug("MenuBar action: manage tapped", category: .startup)
         dismiss()
         if let screen = screenManager.screens.first {
             openSettingsForScreen(screen.id)
@@ -405,64 +374,42 @@ struct MenuBarContent: View {
     }
 
     private func invokeOpenScreenSettings(_ id: CGDirectDisplayID) {
-        activeOverlay = nil
+        Logger.debug("MenuBar action: display settings tapped", category: .startup)
         dismiss()
         openSettingsForScreen(id)
     }
 
     private func invokeOpenSettings() {
-        activeOverlay = nil
+        Logger.debug("MenuBar action: settings tapped", category: .startup)
         dismiss()
         openSettings()
     }
 
     private func invokeQuit() {
+        Logger.debug("MenuBar action: quit tapped", category: .startup)
         NSApp.terminate(nil)
-    }
-
-    private func refreshGlobalToggles() {
-        let settings = SettingsManager.shared.loadGlobalSettings()
-        globalPauseOnBattery = settings.globalPauseOnBattery
-        globalPauseOnFullScreen = settings.pauseOnFullScreen
-    }
-
-    private func commitGlobalToggles() {
-        var settings = SettingsManager.shared.loadGlobalSettings()
-        settings.globalPauseOnBattery = globalPauseOnBattery
-        settings.pauseOnFullScreen = globalPauseOnFullScreen
-        SettingsManager.shared.saveGlobalSettings(settings)
-        screenManager.handleGlobalSettingsChanged()
-    }
-
-    private func toggleGlobalMute() {
-        let configurations = SettingsManager.shared.loadConfigurations()
-        let shouldMute = configurations.contains { !$0.muted }
-
-        for screen in screenManager.screens {
-            screenManager.updateMuted(shouldMute, for: screen)
-        }
     }
 
     private func usageColor(for percent: Double) -> Color {
         if percent >= 80 { return .red }
         if percent >= 50 { return .orange }
-        return .green
+        // Neutral fill under the warning threshold — warm colors stay reserved
+        // for the warning/critical bands so they read as alerts, not decoration.
+        return .white.opacity(0.55)
     }
 }
 
 /// Metric block driven by the user's `MenuBarDensity` preference. Comfortable
 /// keeps the existing defaults; Compact trims padding + row spacing so users
-/// on busy multi-display setups see more without scrolling. Layout uses these
-/// statics today; the dynamic resolver lives in `metrics(for:)`.
+/// on busy multi-display setups see more without scrolling.
 private enum MenuBarControlCenterMetrics {
-    static let popoverWidth: CGFloat = 292
+    static let popoverWidth: CGFloat = 320
     static let outerPadding: CGFloat = 12
     static let componentSpacing: CGFloat = 10
     static let rowSpacing: CGFloat = 7
     static let controlSpacing: CGFloat = 7
-    static let rowPaddingHorizontal: CGFloat = 9
-    static let rowPaddingVertical: CGFloat = 8
-    static let overlayBottomPadding: CGFloat = 48
+    static let rowPaddingHorizontal: CGFloat = 10
+    static let rowPaddingVertical: CGFloat = 9
 
     struct Resolved {
         let popoverWidth: CGFloat
@@ -472,7 +419,6 @@ private enum MenuBarControlCenterMetrics {
         let controlSpacing: CGFloat
         let rowPaddingHorizontal: CGFloat
         let rowPaddingVertical: CGFloat
-        let overlayBottomPadding: CGFloat
     }
 
     static func resolved(for density: MenuBarDensity) -> Resolved {
@@ -485,8 +431,7 @@ private enum MenuBarControlCenterMetrics {
                 rowSpacing: rowSpacing,
                 controlSpacing: controlSpacing,
                 rowPaddingHorizontal: rowPaddingHorizontal,
-                rowPaddingVertical: rowPaddingVertical,
-                overlayBottomPadding: overlayBottomPadding
+                rowPaddingVertical: rowPaddingVertical
             )
         case .compact:
             // Trim padding ≈ 35% so 3+ displays + power controls fit on a
@@ -499,15 +444,35 @@ private enum MenuBarControlCenterMetrics {
                 rowSpacing: 4,
                 controlSpacing: 5,
                 rowPaddingHorizontal: 7,
-                rowPaddingVertical: 5,
-                overlayBottomPadding: 36
+                rowPaddingVertical: 5
             )
         }
     }
 }
 
-private enum MenuBarOverlay: Equatable {
-    case more
+private enum DisplayVisualState: Equatable {
+    case active
+    case paused
+    case inactive
+
+    var tint: Color {
+        switch self {
+        case .active:   return .green
+        case .paused:   return .orange
+        case .inactive: return .secondary
+        }
+    }
+
+    var accessibilityLabel: String {
+        switch self {
+        case .active:
+            return "active"
+        case .paused:
+            return "paused"
+        case .inactive:
+            return "idle"
+        }
+    }
 }
 
 @MainActor
@@ -521,31 +486,108 @@ enum PlaybackToggle {
     }
 }
 
-private struct PowerTogglePill: View {
-    let isOn: Bool
-
-    var body: some View {
-        HStack(spacing: 5) {
-            Circle()
-                .fill(isOn ? Color.green : Color.secondary)
-                .frame(width: 6, height: 6)
-            Text(isOn ? "On" : "Off")
-                .font(.system(size: 11, weight: .semibold))
+/// Outer "Control-Center-style" glass shell.
+///
+/// On **macOS 26+** the popover's system NSVisualEffectView would block the
+/// desktop wallpaper, defeating the inner Liquid Glass refraction. We strip
+/// that chrome (`MenuBarWindowChromeClearer`) and replace it with a native
+/// `.glassEffect` so the popover itself becomes one big crystalline capsule
+/// the inner row / button glass surfaces can refract over.
+///
+/// On **macOS 14/15** the popover's NSVisualEffectView *is* the surface —
+/// stripping it would leave the popover transparent without a replacement
+/// (Liquid Glass doesn't exist there). Layering an `adaptiveGlassSurface`
+/// on top would double up `.regularMaterial` for no visual win. So we leave
+/// the system chrome alone and skip the outer shell entirely.
+private struct MenuBarOuterShell: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content
+                .adaptiveGlassSurface(.roundedRectangle(22))
+                .background(MenuBarWindowChromeClearer())
+        } else {
+            content
         }
-        .foregroundStyle(isOn ? Color.green : Color.secondary)
-        .padding(.horizontal, 8)
-        .frame(height: 27)
-        .readableGlass(radius: 14, tint: isOn ? Color.green : Color.secondary, interactive: true)
+    }
+}
+
+private struct AppTile: View {
+    var body: some View {
+        Image(systemName: "play.rectangle.fill")
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(Color.accentColor)
+            .frame(width: 26, height: 26)
+            .adaptiveGlassSurface(.roundedRectangle(8))
+            .accessibilityHidden(true)
+    }
+}
+
+/// Custom toggle whose track carries an "On" / "Off" label inline, so the
+/// switch communicates state via three cues at once: knob position, track
+/// color, and text. macOS's native `.switch` only gives the first two.
+///
+/// The label sits *centered in the half of the track the knob does not
+/// occupy* — never centered in the whole track, otherwise the knob would
+/// overlap it.
+private struct InlineLabelSwitchStyle: ToggleStyle {
+    private let trackWidth: CGFloat = 54
+    private let trackHeight: CGFloat = 24
+    private let knobSize: CGFloat = 20
+    private let knobPadding: CGFloat = 2
+
+    /// Horizontal slot the knob (plus its padding) occupies. The label is
+    /// centered in the *remaining* slot so it always reads centered in its
+    /// own half rather than nudged against the track edge.
+    private var knobChannelWidth: CGFloat { knobSize + knobPadding * 2 }
+
+    func makeBody(configuration: Configuration) -> some View {
+        Button {
+            configuration.isOn.toggle()
+        } label: {
+            ZStack {
+                Capsule()
+                    .fill(configuration.isOn ? Color.accentColor : Color.secondary.opacity(0.42))
+
+                HStack(spacing: 0) {
+                    if configuration.isOn {
+                        Text("On")
+                            .frame(maxWidth: .infinity, alignment: .center)
+                        Color.clear.frame(width: knobChannelWidth)
+                    } else {
+                        Color.clear.frame(width: knobChannelWidth)
+                        Text("Off")
+                            .frame(maxWidth: .infinity, alignment: .center)
+                    }
+                }
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.white.opacity(configuration.isOn ? 0.95 : 0.70))
+
+                Circle()
+                    .fill(.white)
+                    .frame(width: knobSize, height: knobSize)
+                    .shadow(color: .black.opacity(0.25), radius: 1.5, y: 1)
+                    .padding(knobPadding)
+                    .frame(
+                        maxWidth: .infinity,
+                        alignment: configuration.isOn ? .trailing : .leading
+                    )
+            }
+            .frame(width: trackWidth, height: trackHeight)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(MenuBarPressFeedbackStyle())
+        .animation(.snappy(duration: 0.18), value: configuration.isOn)
     }
 }
 
 private struct MenuBarDisplayRow: View {
     let title: String
-    let subtitle: String
+    let subtitle: AttributedString
+    let subtitleAccessibilityText: String
     let iconName: String
-    let iconTint: Color
+    let visualState: DisplayVisualState
     let isPlaying: Bool
-    let showsStatusDot: Bool
     let supportsPlayback: Bool
     let canStepPlaylist: Bool
     let videoVolume: Binding<Double>?
@@ -562,96 +604,129 @@ private struct MenuBarDisplayRow: View {
     var body: some View {
         VStack(spacing: 7) {
             HStack(spacing: 8) {
+                // Whole-card click target: any tap on the icon, title, subtitle,
+                // or the empty space between them jumps to the display's
+                // Settings page. The trailing control buttons (and the volume
+                // slider below) stay independent gesture targets.
+                //
+                // State is conveyed entirely by the leading `DisplayIconTile`
+                // (color + glyph shape) — the standalone status chip was dropped
+                // because the icon tint already carries the same information
+                // and a chip duplicates it for every screen.
                 Button(action: openAction) {
                     HStack(spacing: 8) {
-                        Image(systemName: iconName)
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(iconTint)
-                            .frame(width: 22, height: 22)
-                            .readableGlass(radius: 8, tint: iconTint)
+                        DisplayIconTile(systemImage: iconName, state: visualState)
 
                         VStack(alignment: .leading, spacing: 2) {
                             Text(verbatim: title)
-                                .font(.system(size: 11, weight: .semibold))
-                                .lineLimit(1)
-                            Text(verbatim: subtitle)
-                                .font(.system(size: 9))
-                                .foregroundStyle(.secondary)
+                                .font(.system(size: 12, weight: .semibold))
                                 .lineLimit(1)
                                 .truncationMode(.middle)
+                            Text(subtitle)
+                                .font(.system(size: 10))
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
-
-                        Circle()
-                            .fill(iconTint)
-                            .frame(width: 5, height: 5)
-                            .opacity(showsStatusDot ? 1 : 0)
                     }
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(MenuBarPressFeedbackStyle())
                 .help(Text("Open display settings"))
+                .accessibilityLabel(Text("\(title), \(subtitleAccessibilityText), \(visualState.accessibilityLabel)"))
+                .accessibilityElement(children: .combine)
 
-                HStack(spacing: 4) {
-                    IconControlButton(
-                        systemImage: "chevron.left",
-                        isEnabled: supportsPlayback && canStepPlaylist,
-                        action: previousAction,
-                        accessibilityLabel: "Previous wallpaper"
-                    )
+                // Show only the controls the wallpaper can actually drive:
+                //   • single video / web → just play-pause
+                //   • video playlist → prev / play-pause / next
+                //   • non-playable (scene-still, unsupported) → no buttons at all
+                // Beats greying out disabled buttons — fewer visible slots,
+                // less cognitive noise per row.
+                if supportsPlayback {
+                    HStack(spacing: 4) {
+                        if canStepPlaylist {
+                            IconControlButton(
+                                systemImage: "chevron.left",
+                                isEnabled: true,
+                                action: previousAction,
+                                accessibilityLabel: "Previous wallpaper"
+                            )
+                        }
 
-                    IconControlButton(
-                        systemImage: isPlaying ? "pause.fill" : "play.fill",
-                        isEnabled: supportsPlayback,
-                        action: playbackAction,
-                        accessibilityLabel: isPlaying ? "Pause wallpaper" : "Play wallpaper",
-                        isProminent: true
-                    )
+                        IconControlButton(
+                            systemImage: isPlaying ? "pause.fill" : "play.fill",
+                            isEnabled: true,
+                            action: playbackAction,
+                            accessibilityLabel: isPlaying ? "Pause wallpaper" : "Play wallpaper",
+                            isProminent: true
+                        )
 
-                    IconControlButton(
-                        systemImage: "chevron.right",
-                        isEnabled: supportsPlayback && canStepPlaylist,
-                        action: nextAction,
-                        accessibilityLabel: "Next wallpaper"
-                    )
-
-                    IconControlButton(
-                        systemImage: "arrow.up.right",
-                        isEnabled: true,
-                        action: openAction,
-                        accessibilityLabel: "Open display settings"
-                    )
+                        if canStepPlaylist {
+                            IconControlButton(
+                                systemImage: "chevron.right",
+                                isEnabled: true,
+                                action: nextAction,
+                                accessibilityLabel: "Next wallpaper"
+                            )
+                        }
+                    }
                 }
             }
+            .accessibilityElement(children: .contain)
 
             if let videoVolume {
-                HStack(spacing: 7) {
-                    Image(systemName: volumeIcon(for: videoVolume.wrappedValue))
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 22)
-                        .accessibilityHidden(true)
-
-                    Slider(
-                        value: videoVolume,
-                        in: 0...1
-                    )
-                        .controlSize(.mini)
-                        .accessibilityLabel(Text("Video volume"))
-                        .accessibilityValue(Text("\(volumePercent(videoVolume.wrappedValue)) percent"))
-
-                    Text(verbatim: "\(volumePercent(videoVolume.wrappedValue))%")
-                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 34, alignment: .trailing)
-                }
-                .frame(maxWidth: .infinity)
+                VolumeControlRow(videoVolume: videoVolume)
             }
         }
         .padding(.horizontal, metrics.rowPaddingHorizontal)
         .padding(.vertical, metrics.rowPaddingVertical)
         .frame(maxWidth: .infinity)
-        .readableGlass(radius: 12, tint: iconTint, interactive: true)
+        // No tint — let the system render its native edge highlight + interior
+        // refraction. Tinting forced opaque gray bands that read as flat cards.
+        .adaptiveGlassSurface(.roundedRectangle(12), interactive: true)
+    }
+}
+
+private struct DisplayIconTile: View {
+    let systemImage: String
+    let state: DisplayVisualState
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(.system(size: 11, weight: .semibold))
+            // State color rides on the glyph only — the surrounding glass tile
+            // stays neutral so we don't bring back the color-block surfaces.
+            .foregroundStyle(state.tint)
+            .frame(width: 26, height: 26)
+            .adaptiveGlassSurface(.roundedRectangle(8))
+            .accessibilityHidden(true)
+    }
+}
+
+private struct VolumeControlRow: View {
+    let videoVolume: Binding<Double>
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: volumeIcon(for: videoVolume.wrappedValue))
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 22)
+                .accessibilityHidden(true)
+
+            Slider(value: videoVolume, in: 0...1)
+                .controlSize(.mini)
+                .tint(.secondary)
+                .accessibilityLabel(Text("Video volume"))
+                .accessibilityValue(Text("\(volumePercent(videoVolume.wrappedValue)) percent"))
+
+            Text(verbatim: "\(volumePercent(videoVolume.wrappedValue))%")
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .frame(width: 34, alignment: .trailing)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private func volumePercent(_ value: Double) -> Int {
@@ -678,49 +753,18 @@ private struct IconControlButton: View {
     var isProminent: Bool = false
 
     var body: some View {
+        // The prominent / regular branch is decided once per row (play vs
+        // prev/next). On macOS 26 each gets Apple's polished Liquid Glass
+        // edge highlight + press squish; on 14/15 it falls back to
+        // `.bordered` / `.borderedProminent` capsule via the adaptive layer.
         Button(action: action) {
             Image(systemName: systemImage)
-                .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(isProminent ? Color.accentColor : Color.primary.opacity(0.72))
-                .frame(width: 23, height: 23)
-                .readableGlass(
-                    radius: 8,
-                    tint: isProminent ? Color.accentColor : Color.secondary,
-                    interactive: isEnabled
-                )
+                .font(.system(size: 11, weight: .bold))
         }
-        .buttonStyle(.plain)
+        .adaptiveGlassButton(isProminent ? .prominent : .regular)
+        .controlSize(.small)
         .disabled(!isEnabled)
-        .opacity(isEnabled ? 1 : 0.38)
         .accessibilityLabel(Text(accessibilityLabel))
-    }
-}
-
-private struct MenuBarControlButton: View {
-    let title: String
-    let systemImage: String
-    let tint: Color
-    var isProminent: Bool = false
-    var isEnabled: Bool = true
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 10, weight: .semibold))
-                Text(verbatim: title)
-                    .font(.system(size: 10, weight: .semibold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.82)
-            }
-            .foregroundStyle(tint)
-            .frame(maxWidth: .infinity, minHeight: 34)
-            .readableGlass(radius: 11, tint: tint, interactive: true)
-        }
-        .buttonStyle(.plain)
-        .disabled(!isEnabled)
-        .opacity(isEnabled ? 1 : 0.42)
     }
 }
 
@@ -740,10 +784,10 @@ private struct MenuBarUsageStrip: View {
                 MenuBarUsageMetricView(metric: metric)
             }
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity)
-        .readableGlass(radius: 11, tint: .secondary)
+        .adaptiveGlassSurface(.roundedRectangle(11))
     }
 }
 
@@ -783,113 +827,101 @@ private struct MenuBarUsageMetricView: View {
     }
 }
 
-private struct MenuBarInlineOverlayPanel<Content: View>: View {
-    @ViewBuilder let content: () -> Content
-
-    var body: some View {
-        VStack(spacing: 7) {
-            content()
-        }
-        .padding(9)
-        .frame(width: 198)
-        .readableGlass(radius: 14, tint: .secondary)
-    }
+private enum FooterUtilityRole {
+    case neutral
+    case destructiveGlyph
 }
 
-private struct MenuBarOverlayButton: View {
-    let title: String
+private struct MenuBarFooterUtility: View {
     let systemImage: String
-    var tint: Color = .primary
-    var surfaceTint: Color = .secondary
+    let role: FooterUtilityRole
     let action: () -> Void
+    let help: LocalizedStringKey
+    let accessibilityLabel: LocalizedStringKey
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 9) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(tint)
-                    .frame(width: 16)
-                Text(verbatim: title)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(tint)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 10)
-            .frame(maxWidth: .infinity, minHeight: 32)
-            .readableGlass(radius: 10, tint: surfaceTint, interactive: true)
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-private struct MenuBarFooterLabel: View {
-    let title: String
-    let systemImage: String
-
-    var body: some View {
-        HStack(spacing: 6) {
             Image(systemName: systemImage)
-                .font(.system(size: 10, weight: .semibold))
-            Text(verbatim: title)
-                .font(.system(size: 11, weight: .semibold))
-                .lineLimit(1)
+                .font(.system(size: 13, weight: .semibold))
+                // Glyph still carries the role (red = destructive). The
+                // glass surface itself stays neutral — Apple's destructive
+                // intent should come from the icon, not a colored surface.
+                .foregroundStyle(role == .destructiveGlyph ? Color.red : Color.primary)
         }
-        .frame(maxWidth: .infinity, minHeight: 34)
-        .readableGlass(radius: 11, tint: .accentColor, interactive: true)
+        .adaptiveGlassButton(.regular)
+        .controlSize(.large)
+        .help(Text(help))
+        .accessibilityLabel(Text(accessibilityLabel))
     }
 }
 
-private struct MenuBarQuitButton: View {
-    var body: some View {
-        Image(systemName: "power")
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(.red)
-            .frame(width: 34, height: 34)
-            .readableGlass(radius: 11, tint: .red, interactive: true)
+/// Adds a subtle press cue (scale + dim) to every menu-bar button that
+/// doesn't already go through `.adaptiveGlassButton` (which delivers its
+/// own native press feedback). Currently used only by the master toggle's
+/// custom Capsule track and the whole-row display card.
+private struct MenuBarPressFeedbackStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.96 : 1.0)
+            .opacity(configuration.isPressed ? 0.85 : 1.0)
+            .animation(.snappy(duration: 0.12), value: configuration.isPressed)
     }
 }
 
-private extension View {
-    func readableGlass(radius: CGFloat, tint: Color, interactive: Bool = false) -> some View {
-        modifier(ReadableGlassSurface(radius: radius, tint: tint, interactive: interactive))
+/// Bridges into AppKit at view-appear time to strip the menubar popover's
+/// chrome so the desktop wallpaper bleeds through the outer Liquid Glass
+/// shell. Two layers have to be cleared, not one:
+///
+/// 1. **NSWindow itself** — `isOpaque = false`, `backgroundColor = .clear`.
+///    The window stops painting its own backdrop.
+/// 2. **NSVisualEffectView descendants** — `MenuBarExtra(.window)` plants a
+///    dark-vibrancy `NSVisualEffectView` as the popover's default backdrop.
+///    It is a sibling/child of the SwiftUI host view, NOT the window's
+///    `backgroundColor`, so step 1 alone leaves a uniform dark layer
+///    behind everything. Hiding it lets the Liquid Glass shell sit
+///    directly over the desktop wallpaper.
+///
+/// Gated to macOS 26+ by the call site (`MenuBarOuterShell`). On macOS
+/// 14/15 we keep the system chrome — there is no Liquid Glass to take its
+/// place, and stripping vibrancy without a replacement leaves an empty
+/// transparent popover.
+///
+/// Idempotent: AppKit re-uses the same NSWindow across popover open/close
+/// cycles, and these setters are no-ops once already cleared.
+private struct MenuBarWindowChromeClearer: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        DispatchQueue.main.async { Self.stripChrome(anchoredAt: view) }
+        return view
     }
-}
 
-private struct ReadableGlassSurface: ViewModifier {
-    let radius: CGFloat
-    let tint: Color
-    let interactive: Bool
-
-    @Environment(\.colorScheme) private var colorScheme
-
-    private var edgeOpacity: Double {
-        colorScheme == .dark ? 0.18 : 0.13
+    func updateNSView(_ nsView: NSView, context: Context) {
+        // The accessor view may attach to its NSWindow late — the first
+        // `makeNSView` callback can fire before `view.window` is set.
+        // Re-apply on every update so the cleared chrome survives a
+        // popover that opens fresh after a density change or a relaunch.
+        DispatchQueue.main.async { Self.stripChrome(anchoredAt: nsView) }
     }
 
-    private var shadowOpacity: Double {
-        colorScheme == .dark ? 0.22 : 0.08
+    private static func stripChrome(anchoredAt anchor: NSView) {
+        guard let window = anchor.window else { return }
+        window.isOpaque = false
+        window.backgroundColor = .clear
+
+        if let contentView = window.contentView {
+            hideVisualEffectViews(in: contentView)
+        }
     }
 
-    func body(content: Content) -> some View {
-        // The menu bar floats over a live wallpaper, so even on macOS 26 the
-        // native glass needs an explicit edge + drop shadow for readability.
-        // On 14/15 the wrapper provides the stroke via its fallback chrome, so
-        // here we only contribute the shadow (and an extra edge on 26 since
-        // glass on its own lacks one).
-        content
-            .adaptiveGlassSurface(
-                .roundedRectangle(radius),
-                tint: tint,
-                interactive: interactive
-            )
-            .overlay {
-                if #available(macOS 26.0, *) {
-                    RoundedRectangle(cornerRadius: radius, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(edgeOpacity), lineWidth: 0.6)
-                }
-            }
-            .shadow(color: Color.black.opacity(shadowOpacity), radius: 5, y: 1)
+    private static func hideVisualEffectViews(in view: NSView) {
+        if let vfx = view as? NSVisualEffectView {
+            // `isHidden` removes the view from rendering without unhooking
+            // it from the view hierarchy, so AppKit's popover bookkeeping
+            // (focus, dismissal on click-outside) stays intact.
+            vfx.isHidden = true
+        }
+        for subview in view.subviews {
+            hideVisualEffectViews(in: subview)
+        }
     }
 }
