@@ -115,7 +115,11 @@ final class VideoEffectsManager {
         // AVVideoComposition counterpart returns an immutable composition with
         // private instructions; mutateing a copy of it via mutableCopy() is
         // unsupported and can drop the frame-rate override on macOS 14/15.
-        let mutable = try await AVMutableVideoComposition(
+        // `init(asset:applyingCIFiltersWithHandler:)` is the legacy sync
+        // initializer (macOS 10.11+). `try await` is not needed at the call
+        // site — the enclosing function keeps `async throws` because the
+        // macOS 26 branch in `buildUsingApplier` genuinely uses both.
+        let mutable = AVMutableVideoComposition(
             asset: asset,
             applyingCIFiltersWithHandler: { request in
                 let sourceExtent = request.sourceImage.extent

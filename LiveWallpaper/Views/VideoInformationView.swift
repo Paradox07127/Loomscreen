@@ -2,15 +2,36 @@ import LiveWallpaperCore
 import SwiftUI
 import AVKit
 
+/// Floating capsule shown on the video preview card. Surfaces "what is this
+/// asset" glance information (format / resolution / FPS / file size) so the
+/// user doesn't have to dig into Finder or QuickTime to identify a file.
+///
+/// Metadata is loaded from `AVURLAsset(url:)` rather than the live player so
+/// the overlay can render across the active / poster / unloaded states —
+/// playing the preview isn't a prerequisite for showing the badges.
 struct VideoInformationOverlay: View {
-    let player: AVPlayer
+    let videoURL: URL?
+    /// Optional: present only while the preview is actively playing.
+    /// Used solely as a load-trigger identity so toggling preview off and on
+    /// doesn't refire a redundant metadata load for the same URL.
+    let player: AVPlayer?
 
     @State private var videoResolution: (width: Int, height: Int)? = nil
     @State private var videoFrameRate: Double = 0
     @State private var fileSize: String = ""
     @State private var formatBadges: [String] = []
 
+    @ViewBuilder
     var body: some View {
+        if let url = videoURL {
+            content
+                .task(id: loadIdentity(for: url)) {
+                    await loadVideoInformation(from: url)
+                }
+        }
+    }
+
+    private var content: some View {
         HStack(spacing: 12) {
             if !formatBadges.isEmpty {
                 HStack(spacing: 4) {
@@ -49,32 +70,36 @@ struct VideoInformationOverlay: View {
         .background(Color.black.opacity(0.6))
         .clipShape(Capsule())
         .shadow(color: .black.opacity(0.3), radius: 5, x: 0, y: 2)
-        .task(id: currentItemID) {
-            await loadVideoInformation()
-        }
     }
 
-    private var currentItemID: ObjectIdentifier? {
-        guard let item = player.currentItem else { return nil }
-        return ObjectIdentifier(item)
+    /// Identity key for `.task(id:)`. URL change → reload, file-only re-mount
+    /// (player toggle on the same URL) → don't reload. The optional player
+    /// identity stays out of this on purpose so play/stop transitions don't
+    /// clear and re-fetch the same metadata.
+    private func loadIdentity(for url: URL) -> String {
+        url.absoluteString
     }
 
     @MainActor
-    private func loadVideoInformation() async {
+    private func loadVideoInformation(from url: URL) async {
         resetVideoInformation()
-        guard let playerItem = player.currentItem else { return }
-
-        if let urlAsset = playerItem.asset as? AVURLAsset {
-            fileSize = Self.fileSizeDescription(for: urlAsset.url) ?? ""
-
-            if let info = try? await PlayableVideoLoader.detectFormat(at: urlAsset.url) {
-                guard !Task.isCancelled else { return }
-                formatBadges = info.badges
+        let didStartScope = url.startAccessingSecurityScopedResource()
+        defer {
+            if didStartScope {
+                url.stopAccessingSecurityScopedResource()
             }
         }
 
+        fileSize = Self.fileSizeDescription(for: url) ?? ""
+
+        if let info = try? await PlayableVideoLoader.detectFormat(at: url) {
+            guard !Task.isCancelled else { return }
+            formatBadges = info.badges
+        }
+
         do {
-            let videoTracks = try await playerItem.asset.loadTracks(withMediaType: .video)
+            let asset = AVURLAsset(url: url)
+            let videoTracks = try await asset.loadTracks(withMediaType: .video)
             guard let track = videoTracks.first else { return }
 
             let naturalSize = try await track.load(.naturalSize)

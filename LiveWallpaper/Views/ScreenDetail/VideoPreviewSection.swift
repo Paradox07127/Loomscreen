@@ -17,6 +17,24 @@ struct VideoPreviewSection: View {
             } else if hasPreviewSource {
                 unloadedPreview
             }
+
+            // Hoist the info pill out of `activePreview` so the badges
+            // (format / resolution / FPS / file size) read across the
+            // active / poster / unloaded states. The overlay loads its
+            // metadata from `previewController.assetURL` directly, so it
+            // no longer requires a running player.
+            VStack {
+                HStack {
+                    VideoInformationOverlay(
+                        videoURL: previewController.assetURL,
+                        player: previewController.player
+                    )
+                    Spacer()
+                }
+                Spacer()
+            }
+            .padding(16)
+            .allowsHitTesting(false)
         }
         .contentShape(Rectangle())
         .onTapGesture(count: 1) {
@@ -34,15 +52,6 @@ struct VideoPreviewSection: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipShape(RoundedRectangle(cornerRadius: 16))
                 .shadow(color: Color.black.opacity(0.15), radius: 10, x: 0, y: 4)
-
-            VStack {
-                HStack {
-                    VideoInformationOverlay(player: player)
-                    Spacer()
-                }
-                Spacer()
-            }
-            .padding(16)
 
             playbackControls
         }
