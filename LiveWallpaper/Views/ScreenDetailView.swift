@@ -388,7 +388,7 @@ struct ScreenDetailView: View {
                             Image(systemName: "circle.fill")
                                 .font(.system(size: 6))
                                 .foregroundStyle(sessionStatusColor)
-                                .symbolEffect(.pulse, options: .repeat(.continuous), isActive: wallpaperSessionSummary.activity == .active)
+                                .symbolEffect(.pulse, options: .repeating, isActive: wallpaperSessionSummary.activity == .active)
                             Text(sessionStatusText)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -703,10 +703,20 @@ struct ScreenDetailView: View {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
                 VStack(spacing: 10) {
-                    Image(systemName: "arrow.down.doc.fill")
-                        .font(.system(size: 32, weight: .semibold))
-                        .foregroundStyle(Color.accentColor)
-                        .symbolEffect(.bounce, options: .repeat(.continuous))
+                    Group {
+                        if #available(macOS 15.0, *) {
+                            Image(systemName: "arrow.down.doc.fill")
+                                .symbolEffect(.bounce, options: .repeating)
+                        } else {
+                            // macOS 14: .bounce cannot repeat indefinitely.
+                            // Substitute .pulse so the affordance still draws
+                            // the eye while a drag is in progress.
+                            Image(systemName: "arrow.down.doc.fill")
+                                .symbolEffect(.pulse, options: .repeating)
+                        }
+                    }
+                    .font(.system(size: 32, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
                     Text("Drop to use as wallpaper")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.primary)
