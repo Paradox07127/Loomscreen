@@ -83,9 +83,9 @@ struct ScreenDetailView: View {
             Button {
                 requestApplyToAll()
             } label: {
-                Label("Apply to All", systemImage: "square.on.square")
+                Image(systemName: "square.on.square")
             }
-            .help(Text("Copy this display's wallpaper and settings to every other display"))
+            .help(Text("Apply to All — copy this display's wallpaper and settings to every other display"))
             .accessibilityLabel(Text("Apply to all displays"))
             .accessibilityHint(Text("Copies the current wallpaper and settings to every other connected display"))
             .buttonStyle(.glass)
@@ -403,11 +403,11 @@ struct ScreenDetailView: View {
                     Button {
                         showBookmarks = true
                     } label: {
-                        Label("Bookmarks", systemImage: "bookmark.fill")
+                        Image(systemName: "bookmark.fill")
                     }
                     .buttonStyle(.glass)
                     .controlSize(.regular)
-                    .help(Text("Saved video / HTML / shader shortcuts"))
+                    .help(Text("Bookmarks — saved video / HTML / shader shortcuts"))
                     .accessibilityLabel(Text("Bookmarks"))
                     .popover(isPresented: $showBookmarks, arrowEdge: .bottom) {
                         BookmarksPopover(screen: screen)
@@ -420,11 +420,11 @@ struct ScreenDetailView: View {
                                 Button {
                                     showFilePicker()
                                 } label: {
-                                    Label("Select Video", systemImage: "folder.badge.plus")
+                                    Image(systemName: "folder.badge.plus")
                                 }
                                 .buttonStyle(.glassProminent)
                                 .controlSize(.regular)
-                                .help(Text("Choose a video file for this display"))
+                                .help(Text("Select Video — choose a video file for this display"))
                                 .accessibilityLabel(Text("Select video"))
                                 .accessibilityHint(Text("Opens a file picker to choose a wallpaper video"))
                             }
@@ -437,7 +437,7 @@ struct ScreenDetailView: View {
                             .buttonStyle(.glass)
                             .destructiveControlTint()
                             .controlSize(.regular)
-                            .help(Text("Clear current wallpaper"))
+                            .help(Text("Clear Wallpaper — remove the current wallpaper without deleting source files"))
                             .accessibilityLabel(Text("Clear current wallpaper"))
                             .accessibilityHint(Text("Removes the current wallpaper from this screen without deleting source files or library items"))
                         }
