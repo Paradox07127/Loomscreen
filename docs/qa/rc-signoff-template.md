@@ -12,6 +12,10 @@
 | Notarization request ID | |
 | macOS SDK | 26.4 |
 | Xcode version | Xcode 26.4.1 (17E202) |
+| Minimum runtime target | macOS 14.0 |
+| Supported architectures | Apple Silicon only (`ARCHS = arm64`) |
+| Compatibility floor smoke | macOS 14 Apple Silicon (ENV-09) |
+| Liquid Glass path smoke | macOS 26 Apple Silicon (ENV-11) |
 
 ## Automated Gates
 
@@ -20,7 +24,7 @@
 | Release candidate script | `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer DERIVED_DATA=/tmp/LiveWallpaperReleaseCandidateCheck scripts/release_candidate_check.sh` | Passed with warning | Script ended with `Release candidate checks passed.`; warning remains for missing Developer ID Application identity. Use `REQUIRE_DEVELOPER_ID=1` for the formal signing-machine gate |
 | Release build settings | `xcodebuild -showBuildSettings -configuration Release` | Passed | `ENABLE_HARDENED_RUNTIME = YES` |
 | Privacy manifest | `plutil -lint LiveWallpaper/PrivacyInfo.xcprivacy` | Passed | Manifest lints cleanly and declares required-reason APIs |
-| Unit tests | `xcodebuild test -only-testing:LiveWallpaperTests` | Passed | 560 tests in 88 suites passed |
+| Unit tests | `xcodebuild test -only-testing:LiveWallpaperTests` | Passed | 669 tests in 98 suites passed (includes `MacOSCompatibilityPolicyTests`) |
 | i18n guard | `I18N_GUARD_SCOPE=all scripts/i18n_guard.sh` | Passed | No output, exit 0 |
 | Static audit | `scripts/audit.sh static` | Passed | Audit files generated; broad `NSObject` NSSecureCoding decode allow-lists fail the gate |
 | Whitespace | `git diff --check` | Passed | No output, exit 0 |
