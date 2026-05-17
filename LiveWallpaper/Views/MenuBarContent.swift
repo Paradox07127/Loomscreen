@@ -41,7 +41,7 @@ struct MenuBarContent: View {
     }
 
     var body: some View {
-        GlassEffectContainer(spacing: metrics.componentSpacing) {
+        AdaptiveGlassContainer(spacing: metrics.componentSpacing) {
             VStack(alignment: .leading, spacing: metrics.componentSpacing) {
                 header
                 sectionLabel("DISPLAYS")
@@ -864,10 +864,6 @@ private struct ReadableGlassSurface: ViewModifier {
 
     @Environment(\.colorScheme) private var colorScheme
 
-    private var tintOpacity: Double {
-        colorScheme == .dark ? 0.20 : 0.11
-    }
-
     private var edgeOpacity: Double {
         colorScheme == .dark ? 0.18 : 0.13
     }
@@ -878,29 +874,30 @@ private struct ReadableGlassSurface: ViewModifier {
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if interactive {
-            decorated(
-                content.glassEffect(
-                    .regular.tint(tint.opacity(tintOpacity)).interactive(),
-                    in: .rect(cornerRadius: radius)
+        if #available(macOS 26.0, *) {
+            // Native Liquid Glass alone is too soft against a live wallpaper
+            // background. Re-apply the menu bar's explicit edge + drop shadow
+            // on top so the surface stays readable.
+            content
+                .adaptiveGlassSurface(
+                    .roundedRectangle(radius),
+                    tint: tint,
+                    interactive: interactive
                 )
-            )
+                .overlay {
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(edgeOpacity), lineWidth: 0.6)
+                }
+                .shadow(color: Color.black.opacity(shadowOpacity), radius: 5, y: 1)
         } else {
-            decorated(
-                content.glassEffect(
-                    .regular.tint(tint.opacity(tintOpacity)),
-                    in: .rect(cornerRadius: radius)
+            // The adaptive fallback already includes stroke + shadow; no extra
+            // chrome needed.
+            content
+                .adaptiveGlassSurface(
+                    .roundedRectangle(radius),
+                    tint: tint,
+                    interactive: interactive
                 )
-            )
         }
-    }
-
-    private func decorated<V: View>(_ view: V) -> some View {
-        view
-            .overlay {
-                RoundedRectangle(cornerRadius: radius, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(edgeOpacity), lineWidth: 0.6)
-            }
-            .shadow(color: Color.black.opacity(shadowOpacity), radius: 5, y: 1)
     }
 }

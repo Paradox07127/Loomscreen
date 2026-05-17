@@ -72,7 +72,7 @@ struct HTMLSourceSection: View {
                     .onSubmit { commitURL() }
 
                 Button("Use") { commitURL() }
-                    .buttonStyle(.glassProminent)
+                    .adaptiveGlassButton(.prominent)
                     .disabled(urlInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             Text("Web pages, Shadertoy, CodePen demos, or any URL.")

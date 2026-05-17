@@ -114,7 +114,7 @@ struct WPEFallbackCard: View {
         }
         .padding(32)
         .frame(maxWidth: 480)
-        .glassEffect(.regular, in: .rect(cornerRadius: 24))
+        .adaptiveGlassSurface(.roundedRectangle(24))
     }
 
     /// Renders one row per missing workshop ID. Wraps the list in a
@@ -169,7 +169,7 @@ struct WPEFallbackCard: View {
                 } label: {
                     Label("Copy all IDs", systemImage: "doc.on.doc")
                 }
-                .buttonStyle(.glass)
+                .adaptiveGlassButton(.regular)
                 .controlSize(.regular)
                 .accessibilityHint(Text("Copies every missing workshop ID to your clipboard so you can subscribe in Steam"))
 
@@ -178,7 +178,7 @@ struct WPEFallbackCard: View {
                 } label: {
                     Label("Open this project", systemImage: "arrow.up.right.square")
                 }
-                .buttonStyle(.glass)
+                .adaptiveGlassButton(.regular)
                 .controlSize(.regular)
             }
 
@@ -188,7 +188,7 @@ struct WPEFallbackCard: View {
             } label: {
                 Label("View in Workshop", systemImage: "arrow.up.right.square")
             }
-            .buttonStyle(.glass)
+            .adaptiveGlassButton(.regular)
             .controlSize(.regular)
             .accessibilityHint(Text("Opens this wallpaper's Steam Workshop page in your browser"))
         }
