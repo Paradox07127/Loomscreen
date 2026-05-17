@@ -285,6 +285,9 @@ struct ScreenDetailView: View {
                                 }
                             }
                             #endif
+                            if featureCatalog.isEnabled(.inspectorPreview), htmlSource != nil {
+                                HTMLPreviewSection(source: htmlSource)
+                            }
                             HTMLSourceSection(
                                 screen: screen,
                                 source: $htmlSource,
@@ -845,6 +848,11 @@ struct ScreenDetailView: View {
             assignIfChanged(htmlConfig, to: .default) { htmlConfig = $0 }
             assignIfChanged(hasPreviewSource, to: screen.videoPlayer?.videoURL != nil) { hasPreviewSource = $0 }
             assignIfChanged(lastPreviewPosterBookmarkData, to: nil) { lastPreviewPosterBookmarkData = $0 }
+            // Config was cleared (e.g. Reset Defaults): make sure the
+            // poster / preview player cached on `previewController`
+            // doesn't keep showing the old video frame after the
+            // runtime session has already been torn down.
+            previewController.cleanup()
             loadPreviewPosterIfNeeded()
         }
     }

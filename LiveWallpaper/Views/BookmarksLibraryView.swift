@@ -137,9 +137,12 @@ private struct BookmarkCard: View {
     let onDelete: () -> Void
 
     @State private var isHovering = false
+    @State private var thumbnail: NSImage?
+    @State private var thumbnailDidAttempt = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            thumbnailView
             header
             footer
         }
@@ -156,6 +159,82 @@ private struct BookmarkCard: View {
         .animation(.spring(response: 0.25, dampingFraction: 0.85), value: isHovering)
         .onHover { isHovering = $0 }
         .contextMenu { contextMenu }
+        .onAppear { loadThumbnailIfNeeded() }
+        .onChange(of: bookmark.id) { _, _ in
+            thumbnail = nil
+            thumbnailDidAttempt = false
+            loadThumbnailIfNeeded()
+        }
+    }
+
+    private var thumbnailView: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(bookmark.presentationTint.opacity(0.10))
+
+            if let thumbnail {
+                Image(nsImage: thumbnail)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFill()
+            } else {
+                Image(systemName: bookmark.iconName)
+                    .font(.system(size: 28, weight: .light))
+                    .foregroundStyle(bookmark.presentationTint.opacity(0.8))
+            }
+        }
+        .frame(height: 96)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
+        )
+    }
+
+    private func loadThumbnailIfNeeded() {
+        guard thumbnail == nil, !thumbnailDidAttempt else { return }
+        thumbnailDidAttempt = true
+
+        if let cached = WallpaperThumbnailService.shared.cachedThumbnail(forKey: bookmarkCacheKey) {
+            thumbnail = cached
+            return
+        }
+
+        Task { @MainActor in
+            switch bookmark.content {
+            case .video(let bookmarkData):
+                guard case .success(let resolved) = SecurityScopedBookmarkResolver.shared.resolve(
+                    bookmarkData,
+                    target: .transient
+                ) else { return }
+                if let image = await WallpaperThumbnailService.shared.videoPosterImage(
+                    for: resolved.url,
+                    cacheKey: bookmarkCacheKey
+                ) {
+                    thumbnail = image
+                }
+            case .html(let source, _):
+                if let image = await HTMLPreviewKey.fetchSnapshot(
+                    for: source,
+                    cacheKey: bookmarkCacheKey
+                ) {
+                    thumbnail = image
+                }
+            case .metalShader, .scene:
+                // Shader/scene previews are best handled by their own
+                // capture pipelines (live MTKView snapshot) — out of
+                // scope here; fall back to the SF Symbol placeholder.
+                break
+            }
+        }
+    }
+
+    private var bookmarkCacheKey: String {
+        // The bookmark UUID is stable across renames, so it makes a
+        // perfect cache key that survives label edits while still
+        // invalidating when the underlying source changes (bookmark
+        // gets re-saved → new UUID).
+        "bookmark::" + bookmark.id.uuidString
     }
 
     private var header: some View {
