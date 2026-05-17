@@ -12,6 +12,12 @@ final class InspectorPreviewController {
     private(set) var currentPosition: Double = 0
     private(set) var duration: Double = 1
     private(set) var lastError: String?
+    /// Last URL handed to either `loadPoster(from:)` or
+    /// `startPlaybackPreview(from:)`. Lets the info overlay load asset
+    /// metadata (resolution / FPS / format / size) before — or instead of —
+    /// the player coming up, so the overlay can show even on the poster /
+    /// unloaded states.
+    private(set) var assetURL: URL?
 
     @ObservationIgnored private var playerObserver: AnyCancellable?
     @ObservationIgnored private var itemStatusObserver: AnyCancellable?
@@ -26,6 +32,7 @@ final class InspectorPreviewController {
     func loadPoster(from url: URL, syncTime: CMTime? = nil) {
         guard player == nil else { return }
 
+        assetURL = url
         posterTask?.cancel()
         isLoading = true
         lastError = nil
@@ -77,6 +84,7 @@ final class InspectorPreviewController {
     func startPlaybackPreview(from url: URL, syncTo wallpaperPlayer: AVPlayer?) {
         cleanupPlayer()
         posterTask?.cancel()
+        assetURL = url
         isLoading = true
         lastError = nil
 
@@ -130,6 +138,7 @@ final class InspectorPreviewController {
         posterTask?.cancel()
         posterTask = nil
         posterImage = nil
+        assetURL = nil
         currentPosition = 0
         duration = 1
         lastError = nil

@@ -11,6 +11,7 @@ import SwiftUI
 /// the bookmark grid share the same render pass + NSCache entry per source.
 struct HTMLPreviewSection: View {
     let source: HTMLSource?
+    let config: HTMLConfig
 
     @State private var snapshot: NSImage?
     @State private var isLoading = false
@@ -21,6 +22,19 @@ struct HTMLPreviewSection: View {
             cardBody
                 .clipShape(RoundedRectangle(cornerRadius: 16))
                 .shadow(color: Color.black.opacity(0.15), radius: 10, x: 0, y: 4)
+
+            // Top-left info pill — mirrors `VideoInformationOverlay`'s
+            // placement on the video preview so both wallpaper types share
+            // the same "what is this" reading order.
+            VStack {
+                HStack {
+                    HTMLInformationOverlay(source: source, config: config)
+                    Spacer()
+                }
+                Spacer()
+            }
+            .padding(14)
+            .allowsHitTesting(false)
 
             refreshButton
                 .padding(10)
@@ -193,5 +207,105 @@ enum HTMLPreviewKey {
             for: target,
             cacheKey: cacheKey
         )
+    }
+}
+
+/// Floating capsule shown on the HTML preview, parallel to
+/// `VideoInformationOverlay`. Surfaces the same kind of "what is this"
+/// glance information that the video overlay does — source kind, source
+/// identifier, and the runtime-mode badges that meaningfully change how
+/// the page is drawn (insecure URL, physical-pixel layout, JavaScript
+/// off).
+///
+/// Deliberately omits anything that already lives in a banner inside
+/// `HTMLSourceSection` (trust state for remote URLs) or the HTML
+/// Rendering inspector card (viewport / DPR / scale), so the overlay
+/// stays a one-line summary rather than a duplicate diagnostic surface.
+struct HTMLInformationOverlay: View {
+    let source: HTMLSource?
+    let config: HTMLConfig
+
+    @ViewBuilder
+    var body: some View {
+        if let source {
+            content(for: source)
+        }
+    }
+
+    private func content(for source: HTMLSource) -> some View {
+        HStack(spacing: 10) {
+            if source.isInsecureURL {
+                tag("HTTP", background: Color.orange.opacity(0.55))
+            }
+
+            HStack(spacing: 4) {
+                Image(systemName: icon(for: source))
+                Text(verbatim: identifier(for: source))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .frame(maxWidth: 200, alignment: .leading)
+
+            // Always-on state badges (mirrors video's resolution/FPS chunks):
+            // give URLs a JS readout so the overlay isn't just "path"
+            // when nothing special is configured. Local file/folder sources
+            // typically ship inert HTML — JS state there is rarely
+            // load-bearing, so we still flag only the rare "off" case.
+            if case .url = source {
+                if config.allowJavaScript {
+                    tag("JS")
+                } else {
+                    tag("NO JS", background: Color.red.opacity(0.55))
+                }
+            } else if !config.allowJavaScript {
+                tag("NO JS", background: Color.red.opacity(0.55))
+            }
+
+            if config.physicalPixelLayout {
+                tag("PHYS PX")
+            }
+            if config.allowMouseInteraction {
+                tag("CLICKS")
+            }
+        }
+        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+        .foregroundStyle(.white)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(Color.black.opacity(0.6))
+        .clipShape(Capsule())
+        .shadow(color: .black.opacity(0.3), radius: 5, x: 0, y: 2)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func tag(_ text: String, background: Color = Color.white.opacity(0.18)) -> some View {
+        Text(verbatim: text)
+            .font(.system(size: 10, weight: .bold, design: .rounded))
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(background, in: Capsule())
+    }
+
+    private func icon(for source: HTMLSource) -> String {
+        switch source {
+        case .url:    return "globe"
+        case .file:   return "doc.richtext"
+        case .folder: return "folder"
+        case .inline: return "curlybraces"
+        }
+    }
+
+    private func identifier(for source: HTMLSource) -> String {
+        switch source {
+        case .url(let url):
+            // Prefer host so a long path doesn't blow out the capsule.
+            // Falls back to the full string only when the URL has no
+            // host (rare — relative URLs slip through here).
+            return url.host ?? url.absoluteString
+        case .file, .folder:
+            return source.displayName
+        case .inline:
+            return "Inline HTML"
+        }
     }
 }

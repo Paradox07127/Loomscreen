@@ -417,11 +417,12 @@ struct MenuBarContent: View {
     }
 
     private func usageColor(for percent: Double) -> Color {
+        // Traffic-light scheme: green when the system is comfortable, orange
+        // as soon as a resource crosses half its budget, red past the 80%
+        // critical band where users typically start noticing pressure.
         if percent >= 80 { return .red }
         if percent >= 50 { return .orange }
-        // Neutral fill under the warning threshold — warm colors stay reserved
-        // for the warning/critical bands so they read as alerts, not decoration.
-        return .white.opacity(0.55)
+        return .green
     }
 }
 

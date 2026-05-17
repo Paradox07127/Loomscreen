@@ -167,6 +167,11 @@ instead of `.repeating` so users on Sequoia and later keep the smoother
 `repeat(.continuous)` behavior — `.repeating` alone maps to a periodic
 cadence on macOS 15+.
 
+Runtime verification on real macOS 14 / 15 uses the local VirtualBuddy VM
+matrix. See [`docs/qa/vm-test-environment.md`](docs/qa/vm-test-environment.md)
+for the connection, shared-folder bridge, build-push, crash-log and
+debugging workflow; do not re-derive any of those paths in feature code.
+
 ## Parallel-session coordination
 
 Multiple Claude sessions run on different worktrees under

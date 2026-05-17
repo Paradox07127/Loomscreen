@@ -286,7 +286,7 @@ struct ScreenDetailView: View {
                             }
                             #endif
                             if featureCatalog.isEnabled(.inspectorPreview), htmlSource != nil {
-                                HTMLPreviewSection(source: htmlSource)
+                                HTMLPreviewSection(source: htmlSource, config: htmlConfig)
                             }
                             HTMLSourceSection(
                                 screen: screen,
