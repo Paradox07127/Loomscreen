@@ -176,7 +176,7 @@ struct WorkshopGalleryView: View {
                 }
             },
             actions: {
-                GlassEffectContainer(spacing: 8) {
+                AdaptiveGlassContainer(spacing: 8) {
                     HStack(spacing: 8) {
                         if hasLibraryRoot {
                             if allowsTargetSelection {
@@ -414,7 +414,7 @@ struct WorkshopGalleryView: View {
                 } label: {
                     Image(systemName: "chevron.left")
                 }
-                .buttonStyle(.glass)
+                .adaptiveGlassButton(.regular)
                 .controlSize(.regular)
                 .help(Text("Back to library"))
                 .accessibilityLabel(Text("Back to library"))
@@ -948,7 +948,7 @@ private struct WorkshopGalleryFilterBar: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
         .frame(minWidth: 220, idealWidth: 280, maxWidth: 360)
-        .glassEffect(.regular.interactive(), in: .capsule)
+        .adaptiveGlassSurface(.capsule, interactive: true)
     }
 }
 
@@ -1180,10 +1180,7 @@ private struct WorkshopToolbarButtonStyle: ButtonStyle {
                 .padding(.horizontal, horizontalPadding)
                 .padding(.vertical, verticalPadding)
                 .frame(minHeight: 34)
-                .glassEffect(
-                    .regular.tint(effectiveTint.opacity(isEnabled ? 0.16 : 0.06)).interactive(),
-                    in: .capsule
-                )
+                .adaptiveGlassSurface(.capsule, tint: effectiveTint, interactive: true)
                 .contentShape(Capsule())
                 .scaleEffect(configuration.isPressed ? 0.97 : 1)
                 .opacity(isEnabled ? 1 : 0.46)

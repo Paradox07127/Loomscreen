@@ -59,8 +59,10 @@ Script lives at `Scripts/build_spirv_cross_xcframework.sh`. Idempotent:
 
 1. Clone (or `git pull` if already present) each repo into
    `ThirdParty/sources/{glslang,SPIRV-Cross,SPIRV-Tools}` at the pinned tag.
-2. Build static libs for `arm64-macos` (no x86_64 — repo targets macOS 14+
-   Apple Silicon).
+2. Build static libs for `arm64-macos` only. Artifact is arm64-only **by
+   design** — LiveWallpaper is Apple Silicon-only (macOS 14+), and there are
+   no plans to add an x86_64 slice. `scripts/build_spirv_cross_xcframework.sh`
+   correspondingly hard-codes `arm64` and should not be parameterized.
 3. Lipo the static libs into one `.framework` per slice with a hand-written
    `module.modulemap` that exposes only the C entry points we wrap (no full
    C++ headers reach Swift).

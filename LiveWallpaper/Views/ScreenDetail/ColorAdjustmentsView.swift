@@ -41,7 +41,7 @@ struct ColorAdjustmentsView: View {
                     }
                     .buttonStyle(.plain)
                     .destructiveControlTint()
-                    .glassEffect(.regular.tint(Color.red.opacity(0.15)).interactive(), in: .capsule)
+                    .adaptiveGlassSurface(.capsule, tint: .red, interactive: true)
                     .help(Text("Reset all color adjustments to default values"))
                     Spacer()
                 }

@@ -25,6 +25,9 @@ A release candidate can be signed off only when every P0 and P1 row is Passed or
 | ENV-06 | Offline network | Yes | Not Started | Weather and remote HTML failure behavior |
 | ENV-07 | Light appearance | Yes | Passed | System appearance was Light on 2026-05-10 continued QA; settings sidebar, empty state, video detail, controls, and shader view rendered as Light |
 | ENV-08 | Dark appearance | Yes | Passed | Settings UI, empty state, video, HTML, shader, and inspector controls covered in Dark |
+| ENV-09 | macOS 14.0-14.x, Apple Silicon | Yes | Not Started | Compatibility floor: launch, settings, menu bar, video, HTML, shader smoke. Material-based AdaptiveGlass fallback path. Intel intentionally unsupported. |
+| ENV-10 | macOS 15.x, Apple Silicon | Yes | Not Started | Middle release: adaptive material UI and runtime smoke. `.continuouslyRepeating` resolves to `.repeat(.continuous)` here. |
+| ENV-11 | macOS 26.x, Apple Silicon | Yes | Not Started | Native Liquid Glass path and current release baseline. `AVCIImageFiltering*` applier path active. |
 
 ## Functional QA
 
