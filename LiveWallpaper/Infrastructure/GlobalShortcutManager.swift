@@ -1,4 +1,3 @@
-#if !LITE_BUILD
 import Foundation
 import AppKit
 import Carbon.HIToolbox
@@ -257,4 +256,3 @@ private extension GlobalShortcutAction {
         return allCases[index]
     }
 }
-#endif

@@ -47,9 +47,22 @@ public struct ProductCapabilities: Sendable, Equatable {
         self.enabledFeatures = enabledFeatures
     }
 
+    /// Lite removes only the heavy GPU pipelines (Wallpaper Engine scene
+    /// rendering + custom metal shaders) and the developer-tools harness.
+    /// Everything else — playlists, schedules, video effects, weather, global
+    /// shortcuts, lock-screen snapshots, inspector preview, system monitor —
+    /// keeps the same surface area as Pro so the video / HTML / Aerials
+    /// experience is feature-complete.
     public static let lite = ProductCapabilities(
         sku: .lite,
-        enabledFeatures: [.video, .html, .appleAerials, .systemMonitor]
+        enabledFeatures: [
+            .video, .html,
+            .videoEffects, .weatherReactive,
+            .scheduleAutomation, .playlists,
+            .systemMonitor, .globalShortcuts,
+            .lockScreenSnapshots,
+            .appleAerials, .inspectorPreview
+        ]
     )
 
     public static let pro = ProductCapabilities(

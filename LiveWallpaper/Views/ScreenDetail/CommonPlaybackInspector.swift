@@ -86,39 +86,38 @@ struct CommonPlaybackInspector: View {
 
     // MARK: - Rows
 
+    /// First N% of the slider is a mute "dead zone" — prevents a stray drag
+    /// from leaking a 1-2% audio level. Past this threshold the slider's
+    /// position maps linearly to the [0,1] internal volume.
+    private static let audioDeadZone: Double = 0.10
+
     private var audioRow: some View {
         let mutedBinding = audioMutedBinding
         let isMuted = mutedBinding.wrappedValue
         return SettingRow(
             icon: isMuted ? "speaker.slash" : "speaker.wave.2",
             iconColor: isMuted ? .secondary : .blue,
-            title: "Audio",
-            subtitle: isMuted
-                ? LocalizedStringKey("Muted (default)")
-                : LocalizedStringKey("Routed through system output")
+            title: "Audio"
         ) {
             HStack(spacing: 8) {
-                if wallpaperType == .video {
-                    Slider(value: videoVolumeBinding, in: 0...1)
-                        .controlSize(.small)
-                        .frame(width: 82)
-                        .accessibilityLabel(Text("Audio"))
-                        .accessibilityValue(Text(verbatim: "\(videoVolumePercent)%"))
-
-                    Text(verbatim: "\(videoVolumePercent)%")
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 36, alignment: .trailing)
-                }
-
-                Toggle("", isOn: Binding(
-                    get: { !mutedBinding.wrappedValue },
-                    set: { mutedBinding.wrappedValue = !$0 }
-                ))
-                    .labelsHidden()
-                    .toggleStyle(.switch)
+                Slider(value: unifiedAudioBinding, in: 0...1)
+                    .controlSize(.small)
+                    .frame(width: 96)
                     .accessibilityLabel(Text("Audio"))
-                    .accessibilityHint(Text("When off, audio tracks are disabled entirely so macOS does not engage the audio engine"))
+                    .accessibilityValue(Text(verbatim: isMuted ? "Muted" : "\(videoVolumePercent)%"))
+
+                Text(verbatim: isMuted ? "Muted" : "\(videoVolumePercent)%")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 44, alignment: .trailing)
+                    .monospacedDigit()
+
+                Image(systemName: "info.circle")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .help(Text("Audio is muted by default. The slider's first ~10% is a mute dead zone — drag past it to engage audio so a tiny accidental move can't leak a quiet 1-2% level."))
+                    .accessibilityLabel(Text("Audio control help"))
+                    .accessibilityHint(Text("The slider has a small mute dead zone at the low end to prevent accidental low-volume audio leaks"))
             }
         }
     }
@@ -233,11 +232,39 @@ struct CommonPlaybackInspector: View {
         )
     }
 
-    private var videoVolumeBinding: Binding<Double> {
+    /// Single binding driving the audio slider. Slider position [0, 1] maps to:
+    ///   - [0, deadZone)  → muted (volume 0 displayed)
+    ///   - [deadZone, 1]  → unmuted; internal volume = (pos - deadZone) / (1 - deadZone)
+    /// For HTML wallpapers there is no granular volume, so the slider only
+    /// toggles `HTMLConfig.muteAudio` — position past the dead zone means
+    /// "unmuted at the WebView's native level".
+    private var unifiedAudioBinding: Binding<Double> {
         Binding(
-            get: { videoVolume },
-            set: { newValue in
-                let clampedValue = Self.clampedVolume(newValue)
+            get: {
+                if audioMutedBinding.wrappedValue { return 0 }
+                if htmlConfig != nil { return 1.0 }
+                let deadZone = Self.audioDeadZone
+                return deadZone + Self.clampedVolume(videoVolume) * (1 - deadZone)
+            },
+            set: { sliderValue in
+                let shouldMute = sliderValue < Self.audioDeadZone
+                let mutedBinding = audioMutedBinding
+
+                if shouldMute {
+                    if !mutedBinding.wrappedValue {
+                        mutedBinding.wrappedValue = true
+                    }
+                    return
+                }
+
+                // Coming out of mute (or moving the slider further up)
+                if mutedBinding.wrappedValue {
+                    mutedBinding.wrappedValue = false
+                }
+                guard htmlConfig == nil else { return } // HTML has no volume knob
+
+                let normalized = (sliderValue - Self.audioDeadZone) / (1 - Self.audioDeadZone)
+                let clampedValue = Self.clampedVolume(normalized)
                 guard abs(videoVolume - clampedValue) > 0.001 else { return }
                 videoVolume = clampedValue
                 screenManager.updateVideoVolume(clampedValue, for: screen)
