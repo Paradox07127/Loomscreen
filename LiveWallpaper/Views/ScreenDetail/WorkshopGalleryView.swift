@@ -186,9 +186,11 @@ struct WorkshopGalleryView: View {
                             Button {
                                 Task { await refreshScan() }
                             } label: {
-                                Label("Rescan", systemImage: "arrow.clockwise")
+                                Image(systemName: "arrow.clockwise")
                             }
                             .buttonStyle(WorkshopToolbarButtonStyle())
+                            .help(Text("Rescan — re-scan the workshop folder for new projects"))
+                            .accessibilityLabel(Text("Rescan workshop"))
                             .accessibilityHint(Text("Re-scan the workshop folder for new projects"))
                             .disabled(isBusy)
 
@@ -410,10 +412,12 @@ struct WorkshopGalleryView: View {
                 Button {
                     selectedUnsupportedOrigin = nil
                 } label: {
-                    Label("Back to library", systemImage: "chevron.left")
+                    Image(systemName: "chevron.left")
                 }
                 .buttonStyle(.glass)
                 .controlSize(.regular)
+                .help(Text("Back to library"))
+                .accessibilityLabel(Text("Back to library"))
                 Spacer()
             }
 
