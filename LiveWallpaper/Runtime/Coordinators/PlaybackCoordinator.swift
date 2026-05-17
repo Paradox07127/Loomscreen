@@ -529,7 +529,11 @@ final class PlaybackCoordinator {
         syncVideoAudioLeadership()
         applyVideoSpanLayout()
         applyStartupPlaybackPolicy(to: player, for: liveScreen)
-        Logger.info("Video player setup complete for screen \(screen.id)", category: .screenManager)
+        // "Initialized" rather than "setup complete" — the async loadingTask
+        // inside the player is still running at this point; actual playback
+        // readiness comes through the player's own "Player is ready to play"
+        // log later in the same console session.
+        Logger.info("Video player initialized for screen \(screen.id) — async asset load in progress", category: .screenManager)
         notifyWallpaperSessionChanged()
     }
 

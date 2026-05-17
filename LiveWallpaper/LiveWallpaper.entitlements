@@ -10,6 +10,19 @@
 	<false/>
 	<key>com.apple.security.device.power</key>
 	<true/>
+	<!--
+	    macOS 13+ AVFoundation tries to connect to `com.apple.audioanalyticsd`
+	    on every AVPlayer init to log playback codec/format usage statistics.
+	    A sandboxed app without this mach-lookup exception trips a runtime
+	    PRECONDITION FAILURE (visible in Console) — playback continues fine,
+	    but it spams the log on every video swap. Whitelisting this single
+	    system service costs no privacy (it ships nothing user-identifying)
+	    and silences the noise.
+	-->
+	<key>com.apple.security.exception.mach-lookup.global-name</key>
+	<array>
+		<string>com.apple.audioanalyticsd</string>
+	</array>
 	<key>com.apple.security.files.bookmarks.app-scope</key>
 	<true/>
 	<key>com.apple.security.files.user-selected.read-only</key>

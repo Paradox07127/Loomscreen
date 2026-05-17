@@ -63,6 +63,10 @@ final class WallpaperVideoPlayer {
     private var cleanupTasks = Set<AnyCancellable>()
     private var loadingTask: Task<Void, Never>?
     private var frameRateLimitTask: Task<Void, Never>?
+    /// Retained for the lifetime of the player when in-memory caching is
+    /// engaged. `AVAssetResourceLoader.setDelegate(_:queue:)` only keeps a
+    /// weak reference, so we have to own it here.
+    private var inMemoryAssetLoader: InMemoryVideoAssetLoader?
     /// Mirrored onto looper items and future template clones.
     private var currentVideoComposition: AVVideoComposition?
     private var currentItemSubscription: AnyCancellable?
@@ -155,11 +159,73 @@ final class WallpaperVideoPlayer {
 
                 try Task.checkCancellation()
 
+                // Duration drives how aggressively we ask AVPlayer to pre-buffer.
+                // It's also the gate for in-memory caching (short clips only).
+                let cmDuration = try? await asset.load(.duration)
+                let durationSeconds = Self.usableDuration(from: cmDuration)
+                let bufferDuration = Self.bufferDuration(forDuration: durationSeconds)
+
+                // In-memory cache decision: tested `preferredForwardBufferDuration`
+                // against fs_usage on 4K 60fps and AVFoundation ignored the hint —
+                // it kept reading ~4 MB/s straight off disk forever. So for clips
+                // small enough to fit comfortably in RAM, swap to a custom-scheme
+                // asset backed by `InMemoryVideoAssetLoader`. That hard-guarantees
+                // 0 physical reads after the initial load.
+                let fileSize = Self.fileSize(of: url)
+                let memoryCached = Self.shouldUseInMemoryCache(
+                    fileSize: fileSize,
+                    duration: durationSeconds
+                )
+
+                let activeAsset: AVURLAsset
+                let loader: InMemoryVideoAssetLoader?
+                if memoryCached {
+                    do {
+                        let result = try InMemoryVideoAssetLoader.load(from: url)
+                        // Tight asset options: tell AVFoundation up front that
+                        // this is a self-contained local asset — no remote
+                        // references to follow, no HLS to probe, no AirPlay
+                        // route negotiation. Otherwise CoreMedia spams
+                        // `<<<< VRP >>>>` / `<<<< FigFilePlayer >>>>` errors
+                        // every time it gives up on those probes against
+                        // our custom `lwmem://` scheme.
+                        let memOptions: [String: Any] = [
+                            AVURLAssetReferenceRestrictionsKey: AVAssetReferenceRestrictions.forbidAll.rawValue,
+                            AVURLAssetAllowsCellularAccessKey: false,
+                            AVURLAssetAllowsExpensiveNetworkAccessKey: false,
+                            AVURLAssetAllowsConstrainedNetworkAccessKey: false
+                        ]
+                        let memAsset = AVURLAsset(url: result.customURL, options: memOptions)
+                        memAsset.resourceLoader.setDelegate(result.loader, queue: .main)
+                        activeAsset = memAsset
+                        loader = result.loader
+                        Logger.notice(
+                            "Loaded \(fileSize / (1024 * 1024)) MB video into RAM — 0 physical reads expected after warmup",
+                            category: .videoPlayer
+                        )
+                    } catch {
+                        Logger.warning(
+                            "In-memory load failed (\(error.localizedDescription)) — falling back to streaming",
+                            category: .videoPlayer
+                        )
+                        activeAsset = asset
+                        loader = nil
+                    }
+                } else {
+                    activeAsset = asset
+                    loader = nil
+                    Logger.debug(
+                        "Streaming from disk: \(fileSize / (1024 * 1024)) MB, \(String(format: "%.1f", durationSeconds))s — outside in-memory thresholds",
+                        category: .videoPlayer
+                    )
+                }
+
                 timer.checkpoint("Properties loaded")
 
                 await MainActor.run { [weak self] in
                     guard let self else { return }
-                    self.configurePlaybackComponents(with: asset)
+                    self.inMemoryAssetLoader = loader
+                    self.configurePlaybackComponents(with: activeAsset, bufferDuration: bufferDuration)
                     timer.checkpoint("Playback configured")
                 }
 
@@ -186,11 +252,73 @@ final class WallpaperVideoPlayer {
         }
     }
     
-    private func configurePlaybackComponents(with asset: AVURLAsset) {
+    /// Upper bound on `preferredForwardBufferDuration`. Above this we fall
+    /// back to the default 5s buffer rather than asking AVFoundation to keep
+    /// the whole file in RAM — a 5-minute 4K clip would otherwise pin ~2 GB
+    /// of buffer per active screen.
+    private static let fullBufferCapSeconds: TimeInterval = 60
+
+    /// Duration cap for in-memory caching. Independent of the user-facing
+    /// size slider: a low-bitrate 5-minute clip can squeak under the size
+    /// cap but isn't what "short looped wallpaper" was designed for, so
+    /// keep this implicit and not user-tweakable.
+    private static let inMemoryAssetMaxDuration: TimeInterval = 90
+
+    private static func fileSize(of url: URL) -> Int {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path(percentEncoded: false)),
+              let size = attrs[.size] as? NSNumber else {
+            return 0
+        }
+        return size.intValue
+    }
+
+    /// Per-screen cache budget driven by `GlobalSettings.videoCacheMaxBytesPerScreen`.
+    /// Pulled at load time rather than baked statically so user setting
+    /// changes pick up on the next wallpaper load without an app restart.
+    private static func shouldUseInMemoryCache(fileSize: Int, duration: TimeInterval) -> Bool {
+        guard fileSize > 0 else { return false }
+        let budget = SettingsManager.shared.loadGlobalSettings().videoCacheMaxBytesPerScreen
+        guard budget > 0 else { return false }       // user dragged slider to 0 = explicit "streaming only"
+        guard fileSize <= budget else { return false }
+        // Treat indefinite / unknown duration as "don't cache" — we'd rather
+        // stream a live source than risk pinning gigabytes of RAM.
+        guard duration > 0 else { return false }
+        guard duration <= inMemoryAssetMaxDuration else { return false }
+        return true
+    }
+
+    /// Extra headroom appended to the video duration when full-buffer mode
+    /// is engaged. Keeps the loop wrap-around from triggering a fresh
+    /// disk fetch when the player is reading slightly past `duration`
+    /// (`AVPlayerLooper` cross-fades a few frames between iterations).
+    private static let bufferSafetyMargin: TimeInterval = 2
+
+    private static func usableDuration(from cmTime: CMTime?) -> TimeInterval {
+        guard let cmTime, cmTime.isValid, !cmTime.isIndefinite else { return 0 }
+        let seconds = cmTime.seconds
+        guard seconds.isFinite, seconds > 0 else { return 0 }
+        return seconds
+    }
+
+    private static func bufferDuration(forDuration durationSeconds: TimeInterval) -> TimeInterval {
+        // Unknown / indefinite (live or unscannable) → keep the 5s default.
+        guard durationSeconds > 0 else { return 5 }
+        // Clip is short enough to keep entirely in RAM → buffer the whole
+        // thing + a small margin so loop wrap-around doesn't re-fetch.
+        if durationSeconds <= fullBufferCapSeconds {
+            return durationSeconds + bufferSafetyMargin
+        }
+        // Long clip → don't try to pin gigabytes of buffer; let AVPlayer
+        // use its own short forward-buffer policy.
+        return 5
+    }
+
+    private func configurePlaybackComponents(with asset: AVURLAsset, bufferDuration: TimeInterval) {
         let playerItem = AVPlayerItem(asset: asset)
 
-        playerItem.preferredForwardBufferDuration = 5.0
+        playerItem.preferredForwardBufferDuration = bufferDuration
         playerItem.canUseNetworkResourcesForLiveStreamingWhilePaused = false
+        Logger.debug("Forward buffer hint: \(String(format: "%.1f", bufferDuration))s", category: .videoPlayer)
 
         applyAudioPolicy(to: playerItem)
 
@@ -723,6 +851,20 @@ final class WallpaperVideoPlayer {
         currentItemSubscription?.cancel()
         currentItemSubscription = nil
         currentVideoComposition = nil
+
+        // Drop the in-memory file payload too. Without this the Data sticks
+        // around (hundreds of MB for 4K) until the next wallpaper happens to
+        // re-create the player; nil-ing here releases it as soon as the
+        // current wallpaper is cleaned up.
+        //
+        // Log explicitly so a video swap that "doesn't release RAM" can be
+        // verified in console — if cleanup fires but Activity Monitor still
+        // grows, the leak is somewhere downstream (AVFoundation internal
+        // cache, kernel buffer cache, etc.) rather than in our retain graph.
+        if inMemoryAssetLoader != nil {
+            Logger.notice("Releasing in-memory video cache for \(videoURL?.lastPathComponent ?? "<unknown>")", category: .videoPlayer)
+        }
+        inMemoryAssetLoader = nil
 
         cleanupTasks.removeAll()
 

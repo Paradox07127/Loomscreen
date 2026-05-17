@@ -15,6 +15,11 @@ struct GeneralSettingsView: View {
     @State private var pauseOnFullScreen: Bool
     @State private var showInDock: Bool
     @State private var menuBarDensity: MenuBarDensity
+    /// Slider value held in MB for UI ergonomics — converted to bytes when
+    /// persisted to `GlobalSettings.videoCacheMaxBytesPerScreen`. `Double`
+    /// because SwiftUI's `Slider` is a `Double` ramp; the step ensures it
+    /// always lands on a `% 32 == 0` MB boundary so the label reads cleanly.
+    @State private var videoCacheBudgetMB: Double
 
     @State private var pendingDestructive: PendingDestructive?
     @State private var showingValidationResults = false
@@ -45,6 +50,7 @@ struct GeneralSettingsView: View {
         _pauseOnFullScreen = State(initialValue: settings.pauseOnFullScreen)
         _showInDock = State(initialValue: settings.showInDock)
         _menuBarDensity = State(initialValue: settings.menuBarDensity)
+        _videoCacheBudgetMB = State(initialValue: Double(settings.videoCacheMaxBytesPerScreen) / Double(1024 * 1024))
     }
 
     var body: some View {
@@ -373,6 +379,8 @@ struct GeneralSettingsView: View {
                 Text("Behavior")
             }
 
+            performanceSection
+
             powerSavingSection
 
             batteryThresholdSection
@@ -386,6 +394,93 @@ struct GeneralSettingsView: View {
     }
 
     // MARK: - General Sections
+
+    /// Per-screen RAM budget for the in-memory video cache. Driving the
+    /// budget from a slider rather than a 3-mode picker lets each user dial
+    /// in their own RAM-vs-disk-reads trade-off instead of taking whichever
+    /// preset we picked.
+    ///
+    /// 0 = streaming only (no caching). The "total" line under the slider
+    /// makes the multi-screen multiplier explicit so users see the full
+    /// memory implication before letting go of the thumb.
+    @ViewBuilder
+    private var performanceSection: some View {
+        Section {
+            SettingRow(
+                icon: "memorychip",
+                iconColor: .pink,
+                title: "Video memory cache",
+                subtitle: cacheSubtitleKey
+            ) {
+                EmptyView()
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(videoCacheValueLabel)
+                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Text(videoCacheTotalLabel)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Slider(
+                    value: Binding(
+                        get: { videoCacheBudgetMB },
+                        set: { newValue in
+                            // Snap to 32 MB step so the display label stays clean
+                            // (Slider's continuous Double would otherwise produce
+                            // ugly fractional values).
+                            let snapped = (newValue / 32).rounded() * 32
+                            videoCacheBudgetMB = snapped
+                            updateGlobalSettings()
+                        }
+                    ),
+                    in: 0...Double(GlobalSettings.maxVideoCacheBytes / (1024 * 1024)),
+                    step: 32
+                ) {
+                    Text("Video memory cache")
+                } minimumValueLabel: {
+                    Text("0")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } maximumValueLabel: {
+                    Text("1 GB")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityLabel(Text("Video memory cache per screen"))
+                .accessibilityValue(Text(videoCacheValueLabel))
+            }
+            .padding(.vertical, 4)
+        } header: {
+            Text("Performance")
+        }
+    }
+
+    private var videoCacheValueLabel: String {
+        if videoCacheBudgetMB <= 0 {
+            return "Streaming only"
+        }
+        return "\(Int(videoCacheBudgetMB)) MB / screen"
+    }
+
+    private var videoCacheTotalLabel: String {
+        let screenCount = max(screenManager.screens.count, 1)
+        if videoCacheBudgetMB <= 0 {
+            return "\(screenCount) screen\(screenCount == 1 ? "" : "s") — 0 MB cached"
+        }
+        let totalMB = Int(videoCacheBudgetMB) * screenCount
+        return "\(screenCount) screen\(screenCount == 1 ? "" : "s") — up to \(totalMB) MB total"
+    }
+
+    private var cacheSubtitleKey: LocalizedStringKey {
+        // Stable user-facing copy — kept as a constant so the SettingRow
+        // subtitle binding doesn't churn as the slider moves.
+        "Higher = fewer disk reads, more RAM. Lower = less RAM, video re-reads disk on every loop."
+    }
 
     @ViewBuilder
     private var powerSavingSection: some View {
@@ -650,6 +745,7 @@ struct GeneralSettingsView: View {
         settings.pauseOnFullScreen = pauseOnFullScreen
         settings.showInDock = showInDock
         settings.menuBarDensity = menuBarDensity
+        settings.videoCacheMaxBytesPerScreen = Int(videoCacheBudgetMB) * 1024 * 1024
         SettingsManager.shared.saveGlobalSettings(settings)
         screenManager.handleGlobalSettingsChanged()
         if dockChanged {
