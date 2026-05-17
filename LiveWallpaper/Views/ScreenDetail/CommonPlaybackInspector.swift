@@ -115,7 +115,7 @@ struct CommonPlaybackInspector: View {
                 Image(systemName: "info.circle")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-                    .help(Text("Audio is muted by default. The slider's first ~10% is a mute dead zone — drag past it to engage audio so a tiny accidental move can't leak a quiet 1-2% level."))
+                    .help(Text("Audio is muted by default. The first part of the slider is a mute dead zone — drag past it to engage audio so a tiny accidental move can't leak a quiet level."))
                     .accessibilityLabel(Text("Audio control help"))
                     .accessibilityHint(Text("The slider has a small mute dead zone at the low end to prevent accidental low-volume audio leaks"))
             }

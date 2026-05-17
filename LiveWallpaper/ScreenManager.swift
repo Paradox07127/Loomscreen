@@ -571,10 +571,26 @@ final class ScreenManager {
     }
 
     func resetAllWallpaperSessions() {
-        for screen in screens {
+        let snapshot = screens
+        for screen in snapshot {
             releaseRuntimeSession(screen)
         }
         configurationStore.clearCache()
+        // Broadcast per-screen so ScreenDetailView re-reads its now-empty
+        // configuration and drops the @State copies it held for the
+        // previous wallpaper (preview source, mode picker, effect config,
+        // playlist / schedule rows, etc.). Without this the inspector
+        // continues to show the pre-reset video info even after the
+        // runtime session is gone.
+        Task { @MainActor in
+            for screen in snapshot {
+                NotificationCenter.default.post(
+                    name: .wallpaperConfigurationDidChange,
+                    object: nil,
+                    userInfo: ["screenID": screen.id]
+                )
+            }
+        }
         notifyWallpaperSessionChanged()
     }
     
