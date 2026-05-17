@@ -26,6 +26,8 @@ public struct AdaptiveGlassContainer<Content: View>: View {
                 content
             }
         } else {
+            // `spacing` is a Liquid Glass morph distance, not a stack spacing —
+            // it has no analogue on macOS 14/15, so pass content through.
             content
         }
     }
@@ -34,7 +36,7 @@ public struct AdaptiveGlassContainer<Content: View>: View {
 public extension View {
     func adaptiveGlassSurface(
         _ shape: AdaptiveGlassShape = .roundedRectangle(12),
-        tint: Color = .secondary,
+        tint: Color? = nil,
         interactive: Bool = false
     ) -> some View {
         modifier(AdaptiveGlassSurfaceModifier(shape: shape, tint: tint, interactive: interactive))
@@ -47,18 +49,26 @@ public extension View {
 
 private struct AdaptiveGlassSurfaceModifier: ViewModifier {
     let shape: AdaptiveGlassShape
-    let tint: Color
+    let tint: Color?
     let interactive: Bool
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    private var increaseContrast: Bool { colorSchemeContrast == .increased }
 
     private var tintOpacity: Double { colorScheme == .dark ? 0.20 : 0.11 }
     private var fallbackTintOpacity: Double { colorScheme == .dark ? 0.22 : 0.14 }
-    private var fallbackStrokeOpacity: Double { colorScheme == .dark ? 0.32 : 0.22 }
-    private var neutralStrokeOpacity: Double { colorScheme == .dark ? 0.18 : 0.13 }
+    private var baseStrokeOpacity: Double {
+        let base = colorScheme == .dark ? 0.32 : 0.22
+        return increaseContrast ? min(base + 0.20, 0.6) : base
+    }
+    private var neutralStrokeOpacity: Double {
+        let base = colorScheme == .dark ? 0.18 : 0.13
+        return increaseContrast ? min(base + 0.20, 0.5) : base
+    }
     private var shadowOpacity: Double { colorScheme == .dark ? 0.22 : 0.08 }
-
-    private var hasSemanticTint: Bool { tint != .secondary }
 
     @ViewBuilder
     func body(content: Content) -> some View {
@@ -72,25 +82,16 @@ private struct AdaptiveGlassSurfaceModifier: ViewModifier {
     @available(macOS 26.0, *)
     @ViewBuilder
     private func nativeGlass(_ content: Content) -> some View {
+        let baseGlass: Glass = tint.map { .regular.tint($0.opacity(tintOpacity)) } ?? .regular
+        let glass: Glass = interactive ? baseGlass.interactive() : baseGlass
+
         switch shape {
         case .circle:
-            if interactive {
-                content.glassEffect(.regular.tint(tint.opacity(tintOpacity)).interactive(), in: .circle)
-            } else {
-                content.glassEffect(.regular.tint(tint.opacity(tintOpacity)), in: .circle)
-            }
+            content.glassEffect(glass, in: .circle)
         case .capsule:
-            if interactive {
-                content.glassEffect(.regular.tint(tint.opacity(tintOpacity)).interactive(), in: .capsule)
-            } else {
-                content.glassEffect(.regular.tint(tint.opacity(tintOpacity)), in: .capsule)
-            }
+            content.glassEffect(glass, in: .capsule)
         case .roundedRectangle(let radius):
-            if interactive {
-                content.glassEffect(.regular.tint(tint.opacity(tintOpacity)).interactive(), in: .rect(cornerRadius: radius))
-            } else {
-                content.glassEffect(.regular.tint(tint.opacity(tintOpacity)), in: .rect(cornerRadius: radius))
-            }
+            content.glassEffect(glass, in: .rect(cornerRadius: radius))
         }
     }
 
@@ -107,21 +108,38 @@ private struct AdaptiveGlassSurfaceModifier: ViewModifier {
     }
 
     private func decorate<S: InsettableShape>(_ content: Content, shape: S) -> some View {
-        let strokeColor: Color = hasSemanticTint
-            ? tint.opacity(fallbackStrokeOpacity)
-            : Color.primary.opacity(neutralStrokeOpacity)
+        let strokeColor: Color = tint?.opacity(baseStrokeOpacity)
+            ?? Color.primary.opacity(neutralStrokeOpacity)
+        let strokeWidth: CGFloat = increaseContrast ? 1.0 : 0.6
 
         return content
             .background {
-                if hasSemanticTint {
-                    shape.fill(tint.opacity(fallbackTintOpacity))
+                // Back-to-front: tint underlay → translucent material on top so
+                // the material softens the tint into a wash. On Reduce
+                // Transparency, swap to a solid window-background fill so the
+                // surface is no longer translucent.
+                ZStack {
+                    if reduceTransparency {
+                        shape.fill(Color(nsColor: .windowBackgroundColor))
+                        if let tint {
+                            shape.fill(tint.opacity(fallbackTintOpacity))
+                        }
+                    } else {
+                        if let tint {
+                            shape.fill(tint.opacity(fallbackTintOpacity))
+                        }
+                        shape.fill(.regularMaterial)
+                    }
                 }
             }
-            .background(.regularMaterial, in: shape)
             .overlay {
-                shape.strokeBorder(strokeColor, lineWidth: 0.6)
+                shape.strokeBorder(strokeColor, lineWidth: strokeWidth)
             }
-            .shadow(color: Color.black.opacity(shadowOpacity), radius: 5, y: 1)
+            .shadow(
+                color: Color.black.opacity(reduceTransparency ? 0 : shadowOpacity),
+                radius: 5,
+                y: 1
+            )
     }
 }
 
