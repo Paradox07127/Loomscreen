@@ -9367,18 +9367,18 @@
         }
       }
     },
-    "Offsets the rendered page in CSS pixels.": {
+    "Offsets the rendered page horizontally (X) and vertically (Y) in CSS pixels.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Offsets the rendered page in CSS pixels."
+            "value": "Offsets the rendered page horizontally (X) and vertically (Y) in CSS pixels."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "以 CSS 像素偏移渲染的页面。"
+            "value": "以 CSS 像素为单位水平 (X) 与垂直 (Y) 偏移渲染的页面。"
           }
         }
       }
@@ -12879,18 +12879,18 @@
         }
       }
     },
-    "Rotates around the center.": {
+    "Rotates the rendered page around its center.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Rotates around the center."
+            "value": "Rotates the rendered page around its center."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "围绕中心旋转。"
+            "value": "围绕页面中心旋转。"
           }
         }
       }
@@ -15349,34 +15349,18 @@
         }
       }
     },
-    "The page reloads at the selected interval — useful for dashboards or feeds.": {
+    "Reloads the page at the chosen interval. Useful for dashboards or feeds; off keeps the page rendering continuously without reloads.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The page reloads at the selected interval — useful for dashboards or feeds."
+            "value": "Reloads the page at the chosen interval. Useful for dashboards or feeds; off keeps the page rendering continuously without reloads."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "页面按选定间隔重新加载——适用于仪表盘或信息流。"
-          }
-        }
-      }
-    },
-    "The page renders continuously; no reloads.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The page renders continuously; no reloads."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "页面持续渲染，不重新加载。"
+            "value": "按所选间隔重新加载页面。适用于仪表盘或信息流；关闭后页面持续渲染，不会重新加载。"
           }
         }
       }
@@ -15920,6 +15904,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "偏好设置"
+          }
+        }
+      }
+    },
+    "Transform": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transform"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "变换"
           }
         }
       }
