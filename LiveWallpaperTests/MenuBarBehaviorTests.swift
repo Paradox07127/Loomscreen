@@ -169,10 +169,6 @@ struct MenuBarBehaviorTests {
     }
 }
 
-
-
-
-
 /// Captures the number of times a notification fires. Synchronous observer
 /// keeps the body race-free under Swift 6; the lock guards the count so we
 /// can mark the type Sendable without main-actor isolation, which lets

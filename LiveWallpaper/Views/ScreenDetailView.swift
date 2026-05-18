@@ -553,7 +553,7 @@ struct ScreenDetailView: View {
                                     }
                                 }
                                 .groupBoxStyle(ContainerGroupBoxStyle())
-                                } // end videoEffects gate
+                                }
                             }
                         }
                     }
@@ -645,9 +645,6 @@ struct ScreenDetailView: View {
                             Image(systemName: "arrow.down.doc.fill")
                                 .symbolEffect(.bounce, options: .repeat(.continuous))
                         } else {
-                            // macOS 14: .bounce cannot repeat indefinitely.
-                            // Substitute .pulse so the affordance still draws
-                            // the eye while a drag is in progress.
                             Image(systemName: "arrow.down.doc.fill")
                                 .symbolEffect(.pulse, options: .continuouslyRepeating)
                         }
@@ -664,7 +661,6 @@ struct ScreenDetailView: View {
             }
             .padding(20)
             .transition(.opacity)
-            // Drop handling stays on the outer view.
             .allowsHitTesting(false)
         }
     }
@@ -795,10 +791,6 @@ struct ScreenDetailView: View {
             assignIfChanged(htmlConfig, to: .default) { htmlConfig = $0 }
             assignIfChanged(hasPreviewSource, to: screen.videoPlayer?.videoURL != nil) { hasPreviewSource = $0 }
             assignIfChanged(lastPreviewPosterBookmarkData, to: nil) { lastPreviewPosterBookmarkData = $0 }
-            // Config was cleared (e.g. Reset Defaults): make sure the
-            // poster / preview player cached on `previewController`
-            // doesn't keep showing the old video frame after the
-            // runtime session has already been torn down.
             previewController.cleanup()
             loadPreviewPosterIfNeeded()
         }
@@ -832,9 +824,7 @@ struct ScreenDetailView: View {
         handleSelectedFile(url: url)
     }
 
-    /// Routes the banner's "Re-pick" button to the picker matching the current
-    /// session type. Falls back to the video picker for non-pickable backends
-    /// (scene / shader sessions are switched via the type segmented control).
+    /// Routes the banner's "Re-pick" button to the picker matching the current session type.
     private func rePickRuntimeSource() {
         let activeType = screen.runtimeSession?.wallpaperType ?? selectedWallpaperType
         switch activeType {
@@ -1054,14 +1044,12 @@ struct ScreenDetailView: View {
         return true
     }
 
-    /// Video card opens the existing file picker. Cancellation returns the
-    /// user to the guide unchanged.
+    /// Video card opens the existing file picker.
     private func triggerVideoGuideAction() {
         showFilePicker()
     }
 
-    /// HTML / Shader / Scene cards flip the selected type so that type's
-    /// empty state takes over.
+    /// HTML / Shader / Scene cards flip the selected type so that type's empty state takes over.
     private func triggerHTMLGuideAction() {
         selectedWallpaperType = .html
     }

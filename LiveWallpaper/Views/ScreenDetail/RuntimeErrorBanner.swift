@@ -31,8 +31,6 @@ struct RuntimeErrorBanner: View {
                         .truncationMode(.middle)
                 }
             }
-            // Combine the title + truncated path for VoiceOver, but use the
-            // un-truncated path so screen readers get the full context.
             .accessibilityElement(children: .combine)
             .accessibilityLabel(Text(error.title))
             .accessibilityValue(Text(verbatim: error.accessibilityDetail))

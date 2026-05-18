@@ -101,21 +101,13 @@ public struct GlobalSettings: Codable, Sendable {
         showInDock = try c.decodeIfPresent(Bool.self, forKey: .showInDock) ?? false
         weatherLocation = (try? c.decodeIfPresent(WeatherLocationPreference.self, forKey: .weatherLocation)) ?? .default
         globalShortcuts = (try? c.decodeIfPresent([GlobalShortcutAction.RawAction: GlobalShortcutBinding?].self, forKey: .globalShortcuts)) ?? [:]
-        // Lossy decode: a malformed WPE history entry should not invalidate the
-        // entire settings blob. Falls back to empty array if any entry breaks.
         recentWPEImports = (try? c.decodeIfPresent([WPEHistoryEntry].self, forKey: .recentWPEImports)) ?? []
         menuBarDensity = (try? c.decodeIfPresent(MenuBarDensity.self, forKey: .menuBarDensity)) ?? .comfortable
-        // Clamp on decode so an old settings blob carrying a value outside
-        // the current slider range can't sneak in (e.g. 5 GB). Negative
-        // values fall back to default — anything bigger gets capped.
         let storedCache = (try? c.decodeIfPresent(Int.self, forKey: .videoCacheMaxBytesPerScreen)) ?? GlobalSettings.defaultVideoCacheBytes
         if storedCache < 0 {
             videoCacheMaxBytesPerScreen = GlobalSettings.defaultVideoCacheBytes
         } else {
             videoCacheMaxBytesPerScreen = min(storedCache, GlobalSettings.maxVideoCacheBytes)
         }
-        // Legacy `batteryResolutionCap` key is silently ignored on decode — superseded
-        // by the "pause on battery = static wallpaper" model; no frame-rate or resolution
-        // degradation is applied anymore.
     }
 }

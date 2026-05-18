@@ -82,11 +82,6 @@ int wpe_shader_glsl_to_spirv(
     vertex.setStrings(&vertSource, 1);
     fragment.setStrings(&fragment_glsl, 1);
 
-    // WPE shaders are OpenGL-flavoured: no explicit `layout(location=N)` or
-    // `layout(binding=N)` qualifiers. Configure glslang for the OpenGL
-    // client + SPIR-V target so the missing layout decorations don't fail
-    // parsing; SPIRV-Cross consumes the resulting OpenGL-flavoured SPIR-V
-    // and translates to MSL the same way.
     vertex.setEnvInput(glslang::EShSourceGlsl,   EShLangVertex,   glslang::EShClientOpenGL, 410);
     vertex.setEnvClient(glslang::EShClientOpenGL, glslang::EShTargetOpenGL_450);
     vertex.setEnvTarget(glslang::EShTargetSpv,    glslang::EShTargetSpv_1_0);
@@ -94,9 +89,6 @@ int wpe_shader_glsl_to_spirv(
     fragment.setEnvClient(glslang::EShClientOpenGL, glslang::EShTargetOpenGL_450);
     fragment.setEnvTarget(glslang::EShTargetSpv,   glslang::EShTargetSpv_1_0);
 
-    // Auto-assign locations/bindings — WPE shader source carries neither.
-    // Without these, glslang's SPIR-V target rejects `in vec2 v_TexCoord;`
-    // with "SPIR-V requires location for user input/output".
     vertex.setAutoMapLocations(true);
     vertex.setAutoMapBindings(true);
     fragment.setAutoMapLocations(true);
@@ -122,8 +114,6 @@ int wpe_shader_glsl_to_spirv(
         glslang::FinalizeProcess();
         return 3;
     }
-    // Run mapIO after link so the auto-map flags actually assign slots —
-    // GlslangToSpv reads the assignments from each intermediate.
     if (!program.mapIO()) {
         writeDiag(out_diag, std::string("glslang mapIO failed: ") + program.getInfoLog());
         glslang::FinalizeProcess();

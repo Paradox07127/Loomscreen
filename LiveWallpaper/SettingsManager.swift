@@ -95,14 +95,7 @@ final class SettingsManager {
         loadConfigurations().first { $0.screenID == screenID }
     }
 
-    /// Updates the in-memory cache synchronously so MainActor readers
-    /// (bindings, `getConfiguration`, etc.) observe the new value before
-    /// this function returns. Disk encode/fsync/rename is queued on the
-    /// persistence actor so the caller — typically a toggle/slider handler
-    /// — is not blocked by I/O. A failed disk write drops the cache *only*
-    /// when no newer write has since superseded it, so the next read still
-    /// reflects the most recently durable state without stomping on an
-    /// in-flight successor.
+    /// Updates the in-memory cache synchronously so MainActor readers (bindings, `getConfiguration`, etc.) observe the new value before this function returns.
     private func persistConfigurations(_ configs: [ScreenConfiguration]) {
         configurationWriteGeneration &+= 1
         let generation = configurationWriteGeneration
@@ -124,12 +117,7 @@ final class SettingsManager {
         }
     }
 
-    /// Awaits in-flight configuration writes. The persistence actor
-    /// guarantees that older submissions are dropped if a newer one has
-    /// already committed, so submitting a fresh write with the latest cache
-    /// and a higher generation drains the queue while leaving disk in the
-    /// most-recent UI state. Call at application termination or in test
-    /// teardown to enforce durability.
+    /// Awaits in-flight configuration writes.
     func flushPendingConfigurationWrites() async {
         configurationWriteGeneration &+= 1
         let generation = configurationWriteGeneration
@@ -148,7 +136,6 @@ final class SettingsManager {
     func saveGlobalSettings(_ settings: GlobalSettings) {
         let previousStartOnLogin = cachedGlobalSettings?.startOnLogin ?? loadGlobalSettings().startOnLogin
         do {
-            // Write to disk first; only commit the cache if it sticks.
             try globalSettingsStore.write(settings)
             cachedGlobalSettings = settings
             if previousStartOnLogin != settings.startOnLogin {
@@ -157,8 +144,6 @@ final class SettingsManager {
             Logger.settingsChanged(setting: "globalSettings", value: "Updated global settings")
         } catch {
             Logger.error("Failed to persist global settings: \(error.localizedDescription)", category: .settings)
-            // Force a re-read on next access so we return the last-good
-            // persisted version instead of the rejected update.
             cachedGlobalSettings = nil
         }
     }
@@ -197,9 +182,7 @@ final class SettingsManager {
 
     // MARK: - Workshop Library Root Bookmark (Phase 1.5 gallery)
 
-    /// Persists the security-scoped bookmark to the user-chosen Workshop
-    /// library root (e.g. `~/Documents/Live Wallpapers/431960/`). The bookmark
-    /// is created via `NSOpenPanel` once and reused on subsequent scans.
+    /// Persists the security-scoped bookmark to the user-chosen Workshop library root (e.g. `~/Documents/Live Wallpapers/431960/`).
     func saveWorkshopLibraryRootBookmark(_ bookmark: Data) {
         UserDefaults.standard.set(bookmark, forKey: Keys.workshopLibraryRootBookmark)
         NotificationCenter.default.post(name: .workshopLibraryRootBookmarkDidChange, object: nil)
@@ -216,10 +199,7 @@ final class SettingsManager {
 
     // MARK: - Wallpaper Engine Assets Root Bookmark
 
-    /// Persists the security-scoped bookmark to the Wallpaper Engine install
-    /// root. Scene renderers mount `<root>/assets` as a read-only fallback so
-    /// projects that reference shared engine framework files (e.g.
-    /// `materials/util/composelayer.json`) can resolve them.
+    /// Persists the security-scoped bookmark to the Wallpaper Engine install root.
     func saveWPEEngineAssetsBookmark(_ bookmark: Data) {
         UserDefaults.standard.set(bookmark, forKey: Keys.wpeEngineAssetsRootBookmark)
         NotificationCenter.default.post(name: .wpeEngineAssetsBookmarkDidChange, object: nil)
@@ -264,32 +244,17 @@ final class SettingsManager {
     }
 
     func cleanAllSettings(applyLoginSetting: Bool = true) {
-        // Seed caches with "loaded, empty" instead of nil. The async disk
-        // delete below races against any reader that fires between this
-        // function returning and the actor draining; if the cache were
-        // nil, a reader's `loadConfigurations()` would fall through to a
-        // disk read that still sees the pre-delete file and resurrect
-        // the configs into the cache. Holding `[]` and `defaults` short-
-        // circuits that read while preserving the "already loaded"
-        // contract used elsewhere.
         cachedGlobalSettings = GlobalSettings()
         cachedConfigurations = []
 
-        // Route screen-config deletion through the same persistence actor
-        // and generation counter as writes, so a pending async write from
-        // before this Reset cannot resurrect the file after it lands.
         configurationWriteGeneration &+= 1
         let generation = configurationWriteGeneration
         Task { [configurationPersistenceActor] in
             await configurationPersistenceActor.delete(generation: generation)
         }
-        // Global settings + bookmarks remain synchronous (low write frequency,
-        // no main-thread responsiveness concern).
         globalSettingsStore.delete()
         wallpaperBookmarksStore.delete()
 
-        // Legacy UserDefaults keys (kept for rollback during the migration
-        // window). Clearing them here makes Reset truly idempotent.
         UserDefaults.standard.removeObject(forKey: Keys.screenConfigurations)
         UserDefaults.standard.removeObject(forKey: Keys.globalSettings)
         UserDefaults.standard.removeObject(forKey: Keys.aerialsDirectoryBookmark)
@@ -298,13 +263,6 @@ final class SettingsManager {
         UserDefaults.standard.removeObject(forKey: Keys.workshopLibraryRootBookmark)
         UserDefaults.standard.removeObject(forKey: Keys.wpeEngineAssetsRootBookmark)
         UserDefaults.standard.removeObject(forKey: Keys.appLanguage)
-        // `configMigrationVersion` is intentionally preserved — it tracks
-        // "which migration steps have already been applied to this install",
-        // not "is there data". Resetting it would re-run the seed pass on
-        // the next launch; with the legacy keys already cleared above
-        // that's a no-op today, but keeping the counter prevents any
-        // future migration step from re-firing against partially-cleared
-        // state.
 
         BookmarkStore.shared.resetAfterSettingsCleared()
         TrustedHostStore.shared.resetAfterSettingsCleared()
@@ -315,15 +273,7 @@ final class SettingsManager {
 
     // MARK: - Legacy Migration
 
-    /// Seeds the new file-backed stores from any pre-existing `UserDefaults`
-    /// blobs. Idempotent — gated on `Keys.configMigrationVersion` but only
-    /// when every required seed succeeded. A transient disk-full / TCC /
-    /// read-only home will leave the version counter at zero so the next
-    /// launch retries; otherwise we'd permanently strand the user's data.
-    ///
-    /// The legacy UserDefaults entries are intentionally NOT removed here
-    /// so users can roll back to the previous app version once if needed.
-    /// The next release will drop them.
+    /// Seeds the new file-backed stores from any pre-existing `UserDefaults` blobs.
     private func migrateLegacyUserDefaultsIfNeeded() {
         let storedVersion = UserDefaults.standard.integer(forKey: Keys.configMigrationVersion)
         guard storedVersion < Self.currentMigrationVersion else { return }
@@ -360,16 +310,12 @@ final class SettingsManager {
         )
     }
 
-    /// Returns `true` if the seed step succeeded — either the legacy blob
-    /// was absent (nothing to do) or it was successfully written to the
-    /// file store. Returns `false` only on an actual write/encode failure
-    /// so the caller can defer bumping the migration version.
+    /// Returns `true` if the seed step succeeded — either the legacy blob was absent (nothing to do) or it was successfully written to the file store.
     private func seedStoreFromUserDefaults<V: Codable>(
         store: AtomicFileStore<V>,
         legacyKey: String,
         label: String
     ) -> Bool {
-        // Never overwrite an existing file payload — the file always wins.
         guard !store.hasPersistedValue else { return true }
         guard let data = UserDefaults.standard.data(forKey: legacyKey) else { return true }
         do {
@@ -406,9 +352,6 @@ final class SettingsManager {
         case .metalShader:
             return true
         case .scene(let descriptor):
-            // The cache resolver re-validates `cacheRelativePath` on resume,
-            // so here we only confirm the descriptor still has the parts
-            // needed to even attempt a cache lookup.
             return !descriptor.workshopID.isEmpty
                 && !descriptor.cacheRelativePath.isEmpty
                 && !descriptor.entryFile.isEmpty

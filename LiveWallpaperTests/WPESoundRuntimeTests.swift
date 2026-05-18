@@ -88,7 +88,6 @@ struct WPESoundRuntimeTests {
         let attached = runtime.start(sounds: [])
         defer { runtime.stop() }
         #expect(attached == 0)
-        // Spectrum still readable; engine running with silent input.
         #expect(runtime.currentSpectrum.count == WPESoundRuntime.binCount)
     }
 }

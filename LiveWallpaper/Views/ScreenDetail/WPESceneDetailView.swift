@@ -38,17 +38,10 @@ struct WPESceneDetailView: View {
         .task(id: descriptor.workshopID) {
             await refreshState()
         }
-        // Re-evaluate when ReduceMotion flips so a Settings change immediately
-        // pauses the preview without waiting for a re-render.
         .onChange(of: reduceMotion) { _, _ in
             Task { @MainActor in await refreshState() }
         }
         .onReceive(Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()) { _ in
-            // Polling is bounded: only fires while we're still resolving
-            // initial state. Once we land in playing/paused/error the timer
-            // becomes a no-op (Timer.publish itself can't be cancelled
-            // reactively from inside .onReceive without keeping a Cancellable
-            // bag, which costs more than the early return).
             guard state == .idle || state.isLoading else { return }
             Task { @MainActor in
                 await refreshState()
@@ -61,11 +54,6 @@ struct WPESceneDetailView: View {
     @ViewBuilder
     private var previewCard: some View {
         ZStack {
-            // The snapshot preview never unmounts mid-lifecycle — paused
-            // state is communicated by an overlay on top of the existing
-            // image, not by replacing the host view. This avoids a Metal
-            // command-buffer thrash when the user toggles ReduceMotion /
-            // focus / throttle.
             switch state {
             case .idle:
                 fallbackBackground
@@ -88,9 +76,6 @@ struct WPESceneDetailView: View {
                     .overlay(errorOverlay(reason: fallbackReason))
             }
         }
-        // Use opacity-only transitions: `.scale` would animate the size of
-        // the NSViewRepresentable host (`WPEPreviewView`), which triggers
-        // an AppKit Auto-Layout cycle in the host window pass.
         .transition(.opacity)
         .animation(.easeInOut(duration: 0.2), value: stateKey)
         .frame(maxWidth: .infinity)
@@ -132,9 +117,7 @@ struct WPESceneDetailView: View {
         }
     }
 
-    /// Inline copy that avoids nesting a full `WPEFallbackCard` (with its
-    /// own glass background) inside this card. Mirrors the WPEFallbackCard
-    /// strings so users see consistent language across surfaces.
+    /// Inline copy that avoids nesting a full `WPEFallbackCard` (with its own glass background) inside this card.
     private func errorTitle(for reason: FallbackReason) -> Text {
         switch reason {
         case .unsupportedType:        return Text("Scene format not supported")
@@ -164,9 +147,6 @@ struct WPESceneDetailView: View {
         case .sceneResourceMissing:
             return Text("Image layers couldn't be located inside the cache.")
         case .missingDependency(let ids):
-            // Cap visible IDs so a composite scene with many deps doesn't
-            // explode the inline overlay; the full list is still rendered
-            // by `WPEFallbackCard` when the user navigates to the error.
             if ids.count <= 2 {
                 return Text("Subscribe to \(ids.joined(separator: ", ")) in Steam, then re-import.", comment: "Scene dependency recovery hint. The placeholder is one or two Workshop IDs.")
             }
@@ -206,9 +186,6 @@ struct WPESceneDetailView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 4)
-                // Discoverable affordance for the renderer diagnostics panel.
-                // Replaces the previous Option-click hidden gesture, which the
-                // gemini audit flagged as completely undiscoverable.
                 Button {
                     withAnimation(DesignTokens.motion(reduceMotion, .spring(response: 0.35, dampingFraction: 0.85))) {
                         showDiagnostics.toggle()
@@ -240,10 +217,6 @@ struct WPESceneDetailView: View {
 
     @ViewBuilder
     private var diagnosticsPanel: some View {
-        // Build the VoiceOver label up-front so the panel announces both
-        // the title AND the active diagnostic in one pass — the previous
-        // implementation overrode `accessibilityLabel` on the parent and
-        // hid the error text from screen readers entirely (gemini audit).
         let diagnosticText = session?.sceneRenderer?.loadDiagnostics?.errorDescription
             ?? "All declared layers decoded cleanly."
         #if DEBUG
@@ -353,11 +326,6 @@ struct WPESceneDetailView: View {
     }
 
     private var actions: some View {
-        // Apple HIG: destructive "Clear" sits leading; the constructive
-        // recovery action ("Retry") sits trailing and gets prominent
-        // styling so the recommended path is visually obvious. Without
-        // this swap, an Option-button-mash could land on the destructive
-        // button by accident.
         HStack(spacing: 12) {
             Button(role: .destructive) {
                 onClearWallpaper()
@@ -407,20 +375,11 @@ struct WPESceneDetailView: View {
             state = .loading(progress: session.loadProgress)
             return
         }
-        // Drive the runtime profile from the same env signals the state
-        // machine consults — this is the single point where ReduceMotion
-        // / throttle propagate down to the controller. `applyPerformanceProfile`
-        // is idempotent so re-issuing the current profile every poll is cheap.
         renderer.applyPerformanceProfile(reduceMotion ? .suspended : .quality)
         if reduceMotion || session.isThrottled {
             state = .paused(reason: reduceMotion ? .reduceMotion : .throttled)
             return
         }
-        // Metal backend has a CGImage readback once load completes. Surface
-        // it as `.playingSnapshot` so the view shows the actual rendered
-        // scene instead of the static preview-unavailable card; only fall
-        // back to `.previewUnavailable` if the snapshot pipeline somehow
-        // returned nil (offscreen-only fixtures).
         if let snapshot = renderer.previewSnapshot {
             state = .playingSnapshot(snapshot)
             return
@@ -439,9 +398,7 @@ struct WPESceneDetailView: View {
         }
     }
 
-    /// Maps the most-specific per-layer failure into the corresponding
-    /// FallbackReason. Phase 2.1 surfaces .tex container/format errors with
-    /// their precise codes so the user understands why a layer was skipped.
+    /// Maps the most-specific per-layer failure into the corresponding FallbackReason.
     static func fallbackReason(for diagnostic: SceneLoadDiagnostic) -> FallbackReason {
         switch diagnostic {
         case .texture(_, let error):
@@ -469,9 +426,6 @@ struct WPESceneDetailView: View {
     }
 
     private var stateKey: Int {
-        // Lightweight state-change fingerprint for animation triggers; the
-        // associated values (snapshot / fallback) compare poorly so we
-        // map down to ints.
         switch state {
         case .idle:            return 0
         case .loading:         return 1
@@ -487,11 +441,6 @@ struct WPESceneDetailView: View {
             return String(localized: "Idle", defaultValue: "Idle", comment: "Scene renderer state.")
         case .loading:
             return String(localized: "Loading", defaultValue: "Loading", comment: "Scene renderer state.")
-        // The Metal renderer pauses its displaylink after first paint and
-        // surfaces a CGImage readback as the inspector thumbnail. The live
-        // pixels keep flowing into the wallpaper window; this label calls
-        // out that the inspector card is the static preview, not a hung
-        // renderer.
         case .playingSnapshot:
             return String(localized: "Static Preview", defaultValue: "Static Preview", comment: "Scene renderer state.")
         case .paused:
@@ -616,10 +565,6 @@ private struct MetalSnapshotPreview: View {
     let image: NSImage
 
     var body: some View {
-        // Phase 2B Task 5 ships a one-shot static snapshot — no
-        // `.updatesFrequently` trait until the per-frame readback timer
-        // (Phase 2C) makes the image actually animate, otherwise VoiceOver
-        // would announce stale "updates" on a frozen frame.
         Image(nsImage: image)
             .resizable()
             .interpolation(.medium)

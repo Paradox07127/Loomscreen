@@ -42,14 +42,11 @@ struct FolderURLSchemeHandlerIsolationTests {
         let nonce = handler.currentSessionNonce ?? ""
         let request = URLRequest(url: URL(string: "livewallpaper://wallpaper/index.html?n=\(nonce)")!)
 
-        // Sanity: with active folder + matching nonce, validation succeeds.
         let live = FakeURLSchemeTask(request: request)
         handler.webView(WKWebView(), start: live)
-        // Stop right away to release the worker; we only care that no error fired.
         handler.webView(WKWebView(), stop: live)
         #expect(live.failedError == nil)
 
-        // Now flip to a remote source — folder must be unreachable.
         handler.folderURL = nil
         let stale = FakeURLSchemeTask(request: request)
         handler.webView(WKWebView(), start: stale)
@@ -110,7 +107,6 @@ struct FolderURLSchemeHandlerIsolationTests {
 
         handler.folderURL = folder
 
-        // Subresource — main document was an earlier same-scheme top-level URL.
         let mainDocURL = URL(string: "livewallpaper://wallpaper/index.html?n=\(handler.currentSessionNonce ?? "")")!
         var request = URLRequest(url: URL(string: "livewallpaper://wallpaper/app.js")!)
         request.mainDocumentURL = mainDocURL
@@ -118,7 +114,6 @@ struct FolderURLSchemeHandlerIsolationTests {
         let task = FakeURLSchemeTask(request: request)
         handler.webView(WKWebView(), start: task)
 
-        // Detached worker is async — wait until either succeeds or errors out.
         try await waitUntil(timeout: .seconds(2)) { task.didFinishCalled || task.failedError != nil }
         handler.webView(WKWebView(), stop: task)
 

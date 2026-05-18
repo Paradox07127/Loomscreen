@@ -51,10 +51,7 @@ public struct WallpaperBookmark: Identifiable, Codable, Equatable, Sendable {
         }
     }
 
-    /// Two bookmarks represent the same plan when applying them would
-    /// produce indistinguishable screen state. Identity / label / created-at
-    /// are excluded — they're metadata about the bookmark itself, not what
-    /// it does.
+    /// Two bookmarks represent the same plan when applying them would produce indistinguishable screen state.
     public func isEquivalentPlan(to other: WallpaperBookmark) -> Bool {
         content == other.content
             && playbackSettings == other.playbackSettings

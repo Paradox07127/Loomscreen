@@ -25,8 +25,6 @@ struct WPESceneScriptRuntimeTests {
         """#
         let document = try WPESceneDocumentParser.parse(data: Data(json.utf8))
         let text = try #require(document.textObjects.first)
-        // Initial render uses the static `value`; the script is
-        // captured for runtime tick.
         #expect(text.text == "00:00")
         #expect(text.textScript?.contains("update(value)") == true)
     }
@@ -41,7 +39,6 @@ struct WPESceneScriptRuntimeTests {
         let instance = try WPESceneScriptInstance(script: script, initialValue: "hello")
         let updated = instance.tickString()
         #expect(updated == "live: hello")
-        // Subsequent ticks see the evolved value.
         let next = instance.tickString()
         #expect(next == "live: live: hello")
     }
@@ -54,7 +51,6 @@ struct WPESceneScriptRuntimeTests {
         export function update(value) { counter += 1; return String(counter); }
         """
         let instance = try WPESceneScriptInstance(script: script, initialValue: "0")
-        // init() set counter to 100; first update() increments to 101.
         let first = instance.tickString()
         #expect(first == "101")
         let second = instance.tickString()
@@ -71,7 +67,6 @@ struct WPESceneScriptRuntimeTests {
 
     @Test("createScriptProperties chain doesn't crash")
     func createScriptPropertiesChain() throws {
-        // Real corpus shape for a clock scene's property declaration.
         let script = """
         export var scriptProperties = createScriptProperties()
             .addCheckbox({name: 'use12hFormat', label: '12h', value: false})
@@ -83,9 +78,6 @@ struct WPESceneScriptRuntimeTests {
         """
         let instance = try WPESceneScriptInstance(script: script, initialValue: "init")
         let result = instance.tickString()
-        // The chainable stub returns proxies, so `scriptProperties.sep`
-        // is undefined → string concat → "undefinedOK". Crucially the
-        // script doesn't crash.
         #expect(result.hasSuffix("OK"))
     }
 

@@ -129,8 +129,6 @@ final class WPECorpusPlaybackHarness {
 
         let projects: [WallpaperEngineLibraryScanner.DiscoveredProject]
         do {
-            // `alreadyImported` only flips a flag on each row; pass an empty
-            // set so the scan is a pure inventory of the library.
             projects = try await WallpaperEngineLibraryScanner()
                 .scan(rootBookmarkData: rootBookmarkData, alreadyImportedWorkshopIDs: [])
                 .filter { $0.type == .scene && $0.hasScenePackage }
@@ -141,9 +139,6 @@ final class WPECorpusPlaybackHarness {
             return
         }
 
-        // The library bookmark needs to stay scoped for the lifetime of the
-        // loop — every per-scene `ensureExtracted` re-reads the source pkg
-        // off the user's library.
         let libraryRoot: URL
         switch SecurityScopedBookmarkResolver.shared.resolve(
             rootBookmarkData,
@@ -197,8 +192,6 @@ final class WPECorpusPlaybackHarness {
                 )
             }
 
-            // Drain Metal + AppKit queues between scenes so the next renderer
-            // sees a clean slate.
             await Task.yield()
         }
 
@@ -236,9 +229,6 @@ final class WPECorpusPlaybackHarness {
             )
             preflightTier = preflight.tier
 
-            // Pass `origin: nil` — corpus testing doesn't need cross-workshop
-            // Steam-subscription resolution, and synthesising an origin would
-            // require a fresh security-scoped bookmark on every iteration.
             let dependencyMounts = WPEDependencyMountResolver().mounts(
                 dependencyWorkshopIDs: project.dependencyWorkshopIDs,
                 origin: nil
@@ -344,10 +334,6 @@ final class WPECorpusPlaybackHarness {
             frame: frame,
             device: device
         )
-        // Keep the window in the window server (so CAMetalLayer can produce
-        // drawables for the renderer's first-frame attempt) but invisible
-        // to the user — alphaValue 0 + wallpaper level + orderBack means
-        // the test sweep doesn't flash anything onto the desktop.
         let window = VideoWallpaperWindow(frame: frame)
         window.contentView = renderer.nsView
         window.alphaValue = 0
@@ -355,11 +341,7 @@ final class WPECorpusPlaybackHarness {
         return HeadlessSession(renderer: renderer, window: window)
     }
 
-    /// Re-derive the cache URL from the descriptor's `cacheRelativePath`,
-    /// matching the contract `AmbientWallpaperSessionBuilder` enforces. The
-    /// path was already produced by `ensureExtracted`, so any failure here
-    /// means the safety check would have rejected an in-process write too —
-    /// throw the same harness error so the entry is recorded as `.fail`.
+    /// Re-derive the cache URL from the descriptor's `cacheRelativePath`, matching the contract `AmbientWallpaperSessionBuilder` enforces.
     private func applicationSupportCacheURL(for descriptor: SceneDescriptor) -> URL {
         let support = (try? FileManager.default.url(
             for: .applicationSupportDirectory,
@@ -379,16 +361,7 @@ final class WPECorpusPlaybackHarness {
         headless.window.close()
     }
 
-    /// Races `renderer.load()` against a wall-clock timeout. Returns when the
-    /// first one resolves; the other is cancelled. A `TaskGroup` would force
-    /// the load closure to be `@Sendable` even though both the closure and
-    /// the renderer are `@MainActor`-isolated, so we drive the race manually
-    /// via a continuation.
-    ///
-    /// On timeout (or any error), we explicitly drain `loadTask.value` before
-    /// returning so the caller's `defer { tearDown(...) }` sees a quiescent
-    /// renderer — otherwise an in-flight `performLoad` could still be
-    /// touching textures and pipeline state after `cleanup()` runs.
+    /// Races `renderer.load()` against a wall-clock timeout.
     private func loadWithTimeout(renderer: WPESceneRenderer, seconds: Double) async throws {
         let nanoseconds = Self.timeoutNanoseconds(for: seconds)
         let state = TimeoutRaceState()
@@ -423,8 +396,6 @@ final class WPECorpusPlaybackHarness {
                 loadTask.cancel()
             }
         } catch {
-            // Wait for the cancelled load to actually exit before propagating
-            // — keeps the renderer in a stable state for tearDown.
             _ = await loadTask.result
             throw error
         }

@@ -61,12 +61,6 @@ final class WallpaperEngineImportService {
         folderURL: URL,
         sourceBookmark: Data
     ) async -> ImportResult {
-        // WPE distributes video wallpapers in two shapes (per
-        // help.wallpaperengine.io and linux-wallpaperengine docs):
-        //   1) packaged: `scene.pkg` archive containing the video file,
-        //   2) unpackaged: `<entryFile>` directly inside the project folder.
-        // Both are valid; rejecting unpackaged videos cuts off the majority
-        // of community video wallpapers.
         let pkgURL = folderURL.appendingPathComponent("scene.pkg")
         if fileManager.fileExists(atPath: pkgURL.path) {
             return await importPackagedVideo(project: project, pkgURL: pkgURL, sourceBookmark: sourceBookmark)
@@ -129,8 +123,6 @@ final class WallpaperEngineImportService {
             return .rejected(reason: "Cannot create video bookmark")
         }
 
-        // Source-folder backed: cacheRelativePath is nil; reconcile uses
-        // the source-folder bookmark's prefix-path match to keep the badge.
         let origin = makeOrigin(
             project: project,
             sourceBookmark: sourceBookmark,
@@ -159,8 +151,6 @@ final class WallpaperEngineImportService {
             return .rejected(reason: "Cannot create web folder bookmark")
         }
 
-        // Unpacked web wallpapers stay in the user's Steam folder. They are
-        // supported source-folder-backed imports, not unsupported nil-cache entries.
         let origin = makeOrigin(
             project: project,
             sourceBookmark: sourceBookmark,
@@ -212,9 +202,6 @@ final class WallpaperEngineImportService {
         folderURL: URL,
         sourceBookmark: Data
     ) async -> ImportResult {
-        // Windows plugins are a hard "won't run on macOS" condition — short
-        // circuit before extraction so the UI shows the permanent unsupported
-        // badge instead of a parse-failure copy.
         if project.requiresWindowsPlugin {
             return .unsupported(origin: makeOrigin(
                 project: project,
@@ -224,10 +211,6 @@ final class WallpaperEngineImportService {
             ))
         }
 
-        // Dependency gate: bail before touching `scene.pkg` when the project
-        // declares workshop IDs we cannot satisfy. Surfaces missing deps in
-        // the import alert (where the user is paying attention) rather than
-        // after the extraction churn.
         let missingDeps = await missingDependencies(
             declared: project.dependencyWorkshopIDs,
             sourceFolderURL: folderURL
@@ -282,10 +265,6 @@ final class WallpaperEngineImportService {
             return .rejected(reason: "Missing scene entry \(project.entryFile)")
         }
 
-        // Parse `scene.json` to classify capability tier. Failures here are
-        // user-actionable (file shipped malformed) so we reject rather than
-        // mark unsupported — the UI surfaces the parse error to help the
-        // user nudge the wallpaper author.
         let sceneData: Data
         do {
             sceneData = try Data(contentsOf: entryURL)
@@ -300,10 +279,6 @@ final class WallpaperEngineImportService {
             return .rejected(reason: describe(error))
         }
 
-        // Mirror the runtime's mount chain so the import gate sees the
-        // same resources the renderer will: bundled framework built-ins +
-        // dependency-mounted workshop addons + the optional user-granted
-        // WPE assets root (if any).
         let dependencyMounts = WPEDependencyMountResolver().mounts(
             dependencyWorkshopIDs: project.dependencyWorkshopIDs,
             origin: nil
@@ -385,14 +360,7 @@ final class WallpaperEngineImportService {
         )
     }
 
-    /// Returns the subset of `declared` workshop IDs whose extracted payload
-    /// is NOT currently available either in our cache OR as a sibling
-    /// `~/Documents/Live Wallpapers/<appid>/<wid>/` folder. Empty when the
-    /// project declares no dependencies. The sibling-folder check is what
-    /// makes Solution A actually work — Steam Workshop downloads land next
-    /// to the project the user is importing, not in our cache. Without this
-    /// the user would subscribe in Steam, re-import, and still see the
-    /// "missing dependency" message indefinitely.
+    /// Returns the subset of `declared` workshop IDs whose extracted payload is NOT currently available either in our cache OR as a sibling `~/Documents/Live Wallpapers/<appid>/<wid>/` folder.
     private func missingDependencies(declared: [String], sourceFolderURL: URL) async -> [String] {
         guard !declared.isEmpty else { return [] }
         let cached = await cache.listAvailableWorkshopIDs()
@@ -401,10 +369,7 @@ final class WallpaperEngineImportService {
         return declared.filter { !available.contains($0) }
     }
 
-    /// Inspects the parent of `sourceFolderURL` (the Steam Workshop content
-    /// directory) for sibling folders matching declared dependency IDs.
-    /// Each sibling must be a directory carrying a `project.json` to count
-    /// as installed — empty or partial folders are ignored.
+    /// Inspects the parent of `sourceFolderURL` (the Steam Workshop content directory) for sibling folders matching declared dependency IDs.
     private func subscribedWorkshopIDs(declared: [String], sourceFolderURL: URL) -> Set<String> {
         let workshopRoot = sourceFolderURL.deletingLastPathComponent()
         var hits: Set<String> = []
@@ -483,9 +448,6 @@ struct WPECachedContentResolver {
             return nil
         }
 
-        // Resolve symlinks before containment check — otherwise an
-        // attacker-controlled symlink at `Application Support/LiveWallpaper`
-        // could point at a sibling directory and still pass the prefix test.
         let safeSupportRoot = applicationSupportRootURL.standardizedFileURL.resolvingSymlinksInPath()
         let cacheURL = safeSupportRoot
             .appendingPathComponent(cacheRelativePath, isDirectory: true)
@@ -516,10 +478,6 @@ struct WPECachedContentResolver {
             do {
                 let data = try Data(contentsOf: entryURL)
                 let document = try WPESceneDocumentParser.parse(data: data)
-                // Match the runtime's mount chain (bundled built-ins +
-                // dependency mounts + optional engine assets root) so the
-                // re-classify on cached content lines up with what the
-                // renderer will actually be able to load.
                 let dependencyMounts = WPEDependencyMountResolver().mounts(
                     dependencyWorkshopIDs: origin.dependencyWorkshopIDs,
                     origin: origin
@@ -531,10 +489,6 @@ struct WPECachedContentResolver {
                     dependencyMounts: dependencyMounts,
                     engineAssetsRootURL: engineRoot
                 )
-                // Reconstruct a minimal `WallpaperEngineProject` from the
-                // persisted origin so preflight can read the same flags it
-                // does at first-import time. The `propertyCount` is
-                // irrelevant to preflight; we pass 0.
                 let synthesizedProject = WallpaperEngineProject(
                     workshopID: origin.workshopID,
                     title: origin.title,
@@ -573,11 +527,7 @@ struct WPECachedContentResolver {
     }
 }
 
-/// Enumerates regular-file entries under a scene cache root so
-/// `WPEScenePreflight` can probe for custom shader payloads (`.vert`,
-/// `.frag`) without having to walk the directory itself. Capped at
-/// `limit` files to keep large auxiliary asset folders from dominating the
-/// import critical path.
+/// Enumerates regular-file entries under a scene cache root so `WPEScenePreflight` can probe for custom shader payloads (`.vert`, `.frag`) without having to walk the directory itself.
 private func scenePackageEntryNames(
     in rootURL: URL,
     fileManager: FileManager,
@@ -604,8 +554,7 @@ private func scenePackageEntryNames(
     return entries
 }
 
-/// `WPEScenePreflight` emits an unordered `Set` so descriptor persistence
-/// matches the historical ordering convention (alphabetical by raw value).
+/// `WPEScenePreflight` emits an unordered `Set` so descriptor persistence matches the historical ordering convention (alphabetical by raw value).
 private func sortedPreflightFeatureFlags(_ flags: Set<WPESceneFeatureFlag>) -> [WPESceneFeatureFlag] {
     flags.sorted { $0.rawValue < $1.rawValue }
 }

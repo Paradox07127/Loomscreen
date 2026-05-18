@@ -27,11 +27,6 @@ struct WPECorpusFailurePatternsTests {
 
     @Test("Helper that samples g_Texture1 hits the helper-scope texture gap")
     func helperScopeTextureGap() throws {
-        // Mirrors workshop/2487531853/effects/lens_flare_sun:
-        // helper function above main() references g_Texture1 directly.
-        // Metal compile fails because the texture alias only exists
-        // inside `wpe_translated_fragment()`, not at file scope where
-        // helpers live.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -53,10 +48,6 @@ struct WPECorpusFailurePatternsTests {
         let opts = MTLCompileOptions()
         opts.languageVersion = .version3_0
 
-        // CURRENT: Metal rejects the MSL with "undeclared identifier g_Texture1"
-        // because helpers can't see the local texture alias.
-        // POST-SPIRV-Cross: this `#expect(throws:)` should be inverted to
-        // `_ = try device.makeLibrary(...)` (no throw).
         #expect(throws: (any Error).self) {
             _ = try device.makeLibrary(source: result.mslSource, options: opts)
         }
@@ -66,19 +57,8 @@ struct WPECorpusFailurePatternsTests {
 
     @Test("Scene-authored named FBO chain reads must resolve to prior writes")
     func sceneAuthoredFBOChain() {
-        // Mirrors Blue Archive workshop scenes (3461168300, 3554161528):
-        // the post-process layer writes to a named FBO `blur_start_2`,
-        // then a later pass binds it as an input. The executor's
-        // `frameState.latestNamedTextures` already tracks `_rt_*` engine
-        // aliases (PR #67), but scene-authored names like `blur_start_2`
-        // are not in the alias predicate AND the writing pass may fail
-        // to compile (its blur shader hits Phase 2 transpiler limits),
-        // leaving the read with no source.
-        //
-        // No direct transpiler reproduction — this is a pass-graph /
-        // executor concern. Documents the gap for Phase 2c.
         let knownSceneFBOName = "blur_start_2"
-        let documentedSceneCount = 2  // 3461168300, 3554161528
+        let documentedSceneCount = 2
         #expect(knownSceneFBOName.hasPrefix("blur_"))
         #expect(documentedSceneCount == 2)
     }
@@ -87,14 +67,6 @@ struct WPECorpusFailurePatternsTests {
 
     @Test("Uniforms in #if blocks reach helpers via aliases")
     func uniformsInConditionalBlocks() throws {
-        // Mirrors workshop/3082978660/effects/Simple_Audio_Bars: the
-        // shader declares `uniform float u_Radius;` (etc.) inside
-        // `#if SHAPE == ROUNDED` blocks. The transpiler walks
-        // line-by-line and SHOULD parse these declarations (the line
-        // pattern matches), but the corpus run shows them unresolved
-        // in helper functions. Root cause is the helper-scope problem
-        // again: even if u_Radius is in the uniform struct, the helper
-        // can't see the `auto u_Radius = u.vals[N].x;` alias.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -115,9 +87,6 @@ struct WPECorpusFailurePatternsTests {
         let opts = MTLCompileOptions()
         opts.languageVersion = .version3_0
 
-        // CURRENT: helper roundedRect references u_Radius, which is
-        // only aliased inside main(). Metal rejects.
-        // POST-SPIRV-Cross: should compile cleanly.
         #expect(throws: (any Error).self) {
             _ = try device.makeLibrary(source: result.mslSource, options: opts)
         }

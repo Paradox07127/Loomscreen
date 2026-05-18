@@ -10,7 +10,6 @@ struct WallpaperEngineCacheTests {
         defer { env.cleanup() }
 
         let firstURL = try await env.cache.ensureExtracted(workshopID: env.workshopID, sourcePkgURL: env.pkgURL)
-        // Drop a sentinel inside the cache; a hit must NOT delete it.
         let sentinel = firstURL.appendingPathComponent("hit-marker.txt")
         try Data("hit".utf8).write(to: sentinel)
 
@@ -61,9 +60,6 @@ struct WallpaperEngineCacheTests {
         let originalEntry = firstURL.appendingPathComponent("payload.bin")
         #expect(try Data(contentsOf: originalEntry) == Data([0x01, 0x02]))
 
-        // Use a SECOND pkg at a different path with a different entry layout —
-        // guarantees both `size` and `mtime` of the URL differ from what the
-        // manifest captured, regardless of FS mtime resolution.
         let secondPkgURL = env.pkgURL.deletingLastPathComponent().appendingPathComponent("scene-v2.pkg")
         let secondPkg = SyntheticPackage.makeData(entries: [
             .init(name: "fresh-payload.bin", bytes: Array(repeating: 0xAA, count: 64))
@@ -112,8 +108,6 @@ struct WallpaperEngineCacheTests {
         defer { env.cleanup() }
 
         let cacheURL = try await env.cache.ensureExtracted(workshopID: env.workshopID, sourcePkgURL: env.pkgURL)
-        // Delete every payload file but keep manifest.json so the cache appears
-        // populated by metadata only.
         let entries = try FileManager.default.contentsOfDirectory(atPath: cacheURL.path)
         for entry in entries where entry != "manifest.json" {
             try FileManager.default.removeItem(at: cacheURL.appendingPathComponent(entry))
@@ -149,7 +143,6 @@ struct WallpaperEngineCacheTests {
         try await env.cache.purge(workshopID: env.workshopID)
         #expect(!FileManager.default.fileExists(atPath: cacheURL.path))
 
-        // Calling purge again on a non-existent cache must not throw.
         try await env.cache.purge(workshopID: env.workshopID)
     }
 
@@ -158,7 +151,6 @@ struct WallpaperEngineCacheTests {
         let env = try TempCacheEnvironment.make(workshopID: "stats-a")
         defer { env.cleanup() }
 
-        // Create 2 distinct workshop caches via the same cache root.
         _ = try await env.cache.ensureExtracted(workshopID: "alpha", sourcePkgURL: env.pkgURL)
         _ = try await env.cache.ensureExtracted(workshopID: "beta", sourcePkgURL: env.pkgURL)
 
@@ -200,12 +192,10 @@ struct WallpaperEngineCacheTests {
         _ = try await env.cache.ensureExtracted(workshopID: "fresh", sourcePkgURL: env.pkgURL)
         _ = try await env.cache.ensureExtracted(workshopID: "stale", sourcePkgURL: env.pkgURL)
 
-        // Cutoff in the future drops everything; cutoff in the past drops nothing.
         let allFreed = await env.cache.purgeOlderThan(Date().addingTimeInterval(60))
         #expect(allFreed > 0)
         #expect(await env.cache.stats().entries.isEmpty)
 
-        // Recreate then verify the past-cutoff is a no-op.
         _ = try await env.cache.ensureExtracted(workshopID: "fresh-again", sourcePkgURL: env.pkgURL)
         let nothingFreed = await env.cache.purgeOlderThan(Date(timeIntervalSince1970: 0))
         #expect(nothingFreed == 0)

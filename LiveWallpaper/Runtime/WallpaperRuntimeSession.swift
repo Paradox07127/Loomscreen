@@ -16,8 +16,7 @@ protocol WallpaperRuntimeSession: AnyObject {
     func updateFrame(to frame: CGRect)
     func cleanup()
 
-    /// Suspend during `NSWorkspaceWillSleep` — pauses playback while
-    /// remembering enough state for `resume()` to restore it.
+    /// Suspend during `NSWorkspaceWillSleep` — pauses playback while remembering enough state for `resume()` to restore it.
     func suspend()
     /// Resume after `NSWorkspaceDidWake`.
     func resume()
@@ -64,7 +63,6 @@ protocol WallpaperResourceCleanable: AnyObject {
 @MainActor
 protocol HTMLWallpaperConfigApplying: AnyObject {
     /// Applies a config to a live HTML renderer without replacing the window.
-    /// Returns `false` when a WebKit-level choice requires a session rebuild.
     func applyHTMLConfig(_ config: HTMLConfig) -> Bool
 }
 

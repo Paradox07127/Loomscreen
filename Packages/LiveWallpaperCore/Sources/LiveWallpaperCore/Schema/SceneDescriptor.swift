@@ -62,12 +62,9 @@ public struct SceneDescriptor: Codable, Equatable, Sendable {
         workshopID = try c.decode(String.self, forKey: .workshopID)
         cacheRelativePath = try c.decode(String.self, forKey: .cacheRelativePath)
         entryFile = try c.decode(String.self, forKey: .entryFile)
-        // Lossy: an unrecognised tier (e.g. future Phase 2.x value) decodes
-        // to `.unsupported` so an old build does not blow up on new payloads.
         capabilityTier = (try? c.decode(SceneCapabilityTier.self, forKey: .capabilityTier)) ?? .unsupported
         dependencyWorkshopIDs = (try? c.decodeIfPresent([String].self, forKey: .dependencyWorkshopIDs)) ?? []
         preflightTier = try? c.decodeIfPresent(WPEScenePreflightTier.self, forKey: .preflightTier)
-        // Drop unknown future flags so old builds keep loading new payloads.
         let rawFlags = (try? c.decodeIfPresent([String].self, forKey: .preflightFeatureFlags)) ?? []
         preflightFeatureFlags = rawFlags.compactMap(WPESceneFeatureFlag.init(rawValue:))
     }
@@ -80,8 +77,6 @@ public struct SceneDescriptor: Codable, Equatable, Sendable {
         try c.encode(capabilityTier, forKey: .capabilityTier)
         try c.encode(dependencyWorkshopIDs, forKey: .dependencyWorkshopIDs)
         try c.encodeIfPresent(preflightTier, forKey: .preflightTier)
-        // Persist as raw strings so unknown enum cases produced by future
-        // builds round-trip through older versions of the decoder.
         try c.encode(preflightFeatureFlags.map(\.rawValue), forKey: .preflightFeatureFlags)
     }
 }

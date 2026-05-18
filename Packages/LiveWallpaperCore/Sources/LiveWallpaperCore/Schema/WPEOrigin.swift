@@ -92,8 +92,6 @@ public struct WPEOrigin: Codable, Equatable, Sendable {
         entryFile = try container.decodeIfPresent(String.self, forKey: .entryFile)
         resourceLocation = try container.decodeIfPresent(WPEResourceLocation.self, forKey: .resourceLocation)
             ?? Self.defaultResourceLocation(originalType: originalType, cacheRelativePath: cacheRelativePath)
-        // Lossy decode for both new fields so a Phase 2.0 plist (predating
-        // them) loads cleanly without invalidating the surrounding origin.
         dependencyWorkshopIDs = (try? container.decodeIfPresent([String].self, forKey: .dependencyWorkshopIDs)) ?? []
         missingDependencyIDs = (try? container.decodeIfPresent([String].self, forKey: .missingDependencyIDs)) ?? []
         requiresWindowsPlugin = (try? container.decodeIfPresent(Bool.self, forKey: .requiresWindowsPlugin)) ?? false
@@ -103,9 +101,7 @@ public struct WPEOrigin: Codable, Equatable, Sendable {
         originalType.localizedDisplayName
     }
 
-    /// Pure-data default resolver — only inspects `originalType` and the
-    /// presence of `cacheRelativePath`. Kept on the schema struct because
-    /// both inits need it; never touches `WPEPathSafety`.
+    /// Pure-data default resolver — only inspects `originalType` and the presence of `cacheRelativePath`.
     public static func defaultResourceLocation(
         originalType: WPEType,
         cacheRelativePath: String?

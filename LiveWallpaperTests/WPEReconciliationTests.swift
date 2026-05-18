@@ -73,7 +73,6 @@ struct WPEReconciliationTests {
 
     @Test("Reconcile clears origin when video bookmark no longer matches cache")
     func reconcileClearsWhenVideoBookmarkMismatches() {
-        // Synthetic bookmark that won't resolve to the WPE cache directory.
         var config = makeConfiguration(activeWallpaper: .video(bookmarkData: Data("non-wpe".utf8)))
         config.wpeOrigin = makeOrigin(workshopID: "333", cacheRelativePath: "wpe-cache/333")
         WPEOriginReconciler().reconcile(&config, event: .userReplacedActiveWallpaper(previous: nil))
@@ -240,12 +239,6 @@ struct WPEReconciliationTests {
 
     @Test("matchesBookmark returns true for a real security-scoped bookmark inside the cache")
     func matchesBookmarkAcceptsRealBookmarkInsideCache() throws {
-        // Build a temp directory that mimics ApplicationSupport/LiveWallpaper/wpe-cache/<id>/payload.mp4
-        // and create a real security-scoped bookmark for the payload file.
-        // Note: production matchesBookmark always resolves real ApplicationSupport;
-        // we cannot redirect that without DI, so the realistic scenario we can
-        // exercise here is the negative case (path outside ApplicationSupport).
-        // The matchesBookmark with a foreign-path bookmark must be rejected.
         let temp = FileManager.default.temporaryDirectory
             .appendingPathComponent("wpe-match-test-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: temp) }
@@ -260,7 +253,6 @@ struct WPEReconciliationTests {
         )
 
         let origin = makeOrigin(workshopID: "888", cacheRelativePath: "wpe-cache/888")
-        // Should be false because temp directory is NOT inside ApplicationSupport/LiveWallpaper/wpe-cache/888.
         #expect(!WPEOrigin.matchesBookmark(bookmark, origin: origin))
     }
 

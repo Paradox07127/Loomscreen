@@ -32,7 +32,6 @@ public final class ResourceUtilities {
     public static let supportedHTMLContentTypes: [UTType] = [.html]
 
     public static func createBookmark(for url: URL) -> Data? {
-        // Some URL sources need an active scope before bookmarkData can read metadata.
         let didStartScope = url.startAccessingSecurityScopedResource()
         defer {
             if didStartScope {
@@ -82,11 +81,7 @@ public final class ResourceUtilities {
         return ["html", "htm"].contains(url.pathExtension.lowercased())
     }
 
-    /// Creates a persistent video bookmark. Security-scoped bookmarks are the
-    /// preferred path for user-selected files. If macOS' app-scope bookmark
-    /// service fails, copy the video into our Application Support container and
-    /// bookmark that app-owned copy so the selected wallpaper still survives
-    /// relaunch.
+    /// Creates a persistent video bookmark.
     public static func createVideoBookmark(
         for url: URL,
         applicationSupportRootURL: URL? = nil,
@@ -280,8 +275,6 @@ public final class ResourceUtilities {
     // MARK: - HTML Source Bookmarking
 
     /// Preserves a user's explicit File-mode choice as a file source.
-    /// Users who need sibling assets should choose Folder mode so the whole
-    /// directory is intentionally bookmarked.
     public static func htmlSourceFromPickedFile(_ fileURL: URL) -> HTMLSource? {
         if let fileBookmark = createBookmark(for: fileURL) {
             return .file(bookmarkData: fileBookmark)

@@ -15,17 +15,14 @@ struct LiteSKUSmokeTests {
     func liteCatalogSurfaceArea() {
         let capabilities = ProductCapabilities.lite
         #expect(capabilities.sku == .lite)
-        // Wallpaper types: video + html only (no shader, no scene)
         #expect(capabilities.selectableWallpaperTypes == [.video, .html])
         #expect(capabilities.canRender(.video))
         #expect(capabilities.canRender(.html))
         #expect(!capabilities.canRender(.metalShader))
         #expect(!capabilities.canRender(.scene))
-        // Automation, playlists, schedule — same as Pro for video/html
         #expect(capabilities.selectableWallpaperModes.contains(.single))
         #expect(capabilities.selectableWallpaperModes.contains(.playlist))
         #expect(capabilities.selectableWallpaperModes.contains(.schedule))
-        // Video / web feature surface mirrors Pro
         #expect(capabilities.enabledFeatures.contains(.appleAerials))
         #expect(capabilities.enabledFeatures.contains(.scheduleAutomation))
         #expect(capabilities.enabledFeatures.contains(.playlists))
@@ -35,7 +32,6 @@ struct LiteSKUSmokeTests {
         #expect(capabilities.enabledFeatures.contains(.inspectorPreview))
         #expect(capabilities.enabledFeatures.contains(.videoEffects))
         #expect(capabilities.enabledFeatures.contains(.weatherReactive))
-        // Only Pro-exclusive features
         #expect(!capabilities.enabledFeatures.contains(.wpeImport))
         #expect(!capabilities.enabledFeatures.contains(.developerTools))
     }
@@ -75,9 +71,6 @@ struct LiteSKUSmokeTests {
             Issue.record("No NSScreen available for Lite automation skip test")
             return
         }
-        // Even with startAutomation: true, the per-feature gates in Phase 8
-        // should short-circuit so Lite never spins up the orchestrator or
-        // weather subscriber.
         let manager = ScreenManager(startupOptions: ScreenManagerStartupOptions(
             restoreSavedWallpapers: false,
             startAutomation: true,
@@ -89,10 +82,6 @@ struct LiteSKUSmokeTests {
             originReconciler: PreservingOriginReconciler()
         ))
 
-        // Lite mirrors Pro for the video/HTML feature set, so playlists,
-        // scheduleAutomation, and weatherReactive are all enabled — only the
-        // heavy GPU pipelines (.scene, .metalShader) and Pro-exclusive
-        // chrome (.wpeImport, .developerTools) drop out.
         #expect(manager.featureCatalog.isEnabled(.playlists))
         #expect(manager.featureCatalog.isEnabled(.scheduleAutomation))
         #expect(manager.featureCatalog.isEnabled(.weatherReactive))

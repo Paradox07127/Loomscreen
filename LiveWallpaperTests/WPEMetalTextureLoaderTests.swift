@@ -34,8 +34,6 @@ struct WPEMetalTextureLoaderTests {
 
         #expect(texture.width == 2)
         #expect(texture.height == 2)
-        // Phase 2A H3: payloads default to sRGB so the gamma matches the
-        // SpriteKit/CGImage fallback. Linear uploads must be opted into.
         #expect(texture.pixelFormat == .rgba8Unorm_srgb)
     }
 

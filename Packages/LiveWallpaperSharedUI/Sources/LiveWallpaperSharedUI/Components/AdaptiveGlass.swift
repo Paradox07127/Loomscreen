@@ -26,8 +26,6 @@ public struct AdaptiveGlassContainer<Content: View>: View {
                 content
             }
         } else {
-            // `spacing` is a Liquid Glass morph distance, not a stack spacing —
-            // it has no analogue on macOS 14/15, so pass content through.
             content
         }
     }
@@ -123,10 +121,6 @@ private struct AdaptiveGlassSurfaceModifier: ViewModifier {
 
         return content
             .background {
-                // Back-to-front: tint underlay → translucent material on top so
-                // the material softens the tint into a wash. On Reduce
-                // Transparency, swap to a solid window-background fill so the
-                // surface is no longer translucent.
                 ZStack {
                     if reduceTransparency {
                         shape.fill(Color(nsColor: .windowBackgroundColor))
@@ -144,11 +138,6 @@ private struct AdaptiveGlassSurfaceModifier: ViewModifier {
             .overlay {
                 shape.strokeBorder(strokeColor, lineWidth: strokeWidth)
             }
-            // Match native `.glassEffect(in: shape)` hit-area shaping: tap
-            // targets are bounded to the visible glass shape, not the underlying
-            // rectangular frame. Content is NOT clipped here (native glass also
-            // does not clip), so callers that draw content past the shape edges
-            // keep the same behavior on both paths.
             .contentShape(shape)
     }
 }

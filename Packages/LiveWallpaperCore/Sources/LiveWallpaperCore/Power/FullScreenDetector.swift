@@ -27,14 +27,12 @@ public final class FullScreenDetector {
     // MARK: - Setup
 
     private func setupNotifications() {
-        // React to space changes (includes entering/exiting fullscreen Spaces)
         NSWorkspace.shared.notificationCenter
             .publisher(for: NSWorkspace.activeSpaceDidChangeNotification)
             .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
             .sink { [weak self] _ in self?.checkFullScreenState() }
             .store(in: &cancellables)
 
-        // React to app activation changes
         NSWorkspace.shared.notificationCenter
             .publisher(for: NSWorkspace.didActivateApplicationNotification)
             .debounce(for: .milliseconds(300), scheduler: DispatchQueue.main)
@@ -102,7 +100,6 @@ public final class FullScreenDetector {
 
         let ownPID = ProcessInfo.processInfo.processIdentifier
 
-        // CGDisplayBounds already matches CGWindowList's coordinate space.
         let screenFrames: [(id: CGDirectDisplayID, frame: CGRect)] = screens.compactMap { screen in
             guard let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else {
                 return nil
@@ -132,7 +129,6 @@ public final class FullScreenDetector {
             )
 
             for (screenID, cgScreenFrame) in screenFrames {
-                // Intersection avoids cross-triggering same-size displays.
                 let intersection = windowFrame.intersection(cgScreenFrame)
                 guard !intersection.isNull else { continue }
                 let coverage = intersection.width * intersection.height

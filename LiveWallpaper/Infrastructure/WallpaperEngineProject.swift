@@ -58,13 +58,7 @@ struct WallpaperEngineProject: Sendable, Equatable {
         )
     }
 
-    /// Pulls workshop IDs out of the top-level `dependencies` array in
-    /// `project.json` (the only manifest shape WPE actually emits in
-    /// practice). Filters to numeric IDs in the 9–20 digit range so we
-    /// don't coerce config values (e.g. volume sliders) into fake
-    /// dependencies. A future revision could also walk
-    /// `general.properties.<name>.value` when WPE starts using property-
-    /// driven asset references — Phase 2.0.1 keeps the surface narrow.
+    /// Pulls workshop IDs out of the top-level `dependencies` array in `project.json` (the only manifest shape WPE actually emits in practice).
     private static func collectDependencyWorkshopIDs(from manifest: DecodedManifest) -> [String] {
         var ids = Set<String>()
         for raw in manifest.dependencies ?? [] {
@@ -75,19 +69,14 @@ struct WallpaperEngineProject: Sendable, Equatable {
         return ids.sorted()
     }
 
-    /// Heuristic check for a Steam Workshop ID. Workshop IDs are decimal
-    /// integers that fit in UInt64; treat 9–20 digits as the safe range.
+    /// Heuristic check for a Steam Workshop ID.
     private static func looksLikeWorkshopID(_ value: String) -> Bool {
         let digits = value.count
         guard (9...20).contains(digits) else { return false }
         return value.allSatisfy(\.isNumber)
     }
 
-    /// Recursively walks `bin/` looking for any `.dll`. WPE workshop
-    /// projects ship plugins flat (`bin/plugin.dll`) but also nested by
-    /// architecture (`bin/x64/`, `bin/x86/`); a flat-only check would miss
-    /// the second case and let the project fall through to the dependency
-    /// gate with the wrong reason.
+    /// Recursively walks `bin/` looking for any `.dll`.
     private static func detectsWindowsPlugin(in folder: URL) -> Bool {
         let bin = folder.appendingPathComponent("bin", isDirectory: true)
         var isDir: ObjCBool = false
@@ -165,9 +154,6 @@ private struct DecodedManifest: Decodable, Sendable {
         type = try container.decodeFlexibleString(forKey: .type)
         preview = try container.decodeFlexibleString(forKey: .preview)
         general = try? container.decode(DecodedGeneral.self, forKey: .general)
-        // WPE writes `dependencies` as a flexible array of either strings or
-        // numbers. Coerce both into strings so the workshop-ID heuristic can
-        // gate them uniformly without each call site repeating the dance.
         dependencies = try container.decodeFlexibleStringArray(forKey: .dependencies)
     }
 }
@@ -194,9 +180,7 @@ private extension KeyedDecodingContainer {
         return nil
     }
 
-    /// Decodes a JSON array whose elements may be strings or numeric IDs and
-    /// returns a flat string list. Returns nil when the key is missing so
-    /// callers can distinguish "not declared" from "empty array".
+    /// Decodes a JSON array whose elements may be strings or numeric IDs and returns a flat string list.
     func decodeFlexibleStringArray(forKey key: Key) throws -> [String]? {
         guard contains(key) else { return nil }
         if let strings = try? decode([String].self, forKey: key) {
@@ -205,8 +189,6 @@ private extension KeyedDecodingContainer {
         if let ints = try? decode([Int64].self, forKey: key) {
             return ints.map(String.init)
         }
-        // Mixed: walk per-element through an unkeyed container so a single
-        // numeric value doesn't poison the whole array.
         guard var nested = try? nestedUnkeyedContainer(forKey: key) else {
             return nil
         }

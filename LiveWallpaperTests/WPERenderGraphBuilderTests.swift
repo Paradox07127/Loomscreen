@@ -273,9 +273,6 @@ struct WPERenderGraphBuilderTests {
         try writeJSON([
             "passes": [[
                 "shader": "compose",
-                // Workshop bokeh_blur uses non-`_rt_` names like `_downscaled1`
-                // for its scratch FBOs; we must still classify these as runtime
-                // buffers, not on-disk assets.
                 "textures": ["_downscaled1", "_alias_x", "_rt_FullFrameBuffer"]
             ]]
         ], to: root.appendingPathComponent("materials/layer.json"))

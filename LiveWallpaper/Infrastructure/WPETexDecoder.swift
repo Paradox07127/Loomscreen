@@ -17,9 +17,7 @@ import ImageIO
 struct WPETexDecoder: Sendable {
     init() {}
 
-    /// Cheap header probe — used by `WallpaperEngineImportService` during
-    /// capability tier classification. Reads only as far as the `TEXI`
-    /// block so we don't pay the full mipmap walk per layer at import time.
+    /// Cheap header probe — used by `WallpaperEngineImportService` during capability tier classification.
     func probe(data: Data) -> Result<WPETexInfo, WPETexDecodeError> {
         do {
             return .success(try parseHeader(data: data))
@@ -30,8 +28,7 @@ struct WPETexDecoder: Sendable {
         }
     }
 
-    /// Hot path. Reads container → info → bitmap, picks the largest mip,
-    /// dispatches to the appropriate pixel decoder, and returns a CGImage.
+    /// Hot path.
     func decode(data: Data) -> Result<CGImage, WPETexDecodeError> {
         do {
             let parsed = try parse(data: data)
@@ -43,15 +40,11 @@ struct WPETexDecoder: Sendable {
         }
     }
 
-    /// Metal path. Extracts normalized mip bytes without forcing ImageIO /
-    /// CGImage decode, so compressed BC payloads can be uploaded for native
-    /// GPU sampling on devices that support them.
+    /// Metal path.
     func extractTexturePayload(data: Data) -> Result<WPETexTexturePayload, WPETexDecodeError> {
         do {
             let parsed = try parse(data: data)
 
-            // Phase 2E: video TEX payloads now route to AVFoundation via the
-            // renderer's `WPEVideoTextureSource` instead of failing closed.
             if let videoPayload = makeVideoPayload(from: parsed) {
                 return .success(WPETexTexturePayload(
                     info: parsed.info,
@@ -61,13 +54,6 @@ struct WPETexDecoder: Sendable {
                 ))
             }
 
-            // WPE TEXB v3+ frequently ships the source image (PNG/JPEG)
-            // verbatim inside the bitmap block instead of decompressed
-            // pixels. Previously we bailed here with .unsupportedFormat,
-            // which is what the corpus baseline reported as "code: 0" for
-            // ~80% of workshop scenes. Now we decode the encoded payload
-            // through ImageIO into RGBA8 bytes and continue the Metal
-            // upload path as if the TEX had shipped raw RGBA8888.
             if parsed.bitmap.usesEncodedImagePayload {
                 let bridgedPayload = try bridgeEncodedImagePayload(parsed)
                 return .success(bridgedPayload)
@@ -190,7 +176,6 @@ struct WPETexDecoder: Sendable {
         }
         let containerVersion = parseTrailingVersion(containerMagic)
 
-        // The first sub-block must be TEXI; otherwise the file is malformed.
         let infoMagic = try reader.readMagic()
         guard infoMagic.hasPrefix("TEXI") else {
             throw WPETexDecodeError.unsupportedBlock(magic: infoMagic)
@@ -257,9 +242,7 @@ struct WPETexDecoder: Sendable {
         )
     }
 
-    /// Parses the optional `TEXS` block. Phase 2E uses only `frameTime`; the
-    /// UV crop/rotation fields are read for completeness but currently
-    /// ignored at render time.
+    /// Parses the optional `TEXS` block.
     private func parseFrameInfoBlock(
         versionedMagic: String,
         reader: inout WPETexByteReader
@@ -331,19 +314,6 @@ struct WPETexDecoder: Sendable {
     ) throws -> WPETexInfo {
         let infoVersion = parseTrailingVersion(versionedMagic)
 
-        // Layout cross-checked against RePKG and linux-wallpaperengine:
-        //   format (uint32)
-        //   flags (uint32)
-        //   textureWidth  (uint32, padded to power of 2)
-        //   textureHeight (uint32)
-        //   imageWidth    (uint32, actual visible pixels)
-        //   imageHeight   (uint32)
-        //   unkInt0       (uint32)
-        // The image-vs-texture distinction matters: WPE pads compressed
-        // textures to power-of-two for GPU upload, but stores the visible
-        // sub-rect as `imageWidth/imageHeight`. We use the texture
-        // dimensions (full payload) so the bitmap mipmaps line up; the
-        // visible rect can be cropped at render time later.
         let formatCode = Int(try reader.readInt32(blockName: "TEXI.format"))
         let flags = try reader.readUInt32(blockName: "TEXI.flags")
         let textureWidth = Int(try reader.readInt32(blockName: "TEXI.textureWidth"))
@@ -394,8 +364,6 @@ struct WPETexDecoder: Sendable {
         case 4:
             sourceImageFormatCode = Int(try reader.readInt32(blockName: "TEXB.imageFormat"))
             isVideoPayload = try reader.readInt32(blockName: "TEXB.isVideoMP4") == 1
-            // RePKG and linux-wallpaperengine both treat non-MP4 TEXB0004
-            // as TEXB0003 for the mipmap layout.
             if !isVideoPayload {
                 effectiveBitmapVersion = 3
             }
@@ -403,11 +371,6 @@ struct WPETexDecoder: Sendable {
             throw WPETexDecodeError.unsupportedBlock(magic: versionedMagic)
         }
 
-        // Phase 2E: retain every TEXB image group. Older Workshop encoders
-        // concatenate animation frames inside a single TEXB block before any
-        // TEXS metadata, so the multi-frame data must be preserved here for
-        // the renderer-side animation source. Static decode paths still see
-        // only the first frame via `WPETexBitmapBlock.mipmaps`.
         var frames: [[WPETexMipmap]] = []
         frames.reserveCapacity(imageCount)
         for _ in 0..<imageCount {
@@ -536,8 +499,6 @@ struct WPETexDecoder: Sendable {
                 mipmap: mip.index
             )
         case .rgba1010102:
-            // Phase 2.1 explicitly defers RGBA1010102; surface as
-            // unsupported so the UI shows a precise reason.
             throw WPETexDecodeError.unsupportedFormat(code: format.rawValue)
         }
         return try decoded.makeCGImage()
@@ -559,26 +520,8 @@ struct WPETexDecoder: Sendable {
         return image
     }
 
-    /// Converts a TEXB-encoded image payload (PNG/JPEG bytes wrapped inside
-    /// a WPE `.tex` file) into a synthetic `WPETexTexturePayload` shaped like
-    /// raw RGBA8888 so the existing Metal upload path can consume it without
-    /// branching on encoded-vs-raw at every call site.
-    ///
-    /// The first mip's payload is inflated (LZ4 if the TEXB block flagged
-    /// it as compressed), then decoded through ImageIO and rasterised into
-    /// a known RGBA8 byte order via a `CGContext`. The synthesised
-    /// `WPETexInfo` overrides `format` to `.rgba8888` so downstream
-    /// `WPEMetalTextureFormatMapper.mapping(for:...)` picks
-    /// `rgba8Unorm_srgb`.
-    ///
-    /// Animation frame tracks intentionally drop here — the WPE animation
-    /// branch still needs source-frame decoding work and isn't part of
-    /// this bridge.
+    /// Converts a TEXB-encoded image payload (PNG/JPEG bytes wrapped inside a WPE `.tex` file) into a synthetic `WPETexTexturePayload` shaped like raw RGBA8888 so the existing Metal upload path can consume it without branching on encoded-vs-raw at every call site.
     private func bridgeEncodedImagePayload(_ parsed: ParsedTex) throws -> WPETexTexturePayload {
-        // Encoded multi-frame TEXB blocks would need per-frame ImageIO
-        // decode + animation-track stitching; bailing here keeps the
-        // diagnostic precise rather than silently flattening an animation
-        // to its first frame.
         guard !parsed.hasAnimationFrames else {
             throw WPETexDecodeError.unsupportedAnimation
         }
@@ -618,15 +561,7 @@ struct WPETexDecoder: Sendable {
         )
     }
 
-    /// Renders a `CGImage` into straight-alpha, sRGB-encoded RGBA8 bytes
-    /// suitable for upload as `MTLPixelFormat.rgba8Unorm_srgb`.
-    ///
-    /// CoreGraphics 8-bit RGBA bitmap contexts only support premultiplied
-    /// or opaque alpha, so we draw into a premultiplied target and
-    /// unpremultiply in place. The destination color space is pinned to
-    /// sRGB so the rendered bytes don't depend on the device's display
-    /// profile — Metal's sRGB sampler then applies the expected
-    /// sRGB→linear decode at sample time.
+    /// Renders a `CGImage` into straight-alpha, sRGB-encoded RGBA8 bytes suitable for upload as `MTLPixelFormat.rgba8Unorm_srgb`.
     private func rasterizeRGBA8(from image: CGImage, mipmap: Int) throws -> DecodedRGBAImage {
         let width = image.width
         let height = image.height
@@ -663,12 +598,7 @@ struct WPETexDecoder: Sendable {
         return DecodedRGBAImage(width: width, height: height, pixels: buffer)
     }
 
-    /// Reverses `CGImageAlphaInfo.premultipliedLast` in place so semi-
-    /// transparent pixels are emitted as straight-alpha RGBA8. WPE
-    /// shaders (`genericimage` family, blend modes) expect non-
-    /// premultiplied samples and apply their own alpha math; without
-    /// this pass, semi-transparent edges double-multiply and render too
-    /// dark.
+    /// Reverses `CGImageAlphaInfo.premultipliedLast` in place so semi- transparent pixels are emitted as straight-alpha RGBA8.
     private func unpremultiplyAlphaLast(_ buffer: inout Data) {
         buffer.withUnsafeMutableBytes { rawBuffer in
             let bytes = rawBuffer.bindMemory(to: UInt8.self)
@@ -708,15 +638,7 @@ struct WPETexDecoder: Sendable {
         )
     }
 
-    /// Reconciles `payload` against `expectedByteCount`. Three cases:
-    /// 1. Exact match → return as-is.
-    /// 2. Mip flagged `compressed` (V3+) OR payload is shorter than
-    ///    expected → run LZ4 raw decompression.
-    /// 3. Otherwise (uncompressed flag, padded payload longer than
-    ///    expected) → take the leading prefix. WPE's V1/V2 bitmaps
-    ///    occasionally carry trailing slack bytes for alignment; treating
-    ///    that as a decode failure was the source of false negatives in
-    ///    early Phase 2.1 testing.
+    /// Reconciles `payload` against `expectedByteCount`.
     private func inflateIfNeeded(
         payload: Data,
         expectedByteCount: Int?,
@@ -742,8 +664,6 @@ struct WPETexDecoder: Sendable {
             return payload.prefix(expectedByteCount)
         }
 
-        // Legacy tolerance for old fixtures and early WPE variants that omit
-        // the explicit compression flag but still store an LZ4 block.
         return try lz4Inflate(payload: payload, outputCount: expectedByteCount, mipmap: mipmap)
     }
 
@@ -771,8 +691,7 @@ struct WPETexDecoder: Sendable {
 
     // MARK: - Helpers
 
-    /// "TEXV0005" → 5. Defaults to 0 when the suffix isn't a number so we
-    /// can flag genuinely unknown containers later.
+    /// "TEXV0005" → 5.
     private func parseTrailingVersion(_ magic: String) -> Int {
         let digits = magic.suffix(4)
         return Int(digits) ?? 0

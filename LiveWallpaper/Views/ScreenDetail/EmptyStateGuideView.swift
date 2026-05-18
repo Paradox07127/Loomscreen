@@ -88,8 +88,6 @@ struct EmptyStateGuideView: View {
     }
 
     private var videoSubtitle: LocalizedStringKey {
-        // Lite collapses the playlist/schedule chrome, so its subtitle
-        // doesn't promise automation features that aren't there.
         featureCatalog.isEnabled(.playlists) || featureCatalog.isEnabled(.scheduleAutomation)
             ? "MP4 / MOV, playlists, and schedules."
             : "MP4 / MOV from your Mac."

@@ -48,11 +48,7 @@ final class WallpaperEngineLibraryScanner: @unchecked Sendable {
         self.fileManager = fileManager
     }
 
-    /// Off-main scan. Resolves `rootBookmarkData`, walks the immediate
-    /// children of the root, and parses each `<workshopID>/project.json`.
-    /// Children that are not directories or whose project.json is missing
-    /// or malformed are silently skipped — they're not part of a WPE
-    /// library by definition.
+    /// Off-main scan.
     func scan(
         rootBookmarkData: Data,
         alreadyImportedWorkshopIDs: Set<String>
@@ -79,10 +75,6 @@ final class WallpaperEngineLibraryScanner: @unchecked Sendable {
         ) {
         case .success(let resolved):
             rootURL = resolved.url
-            // Carry the refreshed bookmark (if the resolver auto-refreshed a
-            // stale one) into every DiscoveredProject so the gallery's
-            // follow-up apply/prepare doesn't re-resolve the original stale
-            // blob and burn another grace use.
             effectiveRootBookmarkData = resolved.bookmarkData
         case .failure(let failure):
             throw ScanError.rootInaccessible(failure.errorDescription ?? "Unknown bookmark failure")
@@ -134,7 +126,6 @@ final class WallpaperEngineLibraryScanner: @unchecked Sendable {
             ))
         }
 
-        // Order: compatible first (video / web), then unsupported, then by title.
         results.sort { lhs, rhs in
             let lhsRank = compatibilityRank(lhs.type)
             let rhsRank = compatibilityRank(rhs.type)

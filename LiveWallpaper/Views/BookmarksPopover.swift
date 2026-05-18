@@ -23,9 +23,6 @@ struct BookmarksPopover: View {
         }
         .padding(14)
         .frame(width: 340)
-        // Cap popover height. macOS 26 `.popover` lets a child without an
-        // explicit height grow to fit the entire detail area, which overlaps
-        // the inspector and (when sidebar is collapsed) the dashboard column.
         .frame(minHeight: 220, maxHeight: 480)
         .presentationCompactAdaptation(.popover)
         .confirmDestructive($pendingDestructive)
@@ -131,8 +128,7 @@ struct BookmarksPopover: View {
         screenManager.getConfiguration(for: screen)?.activeWallpaper
     }
 
-    /// Snapshot the screen's full playback + effect state so the bookmark
-    /// captures a complete plan, not just the content pointer.
+    /// Snapshot the screen's full playback + effect state so the bookmark captures a complete plan, not just the content pointer.
     private func currentPlaybackSettings() -> BookmarkPlaybackSettings? {
         guard let config = screenManager.getConfiguration(for: screen) else { return nil }
         return BookmarkPlaybackSettings.snapshot(of: config)

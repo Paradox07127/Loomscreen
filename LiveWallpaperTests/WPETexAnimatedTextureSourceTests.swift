@@ -19,8 +19,6 @@ struct WPETexAnimatedTextureSourceTests {
             loop: true
         )
 
-        // 25 FPS = 40ms per frame. Check the cadence boundaries (±epsilon
-        // to avoid float-rounding failures right at the edge).
         #expect(source.frameIndex(at: 0.000) == 0)
         #expect(source.frameIndex(at: 0.039) == 0)
         #expect(source.frameIndex(at: 0.041) == 1)

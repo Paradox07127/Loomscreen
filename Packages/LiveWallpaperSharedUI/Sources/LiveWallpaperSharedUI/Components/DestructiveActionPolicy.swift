@@ -158,11 +158,7 @@ public struct PendingDestructive: Identifiable {
 }
 
 extension View {
-    /// Presents the native macOS confirmation alert when `pending` becomes
-    /// non-nil. macOS 26 Tahoe's system alert chrome already renders in
-    /// the Liquid Glass material — we get the platform look for free,
-    /// keep HIG-perfect button placement / destructive tint / keyboard
-    /// shortcuts, and stop drifting from system theme refreshes.
+    /// Presents the native macOS confirmation alert when `pending` becomes non-nil.
     public func confirmDestructive(_ pending: Binding<PendingDestructive?>) -> some View {
         modifier(DestructiveConfirmationModifier(pending: pending))
     }

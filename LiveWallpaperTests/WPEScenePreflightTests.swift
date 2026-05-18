@@ -24,10 +24,6 @@ struct WPEScenePreflightTests {
 
     @Test("Custom shader source now degrades (translator ships) instead of blocking")
     func customShaderDegradesAfterTranslator() {
-        // Phase 2D-O: with the Swift transpiler shipping as the default
-        // backend, a custom shader is no longer a hard block — it
-        // degrades to `degradedPlayable` to surface the visual-fidelity
-        // caveat without preventing playback.
         let project = Self.makeProject()
         let document = Self.makeDocument(imageObjects: [Self.makeImageObject()])
 
@@ -43,8 +39,6 @@ struct WPEScenePreflightTests {
 
     @Test("Particle objects classify as native — runtime ships")
     func particlesPlayNatively() {
-        // Phase 2D-L shipped CPU emitter + GPU instanced draw; particle
-        // presence no longer downgrades the tier on its own.
         let project = Self.makeProject()
         let document = Self.makeDocument(
             imageObjects: [Self.makeImageObject()],
@@ -63,10 +57,6 @@ struct WPEScenePreflightTests {
 
     @Test("Animation layers degrade — base image renders, mesh deformation deferred")
     func animationLayerDegrades() {
-        // Phase 2D-O: animationlayer-bearing scenes render their base
-        // image layers fine; the mesh-deformation puppet warp is still
-        // approximated as static, so the tier indicates "degraded"
-        // rather than blocking playback outright.
         let project = Self.makeProject()
         let layer = WPESceneAnimationLayer(id: 1, rate: 24, visible: true, blend: 1, animation: 0)
         let image = Self.makeImageObject(animationLayers: [layer])

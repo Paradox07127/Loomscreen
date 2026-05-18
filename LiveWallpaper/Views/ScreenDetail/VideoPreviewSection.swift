@@ -18,11 +18,6 @@ struct VideoPreviewSection: View {
                 unloadedPreview
             }
 
-            // Hoist the info pill out of `activePreview` so the badges
-            // (format / resolution / FPS / file size) read across the
-            // active / poster / unloaded states. The overlay loads its
-            // metadata from `previewController.assetURL` directly, so it
-            // no longer requires a running player.
             VStack {
                 HStack {
                     VideoInformationOverlay(

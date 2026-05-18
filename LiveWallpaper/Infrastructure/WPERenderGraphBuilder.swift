@@ -324,10 +324,6 @@ struct WPERenderGraphBuilder: Sendable {
         if name == "previous" {
             return .previous
         }
-        // WPE runtime-buffer naming convention: any texture ref starting with
-        // `_` (e.g. `_rt_FullFrameBuffer`, `_alias_X`, workshop-defined
-        // `_downscaled1`) refers to an FBO declared in effect.json `fbos[]`
-        // rather than a real asset on disk.
         if name.hasPrefix("_") {
             return .fbo(name)
         }
@@ -448,7 +444,6 @@ private struct WPEMaterialPass {
         var mergedTextures = textures
         for (index, path) in override.textures {
             if path.hasPrefix("_") {
-                // WPE runtime-buffer convention — see textureReference(_:ownerPath:).
                 mergedTextures[index] = .fbo(path)
             } else {
                 mergedTextures[index] = .asset(path)

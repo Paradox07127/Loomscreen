@@ -11,18 +11,13 @@ import CoreLocation
 /// can try the next link in the chain.
 @MainActor
 protocol WeatherLocationProviding: AnyObject {
-    /// Pull the latest known location preference and resolve it. Returns
-    /// the working source's coordinate plus an updated status describing
-    /// what actually succeeded (the user-preferred source may be downgraded
-    /// at runtime — e.g. CoreLocation denied → IP geo).
+    /// Pull the latest known location preference and resolve it.
     func resolveCoordinate() async -> WeatherLocationResolution
 
-    /// Triggers a CoreLocation authorisation prompt if the user has chosen
-    /// `.coreLocation` and we haven't asked yet. Idempotent.
+    /// Triggers a CoreLocation authorisation prompt if the user has chosen `.coreLocation` and we haven't asked yet.
     func requestCoreLocationAuthorizationIfNeeded()
 
-    /// Drops any cached IP-derived coordinate so a future resolve hits the
-    /// network again. Useful when the user explicitly refreshes weather.
+    /// Drops any cached IP-derived coordinate so a future resolve hits the network again.
     func invalidateIPGeolocationCache()
 }
 
@@ -43,8 +38,7 @@ struct WeatherLocationResolution: Equatable {
         coordinate: nil, resolvedSource: nil, displayName: nil, error: nil
     )
 
-    /// Required so the type can be `Equatable` (CLLocationCoordinate2D
-    /// isn't Equatable by default).
+    /// Required so the type can be `Equatable` (CLLocationCoordinate2D isn't Equatable by default).
     static func == (lhs: WeatherLocationResolution, rhs: WeatherLocationResolution) -> Bool {
         lhs.resolvedSource == rhs.resolvedSource &&
         lhs.displayName == rhs.displayName &&
@@ -91,8 +85,6 @@ final class WeatherLocationProvider: NSObject, WeatherLocationProviding, CLLocat
         switch preference.source {
         case .coreLocation:
             if let resolved = await tryCoreLocation() { return resolved }
-            // Cascade — if CoreLocation can't deliver, fall through to IP geo
-            // so the user keeps seeing live weather without re-prompting.
             if let resolved = await tryIPGeolocation(noteCoreLocationFallback: true) { return resolved }
             return tryManual(preference)
                 ?? WeatherLocationResolution(
@@ -104,8 +96,6 @@ final class WeatherLocationProvider: NSObject, WeatherLocationProviding, CLLocat
 
         case .manual:
             if let resolved = tryManual(preference) { return resolved }
-            // No manual coord saved — fall through to IP so weather keeps
-            // working until the user enters one.
             if let resolved = await tryIPGeolocation(noteCoreLocationFallback: false) { return resolved }
             return WeatherLocationResolution(
                 coordinate: nil,
@@ -127,17 +117,9 @@ final class WeatherLocationProvider: NSObject, WeatherLocationProviding, CLLocat
     }
 
     func requestCoreLocationAuthorizationIfNeeded() {
-        // Only nudge the system permission dialog when CoreLocation is
-        // actually the user's preferred source. Manual / IP users explicitly
-        // opted out of Location Services and would find the prompt
-        // surprising.
         guard SettingsManager.shared.loadGlobalSettings().weatherLocation.source == .coreLocation else {
             return
         }
-        // `requestWhenInUseAuthorization()` exists on macOS even though the
-        // returned status maps to `.authorized` rather than the iOS-style
-        // `.authorizedWhenInUse`. The legacy `requestAlwaysAuthorization()`
-        // is gone from Catalyst's macOS surface.
         if locationManager.authorizationStatus == .notDetermined {
             locationManager.requestWhenInUseAuthorization()
         }
@@ -150,9 +132,6 @@ final class WeatherLocationProvider: NSObject, WeatherLocationProviding, CLLocat
     // MARK: - CoreLocation
 
     private func tryCoreLocation() async -> WeatherLocationResolution? {
-        // macOS only exposes `.authorized` (no in-use vs always split). We
-        // accept that plus `.authorizedAlways` to stay symmetric with iOS-
-        // shaped status returns from rare framework variants.
         let status = locationManager.authorizationStatus
         guard status == .authorizedAlways || status == .authorized else {
             if status == .notDetermined {
@@ -161,10 +140,6 @@ final class WeatherLocationProvider: NSObject, WeatherLocationProviding, CLLocat
             return nil
         }
 
-        // Single-flight: if a previous resolve is still waiting on
-        // didUpdateLocations, return nil so the fallback chain proceeds
-        // immediately rather than queueing a second `requestLocation()`
-        // that would race with the in-flight one.
         guard !coreLocationRequestInFlight else { return nil }
 
         let location = await withTaskCancellationHandler {
@@ -202,9 +177,6 @@ final class WeatherLocationProvider: NSObject, WeatherLocationProviding, CLLocat
     }
 
     nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        // No-op: the resolve path will check authorisation on its next pass.
-        // Posting `weatherLocationPreferenceDidChange` here would be wrong —
-        // the preference didn't change, only the underlying authorization.
     }
 
     private func fulfillCoreLocationRequest(with location: CLLocation?) {
@@ -214,9 +186,7 @@ final class WeatherLocationProvider: NSObject, WeatherLocationProviding, CLLocat
         continuation?.resume(returning: location)
     }
 
-    /// Cancellation path — the awaiting Task was cancelled before
-    /// CoreLocation responded. Resumes the continuation with nil so the
-    /// awaiter doesn't deadlock.
+    /// Cancellation path — the awaiting Task was cancelled before CoreLocation responded.
     private func cancelCoreLocationRequest() {
         let continuation = pendingCoreLocationContinuation
         pendingCoreLocationContinuation = nil
@@ -258,9 +228,6 @@ final class WeatherLocationProvider: NSObject, WeatherLocationProviding, CLLocat
                 return nil
             }
             let decoded = try JSONDecoder().decode(IPGeoResponse.self, from: data)
-            // Defensive: external endpoints occasionally return out-of-range
-            // or NaN values during outages. Reject them rather than feed
-            // garbage into the weather URL builder.
             guard let coord = validatedCoordinate(latitude: decoded.latitude, longitude: decoded.longitude) else {
                 Logger.warning("IP geolocation returned invalid coordinate", category: .screenManager)
                 return nil

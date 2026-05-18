@@ -19,8 +19,7 @@ struct ConfigurationDocument: FileDocument {
         self.encodedPayload = encodedPayload
     }
 
-    /// MainActor-bound factory: snapshots the current configuration and
-    /// encodes it for the exporter sheet.
+    /// MainActor-bound factory: snapshots the current configuration and encodes it for the exporter sheet.
     @MainActor
     static func snapshot() throws -> ConfigurationDocument {
         let bundle = ConfigurationPorter.currentBundle()
@@ -28,9 +27,7 @@ struct ConfigurationDocument: FileDocument {
         return ConfigurationDocument(encodedPayload: data)
     }
 
-    /// `FileDocument`'s reading initializer is required even though we
-    /// never read via this path — import goes through `ConfigurationPorter`
-    /// so it can show the confirmation alert before applying.
+    /// `FileDocument`'s reading initializer is required even though we never read via this path — import goes through `ConfigurationPorter` so it can show the confirmation alert before applying.
     init(configuration: ReadConfiguration) throws {
         guard let data = configuration.file.regularFileContents else {
             throw CocoaError(.fileReadCorruptFile)

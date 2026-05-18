@@ -30,10 +30,7 @@ struct WPESPIRVShaderCompiler: WPEShaderCompiling {
         self.fallback = fallback
     }
 
-    /// Returns true when the XCFramework is vendored AND its C entry points
-    /// are reachable. The renderer init seam queries this to decide whether
-    /// to construct a SPIRV-Cross-backed compiler at all. False on every
-    /// build that doesn't link `WPEShaderToolchain.xcframework`.
+    /// Returns true when the XCFramework is vendored AND its C entry points are reachable.
     static func isToolchainAvailable() -> Bool {
         #if canImport(WPEShaderToolchain)
         return true
@@ -44,13 +41,6 @@ struct WPESPIRVShaderCompiler: WPEShaderCompiling {
 
     func compile(_ request: WPEShaderCompileRequest) throws -> WPEShaderCompileResult {
         #if canImport(WPEShaderToolchain)
-        // Try SPIRV-Cross first; on any failure fall through to the Swift
-        // transpiler so:
-        // 1. The executor's existing test suite — which asserts specific
-        //    Swift-transpiler error messages — keeps passing.
-        // 2. Shaders the Swift path handles don't regress just because
-        //    SPIRV-Cross has a different opinion. The new path is strictly
-        //    additive coverage for the helper-scope / multi-texture gap.
         do {
             return try compileViaToolchain(request)
         } catch {
@@ -63,7 +53,6 @@ struct WPESPIRVShaderCompiler: WPEShaderCompiling {
 
     #if canImport(WPEShaderToolchain)
     private func compileViaToolchain(_ request: WPEShaderCompileRequest) throws -> WPEShaderCompileResult {
-        // 1. GLSL → SPIR-V via glslang.
         var spirvBuffer: UnsafeMutablePointer<UInt32>?
         var spirvCount: Int = 0
         var diag: UnsafeMutablePointer<CChar>?
@@ -80,7 +69,6 @@ struct WPESPIRVShaderCompiler: WPEShaderCompiling {
         }
         defer { wpe_shader_free_spirv(spirvBuffer) }
 
-        // 2. SPIR-V → MSL via SPIRV-Cross.
         var mslPtr: UnsafeMutablePointer<CChar>?
         diag = nil
         let mslResult = wpe_shader_spirv_to_msl(spirv, spirvCount, &mslPtr, &diag)
@@ -93,7 +81,6 @@ struct WPESPIRVShaderCompiler: WPEShaderCompiling {
         let mslSource = String(cString: mslChars)
         free(mslChars)
 
-        // 3. Reflection → uniform / sampler layout.
         var reflection = wpe_shader_reflection_result()
         diag = nil
         let reflectionResult = wpe_shader_reflect_spirv(spirv, spirvCount, &reflection, &diag)
@@ -108,7 +95,6 @@ struct WPESPIRVShaderCompiler: WPEShaderCompiling {
         let uniformLayout = Self.buildUniformLayout(reflection: reflection)
         let samplerNames = Self.buildSamplerNames(reflection: reflection)
 
-        // 4. MTLLibrary from the emitted MSL.
         let library: MTLLibrary
         do {
             let options = MTLCompileOptions()
@@ -144,7 +130,7 @@ struct WPESPIRVShaderCompiler: WPEShaderCompiling {
             guard let entry = reflection.uniforms?[i] else { continue }
             let name = entry.name.map { String(cString: $0) } ?? ""
             let sizeBytes = Int(entry.size_bytes)
-            let slotCount = max(1, (sizeBytes + 15) / 16) // round up to float4
+            let slotCount = max(1, (sizeBytes + 15) / 16)
             slots.append(WPEUniformSlot(
                 name: name,
                 glslType: "vec4",

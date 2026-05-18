@@ -7,9 +7,6 @@ struct WPETexMetalTranscoderTests {
 
     @Test("Legacy transcoder remains unavailable; Phase 2A uses native texture mapping")
     func legacyTranscoderRemainsUnavailable() {
-        // The SpriteKit/CGImage path cannot consume BC payloads, so the
-        // legacy transcoder remains fail-closed. Phase 2A's Metal renderer
-        // samples supported BC payloads directly as compressed textures.
         #expect(!WPETexMetalTranscoder.isAvailable(for: .dxt1))
         #expect(!WPETexMetalTranscoder.isAvailable(for: .dxt3))
         #expect(!WPETexMetalTranscoder.isAvailable(for: .dxt5))

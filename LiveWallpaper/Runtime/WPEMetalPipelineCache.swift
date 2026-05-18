@@ -82,8 +82,6 @@ final class WPEMetalPipelineCache {
             attachment.destinationAlphaBlendFactor = .one
 
         case "multiply":
-            // WPE multiply preserves the destination alpha (OpenGL convention).
-            // RGB = src.rgb * dst.rgb; alpha = dst.alpha.
             attachment.isBlendingEnabled = true
             attachment.rgbBlendOperation = .add
             attachment.alphaBlendOperation = .add

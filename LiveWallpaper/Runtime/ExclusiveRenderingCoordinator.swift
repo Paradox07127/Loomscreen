@@ -38,8 +38,6 @@ final class ExclusiveRenderingCoordinator {
             }
             observers.append(observer)
         }
-        // Compute the initial state once so the consumer sees a well-defined
-        // value before the first notification fires.
         refreshFromCurrentState()
     }
 
@@ -59,16 +57,10 @@ final class ExclusiveRenderingCoordinator {
         }
     }
 
-    /// Wallpaper windows are tagged with a non-default level + non-resizable
-    /// style mask; treat anything that looks like one as "not the console
-    /// window" so the scene runtime is not throttled by its own host.
+    /// Wallpaper windows are tagged with a non-default level + non-resizable style mask; treat anything that looks like one as "not the console window" so the scene runtime is not throttled by its own host.
     private static func isInteractiveConsoleKeyWindow(_ window: NSWindow?) -> Bool {
         guard let window else { return false }
         if window is VideoWallpaperWindow { return false }
-        // Wallpaper windows live on the desktop level — anything ≤ desktopWindow
-        // is by construction NOT a console-style window. Check explicitly so
-        // future wallpaper window types without the dedicated subclass still
-        // get filtered out.
         let desktopLevel = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)))
         if window.level.rawValue <= desktopLevel.rawValue { return false }
         return window.canBecomeKey

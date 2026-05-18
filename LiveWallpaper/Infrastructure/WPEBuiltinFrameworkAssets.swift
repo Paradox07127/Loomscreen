@@ -47,9 +47,7 @@ enum WPEBuiltinFrameworkAssets {
         withExtension: "bundle"
     )
 
-    /// Builds a `SceneResourceResolver` rooted at `rootURL`. Returns `nil` so
-    /// the multi-root resolver can omit this tier when the bundle subtree is
-    /// unavailable.
+    /// Builds a `SceneResourceResolver` rooted at `rootURL`.
     static func makeResolver() -> SceneResourceResolver? {
         guard let rootURL else { return nil }
         return SceneResourceResolver(cacheRootURL: rootURL)

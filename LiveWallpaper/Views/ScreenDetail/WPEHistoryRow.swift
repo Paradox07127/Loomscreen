@@ -15,8 +15,6 @@ struct WPEHistoryRow: View {
     var body: some View {
         Button(action: onTap) {
             VStack(spacing: 0) {
-                // Square preview occupies the full card width (140×140) so
-                // 1:1 sources render flush. Card height adjusts below to fit.
                 WPEPreviewView(
                     imageURL: previewURL,
                     securityScopedBookmarkData: entry.origin.sourceFolderBookmark
@@ -130,9 +128,6 @@ struct WPEHistoryRow: View {
             if !entry.origin.missingDependencyIDs.isEmpty {
                 return ("Needs deps", .yellow, Text("Wallpaper depends on Workshop projects you haven't subscribed to"))
             }
-            // Phase 2.1: scenes are renderable when image-only; default
-            // tier is best-effort, so we tag them Experimental until the
-            // import service can persist a richer capability summary.
             return ("Experimental", .yellow, Text("Scene wallpapers are rendered with the Phase 2.1 image-only engine"))
         case .unknown:
             return ("Untested", .gray, Text("Wallpaper Engine project type is unknown"))

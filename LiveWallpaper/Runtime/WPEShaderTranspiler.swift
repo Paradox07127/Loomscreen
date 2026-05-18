@@ -50,22 +50,11 @@ struct WPEShaderTranspiler {
     /// switch to `setFragmentBuffer` first.
     static let uniformSlotMaximum = 256
 
-    /// Translate a preprocessed WPE fragment shader to MSL. Returns the
-    /// MSL source and the inferred Metal parameter layout. Throws when the
-    /// input falls outside the supported subset; the caller should pass
-    /// the failure through to the executor as `translationFailed`.
+    /// Translate a preprocessed WPE fragment shader to MSL.
     static func translateFragment(
         shaderName: String,
         preprocessedSource: String
     ) throws -> WPEShaderTranslationResult {
-        // Pre-pass: scrub any `out (vec4|float4) (wpe_fragColor|out_FragColor);`
-        // declaration regardless of leading whitespace, layout(...) prefixes,
-        // or trailing comments. The line-by-line `hasPrefix` guard below
-        // catches the canonical prelude line, but Phase A.3 corpus runs
-        // surfaced cases where the declaration survived to MSL anyway — once
-        // we let through one variant, Metal rejects the whole shader with
-        // `unknown type name 'out'`. Make the scrub robust at the source-text
-        // level so any spelling reaches the line scan already neutralised.
         let scrubbedSource = Self.scrubFragmentOutDeclarations(preprocessedSource)
         let lines = scrubbedSource.components(separatedBy: "\n")
 
@@ -80,18 +69,9 @@ struct WPEShaderTranspiler {
                 bodyLines.append(raw)
                 continue
             }
-            // Metal doesn't accept GLSL `#version`/`#extension` directives.
-            // Strip them — the preprocessor's preamble is GLSL-flavored
-            // and would otherwise crash the Metal compiler with
-            // "invalid preprocessing directive".
             if trimmed.hasPrefix("#version") || trimmed.hasPrefix("#extension") {
                 continue
             }
-            // The shader prelude emits `out vec4 out_FragColor;` (the WPE
-            // convention) and the gl_FragColor preprocessor pass emits
-            // `out vec4 wpe_fragColor;`. Both are GLSL-only; MSL has no
-            // top-level `out` so we strip them here. The body rewrites in
-            // `translateMain(_:)` redirect the variable to a return value.
             if trimmed.hasPrefix("out vec4 wpe_fragColor")
                 || trimmed.hasPrefix("out float4 wpe_fragColor")
                 || trimmed.hasPrefix("out vec4 out_FragColor")
@@ -113,10 +93,6 @@ struct WPEShaderTranspiler {
             bodyLines.append(raw)
         }
 
-        // Sampler slots are numbered by declaration order: g_Texture0 first,
-        // then g_Texture1, etc. Most WPE shaders already follow that
-        // convention, but we sort by name suffix so an out-of-order file
-        // still ends up assigned correctly.
         let sortedSamplers = samplers.sorted { lhs, rhs in
             (Self.textureSlot(for: lhs.name) ?? .max) < (Self.textureSlot(for: rhs.name) ?? .max)
         }
@@ -125,15 +101,9 @@ struct WPEShaderTranspiler {
                 "shader '\(shaderName)' uses \(sortedSamplers.count) samplers; transpiler supports up to 4"
             )
         }
-        // Heuristic only — a fragment with no texCoord and no fragCoord is
-        // unusual but legal. We don't reject these; we just emit a single
-        // uv stage_in and trust the body. (No assertion needed.)
         _ = !varyings.isEmpty || preprocessedSource.contains("v_TexCoord") || preprocessedSource.contains("gl_FragCoord")
 
         let body = bodyLines.joined(separator: "\n")
-        // Reorder so the function/struct emission can sit above main(): we
-        // strip the original `void main()` body, transform it, and emit it
-        // last under the new fragment signature.
         guard let mainRange = Self.locateMain(in: body) else {
             throw WPEShaderCompilerError.translationFailed(
                 "shader '\(shaderName)' has no recognizable `void main()` entry point"
@@ -155,11 +125,6 @@ struct WPEShaderTranspiler {
             mainBody: translatedMain
         )
 
-        // Compute slot assignments mirroring the MSL packing emitted by
-        // `renderMSL`. Each uniform takes 1-4 slots (mat4 is 4); array
-        // uniforms take `arrayLength` slots so the dispatcher can write
-        // each element into its own scalar position without needing
-        // alignment trickery.
         var layout: [WPEUniformSlot] = []
         var nextSlot = 0
         for u in uniforms {
@@ -203,12 +168,9 @@ struct WPEShaderTranspiler {
 
     // MARK: - main() handling
 
-    /// Range covering everything from `void main()` through the matching
-    /// closing brace. We scan for the keyword, track brace depth, and
-    /// return the substring including the trailing brace.
+    /// Range covering everything from `void main()` through the matching closing brace.
     private static func locateMain(in source: String) -> Range<String.Index>? {
         guard let keywordRange = source.range(of: "void main") else { return nil }
-        // Find the opening brace after the keyword.
         guard let openBrace = source.range(of: "{", range: keywordRange.upperBound..<source.endIndex) else {
             return nil
         }
@@ -224,20 +186,13 @@ struct WPEShaderTranspiler {
         return keywordRange.lowerBound..<index
     }
 
-    /// Strip the `void main() { ... }` wrapper, transform the inner body,
-    /// and rebuild it as a Metal-friendly statement list. Replaces
-    /// `gl_FragColor = X;` with a stash + `return out_color;` at the end.
+    /// Strip the `void main() { ... }` wrapper and rebuild it as Metal-friendly statements.
     private static func translateMain(_ source: String) -> String {
         guard let openBrace = source.range(of: "{") else { return "" }
         guard let closeBrace = source.range(of: "}", options: .backwards) else { return "" }
         var inner = String(source[openBrace.upperBound..<closeBrace.lowerBound])
         inner = applySubstitutions(inner)
 
-        // Replace fragment-color writes with a stash variable. Accept all
-        // three names that show up in WPE shaders: the GLSL-builtin
-        // `gl_FragColor`, the preprocessor's `wpe_fragColor` rewrite, and
-        // the shader-prelude declaration `out_FragColor`. Append a final
-        // return statement.
         let usesGLOut = inner.contains("gl_FragColor")
         let usesWPEOut = inner.contains("wpe_fragColor")
         let usesOutFragColor = inner.contains("out_FragColor")
@@ -255,8 +210,6 @@ struct WPEShaderTranspiler {
                 + inner
                 + "\nreturn out_color;\n"
         } else {
-            // Some shaders return early or use no explicit out — guard with
-            // a default return so the Metal compiler doesn't complain.
             inner = inner + "\nreturn float4(0.0);\n"
         }
         return inner
@@ -264,14 +217,10 @@ struct WPEShaderTranspiler {
 
     // MARK: - Type / intrinsic substitutions
 
-    /// Apply token-level substitutions for the GLSL→MSL gap. Implementation
-    /// is conservative: we use word-boundary matches via regex so a name
-    /// like `vec2_radius` doesn't get caught by `vec2`. Order matters —
-    /// longer matches first so `mat3` doesn't half-match before `mat3x3`.
+    /// Apply token-level substitutions for the GLSL→MSL gap.
     private static func applySubstitutions(_ source: String) -> String {
         var s = source
 
-        // Type names. Apply 4 → 3 → 2 to avoid prefix collisions.
         for (glsl, msl) in [
             ("ivec4", "int4"), ("ivec3", "int3"), ("ivec2", "int2"),
             ("uvec4", "uint4"), ("uvec3", "uint3"), ("uvec2", "uint2"),
@@ -282,56 +231,20 @@ struct WPEShaderTranspiler {
             s = wordReplace(s, find: glsl, replace: msl)
         }
 
-        // Intrinsics WPE/GLSL → Metal. Most have identical names; the
-        // ones below differ.
         s = wordReplace(s, find: "frac", replace: "fract")
         s = wordReplace(s, find: "atan2", replace: "atan2")
         s = wordReplace(s, find: "lerp", replace: "mix")
 
-        // texture2D / texture is replaced with texture.sample(...). We
-        // leave the existing `texture(s, uv)` form alone because that's
-        // already produced by `WPEShaderPreprocessor`. Then convert it
-        // here in one pass.
         s = rewriteTextureCalls(s)
 
-        // GLSL's `inout T name` / `out T name` function-parameter qualifiers
-        // need to become Metal's `thread T& name`. The previous transpiler
-        // passed them through verbatim, so any helper using by-reference
-        // parameters (raymarch SDFs, normal accumulators, light pickers)
-        // failed Metal compilation with 'unknown type name inout'. Affects
-        // ~4 corpus scenes (lightshafts, tint, ps2_startup_screen, …).
         s = rewriteReferenceParameters(s)
 
-        // GLSL's `in T name` parameter qualifier is the default pass-by-value
-        // form and has no MSL keyword equivalent — it must be stripped or
-        // Metal rejects the declaration with `unknown type name 'in'`. Hit
-        // every helper signature in effects/blendgradient + related blend
-        // shaders (≥9 corpus scenes ran into this on `ApplyBlending`,
-        // `ApplyBlendingAlpha`, `mixSoftLight`, etc.), and the cascading
-        // "undeclared identifier" errors for `A`, `B`, `result`, `opacity`
-        // were all downstream of the failed function declaration.
         s = stripInParameterQualifier(s)
-
-        // gl_FragCoord → custom binding. We won't support FragCoord-driven
-        // shaders in the first pass — trip the compile error on use.
-        // (The transpiler still emits the source; Metal's compiler will
-        // reject `gl_FragCoord` and the executor surfaces translationFailed.)
 
         return s
     }
 
-    /// Rewrite GLSL `inout T name` / `out T name` parameter qualifiers
-    /// to Metal's `thread T& name`. Type names supported: anything
-    /// matching `[A-Za-z_][A-Za-z0-9_]*(?:\d+x\d+)?` — scalars, vector
-    /// types (`float3` after the substitution pass), matrix types
-    /// (`float3x3`), and user struct names.
-    ///
-    /// `out vec4 wpe_fragColor;` / `out vec4 out_FragColor;` top-level
-    /// declarations are stripped earlier in `translateFragment(_:_:)`,
-    /// so what reaches this stage is always inside a parameter list.
-    /// The regex also requires the next character after the parameter
-    /// name to be `,` or `)` to avoid catching field declarations like
-    /// `out vec4 someField` that might survive inside a struct.
+    /// Rewrite GLSL `inout T name` / `out T name` parameter qualifiers to Metal's `thread T& name`.
     private static func rewriteReferenceParameters(_ source: String) -> String {
         let pattern = #"\b(inout|out)\s+([A-Za-z_][A-Za-z0-9_]*(?:\d+x\d+)?)\s+([A-Za-z_][A-Za-z0-9_]*)(?=\s*[,)])"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else {
@@ -345,12 +258,7 @@ struct WPEShaderTranspiler {
         )
     }
 
-    /// Strip GLSL's `in T name` parameter qualifier (MSL has no equivalent —
-    /// `in` is the implicit default). Runs AFTER `rewriteReferenceParameters`
-    /// so `inout` matches `\b(inout|out)\b` and is consumed before this pass
-    /// can mistakenly slice off its `in` prefix. The lookahead `[,)]` keeps
-    /// the regex out of vertex-shader top-level `in vec3 a_Position;`
-    /// declarations and struct field lines that end in `;`.
+    /// Strip GLSL's `in T name` parameter qualifier (MSL has no equivalent — `in` is the implicit default).
     private static func stripInParameterQualifier(_ source: String) -> String {
         let pattern = #"\bin\s+([A-Za-z_][A-Za-z0-9_]*(?:\d+x\d+)?)\s+([A-Za-z_][A-Za-z0-9_]*)(?=\s*[,)])"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else {
@@ -364,15 +272,7 @@ struct WPEShaderTranspiler {
         )
     }
 
-    /// Scrub WPE fragment `out` declarations (`out vec4 out_FragColor;` and
-    /// `out vec4 wpe_fragColor;`, plus their already-substituted `float4`
-    /// twins) from anywhere in the source. The line-by-line `hasPrefix`
-    /// guard in `translateFragment(_:_:)` catches the canonical prelude
-    /// line, but is brittle against trailing comments, `precision`
-    /// statements on the same line, or layout qualifiers — any of which can
-    /// drop the line into the body verbatim and surface as Metal's
-    /// `unknown type name 'out'`. This pass uses a multiline regex so the
-    /// declaration is killed regardless of surrounding text.
+    /// Scrub WPE fragment `out` declarations (`out vec4 out_FragColor;` and `out vec4 wpe_fragColor;`, plus their already-substituted `float4` twins) from anywhere in the source.
     static func scrubFragmentOutDeclarations(_ source: String) -> String {
         let pattern = #"out\s+(vec4|float4)\s+(wpe_fragColor|out_FragColor)\s*;\s*"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else {
@@ -386,9 +286,7 @@ struct WPEShaderTranspiler {
         )
     }
 
-    /// Substring replacement that respects identifier boundaries. We
-    /// implement it without NSRegularExpression to keep the dependency
-    /// footprint small and the behavior trivially debuggable.
+    /// Substring replacement that respects identifier boundaries.
     private static func wordReplace(_ source: String, find: String, replace: String) -> String {
         guard !find.isEmpty else { return source }
         var result = ""
@@ -423,10 +321,7 @@ struct WPEShaderTranspiler {
         return result
     }
 
-    /// Rewrite `texture(<sampler>, <uv>)` calls (already canonicalised by
-    /// the preprocessor) into Metal `<sampler>.sample(linearSampler, uv)`
-    /// form. Naive but effective: scans for `texture(`, walks balanced
-    /// parens, finds the comma at depth 1, splits, and rebuilds.
+    /// Rewrite `texture(<sampler>, <uv>)` calls (already canonicalised by the preprocessor) into Metal `<sampler>.sample(linearSampler, uv)` form.
     private static func rewriteTextureCalls(_ source: String) -> String {
         var result = ""
         result.reserveCapacity(source.count)
@@ -434,8 +329,6 @@ struct WPEShaderTranspiler {
         let needle = "texture("
         while index < source.endIndex {
             if source[index...].hasPrefix(needle) {
-                // Identifier boundary check on the prior char so we don't
-                // catch e.g. `mytexture(`.
                 let priorOK: Bool
                 if index == source.startIndex {
                     priorOK = true
@@ -476,8 +369,7 @@ struct WPEShaderTranspiler {
 
     // MARK: - Render
 
-    /// Emit the final MSL source with the fixed parameter signature so
-    /// the dispatcher knows what to bind without doing runtime reflection.
+    /// Emit the final MSL source with the fixed parameter signature so the dispatcher knows what to bind without doing runtime reflection.
     private static func renderMSL(
         shaderName: String,
         uniforms: [WPEUniformDecl],
@@ -494,23 +386,12 @@ struct WPEShaderTranspiler {
             ""
         ]
 
-        // Stage_in mirrors the fixed `wpe_fullscreen_vertex` vertex shader
-        // exactly: one position + one uv. We do NOT reflect WPE varyings
-        // into stage_in fields because the vertex shader doesn't write
-        // them and Metal would reject the pipeline ("input not written by
-        // vertex shader"). Instead, the body aliases each varying to a
-        // local derived from `in.uv` (see below).
         out.append("struct WPEStageIn {")
         out.append("    float4 position [[position]];")
         out.append("    float2 uv;")
         out.append("};")
         out.append("")
 
-        // Uniform struct: a fixed-size float4 array. Each WPE uniform
-        // occupies 1-4 slots (mat4 = 4) so the Swift dispatcher can pack
-        // values into the buffer without knowing Metal's struct alignment
-        // rules. Aliases inside the function body re-expose each uniform
-        // by its declared name so the body keeps compiling unchanged.
         if !uniforms.isEmpty {
             out.append("struct WPEUniforms {")
             out.append("    float4 vals[\(WPEShaderTranspiler.uniformSlotMaximum)];")
@@ -518,27 +399,14 @@ struct WPEShaderTranspiler {
             out.append("")
         }
 
-        // Shared sampler at file scope so helper functions (declared above
-        // `main()`) can use it without each helper needing the sampler as
-        // an explicit parameter. WPE shaders routinely sample inside their
-        // helpers — `getNoise(float t) { return g_Texture1.sample(linearSampler, …); }`
-        // — and the previous local declaration left every such helper with
-        // `unknown identifier 'linearSampler'`. MSL allows `constexpr sampler`
-        // at file scope, so this is the cheapest fix that unblocks the
-        // sampler half of the helper-scope problem. Helper-scope `g_TextureN`
-        // still fails until SPIRV-Cross lands (file-scope textures are not
-        // legal in MSL).
         out.append("constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);")
         out.append("")
 
-        // Helpers (transpiled).
         if !helpers.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             out.append(helpers)
             out.append("")
         }
 
-        // Fixed signature. Always 4 texture slots so the dispatcher binds
-        // a fallback texture (the primary sample) into unused slots.
         var signature = ["fragment float4 wpe_translated_fragment("]
         signature.append("    WPEStageIn in [[stage_in]],")
         if !uniforms.isEmpty {
@@ -551,18 +419,9 @@ struct WPEShaderTranspiler {
         signature.append(") {")
         out.append(signature.joined(separator: "\n"))
 
-        // For each sampler in the original source, alias the declared
-        // name (e.g. `g_Texture0`) to the corresponding `texN` parameter
-        // so the body code keeps compiling unchanged. Same for uniforms —
-        // alias to `u.<name>`.
         for (slot, sampler) in samplers.enumerated() {
             out.append("    auto \(sampler.name) = tex\(slot);")
         }
-        // Alias each varying to a local derived from `in.uv`. WPE varyings
-        // are almost always interpolated texture coordinates; the
-        // simplest faithful translation is to give every one the same
-        // base UV (with zero-padding for vec3/vec4 carriers like
-        // `varying vec4 v_TexCoord` that pack two UV sets).
         for varying in varyings {
             if varying.name == "uv" { continue }
             switch varying.metalType {
@@ -578,19 +437,9 @@ struct WPEShaderTranspiler {
                 out.append("    \(varying.metalType) \(varying.name) = \(varying.metalType)(0);")
             }
         }
-        // Per-uniform alias. Pull the right slice out of the float4 array
-        // and reconstruct the original type so the function body keeps
-        // referring to `g_TintColor` etc. as if they were native uniforms.
         var slotCursor = 0
         for u in uniforms {
-            // Array uniforms come first because their packing is element-
-            // per-slot regardless of underlying scalar/vec type — matches
-            // the dispatcher's pack path exactly.
             if let arrayLength = u.arrayLength {
-                // Build a stack-allocated array and copy each element from
-                // the appropriate slot. MSL doesn't allow runtime indexing
-                // of `vec4.xyzw` components in all paths, so we keep one
-                // element per slot at the cost of a few extra bytes.
                 let elementType: String
                 switch u.type {
                 case "vec2": elementType = "float2"
@@ -647,9 +496,7 @@ struct WPEShaderTranspiler {
         return out.joined(separator: "\n")
     }
 
-    /// Map `g_Texture0` / `g_Texture1` etc. to a slot index by parsing the
-    /// trailing digit. Anything else returns `nil` and gets sorted to the
-    /// end (and therefore the highest unused slot).
+    /// Map `g_Texture0` / `g_Texture1` etc. to a slot index by parsing the trailing digit.
     private static func textureSlot(for name: String) -> Int? {
         let prefix = "g_Texture"
         guard name.hasPrefix(prefix) else { return nil }
@@ -689,7 +536,6 @@ struct WPESamplerDecl: Equatable {
     let comment: String?
 
     static func parse(line: String) -> Self? {
-        // `uniform sampler2D g_Texture0;`  (optional `// {...}` trailer)
         guard line.hasPrefix("uniform ") else { return nil }
         let body = line.dropFirst("uniform ".count)
         guard body.hasPrefix("sampler2D ") else { return nil }
@@ -713,7 +559,6 @@ struct WPEUniformDecl: Equatable {
     static func parse(line: String) -> Self? {
         guard line.hasPrefix("uniform ") else { return nil }
         let body = String(line.dropFirst("uniform ".count))
-        // Skip sampler2D — handled separately. (Sampler is detected first.)
         if body.hasPrefix("sampler") { return nil }
         let trimmed = body.trimmingCharacters(in: .whitespaces)
         guard let semicolon = trimmed.firstIndex(of: ";") else { return nil }
@@ -721,8 +566,6 @@ struct WPEUniformDecl: Equatable {
         let tokens = decl.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
         guard tokens.count >= 2 else { return nil }
         let type = tokens[0]
-        // `float g_AudioSpectrum32Left[32]` shows up as a single token because
-        // there's no space, but `float foo [32]` could too. Handle both.
         let nameToken = tokens[1...].joined()
         var name = nameToken
         var arrayLength: Int?
@@ -765,8 +608,6 @@ struct WPEVaryingDecl: Equatable {
     let metalType: String
 
     static func parse(line: String) -> Self? {
-        // Both `varying <type> <name>;` and the modern `in <type> <name>;`
-        // (some WPE forks use the latter). Treat both the same.
         let prefix: String
         if line.hasPrefix("varying ") {
             prefix = "varying "

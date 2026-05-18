@@ -54,7 +54,6 @@ struct BookmarkDisplayNameCacheTests {
         }
         cache.record(Data(), name: "should-not-store")
         #expect(cache.name(for: Data()) == nil)
-        // No mutation → no Observation callback.
         #expect(counter.value == 0)
     }
 
@@ -89,11 +88,8 @@ struct BookmarkDisplayNameCacheTests {
     @Test("resolveIfNeeded is idempotent — same bookmark resolved once")
     func resolveIfNeededIsIdempotent() {
         let cache = BookmarkDisplayNameCache()
-        // First call records nil (data isn't a real bookmark), which moves
-        // the entry into the unresolved set so subsequent calls short-circuit.
         cache.resolveIfNeeded(bookmarkA)
         #expect(cache.name(for: bookmarkA) == nil)
-        // After a manual record, resolveIfNeeded must not overwrite it.
         cache.record(bookmarkA, name: "manual.mp4")
         cache.resolveIfNeeded(bookmarkA)
         #expect(cache.name(for: bookmarkA) == "manual.mp4")
@@ -104,7 +100,6 @@ struct BookmarkDisplayNameCacheTests {
         let cache = BookmarkDisplayNameCache()
         cache.record(bookmarkA, name: "kept.mp4")
         cache.prime(bookmarks: [bookmarkA, bookmarkB, Data()])
-        // bookmarkA is preserved, bookmarkB resolved-as-failed, empty ignored.
         #expect(cache.name(for: bookmarkA) == "kept.mp4")
         #expect(cache.name(for: bookmarkB) == nil)
     }

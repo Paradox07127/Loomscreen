@@ -36,9 +36,7 @@ final class WPEImportTracker {
         lastErrors.removeValue(forKey: screenID)
     }
 
-    /// Returns the new generation. Callers compare against this value via
-    /// `isCurrentGeneration(_:for:)` after any async hop to ensure their
-    /// continuation still represents the most recent user intent.
+    /// Returns the new generation.
     func bumpGeneration(for screenID: CGDirectDisplayID) -> Int {
         let next = (generations[screenID] ?? 0) &+ 1
         generations[screenID] = next

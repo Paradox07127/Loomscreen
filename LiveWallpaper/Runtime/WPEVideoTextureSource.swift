@@ -297,9 +297,7 @@ final class WPEVideoTextureSource: @unchecked Sendable {
 extension WPEVideoTextureSource: WPEDynamicTextureSource {}
 
 private extension NSLock {
-    /// Helper avoids shadowing the protocol method `withLock` SwiftSyntax may
-    /// already have on newer SDKs. Renamed to keep this type usable on both
-    /// macOS 13 and macOS 26.
+    /// Helper avoids shadowing the protocol method `withLock` SwiftSyntax may already have on newer SDKs.
     func withLockGuard<T>(_ body: () throws -> T) rethrows -> T {
         lock()
         defer { unlock() }

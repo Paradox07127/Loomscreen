@@ -245,15 +245,11 @@ private struct KeyCaptureMonitor: NSViewRepresentable {
             stopMonitoring()
             localMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 guard let self else { return event }
-                // Ignore standalone modifier presses; require at least one
-                // non-modifier key.
                 let keyCode = UInt32(event.keyCode)
                 let modifiers = self.modifierSet(from: event.modifierFlags)
                 let binding = GlobalShortcutBinding(keyCode: keyCode, modifiers: modifiers)
                 self.onCapture(binding)
                 deactivate()
-                // Swallow the event so the captured combo doesn't leak into
-                // whatever text field has focus.
                 return nil
             }
         }

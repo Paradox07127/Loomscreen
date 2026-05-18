@@ -115,7 +115,6 @@ struct WallpaperEngineImportServiceTests {
         let markerURL = extractedURL.deletingLastPathComponent().appendingPathComponent("marker.txt")
         try Data("marker".utf8).write(to: markerURL)
 
-        // Bump mtime so the cache fingerprint mismatches and forces re-extract.
         try await Task.sleep(nanoseconds: 1_500_000_000)
         let changed = makePackage(entries: [PackageEntrySpec("video.mp4", [0x02, 0x03])])
         try changed.write(to: fixture.folderURL.appendingPathComponent("scene.pkg"), options: .atomic)
@@ -162,9 +161,6 @@ struct WallpaperEngineImportServiceTests {
 
     @Test("Scene with scene.pkg + valid scene.json + image asset returns ready scene content")
     func sceneWithPackageAndAssetReturnsReady() async throws {
-        // The synthetic scene.json declares one image layer; we ship a real
-        // PNG inside the same scene.pkg so the import service classifies it
-        // as `.imageOnly`.
         let pngBytes = try makeFixturePNG(width: 4, height: 4)
         let sceneJSON = """
         {
@@ -307,10 +303,6 @@ struct WallpaperEngineImportServiceTests {
             Issue.record("Expected .scene content, got \(content)")
             return
         }
-        // The image layer renders but the particle layer doesn't — this is
-        // exactly the case the plan's `.degraded` tier is meant to signal so
-        // the UI can warn the user even though the image-only renderer
-        // happily mounts the SKScene.
         #expect(descriptor.capabilityTier == .degraded)
     }
 
@@ -350,11 +342,6 @@ struct WallpaperEngineImportServiceTests {
 
     @Test("Sibling Workshop folder satisfies the dependency check (Solution A re-import flow)")
     func siblingFolderSubscribeRecognised() async throws {
-        // Simulates: user imports project A → sees missing dep B → opens
-        // Steam, subscribes B → B downloads next to A under
-        // `~/Documents/Live Wallpapers/<appid>/<wid>/` → re-import A. The
-        // dependency gate must now treat B as satisfied even though our
-        // own cache hasn't seen B yet.
         let pngBytes = try makeFixturePNG(width: 4, height: 4)
         let sceneJSON = """
         {
@@ -390,8 +377,6 @@ struct WallpaperEngineImportServiceTests {
         )
         defer { fixture.cleanup() }
 
-        // Plant a sibling workshop folder for the dependency at the parent
-        // of the importing folder (the Steam Workshop root layout).
         let workshopRoot = fixture.folderURL.deletingLastPathComponent()
         let depDir = workshopRoot.appendingPathComponent("123456789012", isDirectory: true)
         try FileManager.default.createDirectory(at: depDir, withIntermediateDirectories: true)
@@ -426,7 +411,6 @@ struct WallpaperEngineImportServiceTests {
         )
         defer { fixture.cleanup() }
 
-        // Empty sibling directory — must NOT be considered a satisfied dep.
         let workshopRoot = fixture.folderURL.deletingLastPathComponent()
         let depDir = workshopRoot.appendingPathComponent("123456789012", isDirectory: true)
         try FileManager.default.createDirectory(at: depDir, withIntermediateDirectories: true)
@@ -449,7 +433,6 @@ struct WallpaperEngineImportServiceTests {
         )
         defer { fixture.cleanup() }
 
-        // bin/x64/plugin.dll — flat-only scan would miss this.
         let nestedBin = fixture.folderURL.appendingPathComponent("bin/x64", isDirectory: true)
         try FileManager.default.createDirectory(at: nestedBin, withIntermediateDirectories: true)
         try Data([0x4D, 0x5A]).write(to: nestedBin.appendingPathComponent("plugin.dll"))
@@ -465,9 +448,6 @@ struct WallpaperEngineImportServiceTests {
 
     @Test("Phase 2.0 WPEOrigin plist (no dependency metadata fields) decodes lossily")
     func phase20OriginMigrates() throws {
-        // Encode a current-shape origin then strip the new fields to mimic a
-        // payload written by Phase 2.0. Decode must succeed with both
-        // defaults applied.
         let origin = WPEOrigin(
             workshopID: "legacy",
             title: "Legacy",
@@ -495,9 +475,6 @@ struct WallpaperEngineImportServiceTests {
 
     @Test("Scene with all dependencies satisfied skips the dependency gate")
     func sceneWithSatisfiedDependenciesPassesGate() async throws {
-        // Subscribe scenario: dependency cache pre-populated, scene.pkg exists
-        // and parses cleanly → import service must reach the renderer instead
-        // of returning unsupported.
         let pngBytes = try makeFixturePNG(width: 4, height: 4)
         let sceneJSON = """
         {
@@ -572,8 +549,6 @@ struct WallpaperEngineImportServiceTests {
             return
         }
         #expect(origin.requiresWindowsPlugin)
-        // Plugin gate runs BEFORE dependency check; ensure we never extracted
-        // scene.pkg (cacheRelativePath would be non-nil if we did).
         #expect(origin.cacheRelativePath == nil)
     }
 
@@ -597,9 +572,6 @@ struct WallpaperEngineImportServiceTests {
 
         let project = try WallpaperEngineProject.read(from: folderURL)
 
-        // Numeric strings + flexibly-decoded ints survive; "not-a-workshop-id"
-        // and "1.0.0" are filtered. Order is sorted because the heuristic
-        // unions IDs into a Set before emitting.
         #expect(project.dependencyWorkshopIDs == ["123456789012", "987654321098"])
         #expect(!project.requiresWindowsPlugin)
     }
@@ -635,9 +607,6 @@ struct WallpaperEngineImportServiceTests {
             Issue.record("Expected .unsupported, got \(result)")
             return
         }
-        // Cache extraction still happened for the unsupported scene — the
-        // origin records the cache path so a future user-driven re-attempt
-        // (e.g. workshop ships a fix) can re-evaluate without re-extracting.
         #expect(origin.cacheRelativePath == "wpe-cache/\(fixture.workshopID)")
         #expect(origin.resourceLocation == .cache)
     }
@@ -707,8 +676,6 @@ struct WallpaperEngineImportServiceTests {
         }
         """
         try Data(sceneJSON.utf8).write(to: cacheURL.appendingPathComponent("scene.json"))
-        // Drop a custom shader file in the cache so preflight detects the
-        // `.customShaderSource` flag during reclassification.
         let shaderDir = cacheURL.appendingPathComponent("shaders", isDirectory: true)
         try fileManager.createDirectory(at: shaderDir, withIntermediateDirectories: true)
         try Data("void main() {}".utf8).write(to: shaderDir.appendingPathComponent("cached.frag"))
@@ -737,9 +704,6 @@ struct WallpaperEngineImportServiceTests {
         #expect(descriptor.entryFile == "scene.json")
         #expect(descriptor.capabilityTier == .unsupported)
         #expect(descriptor.dependencyWorkshopIDs == [])
-        // Preflight reclassification picks up the custom shader source on
-        // the cached side too — the descriptor should carry the same flag
-        // set the first-import path would have produced.
         #expect(descriptor.preflightTier == .degradedPlayable)
         #expect(descriptor.preflightFeatureFlags == [.customShaderSource])
     }
@@ -806,8 +770,6 @@ struct WallpaperEngineImportServiceTests {
         try Data(manifest.utf8).write(to: folderURL.appendingPathComponent("project.json"))
         try Data([0x47, 0x49, 0x46]).write(to: folderURL.appendingPathComponent("preview.gif"))
 
-        // Pre-populate the synthetic cache root with sibling workshop IDs so
-        // dependency-gating tests can simulate "user has already subscribed".
         for depID in prefilledCacheWorkshopIDs {
             let depDir = cacheURL.appendingPathComponent(depID, isDirectory: true)
             try fileManager.createDirectory(at: depDir, withIntermediateDirectories: true)
@@ -832,8 +794,7 @@ struct WallpaperEngineImportServiceTests {
         )
     }
 
-    /// Produces a real (decodable) PNG so `SceneResourceResolver.exists`
-    /// returns true for image-only capability detection.
+    /// Produces a real (decodable) PNG so `SceneResourceResolver.exists` returns true for image-only capability detection.
     private func makeFixturePNG(width: Int, height: Int) throws -> Data {
         guard let context = CGContext(
             data: nil,

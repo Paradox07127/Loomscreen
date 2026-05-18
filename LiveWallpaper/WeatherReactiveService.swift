@@ -117,13 +117,10 @@ final class WeatherReactiveService {
     }
 
     func refresh() {
-        // Bypass the IP cache so an explicit refresh always hits the network
-        // when IP-geo is the active source.
         startFetch(invalidateIPCache: true)
     }
 
-    /// Single-flight fetch — supersedes any in-flight fetch so refresh
-    /// taps don't pile up overlapping requests.
+    /// Single-flight fetch — supersedes any in-flight fetch so refresh taps don't pile up overlapping requests.
     private func startFetch(invalidateIPCache: Bool) {
         if invalidateIPCache {
             locationProvider.invalidateIPGeolocationCache()

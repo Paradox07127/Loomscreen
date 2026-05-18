@@ -12,7 +12,6 @@ enum WallpaperPolicyEngine {
             return .suspended
         }
 
-        // Battery pause is applied by ScreenManager, not encoded as quality.
         return .quality
     }
 

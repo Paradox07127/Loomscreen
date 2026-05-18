@@ -25,11 +25,7 @@ extension WPEOrigin {
         return WPEPathSafety.resourceURL(root: sourceFolder, relativePath: entryFile)
     }
 
-    /// Best-effort check that a security-scoped video/folder bookmark still
-    /// points at this origin's WPE backing location. Used by
-    /// `WPEOriginReconciler` to clear `wpeOrigin` when the user replaces
-    /// the wallpaper with non-WPE content via the standard Video / HTML
-    /// pickers.
+    /// Best-effort check that a security-scoped video/folder bookmark still points at this origin's WPE backing location.
     public static func matchesBookmark(_ bookmarkData: Data, origin: WPEOrigin) -> Bool {
         switch origin.resourceLocation {
         case .cache:
@@ -61,8 +57,6 @@ extension WPEOrigin {
         let expectedURL = rootURL
             .appendingPathComponent(cacheRel)
             .standardizedFileURL
-        // Defense-in-depth: reject persisted paths that escape root after
-        // standardization, even if they passed the textual safety check.
         guard WPEPathSafety.contains(expectedURL, in: rootURL) else {
             return false
         }
@@ -80,9 +74,6 @@ extension WPEOrigin {
         let sourceURL = source.standardizedFileURL.resolvingSymlinksInPath()
         let sourcePath = sourceURL.path
 
-        // Branch by `originalType` so a sibling file inside the same WPE folder
-        // does not falsely keep the badge attached. Web stays folder-anchored;
-        // video must match its declared `entryFile` exactly.
         switch origin.originalType {
         case .video:
             guard let expected = origin.sourceEntryURL else { return false }

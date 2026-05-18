@@ -1,10 +1,3 @@
-//
-//  LiveWallpaperUITestsLaunchTests.swift
-//  LiveWallpaperUITests
-//
-//  Created by Taijia Liang on 2/21/25.
-//
-
 import XCTest
 
 final class LiveWallpaperUITestsLaunchTests: XCTestCase {

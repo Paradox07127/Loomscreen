@@ -67,7 +67,6 @@ final class AppleAerialsLibrary {
     func refresh() async {
         guard let directoryURL = resolveAuthorizedDirectory() else { return }
 
-        // scanPlan / fileExists need this scope active.
         let didStartAccess = directoryURL.startAccessingSecurityScopedResource()
         guard didStartAccess else {
             let message = "Cannot access Apple Aerials directory. Grant access again."
@@ -91,13 +90,6 @@ final class AppleAerialsLibrary {
 
         guard let plan = Self.scanPlan(for: directoryURL) else {
             guard scanGeneration == myGeneration else { return }
-            // Don't drop the saved bookmark for this — the directory is
-            // still reachable, just doesn't contain a recognised Apple
-            // wallpaper layout. The user may have a transient situation
-            // (macOS mid-update, files temporarily moved) or they may want
-            // to re-pick the directory via the "Reconnect" button. Either
-            // way, retaining the bookmark is non-destructive: the user can
-            // re-pick with the system file panel from the error view.
             let message = "The selected folder doesn't contain Apple wallpapers. Try ~/Library/Application Support/com.apple.wallpaper/aerials/."
             Logger.warning(message, category: .fileAccess)
             lastScanError = message
@@ -170,10 +162,6 @@ extension AppleAerialsLibrary {
         do {
             let resolution = try resolver(bookmarkData)
             if resolution.isStale {
-                // Apple recommends re-creating the bookmark from the
-                // resolved URL when isStale=true — the URL is still good
-                // for this run; the stored Data needs a fresh copy so
-                // future relaunches don't trip the flag again.
                 Logger.info(
                     "Apple Aerials directory bookmark is stale; refreshing in place",
                     category: .fileAccess
@@ -185,11 +173,6 @@ extension AppleAerialsLibrary {
             isAuthorized = true
             return resolution.url
         } catch {
-            // Resolution failed — could be transient (sandbox not warmed,
-            // home directory moved by Migration Assistant). Surface the
-            // error but keep the saved bookmark so the next launch /
-            // explicit retry can resolve it; the user can still hit
-            // "Reconnect" or "Forget" to take control.
             let message = "Failed to resolve Apple Aerials directory bookmark: \(error.localizedDescription)"
             Logger.error(message, category: .fileAccess)
             isAuthorized = false
@@ -245,8 +228,6 @@ extension AppleAerialsLibrary {
             fileManager: fileManager
         )
 
-        // Per-file bookmark failures must NOT collapse the entire scan —
-        // otherwise a single quarantined .mov would hide the whole library.
         let assets: [AerialAsset] = videoURLs.compactMap { url in
             let id = url.deletingPathExtension().lastPathComponent
             let entry = metadata[id]
@@ -280,9 +261,7 @@ extension AppleAerialsLibrary {
     nonisolated static func scanPlan(for selectedDirectory: URL, fileManager: FileManager = .default) -> ScanPlan? {
         let last = selectedDirectory.lastPathComponent
 
-        // Direct hits — leaf directories that contain .mov files.
         if last == "videos" {
-            // Tahoe: com.apple.wallpaper/aerials/videos/
             return ScanPlan(root: selectedDirectory, recursive: false)
         }
         if last == "4KSDR240FPS" {
@@ -292,7 +271,6 @@ extension AppleAerialsLibrary {
             return ScanPlan(root: selectedDirectory, recursive: true)
         }
         if last == "aerials" {
-            // Tahoe: com.apple.wallpaper/aerials → look for videos/ subdir.
             let videos = selectedDirectory.appendingPathComponent("videos", isDirectory: true)
             if directoryExists(videos, fileManager: fileManager) {
                 return ScanPlan(root: videos, recursive: false)
@@ -303,7 +281,6 @@ extension AppleAerialsLibrary {
             return ScanPlan(root: selectedDirectory, recursive: true)
         }
         if last == "com.apple.wallpaper" {
-            // Tahoe: parent of aerials/videos.
             let videos = selectedDirectory
                 .appendingPathComponent("aerials", isDirectory: true)
                 .appendingPathComponent("videos", isDirectory: true)
@@ -313,7 +290,6 @@ extension AppleAerialsLibrary {
             return nil
         }
 
-        // Parent of a recognized layout.
         let tahoeVideos = selectedDirectory
             .appendingPathComponent("aerials", isDirectory: true)
             .appendingPathComponent("videos", isDirectory: true)
@@ -336,7 +312,6 @@ extension AppleAerialsLibrary {
             return ScanPlan(root: codec4K, recursive: false)
         }
 
-        // idleassetsd top-level (Customer/4KSDR240FPS may live two levels down).
         let idleassetsCustomer = selectedDirectory
             .appendingPathComponent("com.apple.idleassetsd", isDirectory: true)
             .appendingPathComponent("Customer", isDirectory: true)
@@ -461,11 +436,9 @@ extension AppleAerialsLibrary {
     }
 
     nonisolated private static func entriesURL(for selectedDirectory: URL, fileManager: FileManager) -> URL? {
-        // Tahoe layout: aerials/manifest/entries.json.
         let last = selectedDirectory.lastPathComponent
 
         if last == "videos" {
-            // videos/ → ../manifest/entries.json
             let manifestEntries = selectedDirectory
                 .deletingLastPathComponent()
                 .appendingPathComponent("manifest", isDirectory: true)
@@ -490,7 +463,6 @@ extension AppleAerialsLibrary {
             return directManifest
         }
 
-        // Legacy idleassetsd layout.
         if last == "Customer" {
             return selectedDirectory.appendingPathComponent("entries.json", isDirectory: false)
         }

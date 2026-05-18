@@ -75,8 +75,6 @@ public final class BookmarkStore {
     }
 
     /// Re-reads the persistence layer and replaces the in-memory list.
-    /// Used after Import Configuration restores `WallpaperBookmarks.v1`
-    /// from a backup bundle.
     public func reload() {
         bookmarks = persistence.load()
     }
@@ -90,23 +88,12 @@ public final class BookmarkStore {
         Logger.info("Bookmark renamed: type \(bookmarks[index].wallpaperType.rawValue)", category: .ui)
     }
 
-    /// True when an equivalent content is already saved (so UI can disable
-    /// the "Save" button instead of producing duplicates).
+    /// True when an equivalent content is already saved (so UI can disable the "Save" button instead of producing duplicates).
     public func contains(_ content: WallpaperContent) -> Bool {
         bookmarks.contains { $0.content == content }
     }
 
-    /// Returns the first existing bookmark whose content (and Workshop
-    /// origin, when present) points at the same source. Used by the Save
-    /// UI to refuse exact-source duplicates and to surface "Already saved
-    /// as 'X'" instead of silently disabling the button.
-    ///
-    /// Dedup intentionally ignores `playbackSettings`. Legacy bookmarks
-    /// saved before the settings expansion have `nil` settings; comparing
-    /// full equality there would let a same-source duplicate slip through.
-    /// One bookmark per source matches the "save / overwrite" mental model
-    /// users have for shortcuts — to change a bookmark's settings, delete
-    /// it and re-save from the current screen state.
+    /// Returns the first existing bookmark whose content (and Workshop origin, when present) points at the same source.
     public func equivalentBookmark(
         content: WallpaperContent,
         wpeOrigin: WPEOrigin? = nil

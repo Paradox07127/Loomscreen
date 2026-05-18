@@ -22,8 +22,6 @@ struct WPECorpusCompatibilityTests {
         guard let scanner = try Self.makeScanner() else { return }
         let report = try await scanner.scan()
 
-        // The minimum any populated corpus should exhibit. Real-world
-        // workshops are dominated by image objects.
         #expect((report.objectKindCounts[.image] ?? 0) > 0)
     }
 
@@ -32,8 +30,6 @@ struct WPECorpusCompatibilityTests {
         guard let scanner = try Self.makeScanner() else { return }
         let report = try await scanner.scan()
 
-        // The names list is the gating ledger for Phase 2 shader work; it
-        // shouldn't be empty for any scene-bearing corpus.
         if report.scenePackageCount > 0 {
             #expect(!report.topShaderNames.isEmpty)
         }
@@ -44,8 +40,6 @@ struct WPECorpusCompatibilityTests {
         guard let scanner = try Self.makeScanner() else { return }
         let report = try await scanner.scan()
 
-        // Most modern WPE scene packs ship custom shaders; if 0/N have any,
-        // the scanner is wrong (or the corpus is unusual).
         if report.scenePackageCount > 0 {
             #expect(report.scenesWithShaderSources >= 0)
         }

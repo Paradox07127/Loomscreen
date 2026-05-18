@@ -85,7 +85,6 @@ extension WallpaperContent: Codable {
                 self = .html(source: source, config: config)
                 return
             }
-            // Legacy: `case html(String)` synthesised as {"_0": "..."}.
             if let legacyString = try? htmlNested.decode(String.self, forKey: .legacyString) {
                 self = .html(source: HTMLSource(legacyString: legacyString), config: HTMLConfig())
                 return

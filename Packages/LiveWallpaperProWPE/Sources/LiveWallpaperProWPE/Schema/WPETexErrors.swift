@@ -35,8 +35,7 @@ public enum WPETexFormat: Int, Sendable, Equatable {
         }
     }
 
-    /// Expected raw byte count for a given mip dimension (no compression
-    /// padding). Block-compressed mips round up to multiples of 4.
+    /// Expected raw byte count for a given mip dimension (no compression padding).
     public func expectedByteCount(width: Int, height: Int) -> Int {
         if let bpp = bytesPerPixel {
             return max(width, 1) * max(height, 1) * bpp
@@ -295,9 +294,7 @@ public struct DecodedRGBAImage: Sendable, Equatable {
 }
 
 extension DecodedRGBAImage {
-    /// Builds a non-premultiplied RGBA8 `CGImage`. Uses
-    /// `kCGImageAlphaLast` so SpriteKit's `SKTexture(cgImage:)` reads the
-    /// alpha channel correctly without a swizzle pass.
+    /// Builds a non-premultiplied RGBA8 `CGImage`.
     public func makeCGImage() throws -> CGImage {
         let bitsPerComponent = 8
         let bitsPerPixel = 32

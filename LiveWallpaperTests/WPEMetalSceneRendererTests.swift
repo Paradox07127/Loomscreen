@@ -100,10 +100,6 @@ struct WPEMetalSceneRendererTests {
             entryFile: "scene.json",
             capabilityTier: .imageOnly
         )
-        // Pointing the renderer at a directory that does not exist forces
-        // `entryResolver.resolveExistingFileURL` to throw `.fileMissing`,
-        // exercising the H1 diagnostic mapping path without depending on a
-        // real WPE scene fixture.
         let nonExistentRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("WPEMetalDiagnostics-\(UUID().uuidString)", isDirectory: true)
 
@@ -232,20 +228,12 @@ struct WPEMetalSceneRendererTests {
         let diagnostic = try #require(renderer.loadDiagnostics)
         #expect(diagnostic.layerName == "Hero Layer")
         #expect(diagnostic.errorDescription.contains("Hero Layer"))
-        // The user-facing copy must avoid raw engineering jargon.
         #expect(!diagnostic.errorDescription.lowercased().contains("texture"))
         #expect(!diagnostic.errorDescription.lowercased().contains("shader"))
     }
 
     @Test("Texture candidate generator treats dotted basenames as extension-less")
     func textureCandidatesHandlesDottedBasenames() throws {
-        // Three corpus failures (`fate saber sleeping`, `Real time Persona 5`,
-        // `Frieren ... Vinyl Disc`) all reference asset names with internal
-        // dots — `uhdpaper.com-600@5@f`, `91VDetfVuOL._UF1000,...`,
-        // `pngfind.com-vinyl-disc-png-4611544`. `NSString.pathExtension`
-        // reports the trailing component as an extension, which previously
-        // short-circuited the `materials/`-prefix fallback and surfaced
-        // `missing file` despite the file living at the expected location.
         let device = try #require(MTLCreateSystemDefaultDevice())
         let fixture = try MetalSceneFixture.solidColorScene()
         defer { fixture.cleanup() }
@@ -257,7 +245,6 @@ struct WPEMetalSceneRendererTests {
             device: device
         )
 
-        // Pre-fix behaviour returned `[path]` only for any of these.
         let dotted = renderer.textureCandidates(
             for: "anime-girl-sleeping-saber-fate-grand-order-4k-wallpaper-uhdpaper.com-600@5@f"
         )
@@ -273,11 +260,9 @@ struct WPEMetalSceneRendererTests {
         #expect(underscored.contains("materials/91VDetfVuOL._UF1000,1000_QL80_DpWeblab_.png"))
         #expect(underscored.contains("materials/91VDetfVuOL._UF1000,1000_QL80_DpWeblab_.tex"))
 
-        // Real extensions still short-circuit — no spurious materials/ fallback.
         #expect(renderer.textureCandidates(for: "logo.png") == ["logo.png"])
         #expect(renderer.textureCandidates(for: "atlas.tex") == ["atlas.tex"])
 
-        // No-extension bare names keep the existing 5-candidate fallback.
         let bare = renderer.textureCandidates(for: "halo")
         #expect(bare.contains("materials/halo.tex"))
         #expect(bare.contains("materials/halo.png"))
@@ -478,9 +463,6 @@ private struct MetalPixel {
 
 private extension MTLTexture {
     func readPixel(x: Int, y: Int) -> MetalPixel? {
-        // RGBA8 unorm and rgba8 unorm-sRGB share the same byte layout — the
-        // sRGB variant simply tags the texture so hardware applies gamma on
-        // sample/store. Both are fine for raw byte readback.
         let supportedFormats: [MTLPixelFormat] = [.rgba8Unorm, .rgba8Unorm_srgb]
         guard supportedFormats.contains(pixelFormat),
               x >= 0, x < width,

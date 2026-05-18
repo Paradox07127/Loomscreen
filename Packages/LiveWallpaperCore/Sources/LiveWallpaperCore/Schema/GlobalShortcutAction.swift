@@ -40,17 +40,15 @@ public enum GlobalShortcutAction: String, CaseIterable, Codable, Identifiable, S
         }
     }
 
-    /// Default binding shipped on first launch. Returning `nil` means the
-    /// action is unbound until the user opts in — useful for future actions
-    /// where we'd rather not steal a key combo by default.
+    /// Default binding shipped on first launch.
     public static func defaultBinding(for action: GlobalShortcutAction) -> GlobalShortcutBinding? {
         switch action {
         case .togglePlayback:
-            return GlobalShortcutBinding(keyCode: 49, modifiers: [.control, .shift]) // ⌃⇧Space
+            return GlobalShortcutBinding(keyCode: 49, modifiers: [.control, .shift])
         case .nextWallpaper:
-            return GlobalShortcutBinding(keyCode: 124, modifiers: [.control, .shift]) // ⌃⇧→
+            return GlobalShortcutBinding(keyCode: 124, modifiers: [.control, .shift])
         case .toggleMute:
-            return GlobalShortcutBinding(keyCode: 46, modifiers: [.control, .shift]) // ⌃⇧M
+            return GlobalShortcutBinding(keyCode: 46, modifiers: [.control, .shift])
         }
     }
 }
@@ -92,8 +90,7 @@ public struct GlobalShortcutBinding: Codable, Equatable, Hashable, Sendable {
         return symbols + GlobalShortcutBinding.keyName(for: keyCode)
     }
 
-    /// Maps a small set of common keys to friendly names; falls back to
-    /// `Key \(code)` for unmapped codes so debug rendering still works.
+    /// Maps a small set of common keys to friendly names; falls back to `Key \(code)` for unmapped codes so debug rendering still works.
     public static func keyName(for keyCode: UInt32) -> String {
         switch keyCode {
         case 49: return "Space"
@@ -126,8 +123,6 @@ public struct GlobalShortcutBinding: Codable, Equatable, Hashable, Sendable {
     }
 
     private static func printableCharacter(for keyCode: UInt32) -> Character? {
-        // Common ANSI alphabetic + digit virtual key codes. Anything outside
-        // this table falls through to the numeric placeholder above.
         let map: [UInt32: Character] = [
             0: "a", 1: "s", 2: "d", 3: "f", 4: "h", 5: "g", 6: "z", 7: "x",
             8: "c", 9: "v", 11: "b", 12: "q", 13: "w", 14: "e", 15: "r",

@@ -34,7 +34,6 @@ struct WPETexDecoderTests {
     func missingInfoBlock() {
         var buffer = Data()
         appendMagic(&buffer, magic: "TEXV0005")
-        // No follow-up blocks. End of stream → missingInfoBlock.
         let result = WPETexDecoder().decode(data: buffer)
         guard case .failure(.missingInfoBlock) = result else {
             Issue.record("Expected missingInfoBlock, got \(result)")
@@ -98,9 +97,6 @@ struct WPETexDecoderTests {
 
     @Test("Unknown format code surfaces unsupportedFormat with the offending code")
     func unsupportedFormatCode() {
-        // Format 99 doesn't map to any WPETexFormat — the decoder must
-        // reject with the precise integer rather than a generic decode
-        // error so the UI can show "Format 99 not yet supported".
         let buffer = makeImage(width: 2, height: 2, formatCode: 99, payload: Data(count: 16))
         let result = WPETexDecoder().decode(data: buffer)
         guard case .failure(.unsupportedFormat(let code)) = result else {
@@ -112,14 +108,10 @@ struct WPETexDecoderTests {
 
     @Test("LZ4-compressed mip payload decompresses to the expected uncompressed size")
     func lz4InflateOnSizeMismatch() throws {
-        // Build an RGBA8888 mip and LZ4-compress its payload; the decoder
-        // should detect the size mismatch and fall back to LZ4 inflate.
         let width = 4
         let height = 4
         let raw = Data((0..<(width * height * 4)).map { UInt8(($0 * 7) & 0xff) })
         let compressed = try lz4RawCompress(raw)
-        // Don't bother synthesising a real lz4-compressed buffer if the
-        // platform refuses to compress; just guard the test with a check.
         try #require(compressed.count != raw.count,
                      "LZ4 must yield a different byte count to exercise the inflate fallback")
 
@@ -159,11 +151,8 @@ struct WPETexDecoderTests {
 
     // MARK: - Fixture helpers
 
-    /// Synthesises a TEXV0005 / TEXI0001 / TEXB0003 buffer carrying a
-    /// uniform-colour RGBA8888 mipmap. Test-only — production code never
-    /// fabricates `.tex` files.
+    /// Synthesises a TEXV0005 / TEXI0001 / TEXB0003 buffer carrying a uniform-colour RGBA8888 mipmap.
     private func makeRGBA8888TestImage(width: Int, height: Int) -> Data {
-        // Solid orange so the decoded image is recognisable in debug.
         let pixel: [UInt8] = [0xff, 0x80, 0x33, 0xff]
         var raw = Data()
         raw.reserveCapacity(width * height * 4)
@@ -184,23 +173,21 @@ struct WPETexDecoderTests {
         isLZ4Compressed: Bool = false,
         decompressedByteCount: Int? = nil
     ) -> Data {
-        // Mirrors RePKG / linux-wallpaperengine's TEXV0005 → TEXI0001 →
-        // TEXB0003 layout.
         var buffer = Data()
         appendMagic(&buffer, magic: "TEXV0005")
         appendMagic(&buffer, magic: "TEXI0001")
         appendInt32(&buffer, Int32(formatCode))
-        appendUInt32(&buffer, 0)              // flags
-        appendInt32(&buffer, Int32(width))    // textureWidth
-        appendInt32(&buffer, Int32(height))   // textureHeight
-        appendInt32(&buffer, Int32(width))    // imageWidth
-        appendInt32(&buffer, Int32(height))   // imageHeight
-        appendInt32(&buffer, 0)               // unkInt0
+        appendUInt32(&buffer, 0)
+        appendInt32(&buffer, Int32(width))
+        appendInt32(&buffer, Int32(height))
+        appendInt32(&buffer, Int32(width))
+        appendInt32(&buffer, Int32(height))
+        appendInt32(&buffer, 0)
 
         appendMagic(&buffer, magic: "TEXB0003")
-        appendInt32(&buffer, 1)               // imageCount
-        appendInt32(&buffer, -1)              // FreeImage FIF_UNKNOWN
-        appendInt32(&buffer, 1)               // mipmapCount
+        appendInt32(&buffer, 1)
+        appendInt32(&buffer, -1)
+        appendInt32(&buffer, 1)
         appendInt32(&buffer, Int32(width))
         appendInt32(&buffer, Int32(height))
         appendUInt32(&buffer, isLZ4Compressed ? 1 : 0)
@@ -216,21 +203,21 @@ struct WPETexDecoderTests {
         appendMagic(&buffer, magic: "TEXV0005")
         appendMagic(&buffer, magic: "TEXI0001")
         appendInt32(&buffer, Int32(WPETexFormat.rgba8888.rawValue))
-        appendUInt32(&buffer, 2)              // clamp UVs
-        appendInt32(&buffer, 1)               // textureWidth
-        appendInt32(&buffer, 1)               // textureHeight
-        appendInt32(&buffer, 1)               // imageWidth
-        appendInt32(&buffer, 1)               // imageHeight
-        appendInt32(&buffer, 0)               // unkInt0, present in TEXI0001
+        appendUInt32(&buffer, 2)
+        appendInt32(&buffer, 1)
+        appendInt32(&buffer, 1)
+        appendInt32(&buffer, 1)
+        appendInt32(&buffer, 1)
+        appendInt32(&buffer, 0)
 
         appendMagic(&buffer, magic: "TEXB0003")
-        appendInt32(&buffer, 1)               // imageCount
-        appendInt32(&buffer, 13)              // FreeImage FIF_PNG
-        appendInt32(&buffer, 1)               // mipmapCount
-        appendInt32(&buffer, 1)               // mip width
-        appendInt32(&buffer, 1)               // mip height
-        appendUInt32(&buffer, 0)              // not LZ4-compressed
-        appendUInt32(&buffer, 0)              // decompressed byte count unused for image payload
+        appendInt32(&buffer, 1)
+        appendInt32(&buffer, 13)
+        appendInt32(&buffer, 1)
+        appendInt32(&buffer, 1)
+        appendInt32(&buffer, 1)
+        appendUInt32(&buffer, 0)
+        appendUInt32(&buffer, 0)
         appendUInt32(&buffer, UInt32(payload.count))
         buffer.append(payload)
         return buffer
@@ -253,8 +240,8 @@ struct WPETexDecoderTests {
     private func mp4HeaderPayload() -> Data {
         Data([
             0x00, 0x00, 0x00, 0x18,
-            0x66, 0x74, 0x79, 0x70, // ftyp
-            0x6d, 0x70, 0x34, 0x32, // mp42
+            0x66, 0x74, 0x79, 0x70,
+            0x6d, 0x70, 0x34, 0x32,
             0x00, 0x00, 0x00, 0x00,
             0x6d, 0x70, 0x34, 0x32,
             0x69, 0x73, 0x6f, 0x6d
@@ -263,7 +250,7 @@ struct WPETexDecoderTests {
 
     private func appendMagic(_ data: inout Data, magic: String) {
         data.append(contentsOf: magic.utf8)
-        data.append(0x00) // NUL terminator
+        data.append(0x00)
     }
 
     private func appendInt32(_ data: inout Data, _ value: Int32) {
@@ -276,9 +263,7 @@ struct WPETexDecoderTests {
         withUnsafeBytes(of: &le) { data.append(contentsOf: $0) }
     }
 
-    /// Compresses `data` using LZ4 raw. Mirrors what the decoder uses on
-    /// the inflate side. Throws when the platform refuses (e.g. data is
-    /// already smaller than the worst-case LZ4 frame size).
+    /// Compresses `data` using LZ4 raw.
     private func lz4RawCompress(_ data: Data) throws -> Data {
         let dstCapacity = data.count + 64
         var dst = Data(count: dstCapacity)

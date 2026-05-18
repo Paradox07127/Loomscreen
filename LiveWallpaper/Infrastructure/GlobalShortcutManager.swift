@@ -43,8 +43,6 @@ final class GlobalShortcutManager {
 
         let overrides = SettingsManager.shared.loadGlobalSettings().globalShortcuts
         for action in GlobalShortcutAction.allCases {
-            // Three-way decision: explicit nil → unbound; missing key →
-            // ship default; explicit binding → use it.
             let binding: GlobalShortcutBinding?
             if overrides.keys.contains(action.rawAction) {
                 binding = overrides[action.rawAction] ?? nil
@@ -86,8 +84,6 @@ final class GlobalShortcutManager {
     }
 
     private func observePreferenceChanges() {
-        // Idempotent — `start()` may be called more than once during the
-        // app lifecycle (e.g. tests), and we don't want to stack observers.
         guard preferenceObserver == nil else { return }
         preferenceObserver = NotificationCenter.default.addObserver(
             forName: .globalShortcutsDidChange,
@@ -122,9 +118,7 @@ final class GlobalShortcutManager {
 
     // MARK: - Event Handler
 
-    /// Returns true when the handler is installed and the registration
-    /// pipeline can proceed. Logging on failure makes silent breakage
-    /// visible during diagnostic dumps.
+    /// Returns true when the handler is installed and the registration pipeline can proceed.
     private func installEventHandlerIfNeeded() -> Bool {
         guard eventHandler == nil else { return true }
 
@@ -178,9 +172,6 @@ final class GlobalShortcutManager {
         case .togglePlayback:
             manager.togglePlayback()
         case .nextWallpaper:
-            // Advance the playlist on whichever screen is under the mouse;
-            // falls back to the primary screen so single-display Macs still
-            // work without precise pointer position.
             let target = screenUnderCursor(in: manager) ?? manager.screens.first
             if let target { manager.advancePlaylist(for: target) }
         case .toggleMute:
@@ -189,12 +180,9 @@ final class GlobalShortcutManager {
     }
 
     private func toggleGlobalMute(via manager: ScreenManager) {
-        // Read the most recent persisted muted-state to decide direction.
-        // Per-screen state can drift, so flip every screen towards the same
-        // target — feels predictable to keyboard users.
         let configurations = SettingsManager.shared.loadConfigurations()
         let isAnyUnmuted = configurations.contains { !$0.muted }
-        let newMuted = isAnyUnmuted // flip: if any unmuted → mute all
+        let newMuted = isAnyUnmuted
         for screen in manager.screens {
             manager.updateMuted(newMuted, for: screen)
         }
@@ -208,9 +196,7 @@ final class GlobalShortcutManager {
         return manager.screens.first { $0.id == screenIDFromNSScreen(nsScreen) }
     }
 
-    /// `NSScreen` exposes the display ID through a private-ish key on its
-    /// device description dict. Returns 0 for a missing key, which never
-    /// matches a real screen — caller falls back to the primary screen.
+    /// `NSScreen` exposes the display ID through a private-ish key on its device description dict.
     private func screenIDFromNSScreen(_ screen: NSScreen) -> CGDirectDisplayID {
         let key = NSDeviceDescriptionKey("NSScreenNumber")
         return (screen.deviceDescription[key] as? NSNumber)?.uint32Value ?? 0

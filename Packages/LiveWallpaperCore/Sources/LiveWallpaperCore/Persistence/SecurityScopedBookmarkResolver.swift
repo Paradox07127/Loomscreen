@@ -87,19 +87,7 @@ public struct SecurityScopedBookmarkResolver: Sendable {
         self.refreshData = refreshData
     }
 
-    /// Resolves the stored bookmark with security scope, detecting and
-    /// transparently refreshing stale bookmarks. Returned `Resolved.url`
-    /// is NOT scope-active — caller must use `withScopedAccess` (or call
-    /// `startAccessingSecurityScopedResource` directly) before any file
-    /// I/O on it.
-    ///
-    /// Behaviour:
-    /// - `nil` input → `.missing`
-    /// - resolve throws → `.resolutionFailed`
-    /// - `isStale == false` → `.success` with input data
-    /// - `isStale == true` + refresh succeeds → `.success` with new data, target.save invoked
-    /// - `isStale == true` + refresh fails → `.success` with input data (one-shot grace),
-    ///   logged so the next failure surfaces in the log file
+    /// Resolves the stored bookmark with security scope, detecting and transparently refreshing stale bookmarks.
     public func resolve(_ data: Data?, target: Target) -> Result<Resolved, Failure> {
         guard let data else {
             return .failure(.missing)
@@ -121,11 +109,6 @@ public struct SecurityScopedBookmarkResolver: Sendable {
             return .success(Resolved(url: url, bookmarkData: data, didRefresh: false))
         }
 
-        // Stale — try to recreate. Apple recommends starting the scope so
-        // bookmarkData can read the URL's resource values; balanced stop on
-        // exit. Refresh failure isn't fatal: the URL is still good for THIS
-        // run via Apple's grace, so we return the existing data and let the
-        // next launch surface re-grant if it really cannot recover.
         var refreshedData: Data?
         Self.withScopedAccess(url) { _ in
             do {
@@ -144,10 +127,6 @@ public struct SecurityScopedBookmarkResolver: Sendable {
             }
         }
 
-        // Return the refreshed bookmark so in-process callers that copy
-        // `bookmarkData` into their own state (e.g. `DiscoveredProject`)
-        // don't continue circulating the stale blob and burn another grace
-        // use. Falls back to the input on refresh failure.
         return .success(Resolved(
             url: url,
             bookmarkData: refreshedData ?? data,
@@ -155,10 +134,7 @@ public struct SecurityScopedBookmarkResolver: Sendable {
         ))
     }
 
-    /// Runs `work` with security scope started; the stop call is balanced
-    /// in `defer` even if `work` throws. Returns the closure's result; the
-    /// passed-in `Bool` tells the closure whether scope actually started
-    /// (some URLs inside the app container resolve fine without it).
+    /// Runs `work` with security scope started; the stop call is balanced in `defer` even if `work` throws.
     @discardableResult
     public static func withScopedAccess<R>(
         _ url: URL,

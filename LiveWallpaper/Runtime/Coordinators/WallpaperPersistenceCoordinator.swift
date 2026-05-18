@@ -40,36 +40,25 @@ final class WallpaperPersistenceCoordinator {
         self.notifyWallpaperSessionChanged = notifyWallpaperSessionChanged
     }
 
-    /// Canonical write path. Primes the display-name cache for any new
-    /// bookmark in the configuration, persists, then notifies observers
-    /// (the inspector / sidebar listen for
-    /// `.wallpaperConfigurationDidChange`).
+    /// Canonical write path.
     func save(_ configuration: ScreenConfiguration) {
         primeDisplayNames(from: configuration)
         store.save(configuration)
         postChange(for: configuration.screenID)
     }
 
-    /// Canonical delete path. Pairs the store removal with the same
-    /// configuration-changed notification so observers reload state for the
-    /// affected screen.
+    /// Canonical delete path.
     func remove(for screenID: CGDirectDisplayID) {
         store.remove(for: screenID)
         postChange(for: screenID)
     }
 
-    /// Bulk-prime the display-name cache for a configuration without
-    /// rewriting the store. Used by the launch-time reload pass that walks
-    /// existing configurations.
+    /// Bulk-prime the display-name cache for a configuration without rewriting the store.
     func primeDisplayNames(from configuration: ScreenConfiguration) {
         bookmarkDisplayNameCache.prime(bookmarks: Self.videoBookmarks(in: configuration))
     }
 
-    /// Drops configurations whose local resource bookmark no longer
-    /// resolves. Tears down the runtime session for each removed screen
-    /// (via callback) and broadcasts a single session-state-changed if
-    /// anything was removed. Returns the removed screen IDs so callers can
-    /// log or refresh additional state.
+    /// Drops configurations whose local resource bookmark no longer resolves.
     @discardableResult
     func pruneInvalidConfigurations() -> [CGDirectDisplayID] {
         let removed = store.pruneInvalidResourceConfigurations(
@@ -83,8 +72,7 @@ final class WallpaperPersistenceCoordinator {
         return removed
     }
 
-    /// Read-only validation report. Walks every stored screen ID and asks
-    /// `SettingsManager` to verify it. No persistence side effects.
+    /// Read-only validation report.
     func validateAll() -> (valid: Int, invalid: Int) {
         var validCount = 0
         var invalidCount = 0
@@ -105,11 +93,7 @@ final class WallpaperPersistenceCoordinator {
         return (validCount, invalidCount)
     }
 
-    /// Deferred to the next main-actor tick so subscribers run outside the
-    /// current SwiftUI reconcile pass. The cache update inside
-    /// `store.save(_:)` is already synchronous, so readers see the new
-    /// configuration before this notification fires — the hop only delays
-    /// the secondary "redraw" signal, not the data.
+    /// Deferred to the next main-actor tick so subscribers run outside the current SwiftUI reconcile pass.
     private func postChange(for screenID: CGDirectDisplayID) {
         Task { @MainActor in
             NotificationCenter.default.post(
@@ -121,9 +105,6 @@ final class WallpaperPersistenceCoordinator {
     }
 
     /// All video-bookmark `Data` values referenced by a configuration.
-    /// Used to prime the display-name cache when a configuration is saved
-    /// or bulk-reloaded. Walks active wallpaper, the saved fallback,
-    /// playlist bookmarks, and schedule slots (deduped).
     private static func videoBookmarks(in configuration: ScreenConfiguration) -> [Data] {
         var result: [Data] = []
         var seen: Set<Data> = []

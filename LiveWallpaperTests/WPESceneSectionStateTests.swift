@@ -44,7 +44,6 @@ struct WPESceneSectionStateTests {
         #expect(WPESceneDetailView.fallbackReason(for: unsupportedFormat) == .texUnsupportedFormat(code: 8))
         #expect(WPESceneDetailView.fallbackReason(for: unsupportedContainer) == .texContainerUnsupported(magic: "TEXV9999"))
         if case .texDecodeFailed = WPESceneDetailView.fallbackReason(for: truncated) {
-            // OK
         } else {
             Issue.record("Truncated tex should map to .texDecodeFailed")
         }
@@ -104,8 +103,6 @@ struct WPESceneSectionStateTests {
             origin: makeOrigin(),
             reason: .sceneResourceMissing
         )
-        // Reason equality short-circuits the heavier text-based comparison
-        // (the strings live inside private SwiftUI computed props).
         #expect(parse.reason != missing.reason)
         #expect(parse.reason == .sceneParseFailed("missing camera"))
     }

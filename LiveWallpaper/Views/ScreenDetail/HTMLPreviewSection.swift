@@ -23,9 +23,6 @@ struct HTMLPreviewSection: View {
                 .clipShape(RoundedRectangle(cornerRadius: 16))
                 .shadow(color: Color.black.opacity(0.15), radius: 10, x: 0, y: 4)
 
-            // Top-left info pill — mirrors `VideoInformationOverlay`'s
-            // placement on the video preview so both wallpaper types share
-            // the same "what is this" reading order.
             VStack {
                 HStack {
                     HTMLInformationOverlay(source: source, config: config)
@@ -144,9 +141,6 @@ enum HTMLPreviewKey {
         case .folder(let bookmark, let index):
             return "html.folder::" + String(bookmark.base64EncodedString().prefix(40)) + "::" + index
         case .inline(let html):
-            // Inline HTML strings rarely change in practice; hashing keeps
-            // the cache key short while still invalidating when the user
-            // edits the markup.
             return "html.inline::" + String(html.hashValue)
         }
     }
@@ -175,9 +169,6 @@ enum HTMLPreviewKey {
                 cacheKey: cacheKey
             )
         case .inline:
-            // Inline HTML cannot be loaded by WKWebView from a URL without
-            // first writing it to disk; skip preview for now rather than
-            // shipping a temp-file dance with its own cleanup story.
             return nil
         }
     }
@@ -246,11 +237,6 @@ struct HTMLInformationOverlay: View {
             }
             .frame(maxWidth: 200, alignment: .leading)
 
-            // Always-on state badges (mirrors video's resolution/FPS chunks):
-            // give URLs a JS readout so the overlay isn't just "path"
-            // when nothing special is configured. Local file/folder sources
-            // typically ship inert HTML — JS state there is rarely
-            // load-bearing, so we still flag only the rare "off" case.
             if case .url = source {
                 if config.allowJavaScript {
                     tag("JS")
@@ -298,9 +284,6 @@ struct HTMLInformationOverlay: View {
     private func identifier(for source: HTMLSource) -> String {
         switch source {
         case .url(let url):
-            // Prefer host so a long path doesn't blow out the capsule.
-            // Falls back to the full string only when the URL has no
-            // host (rare — relative URLs slip through here).
             return url.host ?? url.absoluteString
         case .file, .folder:
             return source.displayName

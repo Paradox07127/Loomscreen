@@ -37,8 +37,6 @@ struct WallpaperEnginePackage: Sendable, Equatable {
 
         for index in 0..<Int(entryCount) {
             let nameLength = try data.wpeReadU32(cursor: &cursor)
-            // 255 matches the upstream RePKG reader cap. Generous for every
-            // UTF-8 path observed in real workshops.
             guard nameLength >= 1 && nameLength <= 255 else {
                 throw WPEPackageError.invalidEntryName(index: index)
             }
@@ -65,11 +63,7 @@ struct WallpaperEnginePackage: Sendable, Equatable {
         return package
     }
 
-    /// Streaming variant of `parseIndex(of:)`. Reads only the header bytes
-    /// from the given handle so multi-hundred-MB packages don't have to be
-    /// memory-mapped just to discover their entry table. The handle's offset
-    /// is left at the start of the payload (i.e. equal to `dataStart`),
-    /// ready for `extractAll(streamingFrom:to:)` to seek per-entry.
+    /// Streaming variant of `parseIndex(of:)`.
     static func parseIndex(streamingFrom handle: FileHandle) throws -> Self {
         let totalLength: UInt64
         do {
@@ -130,8 +124,6 @@ struct WallpaperEnginePackage: Sendable, Equatable {
         }
 
         let dataStart = UInt64(cursor)
-        // Validate every entry stays within the actual file length without
-        // mapping the payload — bounds checks mirror `parseIndex(of:)`.
         for entry in entries {
             let (absoluteStart, startOverflow) = dataStart.addingReportingOverflow(entry.dataOffset)
             let (absoluteEnd, endOverflow) = absoluteStart.addingReportingOverflow(entry.dataSize)
@@ -149,10 +141,7 @@ struct WallpaperEnginePackage: Sendable, Equatable {
         return Self(magic: magic, entries: entries, dataStart: dataStart)
     }
 
-    /// Streaming companion to `extractAll(from:to:)`. Reads each entry from
-    /// the supplied handle in fixed-size chunks and writes it to the
-    /// inflight directory without ever holding the full pkg in memory.
-    /// Same atomicity + crash-recovery behaviour as the Data-based variant.
+    /// Streaming companion to `extractAll(from:to:)`.
     func extractAll(streamingFrom handle: FileHandle, to rootURL: URL) throws {
         let fileManager = FileManager.default
         let parentURL = rootURL.deletingLastPathComponent()
@@ -175,7 +164,7 @@ struct WallpaperEnginePackage: Sendable, Equatable {
         var movedExistingRoot = false
 
         do {
-            let chunkSize = 1 << 20  // 1 MiB
+            let chunkSize = 1 << 20
             for entry in entries {
                 let targetURL = inflightURL.appendingPathComponent(entry.name)
                 let standardizedTarget = targetURL.standardizedFileURL
@@ -239,15 +228,7 @@ struct WallpaperEnginePackage: Sendable, Equatable {
         buffer.append(chunk)
     }
 
-    /// Atomic extraction: writes into `<root>.inflight` first, then swaps via
-    /// `<root>.replaced` so a partially extracted directory is never observed
-    /// at `rootURL`. Rolls back on failure.
-    ///
-    /// Crash recovery: if a previous extract crashed AFTER moving the live
-    /// `rootURL` into `.replaced` but BEFORE moving `.inflight` into place,
-    /// the next launch finds `rootURL` missing while `.replaced` still holds
-    /// the last-good cache. We restore it before any cleanup so the
-    /// pre-existing wallpaper isn't lost just because we tried to replace it.
+    /// Atomic extraction: writes into `<root>.inflight` first, then swaps via `<root>.replaced` so a partially extracted directory is never observed at `rootURL`.
     func extractAll(from data: Data, to rootURL: URL) throws {
         let fileManager = FileManager.default
         let parentURL = rootURL.deletingLastPathComponent()
@@ -257,8 +238,6 @@ struct WallpaperEnginePackage: Sendable, Equatable {
 
         try fileManager.createDirectory(at: parentURL, withIntermediateDirectories: true)
 
-        // Restore must succeed before cleanup runs, otherwise the next line
-        // would silently delete the only good copy.
         if !fileManager.fileExists(atPath: rootURL.path),
            fileManager.fileExists(atPath: backupURL.path) {
             try fileManager.moveItem(at: backupURL, to: rootURL)
@@ -306,10 +285,7 @@ struct WallpaperEnginePackage: Sendable, Equatable {
         }
     }
 
-    /// Streams a single entry's bytes from the supplied handle. The corpus
-    /// scanner uses this to read `scene.json` (or any single material/effect
-    /// JSON) without paying the cost of extracting the whole package or
-    /// memory-mapping a multi-hundred-MB blob.
+    /// Streams a single entry's bytes from the supplied handle.
     func readEntry(_ entry: Entry, from handle: FileHandle) throws -> Data {
         let absoluteStart = dataStart + entry.dataOffset
         do {
@@ -325,8 +301,7 @@ struct WallpaperEnginePackage: Sendable, Equatable {
         return data
     }
 
-    /// Convenience: locate an entry by case-insensitive name match. Returns
-    /// nil when no entry matches — callers decide whether that's an error.
+    /// Convenience: locate an entry by case-insensitive name match.
     func entry(named name: String) -> Entry? {
         let target = name.lowercased()
         return entries.first { $0.name.lowercased() == target }

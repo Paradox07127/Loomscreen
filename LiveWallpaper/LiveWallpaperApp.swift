@@ -87,9 +87,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         Logger.notice("Application starting", category: .startup)
         if let hint = LogFileSink.shared.tailCommandHint {
-            // Print as a notice so the next-most-recent line in Console.app
-            // gives maintainers a copy-pastable follow command without
-            // having to guess the sandbox container path.
             Logger.notice("Tail the runtime log → \(hint)", category: .startup)
         }
 
@@ -100,10 +97,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let manager = ScreenManager(startupOptions: startupPlan.screenManagerOptions)
         screenManager = manager
 
-        // Tracker-rule precompile is a Pro-side warmup — it pays for itself
-        // only when HTML tracker-blocking is reachable. The rule list still
-        // compiles lazily on first use, so skipping this preserves
-        // functionality and saves ~tens of ms at cold start.
         if manager.featureCatalog.isEnabled(.html) {
             HTMLWallpaperView.precompileTrackerRules()
         }
@@ -112,8 +105,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             manager.refreshScreens()
         }
 
-        // Light async pass: drops configurations whose video bookmark cannot
-        // be resolved any more. Replaces the legacy heavy reloadAllScreens.
         if startupPlan.screenManagerOptions.restoreSavedWallpapers {
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(1))
@@ -155,9 +146,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Dock Visibility
 
-    /// Reads the persisted preference and applies the matching activation
-    /// policy. `.regular` shows the app in Dock + Cmd-Tab; `.accessory`
-    /// hides it back into the menu bar (current default).
+    /// Reads the persisted preference and applies the matching activation policy.
     private func applyDockVisibility() {
         let showInDock = SettingsManager.shared.loadGlobalSettings().showInDock
         let policy: NSApplication.ActivationPolicy = showInDock ? .regular : .accessory
@@ -180,10 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         true
     }
 
-    /// Drains the async persistence actor before exit so the last UI commits
-    /// (typically a toggle the user flipped just before Cmd-Q) are durable
-    /// on disk. `.terminateLater` keeps AppKit from tearing the process
-    /// down until the flush task signals back.
+    /// Drains the async persistence actor before exit so the last UI commits (typically a toggle the user flipped just before Cmd-Q) are durable on disk.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !isWaitingForTerminationFlush else { return .terminateNow }
         isWaitingForTerminationFlush = true
@@ -219,10 +205,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Opens settings, optionally selecting a display from the menu bar.
-    /// `initialAddWallpaperPromptKind`, when non-nil, is consumed by
-    /// `ContentView.onAppear` to launch the matching picker — this replaces
-    /// the racy `dismiss + DispatchQueue.async + post` chain that the menu
-    /// bar previously used to hand off picker requests.
     func showSettings(
         initialScreenID: CGDirectDisplayID? = nil,
         initialAddWallpaperPromptKind: String? = nil,

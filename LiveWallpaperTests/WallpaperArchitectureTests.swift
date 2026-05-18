@@ -274,9 +274,6 @@ struct PlaylistEntryIdentityTests {
     func entryIDUsesStableBookmarkEncoding() {
         let bookmark = Data([0x01, 0x02, 0x03, 0x04])
 
-        // Identity is the bookmark — `isPrimary` / `isPlaying` are entry
-        // properties, not part of identity. Swapping the star marker animates
-        // as an update instead of a delete + insert.
         let primary = PlaylistEntry(bookmark: bookmark, isPrimary: true, isPlaying: false, name: "Primary")
         let extra = PlaylistEntry(bookmark: bookmark, isPrimary: false, isPlaying: false, name: "Extra")
         #expect(primary.id == "AQIDBA==")
@@ -381,8 +378,6 @@ struct HTMLFolderURLSchemeTests {
         let handler = FolderURLSchemeHandler()
         handler.folderURL = fixture.folder
 
-        // Path traversal must be blocked even when nonce is valid: simulate a
-        // subresource request originating from the active top-level document.
         let task = CapturingURLSchemeTask(
             url: URL(string: "livewallpaper://wallpaper/%2e%2e/secret.txt")!,
             mainDocumentURL: makeTopLevelURL(handler: handler)
@@ -422,8 +417,6 @@ struct HTMLFolderURLSchemeTests {
         let handler = FolderURLSchemeHandler()
         handler.folderURL = fixture.folder
 
-        // Asset URL pretends to be a subresource of the active top-level
-        // document so it bypasses the nonce gate (real subresources do).
         let task = CapturingURLSchemeTask(
             url: URL(string: "livewallpaper://wallpaper/large.bin")!,
             mainDocumentURL: makeTopLevelURL(handler: handler)
@@ -431,7 +424,6 @@ struct HTMLFolderURLSchemeTests {
 
         handler.webView(WKWebView(), start: task)
 
-        // Detached worker; wait until streaming completes.
         let deadline = ContinuousClock.now.advanced(by: .seconds(2))
         while task.didFinishCallCount == 0, task.failure == nil, ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(20))
@@ -444,9 +436,7 @@ struct HTMLFolderURLSchemeTests {
         #expect(task.receivedData.reduce(0) { $0 + $1.count } == payload.count)
     }
 
-    /// Builds a `livewallpaper://wallpaper/index.html?n=<nonce>` URL using the
-    /// handler's current session nonce — used as a `mainDocumentURL` stand-in
-    /// so subresource requests skip the top-level nonce gate.
+    /// Builds a `livewallpaper://wallpaper/index.html?n=<nonce>` URL using the handler's current session nonce — used as a `mainDocumentURL` stand-in so subresource requests skip the top-level nonce gate.
     private func makeTopLevelURL(handler: FolderURLSchemeHandler) -> URL {
         let nonce = handler.currentSessionNonce ?? ""
         return URL(string: "livewallpaper://wallpaper/index.html?n=\(nonce)")!
@@ -498,8 +488,6 @@ struct HTMLWallpaperMouseInteractionTests {
         defer { session.cleanup() }
 
         #expect(session.wallpaperWindow?.ignoresMouseEvents == false)
-        // 抬到桌面图标层之上 (`desktopIcon + 1`) 是绕过 macOS Sonoma
-        // "Click wallpaper to reveal desktop" 手势的关键 — 与 Plash 的 DesktopWindow 一致。
         #expect((session.wallpaperWindow?.level.rawValue ?? 0) == CGWindowLevelForKey(.desktopIconWindow) + 1)
         #expect(session.wallpaperWindow?.canBecomeKey == true)
     }
@@ -598,7 +586,6 @@ struct WallpaperVideoPlayerStartupPolicyTests {
         player.play()
         #expect(player.shouldAutoplayWhenReady)
     }
-
 
     @Test("Frame-rate limit requested before AVPlayer item exists is retained")
     func frameRateLimitBeforeItemReadinessIsRetained() {
@@ -802,8 +789,6 @@ struct WallpaperPolicyEngineTests {
             isHiddenByFullScreen: false
         )
 
-        // Battery no longer produces a degraded-animation state — the UX is
-        // static-on-battery, driven by `shouldPauseForPower` when enabled.
         #expect(profile == .quality)
         #expect(!WallpaperPolicyEngine.shouldPauseForPower(
             globalSettings: settings,
@@ -922,8 +907,6 @@ struct PlaylistPolicyTests {
 
     @Test("Sequential cursor advances 0 → 1 → 2 → 0")
     func sequentialCursorAdvances() {
-        // Covers the regression where the old primary-based API stalled after
-        // one rotation when primary coincided with a playlist entry.
         let count = 3
 
         let step1 = PlaylistPolicy.nextCursor(currentCursor: 0, playlistCount: count, shuffle: false)
@@ -943,8 +926,6 @@ struct PlaylistPolicyTests {
 
     @Test("Shuffle excludes the currently playing cursor")
     func shuffleExcludesCurrentCursor() {
-        // randomIndex returns the current cursor → policy must bump to a
-        // different index so we never replay the same video.
         let next = PlaylistPolicy.nextCursor(
             currentCursor: 2,
             playlistCount: 4,
@@ -958,8 +939,6 @@ struct PlaylistPolicyTests {
 
     @Test("Stale cursor (past end) normalizes before advancing")
     func staleCursorNormalizes() {
-        // Persisted cursor 7 against a 3-entry playlist → normalize to 7 % 3 = 1,
-        // advance to 2.
         let next = PlaylistPolicy.nextCursor(currentCursor: 7, playlistCount: 3, shuffle: false)
         #expect(next == 2)
     }
@@ -1030,9 +1009,7 @@ struct PlaylistPolicyTests {
         let primary = Data([0x01])
         let extra1 = Data([0x02])
         let extra2 = Data([0x03])
-        // After user reorders: [extra1, primary, extra2]
         let combined = [extra1, primary, extra2]
-        // Was playing primary → cursor should follow primary to its new index 1.
         #expect(PlaylistPolicy.resolveCursor(activeBookmark: primary, in: combined) == 1)
     }
 
@@ -1085,8 +1062,7 @@ struct ScreenConfigurationHelpersTests {
 
         #expect(config.savedVideoBookmarkData == newBookmark)
         #expect(config.activeWallpaper == .video(bookmarkData: newBookmark))
-        #expect(config.playlistCursorIndex == 0) // reset so cursor isn't stale
-        // Everything else preserved:
+        #expect(config.playlistCursorIndex == 0)
         #expect(config.particleEffect == .snow)
         #expect(config.effectConfig.saturation == 0.7)
         #expect(config.scheduleSlots?.count == ScheduleSlot.defaultSlots.count)
@@ -1130,7 +1106,7 @@ struct ScreenConfigurationHelpersTests {
         let updated = config.withUpdatedActiveBookmark(refreshed)
         #expect(updated.savedVideoBookmarkData == refreshed)
         #expect(updated.activeWallpaper == .video(bookmarkData: refreshed))
-        #expect(updated.playlistBookmarks == [Data([0x02])]) // untouched
+        #expect(updated.playlistBookmarks == [Data([0x02])])
     }
 
     @Test("withUpdatedActiveBookmark refreshes the playlist slot it matches and leaves primary alone")
@@ -1143,7 +1119,6 @@ struct ScreenConfigurationHelpersTests {
             playlistBookmarks: [Data([0x02]), playlistEntry],
             playlistCursorIndex: 2
         )
-        // Simulate "currently playing playlist[1]" — what advancePlaylist does.
         config.activeWallpaper = .video(bookmarkData: playlistEntry)
 
         let refreshed = Data([0xFE])
@@ -1165,7 +1140,6 @@ struct ScreenConfigurationHelpersTests {
                 ScheduleSlot(startHour: 6, endHour: 12, videoBookmarkData: scheduledBookmark, label: "Morning")
             ]
         )
-        // Simulate "currently playing the morning schedule slot".
         config.activeWallpaper = .video(bookmarkData: scheduledBookmark)
 
         let refreshed = Data([0xFE])
@@ -1370,7 +1344,6 @@ struct SchedulePolicyTests {
             ScheduleSlot(startHour: 14, endHour: 18, label: "B"),
         ]
         let gap = SchedulePolicy.findFreeRange(in: slots, minHours: 2)
-        // Free segments: 0–6 (6h), 9–14 (5h), 18–24 (6h). Longest is 0–6 or 18–24, both 6h.
         #expect(gap != nil)
         #expect((gap?.end ?? 0) - (gap?.start ?? 0) >= 5)
     }
@@ -1378,7 +1351,6 @@ struct SchedulePolicyTests {
     @Test("findFreeRange: returns nil when no segment satisfies minHours")
     func findFreeRangeReturnsNil() {
         let slots = [ScheduleSlot(startHour: 0, endHour: 23, label: "AlmostFull")]
-        // Only 23–24 = 1h free; minHours: 2 cannot fit.
         #expect(SchedulePolicy.findFreeRange(in: slots, minHours: 2) == nil)
     }
 

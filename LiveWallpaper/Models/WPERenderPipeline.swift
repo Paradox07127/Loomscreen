@@ -35,12 +35,7 @@ struct WPEShaderProgram: Equatable, Sendable {
 }
 
 extension WPEPreparedRenderPipeline {
-    /// Phase 2B: returns a copy of the pipeline with per-frame Metal runtime
-    /// + camera uniforms merged into every pass's `uniformValues`. Material
-    /// uniforms (e.g. `g_Color`) win on key collision so existing tests stay
-    /// green; runtime keys (`g_Time`, `g_Daytime`, `g_Brightness`,
-    /// `g_PointerPosition`, `g_ViewProjectionMatrix`) only fill in slots the
-    /// pass did not already define.
+    /// Phase 2B: returns a copy of the pipeline with per-frame Metal runtime + camera uniforms merged into every pass's `uniformValues`.
     func addingMetalRuntimeUniforms(
         _ runtimeUniforms: WPEMetalRuntimeUniforms,
         camera: WPEMetalCameraUniforms
@@ -51,11 +46,6 @@ extension WPEPreparedRenderPipeline {
                     graphLayer: layer.graphLayer,
                     passes: layer.passes.map { pass in
                         var values = pass.uniformValues
-                        // Runtime uniforms (`g_Time`, `g_Daytime`,
-                        // `g_Brightness`, `g_PointerPosition`,
-                        // `g_ViewProjectionMatrix`) are reserved names. Always
-                        // overwrite so a stale per-load default never wins
-                        // over the live frame value.
                         for (key, value) in runtimeUniforms.uniformValues {
                             values[key] = value
                         }

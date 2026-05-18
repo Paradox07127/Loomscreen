@@ -30,7 +30,6 @@ struct HTMLTrustVerdictTests {
 
     @Test("URL with no host is local")
     func urlNoHostIsLocal() {
-        // URL("about:blank") has no host
         let v = HTMLTrust.evaluate(source: .url(URL(string: "about:blank")!), trustedOrigins: [])
         #expect(v == .localContent)
     }

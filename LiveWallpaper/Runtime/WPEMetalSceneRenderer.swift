@@ -106,15 +106,8 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         self.cacheRootURL = cacheRootURL
         self.dependencyMounts = dependencyMounts
         self.engineAssetsRootURL = engineAssetsRootURL
-        // Build the throwing dependencies BEFORE opening the security
-        // scope. If executor init fails, Swift will not run `deinit` for a
-        // partially-initialized instance — opening the scope first would
-        // leak that reference count until process exit. Audited by codex.
         let executor = try WPEMetalRenderExecutor(device: device)
         let resolutionTracer = WPEResolutionTracer()
-        // Open the security scope once for the renderer's lifetime; balanced
-        // by `cleanup()` / `deinit`. Tracking the URL that actually started
-        // a scope means we won't try to stop one that never opened.
         let didStartEngineAssetsAccess = engineAssetsRootURL?.startAccessingSecurityScopedResource() ?? false
         self.activeEngineAssetsRootURL = didStartEngineAssetsAccess ? engineAssetsRootURL : nil
         self.entryResolver = SceneResourceResolver(cacheRootURL: cacheRootURL)
@@ -157,19 +150,13 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             try await performLoad()
             loadDiagnostics = nil
         } catch {
-            // Surface a precise reason via `loadDiagnostics` so the detail
-            // view's honesty pass shows the actual failure (unsupported
-            // shader, missing texture, …) instead of "All declared layers
-            // decoded cleanly."
             loadDiagnostics = diagnostic(for: error)
             logSceneFailureDiagnostics(error: error)
             throw error
         }
     }
 
-    /// Dumps the resolved/missed resource tally to the persistent log so
-    /// maintainers can `tail ~/Library/Logs/LiveWallpaper/runtime.log` and
-    /// diagnose without having the DEBUG inspector window open.
+    /// Dumps the resolved/missed resource tally to the persistent log so maintainers can `tail ~/Library/Logs/LiveWallpaper/runtime.log` and diagnose without having the DEBUG inspector window open.
     private func logSceneFailureDiagnostics(error: Error) {
         let snapshot = resolutionTracer.snapshot()
         let workshopID = descriptor.workshopID
@@ -200,11 +187,6 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
     }
 
     private func performLoad() async throws {
-        // Cancellation checkpoints at phase boundaries let unstructured
-        // callers (e.g. the DEBUG corpus-playback harness) actually abort
-        // a long load instead of waiting for it to run to completion. The
-        // production scene-session path is fire-and-forget so these are
-        // benign there.
         onProgress?("Reading scene")
         try Task.checkCancellation()
         let entryURL = try entryResolver.resolveExistingFileURL(relativePath: descriptor.entryFile)
@@ -271,12 +253,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         mtkView.setNeedsDisplay(mtkView.bounds)
     }
 
-    /// Computes one frame's runtime uniforms (clock, daytime, brightness,
-    /// pointer) and submits the render pipeline with both runtime and camera
-    /// uniforms. Called once during `performLoad()` and then per-frame from
-    /// `draw(in:)` so animated scenes refresh without rebuilding the
-    /// pipeline. The captured value is re-read by dynamic texture sources
-    /// in `draw(in:)` to drive their frame selection.
+    /// Computes one frame's runtime uniforms (clock, daytime, brightness, pointer) and submits the render pipeline with both runtime and camera uniforms.
     private func renderCurrentFrame() throws -> MTLTexture {
         guard let pipeline = renderPipeline else {
             throw WPEMetalRenderExecutorError.noRenderablePasses
@@ -285,9 +262,6 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             profile: currentProfile,
             pointerPosition: pointerSampler.sample(mtkView)
         )
-        // Phase 2D-O: feed live FFT bins into the runtime uniform so
-        // audio-reactive shaders animate to the playing audio. When no
-        // sound runtime is active, the default zero spectrum stays.
         if let soundRuntime {
             uniforms = WPEMetalRuntimeUniforms(
                 time: uniforms.time,
@@ -306,10 +280,6 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             runtimeUniforms: uniforms,
             cameraUniforms: cameraUniforms
         )
-        // Phase 2D-L: particles render after the layer/effect pipeline so
-        // they composite on top of the scene's background. CPU tick uses
-        // the scene clock so animation stays in lockstep with shaders'
-        // `g_Time`.
         if !particleSystems.isEmpty {
             for system in particleSystems {
                 system.tick(now: uniforms.time)
@@ -321,17 +291,10 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
                 output: frame
             )
         }
-        // Phase 2D-N: text overlays composite on top of particles. The
-        // rasterizer caches by content hash, so static text only walks
-        // CoreText once.
         if let textRenderer, !textObjects.isEmpty {
             var draws: [WPETextOverlayDraw] = []
             draws.reserveCapacity(textObjects.count)
             for object in textObjects where object.visible && object.alpha > 0 {
-                // Phase 2D-P: refresh scripted text from its JS instance
-                // before the CoreText cache lookup. The cache key
-                // includes the rendered string so a new value triggers
-                // a fresh rasterization automatically.
                 let liveObject: WPESceneTextObject
                 if let instance = textScriptInstances[object.id] {
                     let updated = instance.tickString()
@@ -360,11 +323,6 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
                     liveObject = object
                 }
                 guard let entry = textRenderer.rasterize(liveObject) else { continue }
-                // WPE pixel-space origin is screen-relative; the scene
-                // canvas is centered at (width/2, height/2). Subtract
-                // half-canvas so origin "1920 1080 0" lands at the
-                // center of a 1920×1080 scene. Y is also flipped to
-                // match Metal's NDC convention (already y-up).
                 let halfWidth = Double(sceneRenderSize.width) * 0.5
                 let halfHeight = Double(sceneRenderSize.height) * 0.5
                 let center = SIMD2<Float>(
@@ -402,9 +360,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         return frame
     }
 
-    /// Phase 2D-O: spin up the audio runtime and start playback if the
-    /// scene declared sound objects. Failures are non-fatal — the
-    /// renderer keeps going with silence and surfaces a diagnostic.
+    /// Phase 2D-O: spin up the audio runtime and start playback if the scene declared sound objects.
     private func startSoundRuntime(from document: WPESceneDocument) {
         guard !document.soundObjects.isEmpty else {
             soundRuntime = nil
@@ -413,16 +369,11 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         let runtime = WPESoundRuntime(resolver: resourceResolver)
         let attachedCount = runtime.start(sounds: document.soundObjects)
         if attachedCount == 0 {
-            // Engine couldn't start any players (missing files, decode
-            // failure, or no audio device). Keep the runtime around so
-            // the FFT tap still publishes silence to audio shaders.
         }
         soundRuntime = runtime
     }
 
-    /// Phase 2D-N: build the WPETextRenderer + cache the parsed text
-    /// object list. Rasterization happens lazily during the first frame
-    /// so we don't pay the CoreText cost when the scene is preview-only.
+    /// Phase 2D-N: build the WPETextRenderer + cache the parsed text object list.
     private func loadTextOverlays(from document: WPESceneDocument) {
         textObjects = document.textObjects
         guard !textObjects.isEmpty else {
@@ -434,10 +385,6 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             device: executor.textureSourceDevice,
             resolver: resourceResolver
         )
-        // Phase 2D-P: spin up a SceneScript instance for every text
-        // object whose `text` field carried an embedded script. The
-        // instance evaluates the module once at load (running `init`)
-        // and is ticked per frame to refresh the rendered string.
         textScriptInstances.removeAll(keepingCapacity: false)
         for object in textObjects {
             guard let script = object.textScript else { continue }
@@ -447,10 +394,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         }
     }
 
-    /// Spawn one `WPEParticleSystem` per parsed particle object. Reads
-    /// the linked particle JSON, parses it into a definition, and
-    /// allocates a GPU instance buffer. Resolves the material → first
-    /// texture path so the draw call has a sprite atlas to sample.
+    /// Spawn one `WPEParticleSystem` per parsed particle object.
     private func loadParticleSystems(from document: WPESceneDocument) async {
         particleSystems.removeAll(keepingCapacity: true)
         particleTextures.removeAll(keepingCapacity: true)
@@ -467,10 +411,6 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
                 continue
             }
             particleSystems.append(system)
-            // Try to resolve the material → first texture so the
-            // particle has something to sample. We re-walk the material
-            // here rather than route it through the render-graph builder
-            // because particle materials live outside the layer pipeline.
             if let materialPath = definition.materialRelativePath,
                let materialURL = try? entryResolver.resolveExistingFileURL(relativePath: materialPath),
                let materialData = try? Data(contentsOf: materialURL),
@@ -530,16 +470,9 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
 
     func applyPerformanceProfile(_ profile: WallpaperPerformanceProfile) {
         currentProfile = profile
-        // Phase 2E: forward profile to dynamic sources so video readers
-        // pause cleanly on `.suspended` and resume on `.quality`.
         dynamicTextureSources.values.forEach { $0.applyPerformanceProfile(profile) }
         switch profile {
         case .quality:
-            // Phase 2E correction: enable continuous draw whenever the
-            // scene holds at least one dynamic texture source (animated
-            // TEX or video). Static built-in scenes keep the Phase 2B
-            // paused/present-cached behaviour to avoid burning GPU on a
-            // multi-display setup.
             let hasDynamic = !dynamicTextureSources.isEmpty
             mtkView.isPaused = !hasDynamic
             mtkView.enableSetNeedsDisplay = !hasDynamic
@@ -550,10 +483,6 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             mtkView.isPaused = true
             mtkView.enableSetNeedsDisplay = true
             mtkView.releaseDrawables()
-            // Phase 2C Task 2: pooled FBO/layer-composite textures live
-            // across `render(...)` calls; release them when the wallpaper
-            // is suspended so a 6-display setup does not retain hundreds
-            // of MB of transient render targets while paused.
             executor.releaseTransientResources()
         }
     }
@@ -593,11 +522,6 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         MainActor.assumeIsolated { [weak self] in
             guard let self, didLoad else { return }
             do {
-                // Phase 2E: re-render when there are dynamic texture sources
-                // so animated/video frames advance with the runtime clock.
-                // Static scenes keep the Phase 2B cheap path (present the
-                // cached snapshot) so a 6-display wallpaper does not burn
-                // GPU producing identical frames.
                 let textureToPresent: MTLTexture?
                 if dynamicTextureSources.isEmpty {
                     textureToPresent = outputTexture
@@ -666,11 +590,6 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
                 loadedTextures[path] = texture
             case .dynamicSource(let source):
                 dynamicTextureSources[path] = source
-                // Phase 2E: video sources return nil before the background
-                // reader publishes its first frame. Seed `loadedTextures`
-                // with a 1×1 transparent placeholder so the executor's
-                // texture lookup does not throw `missingTexture` during
-                // the initial render pass.
                 if let texture = source.texture(at: lastRuntimeUniforms?.time ?? 0) {
                     loadedTextures[path] = texture
                 } else {
@@ -678,8 +597,6 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
                 }
             }
         } catch {
-            // Carry the asset path AND layer name through so `diagnostic(for:)`
-            // can attribute the failure to the WPE object that referenced it.
             throw WPEMetalTextureLoadContextError(layerName: layerName, path: path, underlying: error)
         }
     }
@@ -704,8 +621,6 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             return [first, second].filter(\.isExternalTextureReference)
 
         case "genericimage4":
-            // Slot 0 + slot 1 (alpha mask). Slot 1 is optional; only
-            // request load if it's actually bound.
             let primary = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
             var refs: [WPETextureReference] = [primary]
             if let mask = pass.textureBindings[1] ?? pass.pass.textures[1] {
@@ -714,13 +629,6 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             return refs.filter(\.isExternalTextureReference)
 
         default:
-            // Single-input shaders: copy, genericimage2, genericparticle,
-            // and every effect_* variant. The translator-driven custom
-            // shader path also goes here — it always reads at least slot 0.
-            // Multi-pass effects (lightshafts, blur_precise_gaussian, …)
-            // express inter-pass texture references via `pass.binds`,
-            // resolving to FBO names that the executor produces during
-            // earlier passes — those don't need to be pre-loaded.
             let reference = pass.pass.binds[0]
                 ?? pass.textureBindings[0]
                 ?? pass.pass.textures[0]
@@ -736,14 +644,10 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
     }
 
     private func normalizedBuiltinShaderName(_ shaderName: String) -> String {
-        // Mirrors WPEMetalRenderExecutor.normalizedBuiltinShaderName so the
-        // loader and dispatcher route on the same canonical names.
         WPEBuiltinShaderName.normalized(shaderName, genericImageAsCopy: false)
     }
 
-    /// Phase 2E rewrite: returns a `WPELoadedTextureResource` instead of a
-    /// raw texture so the caller can route MP4 video and multi-frame
-    /// animations through dedicated dynamic sources.
+    /// Phase 2E rewrite: returns a `WPELoadedTextureResource` instead of a raw texture so the caller can route MP4 video and multi-frame animations through dedicated dynamic sources.
     private func makeTextureResource(relativePath: String, label: String) async throws -> WPELoadedTextureResource {
         var lastError: Error?
         for candidate in textureCandidates(for: relativePath) {
@@ -778,9 +682,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         throw lastError ?? WPEMetalRenderExecutorError.missingTexture(.image(relativePath))
     }
 
-    /// Phase 2E: stages MP4 bytes into the per-process video cache and
-    /// constructs a `WPEVideoTextureSource` bound to the executor's
-    /// MTLDevice.
+    /// Phase 2E: stages MP4 bytes into the per-process video cache and constructs a `WPEVideoTextureSource` bound to the executor's MTLDevice.
     private func makeVideoTextureSource(
         from payload: WPETexTexturePayload,
         label: String
@@ -805,10 +707,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             .appendingPathComponent("wpe-tex-video", isDirectory: true)
     }
 
-    /// Phase 2E: returns a 1×1 transparent texture used as a temporary
-    /// stand-in for dynamic sources whose first frame has not yet decoded.
-    /// Replaced by the live texture on the next `texturesForCurrentFrame`
-    /// call once the source publishes a frame.
+    /// Phase 2E: returns a 1×1 transparent texture used as a temporary stand-in for dynamic sources whose first frame has not yet decoded.
     private func makeDynamicPlaceholderTexture(label: String) throws -> MTLTexture {
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: WPEMetalRenderExecutor.outputPixelFormat,
@@ -832,10 +731,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         return texture
     }
 
-    /// Phase 2E: pulls fresh `MTLTexture`s from any dynamic sources before
-    /// every render call. `loadedTextures` mirrors the latest texture so a
-    /// pass that samples the same path through the executor always sees a
-    /// live frame.
+    /// Phase 2E: pulls fresh `MTLTexture`s from any dynamic sources before every render call.
     private func texturesForCurrentFrame(time: TimeInterval) -> [String: MTLTexture] {
         var textures = loadedTextures
         for (path, source) in dynamicTextureSources {
@@ -855,11 +751,6 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
 
     private func shouldTryTexturePayload(_ path: String) -> Bool {
         let extensionName = (path as NSString).pathExtension.lowercased()
-        // Anything that's not a recognised raw-image extension is treated as a
-        // candidate for the .tex container path — including the explicit `.tex`
-        // / `.json` cases AND the "garbage trailing component" case (e.g.
-        // `image.com-600@5@f`), which `NSString.pathExtension` reports as a
-        // non-empty extension even though no actual extension exists.
         return !Self.knownRawImageExtensions.contains(extensionName)
     }
 
@@ -872,18 +763,9 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         "png", "jpg", "jpeg", "tga", "dds", "bmp", "gif", "webp"
     ]
 
-    /// Visible to `@testable` test suites that probe the candidate generator
-    /// without spinning up a full renderer fixture. Keep it `internal`, not
-    /// public — the dispatch path goes through `makeTextureResource`.
+    /// Visible to `@testable` test suites that probe the candidate generator without spinning up a full renderer fixture.
     func textureCandidates(for path: String) -> [String] {
         let extensionName = (path as NSString).pathExtension.lowercased()
-        // Trust the path verbatim only when the trailing component is one of
-        // the actual image / tex extensions we recognise. Workshop assets
-        // routinely have dots inside the basename — `uhdpaper.com-600@5@f`,
-        // `91VDetfVuOL._UF1000,1000_QL80_DpWeblab_`, `pngfind.com-...` — and
-        // the prior `extensionName.isEmpty` heuristic mis-classified them as
-        // "already has an extension", returning `[path]` only and skipping the
-        // `materials/` prefix fallback that would have found the actual file.
         if !extensionName.isEmpty,
            Self.knownRawImageExtensions.contains(extensionName) || extensionName == "tex" || extensionName == "json" {
             return [path]
@@ -910,28 +792,11 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             ]
         }
 
-        // WPE runtime-buffer names (`_rt_*`, `_alias_*`, `_downscaled1`, …)
-        // should be intercepted earlier in the graph builder and routed via
-        // `.fbo(_)`, but guard here so an upstream leak doesn't manifest as
-        // a confusing `materials/_downscaled1.png: fileMissing` diagnostic.
         if path.hasPrefix("_") {
             return [path]
         }
 
         if path.contains("/") {
-            // WPE convention: texture refs inside material `textures: [...]`
-            // arrays are relative to `materials/` unless they already include
-            // a known top-level subtree. Without this normalization, refs like
-            // `masks/<hash>`, `particle/halo_2`, `util/white` miss the scene
-            // cache (file lives at `materials/masks/<hash>.tex`) and the
-            // engine-root fallback (file lives at `assets/materials/...`).
-            //
-            // `effects/` looks anchored but isn't — WPE stores effect assets
-            // under `<root>/materials/effects/`, not at the top of `<root>/`.
-            // Including it here caused 36 scenes in the corpus to miss
-            // `effects/waterripplenormal` / `effects/waterflowphase` because
-            // the materials/-prefix fallback was skipped. (Removed in the
-            // bug fix that landed after PR #54.)
             let anchoredPrefixes = ["materials/", "models/", "shaders/", "fonts/", "scripts/", "particles/", "sounds/", "scenes/"]
             if anchoredPrefixes.contains(where: path.hasPrefix) {
                 return [
@@ -971,12 +836,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         return (String(parts[1]), parts.dropFirst(2).joined(separator: "/"))
     }
 
-    /// Maps any error raised during `performLoad()` onto the shared
-    /// `SceneLoadDiagnostic` taxonomy so the UI gets one consistent
-    /// failure-reporting path. The `WPEMetalTextureLoadContextError`
-    /// wrapper carries both the asset path and the failing WPE object
-    /// name through the recursion so missing-asset
-    /// diagnostics blame the exact layer instead of the generic scene entry.
+    /// Maps any error raised during `performLoad()` onto the shared `SceneLoadDiagnostic` taxonomy so the UI gets one consistent failure-reporting path.
     private func diagnostic(for error: Error) -> SceneLoadDiagnostic {
         diagnostic(for: error, fallbackPath: nil, layerName: "scene")
     }

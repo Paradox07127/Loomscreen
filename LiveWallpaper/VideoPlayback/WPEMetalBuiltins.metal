@@ -220,8 +220,6 @@ fragment half4 wpe_genericimage2_fragment(
     float4 sampled = float4(texture0.sample(linearSampler, in.uv));
     float3 rgb = sampled.rgb * uniforms.color.rgb * uniforms.alphaMaskUV.y;
     float alpha = sampled.a * uniforms.color.a * uniforms.alphaMaskUV.x;
-    // Premultiply the output for the "translucent" blend mode used by
-    // genericimage2 in practice — matches WPE's expected rendering path.
     return half4(float4(rgb * alpha, alpha));
 }
 
@@ -235,9 +233,6 @@ fragment half4 wpe_genericimage4_fragment(
     float4 sampled = float4(texture0.sample(linearSampler, in.uv));
     float maskAlpha = 1.0;
     if (uniforms.alphaMaskUV.z > 0.5) {
-        // Slot 1 carries an opacity/blend mask in WPE's genericimage4 default
-        // configuration. Multiply against the source alpha — this is the
-        // "ALPHAMASK" combo the workshop overwhelmingly enables.
         maskAlpha = float(texture1.sample(linearSampler, in.uv).a);
     }
     float3 rgb = sampled.rgb * uniforms.color.rgb * uniforms.alphaMaskUV.y;
@@ -279,9 +274,6 @@ vertex WPEParticleVertexOut wpe_particle_vertex(
     constant WPEParticleInstance* instances [[buffer(1)]],
     constant WPEParticleProjection& projection [[buffer(2)]]
 ) {
-    // 4-vertex tri-strip in clip-space-relative units. Same layout as
-    // `wpe_fullscreen_vertex` so UV mapping stays consistent with the
-    // generic particle fragment.
     float2 corner;
     float2 uv;
     switch (vertexID) {
@@ -293,9 +285,6 @@ vertex WPEParticleVertexOut wpe_particle_vertex(
     WPEParticleInstance instance = instances[instanceID];
     float halfWidth = max(projection.sceneSize.x, 1.0) * 0.5;
     float halfHeight = max(projection.sceneSize.y, 1.0) * 0.5;
-    // Pixel-space center position, expand by per-instance size, project
-    // into NDC. WPE's y is screen-up positive; flip sign so it matches
-    // Metal's NDC convention (also y-up).
     float2 centerNDC = float2(
         instance.positionAndSize.x / halfWidth,
         instance.positionAndSize.y / halfHeight
@@ -317,7 +306,6 @@ fragment half4 wpe_particle_instanced_fragment(
     float4 sampled = float4(texture0.sample(linearSampler, in.uv));
     float3 rgb = sampled.rgb * in.color.rgb;
     float alpha = sampled.a * in.color.a;
-    // Premultiplied output so `translucent` blend mode renders correctly.
     return half4(float4(rgb * alpha, alpha));
 }
 
@@ -371,8 +359,6 @@ fragment half4 wpe_text_overlay_fragment(
 ) {
     constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
     float4 sampled = float4(texture0.sample(linearSampler, in.uv));
-    // CoreText drew premultiplied alpha into rgba8Unorm; tint takes
-    // effect via per-overlay color × the sampled premultiplied output.
     float3 rgb = sampled.rgb * u.color.rgb;
     float alpha = sampled.a * u.color.a;
     return half4(float4(rgb, alpha));
@@ -387,9 +373,6 @@ fragment half4 wpe_genericparticle_fragment(
     float4 sampled = float4(texture0.sample(linearSampler, in.uv));
     float3 rgb = sampled.rgb * uniforms.color.rgb * uniforms.sizeAndAge.y;
     float alpha = sampled.a * uniforms.color.a * uniforms.sizeAndAge.x;
-    // Particle sprites typically render in additive or translucent mode;
-    // both want premultiplied output to behave correctly under the
-    // dispatcher's blend state.
     return half4(float4(rgb * alpha, alpha));
 }
 
@@ -485,10 +468,6 @@ fragment half4 wpe_effect_waterwaves_fragment(
     texture2d<half, access::sample> texture0 [[texture(0)]],
     constant WPEWaterWavesUniforms& uniforms [[buffer(0)]]
 ) {
-    // WaterWaves is structurally similar to Water (both displace UVs by a
-    // sin/cos field) but ships separate uniforms in the corpus. Reuse the
-    // displacement model so scenes that reference the family render even
-    // if the result isn't pixel-identical to the WPE original.
     constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
     float phase = uniforms.time * uniforms.speed;
     float frequency = max(uniforms.frequency, 0.0);
@@ -558,10 +537,8 @@ fragment half4 wpe_effect_foliagesway_fragment(
     texture2d<half, access::sample> texture0 [[texture(0)]],
     constant WPEFoliageSwayUniforms& uniforms [[buffer(0)]]
 ) {
-    // Foliage sway: top of layer displaces horizontally, bottom stays.
-    // Linear y-mask keeps the rooted-base feel; sin(time) drives the sway.
     constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
-    float yMask = 1.0 - in.uv.y;        // top = 1, bottom = 0 (UV is top-down)
+    float yMask = 1.0 - in.uv.y;
     float wave = sin(uniforms.time * uniforms.speed + in.uv.y * uniforms.frequency);
     float2 uv = clamp(in.uv + float2(wave * uniforms.amplitude * yMask, 0.0), float2(0.0), float2(1.0));
     return texture0.sample(linearSampler, uv);
@@ -579,7 +556,6 @@ fragment half4 wpe_effect_waterripple_fragment(
     texture2d<half, access::sample> texture0 [[texture(0)]],
     constant WPEWaterRippleUniforms& uniforms [[buffer(0)]]
 ) {
-    // Radial ripple from center, time-driven phase.
     constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
     float2 c = float2(0.5, 0.5);
     float2 d = in.uv - c;
@@ -639,10 +615,6 @@ fragment half4 wpe_effect_color_grading_fragment(
     texture2d<half, access::sample> texture0 [[texture(0)]],
     constant WPEColorGradingUniforms& uniforms [[buffer(0)]]
 ) {
-    // Lift/gamma/gain (ASC-CDL) is the standard color-grading model. Not
-    // an exact match for every WPE color_grading variant — the family is
-    // really a 3D-LUT applied through a sample — but enough to keep
-    // scenes that depend on its presence rendering with stable colors.
     constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
     float4 sampled = float4(texture0.sample(linearSampler, in.uv));
     float3 lifted = sampled.rgb + uniforms.lift.rgb;
@@ -665,7 +637,6 @@ fragment half4 wpe_effect_shimmer_fragment(
 ) {
     constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
     float4 sampled = float4(texture0.sample(linearSampler, in.uv));
-    // Hash the UV into a high-frequency twinkle, time-modulated.
     float n = fract(sin(dot(in.uv * 100.0, float2(12.9898, 78.233)) + uniforms.time * uniforms.speed) * 43758.5453);
     float boost = 1.0 + n * uniforms.intensity;
     return half4(float4(saturate(sampled.rgb * boost), sampled.a));

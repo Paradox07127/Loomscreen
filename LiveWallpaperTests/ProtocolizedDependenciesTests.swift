@@ -142,8 +142,6 @@ struct ProtocolizedDependenciesTests {
             return
         }
 
-        // Snapshot whatever active bookmark the persistent config store happens to
-        // carry on the host machine — the test must not rely on UserDefaults state.
         let initialBookmark = Self.activeVideoBookmark(manager.getConfiguration(for: liveScreen))
         let rejectedBookmark = Data([0xDE, 0xAD, 0xBE, 0xEF])
 
@@ -157,7 +155,6 @@ struct ProtocolizedDependenciesTests {
         try await Self.waitUntil(timeout: .seconds(2)) {
             await loader.validatedURLs.count >= 1
         }
-        // Allow the catch-branch MainActor.run to finish before asserting.
         try await Task.sleep(for: .milliseconds(50))
 
         let finalBookmark = Self.activeVideoBookmark(manager.getConfiguration(for: liveScreen))

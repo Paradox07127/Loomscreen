@@ -32,10 +32,6 @@ struct WPEImportTrackerTests {
         let tracker = WPEImportTracker()
         let counter = ChangeCounter()
 
-        // Establish a tracked read; mutate; expect the tracking closure to fire
-        // exactly once (Observation contract). If the tracker were not
-        // `@Observable`, the closure would never fire and SwiftUI's
-        // `wpeImportError(for:)` reads in `WPESceneSection` would not refresh.
         withObservationTracking {
             _ = tracker.error(for: screenA)
         } onChange: {
@@ -73,7 +69,6 @@ struct WPEImportTrackerTests {
         #expect(second == 2)
         #expect(third == 3)
 
-        // Independent generation per screen
         let otherFirst = tracker.bumpGeneration(for: screenB)
         #expect(otherFirst == 1)
     }

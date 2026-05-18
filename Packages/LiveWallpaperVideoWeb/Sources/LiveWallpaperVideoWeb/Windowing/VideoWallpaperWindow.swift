@@ -64,8 +64,6 @@ public class VideoWallpaperWindow: NSWindow {
     }
 
     public override func makeKeyAndOrderFront(_ sender: Any?) {
-        // 非交互态：保持壁纸语义，强制排到背后。
-        // 交互态：放行真正的 key window 行为。
         if allowsWallpaperMouseInteraction {
             super.makeKeyAndOrderFront(sender)
         } else {
@@ -74,7 +72,6 @@ public class VideoWallpaperWindow: NSWindow {
     }
 
     public override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        // Prevent keyboard shortcuts from affecting the window
         false
     }
 }
@@ -93,9 +90,7 @@ extension VideoWallpaperWindow {
         applyMouseInteractionPolicy()
     }
 
-    /// Switches the window's color space when an HDR video is loaded so the
-    /// composited output preserves the wider gamut. `nil` restores the
-    /// system default (sRGB-tagged) for SDR sources.
+    /// Switches the window's color space when an HDR video is loaded so the composited output preserves the wider gamut.
     public func setExtendedDynamicRangeEnabled(_ enabled: Bool) {
         colorSpace = enabled ? NSColorSpace.displayP3 : nil
     }
@@ -105,8 +100,6 @@ extension VideoWallpaperWindow {
         ignoresMouseEvents = !allowsWallpaperMouseInteraction
         acceptsMouseMovedEvents = allowsWallpaperMouseInteraction
         if allowsWallpaperMouseInteraction {
-            // 抬到 desktopIcon + 1 后必须主动 makeKeyAndOrderFront，
-            // 否则 window 仍处于 ordered-back 状态、点击不触发 hit-test。
             super.makeKeyAndOrderFront(nil)
         } else {
             orderBack(nil)

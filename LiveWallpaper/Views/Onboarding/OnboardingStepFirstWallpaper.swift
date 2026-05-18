@@ -77,8 +77,6 @@ struct OnboardingStepFirstWallpaper: View {
             )
         }
         .onReceive(NotificationCenter.default.publisher(for: .wpeImportDidComplete)) { _ in
-            // Track success while the Workshop gallery is open so onDismiss
-            // knows whether to advance or stay in source picker.
             if showWorkshopGallery {
                 workshopAppliedAny = true
             }
@@ -336,7 +334,6 @@ struct OnboardingStepFirstWallpaper: View {
 
     private func toggleScreenSelection(_ id: CGDirectDisplayID) {
         if selectedScreenIDs.contains(id) {
-            // Always keep at least one screen selected.
             guard selectedScreenIDs.count > 1 else { return }
             selectedScreenIDs.remove(id)
         } else {
@@ -404,9 +401,6 @@ struct OnboardingStepFirstWallpaper: View {
         Task {
             let granted = await AppleAerialsLibrary.shared.requestAccess()
             isRequestingAerials = false
-            // Audit P0-C: only advance on grant. Denying the prompt used to
-            // dump the user on "All Set" with no wallpaper — now it surfaces
-            // an inline error so they can retry or hit Skip.
             if granted {
                 NotificationCenter.default.post(name: .openAppleAerials, object: nil)
                 nextStep()
@@ -453,9 +447,6 @@ struct OnboardingStepFirstWallpaper: View {
 
         inlineError = nil
         Task { @MainActor in
-            // Audit P0-C: count successful applies. Unsupported / rejected
-            // outcomes used to be silently absorbed — now the user only
-            // advances when at least one display actually got a wallpaper.
             var appliedCount = 0
             var lastFailureReason: String?
             for screen in targets {
@@ -487,9 +478,6 @@ struct OnboardingStepFirstWallpaper: View {
     }
 
     private func handleWorkshopGalleryDismiss() {
-        // Audit P0-C: the Workshop gallery sheet used to advance unconditionally,
-        // including when the user just hit Cancel/Close. Only advance if a
-        // `.wpeImportDidComplete` actually fired while the sheet was open.
         defer { workshopAppliedAny = false }
         if workshopAppliedAny {
             nextStep()
@@ -785,7 +773,6 @@ private struct ScreenThumbnailCard: View {
                     .symbolRenderingMode(.hierarchical)
 
                 VStack(spacing: 2) {
-                    // Display name comes from CGDisplay; not a localizable key.
                     Text(verbatim: screen.name)
                         .font(.system(size: 13, weight: .medium))
                         .lineLimit(1)

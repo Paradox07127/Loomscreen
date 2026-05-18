@@ -40,9 +40,7 @@ struct WPEFallbackCard: View {
         self.reason = reason
     }
 
-    /// Picks the card-level reason from a freshly imported origin so callers
-    /// don't have to reach into the new `WPEOrigin` flags themselves. Order
-    /// matters: plugin > missing-deps > generic unsupported.
+    /// Picks the card-level reason from a freshly imported origin so callers don't have to reach into the new `WPEOrigin` flags themselves.
     static func reason(for origin: WPEOrigin) -> FallbackReason {
         if origin.requiresWindowsPlugin { return .requiresWindowsPlugin }
         if !origin.missingDependencyIDs.isEmpty {
@@ -74,10 +72,6 @@ struct WPEFallbackCard: View {
                 HStack(spacing: 12) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.title2)
-                        // Apple HIG warning semantic — `.yellow` matches
-                        // System Settings/Photos warning chips on macOS 26.
-                        // We keep the orange accent strictly for hard
-                        // permanent blockers (`.requiresWindowsPlugin`).
                         .foregroundStyle(reason.severityTint)
                     Text(verbatim: warningTitle)
                         .font(.headline)
@@ -101,12 +95,6 @@ struct WPEFallbackCard: View {
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(reason.severityTint.opacity(0.14), in: RoundedRectangle(cornerRadius: 16))
-            // Combine ONLY the warning text into a single VoiceOver element
-            // so the title + body announce together, while leaving the
-            // dependency list rows and primary buttons individually
-            // focusable. Applying `.combine` at the card root would flatten
-            // every interactive control into the same element and hide them
-            // from assistive tech.
             .accessibilityElement(children: .combine)
             .accessibilityLabel(Text("\(origin.title). \(warningTitle). \(warningBody)"))
 
@@ -117,10 +105,7 @@ struct WPEFallbackCard: View {
         .adaptiveGlassSurface(.roundedRectangle(24))
     }
 
-    /// Renders one row per missing workshop ID. Wraps the list in a
-    /// bounded `ScrollView` so a project that declares 10+ dependencies
-    /// (rare but real for composite scenes) does not push the primary
-    /// action buttons off-screen.
+    /// Renders one row per missing workshop ID.
     @ViewBuilder
     private func dependencyList(ids: [String]) -> some View {
         ScrollView {

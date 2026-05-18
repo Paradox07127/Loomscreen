@@ -32,7 +32,6 @@ struct SceneResourceResolver: Sendable {
     private let decoder: WPETexDecoder
 
     init(cacheRootURL: URL, decoder: WPETexDecoder = WPETexDecoder()) {
-        // Standardize once so subsequent prefix checks are stable.
         self.cacheRootURL = cacheRootURL.standardizedFileURL.resolvingSymlinksInPath()
         self.decoder = decoder
     }
@@ -43,23 +42,9 @@ struct SceneResourceResolver: Sendable {
     /// strict-concurrency mode).
     private var fileManager: FileManager { .default }
 
-    /// Returns a CGImage decoded from the cache. The returned image is
-    /// independent of the source file handle so the caller can hold it as
-    /// long as needed.
-    ///
-    /// `.tex` files are routed through `WPETexDecoder`; PNG / JPG / GIF go
-    /// through ImageIO. Decode failures for `.tex` surface as
-    /// `.texture(WPETexDecodeError)` so the UI can map them to a precise
-    /// FallbackReason. Decode failures for other extensions stay on
-    /// `.decodeFailed` to match Phase 2.0 contracts.
+    /// Returns a CGImage decoded from the cache.
     func resolveImage(relativePath: String) throws -> CGImage {
         guard !relativePath.isEmpty else { throw ResolveError.fileMissing }
-        // WPE's `scene.json` does not point image layers at texture files
-        // directly. Instead it references a tiny `models/<name>.json`
-        // wrapper that names a `materials/<name>.json` descriptor, which
-        // in turn lists the actual `.tex` payload via `passes[0].textures[0]`.
-        // Resolve the chain up-front so the rest of this method only ever
-        // deals with the terminal asset path.
         let resolvedPath = try resolveImageReference(relativePath: relativePath, depth: 0)
         let target = try resolveURL(for: resolvedPath)
 
@@ -90,10 +75,7 @@ struct SceneResourceResolver: Sendable {
         return image
     }
 
-    /// Returns the raw texture payload for Metal-backed renderers. This uses
-    /// the same WPE model/material JSON chain as `resolveImage(relativePath:)`
-    /// so import-time probes and runtime texture binding agree on the terminal
-    /// asset.
+    /// Returns the raw texture payload for Metal-backed renderers.
     func resolveTexturePayload(relativePath: String) throws -> WPETexTexturePayload {
         guard !relativePath.isEmpty else { throw ResolveError.fileMissing }
         let resolvedPath = try resolveImageReference(relativePath: relativePath, depth: 0)
@@ -120,16 +102,7 @@ struct SceneResourceResolver: Sendable {
         }
     }
 
-    /// Walks WPE's image-reference chain until it produces a path to a
-    /// real asset (`.tex` / `.png` / `.jpg` / `.gif`). Recursion depth is
-    /// capped at 4 to defuse pathological self-referential descriptors —
-    /// real-world chains are at most 3 deep (model → material → texture).
-    ///
-    /// Recognised JSON shapes:
-    ///   - Model wrapper: `{ "material": "materials/X.json", … }`
-    ///   - Material descriptor: `{ "passes": [{ "textures": ["X"], … }] }`
-    /// Anything else (or a missing util model like `models/util/solidlayer.json`)
-    /// surfaces as `materialUnresolved` so the UI can show a precise hint.
+    /// Walks WPE's image-reference chain until it produces a path to a real asset (`.tex` / `.png` / `.jpg` / `.gif`).
     private func resolveImageReference(relativePath: String, depth: Int) throws -> String {
         let lowered = (relativePath as NSString).pathExtension.lowercased()
         if lowered != "json" {
@@ -141,10 +114,6 @@ struct SceneResourceResolver: Sendable {
 
         let url = try resolveURL(for: relativePath)
         guard fileManager.fileExists(atPath: url.path) else {
-            // WPE ships several built-in utility models (e.g.
-            // `models/util/solidlayer.json`) that the engine substitutes
-            // at runtime. We don't have access to them; surface a precise
-            // reason rather than a generic missing-file error.
             if relativePath.contains("models/util/") {
                 throw ResolveError.materialUnresolved(reason: "Built-in WPE layer \(relativePath) is not available on macOS")
             }
@@ -172,19 +141,13 @@ struct SceneResourceResolver: Sendable {
         }
 
         if let textureName = firstTextureName(in: dict) {
-            // WPE convention: the textures array carries identifiers
-            // without extension or directory. The asset always lives at
-            // `materials/<name>.tex` next to the descriptor.
             return "materials/\(textureName).tex"
         }
 
         throw ResolveError.materialUnresolved(reason: "\(relativePath) has no `material` or `passes[].textures[]`")
     }
 
-    /// Drills into a material descriptor's `passes[0].textures[0]` and
-    /// returns its bare identifier. Materials sometimes wrap textures in
-    /// dictionaries (`{"name": "foo", "size": [...]}`); accept both the
-    /// flat string form and a `name` key under the dict form.
+    /// Drills into a material descriptor's `passes[0].textures[0]` and returns its bare identifier.
     private func firstTextureName(in dict: [String: Any]) -> String? {
         guard let passes = dict["passes"] as? [[String: Any]] else { return nil }
         for pass in passes {
@@ -200,10 +163,7 @@ struct SceneResourceResolver: Sendable {
         return nil
     }
 
-    /// Decode-backed probe used by `WallpaperEngineImportService` during
-    /// capability tier classification. Header-only probing is not enough for
-    /// real WPE samples: some `RGBA8888` TEXB payloads actually contain MP4
-    /// bytes and would otherwise be classified as renderable.
+    /// Decode-backed probe used by `WallpaperEngineImportService` during capability tier classification.
     func probeImage(relativePath: String) -> Result<WPETexInfo, ResolveError> {
         guard !relativePath.isEmpty else { return .failure(.fileMissing) }
         let target: URL
@@ -244,10 +204,7 @@ struct SceneResourceResolver: Sendable {
         }
     }
 
-    /// Import-time renderability probe for WPE image references. Unlike
-    /// `exists(relativePath:)`, this follows WPE model/material JSON wrappers
-    /// to the terminal asset so a wrapper file cannot be mistaken for a
-    /// renderable layer when the underlying texture is absent or unsupported.
+    /// Import-time renderability probe for WPE image references.
     func probeRenderableImage(relativePath: String) -> Result<Void, ResolveError> {
         guard !relativePath.isEmpty else { return .failure(.fileMissing) }
         let resolvedPath: String
@@ -279,18 +236,12 @@ struct SceneResourceResolver: Sendable {
         }
     }
 
-    /// File existence probe used by tests + the import service to decide
-    /// whether a scene's declared image layers are actually shipped.
+    /// File existence probe used by tests + the import service to decide whether a scene's declared image layers are actually shipped.
     func exists(relativePath: String) -> Bool {
         (try? resolveExistingFileURL(relativePath: relativePath)) != nil
     }
 
-    /// Validates `relativePath`, joins it onto the cache root, and confirms
-    /// the result is a regular file inside the cache. Used by callers that
-    /// need a safe URL up-front (e.g. `AmbientWallpaperSessionBuilder` for
-    /// the entry file safety probe). Throws `.fileMissing` for both missing
-    /// files and directory hits so callers don't accidentally try to read
-    /// a directory as data.
+    /// Validates `relativePath`, joins it onto the cache root, and confirms the result is a regular file inside the cache.
     func resolveExistingFileURL(relativePath: String) throws -> URL {
         let url = try resolveURL(for: relativePath)
         var isDirectory: ObjCBool = false
@@ -302,7 +253,6 @@ struct SceneResourceResolver: Sendable {
     }
 
     /// Standardize the candidate URL and verify it falls under cache root.
-    /// Mirrors `FolderURLSchemeHandler` and `WPECachedContentResolver`.
     private func resolveURL(for relativePath: String) throws -> URL {
         guard let resolved = WPEPathSafety.strictResourceURL(root: cacheRootURL, relativePath: relativePath) else {
             throw ResolveError.pathEscape

@@ -15,9 +15,6 @@ enum WPEBuiltinShaderName {
         case "compose", "util/compose":
             return "compose"
         case "genericparticle", "particle/genericparticle":
-            // Phase 2D-D: native MSL fast path. Leaves combo handling on the
-            // table — the no-combo case (which is what most scenes ship)
-            // is fully covered by `wpe_genericparticle_fragment`.
             return "genericparticle"
         default:
             if isEffectAlias(stripped, family: "colorbalance") {
@@ -36,9 +33,6 @@ enum WPEBuiltinShaderName {
             if isEffectAlias(stripped, family: "shake") {
                 return "effect_shake"
             }
-            // Phase 2D-E: simple effects whose semantics we model natively.
-            // Multi-pass effects (gaussian blur variants, lightshafts) are
-            // intentionally NOT aliased here — they need real translation.
             if isEffectAlias(stripped, family: "opacity") {
                 return "effect_opacity"
             }
@@ -78,17 +72,6 @@ enum WPEBuiltinShaderName {
             if isEffectAlias(stripped, family: "shimmer") {
                 return "effect_shimmer"
             }
-            // Phase 2D-D: native MSL fast path for the genericimage family.
-            // `genericimage1`/`genericimage2`/`genericimage3` route through
-            // the single-texture variant; `genericimage4` adds an alpha
-            // mask slot. Combos beyond the default no-combo case still
-            // need the full GLSL translator — but this lights up the
-            // overwhelming majority of corpus scenes that just sample
-            // their material texture and apply g_Color/g_Alpha.
-            //
-            // genericImageAsCopy keeps the legacy executor-fallback
-            // behavior available; callers that want the new MSL
-            // fast-path must opt out of that flag.
             if isGenericImageCanonicalName(stripped) {
                 if genericImageAsCopy {
                     return "copy"
@@ -128,13 +111,6 @@ enum WPEBuiltinShaderName {
             || shaderName == "effects/\(family)/\(family)" {
             return true
         }
-        // Phase 2D-G: workshop-relative effect paths point at the same
-        // shader by a different prefix (e.g. `workshop/2718465779/effects/
-        // pulse`). Treat any path that ends in `/effects/<family>` as an
-        // alias so the dispatcher uses the built-in. Trailing punctuation
-        // ("pulse_", "Simple_Audio_Bars" with underscore variants) does
-        // not match — those are intentional shader divergences and need
-        // the translator.
         if shaderName.hasSuffix("/effects/\(family)") {
             return true
         }

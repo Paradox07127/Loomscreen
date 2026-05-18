@@ -10,11 +10,6 @@ struct WPETexTexturePayloadTests {
 
     @Test("Bridges TEXB-encoded PNG payload to RGBA8888 for Metal upload")
     func bridgesEncodedPNGPayloadToRGBA8888() throws {
-        // Synthesise a 4×4 solid-red PNG, wrap it as a WPE .tex file whose
-        // TEXB block declares an encoded image payload. Before the bridge
-        // this returned .unsupportedFormat(code: 0) — the failure mode
-        // that blocked ~80% of workshop scenes in the Phase A.3 corpus
-        // baseline.
         let png = try makeSolidColorPNG(width: 4, height: 4, red: 255, green: 0, blue: 0, alpha: 255)
         let tex = makeImage(
             width: 4,
@@ -31,7 +26,6 @@ struct WPETexTexturePayloadTests {
         #expect(mip.width == 4)
         #expect(mip.height == 4)
         #expect(mip.bytes.count == 4 * 4 * 4)
-        // First pixel should be opaque red after rasterisation.
         let firstPixel = Array(mip.bytes.prefix(4))
         #expect(firstPixel[0] == 0xFF, "R channel should be 0xFF for the solid-red fixture")
         #expect(firstPixel[3] == 0xFF, "A channel should be 0xFF for the solid-red fixture")
@@ -39,11 +33,6 @@ struct WPETexTexturePayloadTests {
 
     @Test("Bridges semi-transparent TEXB-encoded PNG as straight alpha")
     func bridgesSemiTransparentEncodedPNGAsStraightAlpha() throws {
-        // 50% alpha red. CGContext draws into a premultiplied target, then
-        // the bridge unpremultiplies in place. The exported bytes should
-        // expose straight-alpha RGBA — R ≈ 0xFF (full red), A == 0x80 —
-        // so WPE shaders that do their own alpha math don't end up
-        // double-multiplying the colour at semi-transparent edges.
         let png = try makeSolidColorPNG(width: 4, height: 4, red: 255, green: 0, blue: 0, alpha: 128)
         let tex = makeImage(
             width: 4,
@@ -56,16 +45,12 @@ struct WPETexTexturePayloadTests {
         let extracted = try WPETexDecoder().extractTexturePayload(data: tex).get()
         let mip = try #require(extracted.largestMipmap)
         let firstPixel = Array(mip.bytes.prefix(4))
-        // Round-trip through premultiply → unpremultiply tolerates ±1 LSB.
         #expect(firstPixel[0] >= 0xFE, "R should round-trip near 0xFF (got \(firstPixel[0])); double-premultiply would emit ~0x80")
         #expect(firstPixel[3] == 0x80, "A should preserve 0x80 unchanged")
     }
 
     @Test("Rejects encoded TEXB animation tracks with .unsupportedAnimation")
     func rejectsEncodedAnimationFrames() throws {
-        // Two-frame encoded TEXB animation. The bridge can't reproduce the
-        // animation timing yet, so it must surface a precise diagnostic
-        // instead of silently flattening to a single first frame.
         let png = try makeSolidColorPNG(width: 2, height: 2, red: 0, green: 0, blue: 255, alpha: 255)
         let tex = makeAnimatedImage(
             width: 2,
@@ -128,8 +113,6 @@ struct WPETexTexturePayloadTests {
             payload: mp4
         )
 
-        // Phase 2E: MP4-in-TEX is no longer fail-closed on the Metal payload
-        // path. The renderer hands the bytes to `WPEVideoTextureSource`.
         let extracted = try WPETexDecoder().extractTexturePayload(data: tex).get()
 
         let video = try #require(extracted.videoPayload)

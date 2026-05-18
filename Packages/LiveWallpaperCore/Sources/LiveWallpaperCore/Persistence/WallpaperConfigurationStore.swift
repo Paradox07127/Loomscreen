@@ -62,23 +62,18 @@ public final class WallpaperConfigurationStore {
     }
 
     public func pruneInvalidVideoConfigurations(using validator: (CGDirectDisplayID) -> Bool) -> [CGDirectDisplayID] {
-        // Snapshot IDs first; validation may refresh stale bookmarks.
         let candidateVideoIDs = persistence
             .loadConfigurations()
             .filter { $0.wallpaperType == .video }
             .map(\.screenID)
 
-        // 2. Run the validator (side-effect: may refresh stale bookmarks).
         let invalidVideoIDs = Set(candidateVideoIDs.filter { !validator($0) })
 
         guard !invalidVideoIDs.isEmpty else {
-            // Rehydrate cache so any bookmark refreshes performed by the
-            // validator are visible to subsequent reads.
             _ = loadAll()
             return []
         }
 
-        // Re-read so bookmark refreshes survive the rewrite.
         let postValidationConfigs = persistence.loadConfigurations()
 
         let pruned = Self.removingInvalidVideoConfigurations(
@@ -93,7 +88,6 @@ public final class WallpaperConfigurationStore {
     }
 
     public func pruneInvalidResourceConfigurations(using validator: (CGDirectDisplayID) -> Bool) -> [CGDirectDisplayID] {
-        // Snapshot IDs first; validation may refresh stale bookmarks.
         let candidateIDs = persistence
             .loadConfigurations()
             .filter(Self.requiresResourceValidation)
@@ -155,9 +149,6 @@ public final class WallpaperConfigurationStore {
         case .metalShader:
             return false
         case .scene:
-            // Scene wallpapers live under our own application support cache,
-            // not under a user-granted security scope; the resolver checks
-            // existence on its own. No bookmark reachability test needed.
             return false
         }
     }

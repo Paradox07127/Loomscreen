@@ -64,11 +64,6 @@ struct SceneResourceResolverTests {
 
     @Test("Truncated .tex surfaces as a texture-specific resolve error")
     func texTruncatedSurfacesTextureError() throws {
-        // Phase 2.1 routes `.tex` through `WPETexDecoder` instead of the
-        // Phase 2.0 stub. A 2-byte payload now produces a precise
-        // `truncatedBlock` decode error wrapped in
-        // `ResolveError.texture(...)` so the UI can show the failing
-        // block name and offset rather than a generic "unsupported".
         let fixture = try makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         try Data([0x00, 0x01]).write(to: fixture.cacheRoot.appendingPathComponent("layer.tex"))
@@ -79,8 +74,6 @@ struct SceneResourceResolverTests {
             _ = try resolver.resolveImage(relativePath: "layer.tex")
             Issue.record("Expected resolveImage to throw on truncated .tex")
         } catch SceneResourceResolver.ResolveError.texture(let texError) {
-            // Either truncatedBlock or unsupportedContainer is acceptable —
-            // both are precise failure modes. Reject vague decodeFailed.
             switch texError {
             case .truncatedBlock, .unsupportedContainer:
                 break
@@ -113,11 +106,6 @@ struct SceneResourceResolverTests {
 
     @Test("Model wrapper JSON resolves to materials/<name>.tex via material chain")
     func materialChainResolves() throws {
-        // Synthesise the WPE chain: scene.json points at a model wrapper
-        // (`models/foo.json`) → which references a material descriptor
-        // (`materials/foo.json`) → which lists the texture name `foo` →
-        // which becomes `materials/foo.tex`. The resolver must follow the
-        // chain transparently and return the decoded image.
         let fixture = try makeFixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
 
@@ -193,7 +181,6 @@ struct SceneResourceResolverTests {
             _ = try resolver.resolveImage(relativePath: "models/foo.json")
             Issue.record("Expected materialUnresolved")
         } catch SceneResourceResolver.ResolveError.materialUnresolved {
-            // OK
         } catch {
             Issue.record("Expected materialUnresolved, got \(error)")
         }
@@ -226,10 +213,7 @@ struct SceneResourceResolverTests {
         return Fixture(root: root, cacheRoot: cacheRoot)
     }
 
-    /// Writes a synthetic 4×4 RGBA8888 `.tex` file matching the RePKG /
-    /// linux-wallpaperengine layout (TEXV0005 / TEXI0001 / TEXB0003).
-    /// Used by the material-chain test so a real `CGImage` comes out the
-    /// other end.
+    /// Writes a synthetic 4×4 RGBA8888 `.tex` file matching the RePKG / linux-wallpaperengine layout (TEXV0005 / TEXI0001 / TEXB0003).
     private func writeRGBA8888Tex(
         at url: URL,
         width: Int = 4,
@@ -251,20 +235,20 @@ struct SceneResourceResolverTests {
         }
         appendMagic("TEXV0005")
         appendMagic("TEXI0001")
-        appendInt32(0)            // format = RGBA8888
-        appendUInt32(0)           // flags
-        appendInt32(Int32(width)) // textureWidth
-        appendInt32(Int32(height)) // textureHeight
-        appendInt32(Int32(width)) // imageWidth
-        appendInt32(Int32(height)) // imageHeight
-        appendInt32(0)            // unkInt0
+        appendInt32(0)
+        appendUInt32(0)
+        appendInt32(Int32(width))
+        appendInt32(Int32(height))
+        appendInt32(Int32(width))
+        appendInt32(Int32(height))
+        appendInt32(0)
         appendMagic("TEXB0003")
-        appendInt32(1)            // imageCount
-        appendInt32(-1)           // FreeImage FIF_UNKNOWN/raw pixels
-        appendInt32(1)            // mipmapCount
-        appendInt32(Int32(width)) // mip width
-        appendInt32(Int32(height)) // mip height
-        appendUInt32(0)           // not compressed
+        appendInt32(1)
+        appendInt32(-1)
+        appendInt32(1)
+        appendInt32(Int32(width))
+        appendInt32(Int32(height))
+        appendUInt32(0)
         let pixels = payload ?? Data(repeating: 0xFF, count: width * height * 4)
         appendUInt32(UInt32(pixels.count))
         appendUInt32(UInt32(pixels.count))
@@ -283,8 +267,7 @@ struct SceneResourceResolverTests {
         ])
     }
 
-    /// Writes a 4×4 opaque PNG. ImageIO needs at least a real PNG header
-    /// to produce a CGImage; a hand-rolled empty file would yield nil.
+    /// Writes a 4×4 opaque PNG.
     private func writePNG(at url: URL) throws {
         guard let context = CGContext(
             data: nil,

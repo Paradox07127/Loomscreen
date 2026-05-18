@@ -54,9 +54,7 @@ public enum ConfigurationPorter {
     /// seconds on a hostile file.
     public static let maxImportFileSize: Int = 16 * 1024 * 1024
 
-    /// Encodes the bundle to pretty-printed JSON so users who open the file
-    /// in a text editor see readable content. `sortedKeys` keeps diffs
-    /// stable between exports.
+    /// Encodes the bundle to pretty-printed JSON so users who open the file in a text editor see readable content.
     public static func encode(_ bundle: ConfigurationBundle) throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -64,9 +62,7 @@ public enum ConfigurationPorter {
         return try encoder.encode(bundle)
     }
 
-    /// Writes a bundle to `destination` atomically. Returns the URL on
-    /// success. The caller is responsible for security-scoped resource
-    /// access if `destination` was returned by `NSSavePanel`.
+    /// Writes a bundle to `destination` atomically.
     @discardableResult
     public static func export(_ bundle: ConfigurationBundle, to destination: URL) throws -> URL {
         let data = try encode(bundle)
@@ -79,10 +75,7 @@ public enum ConfigurationPorter {
     }
 
     /// Decodes (but does NOT apply) a bundle for preview / dialog purposes.
-    /// Enforces a size cap so a hostile or accidental enormous file can't
-    /// freeze MainActor while we read it.
     public static func decode(from source: URL) throws -> ConfigurationBundle {
-        // Cheap size check before reading the bytes.
         if let size = try? source.resourceValues(forKeys: [.fileSizeKey]).fileSize,
            size > maxImportFileSize {
             throw ImportError.fileTooLarge(bytes: size)
@@ -95,8 +88,6 @@ public enum ConfigurationPorter {
             throw ImportError.invalidFile(reason: error.localizedDescription)
         }
 
-        // Defense-in-depth: some filesystems lie about size; double-check
-        // the actual byte count.
         guard data.count <= maxImportFileSize else {
             throw ImportError.fileTooLarge(bytes: data.count)
         }
@@ -110,9 +101,6 @@ public enum ConfigurationPorter {
             throw ImportError.invalidFile(reason: error.localizedDescription)
         }
 
-        // Schema version must be a positive integer within our supported
-        // range. Reject 0 / negative / future-version files explicitly so
-        // we don't silently apply data we don't understand.
         guard bundle.schemaVersion >= 1,
               bundle.schemaVersion <= ConfigurationBundle.currentSchemaVersion else {
             throw ImportError.unsupportedSchemaVersion(

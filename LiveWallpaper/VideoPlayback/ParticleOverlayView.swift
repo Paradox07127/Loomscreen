@@ -31,10 +31,7 @@ final class ParticleOverlayView: NSView {
 
     // MARK: - Public API
 
-    /// Switches the active particle effect. Pass `.none` to disable particles.
-    /// `density` is a multiplier on the emitter's master birth rate (0.05–3.0
-    /// effective). Density-only updates do not rebuild the cells, so existing
-    /// particles continue their lifecycle smoothly.
+    /// Switches the active particle effect.
     func setEffect(_ effect: ParticleEffect, density: CGFloat = 1.0) {
         if effect == currentEffect {
             updateDensity(density)
@@ -43,7 +40,6 @@ final class ParticleOverlayView: NSView {
 
         currentEffect = effect
 
-        // Remove immediately; existing particles finish their lifetime.
         if let oldEmitter = activeEmitter {
             oldEmitter.birthRate = 0
             oldEmitter.removeFromSuperlayer()
@@ -130,15 +126,15 @@ final class ParticleOverlayView: NSView {
             cell.scale = scale
             cell.scaleRange = scale * 0.3
             cell.alphaRange = alpha * 0.3
-            cell.xAcceleration = 10 * scale // Wind affects closer particles more
-            cell.yAcceleration = -15 * scale // Gravity
+            cell.xAcceleration = 10 * scale
+            cell.yAcceleration = -15 * scale
             cell.color = NSColor(white: 1, alpha: CGFloat(alpha)).cgColor
             return cell
         }
 
-        let near = createLayer(1.2, 50, 10, 0.6, 6.0) // Large, soft, out-of-focus
-        let mid = createLayer(0.6, 30, 30, 0.8, 3.0)  // Medium, sharp
-        let far = createLayer(0.3, 15, 60, 0.4, 2.0)  // Small, slow, dense
+        let near = createLayer(1.2, 50, 10, 0.6, 6.0)
+        let mid = createLayer(0.6, 30, 30, 0.8, 3.0)
+        let far = createLayer(0.3, 15, 60, 0.4, 2.0)
 
         return EmitterPreset(
             cells: [near, mid, far],
@@ -152,24 +148,23 @@ final class ParticleOverlayView: NSView {
     // MARK: - Rain
 
     private static let rainPreset: EmitterPreset = {
-        // Round droplets with gravity-only motion avoid fake wind drift.
         let cell = CAEmitterCell()
         cell.contents = ParticleTextures.softCircle(
             radius: 2.5,
             color: NSColor.white.withAlphaComponent(0.7).cgColor
         )
-        cell.birthRate = 260            // dense, steady drizzle
+        cell.birthRate = 260
         cell.lifetime = 5
         cell.lifetimeRange = 1
-        cell.velocity = 0               // start at rest — gravity does all the work
+        cell.velocity = 0
         cell.velocityRange = 0
         cell.emissionLongitude = 0
         cell.emissionRange = 0
         cell.scale = 0.9
         cell.scaleRange = 0.3
         cell.alphaRange = 0.25
-        cell.yAcceleration = -160       // gentle gravity for a slow fall
-        cell.xAcceleration = 0          // no wind
+        cell.yAcceleration = -160
+        cell.xAcceleration = 0
         cell.color = NSColor(white: 1.0, alpha: 0.75).cgColor
         return EmitterPreset(
             cells: [cell],
@@ -183,31 +178,27 @@ final class ParticleOverlayView: NSView {
     // MARK: - Bokeh
 
     private static let bokehPreset: EmitterPreset = {
-        // Bokeh is the photography effect of out-of-focus highlights appearing
-        // as soft glowing orbs. We emit multiple cells with different warm /
-        // cool / pastel colors spread across the whole screen, using additive
-        // blending to get the signature dreamy glow.
         let palette: [CGColor] = [
-            NSColor(calibratedRed: 1.00, green: 0.90, blue: 0.70, alpha: 0.85).cgColor, // warm amber
-            NSColor(calibratedRed: 0.70, green: 0.88, blue: 1.00, alpha: 0.85).cgColor, // cool blue
-            NSColor(calibratedRed: 1.00, green: 0.75, blue: 0.90, alpha: 0.85).cgColor, // pink
-            NSColor(calibratedRed: 0.85, green: 1.00, blue: 0.85, alpha: 0.85).cgColor, // mint
+            NSColor(calibratedRed: 1.00, green: 0.90, blue: 0.70, alpha: 0.85).cgColor,
+            NSColor(calibratedRed: 0.70, green: 0.88, blue: 1.00, alpha: 0.85).cgColor,
+            NSColor(calibratedRed: 1.00, green: 0.75, blue: 0.90, alpha: 0.85).cgColor,
+            NSColor(calibratedRed: 0.85, green: 1.00, blue: 0.85, alpha: 0.85).cgColor,
         ]
         let cells = palette.map { color -> CAEmitterCell in
             let cell = CAEmitterCell()
             cell.contents = ParticleTextures.softCircle(radius: 32, color: color)
-            cell.birthRate = 0.9      // ~3.6 orbs/sec across all 4 cells — sparse by default
+            cell.birthRate = 0.9
             cell.lifetime = 9
             cell.lifetimeRange = 3
-            cell.velocity = 6         // very slow drift
+            cell.velocity = 6
             cell.velocityRange = 8
-            cell.emissionRange = .pi * 2  // random direction — orbs float freely
+            cell.emissionRange = .pi * 2
             cell.scale = 1.0
             cell.scaleRange = 0.6
-            cell.scaleSpeed = 0.04    // slow growth (emulates depth-of-field pull)
+            cell.scaleSpeed = 0.04
             cell.alphaRange = 0.2
-            cell.alphaSpeed = -0.09   // fade out over lifetime
-            cell.yAcceleration = 3    // gentle upward rise
+            cell.alphaSpeed = -0.09
+            cell.yAcceleration = 3
             cell.color = color
             return cell
         }
@@ -215,8 +206,6 @@ final class ParticleOverlayView: NSView {
             cells: cells,
             shape: .rectangle,
             renderMode: .additive,
-            // Spawn over the entire screen so orbs are always visible across
-            // the whole frame instead of rising from a single edge.
             position: { CGPoint(x: $0.midX, y: $0.midY) },
             size: { CGSize(width: $0.width, height: $0.height) }
         )
@@ -225,8 +214,6 @@ final class ParticleOverlayView: NSView {
     // MARK: - Fireflies
 
     private static let firefliesPreset: EmitterPreset = {
-        // Larger texture (radius=14, scale=1.0–1.4) and higher birthRate so fireflies
-        // produce a real glow over video; pale yellow-green mimics nocturnal insect color.
         let glowColor = NSColor(calibratedRed: 1.0, green: 0.95, blue: 0.55, alpha: 1).cgColor
         let cell = CAEmitterCell()
         cell.contents = ParticleTextures.softCircle(radius: 14, color: glowColor)
@@ -235,11 +222,11 @@ final class ParticleOverlayView: NSView {
         cell.lifetimeRange = 3
         cell.velocity = 18
         cell.velocityRange = 22
-        cell.emissionRange = .pi * 2  // all directions
+        cell.emissionRange = .pi * 2
         cell.scale = 1.0
         cell.scaleRange = 0.4
         cell.alphaRange = 0.6
-        cell.alphaSpeed = -0.12  // slow fade-out for shimmer
+        cell.alphaSpeed = -0.12
         cell.yAcceleration = 2
         cell.color = glowColor
         return EmitterPreset(
@@ -255,14 +242,14 @@ final class ParticleOverlayView: NSView {
 
     private static let leavesPreset: EmitterPreset = {
         let palette: [CGColor] = [
-            NSColor(calibratedRed: 0.85, green: 0.4, blue: 0.1, alpha: 1).cgColor, // Orange
-            NSColor(calibratedRed: 0.9, green: 0.7, blue: 0.1, alpha: 1).cgColor,  // Yellow
-            NSColor(calibratedRed: 0.6, green: 0.3, blue: 0.1, alpha: 1).cgColor   // Brown
+            NSColor(calibratedRed: 0.85, green: 0.4, blue: 0.1, alpha: 1).cgColor,
+            NSColor(calibratedRed: 0.9, green: 0.7, blue: 0.1, alpha: 1).cgColor,
+            NSColor(calibratedRed: 0.6, green: 0.3, blue: 0.1, alpha: 1).cgColor
         ]
         
         var cells: [CAEmitterCell] = []
         for (i, color) in palette.enumerated() {
-            let scaleMultiplier = CGFloat(1.0 - Float(i) * 0.25) // Parallax depth mapping
+            let scaleMultiplier = CGFloat(1.0 - Float(i) * 0.25)
             
             let cell = CAEmitterCell()
             cell.contents = ParticleTextures.leaf(width: 14, height: 9, color: NSColor.white.cgColor)
@@ -278,8 +265,8 @@ final class ParticleOverlayView: NSView {
             cell.alphaRange = 0.3
             cell.spin = 1.5
             cell.spinRange = 2.0
-            cell.xAcceleration = 20 * scaleMultiplier // Wind affects foreground more
-            cell.yAcceleration = -10 * scaleMultiplier // Gravity
+            cell.xAcceleration = 20 * scaleMultiplier
+            cell.yAcceleration = -10 * scaleMultiplier
             cell.color = color
             
             cells.append(cell)
@@ -289,7 +276,7 @@ final class ParticleOverlayView: NSView {
             cells: cells,
             shape: .line,
             renderMode: .unordered,
-            position: { CGPoint(x: $0.midX - $0.width * 0.2, y: $0.maxY) }, // Offset for wind drift
+            position: { CGPoint(x: $0.midX - $0.width * 0.2, y: $0.maxY) },
             size: { CGSize(width: $0.width * 1.5, height: 0) }
         )
     }()
@@ -314,11 +301,10 @@ final class ParticleOverlayView: NSView {
             cell.alphaRange = alpha * 0.3
             cell.spin = 1.0
             cell.spinRange = 2.0
-            cell.xAcceleration = 25 * scale // persistent soft breeze to the right
-            cell.yAcceleration = -12 * scale // light gravity
+            cell.xAcceleration = 25 * scale
+            cell.yAcceleration = -12 * scale
             cell.color = baseColor.copy(alpha: CGFloat(alpha)) ?? baseColor
             
-            // Add slight color variation per petal
             cell.redRange = 0.1
             cell.greenRange = 0.1
             cell.blueRange = 0.1
@@ -326,15 +312,15 @@ final class ParticleOverlayView: NSView {
             return cell
         }
 
-        let near = createLayer(1.4, 55, 6, 0.7, 4.0)   // Large foreground petals
-        let mid = createLayer(0.9, 40, 15, 0.9, 0.0)   // Standard petals
-        let far = createLayer(0.5, 25, 30, 0.5, -4.0)  // Small background drift
+        let near = createLayer(1.4, 55, 6, 0.7, 4.0)
+        let mid = createLayer(0.9, 40, 15, 0.9, 0.0)
+        let far = createLayer(0.5, 25, 30, 0.5, -4.0)
 
         return EmitterPreset(
             cells: [near, mid, far],
             shape: .line,
             renderMode: .unordered,
-            position: { CGPoint(x: $0.midX - $0.width * 0.3, y: $0.maxY) }, // Start further left to drift right across screen
+            position: { CGPoint(x: $0.midX - $0.width * 0.3, y: $0.maxY) },
             size: { CGSize(width: $0.width * 1.6, height: 0) }
         )
     }()
@@ -349,7 +335,6 @@ private enum ParticleTextures {
     private static let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
 
     /// Creates a `CGContext` suitable for drawing a particle texture.
-    /// Returns nil only if the bitmap allocation actually fails.
     private static func makeContext(width: Int, height: Int) -> CGContext? {
         return CGContext(
             data: nil,
@@ -362,8 +347,7 @@ private enum ParticleTextures {
         )
     }
 
-    /// Soft radial-gradient circle, white-to-transparent. Used for snow,
-    /// bokeh, fireflies — any particle that wants a glow falloff.
+    /// Soft radial-gradient circle, white-to-transparent.
     static func softCircle(radius: CGFloat, color: CGColor) -> CGImage? {
         let diameter = max(Int(ceil(radius * 2)), 2)
         guard let ctx = makeContext(width: diameter, height: diameter) else { return nil }
@@ -371,7 +355,6 @@ private enum ParticleTextures {
         let center = CGPoint(x: CGFloat(diameter) / 2, y: CGFloat(diameter) / 2)
         let endRadius = CGFloat(diameter) / 2
 
-        // Build a 2-stop radial gradient that fades to transparent.
         guard let opaqueColor = color.copy(alpha: 1.0),
               let transparent = color.copy(alpha: 0.0),
               let gradient = CGGradient(
@@ -391,8 +374,7 @@ private enum ParticleTextures {
         return ctx.makeImage()
     }
 
-    /// Cherry-blossom petal — a soft teardrop shape with a gentle notch at the
-    /// tip, drawn with a radial gradient to give subtle depth.
+    /// Cherry-blossom petal — a soft teardrop shape with a gentle notch at the tip, drawn with a radial gradient to give subtle depth.
     static func sakuraPetal(width: CGFloat, height: CGFloat, color: CGColor) -> CGImage? {
         let w = max(Int(ceil(width)), 2)
         let h = max(Int(ceil(height)), 2)
@@ -401,23 +383,19 @@ private enum ParticleTextures {
         let widthF = CGFloat(w)
         let heightF = CGFloat(h)
 
-        // Build a teardrop using two symmetric bezier curves. Origin is
-        // bottom-left in the CG context.
         let path = CGMutablePath()
         let tipX = widthF / 2
-        path.move(to: CGPoint(x: tipX, y: 0))                    // narrow tip at bottom
+        path.move(to: CGPoint(x: tipX, y: 0))
         path.addQuadCurve(
-            to: CGPoint(x: tipX, y: heightF),                    // rounded top
+            to: CGPoint(x: tipX, y: heightF),
             control: CGPoint(x: widthF * 1.15, y: heightF * 0.5)
         )
         path.addQuadCurve(
-            to: CGPoint(x: tipX, y: 0),                          // back to tip
+            to: CGPoint(x: tipX, y: 0),
             control: CGPoint(x: -widthF * 0.15, y: heightF * 0.5)
         )
         path.closeSubpath()
 
-        // Clip to the petal path, then draw a radial gradient to get a soft
-        // center-bright / edge-soft look.
         ctx.addPath(path)
         ctx.clip()
 
@@ -429,7 +407,6 @@ private enum ParticleTextures {
                 locations: [0.0, 1.0]
               )
         else {
-            // Fallback to flat fill if gradient construction fails.
             ctx.setFillColor(color)
             ctx.fill(CGRect(x: 0, y: 0, width: widthF, height: heightF))
             return ctx.makeImage()
