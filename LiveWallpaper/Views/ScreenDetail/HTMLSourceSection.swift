@@ -554,16 +554,15 @@ struct HTMLTransformInspector: View {
                     translateRow
                     Divider()
                     rotationRow
+                    Divider()
+                    resetButtonRow
                 }
             }
         }
         .groupBoxStyle(ContainerGroupBoxStyle())
     }
 
-    /// Scale row: a single slider plus a numeric readout. The reset button on
-    /// the right collapses scale + translate + rotation back to identity in
-    /// one click — important because three near-zero values are easier to
-    /// accidentally leave behind than one.
+    /// Scale row: a single slider plus a numeric readout.
     private var scaleRow: some View {
         SettingRow(
             icon: "arrow.up.left.and.arrow.down.right",
@@ -585,26 +584,34 @@ struct HTMLTransformInspector: View {
                     in: HTMLConfig.minTransformScale...HTMLConfig.maxTransformScale
                 )
                 .controlSize(.small)
-                .frame(width: 78)
+                .frame(width: 96)
                 .accessibilityLabel(Text("Scale"))
 
                 Text(verbatim: String(format: "%.0f%%", config.transformScale * 100))
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.secondary)
-                    .frame(width: 36, alignment: .trailing)
+                    .frame(width: 42, alignment: .trailing)
                     .monospacedDigit()
-
-                Button {
-                    resetTransform()
-                } label: {
-                    Image(systemName: "arrow.counterclockwise")
-                }
-                .controlSize(.small)
-                .buttonStyle(.borderless)
-                .help(Text("Reset scale, translate, and rotation"))
-                .accessibilityLabel(Text("Reset transform"))
-                .disabled(!isTransformActive)
             }
+        }
+    }
+
+    /// Dedicated reset row at the bottom of the Transform group. Mirrors the
+    /// "Reset Color & Filters" pattern in ColorAdjustmentsView so the
+    /// destructive action sits visually apart from the value controls.
+    private var resetButtonRow: some View {
+        HStack {
+            Spacer()
+            Button(action: resetTransform) {
+                Label("Reset Transform", systemImage: "arrow.counterclockwise")
+            }
+            .buttonStyle(.bordered)
+            .tint(.red)
+            .controlSize(.small)
+            .disabled(!isTransformActive)
+            .help(Text("Reset scale, translate, and rotation"))
+            .accessibilityLabel(Text("Reset transform"))
+            Spacer()
         }
     }
 

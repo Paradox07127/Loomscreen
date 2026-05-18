@@ -127,7 +127,7 @@ struct CommonPlaybackInspector: View {
                 }
             }
             .labelsHidden()
-            .frame(width: 86)
+            .fixedSize()
             .accessibilityLabel(Text("Frame rate limit"))
             .accessibilityValue(Text(frameRateLimit.titleKey))
         }
@@ -137,7 +137,7 @@ struct CommonPlaybackInspector: View {
         SettingRow(
             icon: "rectangle.on.rectangle",
             iconColor: videoDisplayMode == .spanAllDisplays ? .blue : .secondary,
-            title: "Display Layout",
+            title: "Layout",
             info: "Span uses all connected displays as one virtual video canvas; Per Display gives each screen its own video."
         ) {
             Picker("", selection: videoDisplayModeBinding) {
@@ -147,7 +147,7 @@ struct CommonPlaybackInspector: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 148)
+            .fixedSize()
             .accessibilityLabel(Text("Video display layout"))
             .accessibilityValue(Text(videoDisplayMode.titleKey))
         }
