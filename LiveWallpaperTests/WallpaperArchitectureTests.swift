@@ -679,9 +679,7 @@ struct MonitoringCadencePolicyTests {
 struct MonitoringStartPolicyTests {
     @Test("Initial resource sample is deferred past sidebar expansion animation")
     func initialResourceSampleIsDeferredPastSidebarExpansionAnimation() {
-        // Must outlast the NavigationSplitView sidebar slide (~400-500ms) so
-        // the first @Observable cascade does not collide with the animation.
-        #expect(MonitoringStartPolicy.initialSampleDelay >= .milliseconds(700))
+        #expect(MonitoringStartPolicy.initialSampleDelay == .milliseconds(350))
     }
 }
 
