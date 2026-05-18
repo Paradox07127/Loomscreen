@@ -27,8 +27,6 @@ struct SceneDescriptorCodableTests {
 
     @Test("Unknown capabilityTier decodes lossily as .unsupported")
     func sceneDescriptorTierFallsBack() throws {
-        // Future Phase 2.x might add a new tier (e.g. `.fxOnly`); an old build
-        // shouldn't crash on the next launch.
         let payload: [String: Any] = [
             "workshopID": "abc",
             "cacheRelativePath": "wpe-cache/abc",
@@ -111,8 +109,6 @@ struct SceneDescriptorCodableTests {
             resourceLocation: .cache
         )
 
-        // Build a legacy-shaped JSON: no `activeWallpaper`, just the old
-        // `wallpaperType` key, plus the wpeOrigin we want backfilled.
         let payload: [String: Any] = [
             "screenID": 7,
             "wallpaperType": "Scene",
@@ -203,9 +199,6 @@ struct SceneDescriptorCodableTests {
 
         let decoded = try JSONDecoder().decode(ScreenConfiguration.self, from: data)
 
-        // Without origin context the descriptor cannot be reconstructed safely,
-        // so the persisted blob degrades to an empty video. ScreenManager's
-        // restore path then mounts the not-configured Scene tab placeholder.
         #expect(decoded.activeWallpaper == .video(bookmarkData: Data()))
     }
 

@@ -12,9 +12,6 @@ struct ScreenConfigurationCompatTests {
 
     @Test("Decoding a legacy ScreenConfiguration without wpeOrigin yields nil and preserves other fields")
     func decodeLegacyConfigurationWithoutWPEOrigin() throws {
-        // Build a baseline by encoding a current-shape config WITHOUT wpeOrigin
-        // set, then strip the field from the encoded JSON. That mimics a Day 0
-        // payload that predates the field being added.
         let baselineConfig = ScreenConfiguration(
             screenID: 12_345,
             wallpaper: .video(bookmarkData: Data([0xAA, 0xBB])),
@@ -97,8 +94,6 @@ struct ScreenConfigurationCompatTests {
 
     @Test("Malformed wpeOrigin blob falls back to nil without invalidating the rest")
     func lossilyDecodesMalformedWPEOrigin() throws {
-        // Encode a valid configuration first so we have a known-good baseline,
-        // then surgically replace `wpeOrigin` with a JSON object that fails decoding.
         let origin = WPEOrigin(
             workshopID: "x",
             title: "Lossy",
@@ -115,7 +110,6 @@ struct ScreenConfigurationCompatTests {
 
         let baseline = try JSONEncoder().encode(config)
         var dict = try #require(JSONSerialization.jsonObject(with: baseline) as? [String: Any])
-        // Replace wpeOrigin with a structurally wrong shape.
         dict["wpeOrigin"] = ["totally": "wrong"]
         let mutated = try JSONSerialization.data(withJSONObject: dict, options: .sortedKeys)
 
@@ -129,7 +123,6 @@ struct ScreenConfigurationCompatTests {
 
     @Test("Decoding legacy GlobalSettings without recentWPEImports yields empty array")
     func decodeLegacyGlobalSettingsWithoutRecentImports() throws {
-        // Encode a fresh current-shape GlobalSettings, strip recentWPEImports.
         let baseline = try JSONEncoder().encode(GlobalSettings(globalPauseOnBattery: true, pauseOnFullScreen: true))
         var dict = try #require(JSONSerialization.jsonObject(with: baseline) as? [String: Any])
         dict.removeValue(forKey: "recentWPEImports")

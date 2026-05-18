@@ -37,9 +37,7 @@ public final class LogFileSink: @unchecked Sendable {
         fileURL = Self.prepareLogFileURL()
     }
 
-    /// Threshold below which messages are skipped (only the file mirror; the
-    /// underlying `os.Logger` always receives the call). info/debug are too
-    /// noisy to persist; notice escalates with the rest.
+    /// Threshold below which messages are skipped (only the file mirror; the underlying `os.Logger` always receives the call).
     private func shouldRecord(_ level: Logger.Level) -> Bool {
         switch level {
         case .warning, .error, .fault, .notice:
@@ -89,7 +87,6 @@ public final class LogFileSink: @unchecked Sendable {
         }
 
         let fm = FileManager.default
-        // Drop the oldest, shift others up.
         let oldest = url.deletingPathExtension()
             .appendingPathExtension("\(rotationKeepCount).log")
         try? fm.removeItem(at: oldest)
@@ -100,7 +97,6 @@ public final class LogFileSink: @unchecked Sendable {
         }
         let firstRotated = url.deletingPathExtension().appendingPathExtension("1.log")
         try? fm.moveItem(at: url, to: firstRotated)
-        // Recreate the live file so the next append succeeds.
         try? Data().write(to: url, options: .atomic)
     }
 

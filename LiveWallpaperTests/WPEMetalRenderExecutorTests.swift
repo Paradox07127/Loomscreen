@@ -61,9 +61,6 @@ struct WPEMetalRenderExecutorTests {
                     shader: WPEShaderProgram(
                         name: "effects/broken",
                         vertexSource: "// no main",
-                        // Valid GLSL syntax-wise but no `void main()` — the
-                        // transpiler must surface a translationFailed
-                        // error rather than emit malformed MSL.
                         fragmentSource: "uniform sampler2D g_Texture0;\n// missing main",
                         isBuiltin: false
                     ),
@@ -121,9 +118,6 @@ struct WPEMetalRenderExecutorTests {
                     shader: WPEShaderProgram(
                         name: "effects/multiply_red",
                         vertexSource: "// fullscreen quad: executor supplies the vertex stage",
-                        // Real-shape WPE-flavor fragment: sampler + varying
-                        // + gl_FragColor write. After preprocess + transpile
-                        // it becomes valid MSL the executor can dispatch.
                         fragmentSource: """
                         uniform sampler2D g_Texture0;
                         varying vec2 v_TexCoord;
@@ -148,9 +142,6 @@ struct WPEMetalRenderExecutorTests {
         )
         let pixel = try readPixel(output, x: 1, y: 1)
 
-        // Input was pure blue (0, 0, 255). Shader added 1.0 to red channel
-        // (saturated to 1.0) and kept blue at 255. Expect bright red+blue
-        // → magenta-ish pixel with full alpha.
         #expect(pixel.r >= 250)
         #expect(pixel.b >= 250)
         #expect(pixel.a >= 250)
@@ -195,11 +186,6 @@ struct WPEMetalRenderExecutorTests {
 
     @Test("Multi-pass custom shader reads previous-pass FBO via pass.binds")
     func multiPassEffectChainsFBOsViaBinds() throws {
-        // Two-pass setup: pass 0 writes a custom shader output to an
-        // FBO; pass 1 reads that FBO via `binds[0]` and renders to scene.
-        // If the dispatcher honours `pass.binds`, the second pass sees
-        // the first pass's output and the test passes. Without that
-        // wiring the second pass would re-sample the original input.
         let device = try #require(MTLCreateSystemDefaultDevice())
         let executor = try WPEMetalRenderExecutor(device: device)
         let input = try makeRGBAInputTexture(device: device, bytes: Data([
@@ -224,9 +210,6 @@ struct WPEMetalRenderExecutorTests {
             depthTest: "disabled",
             depthWrite: "disabled"
         )
-        // Second pass: reads the FBO from pass 0 via binds and writes
-        // to the scene output. The actual GLSL just samples slot 0 and
-        // adds a constant red, so we can detect end-to-end correctness.
         let pass1 = WPERenderPass(
             id: "pass1",
             phase: .effect(file: "effects/two_pass/effect.json"),
@@ -261,8 +244,6 @@ struct WPEMetalRenderExecutorTests {
                         shader: WPEShaderProgram(
                             name: "effects/two_pass_first",
                             vertexSource: "// fullscreen vertex from executor",
-                            // First pass: amplify R channel by 25× → maps
-                            // gray (10) up to ≈250.
                             fragmentSource: """
                             uniform sampler2D g_Texture0;
                             varying vec2 v_TexCoord;
@@ -282,12 +263,6 @@ struct WPEMetalRenderExecutorTests {
                         shader: WPEShaderProgram(
                             name: "effects/two_pass_second",
                             vertexSource: "// fullscreen vertex",
-                            // Second pass samples slot 0 (which the
-                            // dispatcher must bind to the pass-0 FBO via
-                            // `binds`) and adds a green tint. If `binds`
-                            // were ignored, slot 0 would fall back to
-                            // pass.pass.source = the original gray image
-                            // and the red channel would stay near 10.
                             fragmentSource: """
                             uniform sampler2D g_Texture0;
                             varying vec2 v_TexCoord;
@@ -313,9 +288,6 @@ struct WPEMetalRenderExecutorTests {
         )
         let pixel = try readPixel(output, x: 1, y: 1)
 
-        // Pass 0 amplified R from 10 → ≈250 in the FBO.
-        // Pass 1 read the FBO (NOT the original) and added green.
-        // Final pixel: high red + high green + zero blue, full alpha.
         #expect(pixel.r >= 200, "Multi-pass output should carry pass-0's amplified R; got \(pixel.r)")
         #expect(pixel.g >= 200, "Pass-1 should contribute saturated green; got \(pixel.g)")
         #expect(pixel.a >= 250)
@@ -339,9 +311,6 @@ struct WPEMetalRenderExecutorTests {
             target: .scene,
             textures: [0: .image("materials/base.png")],
             binds: [:],
-            // sRGB 1.0 mid-tint of red so we can detect both color routing
-            // and gamma handling. Executor converts sRGB→linear before
-            // shading; sRGB-tagged target re-encodes on store.
             constants: ["g_Color": .vector([1, 0, 0, 1])],
             combos: [:],
             blending: "normal",
@@ -369,9 +338,6 @@ struct WPEMetalRenderExecutorTests {
         )
         let pixel = try readPixel(output, x: 1, y: 1)
 
-        // White texture × red tint → red pixel at full alpha. The shader
-        // premultiplies, the sRGB target stores back, so r is at the high
-        // end of the byte range with g/b near zero.
         #expect(pixel.r >= 250)
         #expect(pixel.g <= 5)
         #expect(pixel.b <= 5)
@@ -388,8 +354,6 @@ struct WPEMetalRenderExecutorTests {
             0, 255, 0, 255,
             0, 255, 0, 255
         ]))
-        // Mask alpha = 0 → output alpha must collapse to 0 regardless of
-        // primary alpha. This is the gating test for the hasMask path.
         let mask = try makeRGBAInputTexture(device: device, bytes: Data([
             0, 0, 0, 0,
             0, 0, 0, 0,
@@ -437,11 +401,8 @@ struct WPEMetalRenderExecutorTests {
         )
         let pixel = try readPixel(output, x: 1, y: 1)
 
-        // Mask zeroed alpha + premultiplied output → all channels collapse.
-        // Pass blends "normal" against the cleared (0,0,0,1) backbuffer,
-        // so the result is the clear color, not the texture sample.
-        #expect(pixel.a >= 250) // clear-color alpha
-        #expect(pixel.g <= 5)   // green texture didn't bleed through
+        #expect(pixel.a >= 250)
+        #expect(pixel.g <= 5)
     }
 
     @Test("Copies image layers that have no material passes")
@@ -597,10 +558,6 @@ private extension WPEMetalRenderExecutorTests {
         let output = try executor.render(pipeline: pipeline, size: CGSize(width: 4, height: 4), textures: [:])
         let pixel = try readPixel(output, x: 2, y: 2)
 
-        // sRGB "0.5" round-trips back to byte 128 ±2 when uniforms are
-        // linearized before reaching the sRGB-tagged target. Without the
-        // sRGB→linear conversion the byte would read ~188 (gamma double-
-        // encoded). This test pins the H3 gamma fix.
         #expect(abs(Int(pixel.r) - 128) <= 3)
         #expect(abs(Int(pixel.g) - 128) <= 3)
         #expect(abs(Int(pixel.b) - 128) <= 3)
@@ -1311,7 +1268,6 @@ private extension WPEMetalRenderExecutorTests {
         )
         let pixel = try readPixel(output, x: 0, y: 0)
 
-        // Linear luma for red is 0.2126; storing to rgba8Unorm_srgb reads back ~127.
         expectPixel(pixel, approximately: Pixel(r: 127, g: 127, b: 127, a: 255))
     }
 
@@ -1361,7 +1317,6 @@ private extension WPEMetalRenderExecutorTests {
         )
         let pixel = try readPixel(output, x: 4, y: 0)
 
-        // Center weight 0.18; storing 0.18 linear red to sRGB reads back ~118.
         expectPixel(pixel, approximately: Pixel(r: 118, g: 0, b: 0, a: 255))
     }
 
@@ -1459,8 +1414,6 @@ private extension WPEMetalRenderExecutorTests {
         )
         let pixel = try readPixel(output, x: 0, y: 0)
 
-        // amplitude 1 + frequency 0 + speed 0 → wave = (sin(0), cos(0)) * 1 = (0, 1).
-        // UV (0.25, 0.25) + (0, 1) clamps to (0.25, 1.0) → bottom row → blue.
         expectPixel(pixel, approximately: Pixel(r: 0, g: 0, b: 255, a: 255))
     }
 
@@ -1514,8 +1467,6 @@ private extension WPEMetalRenderExecutorTests {
         )
         let pixel = try readPixel(output, x: 1, y: 0)
 
-        // At time 0, phase = floor(0*1) = 0; jitter = (cos(0), sin(0)) * 0.25 = (0.25, 0).
-        // Pixel x=1 (uv ≈ 0.375) + 0.25 = 0.625 → samples source x ≈ 2 → blue.
         expectPixel(pixel, approximately: Pixel(r: 0, g: 0, b: 255, a: 255))
     }
 }

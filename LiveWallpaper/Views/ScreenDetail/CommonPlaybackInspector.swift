@@ -257,11 +257,10 @@ struct CommonPlaybackInspector: View {
                     return
                 }
 
-                // Coming out of mute (or moving the slider further up)
                 if mutedBinding.wrappedValue {
                     mutedBinding.wrappedValue = false
                 }
-                guard htmlConfig == nil else { return } // HTML has no volume knob
+                guard htmlConfig == nil else { return }
 
                 let normalized = (sliderValue - Self.audioDeadZone) / (1 - Self.audioDeadZone)
                 let clampedValue = Self.clampedVolume(normalized)
@@ -325,10 +324,7 @@ struct CommonPlaybackInspector: View {
         )
     }
 
-    /// Threads `HTMLConfig` keypath writes back through the parent `Binding`
-    /// AND `ScreenManager.updateHTMLConfig` so persistence and runtime apply
-    /// happen in one place. Identity-noop sets are filtered to avoid extra
-    /// session rebuilds.
+    /// Threads `HTMLConfig` keypath writes back through the parent `Binding` AND `ScreenManager.updateHTMLConfig` so persistence and runtime apply happen in one place.
     private func htmlConfigBinding<Value: Equatable>(
         _ htmlConfig: Binding<HTMLConfig>,
         keyPath: WritableKeyPath<HTMLConfig, Value>

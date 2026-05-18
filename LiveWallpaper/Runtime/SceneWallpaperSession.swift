@@ -72,9 +72,7 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
         renderer?.applyPerformanceProfile(isVisible ? profile : .suspended)
     }
 
-    /// Exclusive-rendering coordinator entry point. Throttling is orthogonal
-    /// to power profile — when console window is key we drop to 1fps even on
-    /// `.quality`, then bounce back when the user goes away.
+    /// Exclusive-rendering coordinator entry point.
     func setThrottled(_ throttled: Bool) {
         isThrottled = throttled
         renderer?.setThrottled(throttled)
@@ -87,8 +85,7 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
         window = nil
     }
 
-    /// Loads the scene renderer. Safe to call multiple times — only the
-    /// first call performs I/O.
+    /// Loads the scene renderer.
     func startLoadIfNeeded() {
         guard !didStartLoad, let renderer else { return }
         didStartLoad = true
@@ -103,11 +100,6 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
                 self?.loadError = error
             } catch {
                 Logger.warning("Scene wallpaper load failed: \(error.localizedDescription)", category: .screenManager)
-                // Phase 2B: Metal renderer maps load failures onto
-                // `loadDiagnostics` before rethrowing the raw error type;
-                // surface that taxonomy here so the detail view shows the
-                // precise `SceneLoadDiagnostic` reason instead of a generic
-                // "parse failed" message.
                 if let diagnostic = renderer.loadDiagnostics {
                     self?.loadError = .resourceFailed(diagnostic)
                 } else {
@@ -121,11 +113,7 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
     // (50ms warm-up) gives the Metal renderer enough lead time to present
     // its first frame before the wallpaper window is brought to screen.
 
-    /// Tears the controller's scene down and re-runs `load()`. Used by
-    /// the inspector's Retry button so the user has a recovery path
-    /// without manually clearing + re-importing the wallpaper. Clears
-    /// the previous `loadError` on success so the state machine can move
-    /// back to `.playing` instead of latching on the old failure.
+    /// Tears the controller's scene down and re-runs `load()`.
     func reload() async {
         guard let renderer else {
             loadError = .cacheRootMissing

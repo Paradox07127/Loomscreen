@@ -57,8 +57,6 @@ struct WPEMultiRootResourceResolverTests {
         let engineMaterials = fixture.engineRoot.appendingPathComponent("assets/materials", isDirectory: true)
         try FileManager.default.createDirectory(at: primaryMaterials, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: engineMaterials, withIntermediateDirectories: true)
-        // Project ships its own copy AND the engine ships a different one
-        // at the same relative path. The project copy must always win.
         try Data("project-version".utf8).write(to: primaryMaterials.appendingPathComponent("composelayer.json"))
         try Data("engine-version".utf8).write(to: engineMaterials.appendingPathComponent("composelayer.json"))
 
@@ -87,10 +85,6 @@ struct WPEMultiRootResourceResolverTests {
         let fixture = try makeFixture()
         defer { fixture.cleanup() }
 
-        // Plant a sentinel file at the same relative path under the
-        // engine-assets root. If our resolver incorrectly preferred the
-        // engine resolver over the built-in, this is the file it would
-        // return — and the test would fail.
         let engineModels = fixture.engineRoot
             .appendingPathComponent("assets/models/util", isDirectory: true)
         try FileManager.default.createDirectory(at: engineModels, withIntermediateDirectories: true)
@@ -119,11 +113,6 @@ struct WPEMultiRootResourceResolverTests {
             engineAssetsRootURL: fixture.engineRoot
         )
 
-        // pathEscape from primary must NOT retry against engine root —
-        // pathEscape means the user-supplied path was malformed, not that
-        // we picked the wrong root. Use the dependency-style escape path:
-        // "../" prefix triggers `dependencyReference` short-circuit but
-        // since no mounts are declared it throws pathEscape directly.
         #expect(throws: SceneResourceResolver.ResolveError.pathEscape) {
             _ = try resolver.resolveExistingFileURL(relativePath: "../456/materials/x.png")
         }

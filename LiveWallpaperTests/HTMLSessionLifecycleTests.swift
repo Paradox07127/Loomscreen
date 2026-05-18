@@ -100,8 +100,6 @@ struct FolderURLSchemeHandlerLifecycleTests {
         let folder = makeTemporaryFolder()
         defer { try? FileManager.default.removeItem(at: folder) }
 
-        // Large payload so the streaming loop yields between chunks, leaving
-        // a real window in which `stop` can interrupt delivery.
         let payload = Data(repeating: 0xAB, count: 1 * 1024 * 1024)
         let asset = folder.appendingPathComponent("large.bin")
         try payload.write(to: asset)
@@ -118,8 +116,6 @@ struct FolderURLSchemeHandlerLifecycleTests {
         handler.webView(WKWebView(), start: task)
         handler.webView(WKWebView(), stop: task)
 
-        // Give the worker a moment to observe cancellation; assert it did not
-        // pretend the transfer completed cleanly.
         try await Task.sleep(for: .milliseconds(50))
         #expect(!task.didFinishCalled)
     }

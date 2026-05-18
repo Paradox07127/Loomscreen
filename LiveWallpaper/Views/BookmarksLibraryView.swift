@@ -221,19 +221,12 @@ private struct BookmarkCard: View {
                     thumbnail = image
                 }
             case .metalShader, .scene:
-                // Shader/scene previews are best handled by their own
-                // capture pipelines (live MTKView snapshot) — out of
-                // scope here; fall back to the SF Symbol placeholder.
                 break
             }
         }
     }
 
     private var bookmarkCacheKey: String {
-        // The bookmark UUID is stable across renames, so it makes a
-        // perfect cache key that survives label edits while still
-        // invalidating when the underlying source changes (bookmark
-        // gets re-saved → new UUID).
         "bookmark::" + bookmark.id.uuidString
     }
 

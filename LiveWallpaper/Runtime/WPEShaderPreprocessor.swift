@@ -43,9 +43,6 @@ struct WPEShaderPreprocessor {
             comboValues: comboValues
         )
 
-        // Material `textures` array overlays the shader-declared bindings:
-        // material wins so an artist can rebind slot 0 to a different
-        // texture without editing the shader.
         var combinedBindings = vertResult.bindings.merging(fragResult.bindings) { _, fragmentValue in fragmentValue }
         combinedBindings.merge(materialTextureBindings) { _, materialValue in materialValue }
 
@@ -129,9 +126,6 @@ struct WPEShaderPreprocessor {
                     continue
                 }
                 if visited.contains(path) {
-                    // Already inlined once in this expansion; skip silently
-                    // to mirror C preprocessor behavior with `#pragma once`
-                    // semantics, since WPE shader headers do not declare it.
                     continue
                 }
                 visited.insert(path)
@@ -156,7 +150,6 @@ struct WPEShaderPreprocessor {
     }
 
     private static func extractIncludePath(from line: String) -> String? {
-        // Accepts `#include "x"` and `#include <x>` — both occur in the wild.
         guard let openIndex = line.firstIndex(where: { $0 == "\"" || $0 == "<" }) else {
             return nil
         }
@@ -196,43 +189,22 @@ struct WPEShaderPreprocessor {
 
     // MARK: - Macro fixups
 
-    /// Apply WPE→canonical-GLSL macro substitutions. The transformations are
-    /// intentionally conservative: substring-based fixups for the cases that
-    /// matter at the call sites we've seen in the corpus, plus defensive
-    /// no-ops for vanilla GLSL constructs. The ambition is "compiles cleanly
-    /// after this pass," not "syntactically perfect across all WPE shaders."
-    /// The downstream translator catches the remainder.
+    /// Apply WPE→canonical-GLSL macro substitutions.
     private func applyMacroFixups(source: String, stage: Stage) -> String {
         var s = source
 
-        // WPE flavor uses `texSample2D(sampler, uv)` / `texSample2DLod(...)`.
-        // Map them to canonical `texture(...)` / `textureLod(...)` calls
-        // — works for both GLSL 4.10 core and Metal-style sampler syntax
-        // after SPIRV-Cross emits MSL.
         s = s.replacingOccurrences(of: "texSample2DLod(", with: "textureLod(")
         s = s.replacingOccurrences(of: "texSample2D(", with: "texture(")
         s = s.replacingOccurrences(of: "texSampleNorm2D(", with: "texture(")
 
-        // `gl_FragColor` is removed in core profile — translate to a
-        // forward-declared `out` variable. Only inject the declaration once
-        // and only when it's actually referenced.
         if stage == .fragment, s.contains("gl_FragColor") {
             s = "out vec4 wpe_fragColor;\n" + s.replacingOccurrences(of: "gl_FragColor", with: "wpe_fragColor")
         }
 
-        // HLSL-style `mul(a, b)` is handled by the `#define mul(x, y) ((y) * (x))`
-        // macro injected in `WPERenderPipelineBuilder.shaderPrelude(_:_:)`. We
-        // intentionally do NOT rewrite `mul(` to `(` here — the previous
-        // rewrite mangled the prelude (turning `#define mul(x, y) ...` into
-        // the invalid `#define (x, y) ...`) and produced `(a, b)` rather than
-        // `(b * a)`, breaking matrix-vector multiplications instead of fixing
-        // them.
-
         return s
     }
 
-    /// Replace occurrences of `prefix` only when preceded by a non-identifier
-    /// character (so `mymul(` doesn't get rewritten by `mul(`).
+    /// Replace occurrences of `prefix` only when preceded by a non-identifier character (so `mymul(` doesn't get rewritten by `mul(`).
     private static func replaceWordPrefix(_ prefix: String, in source: String, with replacement: String) -> String {
         guard !prefix.isEmpty else { return source }
         var result = ""
@@ -277,8 +249,6 @@ struct WPEShaderPreprocessor {
 
     private func makePreamble(stage: Stage, comboValues: [String: Int]) -> String {
         var lines: [String] = ["#version 410 core"]
-        // Emit deterministic ordering so cache keys stay stable across
-        // process invocations.
         for name in comboValues.keys.sorted() {
             lines.append("#define \(name) \(comboValues[name]!)")
         }
@@ -321,8 +291,6 @@ struct WPEComboDeclaration: Equatable {
     let defaultValue: Int
 
     static func parse(line: String) -> Self? {
-        // `// [COMBO] {"material":"...", "combo":"NAME", "type":"options",
-        //              "default":0}`
         guard let body = stripPrefix(line, prefix: "// [COMBO]")
             ?? stripPrefix(line, prefix: "//[COMBO]") else {
             return nil
@@ -354,7 +322,6 @@ struct WPEBindDeclaration: Equatable {
     let name: String
 
     static func parse(line: String) -> Self? {
-        // `// [BIND] {"name":"diffuse", "index":0}`
         guard let body = stripPrefix(line, prefix: "// [BIND]")
             ?? stripPrefix(line, prefix: "//[BIND]") else {
             return nil

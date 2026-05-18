@@ -24,13 +24,8 @@ final class InMemoryVideoAssetLoader: NSObject, AVAssetResourceLoaderDelegate, @
     private let data: Data
     private let mimeType: String
 
-    /// Build a `Data` + MIME pair from a local file URL. Caller is
-    /// responsible for whatever security-scoped resource access is needed
-    /// to read the file in the first place.
+    /// Build a `Data` + MIME pair from a local file URL.
     static func load(from url: URL) throws -> (loader: InMemoryVideoAssetLoader, customURL: URL) {
-        // `.mappedIfSafe` lets the kernel memory-map the file when it can,
-        // so we don't double-allocate; the bytes still end up resident in
-        // the buffer cache after the first full scan.
         let data = try Data(contentsOf: url, options: .mappedIfSafe)
         let mime = mimeType(for: url)
         let loader = InMemoryVideoAssetLoader(data: data, mimeType: mime)
@@ -38,9 +33,7 @@ final class InMemoryVideoAssetLoader: NSObject, AVAssetResourceLoaderDelegate, @
         return (loader, customURL)
     }
 
-    /// Convert a regular file URL into the `lwmem://` form that triggers
-    /// the resource-loader delegate path. Keeping the original filename in
-    /// the path makes diagnostics readable.
+    /// Convert a regular file URL into the `lwmem://` form that triggers the resource-loader delegate path.
     static func customURL(for url: URL) -> URL {
         var components = URLComponents()
         components.scheme = scheme
@@ -76,9 +69,6 @@ final class InMemoryVideoAssetLoader: NSObject, AVAssetResourceLoaderDelegate, @
         }
 
         if let dataRequest = loadingRequest.dataRequest {
-            // AVFoundation issues byte-range reads via `currentOffset`. The
-            // requested length can be `Int.max` ("read to EOF") — clamp to
-            // the actual data length so we don't index past the end.
             let start = Int(clamping: dataRequest.currentOffset)
             let requested = dataRequest.requestedLength
             let end: Int

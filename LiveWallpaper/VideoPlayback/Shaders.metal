@@ -22,8 +22,6 @@ struct VertexOut {
 // Vertex shader: full-screen quad from vertex_id (triangle strip, 4 verts)
 // -----------------------------------------------------------------------
 vertex VertexOut vertexShader(uint vertexID [[vertex_id]]) {
-    // Triangle strip: 0 -> bottom-left, 1 -> bottom-right,
-    //                 2 -> top-left,    3 -> top-right
     float2 positions[4] = {
         float2(-1.0, -1.0),
         float2( 1.0, -1.0),
@@ -97,7 +95,6 @@ static half4 wavesEffect(float2 uv, float time) {
     float3 col = mix(deepColor, midColor, smoothstep(0.3, 0.5, y));
     col = mix(col, lightColor, smoothstep(0.5, 0.7, y));
 
-    // Foam line
     float foam = smoothstep(0.0, 0.01, abs(y - 0.5));
     col = mix(float3(0.9, 0.95, 1.0), col, foam);
 
@@ -136,9 +133,9 @@ static half4 gradientEffect(float2 uv, float time) {
 
     float t = rotated.x + 0.5;
 
-    float3 c1 = float3(0.15, 0.05, 0.35);   // deep purple
-    float3 c2 = float3(0.9,  0.3,  0.2);    // warm orange
-    float3 c3 = float3(0.1,  0.6,  0.8);    // teal
+    float3 c1 = float3(0.15, 0.05, 0.35);
+    float3 c2 = float3(0.9,  0.3,  0.2);
+    float3 c3 = float3(0.1,  0.6,  0.8);
 
     float3 col;
     if (t < 0.5) {
@@ -147,7 +144,6 @@ static half4 gradientEffect(float2 uv, float time) {
         col = mix(c2, c3, (t - 0.5) * 2.0);
     }
 
-    // Subtle radial vignette
     float dist = length(center);
     col *= 1.0 - dist * 0.3;
 
@@ -169,7 +165,6 @@ static half4 noiseEffect(float2 uv, float time) {
     col.g = n2 * 0.5 + 0.1;
     col.b = n3 * 0.8 + 0.2;
 
-    // Contrast boost
     col = smoothstep(float3(0.1), float3(0.9), col);
 
     return half4(half3(col), 1.0h);
@@ -179,10 +174,8 @@ static half4 noiseEffect(float2 uv, float time) {
 // Shader 4: Aurora -- flowing aurora borealis simulation
 // -----------------------------------------------------------------------
 static half4 auroraEffect(float2 uv, float time) {
-    // Night sky base
     float3 sky = mix(float3(0.0, 0.0, 0.05), float3(0.02, 0.02, 0.1), uv.y);
 
-    // Aurora layers
     float aurora = 0.0;
     for (int i = 0; i < 3; i++) {
         float fi = float(i);
@@ -199,7 +192,6 @@ static half4 auroraEffect(float2 uv, float time) {
         aurora += band;
     }
 
-    // Aurora color: green to cyan to purple
     float3 auroraColor;
     float colorShift = sin(time * 0.2 + uv.x * 3.0) * 0.5 + 0.5;
     auroraColor = mix(float3(0.1, 0.8, 0.3), float3(0.2, 0.5, 0.9), colorShift);
@@ -207,7 +199,6 @@ static half4 auroraEffect(float2 uv, float time) {
 
     float3 col = sky + auroraColor * aurora;
 
-    // Subtle stars
     float starField = hash(floor(uv * 200.0));
     if (starField > 0.98) {
         float twinkle = sin(time * 3.0 + starField * 100.0) * 0.5 + 0.5;

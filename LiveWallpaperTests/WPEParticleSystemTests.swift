@@ -7,9 +7,6 @@ struct WPEParticleSystemTests {
 
     @Test("Parses canonical snowflat-style particle JSON")
     func parsesCanonicalParticleJSON() throws {
-        // Excerpt from the snowflat preset that ships with WPE: covers
-        // the four initializer + emitter combinations the runtime
-        // depends on. Anything else is parsed leniently with defaults.
         let json = #"""
         {
             "material": "materials/presets/snowflat.json",
@@ -63,13 +60,10 @@ struct WPEParticleSystemTests {
             fadeInSeconds: 0.1
         )
         let system = try #require(WPEParticleSystem(definition: def, device: device))
-        // First tick at time 0 → before start delay; nothing spawns.
         system.tick(now: 0)
         #expect(system.liveInstanceCount == 0)
-        // Tick at 0.5s → still before start delay; nothing.
         system.tick(now: 0.5)
         #expect(system.liveInstanceCount == 0)
-        // Tick past start delay; spawn proceeds.
         system.tick(now: 1.5)
         #expect(system.liveInstanceCount > 0)
     }
@@ -91,9 +85,9 @@ struct WPEParticleSystemTests {
             fadeInSeconds: 0.1
         )
         let system = try #require(WPEParticleSystem(definition: def, device: device))
-        system.tick(now: 0)      // initialize lastTickTime
-        system.tick(now: 1.0)    // 1 second × 1000/s = 1000 spawn requests
-        #expect(system.liveInstanceCount == 8)  // capped
+        system.tick(now: 0)
+        system.tick(now: 1.0)
+        #expect(system.liveInstanceCount == 8)
     }
 
     @Test("Particle system allocates GPU buffer of expected size")

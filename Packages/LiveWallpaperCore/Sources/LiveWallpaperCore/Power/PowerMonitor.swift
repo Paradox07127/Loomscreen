@@ -48,7 +48,6 @@ public final class PowerMonitor: @unchecked Sendable {
     // MARK: - Initialization
 
     private init() {
-        // IOPSGetProvidingPowerSourceType uses "Get" semantics (unretained)
         let source = IOPSGetProvidingPowerSourceType(nil)?.takeUnretainedValue() as? String ?? kIOPMACPowerKey
         powerSourceSubject.send(PowerSource(identifier: source))
         setupPowerNotification()
@@ -90,7 +89,6 @@ public final class PowerMonitor: @unchecked Sendable {
         powerSourceSubject.send(newSource)
         postPowerChangeNotification(oldSource: oldSource, newSource: newSource)
 
-        // Log and update battery monitoring
         if case .battery(let level) = newSource {
             Logger.powerSourceChanged(isOnBattery: true, level: level)
             startBatteryMonitoring()

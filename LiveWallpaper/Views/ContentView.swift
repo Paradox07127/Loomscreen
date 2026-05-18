@@ -79,9 +79,7 @@ struct ContentView: View {
         }
     }
 
-    /// Receives `.promptAddWallpaper` notifications from a re-used settings
-    /// window (one already mounted). The fresh-window path uses
-    /// `initialAddWallpaperPromptKind` consumed in `onAppear`.
+    /// Receives `.promptAddWallpaper` notifications from a re-used settings window (one already mounted).
     private func handleAddWallpaperPrompt(notification: Notification) {
         guard let kind = notification.userInfo?["kind"] as? String else { return }
         handleAddWallpaperPrompt(kind: kind)
@@ -94,10 +92,7 @@ struct ContentView: View {
         handleAddWallpaperPrompt(kind: kind)
     }
 
-    /// Routes a menu-bar quick-add request to the appropriate picker. Targets
-    /// the currently-selected screen if the user has one open; otherwise the
-    /// first registered display. Selection is also redirected so the user
-    /// sees the result land.
+    /// Routes a menu-bar quick-add request to the appropriate picker.
     private func handleAddWallpaperPrompt(kind: String) {
         guard let target = preferredAddWallpaperTarget() else { return }
         selectedNavigation = .screen(target.id)
@@ -203,8 +198,6 @@ struct Sidebar: View {
                             Image(systemName: "arrow.triangle.2.circlepath")
                                 .symbolEffect(.rotate, options: .repeat(.continuous), isActive: isReloading)
                         } else {
-                            // macOS 14 has no .rotate; substitute .pulse so the
-                            // button still indicates ongoing reload activity.
                             Image(systemName: "arrow.triangle.2.circlepath")
                                 .symbolEffect(.pulse, options: .continuouslyRepeating, isActive: isReloading)
                         }
@@ -270,8 +263,6 @@ struct Sidebar: View {
                 }) {
                     SystemMonitorView()
                         .padding(.vertical, 2)
-                        // Tight 4pt horizontal inset. Default List inset on macOS 26 drifts
-                        // with sidebar width, causing dashboard cards to misalign on resize.
                         .listRowInsets(EdgeInsets(top: 2, leading: 4, bottom: 2, trailing: 4))
                         .listRowBackground(Color.clear)
                 }

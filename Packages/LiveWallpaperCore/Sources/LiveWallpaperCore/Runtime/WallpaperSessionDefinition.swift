@@ -13,16 +13,11 @@ public enum WallpaperSessionDefinition: Equatable, Sendable {
             guard !bookmarkData.isEmpty else { return nil }
             self = .video(bookmarkData: bookmarkData)
         case .html(let source, let config):
-            // Empty inline HTML means "user has not picked anything yet" —
-            // surface as no-session so the runtime tears down gracefully.
             if case .inline(let raw) = source, raw.isEmpty { return nil }
             self = .html(source, config)
         case .metalShader(let preset):
             self = .metalShader(preset)
         case .scene(let descriptor):
-            // Reject obviously broken descriptors so ScreenManager falls
-            // back to the not-configured Scene tab placeholder. The cache
-            // resolver re-validates the path on its end too.
             guard !descriptor.workshopID.isEmpty,
                   !descriptor.cacheRelativePath.isEmpty,
                   !descriptor.entryFile.isEmpty else { return nil }

@@ -219,10 +219,6 @@ final class LocationCompleterModel: NSObject, ObservableObject, MKLocalSearchCom
     }
 
     nonisolated func completerDidUpdateResults(_ completer: MKLocalSearchCompleter) {
-        // `MKLocalSearchCompletion` is not Sendable, so capture the titles
-        // up front and re-fetch the corresponding completions on the main
-        // actor. In practice the completer is only mutated on the main
-        // thread, so this round-trip is safe.
         Task { @MainActor [weak self] in
             guard let self else { return }
             self.results = Array(self.completer.results.prefix(8))

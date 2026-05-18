@@ -137,11 +137,7 @@ public final class SystemMonitor {
 
     // MARK: - Update Loop
 
-    /// Captures a full system snapshot off-MainActor and reapplies the
-    /// derived values back on MainActor with diff guards. The sampling code
-    /// itself only touches Mach/IOKit/VM-stat APIs that have no main-thread
-    /// requirement, so moving them off the main queue eliminates the
-    /// recurring 2-second main-thread spike from the previous design.
+    /// Captures a full system snapshot off-MainActor and reapplies the derived values back on MainActor with diff guards.
     private func sampleAndApply() async {
         resourceUpdateCount += 1
         let updateCount = resourceUpdateCount
@@ -166,20 +162,11 @@ public final class SystemMonitor {
             )
         }.value
 
-        // `Task.detached` runs outside the monitor task's cancellation
-        // scope, so a sample that was already in flight when
-        // `stopMonitoring()` ran would otherwise still write back. Re-check
-        // here to keep one-shot late samples from reviving the published
-        // properties after the dashboard left the screen.
         guard !Task.isCancelled else { return }
         applySample(sample)
     }
 
-    /// Reapplies a sample on MainActor with diff guards so views observing
-    /// individual properties (cpuUsage, gpuUsage, …) re-evaluate only when
-    /// the value materially changed. Per-property epsilons suppress the
-    /// constant micro-fluctuation that otherwise drove a re-render every
-    /// 2 seconds even when the dashboard was visually identical.
+    /// Reapplies a sample on MainActor with diff guards so views observing individual properties (cpuUsage, gpuUsage, …) re-evaluate only when the value materially changed.
     private func applySample(_ sample: SystemSample) {
         if abs(cpuUsage - sample.cpuUsage) > Self.percentMaterialEpsilon {
             cpuUsage = sample.cpuUsage

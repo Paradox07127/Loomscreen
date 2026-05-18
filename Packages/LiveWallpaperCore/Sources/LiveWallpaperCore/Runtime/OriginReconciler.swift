@@ -40,9 +40,6 @@ public struct PreservingOriginReconciler: OriginReconciler {
         if origin.resourceLocation == .unsupported {
             configuration.wpeOrigin = nil
         }
-        // Lite never owns WPEPathSafety — preserve origin metadata as
-        // opaque round-trip payload so a future Pro launch can still drive
-        // the WPE badge / fallback card from the persisted record.
         _ = event
     }
 }

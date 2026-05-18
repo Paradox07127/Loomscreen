@@ -36,9 +36,6 @@ final class PlayerHostView: NSView {
     }
 
     /// Forwards an HDR / EDR preference to the underlying `AVPlayerLayer`.
-    /// Uses `preferredDynamicRange` on macOS 26+, falls back to the older
-    /// `wantsExtendedDynamicRangeContent` selector on macOS 14-25, and is a
-    /// no-op below 14 so HDR videos still render (just tone-mapped to SDR).
     func setExtendedDynamicRangeEnabled(_ enabled: Bool) {
         guard let playerLayer else { return }
         if #available(macOS 26, *) {
@@ -104,7 +101,6 @@ class VideoContainerView: NSView {
         layer?.drawsAsynchronously = true
         layer?.masksToBounds = true
 
-        // Subview order keeps particles above the video.
         addSubview(playerHostView)
         addSubview(particleOverlayView)
 

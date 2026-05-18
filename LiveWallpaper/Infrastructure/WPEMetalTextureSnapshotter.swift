@@ -22,11 +22,7 @@ final class WPEMetalTextureSnapshotter: @unchecked Sendable {
         self.queue = DispatchQueue(label: label, qos: .utility)
     }
 
-    /// Synchronous readback. Phase 2B Task 5 uses this from `performLoad()`
-    /// on the main actor — the load is async so an extra blocking call here
-    /// is bounded by the `getBytes` cost (a few milliseconds for 4K), and
-    /// keeping the API non-async sidesteps Swift 6's `MTLTexture` sendable
-    /// check. Per-frame readback (Phase 2C) will need a sendable wrapper.
+    /// Synchronous readback.
     func snapshot(from texture: MTLTexture) -> NSImage? {
         Self.makeImage(from: texture)
     }

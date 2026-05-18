@@ -111,9 +111,6 @@ struct ScreenManagerCoordinationTests {
         registry.setAssetReadiness(installedWork, for: screenID)
         registry.clearAssetReadinessIfMatch(installedWork, for: screenID)
 
-        // After a successful match-clear the slot must be empty: a follow-up
-        // set should NOT cancel the previously cleared work, and the original
-        // task must remain alive (it was never cancelled by the registry).
         registry.setAssetReadiness(Self.makeWork(task: replacementTask), for: screenID)
 
         withExtendedLifetime(installedWork) {
@@ -138,9 +135,6 @@ struct ScreenManagerCoordinationTests {
         registry.setAssetReadiness(newerWork, for: screenID)
         registry.clearAssetReadinessIfMatch(originalWork, for: screenID)
 
-        // If the stale clear were honoured the slot would be empty; a follow-up
-        // replacement would no longer cancel `newerWork`. Verifying the inverse
-        // proves the slot still holds `newerWork`.
         let followupTask = Self.makeSuspendedTask()
         defer { followupTask.cancel() }
         registry.setAssetReadiness(Self.makeWork(task: followupTask), for: screenID)
@@ -713,11 +707,7 @@ struct ScreenManagerCoordinationTests {
         url?.standardizedFileURL.resolvingSymlinksInPath().path(percentEncoded: false)
     }
 
-    /// Boots a `ScreenManager` with the four protocol fakes, ensures a
-    /// `ScreenConfiguration` exists for the host's primary screen, and runs
-    /// the closure. Snapshots and restores the persisted configuration so the
-    /// test never overwrites the developer's real wallpaper preferences.
-    /// Skips gracefully when the test runner has no NSScreen.
+    /// Boots a `ScreenManager` with the four protocol fakes, ensures a `ScreenConfiguration` exists for the host's primary screen, and runs the closure.
     private static func runWithSeededConfiguration(
         _ body: (ScreenManager, Screen) async throws -> Void
     ) async throws {
@@ -729,9 +719,6 @@ struct ScreenManagerCoordinationTests {
         defer { SettingsManager.shared.replaceAllConfigurations(originalConfigurations) }
 
         if !originalConfigurations.contains(where: { $0.screenID == screen.id }) {
-            // Direct seed avoids `setShaderWallpaper`'s real Metal/runtime side
-            // effects; we only need a persisted ScreenConfiguration so the
-            // PlaybackCoordinator's setters have something to mutate.
             SettingsManager.shared.saveConfiguration(
                 ScreenConfiguration(screenID: screen.id, wallpaper: .metalShader(.waves))
             )
@@ -872,8 +859,7 @@ struct ScreenManagerCoordinationTests {
         return ObjectIdentifier(lhs as AnyObject) == ObjectIdentifier(rhs)
     }
 
-    /// Snapshots notifications observed during `mutation`, asserting exactly
-    /// one new `.wallpaperConfigurationDidChange` for the given screen.
+    /// Snapshots notifications observed during `mutation`, asserting exactly one new `.wallpaperConfigurationDidChange` for the given screen.
     private static func expectChange(
         notificationFor screen: Screen,
         _ mutation: () -> Void
@@ -893,8 +879,6 @@ struct ScreenManagerCoordinationTests {
     }
 
     private static func drainMainQueue() async {
-        // 100ms gives congested CI runners enough headroom to drain queued
-        // notifications before we assert the absence of side effects.
         await Task.yield()
         try? await Task.sleep(for: .milliseconds(100))
         await Task.yield()

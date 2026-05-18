@@ -7,8 +7,7 @@ import Foundation
 /// caller can hand it straight to `CGImage` / `SKTexture(cgImage:)`.
 enum WPETexPixelDecoder {
 
-    /// Validates the input length and returns the bytes verbatim — WPE's
-    /// `RGBA8888` is already in the in-memory layout we want.
+    /// Validates the input length and returns the bytes verbatim — WPE's `RGBA8888` is already in the in-memory layout we want.
     static func decodeRGBA8888(
         _ bytes: Data,
         width: Int,
@@ -25,8 +24,7 @@ enum WPETexPixelDecoder {
         return DecodedRGBAImage(width: width, height: height, pixels: bytes)
     }
 
-    /// Single-channel red expanded into RGBA(r,r,r,255). Used for masks /
-    /// luminance overlays that WPE stores compactly.
+    /// Single-channel red expanded into RGBA(r,r,r,255).
     static func decodeR8(
         _ bytes: Data,
         width: Int,
@@ -57,8 +55,7 @@ enum WPETexPixelDecoder {
         return DecodedRGBAImage(width: width, height: height, pixels: rgba)
     }
 
-    /// Two-channel red+green expanded into RGBA(r,g,0,255). Common for WPE
-    /// normal maps and gradient lookups.
+    /// Two-channel red+green expanded into RGBA(r,g,0,255).
     static func decodeRG88(
         _ bytes: Data,
         width: Int,

@@ -33,7 +33,7 @@ public final class BookmarkDisplayNameCache {
         unresolved.remove(bookmarkData)
     }
 
-    /// Best-effort resolution via `ResourceUtilities`. Idempotent.
+    /// Best-effort resolution via `ResourceUtilities`.
     public func resolveIfNeeded(_ bookmarkData: Data) {
         guard !bookmarkData.isEmpty,
               names[bookmarkData] == nil,

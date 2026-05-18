@@ -159,18 +159,10 @@ final class WallpaperVideoPlayer {
 
                 try Task.checkCancellation()
 
-                // Duration drives how aggressively we ask AVPlayer to pre-buffer.
-                // It's also the gate for in-memory caching (short clips only).
                 let cmDuration = try? await asset.load(.duration)
                 let durationSeconds = Self.usableDuration(from: cmDuration)
                 let bufferDuration = Self.bufferDuration(forDuration: durationSeconds)
 
-                // In-memory cache decision: tested `preferredForwardBufferDuration`
-                // against fs_usage on 4K 60fps and AVFoundation ignored the hint —
-                // it kept reading ~4 MB/s straight off disk forever. So for clips
-                // small enough to fit comfortably in RAM, swap to a custom-scheme
-                // asset backed by `InMemoryVideoAssetLoader`. That hard-guarantees
-                // 0 physical reads after the initial load.
                 let fileSize = Self.fileSize(of: url)
                 let memoryCached = Self.shouldUseInMemoryCache(
                     fileSize: fileSize,
@@ -182,13 +174,6 @@ final class WallpaperVideoPlayer {
                 if memoryCached {
                     do {
                         let result = try InMemoryVideoAssetLoader.load(from: url)
-                        // Tight asset options: tell AVFoundation up front that
-                        // this is a self-contained local asset — no remote
-                        // references to follow, no HLS to probe, no AirPlay
-                        // route negotiation. Otherwise CoreMedia spams
-                        // `<<<< VRP >>>>` / `<<<< FigFilePlayer >>>>` errors
-                        // every time it gives up on those probes against
-                        // our custom `lwmem://` scheme.
                         let memOptions: [String: Any] = [
                             AVURLAssetReferenceRestrictionsKey: AVAssetReferenceRestrictions.forbidAll.rawValue,
                             AVURLAssetAllowsCellularAccessKey: false,
@@ -273,15 +258,11 @@ final class WallpaperVideoPlayer {
     }
 
     /// Per-screen cache budget driven by `GlobalSettings.videoCacheMaxBytesPerScreen`.
-    /// Pulled at load time rather than baked statically so user setting
-    /// changes pick up on the next wallpaper load without an app restart.
     private static func shouldUseInMemoryCache(fileSize: Int, duration: TimeInterval) -> Bool {
         guard fileSize > 0 else { return false }
         let budget = SettingsManager.shared.loadGlobalSettings().videoCacheMaxBytesPerScreen
-        guard budget > 0 else { return false }       // user dragged slider to 0 = explicit "streaming only"
+        guard budget > 0 else { return false }
         guard fileSize <= budget else { return false }
-        // Treat indefinite / unknown duration as "don't cache" — we'd rather
-        // stream a live source than risk pinning gigabytes of RAM.
         guard duration > 0 else { return false }
         guard duration <= inMemoryAssetMaxDuration else { return false }
         return true
@@ -301,15 +282,10 @@ final class WallpaperVideoPlayer {
     }
 
     private static func bufferDuration(forDuration durationSeconds: TimeInterval) -> TimeInterval {
-        // Unknown / indefinite (live or unscannable) → keep the 5s default.
         guard durationSeconds > 0 else { return 5 }
-        // Clip is short enough to keep entirely in RAM → buffer the whole
-        // thing + a small margin so loop wrap-around doesn't re-fetch.
         if durationSeconds <= fullBufferCapSeconds {
             return durationSeconds + bufferSafetyMargin
         }
-        // Long clip → don't try to pin gigabytes of buffer; let AVPlayer
-        // use its own short forward-buffer policy.
         return 5
     }
 
@@ -416,7 +392,6 @@ final class WallpaperVideoPlayer {
                 .store(in: &cleanupTasks)
         }
 
-        // Filter benign AVPlayerLooper/compositor transition errors.
         let benignLooperCodes: Set<Int> = [-11847, -11858, -11878, -12504, -12509, -12784, -12823, -12852, -12860]
         NotificationCenter.default.publisher(for: .AVPlayerItemFailedToPlayToEndTime, object: nil)
             .sink { [weak self] notification in
@@ -530,7 +505,6 @@ final class WallpaperVideoPlayer {
 
     func setPlaybackSpeed(_ speed: Double) {
         player?.defaultRate = Float(speed)
-        // Only apply rate immediately if currently playing; avoid implicit resume
         if player?.timeControlStatus == .playing {
             player?.rate = Float(speed)
         }
@@ -725,11 +699,6 @@ final class WallpaperVideoPlayer {
                 let targetFPS = framesPerSecond
                 let duration = try await asset.load(.duration)
 
-                // Apply the asset's `preferredTransform` to the layer instruction
-                // so portrait video (e.g. iPhone vertical recordings) renders
-                // upright. The composition `renderSize` must follow the rotated
-                // bounds — using `naturalSize` directly leaves portrait video
-                // letterboxed inside a landscape canvas.
                 let displayed = naturalSize.applying(transform)
                 let renderSize = CGSize(width: abs(displayed.width), height: abs(displayed.height))
 
@@ -798,8 +767,7 @@ final class WallpaperVideoPlayer {
         setFrameRateLimit(requestedFrameRateLimit)
     }
 
-    /// Sleep / wake suspend hook. Distinct from `pause()` so the session can
-    /// remember "was playing before sleep" and resume to the right state.
+    /// Sleep / wake suspend hook.
     func suspend() {
         pause()
     }
@@ -852,15 +820,6 @@ final class WallpaperVideoPlayer {
         currentItemSubscription = nil
         currentVideoComposition = nil
 
-        // Drop the in-memory file payload too. Without this the Data sticks
-        // around (hundreds of MB for 4K) until the next wallpaper happens to
-        // re-create the player; nil-ing here releases it as soon as the
-        // current wallpaper is cleaned up.
-        //
-        // Log explicitly so a video swap that "doesn't release RAM" can be
-        // verified in console — if cleanup fires but Activity Monitor still
-        // grows, the leak is somewhere downstream (AVFoundation internal
-        // cache, kernel buffer cache, etc.) rather than in our retain graph.
         if inMemoryAssetLoader != nil {
             Logger.notice("Releasing in-memory video cache for \(videoURL?.lastPathComponent ?? "<unknown>")", category: .videoPlayer)
         }

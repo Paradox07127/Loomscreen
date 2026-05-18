@@ -37,7 +37,6 @@ struct WPEMetalRuntimeUniforms: Equatable, Sendable {
         self.daytime = daytime
         self.brightness = brightness
         self.pointerPosition = pointerPosition
-        // Pad/truncate so consumers can always pull the slice they need.
         if audioSpectrum.count >= 64 {
             self.audioSpectrum = Array(audioSpectrum.prefix(64))
         } else {
@@ -48,10 +47,6 @@ struct WPEMetalRuntimeUniforms: Equatable, Sendable {
     }
 
     var uniformValues: [String: WPESceneShaderConstantValue] {
-        // Build the spectrum slices the audio-reactive shader family
-        // consumes. Same data, three resolutions — the shader's combo
-        // selects which one it samples; we publish all so the dispatcher
-        // hits whichever the translated MSL aliased.
         let s64 = audioSpectrum
         let s32 = stride(from: 0, to: 64, by: 2).map { (i: Int) -> Double in
             (s64[i] + s64[i + 1]) * 0.5
@@ -64,9 +59,6 @@ struct WPEMetalRuntimeUniforms: Equatable, Sendable {
             "g_Daytime": .number(daytime),
             "g_Brightness": .number(brightness),
             "g_PointerPosition": .vector([pointerPosition.x, pointerPosition.y]),
-            // Audio runtime: same array fills both stereo channels until
-            // a per-channel runtime ships. Audio-reactive scenes will
-            // animate as silence when the source isn't producing audio.
             "g_AudioSpectrum16Left": .vector(s16),
             "g_AudioSpectrum16Right": .vector(s16),
             "g_AudioSpectrum32Left": .vector(s32),

@@ -194,7 +194,6 @@ struct HTMLSourceSection: View {
                 if origin.isSecure {
                     Button("Trust this origin") {
                         _ = trustStore.trust(origin)
-                        // Re-apply with the now-trusted origin so JS turns on.
                         screenManager.setHTMLWallpaper(source: source, config: config, forceReload: true, for: screen)
                     }
                     .buttonStyle(.borderedProminent)
@@ -240,9 +239,6 @@ struct HTMLSourceSection: View {
         panel.allowedContentTypes = ResourceUtilities.supportedHTMLContentTypes
         panel.prompt = L10n.Panel.useAsWallpaper
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        // Prefer a folder bookmark so siblings (CSS/JS/images) keep working
-        // across launches; falls back to a file-only bookmark when the
-        // sandbox refuses the parent grant.
         guard let source = ResourceUtilities.htmlSourceFromPickedFile(url) else { return }
         screenManager.setHTMLWallpaper(source: source, config: config, for: screen)
     }

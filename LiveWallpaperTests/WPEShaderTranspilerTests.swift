@@ -30,11 +30,8 @@ struct WPEShaderTranspilerTests {
         )
         #expect(result.samplers == ["g_Texture0"])
         #expect(result.uniformLayout.contains { $0.name == "g_Scale" && $0.glslType == "vec2" })
-        // `texture(g_Texture0, x)` should have been rewritten to a Metal
-        // sampler call.
         #expect(result.mslSource.contains("g_Texture0.sample(linearSampler"))
-        #expect(result.mslSource.contains("out vec4") == false) // GLSL syntax should be gone
-        // Confirm Metal accepts what we emitted.
+        #expect(result.mslSource.contains("out vec4") == false)
         let device = try #require(MTLCreateSystemDefaultDevice())
         let opts = MTLCompileOptions()
         opts.languageVersion = .version3_0
@@ -89,7 +86,6 @@ struct WPEShaderTranspilerTests {
         )
         #expect(result.mslSource.contains("float3 p = float3"))
         #expect(result.mslSource.contains("float4(r, 1.0)"))
-        // mat3 takes 3 slots
         #expect(result.uniformLayout[0].slotCount == 3)
         let device = try #require(MTLCreateSystemDefaultDevice())
         let opts = MTLCompileOptions()
@@ -166,7 +162,6 @@ struct WPEShaderTranspilerTests {
             shaderName: "audio_bars",
             preprocessedSource: source
         )
-        // Layout: 32-element array first (32 slots), then u_BarCount (1 slot).
         let spectrum = try #require(result.uniformLayout.first { $0.name == "g_AudioSpectrum32Left" })
         #expect(spectrum.arrayLength == 32)
         #expect(spectrum.slotCount == 32)
@@ -174,8 +169,6 @@ struct WPEShaderTranspilerTests {
         let barCount = try #require(result.uniformLayout.first { $0.name == "u_BarCount" })
         #expect(barCount.slot == 32)
 
-        // MSL emission must declare the array and unroll element reads
-        // so dynamic indexing works at draw time.
         #expect(result.mslSource.contains("float g_AudioSpectrum32Left[32];"))
         #expect(result.mslSource.contains("g_AudioSpectrum32Left[0] = u.vals[0].x;"))
         #expect(result.mslSource.contains("g_AudioSpectrum32Left[31] = u.vals[31].x;"))
@@ -204,7 +197,6 @@ struct WPEShaderTranspilerTests {
         }
         #expect(s32.count == 32)
         #expect(s64.count == 64)
-        // 32-bin slice averages adjacent 64-bin pairs.
         #expect(abs(s32[0] - (s64[0] + s64[1]) * 0.5) < 1e-9)
     }
 
@@ -225,11 +217,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("Strips GLSL 'in' parameter qualifiers so MSL accepts helper signatures")
     func stripsInParameterQualifier() throws {
-        // Mirrors the failing shape from `effects/blendgradient` (workshop
-        // 3479521040): every helper signature uses `in T name` and Metal
-        // rejects the declaration with `unknown type name 'in'`. Once the
-        // qualifier is stripped, the helper compiles and the downstream
-        // `result = B;`, `min(A, B)`, etc. body references resolve.
         let source = """
         #version 410 core
         uniform sampler2D g_Texture0;
@@ -286,31 +273,21 @@ struct WPEShaderTranspilerTests {
 
     @Test("Fragment out_FragColor scrub catches all variants")
     func fragmentOutScrubCatchesAllVariants() {
-        // Canonical prelude line — must be killed.
         #expect(WPEShaderTranspiler.scrubFragmentOutDeclarations("out vec4 out_FragColor;").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        // Already-substituted float4 form (downstream of vec4→float4 pass).
         #expect(WPEShaderTranspiler.scrubFragmentOutDeclarations("out float4 out_FragColor;").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        // Preprocessor-injected wpe_fragColor twin.
         #expect(WPEShaderTranspiler.scrubFragmentOutDeclarations("out vec4 wpe_fragColor;").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        // Two statements on one line (the brittle case the prefix guard misses).
         let mixed = WPEShaderTranspiler.scrubFragmentOutDeclarations("precision highp float; out vec4 out_FragColor;")
         #expect(!mixed.contains("out_FragColor"))
         #expect(mixed.contains("precision highp float"))
-        // Trailing comment.
         let withComment = WPEShaderTranspiler.scrubFragmentOutDeclarations("out vec4 out_FragColor; // injected by prelude\n#define M_PI 3.14")
         #expect(!withComment.contains("out_FragColor"))
         #expect(withComment.contains("#define M_PI"))
-        // Don't murder unrelated `out` parameter qualifiers in function signatures.
         let unrelated = "void foo(out float3 col) { col = float3(0); }"
         #expect(WPEShaderTranspiler.scrubFragmentOutDeclarations(unrelated) == unrelated)
     }
 
     @Test("End-to-end: shader with prelude out_FragColor compiles cleanly")
     func endToEndPreludeOutFragColor() throws {
-        // Mirrors what a WPE workshop fragment looks like coming out of
-        // `WPERenderPipelineBuilder.shaderPrelude(stage: .fragment)`: the
-        // declaration sits below the macro defines, and the body uses
-        // `out_FragColor` as its colour sink.
         let source = """
         // LiveWallpaper WPE shader prelude
         #define GLSL 1
@@ -329,10 +306,8 @@ struct WPEShaderTranspilerTests {
             shaderName: "out_fragcolor_smoke",
             preprocessedSource: source
         )
-        // The top-level declaration must be gone — Metal rejects bare `out`.
         #expect(!result.mslSource.contains("out float4 out_FragColor"))
         #expect(!result.mslSource.contains("out vec4 out_FragColor"))
-        // Body's reference is rewritten to the local stash variable.
         #expect(result.mslSource.contains("out_color"))
 
         let device = try #require(MTLCreateSystemDefaultDevice())
@@ -343,15 +318,6 @@ struct WPEShaderTranspilerTests {
 
     @Test("linearSampler is declared at file scope so helpers can use it")
     func linearSamplerAtFileScope() throws {
-        // Workshop shaders (e.g. `effects/lens_flare_sun`) sample inside
-        // helper functions: `float getNoise(float t) { return g_Texture1.sample(linearSampler, …); }`.
-        // With the sampler declared only inside main() the helper saw
-        // `unknown identifier 'linearSampler'`. Moving the declaration to
-        // file scope makes it visible everywhere.
-        //
-        // NOTE: Helper-scope `g_TextureN` is still broken (Metal forbids
-        // file-scope textures; needs SPIRV-Cross or param-passing rewrite).
-        // This test only verifies the sampler half of the helper-scope fix.
         let source = """
         #version 410 core
         in vec2 v_TexCoord;
@@ -367,13 +333,10 @@ struct WPEShaderTranspilerTests {
             shaderName: "filescope_sampler",
             preprocessedSource: source
         )
-        // The declaration must appear BEFORE the helper definition so
-        // identifier resolution sees it from the helper scope.
         let mslSource = result.mslSource
         let samplerRange = try #require(mslSource.range(of: "constexpr sampler linearSampler"))
         let helperRange = try #require(mslSource.range(of: "float computeAngle("))
         #expect(samplerRange.lowerBound < helperRange.lowerBound, "linearSampler must precede the helper")
-        // Belt: the declaration should not also appear inside main (no duplicate).
         let mainStart = try #require(mslSource.range(of: "wpe_translated_fragment"))
         let mainBodyRest = mslSource[mainStart.upperBound...]
         #expect(!mainBodyRest.contains("constexpr sampler linearSampler"), "no duplicate declaration inside main()")

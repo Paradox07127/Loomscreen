@@ -207,8 +207,6 @@ struct PlaylistSection: View {
     }
 
     private func reorderGesture(for entry: PlaylistEntry) -> some Gesture {
-        // minimumDistance > 0 so a plain click never starts a drag — the row's
-        // menu / context-menu / hover affordances stay live.
         DragGesture(minimumDistance: 4, coordinateSpace: .named(PlaylistCoordSpace))
             .onChanged { value in
                 if draggingID != entry.id {
@@ -231,7 +229,6 @@ struct PlaylistSection: View {
     }
 
     /// Pick the insertion slot whose midpoint sits just below the pointer.
-    /// Returns 0..entries.count (inclusive of the trailing slot).
     private func computeInsertionIndex(draggedID: PlaylistEntry.ID, pointerY: CGFloat) -> Int {
         guard !rowFrames.isEmpty else { return 0 }
         let sorted = rowFrames.sorted { $0.frame.minY < $1.frame.minY }
@@ -243,16 +240,13 @@ struct PlaylistSection: View {
         return sorted.count
     }
 
-    /// Reorder entries locally then sync to ScreenManager. No reload, no
-    /// primary change, no cursor change — just the order.
+    /// Reorder entries locally then sync to ScreenManager.
     private func commitReorder(sourceID: PlaylistEntry.ID, toIndex destination: Int) {
         guard let sourceIndex = entries.firstIndex(where: { $0.id == sourceID }) else { return }
-        // Inserting right at the source position OR right after it is a no-op.
         if destination == sourceIndex || destination == sourceIndex + 1 { return }
 
         var newEntries = entries
         let item = newEntries.remove(at: sourceIndex)
-        // Removing source shifts downstream slots left by one.
         let adjusted = sourceIndex < destination ? destination - 1 : destination
         let clamped = min(max(0, adjusted), newEntries.count)
         newEntries.insert(item, at: clamped)
@@ -304,11 +298,6 @@ struct PlaylistSection: View {
             guard !urls.isEmpty else { return }
             SettingsManager.shared.saveLastUsedDirectory(urls[0].deletingLastPathComponent())
 
-            // Snapshot resolved paths of everything already in the visible
-            // playlist (primary + extras) — playlist dedup compares by file
-            // identity, not raw bookmark bytes, because security-scoped
-            // bookmarks generate fresh tokens per creation and would never
-            // byte-match an existing entry.
             let existingPaths = currentPlaylistResolvedPaths()
             var skipped = 0
 
@@ -341,9 +330,7 @@ struct PlaylistSection: View {
         }
     }
 
-    /// Set of canonical file paths backing the current playlist. Used to
-    /// short-circuit duplicate adds — same video file added twice would
-    /// produce two consecutive plays of the same content during rotation.
+    /// Set of canonical file paths backing the current playlist.
     private func currentPlaylistResolvedPaths() -> Set<String> {
         guard let config = screenManager.getConfiguration(for: screen) else { return [] }
         let combined = config.combinedPlaylist
@@ -369,8 +356,6 @@ struct PlaylistSection: View {
     }
 
     private func remove(_ entry: PlaylistEntry) {
-        // Removing the only remaining entry clears the wallpaper on this display.
-        // Surface a Liquid Glass confirmation so users don't lose their setup unintentionally.
         if entries.count == 1 {
             pendingDestructive = PendingDestructive(
                 .removePlaylistItem(isLast: true, displayName: screen.name)
@@ -386,9 +371,7 @@ struct PlaylistSection: View {
         applyEntriesAfterRemove(newEntries, removedPrimary: entry.isPrimary)
     }
 
-    /// Removal path: may promote a new primary if the deleted entry was
-    /// primary. Distinct from the drag-reorder path so drag never touches
-    /// primary identity.
+    /// Removal path: may promote a new primary if the deleted entry was primary.
     private func applyEntriesAfterRemove(_ newEntries: [PlaylistEntry], removedPrimary: Bool) {
         guard !newEntries.isEmpty else {
             entries = []
@@ -409,10 +392,7 @@ struct PlaylistSection: View {
         screenManager.replacePlaylist(ordered: ordered, primary: primary, for: screen)
     }
 
-    /// Pure-reorder commit: preserves primary identity + currently playing
-    /// video. The starred entry keeps its star at its new position; the
-    /// active playback bookmark is followed to its new index by the
-    /// orchestrator's cursor-resolve logic.
+    /// Pure-reorder commit: preserves primary identity + currently playing video.
     private func applyOrder(_ newEntries: [PlaylistEntry]) {
         guard let primaryIndex = newEntries.firstIndex(where: { $0.isPrimary }) else { return }
         let primary = newEntries[primaryIndex].bookmark

@@ -37,10 +37,7 @@ public struct PlayableVideoLoader: PlayableVideoLoading, Sendable {
         }
     }
 
-    /// Probe codec, HDR transfer function, resolution, and frame rate from the
-    /// first video track. Returns an empty `VideoFormatInfo` when the asset is
-    /// readable but has no usable video track. Errors from track loading
-    /// propagate to the caller.
+    /// Probe codec, HDR transfer function, resolution, and frame rate from the first video track.
     public static func detectFormat(at url: URL) async throws -> VideoFormatInfo {
         let didStartScope = url.startAccessingSecurityScopedResource()
         defer {
@@ -55,8 +52,6 @@ public struct PlayableVideoLoader: PlayableVideoLoading, Sendable {
             return VideoFormatInfo()
         }
 
-        // Sequential awaits — AVAssetTrack is not Sendable in Swift 6 strict
-        // concurrency, so async-let parallelism would race the track reference.
         let descs = try await track.load(.formatDescriptions)
         let size = try await track.load(.naturalSize)
         let transform = try await track.load(.preferredTransform)
@@ -66,7 +61,6 @@ public struct PlayableVideoLoader: PlayableVideoLoading, Sendable {
         let transfer = descs.first.flatMap { transferFunction(of: $0) }
         let isHDR = transfer.map { $0 == "PQ" || $0 == "HLG" } ?? false
 
-        // preferredTransform may rotate portrait video; resolve display size.
         let displaySize = size.applying(transform)
         let displayResolution = CGSize(width: abs(displaySize.width), height: abs(displaySize.height))
 

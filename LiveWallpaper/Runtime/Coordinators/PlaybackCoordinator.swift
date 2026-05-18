@@ -412,7 +412,6 @@ final class PlaybackCoordinator {
             )
         } catch let error as NSError {
             Logger.error("Failed to apply configuration: \(error.localizedDescription) [domain=\(error.domain) code=\(error.code)]", category: .screenManager)
-            // Malformed persisted bookmark; clear it to avoid retry loops.
             if error.domain == NSCocoaErrorDomain, error.code == NSFileReadCorruptFileError {
                 Logger.warning("Clearing unresolvable bookmark for screen \(screen.id); user must re-pick the source.", category: .screenManager)
                 configurationStore.remove(for: screen.id)
@@ -529,10 +528,6 @@ final class PlaybackCoordinator {
         syncVideoAudioLeadership()
         applyVideoSpanLayout()
         applyStartupPlaybackPolicy(to: player, for: liveScreen)
-        // "Initialized" rather than "setup complete" — the async loadingTask
-        // inside the player is still running at this point; actual playback
-        // readiness comes through the player's own "Player is ready to play"
-        // log later in the same console session.
         Logger.info("Video player initialized for screen \(screen.id) — async asset load in progress", category: .screenManager)
         notifyWallpaperSessionChanged()
     }
@@ -541,11 +536,6 @@ final class PlaybackCoordinator {
 
     private func save(_ configuration: ScreenConfiguration) {
         configurationStore.save(configuration)
-        // Deferred one main-actor tick so the notification fires outside the
-        // SwiftUI reconcile pass that may have triggered this save (e.g. a
-        // toggle's `Binding.set`). The store's cache is already updated, so
-        // observers reading the configuration see the new value
-        // synchronously; only the redraw signal is delayed.
         let screenID = configuration.screenID
         Task { @MainActor in
             NotificationCenter.default.post(

@@ -78,9 +78,6 @@ struct GeneralSettingsView: View {
             aboutTab
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
-        // Set min size only; capping maxWidth would clip content in narrow detail panes.
-        // Grouped Form whitespace is absorbed inside Sections (inline Reset button +
-        // compact card layout) rather than by constraining overall width.
         .frame(minWidth: 500, minHeight: 400)
         .background(DesignTokens.Colors.pageBackground)
         .confirmDestructive($pendingDestructive)
@@ -117,9 +114,6 @@ struct GeneralSettingsView: View {
         }
         .errorAlert("Import Failed", message: $importErrorMessage)
         .errorAlert("Export Failed", message: $exportErrorMessage)
-        // Native SwiftUI export: sheet-modal, automatic sandbox extension,
-        // honours our registered `.lwconfig` UTType so Finder shows the
-        // right icon + extension chip in the Save dialog.
         .fileExporter(
             isPresented: $isPresentingExporter,
             document: exportDocument,
@@ -134,9 +128,6 @@ struct GeneralSettingsView: View {
                 exportErrorMessage = error.localizedDescription
             }
         }
-        // Native SwiftUI import: file panel filters strictly to our UTType
-        // so users can't accidentally pick a foreign .json. Decoding + the
-        // confirmation alert still happen below in `handleImportResult`.
         .fileImporter(
             isPresented: $isPresentingImporter,
             allowedContentTypes: [ConfigurationBundle.contentType],
@@ -148,10 +139,7 @@ struct GeneralSettingsView: View {
 
     // MARK: - Import / Export Action Handlers
 
-    /// Builds the document snapshot from the current SettingsManager state
-    /// and asks SwiftUI to present its native export sheet. The actual
-    /// `.fileExporter` modifier handles UTType filtering, sheet modality,
-    /// and (in sandboxed builds) the security-scoped extension grant.
+    /// Builds the document snapshot from the current SettingsManager state and asks SwiftUI to present its native export sheet.
     private func beginExport() {
         do {
             exportDocument = try ConfigurationDocument.snapshot()
@@ -161,8 +149,7 @@ struct GeneralSettingsView: View {
         }
     }
 
-    /// Triggers the `.fileImporter` sheet. Decoding + the confirmation
-    /// dialog happen in `handleImportResult` once SwiftUI returns the URL.
+    /// Triggers the `.fileImporter` sheet.
     private func beginImport() {
         isPresentingImporter = true
     }
@@ -171,8 +158,6 @@ struct GeneralSettingsView: View {
         switch result {
         case .success(let urls):
             guard let source = urls.first else { return }
-            // `.fileImporter` returns a security-scoped URL; balance the
-            // start/stop calls so we have access for the read.
             let didStartAccess = source.startAccessingSecurityScopedResource()
             defer {
                 if didStartAccess {
@@ -191,8 +176,6 @@ struct GeneralSettingsView: View {
             }
 
         case .failure(let error):
-            // User-cancelled imports surface as NSCocoaErrorDomain code 3072
-            // (NSUserCancelledError) and shouldn't show an alert.
             if (error as NSError).code != NSUserCancelledError {
                 importErrorMessage = error.localizedDescription
             }
@@ -205,8 +188,6 @@ struct GeneralSettingsView: View {
         pendingImportBundle = nil
         pendingImportSource = nil
 
-        // Mirror resetAllSettings()'s broadcast: refresh subsystems that
-        // cache GlobalSettings or screen configs out-of-band.
         NotificationCenter.default.post(name: .dockVisibilityDidChange, object: nil)
         NotificationCenter.default.post(name: .globalShortcutsDidChange, object: nil)
         NotificationCenter.default.post(name: .weatherLocationPreferenceDidChange, object: nil)
@@ -214,7 +195,6 @@ struct GeneralSettingsView: View {
         screenManager.resetAllWallpaperSessions()
         screenManager.refreshScreens(preserveRuntimeSessions: false)
 
-        // Re-seed the local State so the form reflects the imported values.
         let settings = SettingsManager.shared.loadGlobalSettings()
         globalPauseOnBattery = settings.globalPauseOnBattery
         startOnLogin = settings.startOnLogin
@@ -225,18 +205,13 @@ struct GeneralSettingsView: View {
         showInDock = settings.showInDock
         menuBarDensity = settings.menuBarDensity
 
-        // SwiftUI sometimes drops a follow-up `.alert` if it's set in the
-        // same runloop tick that dismisses the previous one — wait one
-        // hop so the confirmation alert finishes its dismiss animation.
         let feedback = importFeedbackMessage(for: summary)
         DispatchQueue.main.async {
             importFeedback = feedback
         }
     }
 
-    /// Renders the post-import summary using individual `String(localized:)`
-    /// format strings so each restored section gets its own pluralization
-    /// rule via xcstrings (no manual "(s)" suffixes, no concatenation).
+    /// Renders the post-import summary using individual `String(localized:)` format strings so each restored section gets its own pluralization rule via xcstrings (no manual "(s)" suffixes, no concatenation).
     private func importFeedbackMessage(for summary: ConfigurationPorter.ApplySummary) -> String {
         guard !summary.isEmpty else {
             return String(
@@ -247,9 +222,6 @@ struct GeneralSettingsView: View {
 
         var lines: [String] = []
         if let count = summary.displayCount {
-            // xcstrings will pluralize `display` / `displays` from the
-            // `%lld` rule. Each `String(localized:)` is its own translation
-            // key so translators can pick any grammatical structure.
             lines.append(String(
                 localized: "Restored \(count) display configurations.",
                 comment: "Import success line: how many displays were restored. xcstrings provides a pluralized variant."
@@ -274,7 +246,6 @@ struct GeneralSettingsView: View {
         guard let bundle = pendingImportBundle else { return "" }
         var lines: [String] = []
         if let count = bundle.screenConfigurations?.count {
-            // xcstrings pluralizes `display` / `displays` from `%lld`.
             lines.append(String(
                 localized: "• \(count) display configurations",
                 comment: "Import confirmation bullet: how many displays the bundle includes. xcstrings provides a pluralized variant."
@@ -300,10 +271,6 @@ struct GeneralSettingsView: View {
             )
             : lines.joined(separator: "\n")
 
-        // Single localized format string with two placeholders so
-        // translators can reorder the summary, the device-portability
-        // warning, and the call-to-action question freely (critical for
-        // RTL and verb-final languages).
         return String(
             localized: "\(summary)\n\n\(localizedBookmarkPortabilityWarning)\n\nReplace current configuration?",
             comment: "Import confirmation alert message. First placeholder is a bulleted list of restored sections; second is the device-portability warning."
@@ -430,9 +397,6 @@ struct GeneralSettingsView: View {
                     value: Binding(
                         get: { videoCacheBudgetMB },
                         set: { newValue in
-                            // Snap to 32 MB step so the display label stays clean
-                            // (Slider's continuous Double would otherwise produce
-                            // ugly fractional values).
                             let snapped = (newValue / 32).rounded() * 32
                             videoCacheBudgetMB = snapped
                             updateGlobalSettings()
@@ -477,8 +441,6 @@ struct GeneralSettingsView: View {
     }
 
     private var cacheSubtitleKey: LocalizedStringKey {
-        // Stable user-facing copy — kept as a constant so the SettingRow
-        // subtitle binding doesn't churn as the slider moves.
         "Higher = fewer disk reads, more RAM. Lower = less RAM, video re-reads disk on every loop."
     }
 
@@ -617,12 +579,6 @@ struct GeneralSettingsView: View {
     }
 
     private var troubleshootingActions: some View {
-        // `Grid` keeps the two-column layout but its rows align cleanly
-        // even after the form was widened to host the Export/Import row.
-        // SwiftUI compresses each tile's `.frame(maxWidth: .infinity)` so
-        // narrow windows stay readable instead of clipping the trailing
-        // button. We don't switch to ViewThatFits because the Settings
-        // panel has a fixed minWidth of 500pt — two-column always fits.
         Grid(horizontalSpacing: DesignTokens.Settings.actionGridSpacing,
              verticalSpacing: DesignTokens.Settings.actionGridSpacing) {
             GridRow {
@@ -732,9 +688,6 @@ struct GeneralSettingsView: View {
     // MARK: - Settings Persistence
 
     private func updateGlobalSettings() {
-        // Read current persisted state so toggling unrelated fields does NOT
-        // wipe Wallpaper Engine import history (or any other field added
-        // outside this form). Only override what this view actually owns.
         var settings = SettingsManager.shared.loadGlobalSettings()
         let dockChanged = settings.showInDock != showInDock
         let densityChanged = settings.menuBarDensity != menuBarDensity
@@ -768,9 +721,6 @@ struct GeneralSettingsView: View {
         showInDock = false
         menuBarDensity = .comfortable
 
-        // Reset wipes Dock visibility, weather location preference, and
-        // shortcut bindings. Broadcast all three so the AppDelegate, weather
-        // service, and global shortcut manager re-sync without a relaunch.
         NotificationCenter.default.post(name: .dockVisibilityDidChange, object: nil)
         NotificationCenter.default.post(name: .globalShortcutsDidChange, object: nil)
         NotificationCenter.default.post(name: .weatherLocationPreferenceDidChange, object: nil)

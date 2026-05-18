@@ -289,12 +289,9 @@ final class ScreenManager {
             setupMemoryMonitoring()
         }
         setupFullScreenDetection()
-        // Exclusive-rendering coordinator only matters when scene wallpapers
-        // can run — Lite skips it entirely to avoid the foreground-watcher.
         if featureCatalog.isEnabled(.scene) {
             setupExclusiveRenderingCoordinator()
         }
-        // Lock-screen capture pipeline is Pro-only.
         if featureCatalog.isEnabled(.lockScreenSnapshots) {
             _ = lockScreenSnapshotCoordinator
         }
@@ -305,15 +302,8 @@ final class ScreenManager {
             }
             .store(in: &cleanupTasks)
 
-        // refreshScreens() already calls loadConfigurationForScreen on every
-        // newly registered screen (during init, every screen is "new"), so a
-        // separate loadSavedConfigurations() pass is pure duplicate work and
-        // was a contributor to the launch-time GPU spike.
         refreshScreens()
         if startupOptions.startAutomation {
-            // Automation (playlist + schedule) and weather monitor are
-            // independent Pro features; skip each only when its capability
-            // is off so a future SKU can enable one without the other.
             if featureCatalog.isEnabled(.playlists) || featureCatalog.isEnabled(.scheduleAutomation) {
                 automationOrchestrator.startMonitoring()
             }
@@ -345,9 +335,6 @@ final class ScreenManager {
             }
             .store(in: &cleanupTasks)
         
-        // Sleep / wake notifications are posted on NSWorkspace's notification
-        // center, NOT NotificationCenter.default. The previous version subscribed
-        // on the wrong center and effectively never fired on wake.
         NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.willSleepNotification)
             .sink { [weak self] _ in
                 self?.handleSystemSleep()
@@ -371,7 +358,6 @@ final class ScreenManager {
             try? await Task.sleep(for: .milliseconds(500))
             self?.updateAllWindowFrames()
         }
-
 
     }
 
@@ -404,15 +390,9 @@ final class ScreenManager {
         handleFullScreenChange(fullScreenDetector.hiddenScreens)
     }
 
-    /// Wires the console-key-window observer so scene wallpapers throttle to
-    /// 1 fps while the user is interacting with the LiveWallpaper UI. This is
-    /// the Phase 2.0 "exclusive rendering" policy — scene rendering is the
-    /// most expensive wallpaper type and should yield to anything in the
-    /// foreground.
+    /// Wires the console-key-window observer so scene wallpapers throttle to 1 fps while the user is interacting with the LiveWallpaper UI.
     private func setupExclusiveRenderingCoordinator() {
         exclusiveRenderingCoordinator.start()
-        // Observation framework: register a withObservationTracking loop so
-        // the throttle propagates to every scene session.
         scheduleConsoleKeyTracking()
     }
 
@@ -555,12 +535,7 @@ final class ScreenManager {
     }
 
     /// Tears down the live runtime session for a screen without touching persistence.
-    /// Use `clearWallpaperForScreen(_:)` when you also want to delete the saved
-    /// configuration for that screen.
     private func releaseRuntimeSession(_ screen: Screen) {
-        // Bump generation first so any in-flight async transition (e.g.
-        // setVideo / playlist / schedule) sees the new value and short-circuits
-        // before instantiating a player against a now-dead screen.
         bumpTransition(for: screen.id)
         effectsCoordinator.cancelInflight(for: screen.id)
         transitionRegistry.cancelAssetReadiness(for: screen.id)
@@ -576,12 +551,6 @@ final class ScreenManager {
             releaseRuntimeSession(screen)
         }
         configurationStore.clearCache()
-        // Broadcast per-screen so ScreenDetailView re-reads its now-empty
-        // configuration and drops the @State copies it held for the
-        // previous wallpaper (preview source, mode picker, effect config,
-        // playlist / schedule rows, etc.). Without this the inspector
-        // continues to show the pre-reset video info even after the
-        // runtime session is gone.
         Task { @MainActor in
             for screen in snapshot {
                 NotificationCenter.default.post(
@@ -596,18 +565,15 @@ final class ScreenManager {
     
     // MARK: - Configuration Management
 
-    /// Light launch-time pass: prunes configurations whose local resource
-    /// bookmark is no longer resolvable. Does not tear down healthy sessions.
+    /// Light launch-time pass: prunes configurations whose local resource bookmark is no longer resolvable.
     func pruneInvalidConfigurationsIfNeeded() {
         persistence.pruneInvalidConfigurations()
     }
 
     private func loadConfigurationForScreen(_ screen: Screen) {
-        // If screen already has a video player, just update settings
         if screen.videoPlayer != nil {
             if let cachedConfig = configurationStore.get(for: screen.id) {
                 primeBookmarkDisplayNames(from: cachedConfig)
-                // Apply configuration without recreating the player
                 applyConfiguration(cachedConfig, to: screen, preservingState: true)
             }
             return
@@ -692,8 +658,6 @@ final class ScreenManager {
     }
 
     /// Currently surfaced error for a screen's runtime session (or `nil`).
-    /// Reads through `wallpaperSessionStateVersion` so SwiftUI re-evaluates
-    /// the banner when the session reports a new state.
     func runtimeError(for screen: Screen) -> WallpaperRuntimeError? {
         _ = wallpaperSessionStateVersion
         return transientRuntimeErrors[screen.id] ?? screen.runtimeSession?.runtimeError
@@ -722,8 +686,7 @@ final class ScreenManager {
         }
     }
 
-    /// Subscribes the manager to a session's error changes so the SwiftUI
-    /// banner refreshes when a player or web view starts / clears a failure.
+    /// Subscribes the manager to a session's error changes so the SwiftUI banner refreshes when a player or web view starts / clears a failure.
     private func observeRuntimeErrors(for session: any WallpaperRuntimeSession) {
         let notify: @MainActor () -> Void = { [weak self] in
             self?.markWallpaperSessionStateChanged()
@@ -764,15 +727,7 @@ final class ScreenManager {
         persistence.primeDisplayNames(from: configuration)
     }
 
-    /// Builds the next session-state snapshot from current screen state and
-    /// commits it iff something actually changed. The version counter is
-    /// incremented only on a real diff so consumers reading
-    /// `wallpaperSessionStateVersion` to force a re-evaluation pulse stop
-    /// receiving phantom pulses on no-op calls. Side-effects (Combine
-    /// subject forwarding, full-screen polling) likewise run only on a real
-    /// diff, except `includePollingRefresh` callers that need the polling
-    /// step regardless (screen-set changes update fallback policy even when
-    /// the playback derivative didn't move).
+    /// Builds the next session-state snapshot from current screen state and commits it iff something actually changed.
     private func commitWallpaperSessionState(includePollingRefresh: Bool = false) {
         var next = wallpaperSessionState
         next.summaryCache = WallpaperSessionSummaryCache(
@@ -1014,8 +969,6 @@ final class ScreenManager {
     // MARK: - Wallpaper Engine Import
 
     /// Returns the most recent WPE import error for the given screen, or `nil`.
-    /// Used by the Scene tab to surface failures without bleeding state across
-    /// concurrent imports on different displays.
     func wpeImportError(for screen: Screen) -> AppError? {
         wpeImportTracker.error(for: screen.id)
     }
@@ -1138,17 +1091,7 @@ final class ScreenManager {
         configurationStore.get(for: screen.id)
     }
 
-    /// Copies the active wallpaper + per-screen settings from `source` onto
-    /// every other registered screen, restoring each runtime session so the
-    /// new content shows immediately. Used by the "Apply to All" toolbar
-    /// action; no-op when there's only one screen.
-    ///
-    /// The target's existing runtime session is torn down BEFORE
-    /// `restoreWallpaperSession`, otherwise the video path's reuse-existing-
-    /// player branch would persist the new config but keep playing the old
-    /// URL. `releaseRuntimeSession` also bumps the per-screen transition
-    /// generation, so any in-flight async video load on the target invalidates
-    /// itself instead of overwriting the apply-to-all result.
+    /// Copies the active wallpaper + per-screen settings from `source` onto every other registered screen, restoring each runtime session so the new content shows immediately.
     func applyConfigurationToAllDisplays(from source: Screen) {
         guard screens.count > 1,
               let template = configurationStore.get(for: source.id) else { return }
@@ -1258,8 +1201,6 @@ final class ScreenManager {
         let previousWallpaper = config.activeWallpaper
         guard config.activateSavedVideoWallpaper() else { return }
 
-        // No-op switch: discard the local mutation (incl. playlistCursorIndex reset)
-        // since nothing actually changed; persistence + session rebuild are skipped.
         if previousWallpaper == config.activeWallpaper,
            screen.runtimeSession?.wallpaperType == .video {
             Logger.info("Video wallpaper already active for screen \(screen.id); keeping existing player session", category: .screenManager)
@@ -1271,8 +1212,7 @@ final class ScreenManager {
         loadConfigurationForScreen(screen)
     }
 
-    /// Restore previously-applied HTML source after the user toggles the type
-    /// picker back to HTML. No-op if no HTML was ever set on this screen.
+    /// Restore previously-applied HTML source after the user toggles the type picker back to HTML.
     func switchToHTMLWallpaper(for screen: Screen) {
         guard var config = configurationStore.get(for: screen.id) else { return }
         let previousWallpaper = config.activeWallpaper
@@ -1317,11 +1257,6 @@ final class ScreenManager {
 
         switch definition {
         case .html(let source, let htmlConfig):
-            // Audio-leader policy: same source on multiple screens means N
-            // independent webviews would each decode audio + render WebGL.
-            // Force-mute all but the leader to avoid stacked audio. The
-            // visual remains identical so users still get N×GPU — they're
-            // warned via the Inspector banner.
             let isLeader = htmlCoordinator.isAudioLeader(source: source, excluding: screen.id)
             let effectiveConfig = htmlCoordinator.runtimeConfig(source: source, config: htmlConfig, for: screen)
             session = ambientSessionBuilder.makeHTMLSession(source: source, config: effectiveConfig, frame: screen.frame)
@@ -1335,9 +1270,6 @@ final class ScreenManager {
                 dependencyWorkshopIDs: descriptor.dependencyWorkshopIDs,
                 origin: configuration.wpeOrigin
             )
-            // Resolve the engine assets root at the call site so the runtime
-            // never reaches back into the UI singleton; the renderer owns
-            // the security scope for its lifetime.
             let engineRoot = WPEEngineAssetsLibrary.shared.resolveAuthorizedRoot()
             guard let sceneSession = ambientSessionBuilder.makeSceneSession(
                 descriptor: descriptor,
@@ -1350,9 +1282,6 @@ final class ScreenManager {
             }
             observeRuntimeErrors(for: sceneSession)
             screen.installRuntimeSession(sceneSession)
-            // Sync exclusive-rendering state on install so a scene mounted
-            // while the inspector window is already key starts at 1 fps
-            // instead of waiting for the next focus toggle to throttle it.
             sceneSession.setThrottled(exclusiveRenderingCoordinator.isConsoleKeyWindow)
             let globalSettings = SettingsManager.shared.loadGlobalSettings()
             applyPerformancePolicy(

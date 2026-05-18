@@ -80,8 +80,6 @@ struct ScheduleSection: View {
             }
         }
         .task {
-            // Sleep precisely until the next top-of-hour so currentHour flips
-            // at the boundary instead of up to 59s late.
             while !Task.isCancelled {
                 currentHour = Calendar.current.component(.hour, from: Date())
                 let nextHour = Calendar.current.nextDate(
@@ -142,7 +140,6 @@ struct ScheduleSection: View {
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = ResourceUtilities.supportedVideoContentTypes
         panel.prompt = L10n.Panel.setVideo
-        // Attach to current key window so the panel appears on the user's active display.
         if let parent = NSApp.keyWindow ?? NSApp.mainWindow {
             panel.beginSheetModal(for: parent) { response in
                 guard response == .OK, !panel.urls.isEmpty else {
@@ -176,8 +173,7 @@ struct ScheduleSection: View {
         }
     }
 
-    /// Validate a candidate stepper change against other slots; commit if no conflict,
-    /// otherwise reject and flash a red outline + persistent message.
+    /// Validate a candidate stepper change against other slots; commit if no conflict, otherwise reject and flash a red outline + persistent message.
     private func validateAndCommit(slotID: UUID, start: Int, end: Int) {
         guard let index = scheduleSlots.firstIndex(where: { $0.id == slotID }) else { return }
         var probe = scheduleSlots[index]
@@ -192,7 +188,6 @@ struct ScheduleSection: View {
             withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.2))) { conflictMessage = nil }
             return
         }
-        // Conflict: revert stepper change, show persistent banner, flash outline 1.5s.
         let conflictingLabels = scheduleSlots
             .filter { conflicts.contains($0.id) }
             .map(\.label)
@@ -210,9 +205,6 @@ struct ScheduleSection: View {
     }
 
     private func removeSlot(_ slotID: UUID) {
-        // Last-slot removal disables the whole schedule, which is more disruptive
-        // than dropping one of several — surface the same confirmation that
-        // "Disable Schedule" would.
         if scheduleSlots.count <= 1 {
             let slotCount = scheduleSlots.count
             pendingDestructive = PendingDestructive(.disableSchedule(slotCount: slotCount)) {
@@ -294,14 +286,12 @@ struct ScheduleSlotRow: View {
     var body: some View {
         VStack(spacing: 4) {
             HStack(spacing: 8) {
-                // Active indicator — pulses when slot covers the current hour
                 Image(systemName: "circle.fill")
                     .font(.system(size: 8))
                     .foregroundStyle(isActive ? Color.green : Color.gray.opacity(0.3))
                     .symbolEffect(.pulse, options: .continuouslyRepeating, isActive: isActive)
                     .animation(.smooth(duration: 0.3), value: isActive)
 
-                // Slot label + time (tap to edit)
                 HStack(spacing: 4) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(verbatim: slot.localizedLabel)
@@ -323,7 +313,6 @@ struct ScheduleSlotRow: View {
 
                 Spacer()
 
-                // Video assignment
                 if let name = videoName {
                     HStack(spacing: 4) {
                         Image(systemName: "film.fill")
@@ -368,7 +357,6 @@ struct ScheduleSlotRow: View {
                 .accessibilityLabel(Text("Remove \(slot.localizedLabel) slot", comment: "A11y label for removing a schedule slot. The placeholder is the slot label."))
             }
 
-            // Time range editor (toggled by tapping the time label)
             if isEditingTime {
                 HStack(spacing: 12) {
                     HStack(spacing: 4) {
@@ -466,7 +454,6 @@ struct ScheduleTimelineBar: View {
         if slot.startHour < slot.endHour {
             return [(slot.startHour, slot.endHour)]
         }
-        // Wraps midnight — emit [start, 24) + [0, end).
         return [(slot.startHour, 24), (0, slot.endHour)]
     }
 
@@ -482,11 +469,9 @@ struct ScheduleTimelineBar: View {
             let width = geometry.size.width
 
             ZStack(alignment: .leading) {
-                // Background
                 RoundedRectangle(cornerRadius: 4)
                     .fill(Color.gray.opacity(0.15))
 
-                // Slot segments (handles midnight wrap)
                 ForEach(Array(slots.enumerated()), id: \.element.id) { index, slot in
                     ForEach(Array(Self.segments(for: slot).enumerated()), id: \.offset) { _, segment in
                         let startFraction = CGFloat(segment.start) / 24.0
@@ -502,7 +487,6 @@ struct ScheduleTimelineBar: View {
                     }
                 }
 
-                // Current hour marker
                 let markerX = CGFloat(currentHour) / 24.0 * width
                 Rectangle()
                     .fill(Color.red)

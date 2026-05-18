@@ -36,8 +36,6 @@ struct WPESPIRVIntegrationSmokeTests {
             textureBindings: [:]
         )
         let result = try compiler.compile(request)
-        // SPIRV-Cross output uses `main0` as the fragment entry point
-        // (Phase 2b's wrapper claims `main0` as the function name).
         #expect(result.mslSource.contains("helperRead"))
         #expect(result.library.makeFunction(name: result.fragmentFunctionName) != nil)
     }

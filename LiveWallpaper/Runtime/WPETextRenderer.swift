@@ -43,8 +43,6 @@ final class WPETextRenderer {
     }
 
     /// Rasterize `object` to an MTLTexture sized to its measured bounds.
-    /// Returns nil only when the layout produces an empty (zero-area)
-    /// glyph run, which the caller treats as "skip this layer".
     func rasterize(_ object: WPESceneTextObject) -> (texture: MTLTexture, size: CGSize)? {
         ensureFontRegistered(object.fontRelativePath)
         let key = CacheKey(
@@ -91,19 +89,13 @@ final class WPETextRenderer {
         }
     }
 
-    /// Register a packaged .ttf/.otf with the system font manager so the
-    /// rasterizer can find it by Display Name. WPE bundles fonts inside
-    /// the scene package (e.g. `fonts/p5hatty.ttf`); without registration
-    /// CoreText falls back to the system font and the visual diverges.
+    /// Register a packaged .ttf/.otf with the system font manager so the rasterizer can find it by Display Name.
     private func ensureFontRegistered(_ relativePath: String?) {
         guard let path = relativePath, !registeredFonts.contains(path) else { return }
         registeredFonts.insert(path)
         guard let url = try? resolver.resolveExistingFileURL(relativePath: path) else { return }
         var unmanagedError: Unmanaged<CFError>?
         _ = CTFontManagerRegisterFontsForURL(url as CFURL, .process, &unmanagedError)
-        // Ignore errors — duplicate registration is fine; the rasterizer
-        // falls back to the system font when the registered family
-        // can't be found.
         unmanagedError?.release()
     }
 
@@ -133,15 +125,12 @@ final class WPETextRenderer {
     }
 
     private func resolveFont(relativePath: String?, size: CGFloat) -> CTFont {
-        // Try resolved family first (registration walks scene package).
         if let path = relativePath,
            let url = try? resolver.resolveExistingFileURL(relativePath: path),
            let descriptors = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor],
            let descriptor = descriptors.first {
             return CTFontCreateWithFontDescriptor(descriptor, size, nil)
         }
-        // System fallback — sufficient to keep rendering when the bundled
-        // font is missing or cannot be loaded.
         return CTFontCreateWithName("HelveticaNeue" as CFString, size, nil)
     }
 
@@ -160,8 +149,6 @@ final class WPETextRenderer {
             constraint,
             &fitRange
         )
-        // Add a 4px padding so the last glyph's antialiased edge isn't
-        // clipped at the texture boundary.
         return CGRect(x: 0, y: 0, width: size.width + 4, height: size.height + 4)
     }
 
@@ -187,9 +174,6 @@ final class WPETextRenderer {
         ) else {
             return nil
         }
-        // CoreText draws with origin at lower-left; we want top-left so
-        // the runtime can sample with the same UV convention as image
-        // layers. Flip the CTM before framing.
         ctx.translateBy(x: 0, y: CGFloat(height))
         ctx.scaleBy(x: 1, y: -1)
 
@@ -215,9 +199,6 @@ final class WPETextRenderer {
         guard let texture = device.makeTexture(descriptor: descriptor) else { return nil }
         texture.label = "WPE text \(object.id)"
         let region = MTLRegionMake2D(0, 0, width, height)
-        // Use the unaligned bytesPerRow because Metal's replace expects
-        // exactly width*4 in shared storage; CoreText wrote into the
-        // 256-aligned buffer so we copy row-by-row.
         var packed = [UInt8](repeating: 0, count: bytesPerRow * height)
         for row in 0..<height {
             let src = row * alignedRow

@@ -20,23 +20,11 @@ struct WPEEndToEndCorpusTests {
     @MainActor
     @Test("Every corpus scene reaches first frame or surfaces a precise error")
     func everyCorpusSceneRunsThroughPipeline() async throws {
-        // Strict env-var gate. We deliberately do NOT fall back to a
-        // hardcoded path: the LiveWallpaper app sandbox uses
-        // `files.user-selected.read-only`, so any directory the user
-        // hasn't explicitly granted via NSOpenPanel will hang the test
-        // on `__open` waiting for an interactive sandbox prompt that
-        // never displays. Run this gate from a non-sandboxed context
-        // (CLI tool / direct `swift run`) or grant the path through the
-        // running app first.
         guard let envRoot = ProcessInfo.processInfo.environment["WPE_CORPUS_ROOT"], !envRoot.isEmpty else {
             print("[corpus] WPE_CORPUS_ROOT not set — skipping (sandbox prevents arbitrary-path access from xcodebuild test harness)")
             return
         }
         let root = URL(fileURLWithPath: envRoot, isDirectory: true)
-        // The first FS call against a sandbox-restricted path can hang
-        // indefinitely. Probe with a short timeout: if we can't read the
-        // directory in 2 seconds, assume the sandbox is blocking us and
-        // bail out before the harness times out the whole suite.
         let probeOK = await Self.probeReadable(root, timeoutSeconds: 2)
         guard probeOK else {
             print("[corpus] root '\(envRoot)' is not readable from this sandbox — skipping")
@@ -64,10 +52,6 @@ struct WPEEndToEndCorpusTests {
                 skippedNonScene += 1
                 continue
             }
-            // Extract the scene package into a per-test cache dir so the
-            // resolver can walk it the same way the production import path
-            // does. We don't reuse the production WallpaperEngineCache to
-            // avoid colliding with an in-flight live install.
             let stage = FileManager.default.temporaryDirectory.appendingPathComponent("wpe-e2e-\(workshopID)-\(UUID().uuidString)")
             defer { try? FileManager.default.removeItem(at: stage) }
             do {
@@ -79,7 +63,6 @@ struct WPEEndToEndCorpusTests {
                     let pkg = try WallpaperEnginePackage.parseIndex(streamingFrom: handle)
                     try pkg.extractAll(streamingFrom: handle, to: stage)
                 } else {
-                    // Unpacked scene — copy folder contents.
                     let items = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
                     for item in items {
                         try FileManager.default.copyItem(
@@ -134,7 +117,6 @@ struct WPEEndToEndCorpusTests {
             }
         }
 
-        // Report.
         print("=== Corpus end-to-end pipeline ===")
         print("Scene packages: \(summary.count) (skipped non-scene: \(skippedNonScene))")
         print("Rendered first frame: \(rendered)")
@@ -145,16 +127,10 @@ struct WPEEndToEndCorpusTests {
         for entry in summary.sorted(by: { $0.status < $1.status || ($0.status == $1.status && $0.workshop < $1.workshop) }) {
             print("  [\(entry.status)] \(entry.workshop) — \(entry.detail.prefix(180))")
         }
-        // Soft expectation: the count of rendered scenes is non-zero so we
-        // catch hard regressions (build broken / pipeline crash) in CI.
         #expect(rendered + diagnosticOnly + hardFailures == summary.count)
     }
 
-    /// Sandbox-safe directory probe. Spawns a detached task that tries
-    /// `contentsOfDirectory` and races it against a timeout — under the
-    /// sandbox, the underlying `__open` syscall hangs indefinitely if the
-    /// path is restricted, so we can't use `FileManager.fileExists`
-    /// alone to gate access.
+    /// Sandbox-safe directory probe.
     static func probeReadable(_ url: URL, timeoutSeconds: TimeInterval) async -> Bool {
         await withTaskGroup(of: Bool.self, returning: Bool.self) { group in
             group.addTask {

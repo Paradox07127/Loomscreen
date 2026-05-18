@@ -27,9 +27,6 @@ enum WPESceneTransformMapper {
     ) -> CGPoint {
         let x = CGFloat(origin.x)
         let y = CGFloat(origin.y)
-        // Preserve the Phase 2.0 compatibility heuristic: existing imported
-        // scenes may rely on normalized origins until we have fixture evidence
-        // to replace this with exact WPE projection math.
         let xPx = (x >= 0 && x <= 1) ? x * canvas.width : x
         let yPx = (y >= 0 && y <= 1) ? y * canvas.height : y
 

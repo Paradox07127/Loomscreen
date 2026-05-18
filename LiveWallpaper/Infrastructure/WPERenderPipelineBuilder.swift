@@ -61,10 +61,6 @@ private struct WPEShaderSourceLoader: Sendable {
     private let resolver: WPEMultiRootResourceResolver
 
     init(cacheRootURL: URL, engineAssetsRootURL: URL? = nil) {
-        // Reuse the same fall-through chain as scene-asset lookup so shader
-        // `#include` resolution lands on the engine root for common helpers
-        // (`common_composite.h`, `common_blur.h`, …) that WPE ships under
-        // `assets/shaders/`.
         self.resolver = WPEMultiRootResourceResolver(
             primaryRootURL: cacheRootURL,
             dependencyMounts: [],
@@ -127,10 +123,6 @@ private struct WPEShaderSourceLoader: Sendable {
         case "compose":
             return composeProgram(shaderName: shaderName, combos: combos)
         default:
-            // Phase 2D-C: pre-compiled effects share `copyProgram`'s GLSL
-            // skeleton because the runtime renders them through dedicated
-            // MSL fragments — the prepared GLSL is only kept around for
-            // future shader-translator paths.
             if normalized.hasPrefix("effect_") {
                 return copyProgram(shaderName: shaderName, combos: combos)
             }
@@ -556,9 +548,6 @@ private struct WPEShaderSourceLoader: Sendable {
         if name == "previous" {
             return .previous
         }
-        // Mirrors WPERenderGraphBuilder.textureReference(_:ownerPath:): any
-        // `_`-prefixed name is a runtime FBO declared in effect.json fbos[],
-        // not an on-disk asset.
         if name.hasPrefix("_") {
             return .fbo(name)
         }
@@ -585,16 +574,6 @@ private struct WPEShaderSourceLoader: Sendable {
     }
 
     private func shaderPrelude(comboValues: [String: Int], stage: WPEShaderStage) -> String {
-        // GLSL math-constant macros that WPE workshop shaders rely on.
-        // Neither GLSL nor Metal expose them as identifiers, so we replace
-        // them at the preprocessor stage before transpilation runs. Values
-        // match `<math.h>` to keep parity with desktop WPE builds.
-        //
-        // `atan2` is intentionally NOT redefined: the previous `#define atan2
-        // atan` collapsed two-argument calls to Metal's single-argument
-        // `atan`, breaking every workshop shader that uses polar coordinates.
-        // Metal has a native `atan2(y, x)` that the transpilation pipeline
-        // passes through unchanged, so the macro is unnecessary.
         var lines = [
             "// LiveWallpaper WPE shader prelude",
             "#define GLSL 1",
@@ -648,15 +627,6 @@ private struct WPEShaderSourceLoader: Sendable {
     private func builtinInclude(named name: String) -> String? {
         switch name {
         case "common.h":
-            // Phase 1.5: Add minimal WPE-runtime helpers our transpiler
-            // could not synthesise. `mod(x, y)` is a GLSL intrinsic Metal
-            // doesn't ship at global scope — corpus shader
-            // `ps2_startup_screen` invokes it directly. `rotateVec2` is a
-            // WPE-runtime helper several effects (cloudmotion, swing,
-            // lens_flare) call without defining locally. Both are
-            // implemented as constexpr-friendly inline functions so the
-            // GLSL preprocessor + Metal compiler can fold uses at the
-            // call site without losing precision.
             return """
             #ifndef LIVEWALLPAPER_WPE_COMMON_H
             #define LIVEWALLPAPER_WPE_COMMON_H
@@ -689,13 +659,6 @@ private struct WPEShaderSourceLoader: Sendable {
             #endif
             """
         case "common_blending.h":
-            // Clean-room ApplyBlending implementation. WPE's reference selects
-            // by compile-time `#if BLENDMODE == N`; we use a runtime switch so
-            // the constant-folded result is the same for shaders that bake
-            // the mode in. Mode numbers follow the Photoshop ordering common
-            // to corpus shaders; unknown modes fall back to the source colour
-            // alpha-blended in (Capability: Degraded — exact mode parity is
-            // Phase 5 work).
             return """
             #ifndef LIVEWALLPAPER_WPE_COMMON_BLENDING_H
             #define LIVEWALLPAPER_WPE_COMMON_BLENDING_H
@@ -781,11 +744,6 @@ private struct WPEShaderSourceLoader: Sendable {
     }
 
     private func resolveExistingFileURL(relativePath: String) throws -> URL {
-        // Map the resolver's `ResolveError` into the pipeline-builder's
-        // `WPERenderPipelineError.includeMissing` so existing call sites
-        // (and tests asserting `throws: WPERenderPipelineError.self`) keep
-        // their error contract while still picking up the engine-root
-        // fall-through.
         do {
             return try resolver.resolveExistingFileURL(relativePath: relativePath)
         } catch SceneResourceResolver.ResolveError.fileMissing,

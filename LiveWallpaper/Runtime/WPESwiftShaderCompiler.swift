@@ -46,10 +46,6 @@ struct WPESwiftShaderCompiler: WPEShaderCompiling {
             )
         }
 
-        // Transpiler always emits a single fragment named
-        // `wpe_translated_fragment` and shares the executor's existing
-        // `wpe_fullscreen_vertex` for the vertex stage. That keeps the
-        // pipeline cache key compact.
         return WPEShaderCompileResult(
             library: library,
             vertexFunctionName: "wpe_fullscreen_vertex",

@@ -65,12 +65,7 @@ enum WPEMetalTextureLoaderError: Error, Equatable, LocalizedError, Sendable {
 }
 
 enum WPEMetalTextureFormatMapper {
-    /// Maps a WPE texture container format to the concrete `MTLPixelFormat` the
-    /// renderer should allocate. `colorSpace` defaults to `.sRGB` because WPE
-    /// Workshop content (PNG/JPG/BC) ships as sRGB-encoded perceptual color and
-    /// the SpriteKit fallback decodes through CGImage's sRGB pipeline.
-    /// Single-channel `R8` and two-channel `RG8` are forced to linear because
-    /// Metal does not expose sRGB variants for those formats.
+    /// Maps a WPE texture container format to the concrete `MTLPixelFormat` the renderer should allocate.
     static func mapping(
         for format: WPETexFormat,
         capabilities: WPEMetalTextureCapabilities,

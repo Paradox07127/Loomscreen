@@ -84,7 +84,6 @@ struct ConfigurationPorterTests {
             _ = try ConfigurationPorter.decode(from: destination)
             Issue.record("Expected invalidFile error")
         } catch ConfigurationPorter.ImportError.invalidFile {
-            // Expected.
         }
     }
 
@@ -110,7 +109,6 @@ struct ConfigurationPorterTests {
         let directory = try makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
 
-        // Write a 17 MB file of zero bytes — over the 16 MB cap.
         let destination = directory.appendingPathComponent("huge.lwconfig")
         let chunk = Data(repeating: 0, count: 1024 * 1024)
         let created = FileManager.default.createFile(atPath: destination.path(percentEncoded: false), contents: nil)
@@ -131,13 +129,9 @@ struct ConfigurationPorterTests {
 
     @Test("ConfigurationBundle.contentType has the .lwconfig file extension")
     func contentTypeHasLWConfigExtension() {
-        // We always register `lwconfig` via Info.plist; either the registered
-        // type is loaded (production) or we fall back to .json (test bundle
-        // contexts that don't load Info.plist). Both are conforming JSON
-        // types, but the registered one carries our extension.
         let preferred = ConfigurationBundle.contentType.preferredFilenameExtension
-        let fallback = preferred == "json"   // ran without Info.plist
-        let matched = preferred == "lwconfig" // ran with our registration
+        let fallback = preferred == "json"
+        let matched = preferred == "lwconfig"
         #expect(matched || fallback,
                 "Expected lwconfig (registered) or json (fallback), got \(preferred ?? "<nil>")")
     }
@@ -149,12 +143,9 @@ struct ConfigurationPorterTests {
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         let fixed = Date(timeIntervalSince1970: 1_750_000_000)
         let expected = "LiveWallpaper-\(formatter.string(from: fixed)).\(ConfigurationBundle.fileExtension)"
-        // The porter uses a local-time stamp by default; allow ±1 day so the
-        // test passes in any zone without re-implementing the formatter here.
         let actual = ConfigurationPorter.suggestedExportFileName(now: fixed)
         #expect(actual.hasPrefix("LiveWallpaper-"))
         #expect(actual.hasSuffix(".\(ConfigurationBundle.fileExtension)"))
-        // Soft check that some 4-digit year is present.
         let expectedYearPrefix = String(expected.prefix("LiveWallpaper-2025".count))
         #expect(actual.hasPrefix(expectedYearPrefix.prefix("LiveWallpaper-".count)))
     }
@@ -176,10 +167,6 @@ struct SettingsManagerMigrationTests {
         let directory = try makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
 
-        // Use an isolated UserDefaults domain to avoid clobbering the real
-        // app's keys. We pre-populate the legacy key, then construct a
-        // SettingsManager whose stores point into the temp directory and
-        // verify it reads the migrated blob.
         let suite = "Taijia.LiveWallpaperMigrationTests-\(UUID().uuidString)"
         guard let defaults = UserDefaults(suiteName: suite) else {
             Issue.record("Couldn't create isolated UserDefaults suite")
@@ -190,8 +177,6 @@ struct SettingsManagerMigrationTests {
             defaults.removePersistentDomain(forName: suite)
         }
 
-        // Encode a non-trivial configuration into the legacy key directly so
-        // we can prove the file store was seeded from it.
         let original = [
             ScreenConfiguration(screenID: 42, wallpaper: .video(bookmarkData: Data([0x10, 0x20])))
         ]
@@ -203,28 +188,20 @@ struct SettingsManagerMigrationTests {
             UserDefaults.standard.removeObject(forKey: "Settings.MigrationVersion")
         }
 
-        // New SettingsManager instance pointed at the temp dir — its init
-        // runs the migration as a side effect.
         let manager = SettingsManager(directory: ConfigurationDirectory(root: directory))
 
         let loaded = manager.loadConfigurations()
         #expect(loaded.count == 1)
         #expect(loaded.first?.screenID == 42)
 
-        // File should now exist on disk independent of UserDefaults.
         let onDisk = directory.appendingPathComponent("screen-configurations.json")
         #expect(FileManager.default.fileExists(atPath: onDisk.path(percentEncoded: false)))
     }
 
     @Test("Migration version is NOT bumped when seed writes fail (retry on next launch)")
     func migrationVersionDeferredOnSeedFailure() throws {
-        // Point the directory resolver at a path inside an unwritable
-        // parent so AtomicFileStore.write throws. We expect:
-        //   - the migration version key stays at 0
-        //   - the next SettingsManager construction will try again
         let unwritableRoot = try makeUnwritableDirectory()
         defer {
-            // Restore writability so cleanup can remove it.
             try? FileManager.default.setAttributes(
                 [.posixPermissions: NSNumber(value: Int16(0o700))],
                 ofItemAtPath: unwritableRoot.path(percentEncoded: false)
@@ -232,8 +209,6 @@ struct SettingsManagerMigrationTests {
             try? FileManager.default.removeItem(at: unwritableRoot)
         }
 
-        // Seed UserDefaults with a legacy blob so the migration has work
-        // to do.
         let legacyConfigs = [
             ScreenConfiguration(screenID: 7, wallpaper: .video(bookmarkData: Data([0xCC])))
         ]
@@ -257,7 +232,6 @@ struct SettingsManagerMigrationTests {
         let directory = try makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
 
-        // Pre-seed the file with one value and UserDefaults with another.
         let onDisk = directory.appendingPathComponent("screen-configurations.json")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let fileConfigs = [
@@ -288,9 +262,7 @@ struct SettingsManagerMigrationTests {
         return url
     }
 
-    /// Creates a directory whose POSIX mode is `0500` (read+execute, no
-    /// write). AtomicFileStore.write inside a `Configuration` subfolder
-    /// here will fail because we can't `mkdir` into a read-only parent.
+    /// Creates a directory whose POSIX mode is `0500` (read+execute, no write).
     private func makeUnwritableDirectory() throws -> URL {
         let url = FileManager.default
             .temporaryDirectory

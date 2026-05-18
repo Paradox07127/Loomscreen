@@ -239,12 +239,6 @@ struct DeveloperToolsView: View {
     private func exportReport() {
         guard let report = lastReport else { return }
 
-        // Write into our app container instead of an NSSavePanel-picked
-        // location. The app is sandboxed with only the read-only variant
-        // of user-selected-files entitlement, so writing to ~/Desktop or
-        // ~/Downloads fails with NSFileWriteNoPermissionError. The
-        // container path needs no entitlement, and we open Finder right
-        // at the file so the maintainer doesn't have to chase the path.
         let fileManager = FileManager.default
         let supportRoot: URL
         do {

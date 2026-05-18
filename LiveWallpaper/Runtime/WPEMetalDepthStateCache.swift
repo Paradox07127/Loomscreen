@@ -26,9 +26,7 @@ final class WPEMetalDepthStateCache {
             || pass.pass.depthTest.lowercased() != "disabled"
     }
 
-    /// Phase 2C audit fix: depth textures key on (target, exact destination
-    /// dimensions) so a scaled FBO's depth attachment matches its color
-    /// attachment dimensions instead of being stuck at scene size.
+    /// Phase 2C audit fix: depth textures key on (target, exact destination dimensions) so a scaled FBO's depth attachment matches its color attachment dimensions instead of being stuck at scene size.
     func attachmentTexture(
         for destination: (id: WPEMetalTargetID, texture: MTLTexture),
         frameState: inout WPEMetalFrameState

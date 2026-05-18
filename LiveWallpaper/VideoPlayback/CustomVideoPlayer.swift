@@ -42,10 +42,8 @@ final class PlayerLayerHostView: NSView {
         super.init(frame: frameRect)
         wantsLayer = true
         layerContentsRedrawPolicy = .duringViewResize
-        // Host view: transparent.
         layer = CALayer()
         layer?.backgroundColor = NSColor.clear.cgColor
-        // Player layer: transparent too, so letterbox areas don't show black.
         playerLayer.backgroundColor = NSColor.clear.cgColor
         playerLayer.frame = bounds
         layer?.addSublayer(playerLayer)

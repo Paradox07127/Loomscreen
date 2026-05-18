@@ -59,22 +59,12 @@ enum WPESceneDocumentParser {
             if resolution.primary == .image, let object = parseImageObject(entry, diagnostics: &diagnostics) {
                 imageObjects.append(object)
             }
-            // Phase 2D-K: keep particle metadata around for the runtime,
-            // even though the renderer still downgrades the object until
-            // the CPU emitter ships. The parsed record lets later phases
-            // pick up where parsing left off without rewalking scene.json.
             if resolution.primary == .particle, let object = parseParticleObject(entry, diagnostics: &diagnostics) {
                 particleObjects.append(object)
             }
-            // Phase 2D-N: text objects rasterize via CoreText into an
-            // image layer, so they go through their own parse path and
-            // still flow into the regular image-render flow.
             if resolution.primary == .text, let object = parseTextObject(entry, diagnostics: &diagnostics) {
                 textObjects.append(object)
             }
-            // Phase 2D-O: sound objects feed the AVAudioEngine playback
-            // path + FFT tap. We preserve them at the parse layer so
-            // the runtime can play any audio file the scene declares.
             if resolution.primary == .sound, let object = parseSoundObject(entry, diagnostics: &diagnostics) {
                 soundObjects.append(object)
             }
@@ -113,9 +103,6 @@ enum WPESceneDocumentParser {
             diagnostics.append(.init(severity: .info, message: "Top-level effects are not yet rendered"))
         }
 
-        // Optional general fields we do not yet consume: bloom*, cameraparallax*,
-        // camerashake*. Surfacing them as info-level diagnostics keeps the
-        // import service's tier classifier honest.
         for key in generalDict.keys {
             let lowered = key.lowercased()
             if lowered.hasPrefix("bloom") || lowered.hasPrefix("cameraparallax") || lowered.hasPrefix("camerashake") {
@@ -138,9 +125,6 @@ enum WPESceneDocumentParser {
         _ dict: [String: Any],
         diagnostics: inout [WPESceneDiagnostic]
     ) -> WPESceneSoundObject? {
-        // WPE writes the `sound` field as either a single string or an
-        // array (multiple files for random/playlist mode). We accept
-        // both forms and normalize to an array.
         var paths: [String] = []
         if let single = dict["sound"] as? String, !single.isEmpty {
             paths.append(single)
@@ -173,11 +157,7 @@ enum WPESceneDocumentParser {
         )
     }
 
-    /// Phase 2D-N: text objects shape per the corpus. Many WPE properties
-    /// arrive wrapped as `{ "user": "...", "value": <actual> }` so the
-    /// editor can bind them to user-controlled sliders. We unwrap to the
-    /// runtime value here — SceneScript-driven `value` strings rasterize
-    /// as their initial content until the JS runtime ships.
+    /// Phase 2D-N: text objects shape per the corpus.
     private static func parseTextObject(
         _ dict: [String: Any],
         diagnostics: inout [WPESceneDiagnostic]
@@ -189,11 +169,7 @@ enum WPESceneDocumentParser {
         case let value as String:
             text = value
         case let nested as [String: Any]:
-            // Either `{value: "..."}` or `{script: "...", value: "..."}`.
             text = (nested["value"] as? String) ?? (nested["text"] as? String)
-            // Phase 2D-P: capture the embedded JS so the runtime can
-            // tick it each frame. Initial `value` becomes the visible
-            // text until the first script update returns.
             if let script = nested["script"] as? String, !script.isEmpty {
                 textScript = script
             }
@@ -240,9 +216,7 @@ enum WPESceneDocumentParser {
         )
     }
 
-    /// Unwrap WPE's `{ "user": "...", "value": <X> }` envelope, recursing
-    /// when the inner `value` is itself a property reference. Returns the
-    /// underlying scalar if any.
+    /// Unwrap WPE's `{ "user": "...", "value": <X> }` envelope, recursing when the inner `value` is itself a property reference.
     private static func unwrapDouble(_ raw: Any?) -> Double? {
         if let value = WPEValueParser.double(raw) { return value }
         if let dict = raw as? [String: Any] {
@@ -271,11 +245,6 @@ enum WPESceneDocumentParser {
         _ dict: [String: Any],
         diagnostics: inout [WPESceneDiagnostic]
     ) -> WPESceneParticleObject? {
-        // WPE writes particle objects with a `particle` key referencing the
-        // particles/*.json definition. Some scenes also wrap them under
-        // `controlpoint` / `instanceoverride`; we keep the model lean and
-        // just preserve the top-level metadata. Particles without a path
-        // are skipped — there's nothing to spawn from.
         guard let path = dict["particle"] as? String, !path.isEmpty else {
             diagnostics.append(.init(severity: .warning, message: "Particle object \(dict["name"] as? String ?? "?") has no particle file"))
             return nil
@@ -378,8 +347,6 @@ enum WPESceneDocumentParser {
         diagnostics: inout [WPESceneDiagnostic]
     ) -> WPESceneImageObject? {
         guard let imagePath = dict["image"] as? String, !imagePath.isEmpty else {
-            // No image path means nothing to draw — skip but log so the
-            // import service can flag obviously broken scenes.
             diagnostics.append(.init(severity: .warning, message: "Image object \(dict["name"] as? String ?? "?") has no image path"))
             return nil
         }
@@ -409,9 +376,6 @@ enum WPESceneDocumentParser {
         let effects = parseImageEffects(dict["effects"], imageName: name, diagnostics: &diagnostics)
         let animationLayers = parseAnimationLayers(dict["animationlayers"], imageName: name, diagnostics: &diagnostics)
 
-        // Track partially implemented features so the import flow can
-        // downgrade tier, while preserving enough metadata for fallbacks and
-        // future shader passes.
         if !effects.isEmpty {
             let names = effects.map(\.name).joined(separator: ", ")
             diagnostics.append(.init(severity: .info, message: "Image \(name) declares effects (\(names)) — shader pipeline partially supported"))
@@ -426,8 +390,6 @@ enum WPESceneDocumentParser {
             diagnostics.append(.init(severity: .warning, message: "Image \(name) uses .tex texture — falls back to first-frame stub if available"))
         }
 
-        // WPE writes the field as `parallaxDepth` in newer scenes and the
-        // legacy lowercase `parallaxdepth` in older Workshop content.
         let parallaxDepth = parseDouble(dict["parallaxDepth"]) ?? parseDouble(dict["parallaxdepth"]) ?? 0
 
         return WPESceneImageObject(
@@ -549,8 +511,7 @@ enum WPESceneDocumentParser {
 
     // MARK: - Primitive parsing
 
-    /// Accepts JSON arrays of numbers, JSON dictionaries with x/y/z keys,
-    /// or WPE's space-separated strings ("0.5 0 0").
+    /// Accepts JSON arrays of numbers, JSON dictionaries with x/y/z keys, or WPE's space-separated strings ("0.5 0 0").
     static func parseVector3(_ raw: Any?) -> SIMD3<Double>? {
         WPEValueParser.vector3(raw)
     }

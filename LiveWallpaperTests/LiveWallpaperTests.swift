@@ -110,13 +110,6 @@ struct ResourceUtilitiesTests {
             localBookmarkCreator: { Data($0.path(percentEncoded: false).utf8) }
         )
 
-        // The production code constructs the copied URL via
-        // `appSupportRoot.appendingPathComponent("ImportedVideos").appendingPathComponent(hash)…`
-        // and passes that to `localBookmarkCreator`. Listing the directory
-        // via `contentsOfDirectory` would resolve `/var → /private/var`
-        // symlinks and yield a different byte sequence, so we reconstruct
-        // the expected URL the same way the production code did — only the
-        // hash subfolder name needs to come from disk.
         let importedRoot = appSupportRoot.appendingPathComponent("ImportedVideos", isDirectory: true)
         let importedDirectories = try fileManager.contentsOfDirectory(
             at: importedRoot,
@@ -380,12 +373,10 @@ struct PowerPolicyControllerTests {
         let controller = PowerPolicyController()
         let screen: CGDirectDisplayID = 7
 
-        // Double mark — no crash, still tracked
         controller.markPausedByPower(screen)
         controller.markPausedByPower(screen)
         #expect(controller.wasPausedByPower(screen))
 
-        // Double resume — no crash, still untracked
         controller.markResumedFromPower(screen)
         controller.markResumedFromPower(screen)
         #expect(!controller.wasPausedByPower(screen))
@@ -633,15 +624,11 @@ struct VideoEffectConfigTests {
     func particleDensityIsNotAColorEffect() {
         var config = VideoEffectConfig.default
         config.particleDensity = 2.5
-        // particleDensity is a particle modifier, not a color effect — it must
-        // not flip hasActiveEffect or the CIFilter composition path will run
-        // unnecessarily and burn CPU/GPU on screens with no real effects.
         #expect(!config.hasActiveEffect)
     }
 
     @Test("Legacy JSON without particleDensity decodes to 1.0")
     func legacyJsonDefaultsParticleDensityToOne() throws {
-        // Old configs persisted before the field existed.
         let legacyJSON = """
         {
             "blurRadius": 0,
@@ -680,7 +667,6 @@ struct ScreenConfigurationDecoderTests {
 
     @Test("Legacy JSON with only required fields fills all defaults")
     func legacyJsonMinimalFields() throws {
-        // Pre-feature-creep configs only persisted screenID + bookmark.
         let legacyJSON = """
         {
             "screenID": 12345,
@@ -860,7 +846,7 @@ struct ScreenConfigurationDecoderTests {
             videoBookmarkData: Data([0x01]),
             scheduleSlots: [ScheduleSlot(startHour: 6, endHour: 12, label: "Morning")]
         )
-        config.wallpaperMode = .single  // force, then strip below to test inference
+        config.wallpaperMode = .single
         let encoded = try JSONEncoder().encode(config)
         var dict = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
         dict.removeValue(forKey: "wallpaperMode")
@@ -945,16 +931,12 @@ struct GlobalSettingsDecoderTests {
 
         #expect(decoded.globalPauseOnBattery == false)
         #expect(decoded.minimumBatteryLevel == 0.2)
-        // Unspecified fields keep their defaults.
         #expect(decoded.pauseOnFullScreen == true)
         #expect(decoded.defaultFrameRateLimit == .fps60)
     }
 
     @Test("Legacy JSON carrying `batteryResolutionCap` still decodes")
     func legacyBatteryResolutionCapIgnored() throws {
-        // Regression guard: older persisted configs still had the
-        // `batteryResolutionCap` key; after removal, unknown keys must not
-        // cause decode errors.
         let legacyJSON = """
         {
             "globalPauseOnBattery": true,

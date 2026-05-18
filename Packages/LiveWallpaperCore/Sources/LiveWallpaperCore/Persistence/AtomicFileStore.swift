@@ -71,9 +71,7 @@ public struct AtomicFileStore<Value: Codable> {
         fileExists(fileURL) || fileExists(backupURL)
     }
 
-    /// Reads the current payload, transparently falling back to the backup
-    /// file when the primary is missing or corrupt. Returns `nil` only when
-    /// both files are absent or undecodable.
+    /// Reads the current payload, transparently falling back to the backup file when the primary is missing or corrupt.
     public func read() -> Value? {
         if let value = decode(from: fileURL) {
             return value
@@ -104,9 +102,6 @@ public struct AtomicFileStore<Value: Codable> {
     }
 
     /// Writes `value` atomically, rotating the previous payload to `.bak`.
-    /// Throws `StoreError.writeFailed` on any unrecoverable filesystem
-    /// error — every path through this function wraps the underlying error
-    /// so callers can treat it as a single failure type.
     public func write(_ value: Value) throws {
         do {
             try ensureDirectoryExists()
@@ -132,9 +127,7 @@ public struct AtomicFileStore<Value: Codable> {
         }
     }
 
-    /// Writes raw bytes — used by migration paths that already have a JSON
-    /// blob in `UserDefaults` and want to seed the file store without a
-    /// decode/encode round-trip.
+    /// Writes raw bytes — used by migration paths that already have a JSON blob in `UserDefaults` and want to seed the file store without a decode/encode round-trip.
     public func writeRaw(_ data: Data) throws {
         do {
             try ensureDirectoryExists()
@@ -149,8 +142,7 @@ public struct AtomicFileStore<Value: Codable> {
         }
     }
 
-    /// Removes the primary, backup, lock, and any stale tmp files. Used by
-    /// the global "clean all settings" path.
+    /// Removes the primary, backup, lock, and any stale tmp files.
     public func delete() {
         for url in [fileURL, backupURL, tempURL, lockURL] where fileExists(url) {
             do {
@@ -169,8 +161,6 @@ public struct AtomicFileStore<Value: Codable> {
     private func decode(from url: URL) -> Value? {
         guard fileExists(url) else { return nil }
         do {
-            // Cap read size: if the file is implausibly large (malicious /
-            // truncated to nonsense), refuse to touch it on MainActor.
             if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
                size > Self.maxReasonableFileSize {
                 Logger.error(
@@ -190,9 +180,7 @@ public struct AtomicFileStore<Value: Codable> {
         }
     }
 
-    /// Ensures the parent directory exists and that its permission bits are
-    /// `0700` — security-scoped bookmark Data and absolute path metadata
-    /// live here, so we don't want other local users reading them.
+    /// Ensures the parent directory exists and that its permission bits are `0700` — security-scoped bookmark Data and absolute path metadata live here, so we don't want other local users reading them.
     private func ensureDirectoryExists() throws {
         let directory = fileURL.deletingLastPathComponent()
         if !fileManager.fileExists(atPath: directory.path(percentEncoded: false)) {
@@ -202,8 +190,6 @@ public struct AtomicFileStore<Value: Codable> {
                 attributes: [.posixPermissions: NSNumber(value: Int16(0o700))]
             )
         } else {
-            // Tighten perms on an existing directory if a previous install
-            // (or a manual `mkdir`) created it with looser bits.
             try? fileManager.setAttributes(
                 [.posixPermissions: NSNumber(value: Int16(0o700))],
                 ofItemAtPath: directory.path(percentEncoded: false)
@@ -211,20 +197,11 @@ public struct AtomicFileStore<Value: Codable> {
         }
     }
 
-    /// 1. Acquire an exclusive POSIX lock so two app instances can't race.
-    /// 2. Write payload to `.tmp` with mode `0600`.
-    /// 3. `fsync` the temp file so the bytes are durably on disk before we
-    ///    promote it — otherwise a power loss between rename and disk flush
-    ///    can yield a zero-length file on next boot.
-    /// 4. Atomically swap: existing `file.json` becomes `file.json.bak`,
-    ///    `file.json.tmp` becomes `file.json`.
-    /// 5. `fsync` the directory so the rename itself is durable.
-    /// 6. Release the lock.
+    /// 1.
     private func writeAtomically(_ data: Data) throws {
         let lockFD = try acquireLock()
         defer { releaseLock(lockFD) }
 
-        // Remove stale .tmp from a previously-aborted write.
         if fileExists(tempURL) {
             try fileManager.removeItem(at: tempURL)
         }
@@ -235,17 +212,11 @@ public struct AtomicFileStore<Value: Codable> {
             ofItemAtPath: tempURL.path(percentEncoded: false)
         )
 
-        // Force a flush of the temp file's data blocks before we hand it to
-        // replaceItemAt — POSIX rename is atomic w.r.t. the directory entry
-        // but the file's data is not guaranteed durable until fsync.
         if let handle = try? FileHandle(forWritingTo: tempURL) {
             try? handle.synchronize()
             try? handle.close()
         }
 
-        // Rotate: current → backup, new → current. Done as two moves so the
-        // semantics are explicit; replaceItemAt has historically been
-        // flaky on case-insensitive volumes when target doesn't exist.
         if fileExists(fileURL) {
             if fileExists(backupURL) {
                 try fileManager.removeItem(at: backupURL)
@@ -254,17 +225,12 @@ public struct AtomicFileStore<Value: Codable> {
         }
         try fileManager.moveItem(at: tempURL, to: fileURL)
 
-        // fsync the directory entry so the rename is durable across power
-        // loss. Best-effort — POSIX permits failing silently here.
         fsyncParentDirectory(of: fileURL)
     }
 
-    /// Open (creating if necessary) the lock file and take an exclusive
-    /// `flock`. Other LiveWallpaper instances block here until we release.
+    /// Open (creating if necessary) the lock file and take an exclusive `flock`.
     private func acquireLock() throws -> Int32 {
         let path = lockURL.path(percentEncoded: false)
-        // O_CREAT | O_RDWR with mode 0600 — file content is irrelevant, we
-        // only care about the kernel's lock state attached to the fd.
         let fd = open(path, O_CREAT | O_RDWR, 0o600)
         guard fd >= 0 else {
             throw StoreError.writeFailed(underlying: POSIXError(
@@ -286,10 +252,7 @@ public struct AtomicFileStore<Value: Codable> {
         close(fd)
     }
 
-    /// Calls `fsync(2)` on the parent directory's file descriptor so the
-    /// rename's directory-entry update is durable. macOS uses `F_FULLFSYNC`
-    /// for true platter-flush guarantees, but plain `fsync` on the
-    /// directory is sufficient for crash consistency of the rename itself.
+    /// Calls `fsync(2)` on the parent directory's file descriptor so the rename's directory-entry update is durable.
     private func fsyncParentDirectory(of url: URL) {
         let parent = url.deletingLastPathComponent().path(percentEncoded: false)
         let fd = open(parent, O_RDONLY)
@@ -313,9 +276,7 @@ extension AtomicFileStore: @unchecked Sendable where Value: Sendable {}
 // MARK: - Shared encoder configuration
 
 extension JSONEncoder {
-    /// `outputFormatting` is set to `.sortedKeys` so byte-equality holds
-    /// across writes — this is what makes test fixtures stable and the
-    /// migration path safe to re-run.
+    /// `outputFormatting` is set to `.sortedKeys` so byte-equality holds across writes — this is what makes test fixtures stable and the migration path safe to re-run.
     public static func configurationEncoder() -> JSONEncoder {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]

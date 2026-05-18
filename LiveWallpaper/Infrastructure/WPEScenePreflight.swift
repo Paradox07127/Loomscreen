@@ -31,10 +31,6 @@ enum WPEScenePreflight {
         }
 
         for diagnostic in document.diagnostics {
-            // The parser already emits info-level diagnostics for
-            // unsupported object kinds and animation layers — mine those
-            // strings rather than re-walking the JSON. (Parser owns the
-            // source of truth for what it could and couldn't model.)
             let lowered = diagnostic.message.lowercased()
             if lowered.contains("particle") && lowered.contains("unsupported") {
                 flags.insert(.particleObject)
@@ -67,25 +63,13 @@ enum WPEScenePreflight {
             return .unsupported
         }
 
-        // Phase 2D-O: particle/text/sound runtimes have shipped — they
-        // no longer auto-bump to `runtimeSystemsRequired`. Only the
-        // remaining unimplemented runtime objects (lights) and
-        // animation-layer mesh deformation block playback. Scenes
-        // declaring animationlayers still render their base image
-        // layers; the warp is approximated as a static composite.
         if flags.contains(.lightObject) {
             return .runtimeSystemsRequired
         }
         if flags.contains(.customShaderSource) {
-            // Shader translator is shipping — degrade to indicate the
-            // visual may differ from the WPE reference, but don't
-            // declare the scene unplayable.
             return .degradedPlayable
         }
         if flags.contains(.animationLayer) {
-            // Animation layers parse and the base image renders; mesh
-            // deformation is approximated as static. Surface as
-            // degraded so users know.
             return .degradedPlayable
         }
         if flags.contains(.imageEffect) {

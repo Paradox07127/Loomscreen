@@ -20,10 +20,7 @@ final class WPESceneScriptInstance {
     private let initialValue: JSValue
     private(set) var lastValue: String
 
-    /// `script` is the JS source captured from `text: { script: ... }`
-    /// (or any other scripted field). `initialValue` seeds the first
-    /// `update(value)` call — WPE's convention is that the script
-    /// receives the current value and returns the new one.
+    /// `script` is the JS source captured from `text: { script: ...
     init(script: String, initialValue: String) throws {
         guard let context = JSContext() else {
             throw WPESceneScriptError.contextUnavailable
@@ -35,32 +32,23 @@ final class WPESceneScriptInstance {
         Self.installSandbox(in: context)
         let prepared = Self.preprocess(script: script)
         context.exceptionHandler = { _, ex in
-            // Suppress noisy console output; surface via `lastError`
-            // for callers that want to log it once.
             _ = ex
         }
         let _ = context.evaluateScript(prepared)
 
-        // After evaluation, look up the `update` symbol the WPE convention
-        // expects. Some scripts only define `init` (run once at load) so
-        // we tolerate `update` being absent.
         let updateValue = context.objectForKeyedSubscript("update")
         if let updateValue, !updateValue.isUndefined, updateValue.hasProperty("call") {
             self.updateFunction = updateValue
         } else {
             self.updateFunction = nil
         }
-        // Run init() if defined so the script's one-time setup
-        // (storage reads, default state) executes once at load.
         if let initFn = context.objectForKeyedSubscript("init"),
            !initFn.isUndefined, initFn.hasProperty("call") {
             _ = initFn.call(withArguments: [])
         }
     }
 
-    /// Tick the script's `update(value)` and return the latest value as
-    /// a String. Falls back to the previous value on script error or
-    /// when no `update` is defined.
+    /// Tick the script's `update(value)` and return the latest value as a String.
     func tickString() -> String {
         guard let updateFunction else { return lastValue }
         let arg = JSValue(object: lastValue, in: context) ?? initialValue
@@ -72,7 +60,6 @@ final class WPESceneScriptInstance {
             lastValue = s
             return s
         }
-        // WPE clock scripts sometimes return a number; coerce to string.
         if result.isNumber {
             let s = String(result.toDouble())
             lastValue = s
@@ -81,16 +68,11 @@ final class WPESceneScriptInstance {
         return lastValue
     }
 
-    /// Strip `export` keywords + `'use strict'` so the script body
-    /// evaluates as flat top-level declarations the JSContext can
-    /// look up by name. ES module scopes aren't available in
-    /// JavaScriptCore without manual transformation.
+    /// Strip `export` keywords + `'use strict'` so the script body evaluates as flat top-level declarations the JSContext can look up by name.
     private static func preprocess(script: String) -> String {
         var s = script
         s = s.replacingOccurrences(of: "'use strict';", with: "")
         s = s.replacingOccurrences(of: "\"use strict\";", with: "")
-        // Replace `export function foo` with `function foo` so the
-        // function lands at global scope where we can look it up.
         s = s.replacingOccurrences(of: "export function", with: "function")
         s = s.replacingOccurrences(of: "export var", with: "var")
         s = s.replacingOccurrences(of: "export let", with: "let")
@@ -98,19 +80,13 @@ final class WPESceneScriptInstance {
         return s
     }
 
-    /// Install a minimal global API surface mirroring the subset of
-    /// SceneScript that scripts in the corpus actually use. Anything
-    /// not declared here resolves to undefined.
+    /// Install a minimal global API surface mirroring the subset of SceneScript that scripts in the corpus actually use.
     private static func installSandbox(in context: JSContext) {
-        // `console.log` for script-author diagnostics; no-op so we
-        // don't pollute Xcode's debug pane during corpus scans.
         let console = JSValue(newObjectIn: context)!
         let log: @convention(block) (JSValue) -> Void = { _ in }
         console.setObject(log, forKeyedSubscript: "log" as NSString)
         context.setObject(console, forKeyedSubscript: "console" as NSString)
 
-        // `engine.getTimeOfDay()` returns the fraction of the day
-        // (0..1) — corpus clock scripts use this for sun-rise tints.
         let engine = JSValue(newObjectIn: context)!
         let getTimeOfDay: @convention(block) () -> Double = {
             let date = Date()
@@ -120,9 +96,6 @@ final class WPESceneScriptInstance {
             return secs / 86_400.0
         }
         engine.setObject(getTimeOfDay, forKeyedSubscript: "getTimeOfDay" as NSString)
-        // `engine.getPropertyValue` and `setPropertyValue` are no-ops
-        // for now (no UI wiring yet); they return undefined so script
-        // code that reads a property gets a falsy value and continues.
         let getProperty: @convention(block) (String) -> JSValue? = { _ in
             JSValue(undefinedIn: context)
         }
@@ -131,10 +104,6 @@ final class WPESceneScriptInstance {
         engine.setObject(setProperty, forKeyedSubscript: "setPropertyValue" as NSString)
         context.setObject(engine, forKeyedSubscript: "engine" as NSString)
 
-        // `localstorage` stub backed by an in-context dictionary so
-        // scripts that persist drag positions etc. don't crash. State
-        // is per-scene-instance which is fine for read/write within
-        // one playthrough.
         let storage = JSValue(newObjectIn: context)!
         let storageBacking = NSMutableDictionary()
         let storageGet: @convention(block) (String) -> JSValue? = { key in
@@ -156,14 +125,8 @@ final class WPESceneScriptInstance {
         storage.setObject(storageSet, forKeyedSubscript: "set" as NSString)
         context.setObject(storage, forKeyedSubscript: "localstorage" as NSString)
 
-        // Global `createScriptProperties` chainable stub: corpus scripts
-        // call `.addCheckbox(...).addText(...).finish()` to declare UI
-        // properties. We hand back an empty object that returns itself
-        // from every method so the chain doesn't throw.
         let createScriptProperties: @convention(block) () -> JSValue = {
             let proxy = JSValue(newObjectIn: context)!
-            // Self-returning chainable methods; `finish()` returns the
-            // proxy itself which scripts use as the property bag.
             let chainable: @convention(block) (JSValue) -> JSValue = { _ in proxy }
             for name in ["addCheckbox", "addText", "addSlider", "addColor",
                          "addCombo", "addFile", "addUserShortcut", "addGroup", "finish"] {

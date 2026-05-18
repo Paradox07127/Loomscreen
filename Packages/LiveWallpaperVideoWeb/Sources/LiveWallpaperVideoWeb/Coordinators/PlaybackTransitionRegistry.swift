@@ -55,9 +55,7 @@ public final class PlaybackTransitionRegistry {
         assetReadinessByScreen[screenID] = nil
     }
 
-    /// Replaces the screen's pending asset-readiness work, cancelling any
-    /// in-flight work first. Returns the freshly stored value so callers can
-    /// hold a reference for `clearAssetReadinessIfMatch`.
+    /// Replaces the screen's pending asset-readiness work, cancelling any in-flight work first.
     @discardableResult
     public func setAssetReadiness(_ work: AssetReadinessWork, for screenID: CGDirectDisplayID) -> AssetReadinessWork {
         assetReadinessByScreen[screenID]?.cancel()
@@ -65,9 +63,7 @@ public final class PlaybackTransitionRegistry {
         return work
     }
 
-    /// Used when an asset-readiness callback finishes naturally — only
-    /// removes the slot if the same work instance is still installed (a
-    /// later transition may have replaced it).
+    /// Used when an asset-readiness callback finishes naturally — only removes the slot if the same work instance is still installed (a later transition may have replaced it).
     public func clearAssetReadinessIfMatch(_ work: AssetReadinessWork, for screenID: CGDirectDisplayID) {
         if assetReadinessByScreen[screenID] === work {
             assetReadinessByScreen[screenID] = nil

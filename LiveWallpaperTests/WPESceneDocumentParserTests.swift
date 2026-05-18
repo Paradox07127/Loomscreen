@@ -167,10 +167,6 @@ struct WPESceneDocumentParserTests {
         #expect(document.diagnostics.contains(where: {
             $0.severity == .warning && $0.message.contains("Ambiguous object ImageWithSound")
         }))
-        // Phase 2D-O: sound is no longer "unsupported"; the parser
-        // preserves the ambiguous warning but the secondary kind no
-        // longer emits its own deprecation diagnostic. Tier classification
-        // happens upstream via WPEScenePreflight from the feature flags.
     }
 
     @Test(".tex texture path emits a warning diagnostic")

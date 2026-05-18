@@ -14,7 +14,6 @@ struct FrameRateControlView: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            // Header with effective rate
             HStack {
                 Label("Frame Rate", systemImage: "gauge.high")
                     .font(.subheadline)
@@ -35,7 +34,6 @@ struct FrameRateControlView: View {
                 }
             }
             
-            // Frame rate selection with compact buttons
             HStack(spacing: 8) {
                 ForEach(FrameRateLimit.allCases) { option in
                     Button(action: {
@@ -62,7 +60,6 @@ struct FrameRateControlView: View {
                 }
             }
             
-            // Source info
             if let videoPlayer = screen.videoPlayer, videoPlayer.videoFrameRate > 0 {
                 HStack(spacing: 10) {
                     Text("Video: \(Int(videoPlayer.videoFrameRate)) FPS")
@@ -76,10 +73,8 @@ struct FrameRateControlView: View {
             }
         }
         .onAppear {
-            // Get screen refresh rate
             screenRefreshRate = screenManager.getScreenRefreshRate(for: screen.id)
             
-            // Load current frame rate limit setting
             if let config = screenManager.getConfiguration(for: screen) {
                 selectedLimit = config.frameRateLimit
             }
@@ -98,7 +93,6 @@ struct FrameRateControlView: View {
         )
 
         if limit <= 0 {
-            // For unlimited or when no limiting is needed
             let effectiveRate = min(videoPlayer.videoFrameRate, Double(screenRefreshRate))
             return "\(Int(effectiveRate)) FPS"
         } else {

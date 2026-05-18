@@ -130,10 +130,6 @@ struct WorkshopGalleryView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .workshopLibraryRootBookmarkDidChange)) { _ in
-            // Both handlers mutate @State (hasLibraryRoot / rootPathSummary
-            // and the selected-targets set). Defer to next main-actor tick
-            // so a notification arriving during SwiftUI's reconcile pass
-            // doesn't cascade into "Modifying state during view update".
             Task { @MainActor in updateRootAccessState() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .screensRefreshed)) { _ in
@@ -215,12 +211,6 @@ struct WorkshopGalleryView: View {
                             .disabled(isBusy)
                         }
 
-                        // Engine-assets escape hatch lives OUTSIDE the
-                        // `hasLibraryRoot` gate — a user who manually
-                        // imported a project via WPESceneSection (without
-                        // ever connecting a Workshop library) still needs
-                        // to reach this entry point when a `.sceneResourceMissing`
-                        // fallback card points them here.
                         engineAssetsMenu
 
                         if !allowsTargetSelection {
@@ -343,8 +333,6 @@ struct WorkshopGalleryView: View {
                         noFilteredResultsView
                     } else {
                         LazyVGrid(
-                            // Fixed-width adaptive columns use extra horizontal
-                            // space for more cards without stretching previews.
                             columns: [GridItem(.adaptive(minimum: 160, maximum: 160), spacing: 16)],
                             alignment: .leading,
                             spacing: 16
@@ -540,9 +528,6 @@ struct WorkshopGalleryView: View {
         updateRootAccessState()
         state = .scanning
 
-        // Resolve persisted state on the main actor before crossing onto the
-        // detached scan task. SettingsManager is @MainActor isolated and the
-        // scanner itself runs off main.
         guard let bookmark = SettingsManager.shared.loadWorkshopLibraryRootBookmark() else {
             projects = []
             state = .needsRoot
@@ -560,12 +545,6 @@ struct WorkshopGalleryView: View {
             projects = discovered
             state = .results
         } catch WallpaperEngineLibraryScanner.ScanError.rootInaccessible(let detail) {
-            // Transient scan failure (security-scoped resource not yet
-            // started, directory temporarily missing during a re-launch,
-            // etc.). Keep the saved bookmark so the user can retry without
-            // re-granting access via the system file panel — only the
-            // explicit "Forget Library" destructive action clears the
-            // saved bookmark via `disconnectLibraryRoot()`.
             errorMessage = String(
                 localized: "Workshop folder is unreachable: \(detail). Try again — your saved access remains.",
                 comment: "Workshop library folder access error after a transient scan failure. The placeholder is the system detail. The saved bookmark is preserved so the user can retry."
@@ -660,10 +639,7 @@ struct WorkshopGalleryView: View {
         sortOrder = .recommended
     }
 
-    /// Re-acquires the persisted root bookmark's security scope for the
-    /// duration of one project action. Without this, child URLs handed back by the
-    /// scanner are unreachable in a sandboxed build because the scanner's
-    /// scope ended when `scan()` returned.
+    /// Re-acquires the persisted root bookmark's security scope for the duration of one project action.
     private func applyForScreenWithLibraryAccess(
         _ project: WallpaperEngineLibraryScanner.DiscoveredProject,
         screen: Screen
@@ -967,7 +943,6 @@ private struct WorkshopGalleryCard: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Square preview occupies the full 160pt card width (160×160).
             WPEPreviewView(
                 imageURL: project.previewURL,
                 securityScopedBookmarkData: project.libraryRootBookmarkData
@@ -992,9 +967,6 @@ private struct WorkshopGalleryCard: View {
         }
         .wpeProjectCardChrome(isHovering: isHovering)
         .onHover { isHovering = $0 }
-        // Deliberately NOT .accessibilityElement(children: .combine) — that
-        // would swallow the inner action buttons. Letting SwiftUI infer the
-        // tree keeps the action reachable for VoiceOver users.
     }
 
     @ViewBuilder
@@ -1007,9 +979,6 @@ private struct WorkshopGalleryCard: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
-        // Apple HIG: prefer semantic materials for image overlays.
-        // Locking colorScheme to dark keeps the label legible regardless of
-        // the underlying preview brightness.
         .background(.regularMaterial, in: Capsule())
         .environment(\.colorScheme, .dark)
     }

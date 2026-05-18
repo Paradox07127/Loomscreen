@@ -25,18 +25,9 @@ struct WPESceneSection: View {
                 historyList
             }
         }
-        // Animate only the empty↔grid transition (both pure-SwiftUI subtrees).
-        // Cross-branch animation into `unsupportedDetail` is deliberately
-        // skipped because that branch hosts `WPEPreviewView` (NSViewRepresentable)
-        // and animating across NSView boundaries triggers an AppKit Auto-Layout
-        // constraint cycle (`needs Update Constraints in Window pass …`).
         .animation(.default, value: recentImports.isEmpty)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
-            // `reloadHistory()` writes `recentImports` / `selectedHistoryEntry`
-            // @State — defer to next main-actor tick to keep the first paint
-            // out of the "Modifying state during view update" cascade. Same
-            // pattern as the .onReceive handlers below.
             Task { @MainActor in reloadHistory() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .wpeImportDidComplete)) { notification in
@@ -240,13 +231,7 @@ struct WPESceneSection: View {
         recentImports = SettingsManager.shared.loadGlobalSettings().recentWPEImports
     }
 
-    /// Plan §A4/A5: when a `scene` / `application` / `unknown` check lands for
-    /// THIS screen, auto-promote the user into the unsupported placeholder card
-    /// so they see the preview + tip without having to dig through the grid.
-    /// Defers state mutation to the next runloop tick so we don't ask SwiftUI
-    /// to switch branches (and remount `NSViewRepresentable` previews) during
-    /// the same body evaluation that just refreshed `recentImports`.
-    /// Selects by `workshopID` so two scene imports back-to-back never collide.
+    /// Plan §A4/A5: when a `scene` / `application` / `unknown` check lands for THIS screen, auto-promote the user into the unsupported placeholder card so they see the preview + tip without having to dig through the grid.
     private func selectUnsupportedImportIfNeeded(from notification: Notification) {
         guard let screenID = notification.userInfo?["screenID"] as? CGDirectDisplayID,
               screenID == screen.id,

@@ -77,8 +77,6 @@ public struct ProductCapabilities: Sendable, Equatable {
     )
 
     /// Whether the runtime is permitted to ever render a wallpaper of `type`.
-    /// Used by `WallpaperRuntimeFactory` to short-circuit unsupported types
-    /// without instantiating a session.
     public func canRender(_ type: WallpaperType) -> Bool {
         switch type {
         case .video:       return enabledFeatures.contains(.video)

@@ -15,9 +15,7 @@ struct WPECorpusScanner {
         self.rootURL = rootURL
     }
 
-    /// Walks the corpus and produces a deterministic feature report. Async
-    /// so callers can offload the I/O off the main actor; ordering of the
-    /// per-scene tallies is by workshop ID for reproducibility.
+    /// Walks the corpus and produces a deterministic feature report.
     func scan() async throws -> WPECorpusReport {
         let projectURLs = try Self.enumerateProjectFolders(under: rootURL)
         var builder = ReportBuilder()
@@ -62,8 +60,6 @@ struct WPECorpusScanner {
             builder.note(scenePackagePresent: true)
             try ingestScenePackage(at: pkgURL, project: project, into: &builder)
         } else {
-            // Some workshop scenes ship unpacked. We mirror them in the
-            // import path; counting them here keeps the report honest.
             builder.note(scenePackagePresent: false)
             try ingestUnpackedScene(at: folderURL, project: project, into: &builder)
         }
@@ -110,10 +106,6 @@ struct WPECorpusScanner {
             return
         }
 
-        // Walk the directory tree FIRST so the shader-source flag is set on
-        // the builder before `ingestSceneJSON` commits this scene's feature
-        // set. Material/effect JSONs feed the top-shader ledger; the actual
-        // scene JSON parse comes last so its feature set sees every flag.
         var materialPayloads: [Data] = []
         if let enumerator = FileManager.default.enumerator(
             at: folderURL,
@@ -186,8 +178,6 @@ struct WPECorpusScanner {
             let isEffect = lowered.hasPrefix("effects/") || lowered.contains("/effects/")
             guard isMaterial || isEffect else { continue }
 
-            // Bound the per-entry read; material/effect JSONs are tiny.
-            // A 4 MB upper bound covers every observed file by 100×.
             guard entry.dataSize <= 4 * 1024 * 1024 else { continue }
             if let data = try? package.readEntry(entry, from: handle) {
                 ingestMaterialOrEffect(data: data, into: &builder)
@@ -217,10 +207,7 @@ struct WPECorpusScanner {
         }
     }
 
-    /// Mirrors `WPESceneDocumentParser.objectKindResolution` for one object
-    /// dict. Kept private to the scanner because the parser keeps its own
-    /// resolution type for diagnostics; the scanner only needs the primary
-    /// kind to bucket counts.
+    /// Mirrors `WPESceneDocumentParser.objectKindResolution` for one object dict.
     static func classifyObject(_ entry: [String: Any]) -> WPESceneObjectKind {
         if let explicit = (entry["type"] as? String)?.lowercased(), !explicit.isEmpty {
             switch explicit {
@@ -310,7 +297,6 @@ private struct ReportBuilder {
 
     mutating func note(scenePackagePresent: Bool) {
         if scenePackagePresent { scenePackageCount += 1 }
-        // Each new scene resets the per-scene feature accumulator.
         lastSceneFeatureSet = WPESceneFeatureSet()
         pendingSceneShaderSourcesFlag = false
     }

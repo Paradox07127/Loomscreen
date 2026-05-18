@@ -25,7 +25,6 @@ final class VideoEffectsApplicationService {
         noEffectsHandler: () -> Void
     ) {
         guard let playerItem = player.player?.currentItem else {
-            // Expected during reload/restart while AVPlayerItem is reattaching.
             Logger.debug("Skip apply-effects: no active player for screen \(screenID) yet", category: .videoPlayer)
             return
         }
@@ -33,7 +32,6 @@ final class VideoEffectsApplicationService {
         let hasEffects = config.effectConfig.hasActiveEffect
         let fingerprint = AppliedFingerprint(effects: config.effectConfig, limit: config.frameRateLimit)
 
-        // Skip rebuild when nothing changed (avoids slider-drag GPU spikes).
         if hasEffects, appliedFingerprints[screenID] == fingerprint, inflightTasks[screenID] == nil {
             Logger.debug("Skip apply-effects: fingerprint unchanged for screen \(screenID)", category: .videoPlayer)
             return
@@ -97,8 +95,6 @@ final class VideoEffectsApplicationService {
     func cancelInflight(for screenID: CGDirectDisplayID) {
         inflightTasks[screenID]?.cancel()
         inflightTasks[screenID] = nil
-        // Drop the cached fingerprint so the next legitimate apply rebuilds
-        // composition even if the same config arrives again.
         appliedFingerprints[screenID] = nil
     }
 }

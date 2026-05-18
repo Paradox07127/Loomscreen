@@ -44,8 +44,6 @@ public struct BookmarkPlaybackSettings: Codable, Equatable, Sendable {
     }
 
     /// Snapshot every relevant field from a screen's current configuration.
-    /// Fields not represented in the schema (e.g. `wallpaperMode`,
-    /// `playlistBookmarks`, `scheduleSlots`) are intentionally omitted.
     public static func snapshot(of config: ScreenConfiguration) -> BookmarkPlaybackSettings {
         BookmarkPlaybackSettings(
             playbackSpeed: config.playbackSpeed,

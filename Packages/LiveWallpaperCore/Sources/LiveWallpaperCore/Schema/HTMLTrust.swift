@@ -24,8 +24,7 @@ public struct TrustedHTMLOrigin: Hashable, Codable, Sendable, Comparable, Custom
         port = effectivePort
     }
 
-    /// Accepts new persisted origin strings (`https://host:443`) plus legacy
-    /// host-only values, which migrate to HTTPS on the default port.
+    /// Accepts new persisted origin strings (`https://host:443`) plus legacy host-only values, which migrate to HTTPS on the default port.
     public init?(persistedValue: String) {
         let value = persistedValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return nil }
@@ -118,8 +117,7 @@ public enum HTMLTrust: Equatable, Sendable {
         }
     }
 
-    /// Compatibility shim for legacy host-only callers. Host values migrate to
-    /// HTTPS default-port origins before comparison.
+    /// Compatibility shim for legacy host-only callers.
     public static func evaluate(source: HTMLSource, trustedHosts: Set<String>) -> HTMLTrust {
         let origins = Set(trustedHosts.compactMap(TrustedHTMLOrigin.init(persistedValue:)))
         return evaluate(source: source, trustedOrigins: origins)

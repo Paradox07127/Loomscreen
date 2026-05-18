@@ -36,14 +36,10 @@ final class WPETexAnimatedTextureSource: WPEDynamicTextureSource {
     }
 
     func applyPerformanceProfile(_ profile: WallpaperPerformanceProfile) {
-        // Animated TEX frames are pre-uploaded GPU textures. There is no
-        // decoder worker to pause; renderer-level references control release.
         _ = profile
     }
 
     func invalidate() {
-        // No explicit Metal release hook. Clearing renderer references on
-        // `cleanup()` / `reload()` releases the underlying textures.
     }
 }
 #endif

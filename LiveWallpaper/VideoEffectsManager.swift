@@ -110,15 +110,6 @@ final class VideoEffectsManager {
         params: FilterParameters,
         frameDuration: CMTime
     ) async throws -> AVVideoComposition {
-        // Use AVMutableVideoComposition's CIFilter initializer directly so
-        // setting frameDuration is the documented mutation path. The
-        // AVVideoComposition counterpart returns an immutable composition with
-        // private instructions; mutateing a copy of it via mutableCopy() is
-        // unsupported and can drop the frame-rate override on macOS 14/15.
-        // `init(asset:applyingCIFiltersWithHandler:)` is the legacy sync
-        // initializer (macOS 10.11+). `try await` is not needed at the call
-        // site — the enclosing function keeps `async throws` because the
-        // macOS 26 branch in `buildUsingApplier` genuinely uses both.
         let mutable = AVMutableVideoComposition(
             asset: asset,
             applyingCIFiltersWithHandler: { request in
@@ -175,11 +166,11 @@ final class VideoEffectsManager {
     nonisolated static func warmthForCurrentHour() -> Double {
         let hour = Calendar.current.component(.hour, from: Date())
         switch hour {
-        case 6..<9:   return 5500  // morning cool
-        case 9..<17:  return 6500  // daylight neutral
-        case 17..<20: return 4500  // golden hour
-        case 20..<23: return 3500  // evening warm
-        default:      return 3000  // night very warm
+        case 6..<9:   return 5500
+        case 9..<17:  return 6500
+        case 17..<20: return 4500
+        case 20..<23: return 3500
+        default:      return 3000
         }
     }
 }

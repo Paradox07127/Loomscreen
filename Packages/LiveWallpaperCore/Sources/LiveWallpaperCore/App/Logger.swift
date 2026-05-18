@@ -58,8 +58,7 @@ public final class Logger {
 
     // MARK: - Core Logging
 
-    /// `@autoclosure` defers string interpolation; the message is only
-    /// evaluated when this level is actually being logged.
+    /// `@autoclosure` defers string interpolation; the message is only evaluated when this level is actually being logged.
 
     public static func log(
         _ message: @autoclosure () -> String,
@@ -96,33 +95,27 @@ public final class Logger {
 
     // MARK: - Convenience Methods
 
-
     public static func debug(_ message: @autoclosure () -> String, category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
         #if DEBUG
         log(message(), category: category, level: .debug, file: file, function: function, line: line)
         #endif
     }
 
-
     public static func info(_ message: @autoclosure () -> String, category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
         log(message(), category: category, level: .info, file: file, function: function, line: line)
     }
-
 
     public static func notice(_ message: @autoclosure () -> String, category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
         log(message(), category: category, level: .notice, file: file, function: function, line: line)
     }
 
-
     public static func warning(_ message: @autoclosure () -> String, category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
         log(message(), category: category, level: .warning, file: file, function: function, line: line)
     }
 
-
     public static func error(_ message: @autoclosure () -> String, category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
         log(message(), category: category, level: .error, file: file, function: function, line: line)
     }
-
 
     public static func fault(_ message: @autoclosure () -> String, category: Category = .general, file: String = #file, function: String = #function, line: Int = #line) {
         log(message(), category: category, level: .fault, file: file, function: function, line: line)

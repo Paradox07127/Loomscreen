@@ -121,8 +121,6 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             ? .nonPersistent()
             : .default()
 
-        // Register the custom scheme BEFORE the webView is created —
-        // schemes cannot be added after WKWebView init.
         let handler = FolderURLSchemeHandler()
         configuration.setURLSchemeHandler(handler, forURLScheme: FolderURLSchemeHandler.scheme)
         self.folderHandler = handler
@@ -159,20 +157,10 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     }
 
     /// 注入静态基线脚本 + 反映当前配置的状态脚本。
-    /// - Parameter config: 决定 `lw-browsing-mode` class、自定义 CSS 内容、静音等运行时状态。
-    ///   传 `nil` 表示首次安装（init 阶段，配置未知）。
     private func installBaselineUserScripts(for config: HTMLConfig?) {
         let controller = webView.configuration.userContentController
         controller.removeAllUserScripts()
 
-        // documentStart：尽早注入避免页面闪烁。
-        // 1) 隐藏滚动条 + 锁定 body overflow
-        // 2) 给 root 加 `is-livewallpaper` class（用户 CSS / 站点适配可用）
-        // 3) 预先建好两个 <style> 占位（用户 CSS 与基线 CSS），运行时只改 textContent
-        // 4) 在 physicalPixelLayout 模式下把 devicePixelRatio 锁到 1，匹配
-        //    Wallpaper Engine 在 Windows 上的运行假设（无 HiDPI），防止
-        //    PIXI / Three.js / 4K canvas 项目按 dpr=2 分配双倍 buffer 后
-        //    被 GPU 下采样回 device pixel，造成明显锯齿。
         let cssLiteral = jsStringLiteral(config?.customCSS ?? "")
         let isBrowsing = (config?.allowMouseInteraction ?? false) ? "true" : "false"
         let isMuted = (config?.muteAudio ?? false) ? "true" : "false"
@@ -288,7 +276,6 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     func apply(_ config: HTMLConfig) {
         pendingEphemeral = config.useEphemeralStorage
         if let previous = lastAppliedConfig, previous == config {
-            // 完全相同 — 跳过任何注入操作，避免 WebKit 重新评估脚本包。
             return
         }
 
@@ -305,10 +292,8 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             )
         }
 
-        // 任何运行时状态变化都先尝试通过 evaluateJavaScript 热更新 — 不重建 user script。
         applyRuntimeState(previous: previous, current: config)
 
-        // 仅当下次 reload 时需要的"持久化"状态变化，才重建 user script。
         let needsScriptRebuild = (previous?.customCSS != config.customCSS)
             || (previous?.allowMouseInteraction != config.allowMouseInteraction)
             || (previous?.muteAudio != config.muteAudio)
@@ -328,8 +313,6 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             applyPhysicalPixelZoom()
         }
 
-        // 交互态启用时让 webView 成为 firstResponder —
-        // 部分键盘 / scroll 事件不依赖 hitTest，需要直接送给 firstResponder。
         if config.allowMouseInteraction, let host = webView.window {
             host.makeFirstResponder(webView)
         }
@@ -388,19 +371,14 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         loadSource(source, resetFailureCount: true)
     }
 
-    /// Internal entry point distinguishing user-driven loads (which reset the
-    /// retry budget) from `scheduleRetry` continuations (which keep the
-    /// counter so backoff progresses).
+    /// Internal entry point distinguishing user-driven loads (which reset the retry budget) from `scheduleRetry` continuations (which keep the counter so backoff progresses).
     private func loadSource(_ source: HTMLSource, resetFailureCount: Bool) {
         lastSource = source
         if resetFailureCount {
             resetNavigationFailureState()
         }
         stopActiveSecurityScope()
-        // Cut every non-folder source off from the previous folder's scheme handler
-        // (C1): if folderURL stayed live, a remote page could probe livewallpaper://.
         if case .folder = source {
-            // folderURL is set below — do not clear here.
         } else {
             updateWallpaperEnginePropertyBridge(for: nil)
             folderHandler.folderURL = nil
@@ -420,8 +398,6 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             }
             activeSecurityScopedURL = folderURL
             updateWallpaperEnginePropertyBridge(for: folderURL)
-            // Route through custom scheme so ES module / CORS / fetch all
-            // behave like normal HTTP. file:// would block `<script type="module" crossorigin>`.
             folderHandler.folderURL = folderURL
             guard let nonce = folderHandler.currentSessionNonce else {
                 Logger.error("HTML folder load: missing session nonce for \(indexFileName)", category: .screenManager)
@@ -452,7 +428,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         installBaselineUserScripts(for: lastAppliedConfig)
     }
 
-    /// Re-applies the most recent `HTMLSource`. Used by `WallpaperRuntimeSession.retry()`.
+    /// Re-applies the most recent `HTMLSource`.
     func reloadCurrentSource() {
         guard let lastSource else { return }
         loadSource(lastSource, resetFailureCount: false)
@@ -498,9 +474,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         }
     }
 
-    /// Sleep / wake suspend hook. Identical to `applyPerformanceProfile(.suspended)`
-    /// today, but kept distinct so the AmbientWallpaperSession can layer
-    /// "system asleep" on top of the existing power-policy profile state.
+    /// Sleep / wake suspend hook.
     func suspend() {
         setMediaPlaybackSuspended(true)
     }
@@ -527,9 +501,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         onError?(error)
     }
 
-    /// Returns `true` when a retry was scheduled and the caller should skip
-    /// `reportError`. Increments the consecutive failure counter and arms the
-    /// next backoff slot (1s, 2s, 4s …) bounded by `HTMLConfig.maxRetries`.
+    /// Returns `true` when a retry was scheduled and the caller should skip `reportError`.
     private func shouldRetryNavigationFailure() -> Bool {
         let maxRetries = max(0, lastAppliedConfig?.maxRetries ?? 0)
         guard consecutiveFailureCount < maxRetries else { return false }
@@ -567,8 +539,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
 
     // MARK: - Tracker Blocking
 
-    /// App 启动时调用一次：把 tracker 规则编译进 `WKContentRuleListStore`，
-    /// 后续每个实例直接 `lookUp`，省去 50–200ms 的同步编译。
+    /// App 启动时调用一次：把 tracker 规则编译进 `WKContentRuleListStore`， 后续每个实例直接 `lookUp`，省去 50–200ms 的同步编译。
     static func precompileTrackerRules() {
         WKContentRuleListStore.default()?.compileContentRuleList(
             forIdentifier: trackerRuleListIdentifier,
@@ -600,7 +571,6 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             }
             return
         }
-        // 优先 lookUp（命中由 precompile 写入的 store entry）— 失败再编译。
         WKContentRuleListStore.default()?.lookUpContentRuleList(
             forIdentifier: HTMLWallpaperView.trackerRuleListIdentifier
         ) { [weak self] list, _ in
@@ -648,8 +618,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         webView.frame = bounds
     }
 
-    /// Re-apply pageZoom whenever the host display's backing scale changes
-    /// (window dragged across screens, resolution changed, Spaces switched).
+    /// Re-apply pageZoom whenever the host display's backing scale changes (window dragged across screens, resolution changed, Spaces switched).
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
         applyPhysicalPixelZoom()
@@ -665,11 +634,6 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     // MARK: - Physical-pixel layout (WPE compatibility)
 
     /// Maps logical points → physical pixels for `window.innerWidth/Height`.
-    /// Wallpaper Engine web wallpapers assume Windows DIP (innerWidth = physical
-    /// pixels); on Retina that returns half the expected value, so canvas /
-    /// Pixi / Spine misalign. `pageZoom = 1/scale` shrinks CSS pixels by the
-    /// same factor the OS upscales for Retina, leaving visual size unchanged
-    /// while bringing innerWidth back up to the physical-pixel count.
     private func applyPhysicalPixelZoom() {
         let enabled = lastAppliedConfig?.physicalPixelLayout ?? false
         let scale = effectiveBackingScaleFactor
@@ -808,8 +772,6 @@ extension HTMLWallpaperView: WKNavigationDelegate {
                 decisionHandler(.cancel)
             }
         case .linkActivated:
-            // 交互态：跨域链接交给系统默认浏览器，同源 / file 允许。
-            // 非交互态：所有链接点击都被取消（页面应当只是壁纸，无导航）。
             guard allowMouseInteraction,
                   let url = navigationAction.request.url else {
                 decisionHandler(.cancel)

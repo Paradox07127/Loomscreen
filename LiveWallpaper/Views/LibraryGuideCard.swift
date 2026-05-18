@@ -116,7 +116,6 @@ struct LibraryGuideCard: View {
             }
 
             if let errorMessage, !errorMessage.isEmpty {
-                // Dynamic source (Error.localizedDescription) — bypass localization lookup.
                 Text(verbatim: errorMessage)
                     .font(.system(size: 11))
                     .foregroundStyle(.red)

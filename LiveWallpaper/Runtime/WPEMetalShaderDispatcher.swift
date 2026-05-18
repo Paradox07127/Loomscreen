@@ -256,10 +256,6 @@ struct WPEMetalShaderDispatcher {
                 currentTargetID: destination.id
             )
             encoder.setFragmentTexture(primary, index: 0)
-            // Slot 1 is the alpha mask (most common combo). When the
-            // material doesn't bind it, fall back to slot 0 so the shader
-            // sample is still valid Metal — the `hasMask` flag below
-            // gates the actual contribution to alpha.
             let maskRef = pass.textureBindings[1] ?? pass.pass.textures[1]
             let hasMask = maskRef != nil
             let mask: MTLTexture
@@ -550,10 +546,6 @@ struct WPEMetalShaderDispatcher {
             encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEShakeUniforms>.stride, index: 0)
 
         default:
-            // Phase 2D-H: custom shader. The injected `WPEShaderCompiling`
-            // (default `WPESwiftShaderCompiler`) translates WPE GLSL to
-            // MSL on first use; subsequent frames hit the executor's
-            // memoization cache.
             let result = try executor.compileCustomShader(for: pass)
             let pipelineState = try executor.translatedPipelineState(
                 for: result,
@@ -563,20 +555,6 @@ struct WPEMetalShaderDispatcher {
             )
             encoder.setRenderPipelineState(pipelineState)
 
-            // Texture binding. Lookup chain (highest priority first):
-            //   1. `pass.pass.binds[slot]` — effect.json `bind` entry
-            //      that explicitly rebinds this slot to an FBO. This is
-            //      the multi-pass-effect path: the second pass of a
-            //      separable blur or a lightshafts combine reads the
-            //      previous pass's FBO from this slot.
-            //   2. `pass.textureBindings[slot]` — runtime override
-            //      merged in from scene effect overrides.
-            //   3. `pass.pass.textures[slot]` — material's `textures: []`
-            //      array (the artist-bound input).
-            //   4. `pass.pass.source` for slot 0 — implicit "what came
-            //      before me on the layer composite chain".
-            //   5. Reuse slot 0's texture for unused slots so Metal's
-            //      sampler always has a valid binding.
             var primary: MTLTexture? = nil
             for slot in 0..<4 {
                 let reference = pass.pass.binds[slot]
@@ -591,7 +569,6 @@ struct WPEMetalShaderDispatcher {
                         currentTargetID: destination.id
                     )
                 } else if slot == 0 {
-                    // Slot 0 must always be bound; fall back to source.
                     texture = try WPEMetalShaderInputs.resolve(
                         reference: pass.pass.source,
                         textures: textures,
@@ -599,16 +576,12 @@ struct WPEMetalShaderDispatcher {
                         currentTargetID: destination.id
                     )
                 } else {
-                    texture = primary  // Reuse for unused slots.
+                    texture = primary
                 }
                 if slot == 0, let texture { primary = texture }
                 encoder.setFragmentTexture(texture, index: slot)
             }
 
-            // Uniform packing. Shaders without uniforms still get a
-            // zero-filled buffer bound — the function signature emitted by
-            // the transpiler omits the `constant WPEUniforms&` parameter
-            // when the layout is empty, so we only bind when needed.
             if !result.uniformLayout.isEmpty {
                 var slots = executor.packTranslatedUniforms(for: pass, layout: result.uniformLayout)
                 let byteCount = MemoryLayout<SIMD4<Float>>.stride * slots.count

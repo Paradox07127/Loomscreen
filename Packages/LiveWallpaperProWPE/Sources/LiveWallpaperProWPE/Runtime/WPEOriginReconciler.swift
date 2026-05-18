@@ -38,8 +38,6 @@ public struct WPEOriginReconciler: OriginReconciler {
                 return
             }
         case .metalShader:
-            // Shader switches are transient — preserve origin so a switch
-            // back to Video/HTML restores the badge.
             return
         case .scene(let descriptor):
             guard origin.workshopID == descriptor.workshopID,

@@ -116,10 +116,6 @@ final class WallpaperEffectsCoordinator {
     }
 
     /// Applies the CIFilter chain to a screen's active video player.
-    /// Called both from this coordinator's setters and from
-    /// `PlaybackCoordinator` after it persists configuration mutations.
-    /// `noEffectsHandler` falls back to the frame-rate-limit path so a
-    /// no-op effect config still applies its frame rate cap.
     func applyVideoEffects(for screen: Screen, config: ScreenConfiguration) {
         guard let player = screen.videoPlayer else {
             Logger.warning("Cannot apply effects: no active player for screen \(screen.id)", category: .videoPlayer)
@@ -138,9 +134,7 @@ final class WallpaperEffectsCoordinator {
         )
     }
 
-    /// Cancels any in-flight effect application for the given screen. Used
-    /// by `ScreenManager.releaseRuntimeSession` (and the coordinator's prune
-    /// path) to ensure a teardown isn't shadowed by a stale apply.
+    /// Cancels any in-flight effect application for the given screen.
     func cancelInflight(for screenID: CGDirectDisplayID) {
         videoEffectsApplier.cancelInflight(for: screenID)
     }

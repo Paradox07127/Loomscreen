@@ -39,11 +39,7 @@ struct WPECorpusScannerTests {
 
         let report = try await WPECorpusScanner(rootURL: root).scan()
 
-        // We wrote a `genericimage4` material reference, so the top-shader
-        // ledger must surface it.
         #expect(report.topShaderNames.contains { $0.name == "genericimage4" })
-        // The scene also dropped a .frag/.vert pair into shaders/ — the
-        // scanner should classify the scene as shader-source-bearing.
         #expect(report.scenesWithShaderSources >= 1)
         #expect(report.sceneFeatureCounts[.customShaderSource] == 1)
     }
@@ -106,9 +102,6 @@ struct WPECorpusScannerTests {
         """#
         try sceneJSON.data(using: .utf8)!.write(to: folder.appendingPathComponent("scene.json"))
 
-        // Material referencing a custom shader name (so the top-shader ledger
-        // sees it) plus a shader source pair (so the scanner flags shader
-        // sources present).
         let materialsURL = folder.appendingPathComponent("materials")
         try fm.createDirectory(at: materialsURL, withIntermediateDirectories: true)
         let materialJSON = #"""

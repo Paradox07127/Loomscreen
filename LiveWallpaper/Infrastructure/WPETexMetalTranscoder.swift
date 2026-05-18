@@ -18,9 +18,7 @@ import Metal
 /// resorting to `@unchecked Sendable` on `MTLDevice` / `MTLCommandQueue`.
 enum WPETexMetalTranscoder {
 
-    /// Reports whether the legacy CGImage path can transcode the given
-    /// format. Always `false` for BC family; the Phase 2A Metal path uses
-    /// native compressed texture mapping instead of RGBA8 conversion.
+    /// Reports whether the legacy CGImage path can transcode the given format.
     static func isAvailable(for format: WPETexFormat) -> Bool {
         _ = format
         return false

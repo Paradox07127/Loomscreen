@@ -13,7 +13,6 @@ struct GeneralSettingsRegressionTests {
         withIsolatedGlobalSettings {
             let manager = SettingsManager.shared
 
-            // Seed history first.
             let entry = WPEHistoryEntry(
                 origin: WPEOrigin(
                     workshopID: "preserve-me",
@@ -29,8 +28,6 @@ struct GeneralSettingsRegressionTests {
             manager.recordWPEImport(entry)
             #expect(manager.loadGlobalSettings().recentWPEImports.count == 1)
 
-            // Simulate the GeneralSettingsView toggle path: read → mutate
-            // unrelated fields → write. recentWPEImports must survive.
             var settings = manager.loadGlobalSettings()
             settings.globalPauseOnBattery = true
             settings.startOnLogin = true
@@ -63,10 +60,6 @@ struct GeneralSettingsRegressionTests {
             manager.recordWPEImport(entry)
             #expect(manager.loadGlobalSettings().recentWPEImports.count == 1)
 
-            // The buggy pattern: build a fresh GlobalSettings without copying
-            // the existing recentWPEImports. This is what the regression fix
-            // forbids; we verify the buggy behavior here so future contributors
-            // know exactly what the fix exists to prevent.
             let buggy = GlobalSettings(globalPauseOnBattery: true)
             manager.saveGlobalSettings(buggy)
             #expect(manager.loadGlobalSettings().recentWPEImports.isEmpty,

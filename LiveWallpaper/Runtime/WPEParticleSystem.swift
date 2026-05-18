@@ -78,8 +78,7 @@ final class WPEParticleSystem {
         self.rng = SystemRandomNumberGenerator()
     }
 
-    /// Fast random doubles bounded by [low, high]. Inline so the per-
-    /// particle spawn loop stays tight.
+    /// Fast random doubles bounded by [low, high].
     private func uniform(_ low: Double, _ high: Double) -> Double {
         guard high > low else { return low }
         let r = Double.random(in: 0...1, using: &rng)
@@ -99,17 +98,12 @@ final class WPEParticleSystem {
         if firstTickTime == nil { firstTickTime = now }
         let dt: Float
         if let last = lastTickTime {
-            // Clamp the per-frame physics dt so a stall doesn't fling
-            // particles to the void. `elapsed` is computed from absolute
-            // wallclock so start-delay still triggers correctly even
-            // after a long pause.
             dt = Float(max(0, min(now - last, 0.1)))
         } else {
             dt = 0
         }
         let elapsed = now - (firstTickTime ?? now)
 
-        // Advance + reap.
         for index in 0..<capacity {
             guard particles[index].age != .greatestFiniteMagnitude else { continue }
             particles[index].age += dt
@@ -120,7 +114,6 @@ final class WPEParticleSystem {
             particles[index].position += particles[index].velocity * dt
         }
 
-        // Spawn — only after start delay elapsed.
         if elapsed >= definition.startDelay && definition.rate > 0 {
             spawnAccumulator += Double(dt) * definition.rate
             while spawnAccumulator >= 1 {
@@ -130,16 +123,11 @@ final class WPEParticleSystem {
             }
         }
 
-        // Pack alive particles into the GPU buffer at the front so the
-        // renderer can bind a contiguous range. We rebuild every frame
-        // — capacity is bounded so this is cheap.
         let pointer = instanceBuffer.contents().bindMemory(to: WPEParticleInstance.self, capacity: capacity)
         var written = 0
         for index in 0..<capacity {
             guard particles[index].age != .greatestFiniteMagnitude else { continue }
             let particle = particles[index]
-            // Linear fade-in over `fadeInSeconds`, fade-out over the last
-            // 25% of lifetime. Simple but visually acceptable.
             let fadeIn = max(0.0001, Float(definition.fadeInSeconds))
             let fadeOutStart = particle.lifetime * 0.75
             var alpha: Float = 1
@@ -170,10 +158,6 @@ final class WPEParticleSystem {
     }
 
     private func spawn(into slot: Int) {
-        // Sphere-random dispersal: pick a random unit vector + radius
-        // within [dispersalMin, dispersalMax], then offset from origin.
-        // For more exotic emitter shapes (box, layer image), we'll add
-        // shape-specific spawners; this covers the common case.
         let theta = Double.random(in: 0..<2 * .pi, using: &rng)
         let phi = Double.random(in: 0..<(.pi), using: &rng)
         let radius = uniform(definition.dispersalMin, definition.dispersalMax)
@@ -189,7 +173,6 @@ final class WPEParticleSystem {
         )
         let velocity = uniformVector(definition.velocityMin, definition.velocityMax)
         let size = Float(uniform(definition.sizeMin, definition.sizeMax))
-        // Color comes in 0…255 in WPE's wire format; normalize.
         let rawColor = uniformVector(definition.colorMin, definition.colorMax)
         let lifetime = Float(uniform(definition.lifetimeMin, definition.lifetimeMax))
         particles[slot] = Particle(

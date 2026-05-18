@@ -38,22 +38,17 @@ struct MacOSCompatibilityPolicyTests {
     func liquidGlassAPIsAreCentralized() throws {
         let allowed = "Packages/LiveWallpaperSharedUI/Sources/LiveWallpaperSharedUI/Components/AdaptiveGlass.swift"
         let needles = [
-            // Direct modifier and container forms.
             "GlassEffectContainer",
             ".glassEffect(",
             ".glassEffectID(",
             ".glassEffectUnion(",
             ".glassEffectTransition(",
             "DefaultGlassEffectShape",
-            // Button styles, including both static and initializer-call forms.
             ".buttonStyle(.glass)",
             ".buttonStyle(.glass(",
             ".buttonStyle(.glassProminent)",
             "GlassButtonStyle",
             "GlassProminentButtonStyle",
-            // Bare Glass-literal expressions used outside .glassEffect(...) —
-            // e.g. ternaries selecting between two Glass values stored separately.
-            // These are also macOS 26-only and must not survive the migration.
             "Glass.regular",
             "Glass.clear",
             "Glass.identity",
@@ -77,9 +72,7 @@ struct MacOSCompatibilityPolicyTests {
 
     // MARK: - Helpers
 
-    /// Strip `// …` line comments so explanatory notes like
-    /// `// macOS 26 Liquid Glass` don't false-positive. String literals are
-    /// tracked so a `"//"` inside a string doesn't prematurely cut the line.
+    /// Strip `// …` line comments so explanatory notes like `// macOS 26 Liquid Glass` don't false-positive.
     private func stripLineComments(_ source: String) -> String {
         source
             .split(separator: "\n", omittingEmptySubsequences: false)
@@ -90,9 +83,7 @@ struct MacOSCompatibilityPolicyTests {
             .joined(separator: "\n")
     }
 
-    /// Walks a single line, skipping over string literals, and returns the
-    /// index of the first `//` that begins a real line comment (not one nested
-    /// inside a `"…"`).
+    /// Walks a single line, skipping over string literals, and returns the index of the first `//` that begins a real line comment (not one nested inside a `"…"`).
     private func lineCommentStart(in line: Substring) -> Substring.Index? {
         var inString = false
         var escaped = false

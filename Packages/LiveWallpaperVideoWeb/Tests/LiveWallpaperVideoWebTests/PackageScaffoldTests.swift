@@ -26,7 +26,6 @@ struct VideoWebBasicContentTests {
             .init(screenID: 3, urlKey: "beta", userMuted: false)
         ]
         let result = VideoAudioLeadershipPolicy.effectiveMutedStates(for: entries)
-        // Same-URL group has one leader (lowest-id) unmuted; the other is muted.
         let leaderIDs = [result[1], result[2]].compactMap { $0 }.filter { !$0 }.count
         let mutedCount = [result[1], result[2]].compactMap { $0 }.filter { $0 }.count
         #expect(leaderIDs == 1, "Exactly one screen in the duplicate group must remain unmuted.")

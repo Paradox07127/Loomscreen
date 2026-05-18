@@ -72,10 +72,7 @@ struct VideoInformationOverlay: View {
         .shadow(color: .black.opacity(0.3), radius: 5, x: 0, y: 2)
     }
 
-    /// Identity key for `.task(id:)`. URL change → reload, file-only re-mount
-    /// (player toggle on the same URL) → don't reload. The optional player
-    /// identity stays out of this on purpose so play/stop transitions don't
-    /// clear and re-fetch the same metadata.
+    /// Identity key for `.task(id:)`.
     private func loadIdentity(for url: URL) -> String {
         url.absoluteString
     }

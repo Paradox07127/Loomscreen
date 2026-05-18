@@ -62,7 +62,7 @@ struct ConfigurationDirectory {
             .appendingPathComponent("Configuration", isDirectory: true)
     }
 
-    /// Test/migration injection point. The directory is used verbatim.
+    /// Test/migration injection point.
     init(root: URL) {
         self.root = root
     }

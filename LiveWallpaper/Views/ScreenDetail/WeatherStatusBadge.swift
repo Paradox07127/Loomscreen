@@ -48,8 +48,6 @@ struct WeatherStatusBadge: View {
                         .lineLimit(1)
                 }
             }
-            // Status text combines into one VoiceOver string; the buttons below
-            // intentionally stay outside this group so each remains focusable.
             .accessibilityElement(children: .combine)
             .accessibilityLabel(Text("Weather status: \(weatherStatusLabel)", comment: "Weather badge a11y label. The placeholder is the current condition or location status."))
 

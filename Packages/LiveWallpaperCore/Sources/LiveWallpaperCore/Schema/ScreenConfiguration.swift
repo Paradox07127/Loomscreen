@@ -278,7 +278,6 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         playbackSpeed = try c.decodeIfPresent(Double.self, forKey: .playbackSpeed) ?? 1.0
         fitMode = try c.decodeIfPresent(VideoFitMode.self, forKey: .fitMode) ?? .aspectFill
         videoDisplayMode = try c.decodeIfPresent(VideoDisplayMode.self, forKey: .videoDisplayMode) ?? .perDisplay
-        // Legacy per-screen power settings now live in GlobalSettings.
         frameRateLimit = try c.decodeIfPresent(FrameRateLimit.self, forKey: .frameRateLimit) ?? .fps60
         particleEffect = try c.decodeIfPresent(ParticleEffect.self, forKey: .particleEffect) ?? .none
         effectConfig = try c.decodeIfPresent(VideoEffectConfig.self, forKey: .effectConfig) ?? .default
@@ -306,15 +305,12 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
 
         savedHTMLSource = try c.decodeIfPresent(HTMLSource.self, forKey: .savedHTMLSource)
         savedHTMLConfig = try c.decodeIfPresent(HTMLConfig.self, forKey: .savedHTMLConfig)
-        // Lossy decode: a malformed wpeOrigin should not invalidate the whole
-        // screen configuration; fallback to nil so the wallpaper itself loads.
         wpeOrigin = (try? c.decodeIfPresent(WPEOrigin.self, forKey: .wpeOrigin)) ?? nil
 
         if let decodedWallpaper = try c.decodeIfPresent(WallpaperContent.self, forKey: .activeWallpaper) {
             activeWallpaper = decodedWallpaper
             savedVideoBookmarkData = try c.decodeIfPresent(Data.self, forKey: .savedVideoBookmarkData)
                 ?? decodedWallpaper.activeVideoBookmarkData
-            // Backfill saved HTML if absent but currently HTML.
             if savedHTMLSource == nil,
                case .html(let source, let config) = decodedWallpaper,
                source.isRestorableHTMLSource {
@@ -346,13 +342,6 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
             )
             savedVideoBookmarkData = legacySavedBookmark
         case .scene:
-            // Legacy payloads predate `WallpaperContent.scene`. Backfill from
-            // wpeOrigin when the user already imported a Steam scene workshop:
-            // a valid `cacheRelativePath` + `entryFile` lets us reconstruct
-            // a `SceneDescriptor` (.imageOnly is the optimistic default — the
-            // import service will downgrade on next reconcile if needed).
-            // Otherwise fall back to an empty video so the Scene tab surfaces
-            // its placeholder instead of throwing decode errors.
             if let backfilled = Self.backfillSceneFromLegacyOrigin(wpeOrigin) {
                 activeWallpaper = .scene(backfilled)
                 savedVideoBookmarkData = legacySavedBookmark
@@ -363,11 +352,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         }
     }
 
-    /// Phase 2.0 migration: a previously-stored `wallpaperType == .scene`
-    /// blob from before the `.scene(SceneDescriptor)` case existed cannot
-    /// carry a descriptor in `activeWallpaper`. Reconstruct one when the
-    /// sibling `wpeOrigin` has the necessary fields; otherwise return nil
-    /// so the caller falls back to an empty placeholder configuration.
+    /// Phase 2.0 migration: a previously-stored `wallpaperType == .scene` blob from before the `.scene(SceneDescriptor)` case existed cannot carry a descriptor in `activeWallpaper`.
     private static func backfillSceneFromLegacyOrigin(_ origin: WPEOrigin?) -> SceneDescriptor? {
         guard let origin,
               origin.originalType == .scene,
@@ -469,7 +454,6 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         preserveCurrentHTMLIfNeeded()
         activeWallpaper = .video(bookmarkData: bookmarkData)
         savedVideoBookmarkData = bookmarkData
-        // Restart playlist cursor when explicitly returning to video.
         playlistCursorIndex = 0
         return true
     }
@@ -485,14 +469,10 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
     }
 
     /// Swap primary video while preserving per-screen settings + saved HTML.
-    /// Used when a brand-new video replaces the primary (e.g. file picker) —
-    /// the new entry starts at position 0 of the visible list, so both cursor
-    /// and primary-index reset.
     public mutating func replacePrimaryVideo(bookmarkData: Data) {
         preserveCurrentHTMLIfNeeded()
         savedVideoBookmarkData = bookmarkData
         activeWallpaper = .video(bookmarkData: bookmarkData)
-        // Reset cursor so rotation never points past a reshuffled list.
         playlistCursorIndex = 0
         playlistPrimaryIndex = nil
     }

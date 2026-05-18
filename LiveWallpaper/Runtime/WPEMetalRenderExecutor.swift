@@ -48,15 +48,6 @@ final class WPEMetalRenderExecutor {
         self.targetPool = WPEMetalRenderTargetPool(device: device)
         self.depthCache = WPEMetalDepthStateCache(device: device)
         self.pipelineCache = WPEMetalPipelineCache(device: device, library: library)
-        // Phase 2D-H: default to the Swift transpiler, falling back to the
-        // stub if a caller wants to opt out (tests). Production now goes
-        // through the real translator path.
-        //
-        // Phase 2b seam: when the vendored glslang+SPIRV-Cross XCFramework
-        // is linked (see `WPESPIRVShaderCompiler.isToolchainAvailable()`),
-        // prefer it and use the Swift transpiler as a fall-through. Builds
-        // without the framework keep the existing behaviour because the
-        // toolchain check returns false statically — no runtime cost.
         self.shaderCompiler = shaderCompiler ?? Self.preferredCompiler(device: device)
     }
 
@@ -134,12 +125,7 @@ final class WPEMetalRenderExecutor {
         return output
     }
 
-    /// Phase 2D-L: render every alive particle system on top of the
-    /// supplied output texture. Each system contributes one instanced
-    /// draw call, so the per-frame overhead scales with the number of
-    /// emitters (typically 1-5) rather than total particle count.
-    /// Existing render output is loaded as the color attachment so we
-    /// composite over the layer/effect chain that built the frame.
+    /// Phase 2D-L: render every alive particle system on top of the supplied output texture.
     func drawParticles(
         systems: [WPEParticleSystem],
         texturesByMaterial: [ObjectIdentifier: MTLTexture],
@@ -191,11 +177,7 @@ final class WPEMetalRenderExecutor {
         commandBuffer.waitUntilCompleted()
     }
 
-    /// Phase 2D-N: composite a list of pre-rasterized text overlays on
-    /// top of the supplied output texture. Each overlay is one quad
-    /// draw, sized in pixel space and projected via the scene's
-    /// orthogonal width/height. Reuses the layer pixel format so the
-    /// pipeline state is cached separately from particles.
+    /// Phase 2D-N: composite a list of pre-rasterized text overlays on top of the supplied output texture.
     func drawTextOverlays(
         overlays: [WPETextOverlayDraw],
         sceneSize: CGSize,
@@ -263,9 +245,6 @@ final class WPEMetalRenderExecutor {
             throw WPEMetalRenderExecutorError.pipelineUnavailable("wpe_text_overlay_fragment")
         }
         attachment.pixelFormat = colorPixelFormat
-        // Standard premultiplied translucent compositing. CoreText
-        // already produced premultiplied output so srcRGB = sourceRGB
-        // (no alpha multiply on top).
         attachment.isBlendingEnabled = true
         attachment.rgbBlendOperation = .add
         attachment.alphaBlendOperation = .add
@@ -296,9 +275,6 @@ final class WPEMetalRenderExecutor {
             throw WPEMetalRenderExecutorError.pipelineUnavailable("wpe_particle_instanced_fragment")
         }
         attachment.pixelFormat = colorPixelFormat
-        // Particles render with translucent (premultiplied) blending —
-        // the fragment outputs premultiplied alpha so destination contents
-        // pass through where alpha is zero.
         attachment.isBlendingEnabled = true
         attachment.rgbBlendOperation = .add
         attachment.alphaBlendOperation = .add
@@ -360,12 +336,6 @@ final class WPEMetalRenderExecutor {
             avoiding: readsCurrentTarget ? previousTextureForTarget : nil
         )
 
-        // _rt_FullFrameBuffer ↔ scene aliasing hazard: when the pass targets
-        // .scene AND samples _rt_FullFrameBuffer (which our resolver redirects
-        // to the scene texture), Metal would read and write the same texture
-        // in one encoder. Snapshot the current scene into a dedicated pool
-        // slot before encoding so the resolver finds an explicit texture in
-        // `latestNamedTextures` and the redirect never fires.
         try snapshotFullFrameBufferIfAliasingScene(
             pass: pass,
             destinationTexture: destination.texture,
@@ -375,9 +345,6 @@ final class WPEMetalRenderExecutor {
             frameState: &frameState
         )
 
-        // Phase 2C audit fix: when ping-pong allocates a fresh secondary
-        // texture for `.previous`, copy the prior contents in so blend /
-        // cull / depth-rejected fragments do not see uninitialised memory.
         if readsCurrentTarget,
            let previousTextureForTarget,
            ObjectIdentifier(previousTextureForTarget) != ObjectIdentifier(destination.texture),
@@ -433,16 +400,7 @@ final class WPEMetalRenderExecutor {
         frameState.registerWrite(texture: destination.texture, targetID: destination.id)
     }
 
-    /// Breaks the `_rt_*` scene-alias hazard. The fbo-resolver redirects
-    /// scene-alias names (`_rt_FullFrameBuffer`, `_rt_HalfFrameBuffer`,
-    /// `_rt_EightBuffer*`, …) to the scene output texture when no
-    /// explicit named-texture exists, which lets post-process effects
-    /// sample the composed scene. But if the SAME pass also targets
-    /// `.scene`, the read and write would collide on one texture.
-    /// Pre-encoding a snapshot into a pool-managed slot named after the
-    /// alias resolves both sides: the resolver now finds the snapshot
-    /// in `latestNamedTextures` and never falls through to the scene
-    /// texture.
+    /// Breaks the `_rt_*` scene-alias hazard.
     private func snapshotFullFrameBufferIfAliasingScene(
         pass: WPEPreparedRenderPass,
         destinationTexture: MTLTexture,
@@ -474,9 +432,7 @@ final class WPEMetalRenderExecutor {
         frameState.latestNamedTextures[alias] = snapshot
     }
 
-    /// Phase 2C audit fix: blit-copies a prior physical texture into the
-    /// pool's secondary slot so ping-pong renders that blend or depth-test
-    /// have a defined source to load.
+    /// Phase 2C audit fix: blit-copies a prior physical texture into the pool's secondary slot so ping-pong renders that blend or depth-test have a defined source to load.
     private func copyTexture(
         _ source: MTLTexture,
         to destination: MTLTexture,
@@ -569,9 +525,7 @@ final class WPEMetalRenderExecutor {
         frameState.registerWrite(texture: destination.texture, targetID: destination.id)
     }
 
-    /// Thin delegate so call sites — including `WPEMetalShaderDispatcher`
-    /// across files — keep the same call shape after the pipeline cache
-    /// became a separate type.
+    /// Thin delegate so call sites — including `WPEMetalShaderDispatcher` across files — keep the same call shape after the pipeline cache became a separate type.
     func renderPipeline(
         fragmentName: String,
         blendMode: String = "disabled",
@@ -623,10 +577,7 @@ final class WPEMetalRenderExecutor {
         }
     }
 
-    /// Phase 2D-E: shared dispatch path for single-input effect built-ins
-    /// (opacity, scroll, pulse, iris, waterwaves). They all sample one
-    /// source texture and emit a transformed copy, so the only thing that
-    /// changes per-effect is the fragment name + the uniform struct.
+    /// Phase 2D-E: shared dispatch path for single-input effect built-ins (opacity, scroll, pulse, iris, waterwaves).
     func dispatchSingleSampleEffect<U: BitwiseCopyable>(
         fragmentName: String,
         pass: WPEPreparedRenderPass,
@@ -656,10 +607,6 @@ final class WPEMetalRenderExecutor {
     }
 
     /// Phase 2D-D: pack scene uniforms for the genericimage* built-ins.
-    /// The MSL fragment expects (color × g_Color × brightness, alpha mask
-    /// flag) so we resolve g_Color through the same sRGB→linear path as
-    /// `WPEMetalShaderInputs.colorVector(for:)` and combine with g_Alpha
-    /// + g_Brightness.
     func genericImageUniforms(for pass: WPEPreparedRenderPass, hasMask: Bool) -> WPEGenericImageUniforms {
         WPEGenericImageUniforms(
             color: WPEMetalShaderInputs.colorVector(for: pass),
@@ -672,9 +619,7 @@ final class WPEMetalRenderExecutor {
         )
     }
 
-    /// Phase 2D-D: per-particle uniform pack. Same color path as the image
-    /// fragments; the spectrum slot in `sizeAndAge` stays zero until the
-    /// audio runtime ships and feeds an FFT bin into the executor.
+    /// Phase 2D-D: per-particle uniform pack.
     func genericParticleUniforms(for pass: WPEPreparedRenderPass) -> WPEGenericParticleUniforms {
         WPEGenericParticleUniforms(
             color: WPEMetalShaderInputs.colorVector(for: pass),
@@ -708,10 +653,7 @@ final class WPEMetalRenderExecutor {
         return references
     }
 
-    /// Build (or fetch from cache) an `MTLRenderPipelineState` for a
-    /// translated shader's fragment function. Keyed by library identity
-    /// + blend + formats so distinct render targets can share the
-    /// upstream library without re-creating Metal pipelines per frame.
+    /// Build (or fetch from cache) an `MTLRenderPipelineState` for a translated shader's fragment function.
     func translatedPipelineState(
         for result: WPEShaderCompileResult,
         blendMode: String,
@@ -728,10 +670,6 @@ final class WPEMetalRenderExecutor {
         if let cached = translatedPipelineCache[key] {
             return cached
         }
-        // Fall through to the standard pipeline cache path by passing the
-        // custom library + functions in directly. We can't re-use
-        // WPEMetalPipelineCache because that one is bound to the default
-        // library; instead we replicate the descriptor+blend setup.
         guard let vertex = result.library.makeFunction(name: result.vertexFunctionName)
             ?? device.makeDefaultLibrary()?.makeFunction(name: result.vertexFunctionName),
               let fragment = result.library.makeFunction(name: result.fragmentFunctionName) else {
@@ -751,12 +689,7 @@ final class WPEMetalRenderExecutor {
         return state
     }
 
-    /// Phase 2D-H: pack a runtime uniform buffer matching the layout the
-    /// transpiler emitted (every uniform takes 1-4 float4 slots). Pulls
-    /// values from `pass.uniformValues` first (runtime-merged) then
-    /// `pass.pass.constants` (material defaults). Missing values default
-    /// to zero. The buffer is sized to the slot maximum so any future
-    /// shader that fits the cap binds against the same fixed layout.
+    /// Phase 2D-H: pack a runtime uniform buffer matching the layout the transpiler emitted (every uniform takes 1-4 float4 slots).
     func packTranslatedUniforms(
         for pass: WPEPreparedRenderPass,
         layout: [WPEUniformSlot]
@@ -764,9 +697,6 @@ final class WPEMetalRenderExecutor {
         var slots = [SIMD4<Float>](repeating: SIMD4<Float>(0, 0, 0, 0), count: WPEShaderTranspiler.uniformSlotMaximum)
         for u in layout {
             let value = pass.uniformValues[u.name] ?? pass.pass.constants[u.name]
-            // Array uniforms get one element per slot. We pull as many
-            // doubles as are available out of the constant value and
-            // zero-pad the rest. Audio spectrum uniforms feed in this way.
             if let length = u.arrayLength {
                 let raw = Self.vectorValue(value, count: length)
                 for i in 0..<length {
@@ -862,8 +792,7 @@ final class WPEMetalRenderExecutor {
         }
     }
 
-    /// Mirrors WPEMetalPipelineCache.applyBlendMode so the translated
-    /// pipeline path uses the same blend arithmetic as built-ins.
+    /// Mirrors WPEMetalPipelineCache.applyBlendMode so the translated pipeline path uses the same blend arithmetic as built-ins.
     private static func applyBlendMode(_ mode: String, to attachment: MTLRenderPipelineColorAttachmentDescriptor) {
         switch mode {
         case "disabled":
@@ -903,8 +832,7 @@ final class WPEMetalRenderExecutor {
         }
     }
 
-    /// Run the WPE preprocessor + the configured `WPEShaderCompiling` over
-    /// the given prepared pass. Memoized per source hash.
+    /// Run the WPE preprocessor + the configured `WPEShaderCompiling` over the given prepared pass.
     func compileCustomShader(
         for pass: WPEPreparedRenderPass
     ) throws -> WPEShaderCompileResult {
@@ -912,10 +840,6 @@ final class WPEMetalRenderExecutor {
             throw WPEMetalRenderExecutorError.unsupportedShader(pass.pass.shader)
         }
         let processor = WPEShaderPreprocessor { _, _ in
-            // Pipeline-builder already inlined includes, so the per-stage
-            // pass shouldn't see new ones. Returning nil here leaves a
-            // residual `#include` line as a translator-time error rather
-            // than a silent miss.
             nil
         }
         let request: WPEShaderCompileRequest

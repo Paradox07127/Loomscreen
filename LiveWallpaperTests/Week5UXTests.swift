@@ -31,10 +31,6 @@ struct GlobalSettingsWeek5Tests {
 
     @Test("Legacy settings without showInDock decode safely")
     func legacySettingsWithoutShowInDockDecodeSafely() throws {
-        // Settings persisted by an older build won't have the showInDock key;
-        // the lossy decoder must still hydrate without error and default to
-        // false (menu-bar-only mode). FrameRateLimit is Int-backed, so
-        // pass the numeric raw value.
         let legacyJSON: String = """
         {
           "globalPauseOnBattery": false,
@@ -91,7 +87,6 @@ struct GlobalSettingsWeek5Tests {
         #expect(toggle??.modifiers == [.command, .shift])
 
         let next = reloaded.globalShortcuts[GlobalShortcutAction.nextWallpaper.rawAction]
-        // Explicit nil entry preserved → action is intentionally unbound.
         #expect(next == .some(nil))
 
         let mute = reloaded.globalShortcuts[GlobalShortcutAction.toggleMute.rawAction]
@@ -169,16 +164,10 @@ struct WeatherLocationProviderFallbackTests {
         settings.weatherLocation = WeatherLocationPreference(source: .manual, manual: nil)
         SettingsManager.shared.saveGlobalSettings(settings)
 
-        // Use a URLSession that fails so the IP-fallback also fails — we
-        // don't want this test depending on real network.
         let session = URLSession(configuration: .ephemeral)
         let provider = WeatherLocationProvider(urlSession: session)
-        // Force the IP request to fail by using a bogus host via swizzle is
-        // overkill; instead we lean on the timeout (1s) for an offline test
-        // environment. CI runners with internet still complete < 8s.
         let resolution = await provider.resolveCoordinate()
 
-        // Either error is acceptable depending on CI network availability.
         #expect(resolution.resolvedSource == .manual || resolution.resolvedSource == .ipGeolocation)
     }
 

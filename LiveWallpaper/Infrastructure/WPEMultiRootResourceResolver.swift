@@ -73,12 +73,7 @@ struct WPEMultiRootResourceResolver: Sendable {
         }
     }
 
-    /// Tries the primary resolver first; on `.fileMissing` falls through to
-    /// the app-bundled built-ins, then to the optional engine-assets
-    /// resolver. Other `ResolveError` cases (`.pathEscape`,
-    /// `.materialUnresolved`, `.texture`, …) propagate without retry —
-    /// another root can't fix a malformed path or a project's broken JSON
-    /// chain. Every attempt is forwarded to the optional tracer.
+    /// Tries the primary resolver first; on `.fileMissing` falls through to the app-bundled built-ins, then to the optional engine-assets resolver.
     private func resolveWithFallbacks<T>(
         relativePath: String,
         _ resolve: (SceneResourceResolver, String) throws -> T

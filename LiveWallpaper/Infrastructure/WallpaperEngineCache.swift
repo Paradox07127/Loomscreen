@@ -45,9 +45,6 @@ actor WallpaperEngineCache {
 
         Logger.info("WPE cache extracting workshop \(workshopID)", category: .screenManager)
         do {
-            // Streaming parse + extract: reads the index from the pkg's
-            // header bytes, then per-entry seeks the same handle. Memory
-            // peak is bounded by the 1 MiB chunk inside the package.
             let handle = try FileHandle(forReadingFrom: sourcePkgURL)
             defer { try? handle.close() }
 
@@ -113,10 +110,7 @@ actor WallpaperEngineCache {
         }
     }
 
-    /// Workshop IDs whose extracted payload currently lives under the cache
-    /// root. Used by the import service to flag missing dependencies before
-    /// mounting an unrenderable scene. Filters out subdirectories whose name
-    /// fails the workshop-id safety check (mirrors `stats()`).
+    /// Workshop IDs whose extracted payload currently lives under the cache root.
     func listAvailableWorkshopIDs() -> Set<String> {
         guard fileManager.fileExists(atPath: rootURL.path),
               let children = try? fileManager.contentsOfDirectory(
@@ -146,8 +140,6 @@ actor WallpaperEngineCache {
     }
 
     /// Aggregate stats over every per-workshop subdirectory under the root.
-    /// Subdirectories whose name fails `isSafeWorkshopID` are skipped — they
-    /// can't have been written by us, so we don't account for them.
     func stats() -> WPECacheStats {
         guard fileManager.fileExists(atPath: rootURL.path),
               let children = try? fileManager.contentsOfDirectory(
@@ -177,8 +169,6 @@ actor WallpaperEngineCache {
     }
 
     /// Wipes every per-workshop subdirectory under the root (manifest + payloads).
-    /// Returns the byte count freed for caller reporting; never throws on a
-    /// missing root (idempotent).
     @discardableResult
     func purgeAll() -> UInt64 {
         guard fileManager.fileExists(atPath: rootURL.path),
@@ -206,8 +196,7 @@ actor WallpaperEngineCache {
         return freed
     }
 
-    /// Removes per-workshop directories whose `lastUsed` (manifest extractedAt
-    /// or directory mtime) is older than `cutoff`. Returns the byte count freed.
+    /// Removes per-workshop directories whose `lastUsed` (manifest extractedAt or directory mtime) is older than `cutoff`.
     @discardableResult
     func purgeOlderThan(_ cutoff: Date) -> UInt64 {
         let snapshot = stats()
@@ -275,9 +264,7 @@ actor WallpaperEngineCache {
         cacheURL.appendingPathComponent("manifest.json")
     }
 
-    /// Streaming fingerprint: hashes the source pkg in 64 KiB chunks instead
-    /// of mapping the entire file. Keeps idempotency guarantees (size + mtime
-    /// + sha256) while bounding peak memory regardless of pkg size.
+    /// Streaming fingerprint: hashes the source pkg in 64 KiB chunks instead of mapping the entire file.
     private func fingerprint(for sourcePkgURL: URL) throws -> Fingerprint {
         do {
             let values = try sourcePkgURL.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])

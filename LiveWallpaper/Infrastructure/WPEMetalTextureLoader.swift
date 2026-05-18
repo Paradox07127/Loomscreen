@@ -19,9 +19,6 @@ struct WPEMetalTextureLoader {
     }
 
     func makeTexture(from payload: WPETexTexturePayload, label: String) async throws -> MTLTexture {
-        // Phase 2E: video and animation payloads are routed via the dynamic
-        // texture sources; this static path must reject them so a stale
-        // upload does not silently take a single-frame snapshot.
         if payload.videoPayload != nil {
             throw WPEMetalTextureLoaderError.malformedPayload(
                 "video payload must be routed through WPEVideoTextureSource"
@@ -44,10 +41,7 @@ struct WPEMetalTextureLoader {
         }
     }
 
-    /// Phase 2E: pre-uploads every animation frame to GPU as a separate
-    /// `MTLTexture` and hands the pre-baked array to
-    /// `WPETexAnimatedTextureSource`. Frame selection by `g_Time` happens at
-    /// render time without any per-frame upload cost.
+    /// Phase 2E: pre-uploads every animation frame to GPU as a separate `MTLTexture` and hands the pre-baked array to `WPETexAnimatedTextureSource`.
     @MainActor
     func makeAnimatedTextureSource(
         from payload: WPETexTexturePayload,
@@ -99,8 +93,6 @@ struct WPEMetalTextureLoader {
     func makeTexture(from cgImage: CGImage, label: String) async throws -> MTLTexture {
         let device = self.device
         return try await uploadQueue.perform {
-            // Phase 2A H3: explicitly request sRGB so untagged CGImages do not
-            // fall back to the linear path and re-introduce gamma divergence.
             let loader = MTKTextureLoader(device: device)
             do {
                 let texture = try loader.newTexture(

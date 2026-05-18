@@ -32,10 +32,6 @@ struct WPESceneCapabilityClassifier: Sendable {
             return .unsupported
         }
 
-        // Match the runtime's multi-root chain so the import gate doesn't
-        // false-reject scenes that reference our bundled framework assets
-        // (`models/util/*`, `materials/util/*`, water-effect noise PNGs) or
-        // dependency-mounted workshop addons.
         let resolver = WPEMultiRootResourceResolver(
             primaryRootURL: cacheURL,
             dependencyMounts: dependencyMounts,
@@ -61,14 +57,7 @@ struct WPESceneCapabilityClassifier: Sendable {
         return .degraded
     }
 
-    /// Coarse existence probe — does this relative path resolve to a file
-    /// somewhere in the mount chain? The runtime is responsible for the
-    /// `models/util/X.json → materials/util/X.json → terminal.tex` JSON
-    /// chain walk and graceful degradation when intermediate refs miss; the
-    /// classifier just answers "is there anywhere this object's image
-    /// pointer can land?". A `false` here means the scene has zero hope of
-    /// even starting that chain — that's the precise condition the gate
-    /// rejects on.
+    /// Coarse existence probe — does this relative path resolve to a file somewhere in the mount chain?
     private func isReachable(
         _ relativePath: String,
         through resolver: WPEMultiRootResourceResolver

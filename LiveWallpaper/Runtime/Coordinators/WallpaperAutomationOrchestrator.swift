@@ -58,9 +58,7 @@ final class WallpaperAutomationOrchestrator {
         saveConfiguration(config)
     }
 
-    /// Promote `bookmark` to primary without reordering the visible list — the
-    /// star marker travels with the entry's existing position. Playback jumps
-    /// to the new primary.
+    /// Promote `bookmark` to primary without reordering the visible list — the star marker travels with the entry's existing position.
     func setPrimaryVideo(bookmark: Data, for screen: Screen) {
         guard var config = configurationStore.get(for: screen.id),
               config.savedVideoBookmarkData != bookmark else { return }
@@ -68,12 +66,10 @@ final class WallpaperAutomationOrchestrator {
         let combined = config.combinedPlaylist
         guard let newPrimaryPosition = combined.firstIndex(of: bookmark) else { return }
 
-        // Keep `combined` ordering; only the star (and the extras split) moves.
         let extras = combined.enumerated().compactMap { idx, b -> Data? in
             idx == newPrimaryPosition ? nil : b
         }
 
-        // Preserve cursor on the new primary so it starts playing.
         config.savedVideoBookmarkData = bookmark
         config.activeWallpaper = .video(bookmarkData: bookmark)
         config.playlistBookmarks = extras.isEmpty ? nil : extras
@@ -84,8 +80,7 @@ final class WallpaperAutomationOrchestrator {
         reloadWallpaperForScreen(screen)
     }
 
-    /// Writes the reordered playlist (full visible order) while preserving the
-    /// active bookmark when only the order changed.
+    /// Writes the reordered playlist (full visible order) while preserving the active bookmark when only the order changed.
     func replacePlaylist(ordered: [Data], primary: Data, for screen: Screen) {
         guard var config = configurationStore.get(for: screen.id) else { return }
         guard let primaryIndex = ordered.firstIndex(of: primary) else { return }
@@ -181,9 +176,6 @@ final class WallpaperAutomationOrchestrator {
         config.wallpaperMode = mode
         saveConfiguration(config)
 
-        // Mode switch must immediately apply the playback the new mode dictates
-        // — otherwise the user picks "Schedule" and keeps watching the primary
-        // until the next slot boundary fires hours later.
         switch mode {
         case .single:
             reloadWallpaperForScreen(screen)
@@ -332,9 +324,7 @@ final class WallpaperAutomationOrchestrator {
 
     // MARK: - Automation start
 
-    /// Wires the shared timer (`WallpaperAutomationCoordinator`) into the
-    /// per-screen schedule + playlist handlers. ScreenManager calls this
-    /// once during launch / restore.
+    /// Wires the shared timer (`WallpaperAutomationCoordinator`) into the per-screen schedule + playlist handlers.
     func startMonitoring() {
         automationCoordinator.start(
             screenProvider: { [weak self] in

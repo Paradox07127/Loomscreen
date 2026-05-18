@@ -84,8 +84,6 @@ final class WPEImportCoordinator {
             return .applied(origin: origin)
 
         case .unsupported(let origin):
-            // Scene/application/unknown checks are non-destructive: record the
-            // origin and let UI show a reason card instead of replacing wallpaper.
             SettingsManager.shared.recordWPEImport(
                 WPEHistoryEntry(origin: origin, importedAt: Date(), lastUsedAt: nil)
             )

@@ -34,9 +34,7 @@ final class WallpaperThumbnailService {
         cache.object(forKey: key as NSString)
     }
 
-    /// Returns a poster for the given video URL. Result is cached.
-    /// Returns `nil` if the file cannot be read or the asset has no
-    /// video tracks.
+    /// Returns a poster for the given video URL.
     func videoPosterImage(for url: URL, cacheKey: String) async -> NSImage? {
         if let cached = cachedThumbnail(forKey: cacheKey) { return cached }
         if let inFlight = inFlight[cacheKey] { return await inFlight.value }
@@ -69,10 +67,7 @@ final class WallpaperThumbnailService {
         return result
     }
 
-    /// Returns a snapshot of the rendered HTML source. Result is cached.
-    /// The caller passes `targetSize` for the offscreen window — small
-    /// enough to keep rendering cheap, large enough to look sharp in the
-    /// inspector card.
+    /// Returns a snapshot of the rendered HTML source.
     func htmlSnapshotImage(
         for url: URL,
         cacheKey: String,
@@ -98,8 +93,7 @@ final class WallpaperThumbnailService {
         return result
     }
 
-    /// Drops cached entries matching the prefix. Used when a wallpaper
-    /// source is rebookmarked or refreshed so the next request rebuilds.
+    /// Drops cached entries matching the prefix.
     func invalidate(cacheKey: String) {
         cache.removeObject(forKey: cacheKey as NSString)
     }
@@ -132,9 +126,6 @@ final class WallpaperThumbnailService {
             webView.load(URLRequest(url: url))
         }
 
-        // Race: page load completion vs timeout fallback. Both convergence
-        // paths call `pending.complete(_:)` so the AsyncStream below
-        // wakes up exactly once.
         let timeoutTask = Task<Void, Never> { [weak pending] in
             try? await Task.sleep(for: .seconds(timeout))
             pending?.complete(reason: .timeout)
@@ -143,8 +134,6 @@ final class WallpaperThumbnailService {
         let didLoad = await pending.waitForLoadOutcome()
         timeoutTask.cancel()
 
-        // Allow at least one paint cycle after didFinish even if we got
-        // the success outcome, to avoid capturing a blank canvas.
         if didLoad {
             try? await Task.sleep(for: .milliseconds(250))
         }

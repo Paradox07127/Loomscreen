@@ -33,9 +33,7 @@ struct WPETextRendererTests {
         #expect(text.text == "Hello, world")
         #expect(text.fontRelativePath == "fonts/test.ttf")
         #expect(text.pointSize == 64)
-        // Wrapped color → red
         #expect(text.color.x == 1 && text.color.y == 0 && text.color.z == 0)
-        // Wrapped alpha → 0.5
         #expect(text.alpha == 0.5)
         #expect(text.origin.x == 100 && text.origin.y == 200)
         #expect(text.horizontalAlignment == "left")
@@ -54,7 +52,7 @@ struct WPETextRendererTests {
             id: "1",
             name: "Sample",
             text: "Hi",
-            fontRelativePath: nil,  // system fallback
+            fontRelativePath: nil,
             pointSize: 48,
             color: SIMD3<Double>(1, 1, 1),
             alpha: 1,
@@ -100,8 +98,6 @@ struct WPETextRendererTests {
         )
         let first = try #require(renderer.rasterize(object))
         let second = try #require(renderer.rasterize(object))
-        // Identity comparison: both should be the same MTLTexture object
-        // because the cache hit returns the previously-allocated entry.
         #expect(first.texture === second.texture)
     }
 

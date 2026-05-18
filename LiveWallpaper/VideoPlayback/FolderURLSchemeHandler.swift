@@ -86,8 +86,6 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
         let delivery = SchemeTaskDelivery(urlSchemeTask)
         let taskID = ObjectIdentifier(urlSchemeTask as AnyObject)
 
-        // Replace any earlier work for the same task identifier (defensive — WK
-        // does not normally re-issue start without first invoking stop).
         activeTasks[taskID]?.cancel()
 
         let worker = Task.detached(priority: .userInitiated) { [weak self, fileURL, mime, rangeHeader, url, delivery, taskID] in
@@ -130,11 +128,6 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
             } catch is CancellationError {
                 await delivery.fail(with: Self.makeError(.cancelled, "Request cancelled"))
             } catch {
-                // Wallpaper Engine projects often reference assets that were
-                // never packaged; HTML retries them on every loop tick. Log
-                // each missing resource once at info level (this is normal
-                // web-content 404 behaviour, not an app failure) and keep
-                // anything else at warning so genuine I/O issues surface.
                 let isMissingFile = (error as NSError).domain == NSCocoaErrorDomain
                     && ((error as NSError).code == NSFileReadNoSuchFileError
                         || (error as NSError).code == NSFileNoSuchFileError)
@@ -157,9 +150,6 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
         }
 
         activeTasks[taskID] = ActiveTask(worker: worker, delivery: delivery)
-        // Tiny-file race: the detached worker might already have finished and
-        // run its main-thread cleanup before this assignment happened, leaving
-        // a permanently retained entry. Re-check and prune.
         if delivery.hasTerminated {
             activeTasks.removeValue(forKey: taskID)
         }
@@ -168,14 +158,10 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
     func webView(_ webView: WKWebView, stop urlSchemeTask: any WKURLSchemeTask) {
         let taskID = ObjectIdentifier(urlSchemeTask as AnyObject)
         guard let entry = activeTasks.removeValue(forKey: taskID) else { return }
-        // Mark the delivery first so any in-flight `await delivery.deliver(...)`
-        // hop completes as a no-op instead of touching the (now invalid) task.
         entry.cancel()
     }
 
-    /// Cancels every in-flight scheme worker. Used when `folderURL` changes
-    /// so the previous folder's bytes never finish streaming after the
-    /// security scope is released.
+    /// Cancels every in-flight scheme worker.
     private func cancelAllActiveTasks() {
         let entries = activeTasks
         activeTasks.removeAll()
@@ -292,7 +278,6 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
         let parts = spec.split(separator: "-", omittingEmptySubsequences: false)
         guard parts.count == 2 else { return nil }
 
-        // Suffix syntax: `bytes=-N` → last N bytes.
         if parts[0].isEmpty {
             guard let suffixLength = Int(parts[1]), suffixLength > 0 else { return nil }
             let length = min(suffixLength, totalLength)
@@ -319,9 +304,6 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
         if let utType = UTType(filenameExtension: ext), let mime = utType.preferredMIMEType {
             return mime
         }
-        // Fallbacks for things UTType sometimes misses. Wallpaper Engine projects
-        // are authored on Windows and routinely bundle Ogg/Vorbis audio for
-        // ambience loops; UTType on macOS does not always map "ogg" → audio/ogg.
         switch ext {
         case "js", "mjs": return "application/javascript"
         case "wasm":      return "application/wasm"

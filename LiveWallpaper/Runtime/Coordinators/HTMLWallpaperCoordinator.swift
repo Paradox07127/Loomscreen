@@ -38,10 +38,7 @@ final class HTMLWallpaperCoordinator {
 
     // MARK: - Multi-instance diagnostics
 
-    /// Maps each currently-active HTML source signature to the screens that
-    /// run it. The Inspector uses this to surface "also active on N other
-    /// screen(s)" when the user is configuring a wallpaper that's already
-    /// in use elsewhere.
+    /// Maps each currently-active HTML source signature to the screens that run it.
     func sourceMultiplicity() -> [String: [CGDirectDisplayID]] {
         var map: [String: [CGDirectDisplayID]] = [:]
         for screen in screensProvider() {
@@ -53,9 +50,7 @@ final class HTMLWallpaperCoordinator {
         return map
     }
 
-    /// Screens (other than `excluding`) currently running the same HTML
-    /// source. Used by the audio-leader heuristic and by the inspector's
-    /// "X more screens also play this" banner.
+    /// Screens (other than `excluding`) currently running the same HTML source.
     func screensRunningSameSource(as source: HTMLSource, excluding: CGDirectDisplayID) -> [Screen] {
         let signature = source.diagnosticSignature
         return screensProvider().filter { other in
@@ -68,17 +63,12 @@ final class HTMLWallpaperCoordinator {
         }
     }
 
-    /// True when no other screen is already playing this HTML source — the
-    /// caller becomes the audio leader. The non-leader instances mute their
-    /// playback so stacked audio doesn't pile up across displays.
+    /// True when no other screen is already playing this HTML source — the caller becomes the audio leader.
     func isAudioLeader(source: HTMLSource, excluding screenID: CGDirectDisplayID) -> Bool {
         screensRunningSameSource(as: source, excluding: screenID).isEmpty
     }
 
-    /// Audio-leader policy + trust evaluation merged into the effective
-    /// HTMLConfig used by the runtime session. Same source on multiple
-    /// screens means N independent webviews would each decode audio + render
-    /// WebGL — we force-mute all but the leader so audio doesn't stack.
+    /// Audio-leader policy + trust evaluation merged into the effective HTMLConfig used by the runtime session.
     func runtimeConfig(source: HTMLSource, config: HTMLConfig, for screen: Screen) -> HTMLConfig {
         var effectiveConfig = config
 
@@ -137,10 +127,7 @@ final class HTMLWallpaperCoordinator {
         setWallpaper(source: source, for: screen)
     }
 
-    /// Updates the HTML runtime config — mute, JS toggle, mouse, ephemeral
-    /// storage, tracker blocker. Cheap config changes are pushed into the
-    /// live `HTMLWallpaperConfigApplying` session in place; structural
-    /// changes (storage, JS, tracker block) require a full session rebuild.
+    /// Updates the HTML runtime config — mute, JS toggle, mouse, ephemeral storage, tracker blocker.
     func updateConfig(_ config: HTMLConfig, for screen: Screen) {
         guard var existing = configurationStore.get(for: screen.id),
               case .html(let source, let previousConfig) = existing.activeWallpaper else { return }

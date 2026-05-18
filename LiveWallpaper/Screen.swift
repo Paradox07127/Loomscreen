@@ -94,8 +94,6 @@ class Screen: Identifiable, Hashable {
     }
 
     /// Install a new session, cleaning up the previous one immediately.
-    /// Used for direct replacements (initial install, clear, or any path
-    /// that does not need a visual fade-through window of overlap).
     func installRuntimeSession(_ session: any WallpaperRuntimeSession) {
         guard !isSameSession(runtimeSession, session) else { return }
         let old = runtimeSession
@@ -105,9 +103,6 @@ class Screen: Identifiable, Hashable {
     }
 
     /// Swap to `newSession` WITHOUT cleaning up the previous session.
-    /// Returns the previous session so the caller — typically
-    /// `ScreenManager.transitionSession(...)` — can clean it up after the
-    /// visual crossfade animation finishes.
     @discardableResult
     func stageRuntimeSessionForTransition(_ session: any WallpaperRuntimeSession) -> (any WallpaperRuntimeSession)? {
         guard !isSameSession(runtimeSession, session) else { return nil }
@@ -118,8 +113,6 @@ class Screen: Identifiable, Hashable {
     }
 
     func adoptRuntimeSession(from existingScreen: Screen) {
-        // Adoption shares the SAME session reference between screens, so we
-        // never want to cleanup the previously-held session here.
         let new = existingScreen.runtimeSession
         guard !isSameSession(runtimeSession, new) else { return }
         handleRuntimeSessionTransition(from: runtimeSession, to: new)
@@ -145,13 +138,9 @@ class Screen: Identifiable, Hashable {
         self.nsScreen = nsScreen
         self.frame = nsScreen.frame
 
-        // Get display ID safely with fallback.
-        // `abs(Int.min)` would trap, so we bit-truncate into UInt32 instead —
-        // the exact value doesn't matter, only that it's deterministic per screen.
         self.id = (nsScreen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? UInt32)
             ?? UInt32(truncatingIfNeeded: Self.generateFallbackID(for: nsScreen))
 
-        // Get screen name with fallback
         let screenName = nsScreen.localizedName
         self.name = screenName.isEmpty
             ? "Display \(Int(frame.width))x\(Int(frame.height)) at (\(Int(frame.origin.x)),\(Int(frame.origin.y)))"

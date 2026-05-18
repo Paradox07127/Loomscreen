@@ -82,8 +82,6 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
         muteAudio = try c.decodeIfPresent(Bool.self, forKey: .muteAudio) ?? false
         physicalPixelLayout = try c.decodeIfPresent(Bool.self, forKey: .physicalPixelLayout) ?? false
         useEphemeralStorage = try c.decodeIfPresent(Bool.self, forKey: .useEphemeralStorage) ?? false
-        // Clamp persisted budget into a sane range so a corrupted defaults
-        // file can't drive an unbounded retry loop.
         let decodedRetries = try c.decodeIfPresent(Int.self, forKey: .maxRetries) ?? 3
         maxRetries = min(max(0, decodedRetries), 10)
     }

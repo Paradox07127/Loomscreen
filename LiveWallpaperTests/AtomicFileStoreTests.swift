@@ -44,7 +44,6 @@ struct AtomicFileStoreTests {
         try store.write(TestValue(label: "good", count: 100))
         try store.write(TestValue(label: "newer", count: 200))
 
-        // Simulate disk corruption on the primary file (zero-byte / garbage).
         try Data([0xFF, 0xFE]).write(to: fileURL)
 
         let recovered = store.read()
@@ -98,7 +97,6 @@ struct AtomicFileStoreTests {
     func writeFailsOnUnwritableParent() throws {
         let directory = try makeTempDirectory()
         defer {
-            // Restore writability so cleanup succeeds.
             try? FileManager.default.setAttributes(
                 [.posixPermissions: NSNumber(value: Int16(0o700))],
                 ofItemAtPath: directory.path(percentEncoded: false)
@@ -120,7 +118,6 @@ struct AtomicFileStoreTests {
             try store.write(TestValue(label: "x", count: 1))
             Issue.record("Expected StoreError.writeFailed on read-only parent directory")
         } catch is AtomicFileStore<TestValue>.StoreError {
-            // Expected.
         }
     }
 
@@ -130,8 +127,6 @@ struct AtomicFileStoreTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let fileURL = directory.appendingPathComponent("oversized.json")
 
-        // Create a file whose declared size exceeds the cap. We can stop at
-        // the cap + 1 byte using a sparse write.
         FileManager.default.createFile(atPath: fileURL.path(percentEncoded: false), contents: nil)
         let handle = try FileHandle(forWritingTo: fileURL)
         try handle.seek(toOffset: UInt64(AtomicFileStore<TestValue>.maxReasonableFileSize) + 1)

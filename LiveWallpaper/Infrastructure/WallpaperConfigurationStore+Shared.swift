@@ -28,9 +28,7 @@ struct SettingsManagerScreenConfigurationPersistence: ScreenConfigurationPersist
 }
 
 extension WallpaperConfigurationStore {
-    /// Production convenience constructor. Drops the SettingsManager wiring
-    /// into the Core store so existing call sites
-    /// (`WallpaperConfigurationStore()`) keep working unchanged.
+    /// Production convenience constructor.
     convenience init() {
         self.init(persistence: SettingsManagerScreenConfigurationPersistence())
     }

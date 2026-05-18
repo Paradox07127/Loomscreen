@@ -14,7 +14,6 @@ enum SchedulePolicy {
 
     /// Decide whether to apply a slot, restore primary, or do nothing.
     static func decision(for configuration: ScreenConfiguration, hour: Int) -> Decision {
-        // Only schedule mode may restore or replace the active bookmark.
         guard configuration.wallpaperMode == .schedule,
               let slots = configuration.scheduleSlots, !slots.isEmpty else {
             return .none
@@ -30,8 +29,6 @@ enum SchedulePolicy {
             return .applySlot(slot: slot, bookmarkData: bookmark)
         }
 
-        // No active slot. If we're CURRENTLY playing a scheduled-slot bookmark,
-        // the slot window has ended — fall back to primary.
         if let activeBookmark,
            slots.contains(where: { $0.videoBookmarkData == activeBookmark }),
            let primary = configuration.savedVideoBookmarkData,
@@ -42,7 +39,7 @@ enum SchedulePolicy {
         return .none
     }
 
-    /// Legacy helper kept for backward compatibility. Prefer `decision(for:hour:)`.
+    /// Legacy helper kept for backward compatibility.
     static func scheduledBookmark(
         in configuration: ScreenConfiguration,
         hour: Int
@@ -56,7 +53,6 @@ enum SchedulePolicy {
     // MARK: - Conflict Detection
 
     /// IDs of slots overlapping the given slot (excluding itself).
-    /// Midnight-wrapping slots are decomposed into 1-2 non-wrapping ranges first.
     static func conflicts(slot: ScheduleSlot, against others: [ScheduleSlot]) -> Set<UUID> {
         let ours = hourRanges(for: slot)
         guard !ours.isEmpty else { return [] }
@@ -75,7 +71,6 @@ enum SchedulePolicy {
     }
 
     /// Decompose a slot into `[start, end)` half-open ranges within 0-24.
-    /// Returns 2 ranges when wrapping past midnight; empty when `start == end`.
     static func hourRanges(for slot: ScheduleSlot) -> [Range<Int>] {
         let s = clampHour(slot.startHour)
         let e = clampHour(slot.endHour)
@@ -85,7 +80,6 @@ enum SchedulePolicy {
     }
 
     /// Longest contiguous free range outside `slots`, at least `minHours` long.
-    /// Used by Add Slot to auto-pick a non-conflicting window.
     static func findFreeRange(in slots: [ScheduleSlot], minHours: Int = 2) -> (start: Int, end: Int)? {
         var occupied = Array(repeating: false, count: 24)
         for slot in slots {

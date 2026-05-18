@@ -17,7 +17,6 @@ enum DesktopPictureFrameExtractor {
         imageGenerator.requestedTimeToleranceAfter = CMTime(seconds: 1, preferredTimescale: 600)
 
         let currentTime = player.currentTime()
-        // Local generator is handed to one task and never touched again here.
         nonisolated(unsafe) let generator = imageGenerator
 
         Task {

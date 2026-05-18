@@ -173,8 +173,7 @@ struct WPECacheManagementView: View {
         NotificationCenter.default.post(name: .wpeHistoryDidChange, object: nil)
     }
 
-    /// Surface the unified Liquid Glass confirmation so users see exactly which
-    /// entries (count + total size) are about to be removed before bulk purging.
+    /// Surface the unified Liquid Glass confirmation so users see exactly which entries (count + total size) are about to be removed before bulk purging.
     private func confirmPurgeOlderThan(days: Int) {
         let cutoff = Date().addingTimeInterval(TimeInterval(-days * 86_400))
         let candidates = (stats?.entries ?? []).filter { ($0.lastUsed ?? .distantPast) <= cutoff }
@@ -187,8 +186,7 @@ struct WPECacheManagementView: View {
         }
     }
 
-    /// Bulk-clear confirmation showing the current cache footprint so users
-    /// can see what they're freeing.
+    /// Bulk-clear confirmation showing the current cache footprint so users can see what they're freeing.
     private func confirmClearAll() {
         let entries = stats?.entries ?? []
         let totalBytes = entries.reduce(UInt64(0)) { $0 + $1.sizeBytes }
@@ -200,8 +198,7 @@ struct WPECacheManagementView: View {
         }
     }
 
-    /// Single-entry purge confirmation that resolves the workshop ID to its
-    /// display title so the destructive sheet matches what's visible in the list.
+    /// Single-entry purge confirmation that resolves the workshop ID to its display title so the destructive sheet matches what's visible in the list.
     private func confirmPurge(entry: WPECacheStats.Entry) {
         let workshopID = entry.workshopID
         pendingDestructive = PendingDestructive(
@@ -214,7 +211,7 @@ struct WPECacheManagementView: View {
     // MARK: - Helpers
 
     private var isOversized: Bool {
-        (stats?.totalBytes ?? 0) > 1_073_741_824 // 1 GiB
+        (stats?.totalBytes ?? 0) > 1_073_741_824
     }
 
     private func displayTitle(for workshopID: String) -> String {

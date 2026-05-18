@@ -7,8 +7,7 @@ import Foundation
 /// SKU-scoped pair behind the same call site through dependency injection.
 @MainActor
 extension ConfigurationPorter {
-    /// Snapshots the current state into a `ConfigurationBundle`. Reads run
-    /// through `SettingsManager` so caches stay consistent.
+    /// Snapshots the current state into a `ConfigurationBundle`.
     static func currentBundle() -> ConfigurationBundle {
         let manager = SettingsManager.shared
         return ConfigurationBundle(
@@ -18,16 +17,13 @@ extension ConfigurationPorter {
         )
     }
 
-    /// Writes the current state to `destination` atomically. Returns the
-    /// URL on success. The caller is responsible for security-scoped
-    /// resource access if `destination` was returned by `NSSavePanel`.
+    /// Writes the current state to `destination` atomically.
     @discardableResult
     static func export(to destination: URL) throws -> URL {
         try ConfigurationPorter.export(currentBundle(), to: destination)
     }
 
     /// Applies a decoded bundle through SettingsManager + BookmarkStore.shared.
-    /// Each section is independently optional so partial exports work.
     @discardableResult
     static func apply(_ bundle: ConfigurationBundle) -> ApplySummary {
         let manager = SettingsManager.shared

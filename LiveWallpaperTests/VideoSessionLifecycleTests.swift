@@ -77,21 +77,18 @@ struct VideoSessionLifecycleTests {
             pauseOnFullScreen: true
         )
 
-        // Battery alone triggers pause.
         #expect(WallpaperPolicyEngine.shouldStartVideoPaused(
             globalSettings: settings,
             powerSource: .battery(level: 0.5),
             isHiddenByFullScreen: false
         ))
 
-        // Full-screen alone (with external power) also triggers pause.
         #expect(WallpaperPolicyEngine.shouldStartVideoPaused(
             globalSettings: settings,
             powerSource: .external,
             isHiddenByFullScreen: true
         ))
 
-        // Neither condition active → play.
         #expect(!WallpaperPolicyEngine.shouldStartVideoPaused(
             globalSettings: settings,
             powerSource: .external,
@@ -191,15 +188,10 @@ struct VideoSessionLifecycleTests {
             displayRegistry: FakeDisplayRegistry(screens: [screen])
         ))
 
-        // Subscription was wired during init; baseline read happened at least once.
         let baselineReadCount = powerMonitor.currentPowerSourceReadCount
         powerMonitor.send(.battery(level: 0.10))
-        // Allow the Combine sink to fire on the next main-queue tick.
         try await Task.sleep(for: .milliseconds(20))
 
-        // Switching power sources must drive a fresh read on the injected
-        // monitor (handlePowerStateChange queries `powerSource` to make
-        // performance-policy decisions).
         #expect(powerMonitor.currentPowerSourceReadCount >= baselineReadCount)
     }
 }

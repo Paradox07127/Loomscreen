@@ -45,13 +45,6 @@ struct WPEPreviewView: View {
                 }
             }
         }
-        // 1:1 matches Wallpaper Engine editor's "Generate preview" default
-        // (512×512). Combined with `.resizeAspectFill` inside the layer, the
-        // image fully covers the slot — square sources draw flush, 16:9
-        // sources crop top/bottom equally, vertical sources crop sides.
-        //
-        // Clipping + shadow are intentionally delegated to the parent so
-        // cards can apply uneven (top-only) corner radii without double-clip.
         .aspectRatio(1, contentMode: .fit)
         .clipped()
         .onChange(of: imageURL) { _, _ in
@@ -96,7 +89,7 @@ private enum WPEPreviewDataCache {
     nonisolated(unsafe) static let shared: NSCache<NSURL, NSData> = {
         let cache = NSCache<NSURL, NSData>()
         cache.countLimit = 256
-        cache.totalCostLimit = 64 * 1024 * 1024 // 64 MiB
+        cache.totalCostLimit = 64 * 1024 * 1024
         return cache
     }()
 }
@@ -132,8 +125,6 @@ private struct AspectFillImage: NSViewRepresentable {
         context.coordinator.lastAttempt = loadAttempt
         context.coordinator.cancelInflight()
 
-        // Fast-path: serve cached bytes synchronously on main; still no disk
-        // I/O so the UI thread stays responsive even on cold scroll.
         if let cached = WPEPreviewDataCache.shared.object(forKey: url as NSURL) {
             let ok = nsView.setImage(data: cached as Data)
             onLoadResult(ok)
@@ -144,9 +135,6 @@ private struct AspectFillImage: NSViewRepresentable {
         let coordinator = context.coordinator
         let resultHandler = onLoadResult
         let task = Task { @MainActor in
-            // Heavy I/O runs in a nested userInitiated detached task; here we
-            // just await the bytes on main and apply them. Cancellation flips
-            // before any layer mutation so a stale load can't stomp a fresh one.
             let data = await Self.loadData(url: url, bookmarkData: bookmarkData)
             guard !Task.isCancelled, coordinator.currentURL == url else { return }
             if let data {
@@ -161,10 +149,7 @@ private struct AspectFillImage: NSViewRepresentable {
         coordinator.inflightTask = task
     }
 
-    /// Reads the image off the main thread. Security-scoped bookmarks have to
-    /// be resolved on the calling thread because `startAccessingSecurityScopedResource`
-    /// pairs with the URL; we keep that paired here so the bookmark scope is
-    /// released the instant the read completes.
+    /// Reads the image off the main thread.
     private static func loadData(url: URL, bookmarkData: Data?) async -> Data? {
         await Task.detached(priority: .userInitiated) {
             var scopedURL: URL?
@@ -284,9 +269,6 @@ private final class AspectFillAnimatedImageView: NSView {
         let delay = frameDelays.indices.contains(currentFrameIndex)
             ? frameDelays[currentFrameIndex]
             : 0.1
-        // Timer fires on the main run loop because we're already on it when
-        // scheduling — `assumeIsolated` skips the unnecessary main-actor hop
-        // and silences the Swift 6 cross-isolation warning.
         animationTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.advanceFrame()
@@ -308,7 +290,6 @@ private final class AspectFillAnimatedImageView: NSView {
             guard let props = CGImageSourceCopyPropertiesAtIndex(source, idx, nil) as? [String: Any] else {
                 return 0.1
             }
-            // GIF
             if let gif = props[kCGImagePropertyGIFDictionary as String] as? [String: Any] {
                 if let unclamped = (gif[kCGImagePropertyGIFUnclampedDelayTime as String] as? NSNumber)?.doubleValue, unclamped > 0 {
                     return max(unclamped, 0.02)
@@ -317,7 +298,6 @@ private final class AspectFillAnimatedImageView: NSView {
                     return max(delay, 0.02)
                 }
             }
-            // APNG
             if let png = props[kCGImagePropertyPNGDictionary as String] as? [String: Any] {
                 if let delay = (png[kCGImagePropertyAPNGUnclampedDelayTime as String] as? NSNumber)?.doubleValue, delay > 0 {
                     return max(delay, 0.02)

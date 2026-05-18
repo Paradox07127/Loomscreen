@@ -33,10 +33,6 @@ struct MenuBarContent: View {
     }
 
     var body: some View {
-        // Wrap each body evaluation with an OSSignpost interval so the
-        // "first few clicks don't respond" symptom can be traced in
-        // Instruments → System Trace, filtered by subsystem
-        // `com.taijia.LiveWallpaper` + category `MenuBar`.
         let id = Self.signposter.makeSignpostID()
         let interval = Self.signposter.beginInterval("MenuBarBody", id: id)
         defer { Self.signposter.endInterval("MenuBarBody", interval) }
@@ -60,9 +56,6 @@ struct MenuBarContent: View {
             Logger.debug("MenuBar popover appeared", category: .startup)
         }
         .onReceive(NotificationCenter.default.publisher(for: .menuBarDensityDidChange)) { _ in
-            // Defer the @State write so a density-change notification
-            // arriving during the popover's reconcile doesn't cause
-            // "Modifying state during view update".
             Task { @MainActor in
                 density = SettingsManager.shared.loadGlobalSettings().menuBarDensity
             }
@@ -93,10 +86,6 @@ struct MenuBarContent: View {
             Toggle("", isOn: Binding(
                 get: { isWallpaperEnabled },
                 set: { enabled in
-                    // Equality guard (CLAUDE.md §8): the custom ZStack toggle
-                    // can replay the current value during animation; an
-                    // unconditional setter would re-enter `setWallpapersEnabled`
-                    // and the persistence chain it triggers.
                     guard enabled != isWallpaperEnabled else { return }
                     Logger.debug("MenuBar action: master switch \(enabled ? "on" : "off")", category: .startup)
                     screenManager.setWallpapersEnabled(enabled)
@@ -105,10 +94,6 @@ struct MenuBarContent: View {
             .toggleStyle(InlineLabelSwitchStyle())
             .labelsHidden()
             .disabled(isWallpaperSwitchDisabled)
-            // The custom toggle style draws "On"/"Off" inside the track as
-            // a visual cue, not a label — collapse the children so VoiceOver
-            // reads it as a single switch element with the value we set
-            // explicitly below, not a button containing the literal text.
             .accessibilityElement(children: .ignore)
             .help(Text("LiveWallpaper system on/off — keeps the app running in the background"))
             .accessibilityLabel(Text("LiveWallpaper system"))
@@ -242,9 +227,6 @@ struct MenuBarContent: View {
         attributed.foregroundColor = Color.primary
 
         if !source.isEmpty {
-            // Separator approximates `.tertiary` foreground style — AttributedString
-            // cannot bind to a HierarchicalShapeStyle directly, so reduce opacity
-            // on top of `.secondary` to mimic the visual weight.
             var separator = AttributedString(" · ")
             separator.foregroundColor = Color.secondary.opacity(0.65)
             attributed.append(separator)
@@ -342,18 +324,7 @@ struct MenuBarContent: View {
         return 1 + (config.playlistBookmarks ?? []).count > 1
     }
 
-    /// Effective-audio binding: stays in sync with the inspector's audio
-    /// row (which keeps `muted` and `videoVolume` as separate states).
-    /// The menubar slider treats audio as a single continuous control:
-    ///
-    ///   - reading  → 0 when muted, otherwise the stored volume
-    ///   - writing 0   → mute on (volume is left intact so unmuting later
-    ///                   restores the prior level)
-    ///   - writing >0  → unmute (if needed) and set the volume
-    ///
-    /// This keeps the two surfaces visually consistent even though they
-    /// use different gesture semantics (preview side has a 10% mute
-    /// dead-zone; menubar is a simple 0…1 ramp).
+    /// Effective-audio binding: stays in sync with the inspector's audio row (which keeps `muted` and `videoVolume` as separate states).
     private func videoVolumeBinding(for screen: Screen) -> Binding<Double>? {
         guard let config = screenManager.getConfiguration(for: screen),
               config.wallpaperType == .video,
@@ -417,9 +388,6 @@ struct MenuBarContent: View {
     }
 
     private func usageColor(for percent: Double) -> Color {
-        // Traffic-light scheme: green when the system is comfortable, orange
-        // as soon as a resource crosses half its budget, red past the 80%
-        // critical band where users typically start noticing pressure.
         if percent >= 80 { return .red }
         if percent >= 50 { return .orange }
         return .green
@@ -461,9 +429,6 @@ private enum MenuBarControlCenterMetrics {
                 rowPaddingVertical: rowPaddingVertical
             )
         case .compact:
-            // Trim padding ≈ 35% so 3+ displays + power controls fit on a
-            // single 1080p external panel without scrolling. Width unchanged
-            // so the header / titles still read cleanly.
             return Resolved(
                 popoverWidth: popoverWidth,
                 outerPadding: 8,
@@ -631,15 +596,6 @@ private struct MenuBarDisplayRow: View {
     var body: some View {
         VStack(spacing: 7) {
             HStack(spacing: 8) {
-                // Whole-card click target: any tap on the icon, title, subtitle,
-                // or the empty space between them jumps to the display's
-                // Settings page. The trailing control buttons (and the volume
-                // slider below) stay independent gesture targets.
-                //
-                // State is conveyed entirely by the leading `DisplayIconTile`
-                // (color + glyph shape) — the standalone status chip was dropped
-                // because the icon tint already carries the same information
-                // and a chip duplicates it for every screen.
                 Button(action: openAction) {
                     HStack(spacing: 8) {
                         DisplayIconTile(systemImage: iconName, state: visualState)
@@ -664,12 +620,6 @@ private struct MenuBarDisplayRow: View {
                 .accessibilityLabel(Text("\(title), \(subtitleAccessibilityText), \(visualState.accessibilityLabel)"))
                 .accessibilityElement(children: .combine)
 
-                // Show only the controls the wallpaper can actually drive:
-                //   • single video / web → just play-pause
-                //   • video playlist → prev / play-pause / next
-                //   • non-playable (scene-still, unsupported) → no buttons at all
-                // Beats greying out disabled buttons — fewer visible slots,
-                // less cognitive noise per row.
                 if supportsPlayback {
                     HStack(spacing: 4) {
                         if canStepPlaylist {
@@ -709,8 +659,6 @@ private struct MenuBarDisplayRow: View {
         .padding(.horizontal, metrics.rowPaddingHorizontal)
         .padding(.vertical, metrics.rowPaddingVertical)
         .frame(maxWidth: .infinity)
-        // No tint — let the system render its native edge highlight + interior
-        // refraction. Tinting forced opaque gray bands that read as flat cards.
         .adaptiveGlassSurface(.roundedRectangle(12), interactive: true)
     }
 }
@@ -722,8 +670,6 @@ private struct DisplayIconTile: View {
     var body: some View {
         Image(systemName: systemImage)
             .font(.system(size: 11, weight: .semibold))
-            // State color rides on the glyph only — the surrounding glass tile
-            // stays neutral so we don't bring back the color-block surfaces.
             .foregroundStyle(state.tint)
             .frame(width: 26, height: 26)
             .adaptiveGlassSurface(.roundedRectangle(8))
@@ -769,9 +715,6 @@ private struct VolumeControlRow: View {
         .frame(maxWidth: .infinity)
         .onAppear { liveValue = videoVolume.wrappedValue }
         .onChange(of: videoVolume.wrappedValue) { _, newValue in
-            // Only adopt external writes — `abs(diff) > epsilon` skips the
-            // self-echo from our own setter so a drag isn't pulled back to
-            // the round-tripped value mid-gesture.
             if abs(liveValue - newValue) > 0.001 {
                 liveValue = newValue
             }
@@ -812,10 +755,6 @@ private struct IconControlButton: View {
     var isProminent: Bool = false
 
     var body: some View {
-        // The prominent / regular branch is decided once per row (play vs
-        // prev/next). On macOS 26 each gets Apple's polished Liquid Glass
-        // edge highlight + press squish; on 14/15 it falls back to
-        // `.bordered` / `.borderedProminent` capsule via the adaptive layer.
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 11, weight: .bold))
@@ -902,9 +841,6 @@ private struct MenuBarFooterUtility: View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 13, weight: .semibold))
-                // Glyph still carries the role (red = destructive). The
-                // glass surface itself stays neutral — Apple's destructive
-                // intent should come from the icon, not a colored surface.
                 .foregroundStyle(role == .destructiveGlyph ? Color.red : Color.primary)
         }
         .adaptiveGlassButton(.regular)
@@ -955,10 +891,6 @@ private struct MenuBarWindowChromeClearer: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
-        // The accessor view may attach to its NSWindow late — the first
-        // `makeNSView` callback can fire before `view.window` is set.
-        // Re-apply on every update so the cleared chrome survives a
-        // popover that opens fresh after a density change or a relaunch.
         DispatchQueue.main.async { Self.stripChrome(anchoredAt: nsView) }
     }
 
@@ -974,9 +906,6 @@ private struct MenuBarWindowChromeClearer: NSViewRepresentable {
 
     private static func hideVisualEffectViews(in view: NSView) {
         if let vfx = view as? NSVisualEffectView {
-            // `isHidden` removes the view from rendering without unhooking
-            // it from the view hierarchy, so AppKit's popover bookkeeping
-            // (focus, dismissal on click-outside) stays intact.
             vfx.isHidden = true
         }
         for subview in view.subviews {

@@ -53,8 +53,6 @@ struct SKURoundTripTests {
         #expect(firstDecode.playlistBookmarks == [Data([0x02]), Data([0x03])])
         #expect(firstDecode.scheduleSlots == [scheduleSlot])
 
-        // Encode again to simulate Lite reading + persisting the blob, then
-        // verify a Pro launch can re-decode every Pro-only field.
         let reEncoded = try JSONEncoder().encode(firstDecode)
         let secondDecode = try JSONDecoder().decode(ScreenConfiguration.self, from: reEncoded)
         #expect(secondDecode.activeWallpaper == .scene(descriptor))
@@ -122,7 +120,6 @@ struct SKURoundTripTests {
         #expect(firstDecode.globalPauseOnBattery == true)
         #expect(firstDecode.pauseOnFullScreen == false)
 
-        // Lite-side re-encode must keep the Pro history intact.
         let reEncoded = try JSONEncoder().encode(firstDecode)
         let secondDecode = try JSONDecoder().decode(GlobalSettings.self, from: reEncoded)
         #expect(secondDecode.recentWPEImports.first?.origin == origin)

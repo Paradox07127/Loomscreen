@@ -40,10 +40,7 @@ final class WPESoundRuntime: @unchecked Sendable {
     init(resolver: WPEMultiRootResourceResolver) {
         self.resolver = resolver
         let log2n = vDSP_Length(log2(Double(Self.fftSize)))
-        // FFT setup may fail on very old devices; we degrade to silence.
         self.fftSetup = vDSP.FFT(log2n: log2n, radix: .radix2, ofType: DSPSplitComplex.self)
-        // Hann window dampens spectral leakage from the rectangular
-        // window the tap delivers.
         var w = [Float](repeating: 0, count: Self.fftSize)
         vDSP_hann_window(&w, vDSP_Length(Self.fftSize), Int32(vDSP_HANN_NORM))
         self.window = w
@@ -51,9 +48,7 @@ final class WPESoundRuntime: @unchecked Sendable {
         self.imagBuffer = [Float](repeating: 0, count: Self.fftSize / 2)
     }
 
-    /// Boot the engine. Returns the count of successfully-attached
-    /// players; zero means no audio plays but the renderer can keep
-    /// reading silence from `currentSpectrum`.
+    /// Boot the engine.
     func start(sounds: [WPESceneSoundObject]) -> Int {
         let mainMixer = engine.mainMixerNode
         let outputFormat = mainMixer.outputFormat(forBus: 0)
@@ -73,21 +68,14 @@ final class WPESoundRuntime: @unchecked Sendable {
                 engine.attach(player)
                 engine.connect(player, to: mainMixer, format: file.processingFormat)
                 player.volume = Float(sound.volume)
-                // Loop the buffer indefinitely; multi-file playback
-                // modes (random/playlist) get their first file looped
-                // for now — the runtime can grow shuffle/queue later.
                 player.scheduleBuffer(buffer, at: nil, options: [.loops], completionHandler: nil)
                 players.append(player)
                 buffers.append(buffer)
                 attached += 1
-                break  // one file per sound object — playlist mode is future work
+                break
             }
         }
 
-        // Install the FFT tap on the main mixer's output regardless of
-        // whether any player attached. With zero players the tap reads
-        // silence and the spectrum stays at zero — same effect as the
-        // pre-runtime default but with the path validated end-to-end.
         let bufferSize = AVAudioFrameCount(Self.fftSize)
         mainMixer.installTap(onBus: 0, bufferSize: bufferSize, format: outputFormat) { [weak self] buffer, _ in
             self?.processTap(buffer: buffer)
@@ -130,8 +118,6 @@ final class WPESoundRuntime: @unchecked Sendable {
         let frameLength = Int(buffer.frameLength)
         guard frameLength >= Self.fftSize else { return }
 
-        // Mix down to mono so a single FFT covers the whole signal —
-        // matches the WPE convention of one spectrum per scene.
         var mono = [Float](repeating: 0, count: Self.fftSize)
         let channelCount = Int(buffer.format.channelCount)
         for ch in 0..<channelCount {
@@ -145,12 +131,8 @@ final class WPESoundRuntime: @unchecked Sendable {
             for i in 0..<Self.fftSize { mono[i] *= inv }
         }
 
-        // Apply Hann window in-place.
         vDSP.multiply(mono, window, result: &mono)
 
-        // Convert real samples to a split-complex layout that vDSP's
-        // half-spectrum FFT consumes. Each (real, imag) pair packs two
-        // adjacent samples; the result holds N/2 complex bins.
         var real = realBuffer
         var imag = imagBuffer
         mono.withUnsafeBufferPointer { monoBuf in
@@ -160,7 +142,6 @@ final class WPESoundRuntime: @unchecked Sendable {
                         var split = DSPSplitComplex(realp: rBuf.baseAddress!, imagp: iBuf.baseAddress!)
                         vDSP_ctoz(complexPointer, 2, &split, 1, vDSP_Length(Self.fftSize / 2))
                         fftSetup.forward(input: split, output: &split)
-                        // Magnitude per bin.
                         var magnitudes = [Float](repeating: 0, count: Self.fftSize / 2)
                         vDSP.absolute(split, result: &magnitudes)
                         publishSpectrum(magnitudes: magnitudes)
@@ -170,9 +151,7 @@ final class WPESoundRuntime: @unchecked Sendable {
         }
     }
 
-    /// Compress the half-spectrum into 64 perceptual bins by averaging
-    /// adjacent values, then normalize to 0…1 on a log scale so the
-    /// range matches what audio-reactive shaders expect.
+    /// Compress the half-spectrum into 64 perceptual bins by averaging adjacent values, then normalize to 0…1 on a log scale so the range matches what audio-reactive shaders expect.
     private func publishSpectrum(magnitudes: [Float]) {
         let inputBins = magnitudes.count
         let groupSize = max(1, inputBins / Self.binCount)
@@ -184,7 +163,6 @@ final class WPESoundRuntime: @unchecked Sendable {
             var sum: Float = 0
             for j in start..<end { sum += magnitudes[j] }
             let mean = sum / Float(end - start)
-            // Log-scale: 60 dB dynamic range, mapped to 0…1.
             let normalized = max(0, min(Double(log10(max(mean, 1e-6)) / 6.0 + 1.0), 1.0))
             spectrum[i] = normalized
         }

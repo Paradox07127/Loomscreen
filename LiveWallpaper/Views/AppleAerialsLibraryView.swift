@@ -172,7 +172,6 @@ struct AppleAerialsLibraryView: View {
         let displays = screenManager.screens
         guard !displays.isEmpty else { return }
 
-        // Refresh releases the directory scope; use the file bookmark here.
         guard let scopedURL = resolveScopedURL(asset.bookmarkData) else {
             Logger.error("Failed to resolve aerial bookmark; user may need to reconnect", category: .fileAccess)
             return
