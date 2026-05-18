@@ -97,8 +97,7 @@ struct CommonPlaybackInspector: View {
         return SettingRow(
             icon: isMuted ? "speaker.slash" : "speaker.wave.2",
             iconColor: isMuted ? .secondary : .blue,
-            title: "Audio",
-            info: "Audio is muted by default. The first part of the slider is a mute dead zone — drag past it to engage audio so a tiny accidental move can't leak a quiet level."
+            title: "Audio"
         ) {
             HStack(spacing: 8) {
                 Slider(value: unifiedAudioBinding, in: 0...1)
@@ -120,8 +119,7 @@ struct CommonPlaybackInspector: View {
         SettingRow(
             icon: "gauge.with.dots.needle.bottom.50percent",
             iconColor: .blue,
-            title: "Frame Rate",
-            info: "Caps the wallpaper's render rate. Lower values trade smoothness for less CPU/GPU and energy use."
+            title: "Frame Rate"
         ) {
             Picker("", selection: frameRateBinding) {
                 ForEach(FrameRateLimit.allCases) { limit in
@@ -140,7 +138,6 @@ struct CommonPlaybackInspector: View {
             icon: "rectangle.on.rectangle",
             iconColor: videoDisplayMode == .spanAllDisplays ? .blue : .secondary,
             title: "Display Layout",
-            subtitle: videoDisplayMode.descriptionKey,
             info: "Span uses all connected displays as one virtual video canvas; Per Display gives each screen its own video."
         ) {
             Picker("", selection: videoDisplayModeBinding) {
@@ -183,9 +180,6 @@ struct CommonPlaybackInspector: View {
             icon: "archivebox",
             iconColor: .purple,
             title: "Clear Data on Exit",
-            subtitle: htmlConfig.wrappedValue.useEphemeralStorage
-                ? LocalizedStringKey("Browsing data is cleared on each session")
-                : LocalizedStringKey("Browsing data is saved across sessions"),
             info: "When on, the wallpaper's WKWebView starts fresh each session — cookies, localStorage, and cache are not persisted."
         ) {
             Toggle("", isOn: htmlConfigBinding(htmlConfig, keyPath: \.useEphemeralStorage))
@@ -200,8 +194,7 @@ struct CommonPlaybackInspector: View {
         SettingRow(
             icon: "shield",
             iconColor: .red,
-            title: "Block Trackers",
-            info: "Filters common analytics and ad scripts before they reach the wallpaper renderer."
+            title: "Block Trackers"
         ) {
             Toggle("", isOn: htmlConfigBinding(htmlConfig, keyPath: \.blockTrackers))
                 .labelsHidden()

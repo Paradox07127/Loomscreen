@@ -355,8 +355,7 @@ struct HTMLOptionsInspector: View {
         SettingRow(
             icon: "curlybraces",
             iconColor: .orange,
-            title: "JavaScript",
-            info: "Lets the wallpaper page run JavaScript. Turn off for static HTML or untrusted remote pages."
+            title: "JavaScript"
         ) {
             Toggle("", isOn: Binding(
                 get: { config.allowJavaScript },
@@ -377,9 +376,7 @@ struct HTMLOptionsInspector: View {
             icon: "cursorarrow.click",
             iconColor: .blue,
             title: "Mouse Interaction",
-            subtitle: config.allowMouseInteraction
-                ? "Clicks and scrolls reach the wallpaper. Desktop icons are hidden while this is on."
-                : "Clicks fall through to the desktop, so Finder icons and the Dock stay usable."
+            info: "When on, clicks and scrolls reach the wallpaper but desktop icons and the Dock become unclickable. Off lets you use Finder normally."
         ) {
             Toggle("", isOn: Binding(
                 get: { config.allowMouseInteraction },
@@ -423,10 +420,7 @@ struct HTMLOptionsInspector: View {
         SettingRow(
             icon: "paintbrush",
             iconColor: .pink,
-            title: "Custom CSS",
-            subtitle: (config.customCSS?.isEmpty == false)
-                ? "Applied — open to review or edit."
-                : "Inject site-specific styles after the page loads."
+            title: "Custom CSS"
         ) {
             Button {
                 customCSSPresented = true
