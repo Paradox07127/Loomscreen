@@ -491,7 +491,12 @@ struct ScreenDetailView: View {
                                         isExpanded: $isEnvironmentExpanded
                                     ) {
                                         VStack(spacing: 8) {
-                                            SettingRow(icon: "sparkles", iconColor: .purple, title: "Particles") {
+                                            SettingRow(
+                                                icon: "sparkles",
+                                                iconColor: .purple,
+                                                title: "Particles",
+                                                info: "Overlays a particle layer (rain, snow, fireflies, …) on top of the wallpaper."
+                                            ) {
                                                 Picker("", selection: particleEffectBinding) {
                                                     ForEach(ParticleEffect.allCases) { effect in
                                                         Text(effect.titleKey).tag(effect)
@@ -501,8 +506,6 @@ struct ScreenDetailView: View {
                                                 .frame(width: 86)
                                                 .accessibilityLabel(Text("Particle effect"))
                                                 .accessibilityValue(Text(selectedParticleEffect.titleKey))
-                                                .accessibilityHint(Text("Choose a particle overlay effect"))
-                                                .help(Text("Overlay particle effects on the wallpaper"))
                                             }
 
                                             if selectedParticleEffect != .none {
@@ -523,13 +526,16 @@ struct ScreenDetailView: View {
 
                                             Divider()
 
-                                            SettingRow(icon: "cloud.sun", iconColor: .cyan, title: "Weather") {
+                                            SettingRow(
+                                                icon: "cloud.sun",
+                                                iconColor: .cyan,
+                                                title: "Weather",
+                                                info: "Automatically adjusts particles and color based on real-time weather conditions for the configured location."
+                                            ) {
                                                 Toggle("", isOn: weatherReactiveBinding)
                                                     .labelsHidden()
                                                     .toggleStyle(.switch)
-                                                    .help(Text("Adjust effects based on real-time weather conditions"))
                                                     .accessibilityLabel(Text("Weather-reactive effects"))
-                                                    .accessibilityHint(Text("Automatically adjust particles and color based on real-time weather"))
                                             }
 
                                             if effectConfig.weatherReactive {
