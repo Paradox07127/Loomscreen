@@ -29,8 +29,8 @@ struct ResourceUtilitiesTests {
         #expect(options.contains(.securityScopeAllowOnlyReadAccess))
     }
 
-    @Test("Sandbox entitlements allow read-only user-selected bookmarks")
-    func sandboxEntitlementsAllowReadOnlyUserSelectedBookmarks() throws {
+    @Test("Sandbox entitlements allow read-write user-selected files")
+    func sandboxEntitlementsAllowReadWriteUserSelectedFiles() throws {
         let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let projectRoot = testsDirectory.deletingLastPathComponent()
         let url = projectRoot.appendingPathComponent("LiveWallpaper/LiveWallpaper.entitlements")
@@ -40,7 +40,11 @@ struct ResourceUtilitiesTests {
         )
 
         #expect(plist["com.apple.security.files.bookmarks.app-scope"] as? Bool == true)
-        #expect(plist["com.apple.security.files.user-selected.read-only"] as? Bool == true)
+        // read-write is required so `.fileExporter` (configuration backup) can
+        // write to a user-chosen destination; individual wallpaper bookmarks
+        // still narrow themselves to read via `securityScopeAllowOnlyReadAccess`.
+        #expect(plist["com.apple.security.files.user-selected.read-write"] as? Bool == true)
+        #expect(plist["com.apple.security.files.user-selected.read-only"] == nil)
     }
 
     @Test("Supported video URL detection accepts video files and rejects unrelated drops")

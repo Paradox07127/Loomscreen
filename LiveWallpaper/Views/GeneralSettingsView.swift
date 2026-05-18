@@ -22,8 +22,6 @@ struct GeneralSettingsView: View {
     @State private var videoCacheBudgetMB: Double
 
     @State private var pendingDestructive: PendingDestructive?
-    @State private var showingValidationResults = false
-    @State private var validationMessage = ""
 
     /// Pending import bundle: shown in a confirmation alert before applying
     /// so users can back out after seeing what's inside.
@@ -81,11 +79,6 @@ struct GeneralSettingsView: View {
         .frame(minWidth: 500, minHeight: 400)
         .background(DesignTokens.Colors.pageBackground)
         .confirmDestructive($pendingDestructive)
-        .alert("Configuration Validation", isPresented: $showingValidationResults) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(verbatim: validationMessage)
-        }
         .alert(
             "Import Configuration?",
             isPresented: Binding(
@@ -583,25 +576,7 @@ struct GeneralSettingsView: View {
              verticalSpacing: DesignTokens.Settings.actionGridSpacing) {
             GridRow {
                 settingsActionButton(
-                    title: "Validate Settings",
-                    accessibilityLabel: "Validate settings",
-                    accessibilityHint: "Checks all screen configurations for errors",
-                    systemImage: "doc.text.magnifyingglass",
-                    action: validateConfigurations
-                )
-
-                settingsActionButton(
-                    title: "Reload All Screens",
-                    accessibilityLabel: "Reload all screens",
-                    accessibilityHint: "Refreshes wallpaper playback on all connected screens",
-                    systemImage: "arrow.triangle.2.circlepath",
-                    action: { screenManager.reloadAllScreens() }
-                )
-            }
-
-            GridRow {
-                settingsActionButton(
-                    title: "Export Configuration…",
+                    title: "Export",
                     accessibilityLabel: "Export configuration",
                     accessibilityHint: "Save the current settings, bookmarks, and per-display setup to a backup file",
                     systemImage: "square.and.arrow.up",
@@ -609,7 +584,7 @@ struct GeneralSettingsView: View {
                 )
 
                 settingsActionButton(
-                    title: "Import Configuration…",
+                    title: "Import",
                     accessibilityLabel: "Import configuration",
                     accessibilityHint: "Restore settings, bookmarks, and per-display setup from a backup file",
                     systemImage: "square.and.arrow.down",
@@ -737,35 +712,6 @@ struct GeneralSettingsView: View {
         screenManager.refreshScreens(preserveRuntimeSessions: false)
     }
 
-    private func validateConfigurations() {
-        let (valid, invalid) = screenManager.validateAllConfigurations()
-
-        let connectedScreens = Set(screenManager.screens.map(\.id))
-        let allConfigurations = SettingsManager.shared.loadConfigurations()
-        let configuredScreenIDs = Set(allConfigurations.map { $0.screenID })
-
-        let disconnectedConfigs = configuredScreenIDs.subtracting(connectedScreens)
-        let disconnectedInvalid = disconnectedConfigs.count
-
-        let connectedInvalid = invalid - disconnectedInvalid
-
-        if invalid == 0 {
-            validationMessage = String(localized: "✅ All \(valid) configurations are valid.", comment: "Validation success message. The placeholder is the valid configuration count.")
-        } else {
-            validationMessage = String(localized: "Validation complete: \(valid) of \(valid + invalid) configurations are valid.\n\n", comment: "Validation summary. Placeholders are valid count and total count.")
-
-            if disconnectedInvalid > 0 {
-                validationMessage += String(localized: "• \(disconnectedInvalid) invalid configurations are for disconnected screens.\n", comment: "Validation detail. The placeholder is the invalid disconnected-screen count.")
-            }
-
-            if connectedInvalid > 0 {
-                validationMessage += String(localized: "• \(connectedInvalid) invalid configurations are for connected screens.\n", comment: "Validation detail. The placeholder is the invalid connected-screen count.")
-                validationMessage += String(localized: "\nYou may need to reconfigure these screens.", defaultValue: "\nYou may need to reconfigure these screens.", comment: "Validation follow-up guidance.")
-            }
-        }
-
-        showingValidationResults = true
-    }
 }
 
 private struct SettingsActionTileLabel: View {

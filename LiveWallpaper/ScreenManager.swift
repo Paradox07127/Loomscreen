@@ -1107,10 +1107,6 @@ final class ScreenManager {
         notifyWallpaperSessionChanged()
     }
     
-    func validateAllConfigurations() -> (valid: Int, invalid: Int) {
-        persistence.validateAll()
-    }
-    
     /// Rebuilds display registry and runtime sessions from persisted config.
     func hardRefresh() {
         Logger.notice("Hard refresh: rebuilding display registry + runtime sessions", category: .screenManager)
