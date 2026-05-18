@@ -22,11 +22,6 @@ let package = Package(
             swiftSettings: [
                 .swiftLanguageMode(.v6)
             ]
-        ),
-        .testTarget(
-            name: "LiveWallpaperProFeaturesTests",
-            dependencies: ["LiveWallpaperProFeatures"],
-            path: "Tests/LiveWallpaperProFeaturesTests"
         )
     ]
 )

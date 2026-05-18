@@ -13,6 +13,7 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
     private var currentProfile: WallpaperPerformanceProfile = .quality
     private var isVisible = true
     private var didStartLoad = false
+    private var loadTask: Task<Void, Never>?
     private(set) var isThrottled = false
     private(set) var loadError: SceneRenderingError?
     /// Latest per-layer progress message reported by the renderer.
@@ -79,6 +80,8 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
     }
 
     func cleanup() {
+        loadTask?.cancel()
+        loadTask = nil
         renderer?.cleanup()
         renderer = nil
         window?.close()
@@ -90,15 +93,20 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
         guard !didStartLoad, let renderer else { return }
         didStartLoad = true
         installProgressHandler(on: renderer)
-        Task { @MainActor [weak self] in
+        loadTask = Task { @MainActor [weak self] in
             do {
                 try await renderer.load()
+                guard !Task.isCancelled else { return }
                 self?.loadError = nil
                 self?.loadProgress = nil
+            } catch is CancellationError {
+                return
             } catch let error as SceneRenderingError {
+                guard !Task.isCancelled else { return }
                 Logger.warning("Scene wallpaper load failed: \(error.errorDescription ?? "(no description)")", category: .screenManager)
                 self?.loadError = error
             } catch {
+                guard !Task.isCancelled else { return }
                 Logger.warning("Scene wallpaper load failed: \(error.localizedDescription)", category: .screenManager)
                 if let diagnostic = renderer.loadDiagnostics {
                     self?.loadError = .resourceFailed(diagnostic)
@@ -106,6 +114,7 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
                     self?.loadError = .parseFailed(error.localizedDescription)
                 }
             }
+            self?.loadTask = nil
         }
     }
 
@@ -119,11 +128,15 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
             loadError = .cacheRootMissing
             return
         }
+        loadTask?.cancel()
+        loadTask = nil
         installProgressHandler(on: renderer)
         do {
             try await renderer.reload()
             loadError = nil
             loadProgress = nil
+        } catch is CancellationError {
+            return
         } catch let error as SceneRenderingError {
             loadError = error
         } catch {
