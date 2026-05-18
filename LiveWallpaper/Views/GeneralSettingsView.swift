@@ -540,11 +540,6 @@ struct GeneralSettingsView: View {
                     .monospacedDigit()
             }
 
-            Text("Built with SwiftUI, Metal, and Liquid Glass")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

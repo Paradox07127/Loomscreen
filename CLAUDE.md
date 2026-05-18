@@ -10,7 +10,74 @@ not silently diverge in feature work.**
 macOS SwiftUI live-wallpaper manager. Swift 6 strict concurrency,
 macOS 14+ target. Multi-display, video / HTML / WPE scene wallpapers.
 
-## Active conventions (as of PR #50 — commit `a22a926`)
+Two SKUs share the same codebase:
+- **Pro** (`LiveWallpaper` scheme) — full feature set.
+- **Lite** (`LiveWallpaperLite` scheme, `LITE_BUILD` compile flag) — Pro
+  features compiled out via `#if !LITE_BUILD`. Lite is a **lightweight
+  runtime, not a UI castration**: video/HTML/Aerials UI fidelity must
+  match Pro. Capability gates live in
+  `Packages/LiveWallpaperCore/.../Capabilities/FeatureCatalog.swift`.
+
+Core schema and capability layer live in the `LiveWallpaperCore` SPM
+package (`Packages/LiveWallpaperCore/`). Shared UI components live in
+`LiveWallpaperSharedUI`. New leaf types should land in Core where
+practical so Lite can stay slim.
+
+## Apple platform discipline
+
+This is an Apple-platform app, not a generic codebase. Before reaching
+for custom abstractions or third-party patterns:
+
+1. **Check Apple's docs first.** SwiftUI / AVFoundation / Core Animation
+   / AppKit interop / sandbox entitlements all have official guidance.
+   Use `context7` MCP or `WebFetch` against `developer.apple.com` /
+   WWDC sessions when uncertain — your training data may not reflect
+   recent API changes.
+2. **Prefer native API over hand-rolled.** If a SwiftUI / AppKit /
+   Foundation API does the job, use it. Custom gesture / drawing /
+   threading code is justified only when the native path fails (see
+   the `PlaylistSection` drag-reorder rewrite history for an example —
+   we exhausted `.draggable` and `NSItemProvider` paths before
+   committing to manual `DragGesture`).
+3. **Sample code + community implementations are reference, not
+   prescription.** When borrowing from WWDC sample code or
+   Stack Overflow / Swift Forums threads, restate the pattern in
+   project style; don't paste verbatim.
+4. **Respect macOS version gating.** `if #available(macOS XX, *)` blocks
+   must always have a working fallback. See the AdaptiveGlass wrapper
+   for the canonical pattern.
+
+## Code style & verification discipline
+
+- **No big comment blocks.** Code self-explains; reach for a comment
+  only when *why* isn't obvious from the code (subtle invariant,
+  workaround for a framework quirk, deliberate non-obvious choice).
+  Don't pad files with section banners, restate-the-obvious headers,
+  or paragraph-length prose. The convention sections in this CLAUDE.md
+  are the place for long-form context, not source files.
+- **Tests must earn their keep.** Write tests that catch real
+  regressions — schema migrations, policy decisions, cross-actor
+  invariants, security gates. Skip tests that only re-state what the
+  type system already proves, that exercise getters / setters with no
+  branches, or that lock in an arbitrary implementation detail you
+  might want to change next week.
+- **Never edit production code just to make a test pass.** If a test
+  fails, decide whether the *behavior* is wrong or the *test* is wrong
+  before changing anything. Tests that assert the wrong thing get
+  rewritten (or deleted) — they don't drag the production model along.
+  `PlaylistEntryIdentityTests.entryIDUsesStableBookmarkEncoding` was
+  rewritten when we switched ID semantics; the right call there was to
+  update the test to match the new contract, not to keep the prefixed
+  ID format alive just to keep the test green.
+- **Localization is non-optional.** Every new user-facing English
+  string needs a `zh-Hans` translation in the same commit; the
+  `LocalizationCoverageTests` test enforces this. Don't add an
+  English-only key planning to translate later.
+
+## Active conventions
+
+§1–§9 trace back to PR #50 (commit `a22a926`); §10–§12 cover later
+schema and runtime additions.
 
 ### 1. Persistence
 
@@ -172,6 +239,60 @@ matrix. See [`docs/qa/vm-test-environment.md`](docs/qa/vm-test-environment.md)
 for the connection, shared-folder bridge, build-push, crash-log and
 debugging workflow; do not re-derive any of those paths in feature code.
 
+### 10. Playlist schema — `combinedPlaylist` + `playlistPrimaryIndex`
+
+`ScreenConfiguration` stores playlist contents as:
+- `savedVideoBookmarkData` — the primary (starred) entry's bookmark
+- `playlistBookmarks` — the rest (extras), order-preserving
+- `playlistPrimaryIndex: Int?` — primary's position in the user-visible
+  list (nil = legacy default of 0)
+
+The user-facing combined list comes from
+`ScreenConfiguration.combinedPlaylist`, which splices primary into
+extras at `playlistPrimaryIndex`. **Always go through `combinedPlaylist`**
+when computing the visible playlist order or cursor math — never reach
+for `[savedVideoBookmarkData] + playlistBookmarks` inline. Drag-reorder
+preserves primary identity (the star travels with the entry) by writing
+the new `playlistPrimaryIndex`; it is not a primary swap.
+
+### 11. Bookmark = complete plan, not just file pointer
+
+`WallpaperBookmark.playbackSettings: BookmarkPlaybackSettings?` carries
+the full playback / effect snapshot at save time (playback speed,
+fit mode, frame-rate limit, particle effect, full `VideoEffectConfig`,
+mute / volume, set-as-lock-screen). Applying a bookmark restores the
+**whole plan**, not just content.
+
+Apply order matters: `ScreenManager+Bookmarks.applyBookmark` **must**
+write the settings via the public update setters **before** triggering
+the content swap. `PlaybackCoordinator.setupVideoPlayback` reads the
+stored config at player-creation time and applies effects via
+`applyConfigurationWhenAssetReady`, so the new player must see the
+restored settings already in place. Reversing the order leaves the new
+player initialized from the prior screen's effects.
+
+Dedup is content-only (`BookmarkStore.equivalentBookmark(content:)`):
+one bookmark per source. To change a bookmark's settings, delete and
+re-save from the current screen state. Legacy bookmarks decode with
+`playbackSettings == nil` — they apply as before (content-only).
+
+### 12. Video playback — in-memory cache for sub-budget files
+
+`WallpaperVideoPlayer` switches between disk-streaming and
+`AVAssetResourceLoaderDelegate`-backed in-memory playback based on the
+per-screen budget `GlobalSettings.videoCacheMaxBytesPerScreen` (0 =
+streaming only; default 150 MB; max 1 GB). When a video fits, the file
+is loaded with `Data(contentsOf:options: .mappedIfSafe)` and served via
+the custom `lwmem://wallpaper/<filename>` scheme so AVFoundation never
+re-reads disk during loop playback.
+
+Strict `AVURLAsset` options are required for in-memory load:
+`AVURLAssetReferenceRestrictionsKey: AVAssetReferenceRestrictions.forbidAll.rawValue`,
+plus all `AllowsCellular / Expensive / ConstrainedNetworkAccessKey`
+set to `false`. The entitlements include a mach-lookup exception for
+`com.apple.audioanalyticsd` to silence the AVFoundation precondition
+failure that hits on every sandboxed `AVPlayer` init.
+
 ## Parallel-session coordination
 
 Multiple Claude sessions run on different worktrees under
@@ -203,26 +324,53 @@ explicitly** — do not silently change the pattern in feature code:
 Silent divergence between sessions costs more than a single coordination
 exchange. If you spot two sessions writing incompatible patterns, flag it.
 
-## Tests
+## Build + test gates
+
+Before opening a PR, all three must pass:
 
 ```bash
+# Pro test suite (671 tests as of this writing)
 xcodebuild -scheme LiveWallpaper -configuration Debug \
   test -destination 'platform=macOS,arch=arm64' \
   -skipPackagePluginValidation -skipMacroValidation \
   -only-testing:LiveWallpaperTests
+
+# Lite build (Pro-only sources gated by #if !LITE_BUILD)
+xcodebuild -scheme LiveWallpaperLite -configuration Debug \
+  build -destination 'platform=macOS,arch=arm64' \
+  -skipPackagePluginValidation -skipMacroValidation
 ```
 
-Must pass before opening a PR. `LocalizationCoverageTests.catalogsIncludeSimplifiedChineseTranslations`
-fails if any string-catalog key lacks a `zh-Hans` translation — when
-you add a new English string, add the zh-Hans value in the same commit.
+**Do not run the two schemes in parallel against the same DerivedData
+build database** — they collide on `XCBuildData/build.db` and one
+fails to attach. Run sequentially or in separate DerivedData paths.
+
+`LocalizationCoverageTests.catalogsIncludeSimplifiedChineseTranslations`
+fails when any string-catalog key lacks a `zh-Hans` translation — add
+the translation in the same commit that introduces the English string.
 
 ## File layout cheatsheet
 
-- `LiveWallpaper/ScreenManager.swift` — central `@Observable` facade (1300+ lines, lazy-init coordinators)
+App target (main):
+- `LiveWallpaper/ScreenManager.swift` — central `@Observable` facade, lazy-init coordinators
 - `LiveWallpaper/SettingsManager.swift` — persistence + cache facade
 - `LiveWallpaper/Infrastructure/WallpaperPersistenceActor.swift` — disk writes
 - `LiveWallpaper/Infrastructure/AtomicFileStore.swift` — generic atomic write (fsync + rotate)
 - `LiveWallpaper/Runtime/Coordinators/` — domain coordinators (Effects, Playback, HTML, WPE Import, Persistence, Automation)
+- `LiveWallpaper/Runtime/ScreenManager+Bookmarks.swift` — bookmark apply path (content + playback settings)
+- `LiveWallpaper/VideoPlayback/WallpaperVideoPlayer.swift` — AVPlayer + effects + in-memory loader
+- `LiveWallpaper/VideoPlayback/InMemoryVideoAssetLoader.swift` — `AVAssetResourceLoaderDelegate` for `lwmem://` scheme
 - `LiveWallpaper/SystemMonitor.swift` — CPU/GPU/RAM/energy/FPS
-- `LiveWallpaper/Views/` — SwiftUI views (Settings window, menu bar)
+- `LiveWallpaper/Views/` — SwiftUI views (Settings window, menu bar, screen detail)
 - `LiveWallpaper/Resources/Localizable.xcstrings` — string catalog (zh-Hans required for every entry)
+- `LiveWallpaper/LiveWallpaper.entitlements` — sandbox + mach-lookup exceptions
+
+SPM packages:
+- `Packages/LiveWallpaperCore/` — schemas, capabilities, persistence stores (no UI)
+  - `Schema/ScreenConfiguration.swift` — per-screen state including `combinedPlaylist`
+  - `Schema/WallpaperBookmark.swift` + `BookmarkPlaybackSettings.swift` — bookmark = complete plan
+  - `Capabilities/FeatureCatalog.swift` + `ProductCapabilities.swift` — Lite/Pro gating
+  - `Persistence/BookmarkStore.swift` + `WallpaperConfigurationStore.swift`
+- `Packages/LiveWallpaperSharedUI/` — adaptive components shared by Pro + Lite UI
+  - `Components/AdaptiveGlass.swift` — sole entry point for macOS 26 Liquid Glass
+  - `Components/CollapsibleSection.swift`, `ContainerGroupBoxStyle.swift`, etc.
