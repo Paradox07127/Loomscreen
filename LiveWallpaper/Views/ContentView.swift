@@ -185,6 +185,14 @@ struct Sidebar: View {
     @Environment(\.featureCatalog) private var featureCatalog
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isReloading = false
+    /// Deferred-mount gate for the Dashboard (SystemMonitorView). The
+    /// dashboard's gauge grid (4 ZStack of Circle paths + shadow + gradient
+    /// fill) is non-trivial to render on first mount, and lining its first
+    /// layout pass up with the NavigationSplitView sidebar slide animation
+    /// blows the frame budget — visible as a "smooth → halfway stall → snap"
+    /// reveal. Showing the dashboard only after the slide has settled keeps
+    /// the animation smooth without changing the steady-state UI.
+    @State private var dashboardReady = false
 
     var body: some View {
         List(selection: $selection) {
@@ -193,17 +201,9 @@ struct Sidebar: View {
                 bottomPadding: DesignTokens.Sidebar.displayHeaderBottomPadding
             ) {
                 Button(action: reloadWallpapers) {
-                    Group {
-                        if #available(macOS 15.0, *) {
-                            Image(systemName: "arrow.triangle.2.circlepath")
-                                .symbolEffect(.rotate, options: .repeat(.continuous), isActive: isReloading)
-                        } else {
-                            Image(systemName: "arrow.triangle.2.circlepath")
-                                .symbolEffect(.pulse, options: .continuouslyRepeating, isActive: isReloading)
-                        }
-                    }
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.secondary)
+                    reloadButtonIcon
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
                 .help(Text("Reload all wallpapers"))
@@ -257,7 +257,7 @@ struct Sidebar: View {
                 #endif
             }
 
-            if featureCatalog.isEnabled(.systemMonitor) {
+            if featureCatalog.isEnabled(.systemMonitor), dashboardReady {
                 Section(header: SidebarSectionHeader(title: "Dashboard", showsDivider: true) {
                     EmptyView()
                 }) {
@@ -274,6 +274,30 @@ struct Sidebar: View {
             ideal: SettingsWindowMetrics.sidebarColumnWidth,
             max: SettingsWindowMetrics.sidebarColumnMaxWidth
         )
+        .task {
+            guard !dashboardReady else { return }
+            try? await Task.sleep(for: .milliseconds(700))
+            dashboardReady = true
+        }
+    }
+
+    /// Conditionally applies the `symbolEffect` modifier so the SF Symbols
+    /// CoreAnimation infrastructure isn't attached when no animation needs
+    /// to run. Even with `isActive: false`, the modifier registers a
+    /// per-frame contributor; keeping the chain inert by default keeps the
+    /// sidebar reveal animation off that path entirely.
+    @ViewBuilder
+    private var reloadButtonIcon: some View {
+        let base = Image(systemName: "arrow.triangle.2.circlepath")
+        if isReloading {
+            if #available(macOS 15.0, *) {
+                base.symbolEffect(.rotate, options: .repeat(.continuous), isActive: true)
+            } else {
+                base.symbolEffect(.pulse, options: .continuouslyRepeating, isActive: true)
+            }
+        } else {
+            base
+        }
     }
 
     private func reloadWallpapers() {
