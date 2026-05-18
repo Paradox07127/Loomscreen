@@ -172,6 +172,151 @@ struct HTMLWallpaperViewSourceIsolationTests {
     }
 }
 
+@Suite("HTMLWallpaperView navigation policy")
+struct HTMLWallpaperNavigationPolicyTests {
+
+    private func makeReadRoot() -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LWNavPolicy-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
+    }
+
+    @Test("Remote source rejects file:// navigation")
+    func remoteSourceRejectsFileURL() {
+        let target = URL(fileURLWithPath: "/etc/passwd")
+        let decision = HTMLWallpaperView.navigationDecision(
+            for: target,
+            navigationType: .other,
+            currentURL: URL(string: "https://example.com/"),
+            allowMouseInteraction: false,
+            localReadAccessRoot: nil
+        )
+        #expect(decision == .cancel)
+    }
+
+    @Test("Inline source rejects file:// navigation")
+    func inlineSourceRejectsFileURL() {
+        let target = URL(fileURLWithPath: "/private/var/db/secret")
+        let decision = HTMLWallpaperView.navigationDecision(
+            for: target,
+            navigationType: .other,
+            currentURL: nil,
+            allowMouseInteraction: false,
+            localReadAccessRoot: nil
+        )
+        #expect(decision == .cancel)
+    }
+
+    @Test("Local file source allows sibling file inside read root")
+    func localSourceAllowsSiblingFile() {
+        let root = makeReadRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let sibling = root.appendingPathComponent("asset.css")
+        let decision = HTMLWallpaperView.navigationDecision(
+            for: sibling,
+            navigationType: .other,
+            currentURL: root.appendingPathComponent("index.html"),
+            allowMouseInteraction: false,
+            localReadAccessRoot: root
+        )
+        #expect(decision == .allow)
+    }
+
+    @Test("Local file source rejects parent traversal outside read root")
+    func localSourceRejectsParentTraversal() {
+        let root = makeReadRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let escape = root.deletingLastPathComponent().appendingPathComponent("../etc/passwd")
+        let decision = HTMLWallpaperView.navigationDecision(
+            for: escape,
+            navigationType: .other,
+            currentURL: root.appendingPathComponent("index.html"),
+            allowMouseInteraction: false,
+            localReadAccessRoot: root
+        )
+        #expect(decision == .cancel)
+    }
+
+    @Test("Folder source rejects file URL outside granted folder")
+    func folderSourceRejectsExternalFile() {
+        let root = makeReadRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let outside = URL(fileURLWithPath: "/tmp/some-other-file.png")
+        let decision = HTMLWallpaperView.navigationDecision(
+            for: outside,
+            navigationType: .other,
+            currentURL: URL(string: "livewallpaper://wallpaper/index.html?n=abc"),
+            allowMouseInteraction: false,
+            localReadAccessRoot: root
+        )
+        #expect(decision == .cancel)
+    }
+
+    @Test("Folder scheme navigation is always allowed")
+    func folderSchemeNavigationAllowed() {
+        let target = URL(string: "livewallpaper://wallpaper/sub/index.html?n=abc")!
+        let decision = HTMLWallpaperView.navigationDecision(
+            for: target,
+            navigationType: .other,
+            currentURL: target,
+            allowMouseInteraction: false,
+            localReadAccessRoot: URL(fileURLWithPath: "/tmp/wp")
+        )
+        #expect(decision == .allow)
+    }
+
+    @Test("Link activation with mouse disabled cancels everything")
+    func linkActivationCancelsWithoutMouseInteraction() {
+        let target = URL(string: "https://example.com/click")!
+        let decision = HTMLWallpaperView.navigationDecision(
+            for: target,
+            navigationType: .linkActivated,
+            currentURL: URL(string: "https://example.com/"),
+            allowMouseInteraction: false,
+            localReadAccessRoot: nil
+        )
+        #expect(decision == .cancel)
+    }
+
+    @Test("Link activation opens cross-origin remote URL externally")
+    func linkActivationOpensCrossOriginExternally() {
+        let target = URL(string: "https://other.example/")!
+        let decision = HTMLWallpaperView.navigationDecision(
+            for: target,
+            navigationType: .linkActivated,
+            currentURL: URL(string: "https://example.com/"),
+            allowMouseInteraction: true,
+            localReadAccessRoot: nil
+        )
+        #expect(decision == .openExternally(target))
+    }
+
+    @Test("Link activation on remote page rejects file:// click")
+    func linkActivationOnRemoteRejectsFile() {
+        let decision = HTMLWallpaperView.navigationDecision(
+            for: URL(fileURLWithPath: "/etc/passwd"),
+            navigationType: .linkActivated,
+            currentURL: URL(string: "https://example.com/"),
+            allowMouseInteraction: true,
+            localReadAccessRoot: nil
+        )
+        #expect(decision == .cancel)
+    }
+
+    @Test("Form submission is always cancelled")
+    func formSubmissionCancelled() {
+        let decision = HTMLWallpaperView.navigationDecision(
+            for: URL(string: "https://example.com/submit")!,
+            navigationType: .formSubmitted,
+            currentURL: URL(string: "https://example.com/"),
+            allowMouseInteraction: true,
+            localReadAccessRoot: nil
+        )
+        #expect(decision == .cancel)
+    }
+}
+
 // MARK: - Test helpers
 
 private final class FakeURLSchemeTask: NSObject, WKURLSchemeTask, @unchecked Sendable {

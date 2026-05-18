@@ -249,12 +249,13 @@ public final class SystemMonitor {
 
         if result == KERN_SUCCESS, let threadsList = threadsList {
             for index in 0..<threadsCount {
+                let thread = threadsList[Int(index)]
                 var threadInfo = thread_basic_info()
                 var threadInfoCount = mach_msg_type_number_t(THREAD_INFO_MAX)
 
                 let threadInfoResult = withUnsafeMutablePointer(to: &threadInfo) { ptr in
                     ptr.withMemoryRebound(to: integer_t.self, capacity: Int(threadInfoCount)) { intPtr in
-                        thread_info(threadsList[Int(index)], thread_flavor_t(THREAD_BASIC_INFO), intPtr, &threadInfoCount)
+                        thread_info(thread, thread_flavor_t(THREAD_BASIC_INFO), intPtr, &threadInfoCount)
                     }
                 }
 
@@ -263,6 +264,7 @@ public final class SystemMonitor {
                         totalUsageOfCPU += Double(threadInfo.cpu_usage) / Double(TH_USAGE_SCALE)
                     }
                 }
+                mach_port_deallocate(mach_task_self_, thread)
             }
             vm_deallocate(mach_task_self_, vm_address_t(UInt(bitPattern: threadsList)),
                           vm_size_t(Int(threadsCount) * MemoryLayout<thread_act_t>.stride))
@@ -352,10 +354,11 @@ public final class SystemMonitor {
         var entry: io_registry_entry_t = IOIteratorNext(iterator)
 
         while entry != 0 {
-            defer { IOObjectRelease(entry) }
+            let current = entry
+            defer { IOObjectRelease(current) }
 
             var properties: Unmanaged<CFMutableDictionary>?
-            if IORegistryEntryCreateCFProperties(entry, &properties, kCFAllocatorDefault, 0) == KERN_SUCCESS,
+            if IORegistryEntryCreateCFProperties(current, &properties, kCFAllocatorDefault, 0) == KERN_SUCCESS,
                let dict = properties?.takeRetainedValue() as? [String: Any] {
 
                 if let perfStats = dict["PerformanceStatistics"] as? [String: Any] {

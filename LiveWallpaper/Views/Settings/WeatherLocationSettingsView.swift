@@ -78,7 +78,9 @@ struct WeatherLocationSettingsView: View {
         var settings = SettingsManager.shared.loadGlobalSettings()
         settings.weatherLocation = preference
         SettingsManager.shared.saveGlobalSettings(settings)
-        NotificationCenter.default.post(name: .weatherLocationPreferenceDidChange, object: nil)
+        Task { @MainActor in
+            NotificationCenter.default.post(name: .weatherLocationPreferenceDidChange, object: nil)
+        }
     }
 }
 

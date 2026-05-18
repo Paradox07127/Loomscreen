@@ -188,9 +188,9 @@ struct GeneralSettingsView: View {
         pendingImportBundle = nil
         pendingImportSource = nil
 
-        NotificationCenter.default.post(name: .dockVisibilityDidChange, object: nil)
-        NotificationCenter.default.post(name: .globalShortcutsDidChange, object: nil)
-        NotificationCenter.default.post(name: .weatherLocationPreferenceDidChange, object: nil)
+        postSettingsNotificationAsync(.dockVisibilityDidChange)
+        postSettingsNotificationAsync(.globalShortcutsDidChange)
+        postSettingsNotificationAsync(.weatherLocationPreferenceDidChange)
         screenManager.handleGlobalSettingsChanged()
         screenManager.resetAllWallpaperSessions()
         screenManager.refreshScreens(preserveRuntimeSessions: false)
@@ -702,10 +702,18 @@ struct GeneralSettingsView: View {
         SettingsManager.shared.saveGlobalSettings(settings)
         screenManager.handleGlobalSettingsChanged()
         if dockChanged {
-            NotificationCenter.default.post(name: .dockVisibilityDidChange, object: nil)
+            postSettingsNotificationAsync(.dockVisibilityDidChange)
         }
         if densityChanged {
-            NotificationCenter.default.post(name: .menuBarDensityDidChange, object: nil)
+            postSettingsNotificationAsync(.menuBarDensityDidChange)
+        }
+    }
+
+    /// Defers the post to the next MainActor turn so it does not fire inside
+    /// the SwiftUI reconcile pass that triggered the save (CLAUDE.md §3).
+    private func postSettingsNotificationAsync(_ name: Notification.Name) {
+        Task { @MainActor in
+            NotificationCenter.default.post(name: name, object: nil)
         }
     }
 
@@ -721,9 +729,9 @@ struct GeneralSettingsView: View {
         showInDock = false
         menuBarDensity = .comfortable
 
-        NotificationCenter.default.post(name: .dockVisibilityDidChange, object: nil)
-        NotificationCenter.default.post(name: .globalShortcutsDidChange, object: nil)
-        NotificationCenter.default.post(name: .weatherLocationPreferenceDidChange, object: nil)
+        postSettingsNotificationAsync(.dockVisibilityDidChange)
+        postSettingsNotificationAsync(.globalShortcutsDidChange)
+        postSettingsNotificationAsync(.weatherLocationPreferenceDidChange)
         screenManager.handleGlobalSettingsChanged()
         screenManager.resetAllWallpaperSessions()
         screenManager.refreshScreens(preserveRuntimeSessions: false)

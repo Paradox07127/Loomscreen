@@ -104,6 +104,11 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     private var pendingRetryTask: Task<Void, Never>?
     private var isCleaningUp = false
     private var mediaPlaybackSuspended = false
+    /// Tracks the directory the current source is allowed to read from when
+    /// it is local (`.file` / `.folder`). Remote (`.url`) and `.inline`
+    /// sources leave this nil so the navigation policy can deny `file://`
+    /// requests originating from untrusted content.
+    private var currentLocalReadAccessRoot: URL?
 
     /// Forwarded to the owning `AmbientWallpaperSession` so failures surface as
     /// `RuntimeErrorBanner` and can be retried from the screen-detail UI.
@@ -390,13 +395,16 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
                 return
             }
             activeSecurityScopedURL = url
-            webView.loadFileURL(url, allowingReadAccessTo: Self.readAccessRoot(forFileURL: url))
+            let readRoot = Self.readAccessRoot(forFileURL: url)
+            currentLocalReadAccessRoot = readRoot
+            webView.loadFileURL(url, allowingReadAccessTo: readRoot)
         case .folder(let bookmarkData, let indexFileName):
             guard let folderURL = HTMLWallpaperView.resolveBookmark(bookmarkData) else {
                 reportError(.sandboxRevoked)
                 return
             }
             activeSecurityScopedURL = folderURL
+            currentLocalReadAccessRoot = folderURL
             updateWallpaperEnginePropertyBridge(for: folderURL)
             folderHandler.folderURL = folderURL
             guard let nonce = folderHandler.currentSessionNonce else {
@@ -413,8 +421,10 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             webView.load(URLRequest(url: url))
         case .url(let url):
             guard HTMLWallpaperView.isAllowedRemoteURL(url) else { return }
+            currentLocalReadAccessRoot = nil
             webView.load(URLRequest(url: url))
         case .inline(let html):
+            currentLocalReadAccessRoot = nil
             webView.loadHTMLString(html, baseURL: nil)
         }
     }
@@ -437,6 +447,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     private func stopActiveSecurityScope() {
         activeSecurityScopedURL?.stopAccessingSecurityScopedResource()
         activeSecurityScopedURL = nil
+        currentLocalReadAccessRoot = nil
     }
 
     nonisolated static func isAllowedRemoteURL(_ url: URL) -> Bool {
@@ -463,6 +474,64 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
 
     static func readAccessRoot(forFileURL url: URL) -> URL {
         url.deletingLastPathComponent()
+    }
+
+    /// Result of evaluating a `WKNavigationAction` against the current source's
+    /// access policy. Side-effects (`NSWorkspace.shared.open`) are reified into
+    /// `.openExternally` so `decidePolicyFor` stays a pure dispatcher.
+    enum NavigationDecision: Equatable {
+        case allow
+        case cancel
+        case openExternally(URL)
+    }
+
+    /// Returns true when `url` is a file URL whose standardized path is
+    /// contained inside `root` (also standardized). Used to keep local
+    /// wallpapers from escaping their granted directory via `../` traversal
+    /// or symlinks.
+    nonisolated static func fileURL(_ url: URL, isContainedIn root: URL?) -> Bool {
+        guard let root, url.isFileURL, root.isFileURL else { return false }
+        let target = url.resolvingSymlinksInPath().standardizedFileURL.path
+        let base = root.resolvingSymlinksInPath().standardizedFileURL.path
+        let normalizedBase = base.hasSuffix("/") ? base : base + "/"
+        return target == base || target.hasPrefix(normalizedBase)
+    }
+
+    /// Pure navigation policy used by `decidePolicyFor`. Remote and inline
+    /// sources can never navigate to `file://`; local sources may, but only
+    /// inside their granted read root.
+    nonisolated static func navigationDecision(
+        for url: URL?,
+        navigationType: WKNavigationType,
+        currentURL: URL?,
+        allowMouseInteraction: Bool,
+        localReadAccessRoot: URL?
+    ) -> NavigationDecision {
+        switch navigationType {
+        case .other, .reload:
+            guard let url else { return .cancel }
+            if url.isFileURL {
+                return fileURL(url, isContainedIn: localReadAccessRoot) ? .allow : .cancel
+            }
+            if isAllowedRemoteURL(url) { return .allow }
+            if url.scheme?.lowercased() == FolderURLSchemeHandler.scheme { return .allow }
+            return .cancel
+
+        case .linkActivated:
+            guard allowMouseInteraction, let url else { return .cancel }
+            if url.isFileURL {
+                return fileURL(url, isContainedIn: localReadAccessRoot) ? .allow : .cancel
+            }
+            if isSameOrigin(navigationURL: url, current: currentURL) { return .allow }
+            if isExternallyOpenableURL(url) { return .openExternally(url) }
+            return .cancel
+
+        case .formSubmitted, .backForward, .formResubmitted:
+            return .cancel
+
+        @unknown default:
+            return .cancel
+        }
     }
 
     func applyPerformanceProfile(_ profile: WallpaperPerformanceProfile) {
@@ -761,33 +830,20 @@ extension HTMLWallpaperView: WKNavigationDelegate {
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
     ) {
-        switch navigationAction.navigationType {
-        case .other, .reload:
-            if let url = navigationAction.request.url,
-               HTMLWallpaperView.isAllowedRemoteURL(url)
-                || url.isFileURL
-                || url.scheme?.lowercased() == FolderURLSchemeHandler.scheme {
-                decisionHandler(.allow)
-            } else {
-                decisionHandler(.cancel)
-            }
-        case .linkActivated:
-            guard allowMouseInteraction,
-                  let url = navigationAction.request.url else {
-                decisionHandler(.cancel)
-                return
-            }
-            if HTMLWallpaperView.isSameOrigin(navigationURL: url, current: webView.url) || url.isFileURL {
-                decisionHandler(.allow)
-            } else if HTMLWallpaperView.isExternallyOpenableURL(url) {
-                NSWorkspace.shared.open(url)
-                decisionHandler(.cancel)
-            } else {
-                decisionHandler(.cancel)
-            }
-        case .formSubmitted, .backForward, .formResubmitted:
+        let decision = HTMLWallpaperView.navigationDecision(
+            for: navigationAction.request.url,
+            navigationType: navigationAction.navigationType,
+            currentURL: webView.url,
+            allowMouseInteraction: allowMouseInteraction,
+            localReadAccessRoot: currentLocalReadAccessRoot
+        )
+        switch decision {
+        case .allow:
+            decisionHandler(.allow)
+        case .cancel:
             decisionHandler(.cancel)
-        @unknown default:
+        case .openExternally(let url):
+            NSWorkspace.shared.open(url)
             decisionHandler(.cancel)
         }
     }
