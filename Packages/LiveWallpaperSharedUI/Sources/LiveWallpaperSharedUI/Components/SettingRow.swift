@@ -38,9 +38,9 @@ public struct SettingRow<Content: View>: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
                     .fill(iconColor.opacity(0.15))
-                    .frame(width: 22, height: 22)
+                    .frame(width: 24, height: 24)
                 Image(systemName: icon)
-                    .font(.footnote.weight(.medium))
+                    .font(.subheadline.weight(.medium))
                     .foregroundStyle(iconColor)
             }
             .accessibilityHidden(true)
@@ -48,15 +48,15 @@ public struct SettingRow<Content: View>: View {
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
                     Text(title)
-                        .font(.subheadline.weight(.medium))
-                        .fixedSize(horizontal: false, vertical: true)
+                        .font(.body.weight(.medium))
+                        .lineLimit(1)
                     if let info {
                         InfoTooltipButton(text: info)
                     }
                 }
                 if let subtitle = subtitle {
                     Text(subtitle)
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -89,7 +89,7 @@ public struct InfoTooltipButton: View {
             isPresentingPopover.toggle()
         } label: {
             Image(systemName: "info.circle")
-                .font(.caption2)
+                .font(.caption)
                 .foregroundStyle(.tertiary)
         }
         .buttonStyle(.plain)

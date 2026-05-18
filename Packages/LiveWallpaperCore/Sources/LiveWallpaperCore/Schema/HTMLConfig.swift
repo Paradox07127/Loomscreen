@@ -77,10 +77,11 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
     public static let minTransformScale: Double = 0.1
     public static let maxTransformScale: Double = 3.0
 
-    /// Bounds for translate in CSS pixels. The UI clamps to ±10000 px so a
-    /// stray scroll-wheel gesture in a Stepper can't translate the body
-    /// off into infinity.
-    public static let maxTransformTranslate: Double = 10000
+    /// Bounds for translate in CSS pixels. Covers offsetting a page fully
+    /// off a 6K Pro Display XDR (3024 px wide per side); going further is
+    /// almost always a typo, so we clamp to ±3000 instead of letting users
+    /// translate into infinity by mis-typing a value.
+    public static let maxTransformTranslate: Double = 3000
 
     /// Bounds for the refresh timer. Anything below 5s is rejected because
     /// `WKWebView.reload()` itself takes ~50–200ms and the page rarely has
