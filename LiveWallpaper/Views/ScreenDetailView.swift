@@ -557,6 +557,8 @@ struct ScreenDetailView: View {
                                     }
                                 }
                                 .groupBoxStyle(ContainerGroupBoxStyle())
+
+                                resetDisplayButton
                                 }
                             }
                         }
@@ -895,6 +897,30 @@ struct ScreenDetailView: View {
     private func performClearWallpaper() {
         cleanupPreviewPlayer()
         screenManager.clearWallpaperForScreen(screen)
+    }
+
+    private var resetDisplayButton: some View {
+        HStack {
+            Spacer()
+            Button {
+                pendingDestructive = PendingDestructive(
+                    .resetDisplaySettings(displayName: screen.name)
+                ) {
+                    screenManager.resetDisplaySettings(for: screen)
+                }
+            } label: {
+                Label("Reset This Display", systemImage: "arrow.counterclockwise.circle")
+                    .font(.system(size: 12, weight: .medium))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+            }
+            .buttonStyle(.plain)
+            .destructiveControlTint()
+            .adaptiveGlassSurface(.capsule, tint: .red, interactive: true)
+            .help(Text("Reset all playback, color, particle, audio, and layout settings on this display — wallpaper, playlist, and bookmarks stay"))
+            Spacer()
+        }
+        .padding(.top, 8)
     }
 
     private func requestApplyToAll() {
