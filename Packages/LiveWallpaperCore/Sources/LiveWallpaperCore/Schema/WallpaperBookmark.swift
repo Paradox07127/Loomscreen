@@ -3,12 +3,20 @@ import Foundation
 /// User-saved shortcut to a video / HTML / shader / WPE scene wallpaper,
 /// persisted globally so it survives app relaunch and can be applied to any
 /// screen on demand.
+///
+/// `playbackSettings` carries the rest of the screen's playback / effect
+/// state at the moment the bookmark was saved. Applying a bookmark restores
+/// the full plan, not just the content pointer. Nil = legacy bookmark
+/// (saved before the expansion); the apply path leaves the target screen's
+/// existing settings alone in that case.
 public struct WallpaperBookmark: Identifiable, Codable, Equatable, Sendable {
     public let id: UUID
     public var label: String
     public let createdAt: Date
     public var content: WallpaperContent
     public var sourceDisplayName: String?
+    /// Full playback + effect snapshot. Nil on legacy bookmarks.
+    public var playbackSettings: BookmarkPlaybackSettings?
     /// Optional Workshop metadata needed to restore WPE scene dependencies and
     /// source-folder access when a scene bookmark is applied later.
     public var wpeOrigin: WPEOrigin?
@@ -19,6 +27,7 @@ public struct WallpaperBookmark: Identifiable, Codable, Equatable, Sendable {
         id: UUID = UUID(),
         createdAt: Date = Date(),
         sourceDisplayName: String? = nil,
+        playbackSettings: BookmarkPlaybackSettings? = nil,
         wpeOrigin: WPEOrigin? = nil
     ) {
         self.id = id
@@ -26,6 +35,7 @@ public struct WallpaperBookmark: Identifiable, Codable, Equatable, Sendable {
         self.content = content
         self.createdAt = createdAt
         self.sourceDisplayName = sourceDisplayName
+        self.playbackSettings = playbackSettings
         self.wpeOrigin = wpeOrigin
     }
 
@@ -39,5 +49,15 @@ public struct WallpaperBookmark: Identifiable, Codable, Equatable, Sendable {
         case .metalShader: return "sparkles.rectangle.stack"
         case .scene: return "cube.transparent"
         }
+    }
+
+    /// Two bookmarks represent the same plan when applying them would
+    /// produce indistinguishable screen state. Identity / label / created-at
+    /// are excluded — they're metadata about the bookmark itself, not what
+    /// it does.
+    public func isEquivalentPlan(to other: WallpaperBookmark) -> Bool {
+        content == other.content
+            && playbackSettings == other.playbackSettings
+            && wpeOrigin == other.wpeOrigin
     }
 }

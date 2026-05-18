@@ -45,6 +45,8 @@ struct BookmarksPopover: View {
     @ViewBuilder
     private var saveCurrentRow: some View {
         if let content = currentContent() {
+            let snapshot = currentPlaybackSettings()
+            let duplicate = store.equivalentBookmark(content: content)
             VStack(alignment: .leading, spacing: 6) {
                 Text("Save current wallpaper")
                     .font(.caption)
@@ -57,7 +59,8 @@ struct BookmarksPopover: View {
                         store.add(
                             label: addLabel,
                             content: content,
-                            sourceDisplayName: sourceDisplayName(for: content)
+                            sourceDisplayName: sourceDisplayName(for: content),
+                            playbackSettings: snapshot
                         )
                         addLabel = ""
                     } label: {
@@ -65,9 +68,9 @@ struct BookmarksPopover: View {
                             .font(.system(size: 16))
                     }
                     .buttonStyle(.plain)
-                    .disabled(store.contains(content))
-                    .help(store.contains(content)
-                        ? Text("Already bookmarked", comment: "Tooltip when the current wallpaper is already saved as a bookmark.")
+                    .disabled(duplicate != nil)
+                    .help(duplicate != nil
+                        ? Text("Already saved as “\(duplicate?.label ?? "")”", comment: "Tooltip when an identical plan is already bookmarked. The placeholder is the existing bookmark's label.")
                         : Text("Save as bookmark", comment: "Tooltip for the button that saves the current wallpaper as a bookmark."))
                 }
             }
@@ -126,6 +129,13 @@ struct BookmarksPopover: View {
 
     private func currentContent() -> WallpaperContent? {
         screenManager.getConfiguration(for: screen)?.activeWallpaper
+    }
+
+    /// Snapshot the screen's full playback + effect state so the bookmark
+    /// captures a complete plan, not just the content pointer.
+    private func currentPlaybackSettings() -> BookmarkPlaybackSettings? {
+        guard let config = screenManager.getConfiguration(for: screen) else { return nil }
+        return BookmarkPlaybackSettings.snapshot(of: config)
     }
 
     private func defaultLabel(for content: WallpaperContent) -> String {

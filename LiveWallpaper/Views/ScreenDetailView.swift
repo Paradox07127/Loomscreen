@@ -180,8 +180,6 @@ struct ScreenDetailView: View {
     @State private var selectedFrameRateLimit: FrameRateLimit = .fps60
     @State private var showBookmarks = false
 
-    @AppStorage("Inspector.PlaylistExpanded") private var isPlaylistExpanded = false
-    @AppStorage("Inspector.ScheduleExpanded") private var isScheduleExpanded = false
     @AppStorage("Inspector.EnvironmentExpanded") private var isEnvironmentExpanded = true
     @AppStorage("Inspector.ColorExpanded") private var isColorExpanded = false
     @AppStorage("Inspector.Width") private var inspectorWidth = Double(DesignTokens.Inspector.defaultWidth)
@@ -453,6 +451,11 @@ struct ScreenDetailView: View {
             ScrollView {
                 AdaptiveGlassContainer(spacing: 16) {
                     VStack(spacing: 16) {
+                        if selectedWallpaperType == .video,
+                           featureCatalog.capabilities.selectableWallpaperModes.count > 1 {
+                            wallpaperModeCard
+                        }
+
                         CommonPlaybackInspector(
                             screen: screen,
                             wallpaperType: selectedWallpaperType,
@@ -480,77 +483,6 @@ struct ScreenDetailView: View {
                         if selectedWallpaperType == .video,
                            featureCatalog.capabilities.selectableWallpaperModes.count > 1 {
                             VStack(spacing: 16) {
-                                HStack(spacing: 0) {
-                                    ForEach(featureCatalog.capabilities.selectableWallpaperModes) { mode in
-                                        Button {
-                                            withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.18))) {
-                                                selectedWallpaperMode = mode
-                                            }
-                                            screenManager.updateWallpaperMode(mode, for: screen)
-                                        } label: {
-                                            Text(mode.labelKey)
-                                                .font(.system(size: 12, weight: selectedWallpaperMode == mode ? .semibold : .regular))
-                                                .frame(maxWidth: .infinity)
-                                                .padding(.vertical, 5)
-                                                .background(
-                                                    Capsule()
-                                                        .fill(selectedWallpaperMode == mode ? Color.accentColor.opacity(0.35) : Color.clear)
-                                                )
-                                                .contentShape(Capsule())
-                                        }
-                                        .buttonStyle(.plain)
-                                        .accessibilityLabel(wallpaperModeAccessibilityLabel(mode))
-                                    }
-                                }
-                                .padding(2)
-                                .adaptiveGlassSurface(.capsule, interactive: true)
-
-                                if selectedWallpaperMode == .playlist,
-                                   featureCatalog.isEnabled(.playlists) {
-                                    GroupBox {
-                                        CollapsibleSection(
-                                            title: "Playlist",
-                                            systemImage: "list.bullet",
-                                            isExpanded: $isPlaylistExpanded
-                                        ) {
-                                            PlaylistSection(
-                                                playlistBookmarks: $playlistBookmarks,
-                                                shufflePlaylist: $shufflePlaylist,
-                                                rotationMinutes: $playlistRotationMinutes,
-                                                screen: screen,
-                                                screenManager: screenManager
-                                            )
-                                        }
-                                    }
-                                    .groupBoxStyle(ContainerGroupBoxStyle())
-                                    .transition(reduceMotion ? .opacity : .asymmetric(
-                                        insertion: .opacity.combined(with: .scale(scale: 0.96, anchor: .top)),
-                                        removal: .opacity
-                                    ))
-                                }
-
-                                if selectedWallpaperMode == .schedule,
-                                   featureCatalog.isEnabled(.scheduleAutomation) {
-                                    GroupBox {
-                                        CollapsibleSection(
-                                            title: "Schedule",
-                                            systemImage: "clock",
-                                            isExpanded: $isScheduleExpanded
-                                        ) {
-                                            ScheduleSection(
-                                                scheduleSlots: $scheduleSlots,
-                                                screen: screen,
-                                                screenManager: screenManager
-                                            )
-                                        }
-                                    }
-                                    .groupBoxStyle(ContainerGroupBoxStyle())
-                                    .transition(reduceMotion ? .opacity : .asymmetric(
-                                        insertion: .opacity.combined(with: .scale(scale: 0.96, anchor: .top)),
-                                        removal: .opacity
-                                    ))
-                                }
-
                                 if featureCatalog.isEnabled(.videoEffects) {
                                 GroupBox {
                                     CollapsibleSection(
@@ -1023,6 +955,78 @@ struct ScreenDetailView: View {
 
     private func getScreenRefreshRate() -> Int {
         screenManager.getScreenRefreshRate(for: screen.id)
+    }
+
+    /// Single card that hosts the wallpaper-mode pill at the top and the
+    /// mode-specific automation content (playlist list / schedule slots) right
+    /// below it, so the user sees the switcher and the surface it controls as
+    /// one decision unit.
+    @ViewBuilder
+    private var wallpaperModeCard: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 12) {
+                wallpaperModePill
+
+                Group {
+                    switch selectedWallpaperMode {
+                    case .single:
+                        EmptyView()
+                    case .playlist:
+                        if featureCatalog.isEnabled(.playlists) {
+                            Divider()
+                            PlaylistSection(
+                                playlistBookmarks: $playlistBookmarks,
+                                shufflePlaylist: $shufflePlaylist,
+                                rotationMinutes: $playlistRotationMinutes,
+                                screen: screen,
+                                screenManager: screenManager
+                            )
+                        }
+                    case .schedule:
+                        if featureCatalog.isEnabled(.scheduleAutomation) {
+                            Divider()
+                            ScheduleSection(
+                                scheduleSlots: $scheduleSlots,
+                                screen: screen,
+                                screenManager: screenManager
+                            )
+                        }
+                    }
+                }
+                .transition(reduceMotion ? .opacity : .asymmetric(
+                    insertion: .opacity.combined(with: .move(edge: .top)),
+                    removal: .opacity
+                ))
+            }
+        }
+        .groupBoxStyle(ContainerGroupBoxStyle())
+    }
+
+    private var wallpaperModePill: some View {
+        HStack(spacing: 0) {
+            ForEach(featureCatalog.capabilities.selectableWallpaperModes) { mode in
+                Button {
+                    withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.18))) {
+                        selectedWallpaperMode = mode
+                    }
+                    screenManager.updateWallpaperMode(mode, for: screen)
+                } label: {
+                    Text(mode.labelKey)
+                        .font(.system(size: 12, weight: selectedWallpaperMode == mode ? .semibold : .regular))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule()
+                                .fill(selectedWallpaperMode == mode ? Color.accentColor.opacity(0.35) : Color.clear)
+                        )
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(wallpaperModeAccessibilityLabel(mode))
+            }
+        }
+        .padding(2)
+        .adaptiveGlassSurface(.capsule, interactive: true)
     }
 
     private func wallpaperModeAccessibilityLabel(_ mode: WallpaperMode) -> Text {
