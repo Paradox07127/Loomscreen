@@ -1,13 +1,22 @@
 import SwiftUI
+import LiveWallpaperCore
 
 struct ColorAdjustmentsView: View {
     @Binding var effectConfig: VideoEffectConfig
+    /// Per-screen colourspace override. Lives next to the SDR effect sliders
+    /// because users mentally group "make the colours look right" together;
+    /// the picker covers system-level output, the sliders adjust the image.
+    @Binding var videoColorSpace: VideoColorSpace
     var screen: Screen
     var screenManager: ScreenManager
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             VStack(spacing: 12) {
+                colorSpaceRow
+
+                Divider()
+
                 effectSlider(title: "Blur", value: effectBinding(\.blurRadius), in: 0...30, format: "%.0f")
                 effectSlider(title: "Brightness", value: effectBinding(\.brightness), in: -0.5...0.5, format: "%.2f")
                 effectSlider(title: "Saturation", value: effectBinding(\.saturation), in: 0...2, format: "%.1f")
@@ -47,6 +56,35 @@ struct ColorAdjustmentsView: View {
                     Spacer()
                 }
             }
+        }
+    }
+
+    private var colorSpaceRow: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Color Management")
+                    .font(.system(size: 13, weight: .medium))
+                Spacer()
+                Picker("", selection: Binding(
+                    get: { videoColorSpace },
+                    set: { newValue in
+                        guard videoColorSpace != newValue else { return }
+                        videoColorSpace = newValue
+                        screenManager.updateVideoColorSpace(newValue, for: screen)
+                    }
+                )) {
+                    ForEach(VideoColorSpace.allCases) { space in
+                        Text(LocalizedStringKey(space.titleKey)).tag(space)
+                    }
+                }
+                .labelsHidden()
+                .frame(maxWidth: 160)
+                .accessibilityLabel(Text("Color management"))
+            }
+            Text(LocalizedStringKey(videoColorSpace.descriptionKey))
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

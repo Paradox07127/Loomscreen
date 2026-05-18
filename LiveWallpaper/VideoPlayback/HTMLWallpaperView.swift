@@ -29,6 +29,221 @@ final class HTMLWebView: WKWebView {
 }
 
 enum HTMLWallpaperRuntimeScript {
+    /// Format a `Double` for JS literal embedding with stable decimal output
+    /// (no locale-driven comma separators, no exponent notation).
+    static func jsNumber(_ value: Double) -> String {
+        guard value.isFinite else { return "0" }
+        return String(format: "%.6f", locale: Locale(identifier: "en_US_POSIX"), value)
+    }
+
+    /// Bootstraps the master audio controller. Sets up:
+    ///   1. MutationObserver — applies the current volume/mute to any `<audio>`
+    ///      or `<video>` element added later. Without this, dynamically-created
+    ///      media (the common case for game-style wallpapers) escapes the mute.
+    ///   2. `HTMLMediaElement.prototype.play` patch — enforces volume right
+    ///      before playback starts, in case the page set its own `volume`
+    ///      between creation and play.
+    ///   3. `new Audio()` patch — for standalone `Audio()` objects that never
+    ///      get appended to the DOM (the MutationObserver can't see them).
+    ///   4. `BaseAudioContext.destination` getter override — intercepts Web
+    ///      Audio API graphs and routes them through a per-context `GainNode`
+    ///      so audio synthesized via Web Audio respects the user's volume
+    ///      slider. This is the only way to cover game audio engines that
+    ///      bypass `<audio>` elements entirely.
+    ///
+    /// Exposes `window.__lwUpdateAudio__(volume, muted)` for runtime updates.
+    static func masterAudioController(initialVolume: Double, initialMuted: Bool) -> String {
+        let volumeLiteral = jsNumber(initialVolume)
+        let mutedLiteral = initialMuted ? "true" : "false"
+        return """
+        (function () {
+            if (window.__lwAudioInstalled__) {
+                if (typeof window.__lwUpdateAudio__ === 'function') {
+                    window.__lwUpdateAudio__(\(volumeLiteral), \(mutedLiteral));
+                }
+                return;
+            }
+            window.__lwAudioInstalled__ = true;
+            var __lwVolume__ = \(volumeLiteral);
+            var __lwMuted__ = \(mutedLiteral);
+            var __lwAudioContexts__ = [];
+
+            function effectiveLevel() { return __lwMuted__ ? 0 : __lwVolume__; }
+
+            function applyToElement(el) {
+                if (!el) return;
+                var tag = el.tagName;
+                if (tag !== 'AUDIO' && tag !== 'VIDEO') return;
+                try { el.volume = __lwVolume__; } catch (e) {}
+                try { el.muted = __lwMuted__; } catch (e) {}
+            }
+
+            function scanAndApply(root) {
+                if (!root) return;
+                if (root.nodeType === 1) applyToElement(root);
+                if (root.querySelectorAll) {
+                    var nodes = root.querySelectorAll('audio,video');
+                    for (var i = 0; i < nodes.length; i++) applyToElement(nodes[i]);
+                }
+            }
+
+            function startObserver() {
+                if (!document.body || window.__lwAudioObserver__) return;
+                try {
+                    var observer = new MutationObserver(function (mutations) {
+                        for (var m = 0; m < mutations.length; m++) {
+                            var added = mutations[m].addedNodes;
+                            for (var n = 0; n < added.length; n++) scanAndApply(added[n]);
+                        }
+                    });
+                    observer.observe(document.body, { childList: true, subtree: true });
+                    window.__lwAudioObserver__ = observer;
+                } catch (e) {}
+            }
+
+            if (window.HTMLMediaElement && HTMLMediaElement.prototype.play) {
+                var originalPlay = HTMLMediaElement.prototype.play;
+                HTMLMediaElement.prototype.play = function () {
+                    try { this.volume = __lwVolume__; } catch (e) {}
+                    try { this.muted = __lwMuted__; } catch (e) {}
+                    return originalPlay.apply(this, arguments);
+                };
+            }
+
+            if (window.Audio) {
+                var OriginalAudio = window.Audio;
+                function PatchedAudio() {
+                    var bound = Function.prototype.bind.apply(
+                        OriginalAudio,
+                        [null].concat(Array.prototype.slice.call(arguments))
+                    );
+                    var instance = new bound();
+                    try { instance.volume = __lwVolume__; } catch (e) {}
+                    try { instance.muted = __lwMuted__; } catch (e) {}
+                    return instance;
+                }
+                PatchedAudio.prototype = OriginalAudio.prototype;
+                try { window.Audio = PatchedAudio; } catch (e) {}
+            }
+
+            function patchAudioContext(Ctor) {
+                if (!Ctor || !Ctor.prototype) return;
+                var desc;
+                try { desc = Object.getOwnPropertyDescriptor(Ctor.prototype, 'destination'); }
+                catch (e) { return; }
+                if (!desc || typeof desc.get !== 'function') return;
+                var originalGetter = desc.get;
+                try {
+                    Object.defineProperty(Ctor.prototype, 'destination', {
+                        configurable: true,
+                        get: function () {
+                            var real = originalGetter.call(this);
+                            if (!this.__lwGainNode__) {
+                                try {
+                                    var gain = this.createGain();
+                                    gain.gain.value = effectiveLevel();
+                                    gain.connect(real);
+                                    this.__lwGainNode__ = gain;
+                                    __lwAudioContexts__.push(this);
+                                } catch (e) {
+                                    return real;
+                                }
+                            }
+                            return this.__lwGainNode__;
+                        }
+                    });
+                } catch (e) {}
+            }
+            patchAudioContext(window.AudioContext);
+            patchAudioContext(window.webkitAudioContext);
+
+            window.__lwUpdateAudio__ = function (volume, muted) {
+                if (typeof volume === 'number' && isFinite(volume)) {
+                    __lwVolume__ = Math.max(0, Math.min(1, volume));
+                }
+                __lwMuted__ = !!muted;
+                try {
+                    var nodes = document.querySelectorAll('audio,video');
+                    for (var i = 0; i < nodes.length; i++) applyToElement(nodes[i]);
+                } catch (e) {}
+                var level = effectiveLevel();
+                for (var k = 0; k < __lwAudioContexts__.length; k++) {
+                    var ctx = __lwAudioContexts__[k];
+                    if (ctx && ctx.__lwGainNode__) {
+                        try { ctx.__lwGainNode__.gain.value = level; } catch (e) {}
+                    }
+                }
+            };
+
+            if (document.body) {
+                startObserver();
+                scanAndApply(document);
+            } else if (document.addEventListener) {
+                document.addEventListener('DOMContentLoaded', function () {
+                    startObserver();
+                    scanAndApply(document);
+                });
+            }
+        })();
+        """
+    }
+
+    /// Applies a `transform: translate() rotate() scale()` chain to the
+    /// document body via an injected `<style>` block. Skips touching the
+    /// DOM when all four values are identity — avoids fighting layouts in
+    /// pages that pin their own `body` transform.
+    ///
+    /// Exposes `window.__lwUpdateTransform__(scale, tx, ty, rotation)`.
+    static func transformController(
+        scale: Double,
+        translateX: Double,
+        translateY: Double,
+        rotation: Double
+    ) -> String {
+        let s = jsNumber(scale)
+        let tx = jsNumber(translateX)
+        let ty = jsNumber(translateY)
+        let r = jsNumber(rotation)
+        return """
+        (function () {
+            function ensureStyle() {
+                var el = document.getElementById('__lw-transform-style__');
+                if (el) return el;
+                el = document.createElement('style');
+                el.id = '__lw-transform-style__';
+                (document.head || document.documentElement).appendChild(el);
+                return el;
+            }
+            function apply(scale, tx, ty, rotation) {
+                var identity = scale === 1 && tx === 0 && ty === 0 && rotation === 0;
+                var style = ensureStyle();
+                if (identity) {
+                    style.textContent = '';
+                    if (document.documentElement) {
+                        document.documentElement.classList.remove('lw-transformed');
+                    }
+                    return;
+                }
+                var transform = 'translate(' + tx + 'px,' + ty + 'px) rotate(' + rotation + 'deg) scale(' + scale + ')';
+                style.textContent =
+                    'html.lw-transformed{overflow:hidden!important;}' +
+                    'html.lw-transformed body{transform:' + transform + ';transform-origin:50% 50%;}';
+                if (document.documentElement) {
+                    document.documentElement.classList.add('lw-transformed');
+                }
+            }
+            window.__lwUpdateTransform__ = apply;
+            if (document.body) {
+                apply(\(s), \(tx), \(ty), \(r));
+            } else if (document.addEventListener) {
+                document.addEventListener('DOMContentLoaded', function () {
+                    apply(\(s), \(tx), \(ty), \(r));
+                });
+            }
+        })();
+        """
+    }
+
     static func physicalPixelState(enabled: Bool, backingScale: CGFloat) -> String {
         let scale = max(Double(backingScale), 1.0)
         let scaleLiteral = String(format: "%.6f", locale: Locale(identifier: "en_US_POSIX"), scale)
@@ -102,6 +317,9 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     /// Capped by `HTMLConfig.maxRetries`; used to drive exponential backoff.
     private var consecutiveFailureCount: Int = 0
     private var pendingRetryTask: Task<Void, Never>?
+    /// Repeating reload driver. `nil` when `refreshIntervalSeconds == 0` or
+    /// the view is suspended / torn down.
+    private var refreshTimerTask: Task<Void, Never>?
     private var isCleaningUp = false
     private var mediaPlaybackSuspended = false
     /// Tracks the directory the current source is allowed to read from when
@@ -168,13 +386,23 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
 
         let cssLiteral = jsStringLiteral(config?.customCSS ?? "")
         let isBrowsing = (config?.allowMouseInteraction ?? false) ? "true" : "false"
-        let isMuted = (config?.muteAudio ?? false) ? "true" : "false"
         let physicalPixelBootstrap = (config?.physicalPixelLayout ?? false)
             ? HTMLWallpaperRuntimeScript.physicalPixelState(
                 enabled: true,
                 backingScale: effectiveBackingScaleFactor
             )
             : ""
+
+        let audioController = HTMLWallpaperRuntimeScript.masterAudioController(
+            initialVolume: config?.audioVolume ?? 1.0,
+            initialMuted: config?.muteAudio ?? false
+        )
+        let transformController = HTMLWallpaperRuntimeScript.transformController(
+            scale: config?.transformScale ?? 1.0,
+            translateX: config?.transformTranslateX ?? 0,
+            translateY: config?.transformTranslateY ?? 0,
+            rotation: config?.transformRotationDegrees ?? 0
+        )
 
         let baseline = """
         (function () {
@@ -206,13 +434,9 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
                 });
                 mo.observe(document.documentElement, { childList: true });
             }
-            // 静音状态：通过 JS 在 DOMContentLoaded 时统一施加；后续元素由 navigation finish 兜底。
-            if (\(isMuted)) {
-                document.addEventListener('DOMContentLoaded', function () {
-                    document.querySelectorAll('audio,video').forEach(function (el) { el.muted = true; });
-                });
-            }
         })();
+        \(audioController)
+        \(transformController)
         """
 
         controller.addUserScript(WKUserScript(
@@ -301,7 +525,6 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
 
         let needsScriptRebuild = (previous?.customCSS != config.customCSS)
             || (previous?.allowMouseInteraction != config.allowMouseInteraction)
-            || (previous?.muteAudio != config.muteAudio)
             || (previous?.allowJavaScript != config.allowJavaScript)
             || (previous?.useEphemeralStorage != config.useEphemeralStorage)
             || (previous?.physicalPixelLayout != config.physicalPixelLayout)
@@ -316,6 +539,10 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
 
         if previous?.physicalPixelLayout != config.physicalPixelLayout {
             applyPhysicalPixelZoom()
+        }
+
+        if previous?.refreshIntervalSeconds != config.refreshIntervalSeconds {
+            applyRefreshInterval(config.refreshIntervalSeconds)
         }
 
         if config.allowMouseInteraction, let host = webView.window {
@@ -354,10 +581,24 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             """)
         }
 
-        if previous?.muteAudio != current.muteAudio {
-            let flag = current.muteAudio ? "true" : "false"
+        if previous?.muteAudio != current.muteAudio || previous?.audioVolume != current.audioVolume {
+            let volumeLiteral = HTMLWallpaperRuntimeScript.jsNumber(current.audioVolume)
+            let mutedLiteral = current.muteAudio ? "true" : "false"
             statements.append("""
-            document.querySelectorAll('audio,video').forEach(function(e){e.muted=\(flag);});
+            if (typeof window.__lwUpdateAudio__ === 'function') { window.__lwUpdateAudio__(\(volumeLiteral), \(mutedLiteral)); }
+            """)
+        }
+
+        if previous?.transformScale != current.transformScale
+            || previous?.transformTranslateX != current.transformTranslateX
+            || previous?.transformTranslateY != current.transformTranslateY
+            || previous?.transformRotationDegrees != current.transformRotationDegrees {
+            let scaleLiteral = HTMLWallpaperRuntimeScript.jsNumber(current.transformScale)
+            let txLiteral = HTMLWallpaperRuntimeScript.jsNumber(current.transformTranslateX)
+            let tyLiteral = HTMLWallpaperRuntimeScript.jsNumber(current.transformTranslateY)
+            let rLiteral = HTMLWallpaperRuntimeScript.jsNumber(current.transformRotationDegrees)
+            statements.append("""
+            if (typeof window.__lwUpdateTransform__ === 'function') { window.__lwUpdateTransform__(\(scaleLiteral), \(txLiteral), \(tyLiteral), \(rLiteral)); }
             """)
         }
 
@@ -370,6 +611,30 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
 
         guard !statements.isEmpty else { return }
         webView.evaluateJavaScript(statements.joined(separator: "\n"), completionHandler: nil)
+    }
+
+    // MARK: - Auto-Refresh
+
+    /// Restarts the auto-refresh timer when the interval changes. A non-zero
+    /// `seconds` value spins up a repeating MainActor task that calls
+    /// `reloadCurrentSource()`; `0` tears the timer down. The task is owned
+    /// by `refreshTimerTask` and cancelled on cleanup / suspend.
+    private func applyRefreshInterval(_ seconds: Int) {
+        refreshTimerTask?.cancel()
+        refreshTimerTask = nil
+        guard seconds > 0, !isCleaningUp else { return }
+        let interval = TimeInterval(seconds)
+        refreshTimerTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: .seconds(interval))
+                } catch {
+                    return
+                }
+                guard let self, !Task.isCancelled, !self.isCleaningUp else { return }
+                self.reloadCurrentSource()
+            }
+        }
     }
 
     func loadSource(_ source: HTMLSource) {
@@ -742,6 +1007,8 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         trackerBlockingRequested = false
         pendingRetryTask?.cancel()
         pendingRetryTask = nil
+        refreshTimerTask?.cancel()
+        refreshTimerTask = nil
         onError = nil
         webView.stopLoading()
         webView.navigationDelegate = nil
@@ -848,16 +1115,22 @@ extension HTMLWallpaperView: WKNavigationDelegate {
         }
     }
 
-    /// 导航完成后兜底：autoplay nudge + 静音状态再施加一次（覆盖晚到的元素）。
+    /// 导航完成后兜底：autoplay nudge + 重新应用音量/静音（覆盖晚到的元素）。
+    /// 真正的状态保活由 `masterAudioController` 注入的 MutationObserver 完成；
+    /// 这里仅做 autoplay 推动，并对刚渲染好的元素再调一次 `__lwUpdateAudio__`
+    /// 以保证 navigation-finish 时刻的状态与 `lastAppliedConfig` 同步。
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         Logger.info("HTML wallpaper finished loading: \(webView.url?.absoluteString ?? "<no url>")", category: .screenManager)
         resetNavigationFailureState()
+        let volume = HTMLWallpaperRuntimeScript.jsNumber(lastAppliedConfig?.audioVolume ?? 1.0)
         let muted = lastAppliedConfig?.muteAudio == true ? "true" : "false"
         let nudge = """
         (function() {
+            if (typeof window.__lwUpdateAudio__ === 'function') {
+                try { window.__lwUpdateAudio__(\(volume), \(muted)); } catch (e) {}
+            }
             var elements = document.querySelectorAll('video, audio');
             elements.forEach(function(el) {
-                el.muted = \(muted);
                 if (el.paused && el.autoplay !== false) {
                     try {
                         var promise = el.play();

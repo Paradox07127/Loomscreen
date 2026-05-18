@@ -17,6 +17,47 @@ public enum MenuBarDensity: String, Codable, CaseIterable, Identifiable, Sendabl
     }
 }
 
+/// User preference influencing how AVPlayer treats the active video stream.
+///
+/// AVFoundation does not expose a public API to force software vs. hardware
+/// decoding — it always tries hardware first. What we CAN control is how
+/// aggressively the player loads and how much resolution it commits to,
+/// which maps to a meaningful tradeoff: battery / RAM / GPU vs. fidelity.
+public enum VideoDecoderPreference: String, Codable, CaseIterable, Identifiable, Sendable {
+    /// Leave `AVPlayerItem` defaults untouched — let AVFoundation pick.
+    /// Matches behavior before this preference existed.
+    case auto
+    /// Caps `preferredMaximumResolution` at 1080p and `preferredPeakBitRate`
+    /// at 8 Mbps. Visibly the same on a single display for most clips;
+    /// drastically reduces sustained GPU load on multi-screen 4K setups.
+    case batterySaver
+    /// Removes resolution and bitrate caps so 4K HDR content plays at native
+    /// fidelity. On Intel Macs or older iGPUs this can drop the frame rate
+    /// of OTHER on-screen apps; opt-in.
+    case highQuality
+
+    public var id: String { rawValue }
+
+    public var titleKey: String {
+        switch self {
+        case .auto:         return "Auto"
+        case .batterySaver: return "Battery Saver"
+        case .highQuality:  return "High Quality"
+        }
+    }
+
+    public var descriptionKey: String {
+        switch self {
+        case .auto:
+            return "Let macOS pick — recommended for most Macs."
+        case .batterySaver:
+            return "Caps decode at 1080p / 8 Mbps to lighten GPU load."
+        case .highQuality:
+            return "No resolution or bitrate caps. Heavier on older GPUs."
+        }
+    }
+}
+
 public struct GlobalSettings: Codable, Sendable {
     public var globalPauseOnBattery: Bool
     public var preservePlaybackOnLock: Bool
@@ -48,6 +89,10 @@ public struct GlobalSettings: Codable, Sendable {
     /// independently checks its own file against this budget.
     public var videoCacheMaxBytesPerScreen: Int = GlobalSettings.defaultVideoCacheBytes
 
+    /// Decoder load preference applied to every AVPlayer-backed video
+    /// wallpaper. See `VideoDecoderPreference` for the semantics.
+    public var videoDecoderPreference: VideoDecoderPreference = .auto
+
     /// 150 MB default — covers a typical 30s 1080p clip outright and a 30s
     /// low-bitrate 4K with margin, while keeping the visible memory
     /// footprint under ~200 MB per screen so users glancing at Activity
@@ -74,7 +119,8 @@ public struct GlobalSettings: Codable, Sendable {
         globalShortcuts: [GlobalShortcutAction.RawAction: GlobalShortcutBinding?] = [:],
         recentWPEImports: [WPEHistoryEntry] = [],
         menuBarDensity: MenuBarDensity = .comfortable,
-        videoCacheMaxBytesPerScreen: Int = GlobalSettings.defaultVideoCacheBytes
+        videoCacheMaxBytesPerScreen: Int = GlobalSettings.defaultVideoCacheBytes,
+        videoDecoderPreference: VideoDecoderPreference = .auto
     ) {
         self.globalPauseOnBattery = globalPauseOnBattery
         self.preservePlaybackOnLock = preservePlaybackOnLock
@@ -88,6 +134,7 @@ public struct GlobalSettings: Codable, Sendable {
         self.recentWPEImports = recentWPEImports
         self.menuBarDensity = menuBarDensity
         self.videoCacheMaxBytesPerScreen = videoCacheMaxBytesPerScreen
+        self.videoDecoderPreference = videoDecoderPreference
     }
 
     public init(from decoder: Decoder) throws {
@@ -109,5 +156,6 @@ public struct GlobalSettings: Codable, Sendable {
         } else {
             videoCacheMaxBytesPerScreen = min(storedCache, GlobalSettings.maxVideoCacheBytes)
         }
+        videoDecoderPreference = (try? c.decodeIfPresent(VideoDecoderPreference.self, forKey: .videoDecoderPreference)) ?? .auto
     }
 }
