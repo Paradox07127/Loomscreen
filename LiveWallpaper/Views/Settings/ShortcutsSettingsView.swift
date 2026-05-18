@@ -80,7 +80,9 @@ struct ShortcutsSettingsView: View {
         var settings = SettingsManager.shared.loadGlobalSettings()
         settings.globalShortcuts = bindings
         SettingsManager.shared.saveGlobalSettings(settings)
-        NotificationCenter.default.post(name: .globalShortcutsDidChange, object: nil)
+        Task { @MainActor in
+            NotificationCenter.default.post(name: .globalShortcutsDidChange, object: nil)
+        }
     }
 
     private func validate(_ binding: GlobalShortcutBinding, for action: GlobalShortcutAction) -> ValidationResult {

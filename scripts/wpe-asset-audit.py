@@ -30,7 +30,9 @@ report path. It is safe to run against any of the user's local data.
 from __future__ import annotations
 import argparse
 import json
+import os
 import re
+import shutil
 import struct
 import sys
 from collections import Counter, defaultdict
@@ -237,13 +239,19 @@ def expand_scene_to_tmp(pkg_path: Path, tmp_root: Path) -> Path:
     """Extracts scene.pkg under tmp_root/<workshop_id>/ and returns scene_root."""
     workshop_id = pkg_path.parent.name
     scene_root = tmp_root / workshop_id
+    # Clear any prior extraction so removed entries don't masquerade as resolved.
+    shutil.rmtree(scene_root, ignore_errors=True)
     scene_root.mkdir(parents=True, exist_ok=True)
     try:
         magic, entries, data, payload_start = parse_pkg(pkg_path)
     except PKGError as e:
         raise SystemExit(f"{workshop_id}: {e}")
+    safe_root = scene_root.resolve()
+    safe_root_prefix = str(safe_root) + os.sep
     for name, off, size in entries:
-        out = scene_root / name
+        out = (scene_root / name).resolve()
+        if out != safe_root and not str(out).startswith(safe_root_prefix):
+            raise SystemExit(f"{workshop_id}: rejected unsafe entry path {name!r}")
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_bytes(data[payload_start + off:payload_start + off + size])
     return scene_root
