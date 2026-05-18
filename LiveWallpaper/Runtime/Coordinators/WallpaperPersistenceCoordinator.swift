@@ -10,8 +10,6 @@ import Foundation
 ///   `pruneInvalidConfigurations()` → store-side prune →
 ///                tear down runtime session per removed screen via callback →
 ///                broadcast `notifyWallpaperSessionChanged`
-///   `validateAll()` → per-screen `SettingsManager.validateConfiguration`
-///                report
 ///
 /// Borrows refs to the configuration store and the bookmark display-name
 /// cache (both live as long as `ScreenManager`). Two callbacks bridge back
@@ -70,27 +68,6 @@ final class WallpaperPersistenceCoordinator {
         }
         notifyWallpaperSessionChanged()
         return removed
-    }
-
-    /// Read-only validation report.
-    func validateAll() -> (valid: Int, invalid: Int) {
-        var validCount = 0
-        var invalidCount = 0
-
-        for screenID in store.allScreenIDs() {
-            if SettingsManager.shared.validateConfiguration(for: screenID) {
-                validCount += 1
-            } else {
-                invalidCount += 1
-                Logger.warning("Invalid configuration found for screen \(screenID)", category: .settings)
-            }
-        }
-
-        Logger.info(
-            "Configuration validation complete: \(validCount) valid, \(invalidCount) invalid",
-            category: .settings
-        )
-        return (validCount, invalidCount)
     }
 
     /// Deferred to the next main-actor tick so subscribers run outside the current SwiftUI reconcile pass.
