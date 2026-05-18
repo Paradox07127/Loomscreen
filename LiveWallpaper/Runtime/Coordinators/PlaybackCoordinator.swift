@@ -111,6 +111,14 @@ final class PlaybackCoordinator {
         syncVideoAudioLeadership()
     }
 
+    func updateVideoColorSpace(_ colorSpace: VideoColorSpace, for screen: Screen) {
+        guard var configuration = configurationStore.get(for: screen.id),
+              configuration.videoColorSpace != colorSpace else { return }
+        configuration.videoColorSpace = colorSpace
+        save(configuration)
+        screen.videoPlayer?.setVideoColorSpace(colorSpace)
+    }
+
     func refreshVideoAudioLeadership() {
         syncVideoAudioLeadership()
         applyVideoSpanLayout()
@@ -484,6 +492,7 @@ final class PlaybackCoordinator {
 
             player.setVolume(configuration.videoVolume)
             player.setMuted(configuration.muted)
+            player.setVideoColorSpace(configuration.videoColorSpace)
             player.setPlaybackSpeed(configuration.playbackSpeed)
             applyConfigurationWhenAssetReady(player: player, screen: screen, configuration: configuration)
             applyStartupPlaybackPolicy(to: player, for: screen)
@@ -508,6 +517,7 @@ final class PlaybackCoordinator {
         if let configuration {
             player.setVolume(configuration.videoVolume)
             player.setMuted(configuration.muted)
+            player.setVideoColorSpace(configuration.videoColorSpace)
         }
 
         guard let liveScreen = screensProvider().first(where: { $0.id == screen.id }) else {

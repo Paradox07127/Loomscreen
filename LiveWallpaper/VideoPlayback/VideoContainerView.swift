@@ -1,10 +1,16 @@
 import AppKit
 import AVKit
+import LiveWallpaperCore
 
 // MARK: - PlayerHostView
 
 /// NSView whose backing layer is an AVPlayerLayer.
 final class PlayerHostView: NSView {
+
+    /// Last-applied user color-space preference. Kept so window movement /
+    /// re-attach paths re-derive the right `CGColorSpace` without forcing
+    /// callers to re-thread the preference each time.
+    private var colorSpacePreference: VideoColorSpace = .auto
 
     override func makeBackingLayer() -> CALayer {
         let layer = AVPlayerLayer()
@@ -42,6 +48,41 @@ final class PlayerHostView: NSView {
             playerLayer.preferredDynamicRange = enabled ? .high : .standard
         } else if playerLayer.responds(to: NSSelectorFromString("setWantsExtendedDynamicRangeContent:")) {
             playerLayer.setValue(enabled, forKey: "wantsExtendedDynamicRangeContent")
+        }
+    }
+
+    /// Pin the underlying `AVPlayerLayer` to a specific `CGColorSpace`.
+    /// `.auto` clears the override so AVFoundation's default colour path
+    /// takes over; the other cases force a specific gamut so users can
+    /// debug colour mismatches between displays or commit to wide-gamut
+    /// output even on a content stream whose metadata says otherwise.
+    ///
+    /// `.rec2020HDR` also enables EDR output — HDR primaries without EDR
+    /// would tone-map back to SDR for no benefit.
+    func setColorSpacePreference(_ preference: VideoColorSpace) {
+        colorSpacePreference = preference
+        guard let playerLayer else { return }
+        let space: CGColorSpace?
+        switch preference {
+        case .auto:        space = nil
+        case .sRGB:        space = CGColorSpace(name: CGColorSpace.sRGB)
+        case .displayP3:   space = CGColorSpace(name: CGColorSpace.displayP3)
+        case .rec2020HDR:  space = CGColorSpace(name: CGColorSpace.itur_2020)
+        }
+        // `CALayer.colorspace` is the right knob but the AVPlayerLayer Swift
+        // surface doesn't expose it as a typed property — fall back to KVC.
+        // `setValue(_:forKey:)` walks the same backing storage; AppKit / Core
+        // Animation honour it identically.
+        if let space {
+            playerLayer.setValue(space, forKey: "colorspace")
+        } else {
+            playerLayer.setValue(nil, forKey: "colorspace")
+        }
+        // EDR coupling: HDR primaries are only meaningful with EDR output on.
+        // We don't disable EDR for the SDR cases — `applyHDRPreference` owns
+        // that and is driven by the source content's transfer function.
+        if preference == .rec2020HDR {
+            setExtendedDynamicRangeEnabled(true)
         }
     }
 
@@ -121,6 +162,10 @@ class VideoContainerView: NSView {
 
     func applyHDRPreference(_ enabled: Bool) {
         playerHostView.setExtendedDynamicRangeEnabled(enabled)
+    }
+
+    func applyColorSpacePreference(_ preference: VideoColorSpace) {
+        playerHostView.setColorSpacePreference(preference)
     }
 
     func setSpanRenderConfiguration(_ configuration: VideoSpanRenderConfiguration?) {
