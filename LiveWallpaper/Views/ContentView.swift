@@ -222,9 +222,17 @@ struct Sidebar: View {
                 bottomPadding: DesignTokens.Sidebar.displayHeaderBottomPadding
             ) {
                 Button(action: reloadWallpapers) {
-                    reloadButtonIcon
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(.secondary)
+                    Group {
+                        if #available(macOS 15.0, *) {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .symbolEffect(.rotate, options: .repeat(.continuous), isActive: isReloading)
+                        } else {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .symbolEffect(.pulse, options: .continuouslyRepeating, isActive: isReloading)
+                        }
+                    }
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
                 .help(Text("Reload all wallpapers"))
@@ -297,24 +305,6 @@ struct Sidebar: View {
         )
     }
 
-    /// Conditionally applies the `symbolEffect` modifier so the SF Symbols
-    /// CoreAnimation infrastructure isn't attached when no animation needs
-    /// to run. Even with `isActive: false`, the modifier registers a
-    /// per-frame contributor; keeping the chain inert by default keeps the
-    /// sidebar reveal animation off that path entirely.
-    @ViewBuilder
-    private var reloadButtonIcon: some View {
-        let base = Image(systemName: "arrow.triangle.2.circlepath")
-        if isReloading {
-            if #available(macOS 15.0, *) {
-                base.symbolEffect(.rotate, options: .repeat(.continuous), isActive: true)
-            } else {
-                base.symbolEffect(.pulse, options: .continuouslyRepeating, isActive: true)
-            }
-        } else {
-            base
-        }
-    }
 
     private func reloadWallpapers() {
         withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.2))) {

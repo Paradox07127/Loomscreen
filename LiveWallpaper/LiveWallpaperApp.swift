@@ -248,16 +248,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .environment(\.featureCatalog, manager.featureCatalog)
             .appLanguageScoped()
 
-        // Use NSHostingController instead of installing a bare NSHostingView
-        // as contentView so AppKit treats the SwiftUI tree as a proper view
-        // controller. NavigationSplitView's sidebar toggle integrates with
-        // the AppKit view-controller lifecycle (viewWill/DidAppear) — the
-        // hostingView path skipped those callbacks, leaving the underlying
-        // NSSplitViewController's split state un-realized until the first
-        // user drag, which manifested as the visible "smooth → halfway
-        // stall → snap" reveal animation.
-        let hostingController = NSHostingController(rootView: contentView)
-
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: SettingsWindowMetrics.defaultContentSize),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -273,13 +263,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.titleVisibility = .hidden
         window.backgroundColor = .windowBackgroundColor
         window.isMovableByWindowBackground = false
-        // Pair with `windowWillClose` keeping the controller cached — without
-        // this, AppKit releases the NSWindow on close and the retained
-        // NSWindowController's window reference goes stale, defeating the
-        // SwiftUI hierarchy-survival fix.
+        // Pair with `windowShouldClose` returning false: the close button
+        // only `orderOut`s the window so the warmed NavigationSplitView
+        // state survives. `isReleasedWhenClosed = false` keeps AppKit from
+        // releasing the NSWindow if anything else routes through the real
+        // close path (e.g. app quit).
         window.isReleasedWhenClosed = false
         window.center()
-        window.contentViewController = hostingController
+        window.contentView = NSHostingView(rootView: contentView)
         window.delegate = self
         window.setFrameAutosaveName("LiveWallpaperSettingsWindow")
 

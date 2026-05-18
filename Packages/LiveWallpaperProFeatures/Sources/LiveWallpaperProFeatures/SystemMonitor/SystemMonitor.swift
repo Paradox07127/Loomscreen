@@ -38,14 +38,10 @@ public enum MonitoringCadencePolicy {
 }
 
 public enum MonitoringStartPolicy {
-    /// Delay before the first sample lands on MainActor.
-    ///
-    /// Sized to outlast the macOS NavigationSplitView sidebar slide animation
-    /// (~400-500ms). Without this margin, the first sample fired mid-animation
-    /// and the resulting cascade of @Observable property writes + per-gauge
-    /// `.animation(value:)` transitions blew the SwiftUI frame budget, producing
-    /// a visible mid-slide stall followed by a snap-to-final-position.
-    public static let initialSampleDelay: Duration = .milliseconds(700)
+    /// Delay before the first sample lands on MainActor so the dashboard
+    /// view's initial layout completes before observable property writes
+    /// cascade through SwiftUI.
+    public static let initialSampleDelay: Duration = .milliseconds(350)
 }
 
 @MainActor @Observable
