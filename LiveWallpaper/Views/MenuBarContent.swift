@@ -751,7 +751,7 @@ private struct IconControlButton: View {
     let systemImage: String
     let isEnabled: Bool
     let action: () -> Void
-    let accessibilityLabel: String
+    let accessibilityLabel: LocalizedStringKey
     var isProminent: Bool = false
 
     var body: some View {

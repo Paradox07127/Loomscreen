@@ -4,12 +4,14 @@ import Testing
 
 @Suite("App language preference", .serialized) @MainActor
 struct AppLanguagePreferenceTests {
-    @Test("Language choices include system, English, and Simplified Chinese")
+    @Test("Language choices include system, English, Chinese, and Japanese")
     func languageChoicesExposeSupportedLocales() {
-        #expect(AppLanguagePreference.allCases == [.system, .english, .simplifiedChinese])
+        #expect(AppLanguagePreference.allCases == [.system, .english, .simplifiedChinese, .traditionalChinese, .japanese])
         #expect(AppLanguagePreference.system.localeIdentifier == nil)
         #expect(AppLanguagePreference.english.localeIdentifier == "en")
         #expect(AppLanguagePreference.simplifiedChinese.localeIdentifier == "zh-Hans")
+        #expect(AppLanguagePreference.traditionalChinese.localeIdentifier == "zh-Hant")
+        #expect(AppLanguagePreference.japanese.localeIdentifier == "ja")
     }
 
     @Test("Saved language preference persists and reset returns to system")
