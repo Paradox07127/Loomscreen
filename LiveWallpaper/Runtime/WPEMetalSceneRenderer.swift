@@ -894,7 +894,14 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             case .unsupportedTexture:
                 return .legacyUnsupportedTexture(layer: layerName)
             case .decodeFailed:
-                return .other(layer: layerName, message: "A texture or image file is corrupted and cannot be decoded.")
+                return .other(
+                    layer: layerName,
+                    message: String(
+                        localized: "A texture or image file is corrupted and cannot be decoded.",
+                        defaultValue: "A texture or image file is corrupted and cannot be decoded.",
+                        comment: "Wallpaper Engine fallback diagnostic when a texture decode fails because the file is corrupt."
+                    )
+                )
             }
         default:
             return .other(layer: layerName, message: error.localizedDescription)

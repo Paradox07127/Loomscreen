@@ -5,6 +5,8 @@ public enum AppLanguagePreference: String, CaseIterable, Identifiable, Sendable 
     case system
     case english = "en"
     case simplifiedChinese = "zh-Hans"
+    case traditionalChinese = "zh-Hant"
+    case japanese = "ja"
 
     public static let storageKey = "AppLanguage.Preference"
 
@@ -14,7 +16,7 @@ public enum AppLanguagePreference: String, CaseIterable, Identifiable, Sendable 
         switch self {
         case .system:
             return nil
-        case .english, .simplifiedChinese:
+        case .english, .simplifiedChinese, .traditionalChinese, .japanese:
             return rawValue
         }
     }
@@ -31,6 +33,10 @@ public enum AppLanguagePreference: String, CaseIterable, Identifiable, Sendable 
             return "English"
         case .simplifiedChinese:
             return "Simplified Chinese"
+        case .traditionalChinese:
+            return "Traditional Chinese"
+        case .japanese:
+            return "Japanese"
         }
     }
 
