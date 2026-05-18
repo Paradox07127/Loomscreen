@@ -175,6 +175,7 @@ struct ScreenDetailView: View {
     @State private var isDraggingOver = false
     @State private var videoMuted: Bool = true
     @State private var videoVolume: Double = 1.0
+    @State private var videoColorSpace: VideoColorSpace = .auto
     @State private var lockScreenExtracted: Bool = false
     @State private var particleDensity: Double = 1.0
     @State private var selectedFrameRateLimit: FrameRateLimit = .fps60
@@ -553,7 +554,12 @@ struct ScreenDetailView: View {
                                         systemImage: "slider.horizontal.3",
                                         isExpanded: $isColorExpanded
                                     ) {
-                                        ColorAdjustmentsView(effectConfig: $effectConfig, screen: screen, screenManager: screenManager)
+                                        ColorAdjustmentsView(
+                                            effectConfig: $effectConfig,
+                                            videoColorSpace: $videoColorSpace,
+                                            screen: screen,
+                                            screenManager: screenManager
+                                        )
                                     }
                                 }
                                 .groupBoxStyle(ContainerGroupBoxStyle())
@@ -757,6 +763,7 @@ struct ScreenDetailView: View {
             assignIfChanged(setAsLockScreen, to: config.setAsLockScreen) { setAsLockScreen = $0 }
             assignIfChanged(videoMuted, to: config.muted) { videoMuted = $0 }
             assignIfChanged(videoVolume, to: config.videoVolume) { videoVolume = $0 }
+            assignIfChanged(videoColorSpace, to: config.videoColorSpace) { videoColorSpace = $0 }
             assignIfChanged(selectedFrameRateLimit, to: config.frameRateLimit) { selectedFrameRateLimit = $0 }
             assignIfChanged(playlistBookmarks, to: config.playlistBookmarks ?? []) { playlistBookmarks = $0 }
             assignIfChanged(shufflePlaylist, to: config.shufflePlaylist) { shufflePlaylist = $0 }
