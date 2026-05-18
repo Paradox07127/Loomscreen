@@ -226,16 +226,18 @@ struct CommonPlaybackInspector: View {
     /// Single binding driving the audio slider. Slider position [0, 1] maps to:
     ///   - [0, deadZone)  → muted (volume 0 displayed)
     ///   - [deadZone, 1]  → unmuted; internal volume = (pos - deadZone) / (1 - deadZone)
-    /// For HTML wallpapers there is no granular volume, so the slider only
-    /// toggles `HTMLConfig.muteAudio` — position past the dead zone means
-    /// "unmuted at the WebView's native level".
+    ///
+    /// HTML and video paths share the same UI semantics. For HTML the level
+    /// writes back to `HTMLConfig.audioVolume`, which the master-audio JS
+    /// controller propagates to every `<audio>` / `<video>` element and to
+    /// any active `AudioContext` graphs. The "no granular volume" caveat
+    /// that used to live here is gone since the JS controller now covers it.
     private var unifiedAudioBinding: Binding<Double> {
         Binding(
             get: {
                 if audioMutedBinding.wrappedValue { return 0 }
-                if htmlConfig != nil { return 1.0 }
                 let deadZone = Self.audioDeadZone
-                return deadZone + Self.clampedVolume(videoVolume) * (1 - deadZone)
+                return deadZone + Self.clampedVolume(currentVolume) * (1 - deadZone)
             },
             set: { sliderValue in
                 let shouldMute = sliderValue < Self.audioDeadZone
@@ -251,19 +253,40 @@ struct CommonPlaybackInspector: View {
                 if mutedBinding.wrappedValue {
                     mutedBinding.wrappedValue = false
                 }
-                guard htmlConfig == nil else { return }
 
                 let normalized = (sliderValue - Self.audioDeadZone) / (1 - Self.audioDeadZone)
                 let clampedValue = Self.clampedVolume(normalized)
-                guard abs(videoVolume - clampedValue) > 0.001 else { return }
-                videoVolume = clampedValue
-                screenManager.updateVideoVolume(clampedValue, for: screen)
+                applyVolume(clampedValue)
             }
         )
     }
 
+    /// Reads volume from the right backing store: HTML wallpapers store it
+    /// per-config, video sessions on `ScreenConfiguration.videoVolume`.
+    private var currentVolume: Double {
+        if let htmlConfig {
+            return htmlConfig.wrappedValue.audioVolume
+        }
+        return videoVolume
+    }
+
+    /// Routes a slider-set volume back to the same store `currentVolume` reads from.
+    private func applyVolume(_ value: Double) {
+        if let htmlConfig {
+            guard abs(htmlConfig.wrappedValue.audioVolume - value) > 0.001 else { return }
+            var next = htmlConfig.wrappedValue
+            next.audioVolume = HTMLConfig.clampedAudioVolume(value)
+            htmlConfig.wrappedValue = next
+            screenManager.updateHTMLConfig(next, for: screen)
+            return
+        }
+        guard abs(videoVolume - value) > 0.001 else { return }
+        videoVolume = value
+        screenManager.updateVideoVolume(value, for: screen)
+    }
+
     private var videoVolumePercent: Int {
-        Int((Self.clampedVolume(videoVolume) * 100).rounded())
+        Int((Self.clampedVolume(currentVolume) * 100).rounded())
     }
 
     private static func clampedVolume(_ value: Double) -> Double {
