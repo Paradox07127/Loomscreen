@@ -508,7 +508,7 @@ struct ScreenDetailView: View {
                                                     }
                                                 }
                                                 .labelsHidden()
-                                                .frame(width: 86)
+                                                .fixedSize()
                                                 .accessibilityLabel(Text("Particle effect"))
                                                 .accessibilityValue(Text(selectedParticleEffect.titleKey))
                                             }

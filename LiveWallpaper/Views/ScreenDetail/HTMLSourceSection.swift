@@ -444,7 +444,7 @@ struct HTMLOptionsInspector: View {
                 Text("Every 6 hours").tag(21600)
             }
             .labelsHidden()
-            .frame(width: 140)
+            .fixedSize()
             .accessibilityLabel(Text("Auto-refresh interval"))
         }
     }
@@ -666,14 +666,22 @@ struct HTMLTransformInspector: View {
                 in: -HTMLConfig.maxTransformTranslate...HTMLConfig.maxTransformTranslate
             )
             .controlSize(.small)
-            .frame(width: 78)
+            .frame(width: 96)
             .accessibilityLabel(Text(accessibilityLabel))
 
-            Text(verbatim: "\(Int(value.wrappedValue.rounded()))")
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .frame(width: 36, alignment: .trailing)
-                .monospacedDigit()
+            TextField(
+                "",
+                value: value,
+                format: .number.precision(.fractionLength(0))
+            )
+            .textFieldStyle(.plain)
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundStyle(.primary)
+            .multilineTextAlignment(.trailing)
+            .monospacedDigit()
+            .frame(width: 42)
+            .accessibilityLabel(Text(accessibilityLabel))
+            .accessibilityHint(Text("Type a value in CSS pixels."))
         }
     }
 
