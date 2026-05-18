@@ -35,7 +35,7 @@ struct ColorAdjustmentsView: View {
                 HStack {
                     Spacer()
                     Button(action: resetEffects) {
-                        Label("Reset to Default", systemImage: "arrow.counterclockwise")
+                        Label("Reset Color & Filters", systemImage: "arrow.counterclockwise")
                             .font(.system(size: 12, weight: .medium))
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
@@ -43,7 +43,7 @@ struct ColorAdjustmentsView: View {
                     .buttonStyle(.plain)
                     .destructiveControlTint()
                     .adaptiveGlassSurface(.capsule, tint: .red, interactive: true)
-                    .help(Text("Reset all color adjustments to default values"))
+                    .help(Text("Reset blur, brightness, saturation, warmth, vignette, and auto-tint to defaults"))
                     Spacer()
                 }
             }

@@ -29,6 +29,7 @@ public enum DestructiveAction: Identifiable, Equatable {
     case removeWPECacheEntry(displayName: String)
     case applyConfigurationToAllDisplays(otherCount: Int)
     case clearCurrentWallpaper(displayName: String)
+    case resetDisplaySettings(displayName: String)
 
     public var id: String {
         switch self {
@@ -50,6 +51,7 @@ public enum DestructiveAction: Identifiable, Equatable {
         case .removeWPECacheEntry(let n): return "removeWPECacheEntry-\(n)"
         case .applyConfigurationToAllDisplays(let c): return "applyConfigurationToAllDisplays-\(c)"
         case .clearCurrentWallpaper(let n): return "clearCurrentWallpaper-\(n)"
+        case .resetDisplaySettings(let n): return "resetDisplaySettings-\(n)"
         }
     }
 
@@ -74,6 +76,7 @@ public enum DestructiveAction: Identifiable, Equatable {
         case .removeWPECacheEntry:       return "Remove this cache entry?"
         case .applyConfigurationToAllDisplays: return "Apply this wallpaper to every other display?"
         case .clearCurrentWallpaper:     return "Clear current wallpaper?"
+        case .resetDisplaySettings:      return "Reset this display's settings?"
         }
     }
 
@@ -117,6 +120,8 @@ public enum DestructiveAction: Identifiable, Equatable {
             return "This replaces the wallpaper on \(count) other display\(count == 1 ? "" : "s") with the same content and settings as this one."
         case .clearCurrentWallpaper(let displayName):
             return "Only removes the current wallpaper from \(displayName). Source files, bookmarks, and library items are not deleted."
+        case .resetDisplaySettings(let displayName):
+            return "Restores playback, color, particle, audio, and layout settings on \(displayName) to defaults. The wallpaper itself, playlist bookmarks, and library items stay."
         }
     }
 
@@ -141,6 +146,7 @@ public enum DestructiveAction: Identifiable, Equatable {
         case .removeWPECacheEntry:       return "Remove"
         case .applyConfigurationToAllDisplays: return "Apply to All Displays"
         case .clearCurrentWallpaper:     return "Clear Wallpaper"
+        case .resetDisplaySettings:      return "Reset Settings"
         }
     }
 }

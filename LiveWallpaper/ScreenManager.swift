@@ -1091,6 +1091,40 @@ final class ScreenManager {
         configurationStore.get(for: screen.id)
     }
 
+    /// Restores per-display playback / effect / audio / layout settings to
+    /// their defaults while preserving the wallpaper content itself: video
+    /// bookmarks, HTML source, scene/WPE source, playlist bookmarks, and
+    /// WPE origin metadata are left intact. The HTML config that travels
+    /// with `activeWallpaper` and `savedHTMLConfig` is reset to defaults
+    /// since it represents settings, not source content.
+    func resetDisplaySettings(for screen: Screen) {
+        guard var config = configurationStore.get(for: screen.id) else { return }
+
+        config.playbackSpeed = 1.0
+        config.fitMode = .aspectFill
+        config.videoDisplayMode = .perDisplay
+        config.frameRateLimit = .fps60
+        config.particleEffect = .none
+        config.effectConfig = .default
+        config.scheduleSlots = nil
+        config.shufflePlaylist = false
+        config.playlistRotationMinutes = nil
+        config.setAsLockScreen = false
+        config.wallpaperMode = .single
+        config.muted = true
+        config.videoVolume = 1.0
+        config.savedHTMLConfig = .default
+        if case .html(let source, _) = config.activeWallpaper {
+            config.activeWallpaper = .html(source: source, config: .default)
+        }
+
+        releaseRuntimeSession(screen)
+        saveConfiguration(config)
+        restoreWallpaperSession(for: screen, configuration: config, preservingState: false)
+        notifyWallpaperSessionChanged()
+        Logger.info("Reset display settings for screen \(screen.id)", category: .screenManager)
+    }
+
     /// Copies the active wallpaper + per-screen settings from `source` onto every other registered screen, restoring each runtime session so the new content shows immediately.
     func applyConfigurationToAllDisplays(from source: Screen) {
         guard screens.count > 1,
