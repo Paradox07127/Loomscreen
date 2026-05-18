@@ -6,6 +6,13 @@ struct ContentView: View {
     @Environment(ScreenManager.self) private var screenManager
     @State private var selectedNavigation: Navigation?
     @State private var didConsumeInitialAddWallpaperPrompt = false
+    /// Sidebar visibility binding. Exists so the view can drive a one-shot
+    /// prewarm cycle that emulates the user-discovered "drag the sidebar
+    /// closed, then drag it open" gesture, which warms up the underlying
+    /// NSSplitView state so the first user-driven sidebar toggle no longer
+    /// stalls mid-animation.
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var didPrewarmSidebar = false
     private let initialAddWallpaperPromptKind: String?
 
     init(initialNavigation: Navigation? = nil, initialAddWallpaperPromptKind: String? = nil) {
@@ -14,7 +21,7 @@ struct ContentView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             Sidebar(selection: $selectedNavigation)
                 .onReceive(NotificationCenter.default.publisher(for: .selectScreenInSettings)) { notification in
                     guard let screenID = notification.userInfo?["screenID"] as? CGDirectDisplayID else { return }
@@ -55,6 +62,28 @@ struct ContentView: View {
         .onAppear {
             scheduleDefaultDisplaySelection()
             consumeInitialAddWallpaperPromptIfNeeded()
+            prewarmSidebarIfNeeded()
+        }
+    }
+
+    /// Mimics the user-discovered "drag the sidebar closed then drag it open"
+    /// warmup, but programmatically and animation-suppressed so there is no
+    /// visible flash. Fires once per ContentView lifetime; the cached
+    /// NSWindowController preserves the warmed state across window close.
+    private func prewarmSidebarIfNeeded() {
+        guard !didPrewarmSidebar else { return }
+        didPrewarmSidebar = true
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(50))
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                columnVisibility = .detailOnly
+            }
+            try? await Task.sleep(for: .milliseconds(30))
+            withTransaction(transaction) {
+                columnVisibility = .all
+            }
         }
     }
 

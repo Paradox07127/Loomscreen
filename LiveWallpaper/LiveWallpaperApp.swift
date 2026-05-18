@@ -371,17 +371,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 extension AppDelegate: NSWindowDelegate {
+    /// Intercept the settings window close so the window — and the warmed
+    /// NavigationSplitView / NSSplitViewController state inside it — is just
+    /// hidden, not actually closed. The full close+reopen cycle re-pays
+    /// the sidebar-bridge materialization cost on the next reveal even
+    /// when the NSWindowController is retained, so we redirect close
+    /// requests to `orderOut(nil)`. The onboarding window keeps the
+    /// regular close-and-release semantics.
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        if sender == settingsWindowController?.window {
+            sender.orderOut(nil)
+            return false
+        }
+        return true
+    }
+
     func windowWillClose(_ notification: Notification) {
         guard let closingWindow = notification.object as? NSWindow else { return }
 
-        // NOTE: settingsWindowController is intentionally NOT released here.
-        // Releasing it tears down the NSHostingController + the entire
-        // SwiftUI view hierarchy, so the next showSettings() pays the full
-        // List(.sidebar) / NSOutlineView bridge materialization cost on the
-        // first sidebar reveal frame — visible as a "smooth → halfway stall
-        // → snap" sidebar slide. Keeping the controller alive (paired with
-        // `window.isReleasedWhenClosed = false` in makeSettingsWindowController)
-        // makes close+reopen a pure window orderFront with no remount.
+        // The settings window never reaches here — windowShouldClose
+        // suppresses the close. Only onboarding cleans up its controller.
         if closingWindow == onboardingWindowController?.window {
             onboardingWindowController = nil
             return
