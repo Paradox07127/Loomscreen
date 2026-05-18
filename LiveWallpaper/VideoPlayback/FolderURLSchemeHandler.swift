@@ -19,8 +19,8 @@ import UniformTypeIdentifiers
 /// main thread (documented behaviour) and all mutable state is read / written
 /// from the main thread by `HTMLWallpaperView`.
 final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sendable {
-    static let scheme = "livewallpaper"
-    static let host = "wallpaper"
+    nonisolated static let scheme = "livewallpaper"
+    nonisolated static let host = "wallpaper"
     nonisolated static let responseChunkSize = 64 * 1024
 
     private var activeFolderURL: URL?

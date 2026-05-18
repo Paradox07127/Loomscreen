@@ -45,13 +45,10 @@ struct ColorAdjustmentsView: View {
                     Spacer()
                     Button(action: resetEffects) {
                         Label("Reset Color & Filters", systemImage: "arrow.counterclockwise")
-                            .font(.system(size: 12, weight: .medium))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
                     }
-                    .buttonStyle(.plain)
-                    .destructiveControlTint()
-                    .adaptiveGlassSurface(.capsule, tint: .red, interactive: true)
+                    .buttonStyle(.bordered)
+                    .tint(.red)
+                    .controlSize(.small)
                     .help(Text("Reset blur, brightness, saturation, warmth, vignette, and auto-tint to defaults"))
                     Spacer()
                 }
