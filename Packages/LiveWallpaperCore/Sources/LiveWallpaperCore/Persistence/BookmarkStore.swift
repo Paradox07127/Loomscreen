@@ -40,6 +40,7 @@ public final class BookmarkStore {
         label: String,
         content: WallpaperContent,
         sourceDisplayName: String? = nil,
+        playbackSettings: BookmarkPlaybackSettings? = nil,
         wpeOrigin: WPEOrigin? = nil
     ) -> WallpaperBookmark {
         let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -53,6 +54,7 @@ public final class BookmarkStore {
             label: resolved,
             content: content,
             sourceDisplayName: resolvedSourceDisplayName,
+            playbackSettings: playbackSettings,
             wpeOrigin: wpeOrigin
         )
         bookmarks.append(bookmark)
@@ -92,6 +94,26 @@ public final class BookmarkStore {
     /// the "Save" button instead of producing duplicates).
     public func contains(_ content: WallpaperContent) -> Bool {
         bookmarks.contains { $0.content == content }
+    }
+
+    /// Returns the first existing bookmark whose content (and Workshop
+    /// origin, when present) points at the same source. Used by the Save
+    /// UI to refuse exact-source duplicates and to surface "Already saved
+    /// as 'X'" instead of silently disabling the button.
+    ///
+    /// Dedup intentionally ignores `playbackSettings`. Legacy bookmarks
+    /// saved before the settings expansion have `nil` settings; comparing
+    /// full equality there would let a same-source duplicate slip through.
+    /// One bookmark per source matches the "save / overwrite" mental model
+    /// users have for shortcuts — to change a bookmark's settings, delete
+    /// it and re-save from the current screen state.
+    public func equivalentBookmark(
+        content: WallpaperContent,
+        wpeOrigin: WPEOrigin? = nil
+    ) -> WallpaperBookmark? {
+        bookmarks.first { existing in
+            existing.content == content && existing.wpeOrigin == wpeOrigin
+        }
     }
 
     public func containsWPEBookmark(workshopID: String) -> Bool {

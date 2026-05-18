@@ -2,8 +2,19 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
-/// Unified playlist UI: primary + extras share one drag-reorderable list,
-/// with star (primary) + pulse (now-playing) badges per row.
+/// Unified playlist UI: primary + extras share one reorderable list, with
+/// star (primary) + pulse (now-playing) badges per row.
+///
+/// Drag-reorder is built on `DragGesture` + a `PreferenceKey` that tracks
+/// each row's frame. We deliberately avoid SwiftUI's `.draggable` /
+/// `.dropDestination` / `.onDrag` modifiers — every variant we tried on
+/// macOS 14/15 had the drop event silently swallowed when source and target
+/// were siblings of the same VStack. Hand-rolled gesture has no dependency
+/// on AppKit's dragging-session machinery, so the reorder is deterministic.
+///
+/// Reorder is intentionally side-effect-free: the visible list order is
+/// the only thing that changes. The starred entry keeps its star at its
+/// new position, the currently-playing video keeps playing, no reload.
 struct PlaylistSection: View {
     @Binding var playlistBookmarks: [Data]
     @Binding var shufflePlaylist: Bool
@@ -12,8 +23,13 @@ struct PlaylistSection: View {
     var screenManager: ScreenManager
 
     @State private var entries: [PlaylistEntry] = []
-    @State private var draggingID: PlaylistEntry.ID?
     @State private var pendingDestructive: PendingDestructive?
+
+    // MARK: Drag-reorder state
+    @State private var rowFrames: [PlaylistRowFrame] = []
+    @State private var draggingID: PlaylistEntry.ID?
+    @State private var dragOffsetY: CGFloat = 0
+    @State private var insertionIndex: Int?
 
     private let rotationOptions: [(LocalizedStringKey, Int?)] = [
         ("Off", nil),
@@ -127,41 +143,120 @@ struct PlaylistSection: View {
 
     @ViewBuilder
     private var entryList: some View {
-        VStack(spacing: 4) {
-            ForEach(entries) { entry in
-                PlaylistRow(
-                    entry: entry,
-                    isDragging: draggingID == entry.id,
-                    onSetPrimary: { setAsPrimary(entry) },
-                    onPlayNow: { playNow(entry) },
-                    onRemove: { remove(entry) }
-                )
-                .draggable(entry.id) {
-                    PlaylistRow(
-                        entry: entry,
-                        isDragging: false,
-                        onSetPrimary: {}, onPlayNow: {}, onRemove: {}
-                    )
-                    .padding(6)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-                    .frame(width: 240)
-                }
-                .dropDestination(for: String.self) { items, _ in
-                    handleDrop(itemIDs: items, target: entry.id)
-                } isTargeted: { targeted in
-                    if targeted { draggingID = entry.id } else if draggingID == entry.id { draggingID = nil }
-                }
-                .contextMenu {
-                    Button("Set as Primary", systemImage: "star.fill") { setAsPrimary(entry) }
-                        .disabled(entry.isPrimary)
-                    Button("Play Now", systemImage: "play.fill") { playNow(entry) }
-                        .disabled(entry.isPlaying)
-                    Divider()
-                    Button("Remove", systemImage: "trash", role: .destructive) { remove(entry) }
-                }
+        VStack(spacing: 0) {
+            ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+                insertionMarker(showAt: index)
+                rowView(for: entry)
+                    .padding(.vertical, 2)
             }
+            insertionMarker(showAt: entries.count)
+        }
+        .coordinateSpace(name: PlaylistCoordSpace)
+        .onPreferenceChange(PlaylistRowFramesKey.self) { frames in
+            rowFrames = frames
         }
         .animation(.snappy(duration: 0.18), value: entries.map(\.id))
+    }
+
+    @ViewBuilder
+    private func insertionMarker(showAt index: Int) -> some View {
+        ZStack {
+            if insertionIndex == index, draggingID != nil {
+                Capsule()
+                    .fill(Color.accentColor)
+                    .frame(height: 2)
+                    .padding(.horizontal, 6)
+                    .transition(.opacity)
+                    .accessibilityHidden(true)
+            }
+        }
+        .frame(height: 2)
+    }
+
+    @ViewBuilder
+    private func rowView(for entry: PlaylistEntry) -> some View {
+        PlaylistRow(
+            entry: entry,
+            isBeingDragged: draggingID == entry.id,
+            onSetPrimary: { setAsPrimary(entry) },
+            onPlayNow: { playNow(entry) },
+            onRemove: { remove(entry) }
+        )
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: PlaylistRowFramesKey.self,
+                    value: [PlaylistRowFrame(
+                        id: entry.id,
+                        frame: proxy.frame(in: .named(PlaylistCoordSpace))
+                    )]
+                )
+            }
+        )
+        .offset(y: draggingID == entry.id ? dragOffsetY : 0)
+        .zIndex(draggingID == entry.id ? 1 : 0)
+        .contextMenu {
+            Button("Set as Primary", systemImage: "star.fill") { setAsPrimary(entry) }
+                .disabled(entry.isPrimary)
+            Button("Play Now", systemImage: "play.fill") { playNow(entry) }
+                .disabled(entry.isPlaying)
+            Divider()
+            Button("Remove", systemImage: "trash", role: .destructive) { remove(entry) }
+        }
+        .gesture(reorderGesture(for: entry))
+    }
+
+    private func reorderGesture(for entry: PlaylistEntry) -> some Gesture {
+        // minimumDistance > 0 so a plain click never starts a drag — the row's
+        // menu / context-menu / hover affordances stay live.
+        DragGesture(minimumDistance: 4, coordinateSpace: .named(PlaylistCoordSpace))
+            .onChanged { value in
+                if draggingID != entry.id {
+                    draggingID = entry.id
+                }
+                dragOffsetY = value.translation.height
+                insertionIndex = computeInsertionIndex(
+                    draggedID: entry.id,
+                    pointerY: value.location.y
+                )
+            }
+            .onEnded { _ in
+                let sourceID = entry.id
+                let target = insertionIndex
+                draggingID = nil
+                dragOffsetY = 0
+                insertionIndex = nil
+                if let target { commitReorder(sourceID: sourceID, toIndex: target) }
+            }
+    }
+
+    /// Pick the insertion slot whose midpoint sits just below the pointer.
+    /// Returns 0..entries.count (inclusive of the trailing slot).
+    private func computeInsertionIndex(draggedID: PlaylistEntry.ID, pointerY: CGFloat) -> Int {
+        guard !rowFrames.isEmpty else { return 0 }
+        let sorted = rowFrames.sorted { $0.frame.minY < $1.frame.minY }
+        for (idx, rowFrame) in sorted.enumerated() {
+            if pointerY < rowFrame.frame.midY {
+                return idx
+            }
+        }
+        return sorted.count
+    }
+
+    /// Reorder entries locally then sync to ScreenManager. No reload, no
+    /// primary change, no cursor change — just the order.
+    private func commitReorder(sourceID: PlaylistEntry.ID, toIndex destination: Int) {
+        guard let sourceIndex = entries.firstIndex(where: { $0.id == sourceID }) else { return }
+        // Inserting right at the source position OR right after it is a no-op.
+        if destination == sourceIndex || destination == sourceIndex + 1 { return }
+
+        var newEntries = entries
+        let item = newEntries.remove(at: sourceIndex)
+        // Removing source shifts downstream slots left by one.
+        let adjusted = sourceIndex < destination ? destination - 1 : destination
+        let clamped = min(max(0, adjusted), newEntries.count)
+        newEntries.insert(item, at: clamped)
+        applyOrder(newEntries)
     }
 
     // MARK: - Entry Loading
@@ -180,23 +275,16 @@ struct PlaylistSection: View {
             if !entries.isEmpty { entries = [] }
             return
         }
-        let extras = config.playlistBookmarks ?? []
-        let combined = [primary] + extras
+        let combined = config.combinedPlaylist
         let cursor = config.playlistCursorIndex ?? 0
         let activeBookmark = (cursor < combined.count) ? combined[cursor] : primary
 
-        let nextEntries = [PlaylistEntry(
-            bookmark: primary,
-            isPrimary: true,
-            isPlaying: primary == activeBookmark,
-            name: screenManager.bookmarkDisplayName(for: primary)
-                ?? String(localized: "Primary", defaultValue: "Primary", comment: "Fallback playlist entry name for the primary video.")
-        )] + extras.map {
+        let nextEntries = combined.map { bookmark in
             PlaylistEntry(
-                bookmark: $0,
-                isPrimary: false,
-                isPlaying: $0 == activeBookmark,
-                name: screenManager.bookmarkDisplayName(for: $0)
+                bookmark: bookmark,
+                isPrimary: bookmark == primary,
+                isPlaying: bookmark == activeBookmark,
+                name: screenManager.bookmarkDisplayName(for: bookmark)
                     ?? String(localized: "Unknown", defaultValue: "Unknown", comment: "Fallback playlist entry name.")
             )
         }
@@ -215,7 +303,21 @@ struct PlaylistSection: View {
         let completion: ([URL]) -> Void = { urls in
             guard !urls.isEmpty else { return }
             SettingsManager.shared.saveLastUsedDirectory(urls[0].deletingLastPathComponent())
+
+            // Snapshot resolved paths of everything already in the visible
+            // playlist (primary + extras) — playlist dedup compares by file
+            // identity, not raw bookmark bytes, because security-scoped
+            // bookmarks generate fresh tokens per creation and would never
+            // byte-match an existing entry.
+            let existingPaths = currentPlaylistResolvedPaths()
+            var skipped = 0
+
             for url in urls {
+                let path = url.resolvingSymlinksInPath().path
+                if existingPaths.contains(path) {
+                    skipped += 1
+                    continue
+                }
                 if let bookmark = ResourceUtilities.createVideoBookmark(for: url) {
                     screenManager.recordBookmarkDisplayName(bookmark, name: url.lastPathComponent)
                     playlistBookmarks.append(bookmark)
@@ -223,6 +325,10 @@ struct PlaylistSection: View {
             }
             screenManager.updatePlaylistBookmarks(playlistBookmarks, for: screen)
             loadEntries()
+
+            if skipped > 0 {
+                Logger.info("Playlist add: skipped \(skipped) duplicate(s)", category: .ui)
+            }
         }
         if let parent = NSApp.keyWindow ?? NSApp.mainWindow {
             panel.beginSheetModal(for: parent) { response in
@@ -233,6 +339,23 @@ struct PlaylistSection: View {
             guard panel.runModal() == .OK else { return }
             completion(panel.urls)
         }
+    }
+
+    /// Set of canonical file paths backing the current playlist. Used to
+    /// short-circuit duplicate adds — same video file added twice would
+    /// produce two consecutive plays of the same content during rotation.
+    private func currentPlaylistResolvedPaths() -> Set<String> {
+        guard let config = screenManager.getConfiguration(for: screen) else { return [] }
+        let combined = config.combinedPlaylist
+        var paths: Set<String> = []
+        for bookmarkData in combined {
+            guard case .success(let resolved) = SecurityScopedBookmarkResolver.shared.resolve(
+                bookmarkData,
+                target: .transient
+            ) else { continue }
+            paths.insert(resolved.url.resolvingSymlinksInPath().path)
+        }
+        return paths
     }
 
     private func setAsPrimary(_ entry: PlaylistEntry) {
@@ -260,30 +383,13 @@ struct PlaylistSection: View {
     private func performRemove(_ entry: PlaylistEntry) {
         var newEntries = entries
         newEntries.removeAll(where: { $0.id == entry.id })
-        applyEntries(newEntries, removedPrimary: entry.isPrimary)
+        applyEntriesAfterRemove(newEntries, removedPrimary: entry.isPrimary)
     }
 
-    private func handleDrop(itemIDs: [String], target: PlaylistEntry.ID) -> Bool {
-        guard let dragged = itemIDs.first,
-              dragged != target,
-              let sourceIndex = entries.firstIndex(where: { $0.id == dragged }),
-              let targetIndex = entries.firstIndex(where: { $0.id == target }) else {
-            draggingID = nil
-            return false
-        }
-        var newEntries = entries
-        let item = newEntries.remove(at: sourceIndex)
-        // Removing source shifts downstream indices left, so source<target inserts at target-1.
-        let insertAt = sourceIndex < targetIndex ? max(0, targetIndex - 1) : targetIndex
-        newEntries.insert(item, at: min(insertAt, newEntries.count))
-        applyEntries(newEntries, removedPrimary: false)
-        draggingID = nil
-        return true
-    }
-
-    /// Push the new entry order into ScreenManager. If primary entry no longer
-    /// exists (removed primary), promote the first remaining entry to primary.
-    private func applyEntries(_ newEntries: [PlaylistEntry], removedPrimary: Bool) {
+    /// Removal path: may promote a new primary if the deleted entry was
+    /// primary. Distinct from the drag-reorder path so drag never touches
+    /// primary identity.
+    private func applyEntriesAfterRemove(_ newEntries: [PlaylistEntry], removedPrimary: Bool) {
         guard !newEntries.isEmpty else {
             entries = []
             screenManager.clearWallpaperForScreen(screen)
@@ -295,29 +401,64 @@ struct PlaylistSection: View {
         }
         guard let primaryIndex = working.firstIndex(where: { $0.isPrimary }) else { return }
         let primary = working[primaryIndex].bookmark
-        let extras = working.enumerated().compactMap { idx, e in idx == primaryIndex ? nil : e.bookmark }
+        let ordered = working.map(\.bookmark)
+        let extras = ordered.enumerated().compactMap { idx, b in idx == primaryIndex ? nil : b }
 
         entries = working
         playlistBookmarks = extras
-        screenManager.replacePlaylist(primary: primary, extras: extras, for: screen)
+        screenManager.replacePlaylist(ordered: ordered, primary: primary, for: screen)
+    }
+
+    /// Pure-reorder commit: preserves primary identity + currently playing
+    /// video. The starred entry keeps its star at its new position; the
+    /// active playback bookmark is followed to its new index by the
+    /// orchestrator's cursor-resolve logic.
+    private func applyOrder(_ newEntries: [PlaylistEntry]) {
+        guard let primaryIndex = newEntries.firstIndex(where: { $0.isPrimary }) else { return }
+        let primary = newEntries[primaryIndex].bookmark
+        let ordered = newEntries.map(\.bookmark)
+        let extras = ordered.enumerated().compactMap { idx, b in idx == primaryIndex ? nil : b }
+
+        entries = newEntries
+        playlistBookmarks = extras
+        screenManager.replacePlaylist(ordered: ordered, primary: primary, for: screen)
     }
 }
 
 // MARK: - PlaylistEntry View Model
 
 struct PlaylistEntry: Identifiable, Equatable {
-    var id: String { "\(isPrimary ? "p" : "x"):\(bookmark.base64EncodedString())" }
+    /// Identity is the bookmark — `isPrimary` is a property of the entry, not
+    /// part of its identity, so a row whose primary status flips animates as
+    /// an update rather than a delete + insert.
+    var id: String { bookmark.base64EncodedString() }
     let bookmark: Data
     var isPrimary: Bool
     var isPlaying: Bool
     var name: String
 }
 
+// MARK: - Row position tracking
+
+private let PlaylistCoordSpace = "playlist.row.space"
+
+struct PlaylistRowFrame: Equatable, Sendable {
+    let id: PlaylistEntry.ID
+    let frame: CGRect
+}
+
+private struct PlaylistRowFramesKey: PreferenceKey {
+    static let defaultValue: [PlaylistRowFrame] = []
+    static func reduce(value: inout [PlaylistRowFrame], nextValue: () -> [PlaylistRowFrame]) {
+        value.append(contentsOf: nextValue())
+    }
+}
+
 // MARK: - PlaylistRow
 
 private struct PlaylistRow: View {
     let entry: PlaylistEntry
-    let isDragging: Bool
+    let isBeingDragged: Bool
     let onSetPrimary: () -> Void
     let onPlayNow: () -> Void
     let onRemove: () -> Void
@@ -396,8 +537,8 @@ private struct PlaylistRow: View {
             RoundedRectangle(cornerRadius: 8)
                 .strokeBorder(entry.isPlaying ? Color.green.opacity(0.45) : Color.clear, lineWidth: 1)
         )
+        .shadow(color: Color.black.opacity(isBeingDragged ? 0.22 : 0), radius: 8, x: 0, y: 4)
         .contentShape(Rectangle())
-        .opacity(isDragging ? 0.4 : 1.0)
         .onHover { isHovering = $0 }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel)

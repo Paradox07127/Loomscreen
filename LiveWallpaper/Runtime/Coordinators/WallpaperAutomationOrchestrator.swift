@@ -58,45 +58,58 @@ final class WallpaperAutomationOrchestrator {
         saveConfiguration(config)
     }
 
+    /// Promote `bookmark` to primary without reordering the visible list — the
+    /// star marker travels with the entry's existing position. Playback jumps
+    /// to the new primary.
     func setPrimaryVideo(bookmark: Data, for screen: Screen) {
         guard var config = configurationStore.get(for: screen.id),
               config.savedVideoBookmarkData != bookmark else { return }
 
-        var extras = config.playlistBookmarks ?? []
-        if let oldPrimary = config.savedVideoBookmarkData,
-           !extras.contains(oldPrimary), oldPrimary != bookmark {
-            extras.append(oldPrimary)
-        }
-        extras.removeAll(where: { $0 == bookmark })
+        let combined = config.combinedPlaylist
+        guard let newPrimaryPosition = combined.firstIndex(of: bookmark) else { return }
 
-        config.replacePrimaryVideo(bookmarkData: bookmark)
+        // Keep `combined` ordering; only the star (and the extras split) moves.
+        let extras = combined.enumerated().compactMap { idx, b -> Data? in
+            idx == newPrimaryPosition ? nil : b
+        }
+
+        // Preserve cursor on the new primary so it starts playing.
+        config.savedVideoBookmarkData = bookmark
+        config.activeWallpaper = .video(bookmarkData: bookmark)
         config.playlistBookmarks = extras.isEmpty ? nil : extras
+        config.playlistPrimaryIndex = newPrimaryPosition
+        config.playlistCursorIndex = newPrimaryPosition
         saveConfiguration(config)
 
         reloadWallpaperForScreen(screen)
     }
 
-    /// Writes reordered playlist entries while preserving the active bookmark.
-    func replacePlaylist(primary: Data, extras: [Data], for screen: Screen) {
+    /// Writes the reordered playlist (full visible order) while preserving the
+    /// active bookmark when only the order changed.
+    func replacePlaylist(ordered: [Data], primary: Data, for screen: Screen) {
         guard var config = configurationStore.get(for: screen.id) else { return }
+        guard let primaryIndex = ordered.firstIndex(of: primary) else { return }
 
-        let oldCombined = [config.savedVideoBookmarkData].compactMap { $0 } + (config.playlistBookmarks ?? [])
+        let oldCombined = config.combinedPlaylist
         let oldCursor = config.playlistCursorIndex ?? 0
         let oldActive: Data? = oldCursor < oldCombined.count ? oldCombined[oldCursor] : config.videoBookmarkData
 
         let primaryChanged = config.savedVideoBookmarkData != primary
+        let extras = ordered.enumerated().compactMap { idx, b -> Data? in
+            idx == primaryIndex ? nil : b
+        }
         config.savedVideoBookmarkData = primary
         config.playlistBookmarks = extras.isEmpty ? nil : extras
+        config.playlistPrimaryIndex = primaryIndex
 
-        let newCombined = [primary] + extras
         if primaryChanged {
-            config.playlistCursorIndex = 0
+            config.playlistCursorIndex = primaryIndex
             config.activeWallpaper = .video(bookmarkData: primary)
         } else {
-            let resolved = PlaylistPolicy.resolveCursor(activeBookmark: oldActive, in: newCombined)
+            let resolved = PlaylistPolicy.resolveCursor(activeBookmark: oldActive, in: ordered)
             config.playlistCursorIndex = resolved
-            if resolved < newCombined.count {
-                config.activeWallpaper = .video(bookmarkData: newCombined[resolved])
+            if resolved < ordered.count {
+                config.activeWallpaper = .video(bookmarkData: ordered[resolved])
             }
         }
         saveConfiguration(config)
@@ -107,9 +120,8 @@ final class WallpaperAutomationOrchestrator {
     }
 
     func playPlaylistEntry(at index: Int, for screen: Screen) {
-        guard let config = configurationStore.get(for: screen.id),
-              let primary = config.savedVideoBookmarkData else { return }
-        let combined = [primary] + (config.playlistBookmarks ?? [])
+        guard let config = configurationStore.get(for: screen.id) else { return }
+        let combined = config.combinedPlaylist
         guard index >= 0, index < combined.count else { return }
         applyCursor(index, combined: combined, screen: screen, label: "jumping")
     }
@@ -123,10 +135,9 @@ final class WallpaperAutomationOrchestrator {
 
     func advancePlaylist(for screen: Screen) {
         guard let config = configurationStore.get(for: screen.id),
-              config.wallpaperMode == .playlist,
-              let primary = config.savedVideoBookmarkData else { return }
+              config.wallpaperMode == .playlist else { return }
 
-        let combined = [primary] + (config.playlistBookmarks ?? [])
+        let combined = config.combinedPlaylist
         guard combined.count > 1 else { return }
 
         let currentCursor = config.playlistCursorIndex ?? 0
@@ -141,10 +152,9 @@ final class WallpaperAutomationOrchestrator {
 
     func regressPlaylist(for screen: Screen) {
         guard let config = configurationStore.get(for: screen.id),
-              config.wallpaperMode == .playlist,
-              let primary = config.savedVideoBookmarkData else { return }
+              config.wallpaperMode == .playlist else { return }
 
-        let combined = [primary] + (config.playlistBookmarks ?? [])
+        let combined = config.combinedPlaylist
         guard combined.count > 1 else { return }
 
         let currentCursor = config.playlistCursorIndex ?? 0
@@ -170,6 +180,21 @@ final class WallpaperAutomationOrchestrator {
               config.wallpaperMode != mode else { return }
         config.wallpaperMode = mode
         saveConfiguration(config)
+
+        // Mode switch must immediately apply the playback the new mode dictates
+        // — otherwise the user picks "Schedule" and keeps watching the primary
+        // until the next slot boundary fires hours later.
+        switch mode {
+        case .single:
+            reloadWallpaperForScreen(screen)
+        case .playlist:
+            let combined = config.combinedPlaylist
+            guard !combined.isEmpty else { return }
+            let cursor = max(0, min(config.playlistCursorIndex ?? 0, combined.count - 1))
+            applyCursor(cursor, combined: combined, screen: screen, label: "entering playlist mode")
+        case .schedule:
+            checkAndApplySchedule(for: screen)
+        }
     }
 
     func updatePlaylistRotationMinutes(_ minutes: Int?, for screen: Screen) {

@@ -270,12 +270,18 @@ struct MenuBarPlaybackControlTests {
 
 @Suite("PlaylistEntry identity")
 struct PlaylistEntryIdentityTests {
-    @Test("Entry ID is deterministic and does not use process-randomized hashValue")
+    @Test("Entry ID is the bookmark's base64 encoding and stays stable when primary/playing flip")
     func entryIDUsesStableBookmarkEncoding() {
         let bookmark = Data([0x01, 0x02, 0x03, 0x04])
 
-        #expect(PlaylistEntry(bookmark: bookmark, isPrimary: true, isPlaying: false, name: "Primary").id == "p:AQIDBA==")
-        #expect(PlaylistEntry(bookmark: bookmark, isPrimary: false, isPlaying: false, name: "Extra").id == "x:AQIDBA==")
+        // Identity is the bookmark — `isPrimary` / `isPlaying` are entry
+        // properties, not part of identity. Swapping the star marker animates
+        // as an update instead of a delete + insert.
+        let primary = PlaylistEntry(bookmark: bookmark, isPrimary: true, isPlaying: false, name: "Primary")
+        let extra = PlaylistEntry(bookmark: bookmark, isPrimary: false, isPlaying: false, name: "Extra")
+        #expect(primary.id == "AQIDBA==")
+        #expect(extra.id == "AQIDBA==")
+        #expect(primary.id == extra.id)
     }
 }
 

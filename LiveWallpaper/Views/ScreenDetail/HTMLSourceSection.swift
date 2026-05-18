@@ -16,11 +16,13 @@ struct HTMLSourceSection: View {
 
     var body: some View {
         GroupBox {
-            VStack(alignment: .leading, spacing: 14) {
-                Label("Web / HTML Wallpaper", systemImage: "globe")
-                    .font(.headline)
-
-                HTMLSourceKindPicker(selection: $selectedKind)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Spacer(minLength: 0)
+                    HTMLSourceKindPicker(selection: $selectedKind)
+                        .frame(maxWidth: 280)
+                    Spacer(minLength: 0)
+                }
 
                 sourcePane
                     .animation(.snappy(duration: 0.18), value: selectedKind)

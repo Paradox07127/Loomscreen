@@ -1451,8 +1451,8 @@ final class ScreenManager {
         automationOrchestrator.setPrimaryVideo(bookmark: bookmark, for: screen)
     }
 
-    func replacePlaylist(primary: Data, extras: [Data], for screen: Screen) {
-        automationOrchestrator.replacePlaylist(primary: primary, extras: extras, for: screen)
+    func replacePlaylist(ordered: [Data], primary: Data, for screen: Screen) {
+        automationOrchestrator.replacePlaylist(ordered: ordered, primary: primary, for: screen)
     }
 
     func playPlaylistEntry(at index: Int, for screen: Screen) {

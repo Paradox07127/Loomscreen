@@ -21,8 +21,13 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
     public var playlistBookmarks: [Data]?
     public var shufflePlaylist: Bool
     public var playlistRotationMinutes: Int?
-    /// Cursor in `[savedVideoBookmarkData] + playlistBookmarks`.
+    /// Cursor in `combinedPlaylist` (the visible ordered list).
     public var playlistCursorIndex: Int?
+    /// Position of `savedVideoBookmarkData` inside the visible combined list.
+    /// Nil = legacy default (primary pinned to index 0). When set, drag-reorder
+    /// can move the starred entry to any position without changing primary
+    /// identity.
+    public var playlistPrimaryIndex: Int?
     public var setAsLockScreen: Bool
     public var wallpaperMode: WallpaperMode = .single
     /// Muted by default so wallpaper videos do not take over audio output.
@@ -53,6 +58,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         case shufflePlaylist
         case playlistRotationMinutes
         case playlistCursorIndex
+        case playlistPrimaryIndex
         case setAsLockScreen
         case wallpaperMode
         case muted
@@ -217,6 +223,19 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         activeWallpaper.activeVideoBookmarkData ?? savedVideoBookmarkData
     }
 
+    /// User-visible playlist: primary spliced into `playlistBookmarks` at
+    /// `playlistPrimaryIndex`. Falls back to `[primary] + extras` when the
+    /// index is nil or out of range so legacy configs render unchanged.
+    public var combinedPlaylist: [Data] {
+        guard let primary = savedVideoBookmarkData else { return [] }
+        let extras = playlistBookmarks ?? []
+        let total = extras.count + 1
+        let target = max(0, min(playlistPrimaryIndex ?? 0, total - 1))
+        if target <= 0 { return [primary] + extras }
+        if target >= extras.count { return extras + [primary] }
+        return Array(extras[0..<target]) + [primary] + Array(extras[target...])
+    }
+
     public var hasConfiguredVideoSource: Bool {
         if let bookmarkData = activeWallpaper.activeVideoBookmarkData, !bookmarkData.isEmpty {
             return true
@@ -268,6 +287,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         shufflePlaylist = try c.decodeIfPresent(Bool.self, forKey: .shufflePlaylist) ?? false
         playlistRotationMinutes = try c.decodeIfPresent(Int.self, forKey: .playlistRotationMinutes)
         playlistCursorIndex = try c.decodeIfPresent(Int.self, forKey: .playlistCursorIndex)
+        playlistPrimaryIndex = try c.decodeIfPresent(Int.self, forKey: .playlistPrimaryIndex)
         setAsLockScreen = try c.decodeIfPresent(Bool.self, forKey: .setAsLockScreen) ?? false
         muted = try c.decodeIfPresent(Bool.self, forKey: .muted) ?? true
         videoVolume = Self.clampedVideoVolume(
@@ -402,6 +422,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         try c.encode(shufflePlaylist, forKey: .shufflePlaylist)
         try c.encodeIfPresent(playlistRotationMinutes, forKey: .playlistRotationMinutes)
         try c.encodeIfPresent(playlistCursorIndex, forKey: .playlistCursorIndex)
+        try c.encodeIfPresent(playlistPrimaryIndex, forKey: .playlistPrimaryIndex)
         try c.encode(setAsLockScreen, forKey: .setAsLockScreen)
         try c.encode(wallpaperMode, forKey: .wallpaperMode)
         try c.encode(muted, forKey: .muted)
@@ -464,12 +485,16 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
     }
 
     /// Swap primary video while preserving per-screen settings + saved HTML.
+    /// Used when a brand-new video replaces the primary (e.g. file picker) —
+    /// the new entry starts at position 0 of the visible list, so both cursor
+    /// and primary-index reset.
     public mutating func replacePrimaryVideo(bookmarkData: Data) {
         preserveCurrentHTMLIfNeeded()
         savedVideoBookmarkData = bookmarkData
         activeWallpaper = .video(bookmarkData: bookmarkData)
         // Reset cursor so rotation never points past a reshuffled list.
         playlistCursorIndex = 0
+        playlistPrimaryIndex = nil
     }
 
     /// Activates a schedule slot without replacing the saved primary video.

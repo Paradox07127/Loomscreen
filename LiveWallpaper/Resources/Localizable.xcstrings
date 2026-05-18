@@ -1144,6 +1144,7 @@
     },
     "Already bookmarked" : {
       "comment" : "Tooltip when the current wallpaper is already saved as a bookmark.",
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1155,6 +1156,24 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已添加书签"
+          }
+        }
+      }
+    },
+    "Already saved as “%@”" : {
+      "comment" : "Tooltip when an identical plan is already bookmarked. The placeholder is the existing bookmark's label.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Already saved as “%@”"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已保存为 “%@”"
           }
         }
       }
@@ -10389,6 +10408,7 @@
       }
     },
     "Playlist" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -10589,6 +10609,7 @@
     },
     "Primary" : {
       "comment" : "Fallback playlist entry name for the primary video.",
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -12679,6 +12700,7 @@
       }
     },
     "Schedule" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
