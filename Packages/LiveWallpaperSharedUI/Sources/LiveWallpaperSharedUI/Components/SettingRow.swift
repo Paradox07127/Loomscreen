@@ -100,8 +100,9 @@ public struct InfoTooltipButton: View {
             Text(text)
                 .font(.callout)
                 .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: 280, alignment: .leading)
                 .padding(12)
-                .frame(maxWidth: 260, alignment: .leading)
         }
     }
 }
