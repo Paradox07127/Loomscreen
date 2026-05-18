@@ -194,7 +194,11 @@ struct DeveloperToolsView: View {
         entries.removeAll()
         lastReport = nil
         progressFraction = 0
-        progressLabel = "Scanning library…"
+        progressLabel = String(
+            localized: "Scanning library…",
+            defaultValue: "Scanning library…",
+            comment: "Developer tools progress shown while scanning the local Wallpaper Engine corpus."
+        )
 
         let config = WPECorpusPlaybackHarness.Configuration(
             perSceneTimeoutSeconds: perSceneTimeout
@@ -214,19 +218,33 @@ struct DeveloperToolsView: View {
     private func handleProgress(_ progress: WPECorpusPlaybackHarness.Progress) {
         switch progress {
         case .scanning:
-            progressLabel = "Scanning library…"
+            progressLabel = String(
+                localized: "Scanning library…",
+                defaultValue: "Scanning library…",
+                comment: "Developer tools progress shown while scanning the local Wallpaper Engine corpus."
+            )
         case .running(let index, let total, let workshopID, let title):
-            progressLabel = "Running \(index)/\(total) — \(title.isEmpty ? workshopID : title)"
+            let displayTitle = title.isEmpty ? workshopID : title
+            progressLabel = String(
+                localized: "Running \(index)/\(total) — \(displayTitle)",
+                comment: "Developer tools progress. Placeholders are current index, total count, and current scene title or Workshop ID."
+            )
             progressFraction = total > 0 ? Double(index) / Double(total) : 0
         case .sceneComplete(let entry):
             entries.append(entry)
         case .finished(let report):
             lastReport = report
-            progressLabel = "Finished — \(summaryLabel(report.summary, total: report.total))"
+            progressLabel = String(
+                localized: "Finished — \(summaryLabel(report.summary, total: report.total))",
+                comment: "Developer tools progress after a corpus run completes. The placeholder is a compact result summary."
+            )
             progressFraction = 1
         case .cancelled(let partial):
             lastReport = partial
-            progressLabel = "Cancelled — \(summaryLabel(partial.summary, total: partial.total)) (partial)"
+            progressLabel = String(
+                localized: "Cancelled — \(summaryLabel(partial.summary, total: partial.total)) (partial)",
+                comment: "Developer tools progress after a corpus run is cancelled. The placeholder is a compact partial result summary."
+            )
         case .failedToStart(let message):
             startupError = message
             progressLabel = ""
@@ -249,7 +267,10 @@ struct DeveloperToolsView: View {
                 create: true
             )
         } catch {
-            startupError = "Export failed: cannot locate Application Support — \(error.localizedDescription)"
+            startupError = String(
+                localized: "Export failed: cannot locate Application Support — \(error.localizedDescription)",
+                comment: "Developer tools export error. The placeholder is the system error description."
+            )
             Logger.error("WPE corpus playback export: cannot locate Application Support — \(error.localizedDescription)", category: .screenManager)
             return
         }
@@ -269,7 +290,10 @@ struct DeveloperToolsView: View {
             startupError = nil
             NSWorkspace.shared.activateFileViewerSelecting([fileURL])
         } catch {
-            startupError = "Export failed: \(error.localizedDescription)"
+            startupError = String(
+                localized: "Export failed: \(error.localizedDescription)",
+                comment: "Developer tools export error. The placeholder is the system error description."
+            )
             Logger.error("WPE corpus playback report export failed: \(error.localizedDescription)", category: .screenManager)
         }
     }
