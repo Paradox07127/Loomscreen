@@ -47,6 +47,19 @@ struct LocalizationCoverageTests {
             )
         }
     }
+
+    @Test("String catalogs do not keep stale extraction entries")
+    func stringCatalogsDoNotKeepStaleEntries() throws {
+        for catalogName in ["Localizable.xcstrings", "InfoPlist.xcstrings"] {
+            let catalog = try StringCatalog.load(named: catalogName)
+            let stale = catalog.staleKeys()
+
+            #expect(
+                stale.isEmpty,
+                "\(catalogName) contains stale extraction entries: \(stale.prefix(20).joined(separator: ", "))"
+            )
+        }
+    }
 }
 
 private struct StringCatalog: Decodable {
@@ -100,6 +113,12 @@ private struct StringCatalog: Decodable {
         }
     }
 
+    func staleKeys() -> [String] {
+        strings.keys.sorted().filter { key in
+            strings[key]?.extractionState == "stale"
+        }
+    }
+
     private static func placeholders(in value: String) -> [String] {
         let pattern = #"%(?:(\d+)\$)?[+\- #0]*(?:\d+|\*)?(?:\.(?:\d+|\*))?(?:hh|ll|[hlLzjtq])?[diuoxXfFeEgGaAcCsSp@]"#
         let expression = try? NSRegularExpression(pattern: pattern)
@@ -127,6 +146,7 @@ private struct StringCatalog: Decodable {
     }
 
     struct Entry: Decodable {
+        let extractionState: String?
         let localizations: [String: Localization]?
     }
 
