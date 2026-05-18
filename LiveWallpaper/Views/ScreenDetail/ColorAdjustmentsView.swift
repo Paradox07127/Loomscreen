@@ -1,3 +1,4 @@
+import LiveWallpaperSharedUI
 import SwiftUI
 
 struct ColorAdjustmentsView: View {
@@ -16,17 +17,17 @@ struct ColorAdjustmentsView: View {
 
                 Divider()
 
-                HStack {
+                HStack(spacing: 4) {
                     Text("Auto warm tint by time of day")
                         .font(.system(size: 13, weight: .medium))
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    InfoTooltipButton(text: "Automatically shifts the wallpaper's warmth across the day — cooler at midday, warmer toward sunset.")
                     Spacer()
                     Toggle("", isOn: effectBinding(\.autoTimeTint))
                         .labelsHidden()
                         .toggleStyle(.switch)
-                        .help(Text("Automatically adjust color temperature by time of day"))
                         .accessibilityLabel(Text("Auto warm tint"))
-                        .accessibilityHint(Text("Automatically adjusts color warmth based on time of day"))
                 }
 
                 Divider()
@@ -76,7 +77,9 @@ struct ColorAdjustmentsView: View {
         HStack(spacing: 8) {
             Text(title)
                 .font(.system(size: 13))
-                .frame(width: 62, alignment: .leading)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(width: 90, alignment: .leading)
 
             Slider(value: value, in: range)
                 .controlSize(.small)
@@ -86,7 +89,7 @@ struct ColorAdjustmentsView: View {
             Text(verbatim: String(format: format, value.wrappedValue))
             .font(.system(size: 12, design: .monospaced))
             .foregroundStyle(.secondary)
-            .frame(width: 36, alignment: .trailing)
+            .frame(width: 44, alignment: .trailing)
         }
     }
 }

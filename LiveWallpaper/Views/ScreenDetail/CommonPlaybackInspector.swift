@@ -97,7 +97,8 @@ struct CommonPlaybackInspector: View {
         return SettingRow(
             icon: isMuted ? "speaker.slash" : "speaker.wave.2",
             iconColor: isMuted ? .secondary : .blue,
-            title: "Audio"
+            title: "Audio",
+            info: "Audio is muted by default. The first part of the slider is a mute dead zone — drag past it to engage audio so a tiny accidental move can't leak a quiet level."
         ) {
             HStack(spacing: 8) {
                 Slider(value: unifiedAudioBinding, in: 0...1)
@@ -111,13 +112,6 @@ struct CommonPlaybackInspector: View {
                     .foregroundStyle(.secondary)
                     .frame(width: 44, alignment: .trailing)
                     .monospacedDigit()
-
-                Image(systemName: "info.circle")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .help(Text("Audio is muted by default. The first part of the slider is a mute dead zone — drag past it to engage audio so a tiny accidental move can't leak a quiet level."))
-                    .accessibilityLabel(Text("Audio control help"))
-                    .accessibilityHint(Text("The slider has a small mute dead zone at the low end to prevent accidental low-volume audio leaks"))
             }
         }
     }
@@ -126,7 +120,8 @@ struct CommonPlaybackInspector: View {
         SettingRow(
             icon: "gauge.with.dots.needle.bottom.50percent",
             iconColor: .blue,
-            title: "Frame Rate"
+            title: "Frame Rate",
+            info: "Caps the wallpaper's render rate. Lower values trade smoothness for less CPU/GPU and energy use."
         ) {
             Picker("", selection: frameRateBinding) {
                 ForEach(FrameRateLimit.allCases) { limit in
@@ -145,7 +140,8 @@ struct CommonPlaybackInspector: View {
             icon: "rectangle.on.rectangle",
             iconColor: videoDisplayMode == .spanAllDisplays ? .blue : .secondary,
             title: "Display Layout",
-            subtitle: videoDisplayMode.descriptionKey
+            subtitle: videoDisplayMode.descriptionKey,
+            info: "Span uses all connected displays as one virtual video canvas; Per Display gives each screen its own video."
         ) {
             Picker("", selection: videoDisplayModeBinding) {
                 ForEach(VideoDisplayMode.allCases) { mode in
@@ -157,12 +153,16 @@ struct CommonPlaybackInspector: View {
             .frame(width: 148)
             .accessibilityLabel(Text("Video display layout"))
             .accessibilityValue(Text(videoDisplayMode.titleKey))
-            .help(Text("Span uses all connected displays as one virtual video canvas"))
         }
     }
 
     private var syncToLockScreenRow: some View {
-        SettingRow(icon: "photo.on.rectangle", iconColor: .blue, title: "Desktop Picture") {
+        SettingRow(
+            icon: "photo.on.rectangle",
+            iconColor: .blue,
+            title: "Desktop Picture",
+            info: "Captures the currently visible video frame and uses it as the macOS desktop picture, so the lock screen mirrors what was playing."
+        ) {
             HStack(spacing: 6) {
                 if lockScreenExtracted {
                     Image(systemName: "checkmark.circle.fill")
@@ -173,8 +173,6 @@ struct CommonPlaybackInspector: View {
                     .labelsHidden()
                     .toggleStyle(.switch)
                     .accessibilityLabel(Text("Set current frame as desktop picture"))
-                    .accessibilityHint(Text("Captures the currently visible video frame and uses it as the macOS desktop picture"))
-                    .help(Text("Apply the current video frame as the desktop picture"))
             }
         }
     }
@@ -187,13 +185,13 @@ struct CommonPlaybackInspector: View {
             title: "Clear Data on Exit",
             subtitle: htmlConfig.wrappedValue.useEphemeralStorage
                 ? LocalizedStringKey("Browsing data is cleared on each session")
-                : LocalizedStringKey("Browsing data is saved across sessions")
+                : LocalizedStringKey("Browsing data is saved across sessions"),
+            info: "When on, the wallpaper's WKWebView starts fresh each session — cookies, localStorage, and cache are not persisted."
         ) {
             Toggle("", isOn: htmlConfigBinding(htmlConfig, keyPath: \.useEphemeralStorage))
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .accessibilityLabel(Text("Ephemeral browsing data"))
-                .accessibilityHint(Text("When on, the wallpaper's WKWebView starts fresh each session — cookies, localStorage, and cache are not persisted"))
         }
     }
 
@@ -202,13 +200,13 @@ struct CommonPlaybackInspector: View {
         SettingRow(
             icon: "shield",
             iconColor: .red,
-            title: "Block Trackers"
+            title: "Block Trackers",
+            info: "Filters common analytics and ad scripts before they reach the wallpaper renderer."
         ) {
             Toggle("", isOn: htmlConfigBinding(htmlConfig, keyPath: \.blockTrackers))
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .accessibilityLabel(Text("Block trackers"))
-                .accessibilityHint(Text("Filters analytics and ad scripts before they reach the wallpaper renderer"))
         }
     }
 

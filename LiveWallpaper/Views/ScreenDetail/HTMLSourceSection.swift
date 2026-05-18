@@ -355,7 +355,8 @@ struct HTMLOptionsInspector: View {
         SettingRow(
             icon: "curlybraces",
             iconColor: .orange,
-            title: "JavaScript"
+            title: "JavaScript",
+            info: "Lets the wallpaper page run JavaScript. Turn off for static HTML or untrusted remote pages."
         ) {
             Toggle("", isOn: Binding(
                 get: { config.allowJavaScript },
@@ -399,7 +400,7 @@ struct HTMLOptionsInspector: View {
             icon: "rectangle.split.2x1",
             iconColor: .indigo,
             title: "Physical-pixel layout",
-            subtitle: "Maps window.innerWidth to physical pixels (Wallpaper Engine compatibility). Auto-enabled for folders containing project.json."
+            info: "Maps window.innerWidth to physical pixels (Wallpaper Engine compatibility). Auto-enabled for folders containing project.json."
         ) {
             Toggle("", isOn: Binding(
                 get: { config.physicalPixelLayout },
