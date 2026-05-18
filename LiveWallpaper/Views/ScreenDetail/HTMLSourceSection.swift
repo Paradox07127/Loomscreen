@@ -342,6 +342,14 @@ struct HTMLOptionsInspector: View {
                     Divider()
                     physicalPixelRow
                     Divider()
+                    autoRefreshRow
+                    Divider()
+                    transformScaleRow
+                    Divider()
+                    transformTranslateRow
+                    Divider()
+                    transformRotationRow
+                    Divider()
                     customCSSRow
                 }
             }
@@ -411,6 +419,203 @@ struct HTMLOptionsInspector: View {
             .toggleStyle(.switch)
             .controlSize(.small)
         }
+    }
+
+    // MARK: - Auto-refresh + Transform rows
+
+    /// Refresh interval picker. `0` (Off) is the default — most wallpaper
+    /// content is animation/canvas-driven and doesn't benefit from a reload.
+    /// The presets cover the common dashboard / weather-page cases.
+    private var autoRefreshRow: some View {
+        SettingRow(
+            icon: "arrow.clockwise",
+            iconColor: .cyan,
+            title: "Auto Refresh",
+            subtitle: autoRefreshSubtitle
+        ) {
+            Picker("", selection: Binding(
+                get: { config.refreshIntervalSeconds },
+                set: { newValue in
+                    let clamped = HTMLConfig.clampedRefreshInterval(newValue)
+                    guard config.refreshIntervalSeconds != clamped else { return }
+                    config.refreshIntervalSeconds = clamped
+                    commitConfig()
+                }
+            )) {
+                Text("Off").tag(0)
+                Text("Every 1 min").tag(60)
+                Text("Every 5 min").tag(300)
+                Text("Every 30 min").tag(1800)
+                Text("Every 1 hour").tag(3600)
+                Text("Every 6 hours").tag(21600)
+            }
+            .labelsHidden()
+            .frame(width: 140)
+            .accessibilityLabel(Text("Auto-refresh interval"))
+        }
+    }
+
+    private var autoRefreshSubtitle: LocalizedStringKey {
+        config.refreshIntervalSeconds == 0
+            ? "The page renders continuously; no reloads."
+            : "The page reloads at the selected interval — useful for dashboards or feeds."
+    }
+
+    /// Scale row: a single slider plus a numeric readout. The reset button on
+    /// the right collapses scale + translate + rotation back to identity in
+    /// one click — important because three near-zero values are easier to
+    /// accidentally leave behind than one.
+    private var transformScaleRow: some View {
+        SettingRow(
+            icon: "arrow.up.left.and.arrow.down.right",
+            iconColor: .teal,
+            title: "Scale",
+            subtitle: "Scales the rendered page around its center."
+        ) {
+            HStack(spacing: 8) {
+                Slider(
+                    value: Binding(
+                        get: { config.transformScale },
+                        set: { newValue in
+                            let clamped = HTMLConfig.clampedTransformScale(newValue)
+                            guard abs(config.transformScale - clamped) > 0.001 else { return }
+                            config.transformScale = clamped
+                            commitConfig()
+                        }
+                    ),
+                    in: HTMLConfig.minTransformScale...HTMLConfig.maxTransformScale
+                )
+                .controlSize(.small)
+                .frame(width: 110)
+                .accessibilityLabel(Text("Scale"))
+
+                Text(verbatim: String(format: "%.0f%%", config.transformScale * 100))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 44, alignment: .trailing)
+                    .monospacedDigit()
+
+                Button {
+                    resetTransform()
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                }
+                .controlSize(.small)
+                .buttonStyle(.borderless)
+                .help(Text("Reset scale, translate, and rotation"))
+                .accessibilityLabel(Text("Reset transform"))
+                .disabled(!isTransformActive)
+            }
+        }
+    }
+
+    /// Two coupled steppers — X and Y in CSS pixels. Steppers (not sliders)
+    /// because translate is usually a fine alignment task, not a sweep:
+    /// you want 12px nudges, not "drag and see where it ends up".
+    private var transformTranslateRow: some View {
+        SettingRow(
+            icon: "arrow.up.and.down.and.arrow.left.and.right",
+            iconColor: .purple,
+            title: "Translate",
+            subtitle: "Offsets the rendered page in CSS pixels."
+        ) {
+            HStack(spacing: 6) {
+                Text("X")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                Stepper(value: Binding(
+                    get: { Int(config.transformTranslateX.rounded()) },
+                    set: { newValue in
+                        let clamped = HTMLConfig.clampedTransformTranslate(Double(newValue))
+                        guard abs(config.transformTranslateX - clamped) > 0.5 else { return }
+                        config.transformTranslateX = clamped
+                        commitConfig()
+                    }
+                ), in: -Int(HTMLConfig.maxTransformTranslate)...Int(HTMLConfig.maxTransformTranslate), step: 4) {
+                    Text(verbatim: "\(Int(config.transformTranslateX.rounded()))")
+                        .font(.system(size: 11, design: .monospaced))
+                        .frame(width: 40, alignment: .trailing)
+                        .monospacedDigit()
+                }
+                .controlSize(.small)
+                .labelsHidden()
+                .accessibilityLabel(Text("Translate X"))
+
+                Text("Y")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 4)
+                Stepper(value: Binding(
+                    get: { Int(config.transformTranslateY.rounded()) },
+                    set: { newValue in
+                        let clamped = HTMLConfig.clampedTransformTranslate(Double(newValue))
+                        guard abs(config.transformTranslateY - clamped) > 0.5 else { return }
+                        config.transformTranslateY = clamped
+                        commitConfig()
+                    }
+                ), in: -Int(HTMLConfig.maxTransformTranslate)...Int(HTMLConfig.maxTransformTranslate), step: 4) {
+                    Text(verbatim: "\(Int(config.transformTranslateY.rounded()))")
+                        .font(.system(size: 11, design: .monospaced))
+                        .frame(width: 40, alignment: .trailing)
+                        .monospacedDigit()
+                }
+                .controlSize(.small)
+                .labelsHidden()
+                .accessibilityLabel(Text("Translate Y"))
+            }
+        }
+    }
+
+    /// Rotation in degrees. `±180` covers everything; we keep the slider
+    /// continuous so animation-style "tilt the canvas" use cases feel
+    /// responsive instead of stepped.
+    private var transformRotationRow: some View {
+        SettingRow(
+            icon: "rotate.right",
+            iconColor: .pink,
+            title: "Rotation",
+            subtitle: "Rotates around the center."
+        ) {
+            HStack(spacing: 8) {
+                Slider(
+                    value: Binding(
+                        get: { config.transformRotationDegrees },
+                        set: { newValue in
+                            let clamped = HTMLConfig.clampedTransformRotation(newValue)
+                            guard abs(config.transformRotationDegrees - clamped) > 0.1 else { return }
+                            config.transformRotationDegrees = clamped
+                            commitConfig()
+                        }
+                    ),
+                    in: -180...180
+                )
+                .controlSize(.small)
+                .frame(width: 110)
+                .accessibilityLabel(Text("Rotation"))
+
+                Text(verbatim: String(format: "%.0f°", config.transformRotationDegrees))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 44, alignment: .trailing)
+                    .monospacedDigit()
+            }
+        }
+    }
+
+    private var isTransformActive: Bool {
+        abs(config.transformScale - 1.0) > 0.001
+            || abs(config.transformTranslateX) > 0.5
+            || abs(config.transformTranslateY) > 0.5
+            || abs(config.transformRotationDegrees) > 0.1
+    }
+
+    private func resetTransform() {
+        guard isTransformActive else { return }
+        config.transformScale = 1.0
+        config.transformTranslateX = 0
+        config.transformTranslateY = 0
+        config.transformRotationDegrees = 0
+        commitConfig()
     }
 
     /// Custom CSS row — the editor itself opens in a popover instead of

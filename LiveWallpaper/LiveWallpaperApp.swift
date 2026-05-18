@@ -359,10 +359,14 @@ extension AppDelegate: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         guard let closingWindow = notification.object as? NSWindow else { return }
 
-        if closingWindow == settingsWindowController?.window {
-            settingsWindowController = nil
-            return
-        }
+        // NOTE: settingsWindowController is intentionally NOT released here.
+        // Releasing it tears down the NSHostingController + the entire
+        // SwiftUI view hierarchy, so the next showSettings() pays the full
+        // List(.sidebar) / NSOutlineView bridge materialization cost on the
+        // first sidebar reveal frame — visible as a "smooth → halfway stall
+        // → snap" sidebar slide. Keeping the controller alive (paired with
+        // `window.isReleasedWhenClosed = false` in makeSettingsWindowController)
+        // makes close+reopen a pure window orderFront with no remount.
         if closingWindow == onboardingWindowController?.window {
             onboardingWindowController = nil
             return

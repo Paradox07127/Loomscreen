@@ -20,6 +20,10 @@ struct GeneralSettingsView: View {
     /// because SwiftUI's `Slider` is a `Double` ramp; the step ensures it
     /// always lands on a `% 32 == 0` MB boundary so the label reads cleanly.
     @State private var videoCacheBudgetMB: Double
+    /// Global decoder preference. AVPlayer does not expose a public knob to
+    /// force software / hardware decode, so the cases map to resolution /
+    /// bitrate hints instead. See `VideoDecoderPreference` for semantics.
+    @State private var videoDecoderPreference: VideoDecoderPreference
 
     @State private var pendingDestructive: PendingDestructive?
 
@@ -49,6 +53,7 @@ struct GeneralSettingsView: View {
         _showInDock = State(initialValue: settings.showInDock)
         _menuBarDensity = State(initialValue: settings.menuBarDensity)
         _videoCacheBudgetMB = State(initialValue: Double(settings.videoCacheMaxBytesPerScreen) / Double(1024 * 1024))
+        _videoDecoderPreference = State(initialValue: settings.videoDecoderPreference)
     }
 
     var body: some View {
@@ -197,6 +202,7 @@ struct GeneralSettingsView: View {
         pauseOnFullScreen = settings.pauseOnFullScreen
         showInDock = settings.showInDock
         menuBarDensity = settings.menuBarDensity
+        videoDecoderPreference = settings.videoDecoderPreference
 
         let feedback = importFeedbackMessage(for: summary)
         DispatchQueue.main.async {
@@ -412,6 +418,25 @@ struct GeneralSettingsView: View {
                 .accessibilityValue(Text(videoCacheValueLabel))
             }
             .padding(.vertical, 4)
+
+            SettingRow(
+                icon: "cpu",
+                iconColor: .green,
+                title: "Decoder preference",
+                subtitle: LocalizedStringKey(videoDecoderPreference.descriptionKey)
+            ) {
+                Picker("", selection: $videoDecoderPreference) {
+                    ForEach(VideoDecoderPreference.allCases) { preference in
+                        Text(LocalizedStringKey(preference.titleKey)).tag(preference)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 280)
+                .onChange(of: videoDecoderPreference) { _, _ in updateGlobalSettings() }
+                .accessibilityLabel(Text("Video decoder preference"))
+                .help(Text("AVPlayer always uses hardware decode when available. This setting changes the resolution / bitrate ceiling instead — there is no public API to force software decoding."))
+            }
         } header: {
             Text("Performance")
         }
@@ -661,6 +686,7 @@ struct GeneralSettingsView: View {
         var settings = SettingsManager.shared.loadGlobalSettings()
         let dockChanged = settings.showInDock != showInDock
         let densityChanged = settings.menuBarDensity != menuBarDensity
+        let decoderChanged = settings.videoDecoderPreference != videoDecoderPreference
         settings.globalPauseOnBattery = globalPauseOnBattery
         settings.preservePlaybackOnLock = preservePlaybackOnLock
         settings.startOnLogin = startOnLogin
@@ -669,6 +695,7 @@ struct GeneralSettingsView: View {
         settings.showInDock = showInDock
         settings.menuBarDensity = menuBarDensity
         settings.videoCacheMaxBytesPerScreen = Int(videoCacheBudgetMB) * 1024 * 1024
+        settings.videoDecoderPreference = videoDecoderPreference
         SettingsManager.shared.saveGlobalSettings(settings)
         screenManager.handleGlobalSettingsChanged()
         if dockChanged {
@@ -676,6 +703,9 @@ struct GeneralSettingsView: View {
         }
         if densityChanged {
             postSettingsNotificationAsync(.menuBarDensityDidChange)
+        }
+        if decoderChanged {
+            postSettingsNotificationAsync(.videoDecoderPreferenceDidChange)
         }
     }
 
@@ -698,6 +728,7 @@ struct GeneralSettingsView: View {
         pauseOnFullScreen = true
         showInDock = false
         menuBarDensity = .comfortable
+        videoDecoderPreference = .auto
 
         postSettingsNotificationAsync(.dockVisibilityDidChange)
         postSettingsNotificationAsync(.globalShortcutsDidChange)

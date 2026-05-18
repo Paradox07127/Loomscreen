@@ -185,14 +185,6 @@ struct Sidebar: View {
     @Environment(\.featureCatalog) private var featureCatalog
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isReloading = false
-    /// Deferred-mount gate for the Dashboard (SystemMonitorView). The
-    /// dashboard's gauge grid (4 ZStack of Circle paths + shadow + gradient
-    /// fill) is non-trivial to render on first mount, and lining its first
-    /// layout pass up with the NavigationSplitView sidebar slide animation
-    /// blows the frame budget — visible as a "smooth → halfway stall → snap"
-    /// reveal. Showing the dashboard only after the slide has settled keeps
-    /// the animation smooth without changing the steady-state UI.
-    @State private var dashboardReady = false
 
     var body: some View {
         List(selection: $selection) {
@@ -257,7 +249,7 @@ struct Sidebar: View {
                 #endif
             }
 
-            if featureCatalog.isEnabled(.systemMonitor), dashboardReady {
+            if featureCatalog.isEnabled(.systemMonitor) {
                 Section(header: SidebarSectionHeader(title: "Dashboard", showsDivider: true) {
                     EmptyView()
                 }) {
@@ -274,11 +266,6 @@ struct Sidebar: View {
             ideal: SettingsWindowMetrics.sidebarColumnWidth,
             max: SettingsWindowMetrics.sidebarColumnMaxWidth
         )
-        .task {
-            guard !dashboardReady else { return }
-            try? await Task.sleep(for: .milliseconds(700))
-            dashboardReady = true
-        }
     }
 
     /// Conditionally applies the `symbolEffect` modifier so the SF Symbols

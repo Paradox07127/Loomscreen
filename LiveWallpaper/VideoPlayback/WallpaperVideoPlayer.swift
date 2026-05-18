@@ -75,6 +75,10 @@ final class WallpaperVideoPlayer {
     private let initialFrame: CGRect
     private var fitMode: VideoFitMode = .aspectFill
     private var hasRequestedPlaybackStart = false
+    /// Last applied colorspace preference. Re-applied in
+    /// `configurePlaybackComponents` so a preference set before the asset
+    /// loaded survives the late `VideoContainerView` creation path.
+    private var lastColorSpacePreference: VideoColorSpace = .auto
     
     // MARK: - Initialization
     init(url: URL, frame: CGRect, fitMode: VideoFitMode = .aspectFill, loadImmediately: Bool = true) {
@@ -296,6 +300,7 @@ final class WallpaperVideoPlayer {
         playerItem.canUseNetworkResourcesForLiveStreamingWhilePaused = false
         Logger.debug("Forward buffer hint: \(String(format: "%.1f", bufferDuration))s", category: .videoPlayer)
 
+        Self.applyDecoderPreference(to: playerItem)
         applyAudioPolicy(to: playerItem)
 
         let queuePlayer = AVQueuePlayer()
@@ -321,6 +326,13 @@ final class WallpaperVideoPlayer {
 
         self.window = videoWindow
         self.videoView = containerView
+
+        // Late-binding: a preference set before the container existed only
+        // applied to `lastColorSpacePreference`. Now that the container is
+        // live, push it onto the player layer.
+        if lastColorSpacePreference != .auto {
+            containerView.applyColorSpacePreference(lastColorSpacePreference)
+        }
 
         if let formatInfo {
             applyHDRPreferenceIfNeeded(for: formatInfo)
@@ -391,6 +403,13 @@ final class WallpaperVideoPlayer {
                 }
                 .store(in: &cleanupTasks)
         }
+
+        NotificationCenter.default.publisher(for: .videoDecoderPreferenceDidChange)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.reapplyDecoderPreferenceToActiveItems()
+            }
+            .store(in: &cleanupTasks)
 
         let benignLooperCodes: Set<Int> = [-11847, -11858, -11878, -12504, -12509, -12784, -12823, -12852, -12860]
         NotificationCenter.default.publisher(for: .AVPlayerItemFailedToPlayToEndTime, object: nil)
@@ -552,6 +571,42 @@ final class WallpaperVideoPlayer {
         }
     }
 
+    /// Pushes the user's global decoder preference onto an `AVPlayerItem`.
+    ///
+    /// AVFoundation never lets us pick the decoder backend (hardware vs.
+    /// software) directly — that decision lives in VideoToolbox. We can
+    /// however cap the *work* by capping `preferredMaximumResolution` and
+    /// `preferredPeakBitRate`. Battery Saver maps to a 1080p / 8 Mbps cap,
+    /// High Quality removes both caps explicitly, Auto leaves AVFoundation
+    /// defaults alone.
+    static func applyDecoderPreference(to playerItem: AVPlayerItem) {
+        let preference = SettingsManager.shared.loadGlobalSettings().videoDecoderPreference
+        switch preference {
+        case .auto:
+            break
+        case .batterySaver:
+            playerItem.preferredMaximumResolution = CGSize(width: 1920, height: 1080)
+            playerItem.preferredPeakBitRate = 8_000_000
+        case .highQuality:
+            playerItem.preferredMaximumResolution = .zero
+            playerItem.preferredPeakBitRate = 0
+        }
+    }
+
+    /// Re-applies the active decoder preference to every player item in the
+    /// queue. Called by `WallpaperVideoPlayer` instances in response to the
+    /// `videoDecoderPreferenceDidChange` notification so existing sessions
+    /// react without a teardown.
+    func reapplyDecoderPreferenceToActiveItems() {
+        guard let player else { return }
+        if let templatePlayerItem {
+            Self.applyDecoderPreference(to: templatePlayerItem)
+        }
+        for item in player.items() {
+            Self.applyDecoderPreference(to: item)
+        }
+    }
+
     private static func clampedVolume(_ value: Double) -> Double {
         guard value.isFinite else { return 1.0 }
         return min(max(value, 0), 1)
@@ -574,6 +629,18 @@ final class WallpaperVideoPlayer {
         guard mode != fitMode else { return }
         fitMode = mode
         videoView?.fitMode = mode
+    }
+
+    /// Pins the underlying `AVPlayerLayer` to the user-selected colourspace.
+    /// `.auto` keeps the system default (which already does the right thing
+    /// for ~95% of users); the explicit cases let users debug colour drift
+    /// or force wide-gamut output even when source metadata says SDR.
+    ///
+    /// Calling this is cheap and idempotent — `PlayerHostView` skips the
+    /// `playerLayer.colorspace` assignment when the preference hasn't moved.
+    func setVideoColorSpace(_ preference: VideoColorSpace) {
+        lastColorSpacePreference = preference
+        videoView?.applyColorSpacePreference(preference)
     }
 
     func setSpanRenderConfiguration(_ configuration: VideoSpanRenderConfiguration?) {

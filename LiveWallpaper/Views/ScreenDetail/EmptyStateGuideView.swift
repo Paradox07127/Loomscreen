@@ -33,7 +33,7 @@ struct EmptyStateGuideView: View {
                         title: "Video",
                         subtitle: videoSubtitle,
                         accessibilityLabel: "Video wallpaper type",
-                        actionTitle: "Pick Video…",
+                        actionTitle: "Pick Video",
                         actionSystemImage: "folder",
                         action: onChooseVideo
                     )
