@@ -3,29 +3,35 @@ import Testing
 
 @Suite("Localization coverage")
 struct LocalizationCoverageTests {
-    @Test("String catalogs include Simplified Chinese for every entry")
-    func catalogsIncludeSimplifiedChineseTranslations() throws {
+    private static let requiredLocales = ["zh-Hans", "zh-Hant", "ja"]
+
+    @Test("String catalogs include supported localizations for every entry")
+    func catalogsIncludeSupportedTranslations() throws {
         for catalogName in ["Localizable.xcstrings", "InfoPlist.xcstrings"] {
             let catalog = try StringCatalog.load(named: catalogName)
-            let missing = catalog.keysMissingLocalization("zh-Hans")
+            for locale in Self.requiredLocales {
+                let missing = catalog.keysMissingLocalization(locale)
 
-            #expect(
-                missing.isEmpty,
-                "\(catalogName) is missing zh-Hans translations for: \(missing.prefix(20).joined(separator: ", "))"
-            )
+                #expect(
+                    missing.isEmpty,
+                    "\(catalogName) is missing \(locale) translations for: \(missing.prefix(20).joined(separator: ", "))"
+                )
+            }
         }
     }
 
-    @Test("Simplified Chinese translations preserve string format placeholders")
-    func simplifiedChineseTranslationsPreservePlaceholders() throws {
+    @Test("Supported translations preserve string format placeholders")
+    func supportedTranslationsPreservePlaceholders() throws {
         for catalogName in ["Localizable.xcstrings", "InfoPlist.xcstrings"] {
             let catalog = try StringCatalog.load(named: catalogName)
-            let mismatches = catalog.placeholderMismatches(for: "zh-Hans")
+            for locale in Self.requiredLocales {
+                let mismatches = catalog.placeholderMismatches(for: locale)
 
-            #expect(
-                mismatches.isEmpty,
-                "\(catalogName) has placeholder mismatches: \(mismatches.prefix(20).joined(separator: "; "))"
-            )
+                #expect(
+                    mismatches.isEmpty,
+                    "\(catalogName) has \(locale) placeholder mismatches: \(mismatches.prefix(20).joined(separator: "; "))"
+                )
+            }
         }
     }
 

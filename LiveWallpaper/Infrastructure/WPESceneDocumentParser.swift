@@ -100,7 +100,14 @@ enum WPESceneDocumentParser {
         }
 
         if (root["effects"] as? [Any])?.isEmpty == false {
-            diagnostics.append(.init(severity: .info, message: "Top-level effects are not yet rendered"))
+            diagnostics.append(.init(
+                severity: .info,
+                message: String(
+                    localized: "Top-level effects are not yet rendered",
+                    defaultValue: "Top-level effects are not yet rendered",
+                    comment: "Wallpaper Engine scene diagnostic when root-level effects are ignored."
+                )
+            ))
         }
 
         for key in generalDict.keys {
@@ -136,7 +143,14 @@ enum WPESceneDocumentParser {
             }
         }
         guard !paths.isEmpty else {
-            diagnostics.append(.init(severity: .warning, message: "Sound object \(dict["name"] as? String ?? "?") has no sound files"))
+            let objectName = dict["name"] as? String ?? "?"
+            diagnostics.append(.init(
+                severity: .warning,
+                message: String(
+                    localized: "Sound object \(objectName) has no sound files",
+                    comment: "Wallpaper Engine scene diagnostic. The placeholder is the sound object name."
+                )
+            ))
             return nil
         }
         let id = (dict["id"] as? String)
@@ -177,7 +191,14 @@ enum WPESceneDocumentParser {
             text = nil
         }
         guard let text, !text.isEmpty else {
-            diagnostics.append(.init(severity: .warning, message: "Text object \(dict["name"] as? String ?? "?") has no resolvable text"))
+            let objectName = dict["name"] as? String ?? "?"
+            diagnostics.append(.init(
+                severity: .warning,
+                message: String(
+                    localized: "Text object \(objectName) has no resolvable text",
+                    comment: "Wallpaper Engine scene diagnostic. The placeholder is the text object name."
+                )
+            ))
             return nil
         }
         let id = (dict["id"] as? String)
@@ -246,7 +267,14 @@ enum WPESceneDocumentParser {
         diagnostics: inout [WPESceneDiagnostic]
     ) -> WPESceneParticleObject? {
         guard let path = dict["particle"] as? String, !path.isEmpty else {
-            diagnostics.append(.init(severity: .warning, message: "Particle object \(dict["name"] as? String ?? "?") has no particle file"))
+            let objectName = dict["name"] as? String ?? "?"
+            diagnostics.append(.init(
+                severity: .warning,
+                message: String(
+                    localized: "Particle object \(objectName) has no particle file",
+                    comment: "Wallpaper Engine scene diagnostic. The placeholder is the particle object name."
+                )
+            ))
             return nil
         }
         let id = (dict["id"] as? String)
@@ -334,7 +362,14 @@ enum WPESceneDocumentParser {
             let auto = (nested["auto"] as? Bool) ?? WPESceneGeneral.defaultGeneral.orthogonalProjection.auto
             projection = WPESceneOrthogonalProjection(width: width, height: height, auto: auto)
         } else {
-            diagnostics.append(.init(severity: .info, message: "general.orthogonalprojection missing — using 1920×1080"))
+            diagnostics.append(.init(
+                severity: .info,
+                message: String(
+                    localized: "general.orthogonalprojection missing — using 1920×1080",
+                    defaultValue: "general.orthogonalprojection missing — using 1920×1080",
+                    comment: "Wallpaper Engine scene diagnostic when default projection dimensions are used."
+                )
+            ))
             projection = WPESceneGeneral.defaultGeneral.orthogonalProjection
         }
         return WPESceneGeneral(clearColor: clearColor, orthogonalProjection: projection)
@@ -347,7 +382,14 @@ enum WPESceneDocumentParser {
         diagnostics: inout [WPESceneDiagnostic]
     ) -> WPESceneImageObject? {
         guard let imagePath = dict["image"] as? String, !imagePath.isEmpty else {
-            diagnostics.append(.init(severity: .warning, message: "Image object \(dict["name"] as? String ?? "?") has no image path"))
+            let objectName = dict["name"] as? String ?? "?"
+            diagnostics.append(.init(
+                severity: .warning,
+                message: String(
+                    localized: "Image object \(objectName) has no image path",
+                    comment: "Wallpaper Engine scene diagnostic. The placeholder is the image object name."
+                )
+            ))
             return nil
         }
 

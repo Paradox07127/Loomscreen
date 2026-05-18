@@ -1,176 +1,296 @@
 {
-  "sourceLanguage" : "en",
-  "strings" : {
-    "CFBundleDisplayName" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "LiveWallpaper"
+  "sourceLanguage": "en",
+  "strings": {
+    "CFBundleDisplayName": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "LiveWallpaper"
           }
         },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "LiveWallpaper"
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "LiveWallpaper"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "LiveWallpaper"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "LiveWallpaper"
           }
         }
       }
     },
-    "CFBundleName" : {
-      "comment" : "Bundle name",
-      "extractionState" : "extracted_with_value",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "LiveWallpaperLite"
+    "CFBundleName": {
+      "comment": "Bundle name",
+      "extractionState": "extracted_with_value",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "LiveWallpaperLite"
           }
         },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "needs_review",
-            "value" : "LiveWallpaper"
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "LiveWallpaper"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "LiveWallpaper"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "LiveWallpaper"
           }
         }
       }
     },
-    "LiveWallpaper Configuration" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "LiveWallpaper Configuration"
+    "LiveWallpaper Configuration": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "LiveWallpaper Configuration"
           }
         },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "LiveWallpaper 配置"
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "LiveWallpaper 配置"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "LiveWallpaper 設定"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "LiveWallpaper 構成"
           }
         }
       }
     },
-    "NSDesktopFolderUsageDescription" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Access to Desktop is needed to play wallpaper files stored there."
+    "NSDesktopFolderUsageDescription": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Access to Desktop is needed to play wallpaper files stored there."
           }
         },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "需要访问桌面以播放存储在其中的壁纸文件。"
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要访问桌面以播放存储在其中的壁纸文件。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要存取桌面，才能播放儲存在其中的桌布檔案。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "デスクトップに保存されている壁紙ファイルを再生するために、デスクトップへのアクセスが必要です。"
           }
         }
       }
     },
-    "NSDocumentsFolderUsageDescription" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Access to Documents is needed to play wallpaper files stored there."
+    "NSDocumentsFolderUsageDescription": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Access to Documents is needed to play wallpaper files stored there."
           }
         },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "需要访问文稿以播放存储在其中的壁纸文件。"
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要访问文稿以播放存储在其中的壁纸文件。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要存取文件，才能播放儲存在其中的桌布檔案。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "書類に保存されている壁紙ファイルを再生するために、書類へのアクセスが必要です。"
           }
         }
       }
     },
-    "NSDownloadsFolderUsageDescription" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Access to Downloads is needed to play wallpaper files stored there."
+    "NSDownloadsFolderUsageDescription": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Access to Downloads is needed to play wallpaper files stored there."
           }
         },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "需要访问下载以播放存储在其中的壁纸文件。"
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要访问下载以播放存储在其中的壁纸文件。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "需要存取下載項目，才能播放儲存在其中的桌布檔案。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ダウンロードに保存されている壁紙ファイルを再生するために、ダウンロードへのアクセスが必要です。"
           }
         }
       }
     },
-    "NSLocationWhenInUseUsageDescription" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Location is used to fetch local weather for weather-reactive effects."
+    "NSLocationWhenInUseUsageDescription": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Location is used to fetch local weather for weather-reactive effects."
           }
         },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "定位用于获取本地天气，以驱动随天气变化的效果。"
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "定位用于获取本地天气，以驱动随天气变化的效果。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "位置資訊用來取得本地天氣，驅動會隨天氣變化的效果。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "位置情報は、天気に反応するエフェクト用にローカルの天気を取得するために使われます。"
           }
         }
       }
     },
-    "NSPowerMonitorUsageDescription" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Power status is used to pause wallpapers on battery."
+    "NSPowerMonitorUsageDescription": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Power status is used to pause wallpapers on battery."
           }
         },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "电源状态用于在使用电池供电时暂停壁纸。"
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "电源状态用于在使用电池供电时暂停壁纸。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "電源狀態用來在使用電池時暫停桌布。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "電源状態は、バッテリー使用時に壁紙を一時停止するために使われます。"
           }
         }
       }
     },
-    "NSSecurityScopedBookmarksUsageDescription" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Bookmarks keep access to selected wallpaper files across launches."
+    "NSSecurityScopedBookmarksUsageDescription": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bookmarks keep access to selected wallpaper files across launches."
           }
         },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "书签用于在多次启动之间保留对所选壁纸文件的访问权限。"
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "书签用于在多次启动之间保留对所选壁纸文件的访问权限。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "書籤可在多次啟動之間保留所選桌布檔案的存取權。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ブックマークにより、選択した壁紙ファイルへのアクセスを次回起動後も保持できます。"
           }
         }
       }
     },
-    "NSSystemPreferencesUsageDescription" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "System Settings access is used to help configure related permissions."
+    "NSSystemPreferencesUsageDescription": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "System Settings access is used to help configure related permissions."
           }
         },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "系统设置访问权限用于帮助配置相关权限。"
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "系统设置访问权限用于帮助配置相关权限。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "系統設定存取權用來協助設定相關權限。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "システム設定へのアクセスは、関連する権限設定を案内するために使われます。"
           }
         }
       }
     }
   },
-  "version" : "1.0"
+  "version": "1.0"
 }
