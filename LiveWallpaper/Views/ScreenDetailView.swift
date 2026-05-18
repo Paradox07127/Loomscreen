@@ -494,8 +494,7 @@ struct ScreenDetailView: View {
                                             SettingRow(
                                                 icon: "sparkles",
                                                 iconColor: .purple,
-                                                title: "Particles",
-                                                info: "Overlays a particle layer (rain, snow, fireflies, …) on top of the wallpaper."
+                                                title: "Particles"
                                             ) {
                                                 Picker("", selection: particleEffectBinding) {
                                                     ForEach(ParticleEffect.allCases) { effect in
@@ -529,8 +528,7 @@ struct ScreenDetailView: View {
                                             SettingRow(
                                                 icon: "cloud.sun",
                                                 iconColor: .cyan,
-                                                title: "Weather",
-                                                info: "Automatically adjusts particles and color based on real-time weather conditions for the configured location."
+                                                title: "Weather"
                                             ) {
                                                 Toggle("", isOn: weatherReactiveBinding)
                                                     .labelsHidden()
