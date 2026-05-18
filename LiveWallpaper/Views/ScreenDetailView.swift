@@ -474,6 +474,11 @@ struct ScreenDetailView: View {
                                 config: $htmlConfig
                             )
 
+                            HTMLTransformInspector(
+                                screen: screen,
+                                config: $htmlConfig
+                            )
+
                             HTMLRenderingDiagnosticsInspector(
                                 screen: screen,
                                 source: htmlSource,

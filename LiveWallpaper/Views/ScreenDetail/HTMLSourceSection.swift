@@ -344,12 +344,6 @@ struct HTMLOptionsInspector: View {
                     Divider()
                     autoRefreshRow
                     Divider()
-                    transformScaleRow
-                    Divider()
-                    transformTranslateRow
-                    Divider()
-                    transformRotationRow
-                    Divider()
                     customCSSRow
                 }
             }
@@ -431,7 +425,7 @@ struct HTMLOptionsInspector: View {
             icon: "arrow.clockwise",
             iconColor: .cyan,
             title: "Auto Refresh",
-            subtitle: autoRefreshSubtitle
+            info: "Reloads the page at the chosen interval. Useful for dashboards or feeds; off keeps the page rendering continuously without reloads."
         ) {
             Picker("", selection: Binding(
                 get: { config.refreshIntervalSeconds },
@@ -453,169 +447,6 @@ struct HTMLOptionsInspector: View {
             .frame(width: 140)
             .accessibilityLabel(Text("Auto-refresh interval"))
         }
-    }
-
-    private var autoRefreshSubtitle: LocalizedStringKey {
-        config.refreshIntervalSeconds == 0
-            ? "The page renders continuously; no reloads."
-            : "The page reloads at the selected interval — useful for dashboards or feeds."
-    }
-
-    /// Scale row: a single slider plus a numeric readout. The reset button on
-    /// the right collapses scale + translate + rotation back to identity in
-    /// one click — important because three near-zero values are easier to
-    /// accidentally leave behind than one.
-    private var transformScaleRow: some View {
-        SettingRow(
-            icon: "arrow.up.left.and.arrow.down.right",
-            iconColor: .teal,
-            title: "Scale",
-            subtitle: "Scales the rendered page around its center."
-        ) {
-            HStack(spacing: 8) {
-                Slider(
-                    value: Binding(
-                        get: { config.transformScale },
-                        set: { newValue in
-                            let clamped = HTMLConfig.clampedTransformScale(newValue)
-                            guard abs(config.transformScale - clamped) > 0.001 else { return }
-                            config.transformScale = clamped
-                            commitConfig()
-                        }
-                    ),
-                    in: HTMLConfig.minTransformScale...HTMLConfig.maxTransformScale
-                )
-                .controlSize(.small)
-                .frame(width: 110)
-                .accessibilityLabel(Text("Scale"))
-
-                Text(verbatim: String(format: "%.0f%%", config.transformScale * 100))
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 44, alignment: .trailing)
-                    .monospacedDigit()
-
-                Button {
-                    resetTransform()
-                } label: {
-                    Image(systemName: "arrow.counterclockwise")
-                }
-                .controlSize(.small)
-                .buttonStyle(.borderless)
-                .help(Text("Reset scale, translate, and rotation"))
-                .accessibilityLabel(Text("Reset transform"))
-                .disabled(!isTransformActive)
-            }
-        }
-    }
-
-    /// Two coupled steppers — X and Y in CSS pixels. Steppers (not sliders)
-    /// because translate is usually a fine alignment task, not a sweep:
-    /// you want 12px nudges, not "drag and see where it ends up".
-    private var transformTranslateRow: some View {
-        SettingRow(
-            icon: "arrow.up.and.down.and.arrow.left.and.right",
-            iconColor: .purple,
-            title: "Translate",
-            subtitle: "Offsets the rendered page in CSS pixels."
-        ) {
-            HStack(spacing: 6) {
-                Text("X")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                Stepper(value: Binding(
-                    get: { Int(config.transformTranslateX.rounded()) },
-                    set: { newValue in
-                        let clamped = HTMLConfig.clampedTransformTranslate(Double(newValue))
-                        guard abs(config.transformTranslateX - clamped) > 0.5 else { return }
-                        config.transformTranslateX = clamped
-                        commitConfig()
-                    }
-                ), in: -Int(HTMLConfig.maxTransformTranslate)...Int(HTMLConfig.maxTransformTranslate), step: 4) {
-                    Text(verbatim: "\(Int(config.transformTranslateX.rounded()))")
-                        .font(.system(size: 11, design: .monospaced))
-                        .frame(width: 40, alignment: .trailing)
-                        .monospacedDigit()
-                }
-                .controlSize(.small)
-                .labelsHidden()
-                .accessibilityLabel(Text("Translate X"))
-
-                Text("Y")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, 4)
-                Stepper(value: Binding(
-                    get: { Int(config.transformTranslateY.rounded()) },
-                    set: { newValue in
-                        let clamped = HTMLConfig.clampedTransformTranslate(Double(newValue))
-                        guard abs(config.transformTranslateY - clamped) > 0.5 else { return }
-                        config.transformTranslateY = clamped
-                        commitConfig()
-                    }
-                ), in: -Int(HTMLConfig.maxTransformTranslate)...Int(HTMLConfig.maxTransformTranslate), step: 4) {
-                    Text(verbatim: "\(Int(config.transformTranslateY.rounded()))")
-                        .font(.system(size: 11, design: .monospaced))
-                        .frame(width: 40, alignment: .trailing)
-                        .monospacedDigit()
-                }
-                .controlSize(.small)
-                .labelsHidden()
-                .accessibilityLabel(Text("Translate Y"))
-            }
-        }
-    }
-
-    /// Rotation in degrees. `±180` covers everything; we keep the slider
-    /// continuous so animation-style "tilt the canvas" use cases feel
-    /// responsive instead of stepped.
-    private var transformRotationRow: some View {
-        SettingRow(
-            icon: "rotate.right",
-            iconColor: .pink,
-            title: "Rotation",
-            subtitle: "Rotates around the center."
-        ) {
-            HStack(spacing: 8) {
-                Slider(
-                    value: Binding(
-                        get: { config.transformRotationDegrees },
-                        set: { newValue in
-                            let clamped = HTMLConfig.clampedTransformRotation(newValue)
-                            guard abs(config.transformRotationDegrees - clamped) > 0.1 else { return }
-                            config.transformRotationDegrees = clamped
-                            commitConfig()
-                        }
-                    ),
-                    in: -180...180
-                )
-                .controlSize(.small)
-                .frame(width: 110)
-                .accessibilityLabel(Text("Rotation"))
-
-                Text(verbatim: String(format: "%.0f°", config.transformRotationDegrees))
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 44, alignment: .trailing)
-                    .monospacedDigit()
-            }
-        }
-    }
-
-    private var isTransformActive: Bool {
-        abs(config.transformScale - 1.0) > 0.001
-            || abs(config.transformTranslateX) > 0.5
-            || abs(config.transformTranslateY) > 0.5
-            || abs(config.transformRotationDegrees) > 0.1
-    }
-
-    private func resetTransform() {
-        guard isTransformActive else { return }
-        config.transformScale = 1.0
-        config.transformTranslateX = 0
-        config.transformTranslateY = 0
-        config.transformRotationDegrees = 0
-        commitConfig()
     }
 
     /// Custom CSS row — the editor itself opens in a popover instead of
@@ -696,5 +527,209 @@ struct HTMLOptionsInspector: View {
                 }
             }
         }
+    }
+}
+
+/// Transform inspector — Scale / Translate / Rotation live in their own
+/// GroupBox sibling to HTMLOptionsInspector so the toggle-style options
+/// (JavaScript, mouse interaction, refresh interval, custom CSS) stay
+/// visually distinct from the continuous geometry controls.
+struct HTMLTransformInspector: View {
+    var screen: Screen
+    @Binding var config: HTMLConfig
+
+    @Environment(ScreenManager.self) private var screenManager
+    @AppStorage("Inspector.HTMLTransformExpanded") private var isExpanded = true
+
+    var body: some View {
+        GroupBox {
+            CollapsibleSection(
+                title: "Transform",
+                systemImage: "slider.horizontal.3",
+                isExpanded: $isExpanded
+            ) {
+                VStack(spacing: 8) {
+                    scaleRow
+                    Divider()
+                    translateRow
+                    Divider()
+                    rotationRow
+                }
+            }
+        }
+        .groupBoxStyle(ContainerGroupBoxStyle())
+    }
+
+    /// Scale row: a single slider plus a numeric readout. The reset button on
+    /// the right collapses scale + translate + rotation back to identity in
+    /// one click — important because three near-zero values are easier to
+    /// accidentally leave behind than one.
+    private var scaleRow: some View {
+        SettingRow(
+            icon: "arrow.up.left.and.arrow.down.right",
+            iconColor: .teal,
+            title: "Scale",
+            info: "Scales the rendered page around its center."
+        ) {
+            HStack(spacing: 4) {
+                Slider(
+                    value: Binding(
+                        get: { config.transformScale },
+                        set: { newValue in
+                            let clamped = HTMLConfig.clampedTransformScale(newValue)
+                            guard abs(config.transformScale - clamped) > 0.001 else { return }
+                            config.transformScale = clamped
+                            commitConfig()
+                        }
+                    ),
+                    in: HTMLConfig.minTransformScale...HTMLConfig.maxTransformScale
+                )
+                .controlSize(.small)
+                .frame(width: 78)
+                .accessibilityLabel(Text("Scale"))
+
+                Text(verbatim: String(format: "%.0f%%", config.transformScale * 100))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 36, alignment: .trailing)
+                    .monospacedDigit()
+
+                Button {
+                    resetTransform()
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                }
+                .controlSize(.small)
+                .buttonStyle(.borderless)
+                .help(Text("Reset scale, translate, and rotation"))
+                .accessibilityLabel(Text("Reset transform"))
+                .disabled(!isTransformActive)
+            }
+        }
+    }
+
+    /// Two stacked sliders — X and Y in CSS pixels — sharing one row so
+    /// translate stays a single conceptual control. A draggable slider beats
+    /// a stepper for "find a good position" tasks; the numeric readout still
+    /// shows the exact pixel value for fine adjustments.
+    private var translateRow: some View {
+        SettingRow(
+            icon: "arrow.up.and.down.and.arrow.left.and.right",
+            iconColor: .purple,
+            title: "Translate",
+            info: "Offsets the rendered page horizontally (X) and vertically (Y) in CSS pixels."
+        ) {
+            VStack(alignment: .trailing, spacing: 4) {
+                translateAxisSlider(
+                    axisLabel: "X",
+                    value: Binding(
+                        get: { config.transformTranslateX },
+                        set: { newValue in
+                            let clamped = HTMLConfig.clampedTransformTranslate(newValue)
+                            guard abs(config.transformTranslateX - clamped) > 0.5 else { return }
+                            config.transformTranslateX = clamped
+                            commitConfig()
+                        }
+                    ),
+                    accessibilityLabel: "Translate X"
+                )
+                translateAxisSlider(
+                    axisLabel: "Y",
+                    value: Binding(
+                        get: { config.transformTranslateY },
+                        set: { newValue in
+                            let clamped = HTMLConfig.clampedTransformTranslate(newValue)
+                            guard abs(config.transformTranslateY - clamped) > 0.5 else { return }
+                            config.transformTranslateY = clamped
+                            commitConfig()
+                        }
+                    ),
+                    accessibilityLabel: "Translate Y"
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func translateAxisSlider(
+        axisLabel: String,
+        value: Binding<Double>,
+        accessibilityLabel: LocalizedStringKey
+    ) -> some View {
+        HStack(spacing: 4) {
+            Text(verbatim: axisLabel)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+
+            Slider(
+                value: value,
+                in: -HTMLConfig.maxTransformTranslate...HTMLConfig.maxTransformTranslate
+            )
+            .controlSize(.small)
+            .frame(width: 78)
+            .accessibilityLabel(Text(accessibilityLabel))
+
+            Text(verbatim: "\(Int(value.wrappedValue.rounded()))")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .frame(width: 36, alignment: .trailing)
+                .monospacedDigit()
+        }
+    }
+
+    /// Rotation in degrees. `±180` covers everything; we keep the slider
+    /// continuous so animation-style "tilt the canvas" use cases feel
+    /// responsive instead of stepped.
+    private var rotationRow: some View {
+        SettingRow(
+            icon: "rotate.right",
+            iconColor: .pink,
+            title: "Rotation",
+            info: "Rotates the rendered page around its center."
+        ) {
+            HStack(spacing: 4) {
+                Slider(
+                    value: Binding(
+                        get: { config.transformRotationDegrees },
+                        set: { newValue in
+                            let clamped = HTMLConfig.clampedTransformRotation(newValue)
+                            guard abs(config.transformRotationDegrees - clamped) > 0.1 else { return }
+                            config.transformRotationDegrees = clamped
+                            commitConfig()
+                        }
+                    ),
+                    in: -180...180
+                )
+                .controlSize(.small)
+                .frame(width: 78)
+                .accessibilityLabel(Text("Rotation"))
+
+                Text(verbatim: String(format: "%.0f°", config.transformRotationDegrees))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 36, alignment: .trailing)
+                    .monospacedDigit()
+            }
+        }
+    }
+
+    private var isTransformActive: Bool {
+        abs(config.transformScale - 1.0) > 0.001
+            || abs(config.transformTranslateX) > 0.5
+            || abs(config.transformTranslateY) > 0.5
+            || abs(config.transformRotationDegrees) > 0.1
+    }
+
+    private func resetTransform() {
+        guard isTransformActive else { return }
+        config.transformScale = 1.0
+        config.transformTranslateX = 0
+        config.transformTranslateY = 0
+        config.transformRotationDegrees = 0
+        commitConfig()
+    }
+
+    private func commitConfig() {
+        screenManager.updateHTMLConfig(config, for: screen)
     }
 }
