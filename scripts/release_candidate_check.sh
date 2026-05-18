@@ -49,6 +49,12 @@ xcodebuild test \
 echo "== i18n guard =="
 I18N_GUARD_SCOPE=all scripts/i18n_guard.sh
 
+echo "== String catalog formatting =="
+swift -module-cache-path "${SWIFT_MODULE_CACHE_PATH:-/tmp/LiveWallpaperSwiftModuleCache}" \
+  scripts/format_xcstrings.swift --check \
+  LiveWallpaper/Resources/Localizable.xcstrings \
+  LiveWallpaper/Resources/InfoPlist.xcstrings
+
 echo "== Static audit =="
 scripts/audit.sh static
 
