@@ -1016,6 +1016,10 @@ final class ScreenManager {
         playbackCoordinator.updateVideoVolume(volume, for: screen)
     }
 
+    func updateVideoColorSpace(_ colorSpace: VideoColorSpace, for screen: Screen) {
+        playbackCoordinator.updateVideoColorSpace(colorSpace, for: screen)
+    }
+
     func updateVideoDisplayMode(_ mode: VideoDisplayMode, for screen: Screen) {
         guard var sourceConfiguration = configurationStore.get(for: screen.id),
               sourceConfiguration.wallpaperType == .video,

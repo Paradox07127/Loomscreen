@@ -35,6 +35,10 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
     /// Per-screen video output level. `muted` stays separate so unmute can
     /// restore the user's previous level instead of jumping to full volume.
     public var videoVolume: Double = 1.0
+    /// Color management applied to the per-screen video `AVPlayerLayer`.
+    /// `.auto` (default) keeps current behavior — the layer is not pinned to
+    /// any colorspace and AVFoundation's system path drives the output.
+    public var videoColorSpace: VideoColorSpace = .auto
     /// Wallpaper Engine workshop origin metadata, set when the active wallpaper
     /// was imported from a `~/Documents/Live Wallpapers/<appid>/<wid>/` project.
     /// Cleared automatically when the user replaces the wallpaper with non-WPE
@@ -63,6 +67,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         case wallpaperMode
         case muted
         case videoVolume
+        case videoColorSpace
         case wpeOrigin
 
         case videoBookmarkData
@@ -292,6 +297,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         videoVolume = Self.clampedVideoVolume(
             try c.decodeIfPresent(Double.self, forKey: .videoVolume) ?? 1.0
         )
+        videoColorSpace = (try? c.decodeIfPresent(VideoColorSpace.self, forKey: .videoColorSpace)) ?? .auto
 
         if let storedMode = try c.decodeIfPresent(WallpaperMode.self, forKey: .wallpaperMode) {
             wallpaperMode = storedMode
@@ -412,6 +418,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         try c.encode(wallpaperMode, forKey: .wallpaperMode)
         try c.encode(muted, forKey: .muted)
         try c.encode(videoVolume, forKey: .videoVolume)
+        try c.encode(videoColorSpace, forKey: .videoColorSpace)
         try c.encodeIfPresent(wpeOrigin, forKey: .wpeOrigin)
     }
 

@@ -68,4 +68,9 @@ extension Notification.Name {
     /// `GlobalSettings.menuBarDensity` changed. `MenuBarContent` listens so
     /// the menubar dropdown re-resolves its padding/spacing on the next show.
     public static let menuBarDensityDidChange = Notification.Name("MenuBarDensityDidChange")
+
+    /// `GlobalSettings.videoDecoderPreference` changed. `WallpaperVideoPlayer`
+    /// listens and re-applies the resolution / bitrate ceiling to any active
+    /// `AVPlayerItem` on the next reconcile.
+    public static let videoDecoderPreferenceDidChange = Notification.Name("VideoDecoderPreferenceDidChange")
 }
