@@ -248,6 +248,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .environment(\.featureCatalog, manager.featureCatalog)
             .appLanguageScoped()
 
+        // Use NSHostingController instead of installing a bare NSHostingView
+        // as contentView so AppKit treats the SwiftUI tree as a proper view
+        // controller. NavigationSplitView's sidebar toggle integrates with
+        // the AppKit view-controller lifecycle (viewWill/DidAppear) — the
+        // hostingView path skipped those callbacks, leaving the underlying
+        // NSSplitViewController's split state un-realized until the first
+        // user drag, which manifested as the visible "smooth → halfway
+        // stall → snap" reveal animation.
+        let hostingController = NSHostingController(rootView: contentView)
+
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: SettingsWindowMetrics.defaultContentSize),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -263,8 +273,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.titleVisibility = .hidden
         window.backgroundColor = .windowBackgroundColor
         window.isMovableByWindowBackground = false
+        // Pair with `windowWillClose` keeping the controller cached — without
+        // this, AppKit releases the NSWindow on close and the retained
+        // NSWindowController's window reference goes stale, defeating the
+        // SwiftUI hierarchy-survival fix.
+        window.isReleasedWhenClosed = false
         window.center()
-        window.contentView = NSHostingView(rootView: contentView)
+        window.contentViewController = hostingController
         window.delegate = self
         window.setFrameAutosaveName("LiveWallpaperSettingsWindow")
 
