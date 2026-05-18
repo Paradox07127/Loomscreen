@@ -152,6 +152,7 @@ final class WeatherReactiveService {
         locationStatus = .fetching
 
         let resolution = await locationProvider.resolveCoordinate()
+        guard !Task.isCancelled else { return }
         activeLocationLabel = resolution.displayName
 
         guard let coordinate = resolution.coordinate else {
