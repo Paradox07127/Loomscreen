@@ -167,7 +167,10 @@ struct HTMLSourceSection: View {
                     .font(.caption)
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Button("Revoke") { trustStore.revoke(origin) }
+                Button("Revoke") {
+                    _ = trustStore.revoke(origin)
+                    screenManager.setHTMLWallpaper(source: source, config: config, forceReload: true, for: screen)
+                }
                     .buttonStyle(.bordered)
                     .controlSize(.mini)
                     .help(Text("Remove \(origin.displayName) from trusted origins"))
