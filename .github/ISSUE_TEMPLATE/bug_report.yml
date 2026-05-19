@@ -1,0 +1,84 @@
+name: Bug report
+description: Report a problem with LiveWallpaper
+title: "[Bug] "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug! Before submitting:
+        - Search [existing issues](https://github.com/Paradox07127/LiveWallpaper/issues?q=is%3Aissue) — your bug may already be tracked.
+        - If you opened this template from the in-app **Report a Bug…** sheet, the diagnostic snapshot is already pasted below. Please add **What happened?** and **Steps to reproduce** before posting.
+
+  - type: checkboxes
+    id: prerequisites
+    attributes:
+      label: Prerequisites
+      options:
+        - label: I searched existing issues and did not find a duplicate.
+          required: true
+        - label: I am running the latest release of LiveWallpaper (or a development build I am willing to identify below).
+          required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear and concise description of what the bug is.
+      placeholder: Describe the bug — what did you see? what did you expect to see instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Number each step so someone else can follow.
+      placeholder: |
+        1. Open Settings → General → Troubleshooting
+        2. Click "Report a Bug"
+        3. ...
+    validations:
+      required: true
+
+  - type: input
+    id: app-version
+    attributes:
+      label: App version
+      description: From the diagnostic snapshot or About menu (e.g. `1.0 (Build 42)`).
+      placeholder: "1.0 (Build 42)"
+    validations:
+      required: true
+
+  - type: input
+    id: macos-version
+    attributes:
+      label: macOS version
+      description: From the diagnostic snapshot or  → About This Mac.
+      placeholder: "15.2 (24C101)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: sku
+    attributes:
+      label: SKU
+      options:
+        - Pro
+        - Lite
+        - Not sure
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        **Note:** When you open this template from the in-app **Report a Bug…** sheet, a `<details>` diagnostic snapshot block and reproduction outline are pre-filled at the top of the issue body. You can keep them as-is, edit them, or delete them — file paths and `/Users/<name>` segments are already redacted, but please double-check before posting.
+
+  - type: textarea
+    id: log-file
+    attributes:
+      label: Runtime log
+      description: Optional but very helpful. The in-app sheet shows `runtime.log` in Finder — drag the file into this comment box to attach it.
+      placeholder: Drag runtime.log here to attach.

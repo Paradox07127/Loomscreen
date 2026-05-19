@@ -111,6 +111,49 @@ public final class LogFileSink: @unchecked Sendable {
         }
     }
 
+    /// Tail recent WARNING/ERROR/FAULT lines for the bug-report sheet, taking
+    /// the write lock so we never observe a partially-flushed entry from a
+    /// concurrent `record(...)` and never race with rotation. Reads at most
+    /// `maxReadBytes` from the file tail and returns up to `maxLines` lines.
+    /// Each returned line is truncated to `maxLineLength` so a single
+    /// pathological stack-trace can't blow past GitHub's issue-URL body
+    /// ceiling when concatenated downstream.
+    public func recentDiagnosticLines(
+        maxLines: Int = 5,
+        maxReadBytes: UInt64 = 256 * 1024,
+        maxLineLength: Int = 500
+    ) -> [String] {
+        guard let url = fileURL else { return [] }
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return [] }
+        defer { try? handle.close() }
+
+        let total = (try? handle.seekToEnd()) ?? 0
+        let startOffset = total > maxReadBytes ? total - maxReadBytes : 0
+        do {
+            try handle.seek(toOffset: startOffset)
+        } catch {
+            return []
+        }
+        let data = (try? handle.readToEnd()) ?? Data()
+        guard let text = String(data: data, encoding: .utf8) else { return [] }
+
+        let matching = text
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map(String.init)
+            .filter { line in
+                line.contains("[WARNING]") || line.contains("[ERROR]") || line.contains("[FAULT]")
+            }
+            .map { line in
+                line.count > maxLineLength
+                    ? String(line.prefix(maxLineLength)) + "…"
+                    : line
+            }
+        return Array(matching.suffix(maxLines))
+    }
+
     private static func prepareLogFileURL() -> URL? {
         let fm = FileManager.default
         guard let libraryURL = fm.urls(for: .libraryDirectory, in: .userDomainMask).first else {

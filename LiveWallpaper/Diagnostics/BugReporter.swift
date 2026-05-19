@@ -1,0 +1,214 @@
+import AppKit
+import Foundation
+import LiveWallpaperCore
+
+/// Pure value type assembled by `BugReporter` and consumed by `ReportBugSheet`.
+/// Holds the GitHub-bound diagnostic markdown plus the file URL of the
+/// rotating runtime log so the sheet can offer "Show Log in Finder".
+///
+/// `Identifiable` so SwiftUI's `.sheet(item:)` can present the report; the
+/// id changes on every fresh `makeReport(...)` call so re-opening the sheet
+/// re-renders even if the diagnostic content happens to be byte-identical.
+struct BugReport: Identifiable, Sendable {
+    let id = UUID()
+    let diagnosticMarkdown: String
+    let issueURL: URL
+    let logFileURL: URL?
+    let logFileExists: Bool
+}
+
+/// Builds the data the bug-report sheet needs without doing any UI work.
+/// Kept side-effect-free so it can be unit-tested and called from any actor.
+enum BugReporter {
+    /// `Paradox07127/LiveWallpaper` — the public open-source repo. Hardcoded
+    /// rather than read from a build setting because the issue URL must
+    /// survive even if `Bundle` lookups fail.
+    private static let issueTemplateURL = URL(
+        string: "https://github.com/Paradox07127/LiveWallpaper/issues/new?template=bug_report.yml"
+    )!
+
+    /// How many recent warning/error lines we lift from the runtime log into
+    /// the markdown preview. Five is enough to convey what crashed without
+    /// blowing past GitHub's `body=` URL-parameter ceiling (~8 KB) once the
+    /// markdown is percent-encoded.
+    private static let recentLogLineCount = 5
+    private static let maxLogLineLength = 500
+    /// Hard cap on the markdown body before URL encoding. GitHub returns
+    /// `414 URI Too Long` for very long query strings; staying well under
+    /// 8 KB pre-encoding gives us comfortable headroom even when characters
+    /// like `&`, `#`, newline each expand 3× during percent-encoding.
+    private static let maxBodyLength = 6 * 1024
+
+    @MainActor
+    static func makeReport(activeWallpaperKinds: [String]) -> BugReport {
+        let snapshot = SystemSnapshot.capture(activeWallpaperKinds: activeWallpaperKinds)
+        let recentLog = sanitizedRecentLogLines()
+        let markdown = capped(
+            formatMarkdown(snapshot: snapshot, recentLogLines: recentLog),
+            to: maxBodyLength
+        )
+        return BugReport(
+            diagnosticMarkdown: markdown,
+            issueURL: makeIssueURL(prefilledBody: markdown),
+            logFileURL: Logger.persistentLogFileURL,
+            logFileExists: logFileExists()
+        )
+    }
+
+    // MARK: - Markdown
+
+    private static func formatMarkdown(snapshot: SystemSnapshot, recentLogLines: [String]) -> String {
+        var sections: [String] = []
+
+        sections.append("""
+        <details><summary>Diagnostic snapshot — auto-generated, please review before posting</summary>
+
+        - **App**: LiveWallpaper \(snapshot.appVersion) (Build \(snapshot.appBuild)) — \(snapshot.sku.rawValue) SKU
+        - **macOS**: \(snapshot.macOSVersion) (\(snapshot.macOSBuild))
+        - **Hardware**: \(snapshot.hardwareModel) · \(snapshot.chip) · \(snapshot.physicalMemoryGiB) GB
+        - **Displays**: \(formatDisplays(snapshot.displays))
+        - **Active wallpapers**: \(snapshot.activeWallpaperKinds.isEmpty ? "(none)" : snapshot.activeWallpaperKinds.joined(separator: ", "))
+        - **Locale**: \(snapshot.localeIdentifier)
+        - **Bundle**: `\(snapshot.bundleIdentifier)`
+        """)
+
+        if recentLogLines.isEmpty {
+            sections.append("- **Recent warnings/errors**: (none recorded)")
+        } else {
+            // Fenced code block: a single ``` boundary is safer than per-line
+            // backticks because it survives `` ` `` characters embedded in the
+            // log line itself. The fence length is dynamic to defeat any line
+            // that happens to contain ``` itself.
+            let fence = safeCodeFence(for: recentLogLines)
+            let body = recentLogLines.joined(separator: "\n")
+            sections.append("""
+            - **Recent warnings/errors** (last \(recentLogLines.count)):
+
+            \(fence)
+            \(body)
+            \(fence)
+            """)
+        }
+
+        sections.append("</details>")
+
+        sections.append("""
+
+        ### What happened?
+        <!-- describe the bug here -->
+
+        ### Steps to reproduce
+        1.&nbsp;
+        2.&nbsp;
+        3.&nbsp;
+
+        ### Expected vs actual
+        <!-- what did you expect? what happened instead? -->
+        """)
+
+        return sections.joined(separator: "\n\n")
+    }
+
+    private static func formatDisplays(_ displays: [SystemSnapshot.DisplayDescriptor]) -> String {
+        guard !displays.isEmpty else { return "(none detected)" }
+        let parts = displays.map { d in
+            "\(d.pixelWidth)×\(d.pixelHeight) @\(d.backingScaleFactor)x"
+        }
+        return "\(displays.count) connected (\(parts.joined(separator: " · ")))"
+    }
+
+    /// Picks the shortest fence (`` ``` ``, `` ```` ``, …) that does not appear
+    /// inside any of the lines — preventing user content from prematurely
+    /// closing the code block.
+    private static func safeCodeFence(for lines: [String]) -> String {
+        var fence = "```"
+        while lines.contains(where: { $0.contains(fence) }) {
+            fence += "`"
+        }
+        return fence
+    }
+
+    private static func capped(_ text: String, to maxBytes: Int) -> String {
+        guard text.utf8.count > maxBytes else { return text }
+        var truncated = text
+        while truncated.utf8.count > maxBytes - 32 && !truncated.isEmpty {
+            truncated.removeLast()
+        }
+        return truncated + "\n\n…(diagnostic truncated)"
+    }
+
+    // MARK: - GitHub URL
+
+    private static func makeIssueURL(prefilledBody: String) -> URL {
+        var components = URLComponents(url: issueTemplateURL, resolvingAgainstBaseURL: false)
+            ?? URLComponents()
+        var items = components.queryItems ?? []
+        items.append(URLQueryItem(name: "body", value: prefilledBody))
+        components.queryItems = items
+        return components.url ?? issueTemplateURL
+    }
+
+    // MARK: - Runtime log scan
+
+    private static func logFileExists() -> Bool {
+        guard let url = Logger.persistentLogFileURL else { return false }
+        return FileManager.default.fileExists(atPath: url.path)
+    }
+
+    /// Pulls the most recent WARNING/ERROR/FAULT lines from `LogFileSink`
+    /// (which holds the lock so we never observe a torn write or stale
+    /// rotation), then runs each line through `sanitize(_:)` to strip
+    /// `/Users/<name>` segments and file:// URLs before they leave the
+    /// process.
+    private static func sanitizedRecentLogLines() -> [String] {
+        LogFileSink.shared
+            .recentDiagnosticLines(maxLines: recentLogLineCount, maxLineLength: maxLogLineLength)
+            .map(sanitize)
+    }
+
+    /// Best-effort PII scrub. Existing app log lines embed full paths,
+    /// `file://` URLs, and occasionally HTTP query strings; we mask the
+    /// home-directory prefix and replace the username so a publicly-posted
+    /// snippet cannot identify the user, while keeping the relative path
+    /// useful for triage.
+    static func sanitize(_ line: String) -> String {
+        var result = line
+
+        if let home = ProcessInfo.processInfo.environment["HOME"], !home.isEmpty {
+            result = result.replacingOccurrences(of: home, with: "~")
+        }
+        // Catch any other absolute home path even if HOME isn't set or the
+        // line came from another process snapshot. Replaces
+        // `/Users/<name>` (or `/Volumes/.../Users/<name>`) with `/Users/<redacted>`.
+        result = result.replacingOccurrences(
+            of: #"/Users/[^/\s'"]+"#,
+            with: "/Users/<redacted>",
+            options: .regularExpression
+        )
+        // Strip query strings from URL-shaped substrings so signed CDN
+        // links, tokens, and email-shaped query params can't leak.
+        result = result.replacingOccurrences(
+            of: #"(https?://[^\s'"]+)\?[^\s'"]*"#,
+            with: "$1?<query-redacted>",
+            options: .regularExpression
+        )
+        result = result.replacingOccurrences(
+            of: #"file://[^\s'"]+"#,
+            with: "file://<redacted>",
+            options: .regularExpression
+        )
+        return result
+    }
+
+    // MARK: - Side-effecting helpers (called from the sheet's button actions)
+
+    @MainActor
+    static func revealLogInFinder(_ url: URL) {
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    @MainActor
+    static func openIssueInBrowser(_ url: URL) {
+        NSWorkspace.shared.open(url)
+    }
+}
