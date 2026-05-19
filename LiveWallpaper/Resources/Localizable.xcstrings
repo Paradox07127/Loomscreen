@@ -19390,6 +19390,296 @@
         }
       }
     },
+    "Report a Bug" : {
+      "comment" : "Button label opening the bug-report sheet.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Report a Bug"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "バグを報告"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "报告问题"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "報告問題"
+          }
+        }
+      }
+    },
+    "Report a bug" : {
+      "comment" : "Accessibility label for the Report a Bug button.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Report a bug"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "バグを報告"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "报告问题"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "報告問題"
+          }
+        }
+      }
+    },
+    "Opens a sheet to review diagnostic info and file a GitHub issue" : {
+      "comment" : "Accessibility hint for the Report a Bug button.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Opens a sheet to review diagnostic info and file a GitHub issue"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "診断情報を確認して GitHub の issue を作成するシートを開きます"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开窗口审阅诊断信息并提交 GitHub issue"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟視窗檢視診斷資訊並提交 GitHub issue"
+          }
+        }
+      }
+    },
+    "Thanks for helping LiveWallpaper improve. The information below will be pre-filled into a GitHub issue. **Please review it before posting** — once an issue is created, anyone can read it." : {
+      "comment" : "Explainer body in the Report a Bug sheet.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thanks for helping LiveWallpaper improve. The information below will be pre-filled into a GitHub issue. **Please review it before posting** — once an issue is created, anyone can read it."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LiveWallpaper の改善にご協力いただきありがとうございます。下記の情報は GitHub issue に事前入力されます。**投稿前に内容をご確認ください** — issue は誰でも閲覧できます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "感谢帮助 LiveWallpaper 改进。下方信息会预填到 GitHub issue 里。**提交前请检查一遍** — issue 一旦创建任何人都能看到。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "感謝協助 LiveWallpaper 改進。下方資訊會預先填入 GitHub issue。**送出前請先檢查** — issue 一旦建立任何人都能看到。"
+          }
+        }
+      }
+    },
+    "Diagnostic snapshot" : {
+      "comment" : "Heading above the diagnostic preview in the Report a Bug sheet.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diagnostic snapshot"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "診断スナップショット"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "诊断信息"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "診斷資訊"
+          }
+        }
+      }
+    },
+    "Detailed log: drag the runtime log into the GitHub issue after it opens." : {
+      "comment" : "Caption below the diagnostic preview pointing users at the log file attach step.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Detailed log: drag the runtime log into the GitHub issue after it opens."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "詳細ログ：GitHub issue を開いたら runtime.log をドラッグして添付してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完整日志：GitHub issue 打开后请把 runtime.log 拖进去作为附件。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完整日誌：GitHub issue 開啟後請將 runtime.log 拖入作為附件。"
+          }
+        }
+      }
+    },
+    "Show Log in Finder" : {
+      "comment" : "Button that highlights runtime.log in Finder.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show Log in Finder"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finder でログを表示"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在访达中显示日志"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Finder 中顯示日誌"
+          }
+        }
+      }
+    },
+    "Show runtime log in Finder" : {
+      "comment" : "Accessibility label for the Show Log in Finder button.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show runtime log in Finder"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ランタイムログを Finder で表示"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在访达中显示运行日志"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Finder 中顯示執行日誌"
+          }
+        }
+      }
+    },
+    "Open Finder and highlight the runtime log file" : {
+      "comment" : "Help tooltip for the Reveal Log button.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Finder and highlight the runtime log file"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finder を開いて runtime.log を選択状態で表示します"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在访达中打开并选中 runtime.log 文件"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Finder 中開啟並選取 runtime.log 檔案"
+          }
+        }
+      }
+    },
+    "Continue in Browser" : {
+      "comment" : "Primary button in the Report a Bug sheet — opens the GitHub issue creation URL in the browser.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Continue in Browser"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ブラウザで続ける"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在浏览器中继续"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在瀏覽器中繼續"
+          }
+        }
+      }
+    },
     "Reset this shortcut?" : {
       "extractionState" : "manual",
       "localizations" : {

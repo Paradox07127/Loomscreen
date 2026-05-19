@@ -26,6 +26,7 @@ struct GeneralSettingsView: View {
     @State private var videoDecoderPreference: VideoDecoderPreference
 
     @State private var pendingDestructive: PendingDestructive?
+    @State private var pendingBugReport: BugReport?
 
     /// Pending import bundle: shown in a confirmation alert before applying
     /// so users can back out after seeing what's inside.
@@ -132,6 +133,11 @@ struct GeneralSettingsView: View {
             allowsMultipleSelection: false
         ) { result in
             handleImportResult(result)
+        }
+        .sheet(item: $pendingBugReport) { report in
+            ReportBugSheet(report: report) {
+                pendingBugReport = nil
+            }
         }
     }
 
@@ -596,6 +602,28 @@ struct GeneralSettingsView: View {
              verticalSpacing: DesignTokens.Settings.actionGridSpacing) {
             GridRow {
                 settingsActionButton(
+                    title: "Report a Bug",
+                    accessibilityLabel: "Report a bug",
+                    accessibilityHint: "Opens a sheet to review diagnostic info and file a GitHub issue",
+                    systemImage: "ladybug",
+                    action: presentBugReport
+                )
+
+                settingsActionButton(
+                    title: "Welcome Tour",
+                    accessibilityLabel: "Show welcome tour",
+                    accessibilityHint: "Replays the initial onboarding flow",
+                    systemImage: "sparkles",
+                    action: {
+                        if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
+                            appDelegate.showOnboarding()
+                        }
+                    }
+                )
+            }
+
+            GridRow {
+                settingsActionButton(
                     title: "Export",
                     accessibilityLabel: "Export configuration",
                     accessibilityHint: "Save the current settings, bookmarks, and per-display setup to a backup file",
@@ -613,18 +641,10 @@ struct GeneralSettingsView: View {
             }
 
             GridRow {
-                settingsActionButton(
-                    title: "Welcome Tour",
-                    accessibilityLabel: "Show welcome tour",
-                    accessibilityHint: "Replays the initial onboarding flow",
-                    systemImage: "sparkles",
-                    action: {
-                        if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
-                            appDelegate.showOnboarding()
-                        }
-                    }
-                )
+                Divider().gridCellColumns(2)
+            }
 
+            GridRow {
                 settingsActionButton(
                     title: "Reset Defaults",
                     accessibilityLabel: "Reset all settings to default",
@@ -638,9 +658,16 @@ struct GeneralSettingsView: View {
                         }
                     }
                 )
+                Color.clear
             }
         }
         .padding(.vertical, 4)
+    }
+
+    private func presentBugReport() {
+        let kinds: [String] = screenManager.wallpaperSessionSummaries
+            .compactMap { $0.wallpaperType?.rawValue }
+        pendingBugReport = BugReporter.makeReport(activeWallpaperKinds: kinds)
     }
 
     private func settingsActionButton(
