@@ -412,6 +412,9 @@ struct LiveWallpaperApp: App {
                 },
                 openSettingsForScreen: { [appDelegate] id in
                     appDelegate.showSettings(initialScreenID: id)
+                },
+                openSettingsAndAddWallpaper: { [appDelegate] in
+                    appDelegate.showSettings(initialAddWallpaperPromptKind: "video")
                 }
             )
             .environment(screenManager)

@@ -14,7 +14,6 @@ struct GeneralSettingsView: View {
     @State private var useBatteryThreshold: Bool
     @State private var pauseOnFullScreen: Bool
     @State private var showInDock: Bool
-    @State private var menuBarDensity: MenuBarDensity
     /// Slider value held in MB for UI ergonomics — converted to bytes when
     /// persisted to `GlobalSettings.videoCacheMaxBytesPerScreen`. `Double`
     /// because SwiftUI's `Slider` is a `Double` ramp; the step ensures it
@@ -52,7 +51,6 @@ struct GeneralSettingsView: View {
         _useBatteryThreshold = State(initialValue: settings.minimumBatteryLevel != nil)
         _pauseOnFullScreen = State(initialValue: settings.pauseOnFullScreen)
         _showInDock = State(initialValue: settings.showInDock)
-        _menuBarDensity = State(initialValue: settings.menuBarDensity)
         _videoCacheBudgetMB = State(initialValue: Double(settings.videoCacheMaxBytesPerScreen) / Double(1024 * 1024))
         _videoDecoderPreference = State(initialValue: settings.videoDecoderPreference)
     }
@@ -206,7 +204,6 @@ struct GeneralSettingsView: View {
         useBatteryThreshold = settings.minimumBatteryLevel != nil
         pauseOnFullScreen = settings.pauseOnFullScreen
         showInDock = settings.showInDock
-        menuBarDensity = settings.menuBarDensity
         videoDecoderPreference = settings.videoDecoderPreference
 
         let feedback = importFeedbackMessage(for: summary)
@@ -334,18 +331,6 @@ struct GeneralSettingsView: View {
                         .accessibilityHint(Text("Toggles whether the app appears in the Dock and the Cmd-Tab switcher"))
                 }
 
-                SettingRow(icon: "menubar.rectangle", iconColor: .teal, title: "Menu bar density", subtitle: "Compact tightens padding so more displays fit without scrolling") {
-                    Picker("", selection: $menuBarDensity) {
-                        ForEach(MenuBarDensity.allCases) { density in
-                            Text(LocalizedStringKey(density.titleKey)).tag(density)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.segmented)
-                    .frame(maxWidth: 200)
-                    .onChange(of: menuBarDensity) { _, _ in updateGlobalSettings() }
-                    .accessibilityLabel(Text("Menu bar density"))
-                }
             } header: {
                 Text("Behavior")
             }
@@ -854,7 +839,6 @@ struct GeneralSettingsView: View {
     private func updateGlobalSettings() {
         var settings = SettingsManager.shared.loadGlobalSettings()
         let dockChanged = settings.showInDock != showInDock
-        let densityChanged = settings.menuBarDensity != menuBarDensity
         let decoderChanged = settings.videoDecoderPreference != videoDecoderPreference
         settings.globalPauseOnBattery = globalPauseOnBattery
         settings.preservePlaybackOnLock = preservePlaybackOnLock
@@ -862,16 +846,12 @@ struct GeneralSettingsView: View {
         settings.minimumBatteryLevel = useBatteryThreshold ? minimumBatteryLevel : nil
         settings.pauseOnFullScreen = pauseOnFullScreen
         settings.showInDock = showInDock
-        settings.menuBarDensity = menuBarDensity
         settings.videoCacheMaxBytesPerScreen = Int(videoCacheBudgetMB) * 1024 * 1024
         settings.videoDecoderPreference = videoDecoderPreference
         SettingsManager.shared.saveGlobalSettings(settings)
         screenManager.handleGlobalSettingsChanged()
         if dockChanged {
             postSettingsNotificationAsync(.dockVisibilityDidChange)
-        }
-        if densityChanged {
-            postSettingsNotificationAsync(.menuBarDensityDidChange)
         }
         if decoderChanged {
             postSettingsNotificationAsync(.videoDecoderPreferenceDidChange)
@@ -896,7 +876,6 @@ struct GeneralSettingsView: View {
         useBatteryThreshold = false
         pauseOnFullScreen = true
         showInDock = false
-        menuBarDensity = .comfortable
         videoDecoderPreference = .auto
 
         postSettingsNotificationAsync(.dockVisibilityDidChange)

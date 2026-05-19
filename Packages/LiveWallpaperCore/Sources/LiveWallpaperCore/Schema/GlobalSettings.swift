@@ -1,22 +1,5 @@
 import Foundation
 
-/// Layout density for the MenuBar dropdown. Comfortable mirrors macOS system
-/// menus (default); Compact tightens padding + drops one type step so users
-/// on multi-display setups see more without scrolling.
-public enum MenuBarDensity: String, Codable, CaseIterable, Identifiable, Sendable {
-    case comfortable
-    case compact
-
-    public var id: String { rawValue }
-
-    public var titleKey: String {
-        switch self {
-        case .comfortable: return "Comfortable"
-        case .compact:     return "Compact"
-        }
-    }
-}
-
 /// User preference influencing how AVPlayer treats the active video stream.
 ///
 /// AVFoundation does not expose a public API to force software vs. hardware
@@ -78,10 +61,6 @@ public struct GlobalSettings: Codable, Sendable {
     /// LRU of recently imported Wallpaper Engine projects (capped at 20 by
     /// `SettingsManager.recordWPEImport(_:)`). Most recent at index 0.
     public var recentWPEImports: [WPEHistoryEntry] = []
-    /// Density preference for the MenuBar dropdown. Defaults to comfortable
-    /// (current behaviour); compact tightens padding for users on busy
-    /// multi-display setups.
-    public var menuBarDensity: MenuBarDensity = .comfortable
     /// Per-screen cap on how much RAM the video pipeline may pin to keep a
     /// short looped clip resident (and avoid `~4 MB/s` continuous disk reads
     /// at playback bitrate). 0 disables caching entirely. The total RAM
@@ -118,7 +97,6 @@ public struct GlobalSettings: Codable, Sendable {
         weatherLocation: WeatherLocationPreference = .default,
         globalShortcuts: [GlobalShortcutAction.RawAction: GlobalShortcutBinding?] = [:],
         recentWPEImports: [WPEHistoryEntry] = [],
-        menuBarDensity: MenuBarDensity = .comfortable,
         videoCacheMaxBytesPerScreen: Int = GlobalSettings.defaultVideoCacheBytes,
         videoDecoderPreference: VideoDecoderPreference = .auto
     ) {
@@ -132,7 +110,6 @@ public struct GlobalSettings: Codable, Sendable {
         self.weatherLocation = weatherLocation
         self.globalShortcuts = globalShortcuts
         self.recentWPEImports = recentWPEImports
-        self.menuBarDensity = menuBarDensity
         self.videoCacheMaxBytesPerScreen = videoCacheMaxBytesPerScreen
         self.videoDecoderPreference = videoDecoderPreference
     }
@@ -149,7 +126,6 @@ public struct GlobalSettings: Codable, Sendable {
         weatherLocation = (try? c.decodeIfPresent(WeatherLocationPreference.self, forKey: .weatherLocation)) ?? .default
         globalShortcuts = (try? c.decodeIfPresent([GlobalShortcutAction.RawAction: GlobalShortcutBinding?].self, forKey: .globalShortcuts)) ?? [:]
         recentWPEImports = (try? c.decodeIfPresent([WPEHistoryEntry].self, forKey: .recentWPEImports)) ?? []
-        menuBarDensity = (try? c.decodeIfPresent(MenuBarDensity.self, forKey: .menuBarDensity)) ?? .comfortable
         let storedCache = (try? c.decodeIfPresent(Int.self, forKey: .videoCacheMaxBytesPerScreen)) ?? GlobalSettings.defaultVideoCacheBytes
         if storedCache < 0 {
             videoCacheMaxBytesPerScreen = GlobalSettings.defaultVideoCacheBytes
