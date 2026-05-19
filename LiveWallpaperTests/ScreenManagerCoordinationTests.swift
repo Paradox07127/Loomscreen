@@ -609,6 +609,31 @@ struct ScreenManagerCoordinationTests {
         }
     }
 
+    @Test("Revoking the current trusted HTML origin forces the live page to rebuild")
+    func revokingCurrentTrustedHTMLOriginForcesRebuild() async throws {
+        let originURL = try #require(URL(string: "https://html-revoke-\(UUID().uuidString).example.com/live"))
+        let source = HTMLSource.url(originURL)
+        let origin = try #require(TrustedHTMLOrigin(url: originURL))
+        var config = HTMLConfig.default
+        config.allowJavaScript = true
+
+        #expect(TrustedHostStore.shared.trust(origin))
+        defer { _ = TrustedHostStore.shared.revoke(origin) }
+
+        try await Self.runWithHTMLConfiguration(source: source, config: config) { manager, screen in
+            let session = TestRuntimeSession(wallpaperType: .html)
+            screen.installRuntimeSession(session)
+
+            #expect(TrustedHostStore.shared.revoke(origin))
+            manager.setHTMLWallpaper(source: source, config: config, forceReload: true, for: screen)
+            await Self.drainMainQueue()
+
+            #expect(session.cleanupCount == 1)
+            #expect(!Self.isSameSession(screen.runtimeSession, session))
+            #expect(manager.getConfiguration(for: screen)?.wallpaperType == .html)
+        }
+    }
+
     @Test("Changing HTML JavaScript permission rebuilds the page")
     func updateHTMLConfigJavaScriptToggleRebuildsSession() async throws {
         try await Self.runWithHTMLConfiguration { manager, screen in
