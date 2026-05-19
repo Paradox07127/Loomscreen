@@ -94,11 +94,35 @@ private struct AdaptiveGlassSurfaceModifier: ViewModifier {
 
         switch shape {
         case .circle:
-            content.glassEffect(glass, in: .circle)
+            content
+                .glassEffect(glass, in: .circle)
+                .overlay { interactiveOutline(Circle()) }
         case .capsule:
-            content.glassEffect(glass, in: .capsule)
+            content
+                .glassEffect(glass, in: .capsule)
+                .overlay { interactiveOutline(Capsule()) }
         case .roundedRectangle(let radius):
-            content.glassEffect(glass, in: .rect(cornerRadius: radius))
+            content
+                .glassEffect(glass, in: .rect(cornerRadius: radius))
+                .overlay { interactiveOutline(RoundedRectangle(cornerRadius: radius, style: .continuous)) }
+        }
+    }
+
+    /// Thin contrast stroke layered on top of the native Liquid Glass on macOS 26+.
+    /// Liquid Glass's intrinsic edge highlight is subtle; for interactive surfaces
+    /// (buttons, tappable plates) we add a faint 0.5pt outline so users with low
+    /// vision can locate hit areas. Non-interactive surfaces (decorative shells)
+    /// stay unmodified to preserve the native refraction feel.
+    @available(macOS 26.0, *)
+    @ViewBuilder
+    private func interactiveOutline<S: InsettableShape>(_ shape: S) -> some View {
+        if interactive {
+            shape
+                .strokeBorder(
+                    Color.primary.opacity(increaseContrast ? 0.20 : 0.10),
+                    lineWidth: increaseContrast ? 0.75 : 0.5
+                )
+                .accessibilityHidden(true)
         }
     }
 

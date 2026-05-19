@@ -65,10 +65,6 @@ extension Notification.Name {
     /// `WeatherReactiveService` reacts by re-resolving its provider chain.
     public static let weatherLocationPreferenceDidChange = Notification.Name("WeatherLocationPreferenceDidChange")
 
-    /// `GlobalSettings.menuBarDensity` changed. `MenuBarContent` listens so
-    /// the menubar dropdown re-resolves its padding/spacing on the next show.
-    public static let menuBarDensityDidChange = Notification.Name("MenuBarDensityDidChange")
-
     /// `GlobalSettings.videoDecoderPreference` changed. `WallpaperVideoPlayer`
     /// listens and re-applies the resolution / bitrate ceiling to any active
     /// `AVPlayerItem` on the next reconcile.
