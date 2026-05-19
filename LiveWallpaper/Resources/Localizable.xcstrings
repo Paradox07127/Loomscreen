@@ -2842,34 +2842,6 @@
         }
       }
     },
-    "AVPlayer always uses hardware decode when available. This setting changes the resolution / bitrate ceiling instead — there is no public API to force software decoding." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "AVPlayer always uses hardware decode when available. This setting changes the resolution / bitrate ceiling instead — there is no public API to force software decoding."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "AVPlayer は利用可能な場合、常にハードウェアデコードを使用します。この設定は代わりに解像度/ビットレートの上限を変更します — ソフトウェアデコードを強制する公開 API はありません。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "AVPlayer 始终在可用时使用硬件解码。此设置仅调整分辨率/码率上限——没有公开 API 可以强制软件解码。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "AVPlayer 會在可用時一律使用硬體解碼。此設定改為調整解析度/位元率上限 — 沒有公開 API 可強制使用軟體解碼。"
-          }
-        }
-      }
-    },
     "Back to library" : {
       "localizations" : {
         "en" : {
@@ -2894,6 +2866,91 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "返回資料庫"
+          }
+        }
+      }
+    },
+    "Backup" : {
+      "comment" : "Settings tab title for the configuration backup/restore page.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Backup"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "バックアップ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "备份"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "備份"
+          }
+        }
+      }
+    },
+    "Backup & Restore" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Backup & Restore"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "バックアップと復元"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "备份与恢复"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "備份與還原"
+          }
+        }
+      }
+    },
+    "Backup files travel between Macs and let you roll back a misconfiguration. They contain bookmarks (pointers to your wallpaper files) but not the wallpaper files themselves — the original folders must exist on the destination Mac for the bookmarks to resolve." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Backup files travel between Macs and let you roll back a misconfiguration. They contain bookmarks (pointers to your wallpaper files) but not the wallpaper files themselves — the original folders must exist on the destination Mac for the bookmarks to resolve."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "バックアップファイルは Mac 間で移動でき、設定ミスを巻き戻すのにも便利です。壁紙ファイルへの参照（ブックマーク）は含まれますが、壁紙ファイル自体は含まれません。移行先の Mac に元のフォルダが存在する必要があります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "备份文件可以在 Mac 之间迁移，也能在设置出问题时回滚。它们包含书签（指向你的壁纸文件），但不包含壁纸文件本身——目标 Mac 上必须保留原始文件夹书签才能解析。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "備份檔案可在 Mac 之間遷移，也能在設定出問題時還原。它們包含書籤（指向你的桌布檔案），但不包含桌布檔案本身——目標 Mac 上必須保留原始資料夾，書籤才能解析。"
           }
         }
       }
@@ -3749,6 +3806,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "將解碼上限設為 1080p / 8 Mbps，以降低 GPU 負載。"
+          }
+        }
+      }
+    },
+    "Caps playback at 1080p / 8 Mbps. Looks identical on a 1080p display; lower GPU draw, longer battery life." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Caps playback at 1080p / 8 Mbps. Looks identical on a 1080p display; lower GPU draw, longer battery life."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再生を 1080p / 8 Mbps に制限します。1080p ディスプレイなら見た目は同じで、GPU 負荷とバッテリー消費を抑えられます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "把播放限制到 1080p / 8 Mbps。在 1080p 显示器上视觉一致，GPU 占用更低，电池更耐用。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "將播放限制到 1080p / 8 Mbps。在 1080p 顯示器上視覺一致，GPU 佔用更低，電池更耐用。"
           }
         }
       }
@@ -5411,6 +5497,35 @@
         }
       }
     },
+    "Continue in Browser" : {
+      "comment" : "Primary button in the Report a Bug sheet — opens the GitHub issue creation URL in the browser.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Continue in Browser"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ブラウザで続ける"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在浏览器中继续"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在瀏覽器中繼續"
+          }
+        }
+      }
+    },
     "Copies every missing workshop ID to your clipboard so you can subscribe in Steam" : {
       "localizations" : {
         "en" : {
@@ -5519,6 +5634,63 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "複製所有 ID"
+          }
+        }
+      }
+    },
+    "Copy version" : {
+      "comment" : "Accessibility label for the copy-version button on the About page.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copy version"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "バージョンをコピー"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "复制版本号"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "複製版本號"
+          }
+        }
+      }
+    },
+    "Copy version to clipboard" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copy version to clipboard"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "バージョンをクリップボードにコピー"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "复制版本号到剪贴板"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "複製版本號到剪貼簿"
           }
         }
       }
@@ -6073,34 +6245,6 @@
         }
       }
     },
-    "Decoder preference" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Decoder preference"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "デコーダー設定"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "解码偏好"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "解碼器偏好設定"
-          }
-        }
-      }
-    },
     "Degraded" : {
       "comment" : "Wallpaper Engine scene capability tier.",
       "extractionState" : "manual",
@@ -6272,6 +6416,35 @@
         }
       }
     },
+    "Detailed log: drag the runtime log into the GitHub issue after it opens." : {
+      "comment" : "Caption below the diagnostic preview pointing users at the log file attach step.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Detailed log: drag the runtime log into the GitHub issue after it opens."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "詳細ログ：GitHub issue を開いたら runtime.log をドラッグして添付してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完整日志：GitHub issue 打开后请把 runtime.log 拖进去作为附件。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完整日誌：GitHub issue 開啟後請將 runtime.log 拖入作為附件。"
+          }
+        }
+      }
+    },
     "Developer Tools" : {
       "comment" : "Debug-only settings sidebar item and page title.",
       "extractionState" : "manual",
@@ -6298,6 +6471,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "開發者工具"
+          }
+        }
+      }
+    },
+    "Diagnostic snapshot" : {
+      "comment" : "Heading above the diagnostic preview in the Report a Bug sheet.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diagnostic snapshot"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "診断スナップショット"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "诊断信息"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "診斷資訊"
           }
         }
       }
@@ -6471,31 +6673,31 @@
         }
       }
     },
-    "Layout" : {
-      "comment" : "Label for the video display mode picker (Per Display / Span).",
+    "Discussions" : {
+      "comment" : "About-page tile label linking to GitHub Discussions.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Layout"
+            "value" : "Discussions"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "レイアウト"
+            "value" : "Discussions"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "布局"
+            "value" : "讨论区"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "佈局"
+            "value" : "討論區"
           }
         }
       }
@@ -7153,6 +7355,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "清除所有設定並回復出廠預設值"
+          }
+        }
+      }
+    },
+    "Erases all configurations and restores factory defaults. This cannot be undone — consider exporting a backup first in the Backup tab." : {
+      "comment" : "Footer warning under the Reset Defaults button.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erases all configurations and restores factory defaults. This cannot be undone — consider exporting a backup first in the Backup tab."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "すべての設定を消去して工場出荷時のデフォルトに戻します。この操作は取り消せません。先に Backup タブでバックアップをエクスポートすることをおすすめします。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除所有配置并恢复出厂默认值。此操作不可撤销——建议先在 Backup 标签页里导出一份备份。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除所有設定並還原出廠預設值。此操作無法復原——建議先在 Backup 標籤頁裡匯出一份備份。"
           }
         }
       }
@@ -9476,43 +9707,12 @@
         }
       }
     },
-    "Export" : {
-      "comment" : "Label for a button that exports the current settings, bookmarks, and per-display setup to a backup file.",
+    "Export Configuration" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Export"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "書き出す"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "导出"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "匯出"
-          }
-        }
-      }
-    },
-    "Export configuration" : {
-      "comment" : "A button that exports the user's settings.",
-      "isCommentAutoGenerated" : true,
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Export configuration"
+            "value" : "Export Configuration"
           }
         },
         "ja" : {
@@ -9651,6 +9851,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "匯出 JSON"
+          }
+        }
+      }
+    },
+    "Export…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Export…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "書き出し…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出…"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "匯出…"
           }
         }
       }
@@ -11621,14 +11849,12 @@
         }
       }
     },
-    "Import configuration" : {
-      "comment" : "A button that imports a configuration.",
-      "isCommentAutoGenerated" : true,
+    "Import Configuration" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Import configuration"
+            "value" : "Import Configuration"
           }
         },
         "ja" : {
@@ -11709,6 +11935,34 @@
         }
       }
     },
+    "Import…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import…"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "読み込み…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导入…"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "匯入…"
+          }
+        }
+      }
+    },
     "Imported file contained no recognizable settings." : {
       "comment" : "Toast shown after importing an empty configuration bundle.",
       "localizations" : {
@@ -11734,6 +11988,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "匯入的檔案沒有可辨識的設定。"
+          }
+        }
+      }
+    },
+    "Importing replaces the current global preferences and per-display setup. Bookmarks from the backup are merged into your library — existing entries with the same source are kept." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Importing replaces the current global preferences and per-display setup. Bookmarks from the backup are merged into your library — existing entries with the same source are kept."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "インポートすると現在のグローバル設定とディスプレイごとの設定が置き換わります。バックアップ内のブックマークはライブラリに統合され、同じソースの既存エントリは保持されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导入会覆盖当前的全局首选项和每个显示器的设置。备份里的书签会合并到你的库中——已存在且来源相同的条目会被保留。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "匯入會覆寫目前的全域偏好設定和各顯示器的設定。備份中的書籤會合併到你的庫中——已存在且來源相同的項目會被保留。"
           }
         }
       }
@@ -12053,6 +12335,35 @@
         }
       }
     },
+    "Layout" : {
+      "comment" : "Label for the video display mode picker (Per Display / Span).",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Layout"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "レイアウト"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "布局"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "佈局"
+          }
+        }
+      }
+    },
     "Leaves" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12219,6 +12530,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在等待下一組按鍵組合"
+          }
+        }
+      }
+    },
+    "Live wallpapers for macOS — videos, web pages, and Wallpaper Engine scenes across every connected display." : {
+      "comment" : "Tagline on the About page describing what the app does.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live wallpapers for macOS — videos, web pages, and Wallpaper Engine scenes across every connected display."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS のためのライブ壁紙 — 動画、ウェブページ、Wallpaper Engine シーンを接続中のすべてのディスプレイに。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS 上的动态壁纸——视频、网页、Wallpaper Engine 场景，覆盖每一台外接显示器。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS 上的動態桌布——影片、網頁、Wallpaper Engine 場景，覆蓋每一台外接顯示器。"
           }
         }
       }
@@ -12563,6 +12903,34 @@
         }
       }
     },
+    "macOS always picks hardware vs. software decode itself — apps cannot force a choice. This control instead caps the resolution and bitrate AVPlayer is allowed to request, which is what actually moves the GPU / battery dial." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS always picks hardware vs. software decode itself — apps cannot force a choice. This control instead caps the resolution and bitrate AVPlayer is allowed to request, which is what actually moves the GPU / battery dial."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS はハードウェア／ソフトウェアデコーダーを常に自動選択するため、アプリ側では強制できません。この設定では代わりに AVPlayer が要求できる解像度とビットレートに上限をかけ、GPU 負荷とバッテリー消費を実際にコントロールします。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS 始终自己决定使用硬件还是软件解码——app 无法强制。这个选项实际是限制 AVPlayer 能请求的分辨率和码率，从而真正影响 GPU 负载和电池消耗。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS 始終自行決定使用硬體還是軟體解碼——app 無法強制。這個選項實際是限制 AVPlayer 能請求的解析度與位元率，從而真正影響 GPU 負載與電池消耗。"
+          }
+        }
+      }
+    },
     "macOS can't load Windows native plugins." : {
       "localizations" : {
         "en" : {
@@ -12587,6 +12955,64 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "macOS 無法載入 Windows 原生外掛。"
+          }
+        }
+      }
+    },
+    "macOS picks resolution and bitrate caps based on power source." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS picks resolution and bitrate caps based on power source."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS が電源状況に応じて解像度とビットレートの上限を選びます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "由 macOS 根据电源状态自动选择分辨率和码率上限。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "由 macOS 根據電源狀態自動選擇解析度與位元率上限。"
+          }
+        }
+      }
+    },
+    "Made by <your name>" : {
+      "comment" : "About-page author byline. Placeholder — replace <your name> with the real author before shipping.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Made by <your name>"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "制作: <your name>"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "作者：<your name>"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "作者：<your name>"
           }
         }
       }
@@ -14745,6 +15171,35 @@
         }
       }
     },
+    "Open Finder and highlight the runtime log file" : {
+      "comment" : "Help tooltip for the Reveal Log button.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Finder and highlight the runtime log file"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finder を開いて runtime.log を選択状態で表示します"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在访达中打开并选中 runtime.log 文件"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Finder 中開啟並選取 runtime.log 檔案"
+          }
+        }
+      }
+    },
     "Open Location Services settings" : {
       "localizations" : {
         "en" : {
@@ -15049,6 +15504,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "開啟資料夾選擇器以套用 Wallpaper Engine 專案"
+          }
+        }
+      }
+    },
+    "Opens a sheet to review diagnostic info and file a GitHub issue" : {
+      "comment" : "Accessibility hint for the Report a Bug button.",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Opens a sheet to review diagnostic info and file a GitHub issue"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "診断情報を確認して GitHub の issue を作成するシートを開きます"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开窗口审阅诊断信息并提交 GitHub issue"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟視窗檢視診斷資訊並提交 GitHub issue"
           }
         }
       }
@@ -16639,6 +17124,64 @@
         }
       }
     },
+    "Playback Quality" : {
+      "comment" : "Settings row title for the video playback quality (formerly 'Decoder preference').",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Playback Quality"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再生品質"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "播放质量"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "播放品質"
+          }
+        }
+      }
+    },
+    "Playback quality preference" : {
+      "comment" : "Accessibility label for the playback quality picker.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Playback quality preference"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再生品質の設定"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "播放质量偏好"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "播放品質偏好"
+          }
+        }
+      }
+    },
     "Playback speed" : {
       "comment" : "A11y label for the playback speed picker.\nTooltip for the playback speed picker.",
       "localizations" : {
@@ -17152,6 +17695,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "主要影片"
+          }
+        }
+      }
+    },
+    "Privacy Policy" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Privacy Policy"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プライバシーポリシー"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "隐私政策"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "隱私政策"
           }
         }
       }
@@ -18613,6 +19185,35 @@
         }
       }
     },
+    "Removes resolution and bitrate caps. May reduce frame rate of other apps on Intel Macs and older iGPUs." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Removes resolution and bitrate caps. May reduce frame rate of other apps on Intel Macs and older iGPUs."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "解像度とビットレートの上限を解除します。Intel Mac や古い iGPU では他のアプリのフレームレートが落ちる可能性があります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "去掉分辨率和码率上限。在 Intel Mac 和较老的 iGPU 上可能拖累其他 app 的帧率。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除解析度與位元率上限。在 Intel Mac 和較舊的 iGPU 上可能拖累其他 app 的影格速率。"
+          }
+        }
+      }
+    },
     "Removes the assigned video from this schedule slot" : {
       "localizations" : {
         "en" : {
@@ -18842,6 +19443,7 @@
       }
     },
     "Replays the initial onboarding flow" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -18865,6 +19467,65 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重新播放初始導覽流程"
+          }
+        }
+      }
+    },
+    "Report a bug" : {
+      "comment" : "Accessibility label for the Report a Bug button.",
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Report a bug"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "バグを報告"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "报告问题"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "報告問題"
+          }
+        }
+      }
+    },
+    "Report a Bug" : {
+      "comment" : "Button label opening the bug-report sheet.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Report a Bug"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "バグを報告"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "报告问题"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "報告問題"
           }
         }
       }
@@ -19361,325 +20022,6 @@
         }
       }
     },
-    "Reset Transform" : {
-      "comment" : "Button label that resets scale/translate/rotation back to identity.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Reset Transform"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "トランスフォームをリセット"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重置变换"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重置變換"
-          }
-        }
-      }
-    },
-    "Report a Bug" : {
-      "comment" : "Button label opening the bug-report sheet.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Report a Bug"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "バグを報告"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "报告问题"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "報告問題"
-          }
-        }
-      }
-    },
-    "Report a bug" : {
-      "comment" : "Accessibility label for the Report a Bug button.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Report a bug"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "バグを報告"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "报告问题"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "報告問題"
-          }
-        }
-      }
-    },
-    "Opens a sheet to review diagnostic info and file a GitHub issue" : {
-      "comment" : "Accessibility hint for the Report a Bug button.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Opens a sheet to review diagnostic info and file a GitHub issue"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "診断情報を確認して GitHub の issue を作成するシートを開きます"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "打开窗口审阅诊断信息并提交 GitHub issue"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "開啟視窗檢視診斷資訊並提交 GitHub issue"
-          }
-        }
-      }
-    },
-    "Thanks for helping LiveWallpaper improve. The information below will be pre-filled into a GitHub issue. **Please review it before posting** — once an issue is created, anyone can read it." : {
-      "comment" : "Explainer body in the Report a Bug sheet.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Thanks for helping LiveWallpaper improve. The information below will be pre-filled into a GitHub issue. **Please review it before posting** — once an issue is created, anyone can read it."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "LiveWallpaper の改善にご協力いただきありがとうございます。下記の情報は GitHub issue に事前入力されます。**投稿前に内容をご確認ください** — issue は誰でも閲覧できます。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "感谢帮助 LiveWallpaper 改进。下方信息会预填到 GitHub issue 里。**提交前请检查一遍** — issue 一旦创建任何人都能看到。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "感謝協助 LiveWallpaper 改進。下方資訊會預先填入 GitHub issue。**送出前請先檢查** — issue 一旦建立任何人都能看到。"
-          }
-        }
-      }
-    },
-    "Diagnostic snapshot" : {
-      "comment" : "Heading above the diagnostic preview in the Report a Bug sheet.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Diagnostic snapshot"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "診断スナップショット"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "诊断信息"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "診斷資訊"
-          }
-        }
-      }
-    },
-    "Detailed log: drag the runtime log into the GitHub issue after it opens." : {
-      "comment" : "Caption below the diagnostic preview pointing users at the log file attach step.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Detailed log: drag the runtime log into the GitHub issue after it opens."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "詳細ログ：GitHub issue を開いたら runtime.log をドラッグして添付してください。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "完整日志：GitHub issue 打开后请把 runtime.log 拖进去作为附件。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "完整日誌：GitHub issue 開啟後請將 runtime.log 拖入作為附件。"
-          }
-        }
-      }
-    },
-    "Show Log in Finder" : {
-      "comment" : "Button that highlights runtime.log in Finder.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Show Log in Finder"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Finder でログを表示"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在访达中显示日志"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在 Finder 中顯示日誌"
-          }
-        }
-      }
-    },
-    "Show runtime log in Finder" : {
-      "comment" : "Accessibility label for the Show Log in Finder button.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Show runtime log in Finder"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ランタイムログを Finder で表示"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在访达中显示运行日志"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在 Finder 中顯示執行日誌"
-          }
-        }
-      }
-    },
-    "Open Finder and highlight the runtime log file" : {
-      "comment" : "Help tooltip for the Reveal Log button.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Open Finder and highlight the runtime log file"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Finder を開いて runtime.log を選択状態で表示します"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在访达中打开并选中 runtime.log 文件"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在 Finder 中開啟並選取 runtime.log 檔案"
-          }
-        }
-      }
-    },
-    "Continue in Browser" : {
-      "comment" : "Primary button in the Report a Bug sheet — opens the GitHub issue creation URL in the browser.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Continue in Browser"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ブラウザで続ける"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在浏览器中继续"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在瀏覽器中繼續"
-          }
-        }
-      }
-    },
     "Reset this shortcut?" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -19765,6 +20107,35 @@
         }
       }
     },
+    "Reset Transform" : {
+      "comment" : "Button label that resets scale/translate/rotation back to identity.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reset Transform"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "トランスフォームをリセット"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重置变换"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重置變換"
+          }
+        }
+      }
+    },
     "Resize properties panel" : {
       "localizations" : {
         "en" : {
@@ -19819,6 +20190,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已解析 / 缺少"
+          }
+        }
+      }
+    },
+    "Restore from a previously exported .lwconfig file" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Restore from a previously exported .lwconfig file"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "以前にエクスポートした .lwconfig ファイルから復元します"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从之前导出的 .lwconfig 文件恢复"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "從先前匯出的 .lwconfig 檔案還原"
           }
         }
       }
@@ -20595,6 +20994,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "用書籤儲存喜愛項目"
+          }
+        }
+      }
+    },
+    "Save settings, bookmarks, and per-display setup to a .lwconfig file" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save settings, bookmarks, and per-display setup to a .lwconfig file"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "設定・ブックマーク・ディスプレイ構成を .lwconfig ファイルに保存します"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "把设置、书签和各显示器配置保存到 .lwconfig 文件"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "將設定、書籤和各顯示器配置儲存到 .lwconfig 檔案"
           }
         }
       }
@@ -22140,6 +22567,35 @@
         }
       }
     },
+    "Show Log in Finder" : {
+      "comment" : "Button that highlights runtime.log in Finder.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show Log in Finder"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finder でログを表示"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在访达中显示日志"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Finder 中顯示日誌"
+          }
+        }
+      }
+    },
     "Show renderer diagnostics" : {
       "comment" : "\"Show renderer diagnostics\" is a label for a button that shows a panel that shows information about the renderer.",
       "isCommentAutoGenerated" : true,
@@ -22166,6 +22622,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "顯示渲染器診斷"
+          }
+        }
+      }
+    },
+    "Show runtime log in Finder" : {
+      "comment" : "Accessibility label for the Show Log in Finder button.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show runtime log in Finder"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ランタイムログを Finder で表示"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在访达中显示运行日志"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Finder 中顯示執行日誌"
           }
         }
       }
@@ -22201,6 +22686,7 @@
       }
     },
     "Show welcome tour" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -23846,6 +24332,35 @@
         }
       }
     },
+    "Thanks for helping LiveWallpaper improve. The information below will be pre-filled into a GitHub issue. **Please review it before posting** — once an issue is created, anyone can read it." : {
+      "comment" : "Explainer body in the Report a Bug sheet.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thanks for helping LiveWallpaper improve. The information below will be pre-filled into a GitHub issue. **Please review it before posting** — once an issue is created, anyone can read it."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LiveWallpaper の改善にご協力いただきありがとうございます。下記の情報は GitHub issue に事前入力されます。**投稿前に内容をご確認ください** — issue は誰でも閲覧できます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "感谢帮助 LiveWallpaper 改进。下方信息会预填到 GitHub issue 里。**提交前请检查一遍** — issue 一旦创建任何人都能看到。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "感謝協助 LiveWallpaper 改進。下方資訊會預先填入 GitHub issue。**送出前請先檢查** — issue 一旦建立任何人都能看到。"
+          }
+        }
+      }
+    },
     "The author's scene.json couldn't be parsed: %@" : {
       "comment" : "Wallpaper Engine fallback warning body. The placeholder is parser detail.",
       "localizations" : {
@@ -23871,6 +24386,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無法解析作者的 scene.json：%@"
+          }
+        }
+      }
+    },
+    "The bundle includes all global preferences, the wallpaper library bookmarks, and the per-display playback / effect setup. Wallpaper files themselves are not copied — only references to them." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The bundle includes all global preferences, the wallpaper library bookmarks, and the per-display playback / effect setup. Wallpaper files themselves are not copied — only references to them."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "バンドルにはすべてのグローバル設定、壁紙ライブラリのブックマーク、ディスプレイごとの再生 / エフェクト設定が含まれます。壁紙ファイル自体はコピーされず、参照のみが保存されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "备份包含所有全局首选项、壁纸库书签和每个显示器的播放/特效设置。壁纸文件本身不会被复制——只保存它们的引用。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "備份包含所有全域偏好設定、桌布庫書籤和各顯示器的播放／特效設定。桌布檔案本身不會被複製——僅保存它們的參照。"
           }
         }
       }
@@ -25033,6 +25576,7 @@
       }
     },
     "Troubleshooting" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -25861,34 +26405,6 @@
         }
       }
     },
-    "Video decoder preference" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Video decoder preference"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "動画デコーダー設定"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "视频解码偏好"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "影片解碼器偏好設定"
-          }
-        }
-      }
-    },
     "Video display layout" : {
       "comment" : "A label displayed above a picker that lets the user",
       "isCommentAutoGenerated" : true,
@@ -26204,6 +26720,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在創意工坊中檢視"
+          }
+        }
+      }
+    },
+    "View on GitHub" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "View on GitHub"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GitHub で見る"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 GitHub 上查看"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 GitHub 上檢視"
           }
         }
       }

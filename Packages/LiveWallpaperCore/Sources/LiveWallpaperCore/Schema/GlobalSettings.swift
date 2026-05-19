@@ -49,11 +49,11 @@ public enum VideoDecoderPreference: String, Codable, CaseIterable, Identifiable,
     public var descriptionKey: String {
         switch self {
         case .auto:
-            return "Let macOS pick — recommended for most Macs."
+            return "macOS picks resolution and bitrate caps based on power source."
         case .batterySaver:
-            return "Caps decode at 1080p / 8 Mbps to lighten GPU load."
+            return "Caps playback at 1080p / 8 Mbps. Looks identical on a 1080p display; lower GPU draw, longer battery life."
         case .highQuality:
-            return "No resolution or bitrate caps. Heavier on older GPUs."
+            return "Removes resolution and bitrate caps. May reduce frame rate of other apps on Intel Macs and older iGPUs."
         }
     }
 }
