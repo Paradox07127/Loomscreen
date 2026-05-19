@@ -338,9 +338,11 @@ final class PlaybackCoordinator {
         let generation = transition.bumpTransition(for: screenID)
         let videoLoader = playableVideoLoader
         reportRuntimeError(screenID, nil)
-        Task {
+        let task = Task {
             do {
+                try Task.checkCancellation()
                 try await videoLoader.validatePlayableVideo(at: url)
+                try Task.checkCancellation()
                 await MainActor.run { [weak self] in
                     guard let self,
                           self.transition.isCurrentTransition(generation, for: screenID),
@@ -358,15 +360,22 @@ final class PlaybackCoordinator {
                     self.reportRuntimeError(screenID, nil)
                     self.setupVideoPlayback(url: url, screen: liveScreen)
                 }
+            } catch is CancellationError {
+                // Expected when the user superseded this transition before
+                // `validatePlayableVideo` returned — no error to report.
+                return
             } catch {
                 let runtimeError = Self.runtimeError(from: error, url: url)
                 let message = error.localizedDescription
-                await MainActor.run {
+                await MainActor.run { [weak self] in
+                    guard let self,
+                          self.transition.isCurrentTransition(generation, for: screenID) else { return }
                     self.reportRuntimeError(screenID, runtimeError)
                     Logger.error("Failed to setup video: \(message)", category: .screenManager)
                 }
             }
         }
+        transition.setValidationTask(task, for: screenID)
     }
 
     func applyConfiguration(_ configuration: ScreenConfiguration, to screen: Screen, preservingState: Bool = false) {

@@ -62,15 +62,11 @@ struct GeneralSettingsView: View {
             generalTab
                 .tabItem { Label("General", systemImage: "gearshape") }
 
-            if featureCatalog.isEnabled(.globalShortcuts) {
-                ShortcutsSettingsView()
-                    .tabItem { Label("Shortcuts", systemImage: "command") }
-            }
+            ShortcutsSettingsView()
+                .tabItem { Label("Shortcuts", systemImage: "command") }
 
-            if featureCatalog.isEnabled(.weatherReactive) {
-                WeatherLocationSettingsView()
-                    .tabItem { Label("Weather", systemImage: "cloud.sun") }
-            }
+            WeatherLocationSettingsView()
+                .tabItem { Label("Weather", systemImage: "cloud.sun") }
 
             #if !LITE_BUILD
             if featureCatalog.isEnabled(.wpeImport) {
@@ -78,6 +74,9 @@ struct GeneralSettingsView: View {
                     .tabItem { Label("Cache", systemImage: "internaldrive") }
             }
             #endif
+
+            backupTab
+                .tabItem { Label("Backup", systemImage: "externaldrive") }
 
             aboutTab
                 .tabItem { Label("About", systemImage: "info.circle") }
@@ -358,9 +357,13 @@ struct GeneralSettingsView: View {
             batteryThresholdSection
 
             Section {
-                troubleshootingActions
+                resetDefaultsRow
             } header: {
-                Text("Troubleshooting")
+                Text("Reset")
+            } footer: {
+                Text("Erases all configurations and restores factory defaults. This cannot be undone — consider exporting a backup first in the Backup tab.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -428,8 +431,9 @@ struct GeneralSettingsView: View {
             SettingRow(
                 icon: "cpu",
                 iconColor: .green,
-                title: "Decoder preference",
-                subtitle: LocalizedStringKey(videoDecoderPreference.descriptionKey)
+                title: "Playback Quality",
+                subtitle: LocalizedStringKey(videoDecoderPreference.descriptionKey),
+                info: "macOS always picks hardware vs. software decode itself — apps cannot force a choice. This control instead caps the resolution and bitrate AVPlayer is allowed to request, which is what actually moves the GPU / battery dial."
             ) {
                 Picker("", selection: $videoDecoderPreference) {
                     ForEach(VideoDecoderPreference.allCases) { preference in
@@ -438,10 +442,9 @@ struct GeneralSettingsView: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.segmented)
-                .frame(maxWidth: 280)
+                .fixedSize()
                 .onChange(of: videoDecoderPreference) { _, _ in updateGlobalSettings() }
-                .accessibilityLabel(Text("Video decoder preference"))
-                .help(Text("AVPlayer always uses hardware decode when available. This setting changes the resolution / bitrate ceiling instead — there is no public API to force software decoding."))
+                .accessibilityLabel(Text("Playback quality preference"))
             }
         } header: {
             Text("Performance")
@@ -550,32 +553,179 @@ struct GeneralSettingsView: View {
 
     @ViewBuilder
     private var aboutTab: some View {
-        VStack(spacing: 18) {
-            Spacer(minLength: 12)
+        ScrollView {
+            VStack(spacing: 28) {
+                aboutHero
+                aboutTagline
+                aboutActionGrid
+                aboutFooter
+            }
+            .frame(maxWidth: 480)
+            .padding(.horizontal, 32)
+            .padding(.vertical, 36)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(DesignTokens.Colors.pageBackground)
+    }
 
-            Image(systemName: "play.rectangle.fill")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 72, height: 72)
-                .foregroundStyle(Color.accentColor)
-                .symbolRenderingMode(.hierarchical)
+    private var aboutHero: some View {
+        VStack(spacing: 14) {
+            ZStack {
+                // Soft accent halo behind the icon — gives the hero presence
+                // without the AI-slop "drop shadow on a flat icon" look.
+                Circle()
+                    .fill(Color.accentColor.opacity(0.12))
+                    .frame(width: 128, height: 128)
+                    .blur(radius: 18)
+
+                Image(systemName: "play.rectangle.fill")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 88, height: 88)
+                    .foregroundStyle(Color.accentColor)
+                    .symbolRenderingMode(.hierarchical)
+            }
+            .accessibilityHidden(true)
 
             VStack(spacing: 4) {
                 Text("LiveWallpaper")
-                    .font(.title2)
-                    .fontWeight(.semibold)
+                    .font(.system(size: 24, weight: .semibold))
+                    .textSelection(.enabled)
 
-                Text(verbatim: versionString)
-                    .font(.callout)
+                HStack(spacing: 6) {
+                    Text(verbatim: versionString)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                        .textSelection(.enabled)
+
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(versionString, forType: .string)
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
-                    .monospacedDigit()
+                    .help(Text("Copy version to clipboard"))
+                    .accessibilityLabel(Text("Copy version"))
+                }
             }
-
-            Spacer()
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(32)
-        .background(DesignTokens.Colors.pageBackground)
+    }
+
+    private var aboutTagline: some View {
+        Text("Live wallpapers for macOS — videos, web pages, and Wallpaper Engine scenes across every connected display.")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 8)
+    }
+
+    private var aboutActionGrid: some View {
+        Grid(horizontalSpacing: 10, verticalSpacing: 10) {
+            GridRow {
+                aboutTile(
+                    title: "View on GitHub",
+                    systemImage: "chevron.left.forwardslash.chevron.right",
+                    accent: .blue,
+                    url: URL(string: "https://github.com/Paradox07127/LiveWallpaper")
+                )
+                aboutTile(
+                    title: "Discussions",
+                    systemImage: "bubble.left.and.bubble.right",
+                    accent: .indigo,
+                    url: URL(string: "https://github.com/Paradox07127/LiveWallpaper/discussions")
+                )
+            }
+            GridRow {
+                aboutTile(
+                    title: "Report a Bug",
+                    systemImage: "ladybug",
+                    accent: .red,
+                    action: presentBugReport
+                )
+                aboutTile(
+                    title: "Welcome Tour",
+                    systemImage: "sparkles",
+                    accent: .purple,
+                    action: {
+                        if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
+                            appDelegate.showOnboarding()
+                        }
+                    }
+                )
+            }
+        }
+        .frame(maxWidth: 360)
+    }
+
+    /// Tile-style call-to-action. Uses a low-key surface so the four CTAs read
+    /// as a related group rather than four shouting buttons. Apple's About
+    /// pages keep this region quiet; the hero block does the talking.
+    @ViewBuilder
+    private func aboutTile(
+        title: LocalizedStringKey,
+        systemImage: String,
+        accent: Color,
+        url: URL? = nil,
+        action: (() -> Void)? = nil
+    ) -> some View {
+        Button {
+            if let action {
+                action()
+            } else if let url {
+                NSWorkspace.shared.open(url)
+            }
+        } label: {
+            VStack(spacing: 8) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 22, weight: .regular))
+                    .foregroundStyle(accent)
+                    .frame(height: 26)
+
+                Text(title)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+            .padding(.horizontal, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.secondary.opacity(0.08))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.18), lineWidth: 0.5)
+            )
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .disabled(action == nil && url == nil)
+    }
+
+    /// Author / copyright / license at the very bottom — small, restrained,
+    /// selectable. Placeholders need to be replaced before shipping.
+    private var aboutFooter: some View {
+        VStack(spacing: 4) {
+            // TODO: Replace `<your name>` with the real author byline.
+            Text("Made by <your name>")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            // TODO: Replace with the real copyright year + holder + license.
+            // Suggest MIT or GPLv3 for GitHub open source.
+            Text(verbatim: "© 2026 <copyright holder> · Released under <license>")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .multilineTextAlignment(.center)
+        .textSelection(.enabled)
+        .padding(.top, 4)
     }
 
     private func settingsForm<Content: View>(@ViewBuilder content: () -> Content) -> some View {
@@ -597,71 +747,63 @@ struct GeneralSettingsView: View {
         .accessibilityHint(Text("Choose the display language used by LiveWallpaper"))
     }
 
-    private var troubleshootingActions: some View {
-        Grid(horizontalSpacing: DesignTokens.Settings.actionGridSpacing,
-             verticalSpacing: DesignTokens.Settings.actionGridSpacing) {
-            GridRow {
-                settingsActionButton(
-                    title: "Report a Bug",
-                    accessibilityLabel: "Report a bug",
-                    accessibilityHint: "Opens a sheet to review diagnostic info and file a GitHub issue",
-                    systemImage: "ladybug",
-                    action: presentBugReport
-                )
-
-                settingsActionButton(
-                    title: "Welcome Tour",
-                    accessibilityLabel: "Show welcome tour",
-                    accessibilityHint: "Replays the initial onboarding flow",
-                    systemImage: "sparkles",
-                    action: {
-                        if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
-                            appDelegate.showOnboarding()
-                        }
-                    }
-                )
+    private var resetDefaultsRow: some View {
+        HStack {
+            Spacer()
+            Button {
+                pendingDestructive = PendingDestructive(.resetAllSettings) {
+                    resetAllSettings()
+                }
+            } label: {
+                Label("Reset Defaults", systemImage: "arrow.counterclockwise")
             }
+            .buttonStyle(.bordered)
+            .tint(.red)
+            .controlSize(.regular)
+            .accessibilityLabel(Text("Reset all settings to default"))
+            .accessibilityHint(Text("Erases all configurations and restores factory defaults"))
+            Spacer()
+        }
+        .padding(.vertical, 8)
+    }
 
-            GridRow {
-                settingsActionButton(
-                    title: "Export",
-                    accessibilityLabel: "Export configuration",
-                    accessibilityHint: "Save the current settings, bookmarks, and per-display setup to a backup file",
-                    systemImage: "square.and.arrow.up",
-                    action: beginExport
-                )
+    // MARK: - Backup Tab
 
-                settingsActionButton(
-                    title: "Import",
-                    accessibilityLabel: "Import configuration",
-                    accessibilityHint: "Restore settings, bookmarks, and per-display setup from a backup file",
-                    systemImage: "square.and.arrow.down",
-                    action: beginImport
-                )
-            }
+    @ViewBuilder
+    private var backupTab: some View {
+        settingsForm {
+            Section {
+                SettingRow(
+                    icon: "square.and.arrow.up",
+                    iconColor: .blue,
+                    title: "Export Configuration",
+                    subtitle: "Save settings, bookmarks, and per-display setup to a .lwconfig file",
+                    info: "The bundle includes all global preferences, the wallpaper library bookmarks, and the per-display playback / effect setup. Wallpaper files themselves are not copied — only references to them."
+                ) {
+                    Button("Export…") { beginExport() }
+                        .controlSize(.small)
+                        .accessibilityHint(Text("Save the current settings, bookmarks, and per-display setup to a backup file"))
+                }
 
-            GridRow {
-                Divider().gridCellColumns(2)
-            }
-
-            GridRow {
-                settingsActionButton(
-                    title: "Reset Defaults",
-                    accessibilityLabel: "Reset all settings to default",
-                    accessibilityHint: "Erases all configurations and restores factory defaults",
-                    systemImage: "arrow.counterclockwise",
-                    tint: .red,
-                    isDestructive: true,
-                    action: {
-                        pendingDestructive = PendingDestructive(.resetAllSettings) {
-                            resetAllSettings()
-                        }
-                    }
-                )
-                Color.clear
+                SettingRow(
+                    icon: "square.and.arrow.down",
+                    iconColor: .blue,
+                    title: "Import Configuration",
+                    subtitle: "Restore from a previously exported .lwconfig file",
+                    info: "Importing replaces the current global preferences and per-display setup. Bookmarks from the backup are merged into your library — existing entries with the same source are kept."
+                ) {
+                    Button("Import…") { beginImport() }
+                        .controlSize(.small)
+                        .accessibilityHint(Text("Restore settings, bookmarks, and per-display setup from a backup file"))
+                }
+            } header: {
+                Text("Backup & Restore")
+            } footer: {
+                Text("Backup files travel between Macs and let you roll back a misconfiguration. They contain bookmarks (pointers to your wallpaper files) but not the wallpaper files themselves — the original folders must exist on the destination Mac for the bookmarks to resolve.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
-        .padding(.vertical, 4)
     }
 
     private func presentBugReport() {
