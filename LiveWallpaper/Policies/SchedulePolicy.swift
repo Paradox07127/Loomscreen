@@ -39,17 +39,6 @@ enum SchedulePolicy {
         return .none
     }
 
-    /// Legacy helper kept for backward compatibility.
-    static func scheduledBookmark(
-        in configuration: ScreenConfiguration,
-        hour: Int
-    ) -> (slot: ScheduleSlot, bookmarkData: Data)? {
-        guard case .applySlot(let slot, let bookmarkData) = decision(for: configuration, hour: hour) else {
-            return nil
-        }
-        return (slot, bookmarkData)
-    }
-
     // MARK: - Conflict Detection
 
     /// IDs of slots overlapping the given slot (excluding itself).

@@ -1203,19 +1203,17 @@ struct SchedulePolicyTests {
     func schedulePolicyReturnsBookmark() {
         let current = Data([0x01])
         let scheduled = Data([0x02])
+        let slot = ScheduleSlot(startHour: 6, endHour: 12, videoBookmarkData: scheduled, label: "Morning")
         var configuration = ScreenConfiguration(
             screenID: 41,
             videoBookmarkData: current,
-            scheduleSlots: [
-                ScheduleSlot(startHour: 6, endHour: 12, videoBookmarkData: scheduled, label: "Morning")
-            ]
+            scheduleSlots: [slot]
         )
         configuration.wallpaperMode = .schedule
 
-        let result = SchedulePolicy.scheduledBookmark(in: configuration, hour: 8)
+        let result = SchedulePolicy.decision(for: configuration, hour: 8)
 
-        #expect(result?.slot.label == "Morning")
-        #expect(result?.bookmarkData == scheduled)
+        #expect(result == .applySlot(slot: slot, bookmarkData: scheduled))
     }
 
     @Test("Schedule policy skips already active bookmark")
@@ -1230,9 +1228,9 @@ struct SchedulePolicyTests {
         )
         configuration.wallpaperMode = .schedule
 
-        let result = SchedulePolicy.scheduledBookmark(in: configuration, hour: 8)
+        let result = SchedulePolicy.decision(for: configuration, hour: 8)
 
-        #expect(result == nil)
+        #expect(result == .none)
     }
 
     @Test("Schedule policy applies a primary slot when current wallpaper is not video")
