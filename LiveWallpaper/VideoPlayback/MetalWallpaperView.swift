@@ -136,8 +136,6 @@ final class MetalWallpaperView: NSView, MTKViewDelegate {
         encoder.endEncoding()
         commandBuffer.present(drawable)
         commandBuffer.commit()
-
-        SystemMonitor.shared.tickFrame()
     }
 
     // MARK: - Helpers

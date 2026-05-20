@@ -349,6 +349,7 @@
       }
     },
     "%@, %lld by %lld pixels" : {
+      "comment" : "Sidebar row VoiceOver label combining display name and resolution. First placeholder is the display name, second and third are width and height in pixels.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -6215,34 +6216,6 @@
         }
       }
     },
-    "Dashboard" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Dashboard"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ダッシュボード"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "仪表盘"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "儀表板"
-          }
-        }
-      }
-    },
     "DEBUG-only: corpus playback test and diagnostics" : {
       "comment" : "Accessibility hint for the debug-only Developer Tools sidebar item.",
       "extractionState" : "manual",
@@ -6730,34 +6703,6 @@
         }
       }
     },
-    "Display Not Found" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Display Not Found"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ディスプレイが見つかりません"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "未找到显示器"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "找不到顯示器"
-          }
-        }
-      }
-    },
     "Display P3" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6839,34 +6784,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "完成"
-          }
-        }
-      }
-    },
-    "Double-tap to configure this display" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Double-tap to configure this display"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ダブルタップしてこのディスプレイを設定"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "双击配置此显示器"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "點兩下以設定此顯示器"
           }
         }
       }
@@ -7389,7 +7306,7 @@
       }
     },
     "Error" : {
-      "comment" : "Weather location status.",
+      "comment" : "Scene renderer state.\nWeather location status.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -7987,7 +7904,6 @@
     },
     "error.render.executor.command_buffer_failed" : {
       "comment" : "Error shown when a Metal command buffer reports failure.",
-      "extractionState" : "extracted_with_value",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -8017,7 +7933,6 @@
     },
     "error.render.executor.command_queue_unavailable" : {
       "comment" : "Error shown when the Metal renderer cannot create or access a command queue.",
-      "extractionState" : "extracted_with_value",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -8047,7 +7962,6 @@
     },
     "error.render.executor.library_unavailable" : {
       "comment" : "Error shown when the built-in Metal shader library is unavailable.",
-      "extractionState" : "extracted_with_value",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -8077,7 +7991,6 @@
     },
     "error.render.executor.missing_texture" : {
       "comment" : "Error shown when the Metal renderer cannot find a required texture.",
-      "extractionState" : "extracted_with_value",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -8107,7 +8020,6 @@
     },
     "error.render.executor.no_renderable_passes" : {
       "comment" : "Error shown when the Metal render pipeline has no renderable passes.",
-      "extractionState" : "extracted_with_value",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -8137,7 +8049,6 @@
     },
     "error.render.executor.pipeline_unavailable" : {
       "comment" : "Error shown when the Metal renderer cannot create a render pipeline.",
-      "extractionState" : "extracted_with_value",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -8167,7 +8078,6 @@
     },
     "error.render.executor.shader_translator_unavailable" : {
       "comment" : "Error shown when a custom WPE shader needs translation but the backend is not yet integrated.",
-      "extractionState" : "extracted_with_value",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -8197,7 +8107,6 @@
     },
     "error.render.executor.unsupported_shader" : {
       "comment" : "Error shown when the Metal renderer does not support a shader.",
-      "extractionState" : "extracted_with_value",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -8227,7 +8136,6 @@
     },
     "error.render.executor.unsupported_target" : {
       "comment" : "Error shown when the Metal renderer does not support a render target.",
-      "extractionState" : "extracted_with_value",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -8407,7 +8315,6 @@
     },
     "error.render.pipeline.include_cycle" : {
       "comment" : "Error shown when a Wallpaper Engine shader include cycle is detected.",
-      "extractionState" : "extracted_with_value",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -8437,7 +8344,6 @@
     },
     "error.render.pipeline.include_missing" : {
       "comment" : "Error shown when a Wallpaper Engine shader include file is missing.",
-      "extractionState" : "extracted_with_value",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -8467,7 +8373,6 @@
     },
     "error.render.pipeline.invalid_source_encoding" : {
       "comment" : "Error shown when a Wallpaper Engine shader source file is not UTF-8.",
-      "extractionState" : "extracted_with_value",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -8497,7 +8402,6 @@
     },
     "error.render.pipeline.shader_missing" : {
       "comment" : "Error shown when a Wallpaper Engine shader source file is missing.",
-      "extractionState" : "extracted_with_value",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -9307,7 +9211,6 @@
     },
     "error.texture.format.malformed_payload" : {
       "comment" : "Error shown when a Wallpaper Engine texture payload is malformed.",
-      "extractionState" : "extracted_with_value",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -9337,7 +9240,6 @@
     },
     "error.texture.format.texture_allocation_failed" : {
       "comment" : "Error shown when Metal texture allocation fails.",
-      "extractionState" : "extracted_with_value",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -9367,7 +9269,6 @@
     },
     "error.texture.format.unsupported_compressed_format" : {
       "comment" : "Error shown when the current Metal device cannot sample a compressed texture format.",
-      "extractionState" : "extracted_with_value",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -9397,7 +9298,6 @@
     },
     "error.texture.format.unsupported_format" : {
       "comment" : "Error shown when a Wallpaper Engine texture format cannot be mapped to Metal.",
-      "extractionState" : "extracted_with_value",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -16634,6 +16534,36 @@
         }
       }
     },
+    "Pick a video for the selected display" : {
+      "comment" : "A hint for the user to pick a video for the selected display.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pick a video for the selected display"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選択中のディスプレイ用に動画を選びます"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "为所选显示器选择一个视频"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "為所選顯示器挑選影片"
+          }
+        }
+      }
+    },
     "Pick an MP4 or MOV from your Mac." : {
       "localizations" : {
         "en" : {
@@ -21024,6 +20954,7 @@
       }
     },
     "Scanning library…" : {
+      "comment" : "Developer tools progress shown while scanning the local Wallpaper Engine corpus.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -21682,34 +21613,6 @@
         }
       }
     },
-    "Select a Display" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Select a Display"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ディスプレイを選択"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "选择显示器"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "選擇顯示器"
-          }
-        }
-      }
-    },
     "Select All" : {
       "localizations" : {
         "en" : {
@@ -21734,6 +21637,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "全選"
+          }
+        }
+      }
+    },
+    "Select to configure this display" : {
+      "comment" : "A hint that describes how to interact with this view.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Select to configure this display"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選択してこのディスプレイを設定"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择以配置此显示器"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選擇以設定此顯示器"
           }
         }
       }
@@ -25171,6 +25104,35 @@
         }
       }
     },
+    "toolbar.addWallpaper" : {
+      "comment" : "Settings window toolbar button that opens a video picker for the selected display.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add wallpaper"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "壁紙を追加"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加壁纸"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新增桌布"
+          }
+        }
+      }
+    },
     "toolbar.preferences" : {
       "comment" : "Settings window toolbar button for opening general preferences.",
       "localizations" : {
@@ -25741,6 +25703,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "URL"
+          }
+        }
+      }
+    },
+    "Usage" : {
+      "comment" : "Sidebar section header above the system-resource usage chips (CPU / GPU / RAM).",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Usage"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用状況"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用量"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用量"
           }
         }
       }

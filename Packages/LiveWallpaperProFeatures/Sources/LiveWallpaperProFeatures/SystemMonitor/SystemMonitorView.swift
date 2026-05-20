@@ -7,7 +7,17 @@ public struct SystemMonitorView: View {
     @State private var powerSource: PowerMonitor.PowerSource = PowerMonitor.shared.currentPowerSource
     @AppStorage("Dashboard.RAMScope") private var ramScopeRaw: String = "system"
 
-    public init() {}
+    /// Snapshot of how many displays are currently playing a wallpaper, and
+    /// how many displays are connected in total. Passed in from the caller
+    /// because `SystemMonitorView` lives in the Pro features package and
+    /// cannot import the main-app `ScreenManager` type directly.
+    private let activeDisplayCount: Int
+    private let totalDisplayCount: Int
+
+    public init(activeDisplayCount: Int = 0, totalDisplayCount: Int = 0) {
+        self.activeDisplayCount = activeDisplayCount
+        self.totalDisplayCount = totalDisplayCount
+    }
 
     private var ramPercent: Double {
         ramScopeRaw == "app" ? monitor.memoryPercentage() : monitor.systemMemoryUsage * 100
@@ -39,18 +49,15 @@ public struct SystemMonitorView: View {
 
             VStack(spacing: 6) {
                 HStack(spacing: 12) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "speedometer")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        if monitor.videoFPS > 0 {
-                            Text("Est \(Int(monitor.videoFPS)) FPS")
-                                .font(.caption)
-                                .fontWeight(.medium)
-                        } else {
-                            Text("Paused")
+                    if totalDisplayCount > 0 {
+                        HStack(spacing: 4) {
+                            Image(systemName: "play.tv")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Text(verbatim: "\(activeDisplayCount)/\(totalDisplayCount)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                                .monospacedDigit()
                         }
                     }
 
@@ -142,6 +149,10 @@ public struct SystemMonitorView: View {
 // MARK: - MiniGaugeCard
 
 /// Compact 270° ring gauge for the dashboard grid.
+/// `icon + value` sit centered slightly above the geometric middle so the
+/// static `title` can drop into the ring's empty bottom 90° gap. No element
+/// ever shares vertical space with another — the previous offset-stack
+/// overlap is structurally impossible now, and the card stays 54pt tall.
 struct MiniGaugeCard: View {
     let title: String
     let value: Double
@@ -163,19 +174,22 @@ struct MiniGaugeCard: View {
                 .rotationEffect(.degrees(135))
                 .animation(DesignTokens.motion(reduceMotion, .spring(response: 0.5, dampingFraction: 0.8)), value: displayedPercent)
 
-            Image(systemName: icon)
-                .font(.system(size: 14, weight: .bold))
-                .foregroundStyle(color)
-
-            VStack(spacing: 0) {
-                Text(verbatim: title)
-                    .font(.system(.caption2, design: .rounded).weight(.semibold))
-                    .foregroundStyle(.secondary)
+            VStack(spacing: 1) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(color)
                 Text(verbatim: FormatUtils.formatPercent(Double(displayedPercent)))
-                    .font(.system(.caption2, design: .rounded).weight(.bold))
+                    .font(.system(.caption, design: .rounded).weight(.bold))
+                    .monospacedDigit()
             }
-            .offset(y: 18)
+            .offset(y: -4)
             .dynamicTypeSize(...DynamicTypeSize.large)
+
+            Text(verbatim: title)
+                .font(.system(.caption2, design: .rounded).weight(.semibold))
+                .foregroundStyle(.secondary)
+                .offset(y: 19)
+                .dynamicTypeSize(...DynamicTypeSize.large)
         }
         .frame(width: 54, height: 54)
         .frame(maxWidth: .infinity)
@@ -211,19 +225,22 @@ struct PowerStatusCard: View {
                     .rotationEffect(.degrees(135))
             }
 
-            Image(systemName: iconName)
-                .font(.system(size: 14, weight: .bold))
-                .foregroundStyle(statusColor)
-
-            VStack(spacing: 0) {
-                Text(verbatim: powerSource.shortLabel)
-                    .font(.system(.caption2, design: .rounded).weight(.semibold))
-                    .foregroundStyle(.secondary)
+            VStack(spacing: 1) {
+                Image(systemName: iconName)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(statusColor)
                 Text(verbatim: powerSource.valueLabel)
-                    .font(.system(.caption2, design: .rounded).weight(.bold))
+                    .font(.system(.caption, design: .rounded).weight(.bold))
+                    .monospacedDigit()
             }
-            .offset(y: 18)
+            .offset(y: -4)
             .dynamicTypeSize(...DynamicTypeSize.large)
+
+            Text(verbatim: powerSource.shortLabel)
+                .font(.system(.caption2, design: .rounded).weight(.semibold))
+                .foregroundStyle(.secondary)
+                .offset(y: 19)
+                .dynamicTypeSize(...DynamicTypeSize.large)
         }
         .frame(width: 54, height: 54)
         .frame(maxWidth: .infinity)

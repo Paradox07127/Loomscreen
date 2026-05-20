@@ -531,9 +531,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
                     textureToPresent = frame
                 }
                 guard let texture = textureToPresent else { return }
-                if try executor.present(texture: texture, in: view) {
-                    SystemMonitor.shared.tickFrame()
-                }
+                _ = try executor.present(texture: texture, in: view)
             } catch {
                 Logger.warning("Experimental Metal scene present failed: \(error.localizedDescription)", category: .screenManager)
             }
