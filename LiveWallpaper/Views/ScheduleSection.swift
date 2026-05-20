@@ -177,17 +177,14 @@ struct ScheduleSection: View {
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = ResourceUtilities.supportedVideoContentTypes
         panel.prompt = L10n.Panel.setVideo
-        let assign: ([URL]) -> Void = { urls in
-            assignVideo(urls: urls, to: slotID)
-        }
         if let parent = NSApp.keyWindow ?? NSApp.mainWindow {
             panel.beginSheetModal(for: parent) { response in
                 guard response == .OK else { return }
-                assign(panel.urls)
+                assignVideo(urls: panel.urls, to: slotID)
             }
         } else {
             guard panel.runModal() == .OK else { return }
-            assign(panel.urls)
+            assignVideo(urls: panel.urls, to: slotID)
         }
     }
 
@@ -329,8 +326,6 @@ struct ScheduleSlotRow: View {
 
     @State private var videoName: String?
     @State private var isHovering = false
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -630,11 +625,7 @@ struct ScheduleTimelineBar: View {
     }
 
     private func hourLabel(_ hour: Int) -> String {
-        switch hour {
-        case 0: return "12A"
-        case 12: return "12P"
-        case 24: return "12A"
-        default: return hour < 12 ? "\(hour)A" : "\(hour - 12)P"
-        }
+        // 24-hour numeric, locale-neutral. Matches Apple Health sleep timeline.
+        String(hour)
     }
 }
