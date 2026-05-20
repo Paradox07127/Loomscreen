@@ -93,5 +93,10 @@ enum L10n {
             defaultValue: "Preferences",
             comment: "Settings window toolbar button for opening general preferences."
         )
+        static let addWallpaper = String(
+            localized: "toolbar.addWallpaper",
+            defaultValue: "Add wallpaper",
+            comment: "Settings window toolbar button that opens a video picker for the selected display."
+        )
     }
 }

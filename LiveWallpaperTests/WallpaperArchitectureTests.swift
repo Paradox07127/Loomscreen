@@ -318,16 +318,6 @@ struct MonitoringReferenceCounterTests {
     }
 }
 
-@Suite("Estimated frame tick policy")
-struct EstimatedFrameTickPolicyTests {
-    @Test("Half-second tick count is derived from nominal FPS")
-    func tickCountUsesNominalFPSWithFallback() {
-        #expect(EstimatedFrameTickPolicy.tickCount(forFrameRate: 60, interval: 0.5) == 30)
-        #expect(EstimatedFrameTickPolicy.tickCount(forFrameRate: 24, interval: 0.5) == 12)
-        #expect(EstimatedFrameTickPolicy.tickCount(forFrameRate: 0, interval: 0.5) == 15)
-    }
-}
-
 @Suite("Aerial thumbnail cache key")
 struct AerialThumbnailCacheKeyTests {
     @Test("Key includes path so same file names in different folders stay separate")

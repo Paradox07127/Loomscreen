@@ -7,7 +7,6 @@ final class WallpaperVideoPlayer {
     // MARK: - Notifications
 
     nonisolated static let didChangePlaybackStateNotification = Notification.Name("WallpaperVideoPlayerDidChangePlaybackState")
-    nonisolated static let didCompleteLoopNotification = Notification.Name.videoDidCompleteLoop
 
     // MARK: - Published Properties
 
@@ -71,7 +70,6 @@ final class WallpaperVideoPlayer {
     private var currentVideoComposition: AVVideoComposition?
     private var currentItemSubscription: AnyCancellable?
     private var accessToken = false
-    private var lastObservedLoopCount: Int = 0
     private let initialFrame: CGRect
     private var fitMode: VideoFitMode = .aspectFill
     private var hasRequestedPlaybackStart = false
@@ -345,7 +343,6 @@ final class WallpaperVideoPlayer {
 
         setupPlaybackObservers()
         setupFrameObserver()
-        setupFPSTracking()
         installQueueItemMaintenanceObserver()
 
         if queuePlayer.currentItem == nil {
@@ -431,35 +428,6 @@ final class WallpaperVideoPlayer {
             }
             .store(in: &cleanupTasks)
     }
-    private func setupFPSTracking() {
-        let interval: TimeInterval = 0.5
-        let task = Task { [weak self] in
-            while !Task.isCancelled {
-                do {
-                    try await Task.sleep(for: .milliseconds(500))
-                } catch {
-                    return
-                }
-                guard let self, self.isPlaying else { continue }
-                let estimatedFrames = EstimatedFrameTickPolicy.tickCount(
-                    forFrameRate: self.videoFrameRate,
-                    interval: interval
-                )
-                SystemMonitor.shared.tickEstimatedFrames(estimatedFrames)
-
-                if let loopCount = self.playerLooper?.loopCount,
-                   loopCount > self.lastObservedLoopCount {
-                    self.lastObservedLoopCount = loopCount
-                    NotificationCenter.default.post(
-                        name: Self.didCompleteLoopNotification,
-                        object: self
-                    )
-                }
-            }
-        }
-        cleanupTasks.insert(AnyCancellable { task.cancel() })
-    }
-
     private func setupFrameObserver() {
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .throttle(for: .seconds(0.5), scheduler: DispatchQueue.main, latest: true)

@@ -16,9 +16,6 @@ extension Notification.Name {
     /// Request the settings UI to navigate to the app preferences page.
     public static let openGeneralSettings = Notification.Name("OpenGeneralSettings")
 
-    /// A video player completed one full loop of its current video.
-    public static let videoDidCompleteLoop = Notification.Name("VideoDidCompleteLoop")
-
     /// A screen's persisted wallpaper configuration changed (saved or removed).
     /// `userInfo["screenID"]: CGDirectDisplayID` identifies which screen.
     /// Inspectors / detail views should reload their @State from the manager

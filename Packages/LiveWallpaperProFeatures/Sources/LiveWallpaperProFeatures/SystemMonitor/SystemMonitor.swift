@@ -21,15 +21,6 @@ public struct MonitoringReferenceCounter {
     }
 }
 
-public enum EstimatedFrameTickPolicy {
-    private static let fallbackFPS = 30.0
-
-    public static func tickCount(forFrameRate frameRate: Double, interval: TimeInterval) -> Int {
-        let effectiveFPS = frameRate > 0 ? frameRate : fallbackFPS
-        return max(1, Int((effectiveFPS * interval).rounded()))
-    }
-}
-
 public enum MonitoringCadencePolicy {
     public static func shouldSampleGPU(updateCount: Int, cadence: Int) -> Bool {
         guard cadence > 1, updateCount > 1 else { return true }
@@ -55,9 +46,7 @@ public final class SystemMonitor {
     public private(set) var isMemoryLow: Bool = false
     public private(set) var systemMemoryUsage: Double = 0
     public private(set) var gpuUsage: Double = 0
-    public private(set) var energyImpact: Double = 0
     public private(set) var thermalState: ProcessInfo.ThermalState = .nominal
-    public private(set) var videoFPS: Double = 0
 
     // MARK: - Configuration
 
@@ -66,7 +55,6 @@ public final class SystemMonitor {
     @ObservationIgnored private let gpuSampleCadence = 3
     @ObservationIgnored private var resourceUpdateCount = 0
     @ObservationIgnored private var updateTask: Task<Void, Never>?
-    @ObservationIgnored private var fpsCounter = FPSCounter()
     @ObservationIgnored private var references = MonitoringReferenceCounter()
     @ObservationIgnored private var prevHostCpuLoad: host_cpu_load_info?
 
@@ -106,16 +94,6 @@ public final class SystemMonitor {
         updateTask = nil
     }
 
-    /// Call this from real render loops to track actual FPS.
-    public func tickFrame() {
-        fpsCounter.tick()
-    }
-
-    /// AVPlayer does not expose rendered-frame callbacks here; record an estimate.
-    public func tickEstimatedFrames(_ count: Int) {
-        fpsCounter.tick(count: count)
-    }
-
     public func formattedMemoryUsage() -> String { FormatUtils.formatBytes(memoryUsage) }
     public func formattedTotalMemory() -> String { FormatUtils.formatBytes(totalMemory) }
     public func memoryPercentage() -> Double {
@@ -144,7 +122,6 @@ public final class SystemMonitor {
     private func sampleAndApply() async {
         resourceUpdateCount += 1
         let updateCount = resourceUpdateCount
-        let interval = updateInterval
         let prev = HostCpuLoadSnapshot(value: prevHostCpuLoad)
         let shouldSampleGPU = MonitoringCadencePolicy.shouldSampleGPU(
             updateCount: updateCount,
@@ -160,7 +137,6 @@ public final class SystemMonitor {
                 memoryUsage: SystemMonitor.sampleAppMemoryUsage(),
                 systemMemoryUsage: SystemMonitor.sampleSystemMemoryUsage(),
                 gpuUsage: shouldSampleGPU ? SystemMonitor.sampleGPUUsage() : nil,
-                energyImpact: SystemMonitor.sampleEnergyImpact(updateInterval: interval),
                 thermalState: ProcessInfo.processInfo.thermalState
             )
         }.value
@@ -189,15 +165,8 @@ public final class SystemMonitor {
            abs(gpuUsage - gpu) > Self.percentMaterialEpsilon {
             gpuUsage = gpu
         }
-        if abs(energyImpact - sample.energyImpact) > Self.energyMaterialEpsilon {
-            energyImpact = sample.energyImpact
-        }
         if thermalState != sample.thermalState {
             thermalState = sample.thermalState
-        }
-        let fps = fpsCounter.fps
-        if abs(videoFPS - fps) > Self.fpsMaterialEpsilon {
-            videoFPS = fps
         }
         checkMemoryWarning()
     }
@@ -208,8 +177,6 @@ public final class SystemMonitor {
     // churns the SwiftUI render loop without giving the user new info.
     @ObservationIgnored private static let percentMaterialEpsilon: Double = 1.0
     @ObservationIgnored private static let ratioMaterialEpsilon: Double = 0.01
-    @ObservationIgnored private static let energyMaterialEpsilon: Double = 0.1
-    @ObservationIgnored private static let fpsMaterialEpsilon: Double = 0.5
 
     private struct HostCpuLoadSnapshot: @unchecked Sendable {
         let value: host_cpu_load_info?
@@ -222,7 +189,6 @@ public final class SystemMonitor {
         let memoryUsage: UInt64
         let systemMemoryUsage: Double
         let gpuUsage: Double?
-        let energyImpact: Double
         let thermalState: ProcessInfo.ThermalState
     }
 
@@ -380,50 +346,5 @@ public final class SystemMonitor {
 
         return min(gpuUtil, 100.0)
     }
-
-    // MARK: - Energy Impact (via task_info)
-
-    nonisolated private static func sampleEnergyImpact(updateInterval: TimeInterval) -> Double {
-        var power = task_power_info_v2_data_t()
-        var count = mach_msg_type_number_t(MemoryLayout<task_power_info_v2_data_t>.size / MemoryLayout<integer_t>.size)
-
-        let result = withUnsafeMutablePointer(to: &power) { ptr in
-            ptr.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { intPtr in
-                task_info(mach_task_self_, task_flavor_t(TASK_POWER_INFO_V2), intPtr, &count)
-            }
-        }
-
-        guard result == KERN_SUCCESS else { return 0 }
-
-        let nanojoules = Double(power.gpu_energy.task_gpu_utilisation)
-        let watts = nanojoules / (updateInterval * 1_000_000_000)
-        return watts
-    }
 }
 
-// MARK: - FPS Counter
-
-private class FPSCounter {
-    private var timestamps: [CFAbsoluteTime] = []
-    private let window: TimeInterval = 2.0
-
-    var fps: Double {
-        let now = CFAbsoluteTimeGetCurrent()
-        timestamps.removeAll { now - $0 > window }
-        guard timestamps.count > 1, let first = timestamps.first else { return 0 }
-        return Double(timestamps.count - 1) / (now - first)
-    }
-
-    func tick() {
-        tick(count: 1)
-    }
-
-    func tick(count: Int) {
-        guard count > 0 else { return }
-        let now = CFAbsoluteTimeGetCurrent()
-        timestamps.append(contentsOf: repeatElement(now, count: count))
-        if timestamps.count > 300 {
-            timestamps.removeFirst(timestamps.count - 200)
-        }
-    }
-}
