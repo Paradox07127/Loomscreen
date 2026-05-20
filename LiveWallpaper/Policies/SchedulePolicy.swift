@@ -80,6 +80,10 @@ enum SchedulePolicy {
     }
 
     /// Longest contiguous free range outside `slots`, at least `minHours` long.
+    ///
+    /// Returns `(start, end)` where `start` is in `0..<24` and `end` may exceed
+    /// 24 to encode a midnight-wrap gap (e.g. `(22, 28)` = 22:00 → 04:00).
+    /// Callers should compute the slot's `endHour` as `end % 24`.
     static func findFreeRange(in slots: [ScheduleSlot], minHours: Int = 2) -> (start: Int, end: Int)? {
         var occupied = Array(repeating: false, count: 24)
         for slot in slots {
@@ -90,26 +94,44 @@ enum SchedulePolicy {
             }
         }
 
-        var bestStart = -1
-        var bestLength = 0
-        var index = 0
-        while index < 24 {
-            if !occupied[index] {
-                var probe = index
-                while probe < 24, !occupied[probe] { probe += 1 }
-                let length = probe - index
-                if length > bestLength {
-                    bestLength = length
-                    bestStart = index
-                }
-                index = probe
-            } else {
-                index += 1
-            }
+        if !occupied.contains(true) {
+            return minHours <= 24 ? (0, 24) : nil
+        }
+        if !occupied.contains(false) {
+            return nil
         }
 
-        guard bestLength >= minHours, bestStart >= 0 else { return nil }
-        return (bestStart, bestStart + bestLength)
+        var runs: [(start: Int, end: Int)] = []
+        var index = 0
+        while index < 24 {
+            guard !occupied[index] else { index += 1; continue }
+            let runStart = index
+            while index < 24, !occupied[index] { index += 1 }
+            runs.append((runStart, index))
+        }
+
+        // Stitch a leading 0-anchored run with a trailing 24-anchored run into a
+        // single wrap-around range so the gap `23 → 1` is discoverable.
+        if runs.count >= 2,
+           let first = runs.first, first.start == 0,
+           let last = runs.last, last.end == 24 {
+            let leadingLength = first.end - first.start
+            let trailingLength = last.end - last.start
+            let wrap = (start: last.start, end: last.start + trailingLength + leadingLength)
+            runs.removeFirst()
+            runs.removeLast()
+            runs.append(wrap)
+        }
+
+        var best: (start: Int, end: Int)?
+        for run in runs {
+            let length = run.end - run.start
+            if length < minHours { continue }
+            if best == nil || length > (best!.end - best!.start) {
+                best = run
+            }
+        }
+        return best
     }
 
     private static func clampHour(_ hour: Int) -> Int {

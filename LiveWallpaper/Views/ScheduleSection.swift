@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
+import LiveWallpaperSharedUI
 
 /// Time-of-day wallpaper scheduling UI with conflict detection + per-slot
 /// add/remove. Slots can span midnight.
@@ -10,7 +11,6 @@ struct ScheduleSection: View {
     var screenManager: ScreenManager
 
     @State private var currentHour: Int = Calendar.current.component(.hour, from: Date())
-    @State private var pendingSlotID: UUID?
     /// Slot IDs to flash with red outline when a stepper change conflicts.
     @State private var conflictHighlight: Set<UUID> = []
     @State private var addSlotErrorMessage: String?
@@ -19,38 +19,39 @@ struct ScheduleSection: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private static let timelinePalette: [Color] = [.blue, .orange, .green, .purple]
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DesignTokens.Spacing.md) {
             if scheduleSlots.isEmpty {
                 emptyState
             } else {
-                ScheduleTimelineBar(slots: scheduleSlots, currentHour: currentHour)
+                ScheduleTimelineBar(
+                    slots: scheduleSlots,
+                    currentHour: currentHour,
+                    palette: Self.timelinePalette
+                )
 
-                ForEach($scheduleSlots) { $slot in
-                    ScheduleSlotRow(
-                        slot: $slot,
-                        isActive: slot.containsHour(currentHour),
-                        isHighlightedConflict: conflictHighlight.contains(slot.id),
-                        videoNameProvider: { screenManager.bookmarkDisplayName(for: $0) },
-                        onVideoSelect: { selectVideo(for: slot.id) },
-                        onClearVideo: { clearVideo(for: slot.id) },
-                        onRemove: { removeSlot(slot.id) },
-                        onValidateChange: { proposedStart, proposedEnd in
-                            validateAndCommit(slotID: slot.id, start: proposedStart, end: proposedEnd)
-                        }
-                    )
+                VStack(spacing: 6) {
+                    ForEach(Array($scheduleSlots.enumerated()), id: \.element.id) { index, $slot in
+                        ScheduleSlotRow(
+                            slot: $slot,
+                            accent: Self.timelinePalette[index % Self.timelinePalette.count],
+                            isActive: slot.containsHour(currentHour),
+                            isHighlightedConflict: conflictHighlight.contains(slot.id),
+                            videoNameProvider: { screenManager.bookmarkDisplayName(for: $0) },
+                            onVideoSelect: { selectVideo(for: slot.id) },
+                            onClearVideo: { clearVideo(for: slot.id) },
+                            onRemove: { removeSlot(slot.id) },
+                            onValidateChange: { proposedStart, proposedEnd in
+                                validateAndCommit(slotID: slot.id, start: proposedStart, end: proposedEnd)
+                            }
+                        )
+                    }
                 }
 
                 if let message = addSlotErrorMessage ?? conflictMessage {
-                    HStack(spacing: 4) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.orange)
-                        Text(message)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    .transition(.opacity)
+                    conflictBanner(message: message)
                 }
 
                 Divider()
@@ -67,13 +68,12 @@ struct ScheduleSection: View {
 
                     Spacer()
 
-                    Button(action: disableSchedule) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "xmark.circle")
-                            Text("Disable Schedule")
-                        }
+                    Button(role: .destructive, action: disableSchedule) {
+                        Text("Disable Schedule")
+                            .font(.system(size: 12, weight: .medium))
                     }
-                    .buttonStyle(GlassCapsuleButtonStyle(tint: .red))
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.red)
                     .accessibilityLabel(Text("Disable schedule"))
                     .accessibilityHint(Text("Removes all schedule slots and returns to normal playback"))
                 }
@@ -91,25 +91,63 @@ struct ScheduleSection: View {
                 try? await Task.sleep(for: .seconds(delay))
             }
         }
+        .onChange(of: scheduleSlots.map(\.id)) { _, _ in
+            // Drop stale conflict UI when slots are added/removed/re-ordered.
+            if !conflictHighlight.isEmpty || conflictMessage != nil {
+                conflictHighlight.removeAll()
+                conflictMessage = nil
+            }
+        }
+        .onChange(of: screen.id) { _, _ in
+            // Different screen → fresh state.
+            conflictHighlight.removeAll()
+            conflictMessage = nil
+            addSlotErrorMessage = nil
+        }
         .confirmDestructive($pendingDestructive)
     }
 
     @ViewBuilder
     private var emptyState: some View {
-        HStack {
-            Spacer()
-            Button(action: enableSchedule) {
-                HStack(spacing: 4) {
-                    Image(systemName: "plus.circle.fill")
-                    Text("Enable Schedule")
-                }
-            }
-            .buttonStyle(GlassCapsuleButtonStyle())
-            .accessibilityLabel(Text("Enable schedule"))
-            .accessibilityHint(Text("Creates time-of-day wallpaper slots"))
-            Spacer()
+        IllustratedEmptyState(
+            symbol: "calendar.badge.clock",
+            title: "Set up a schedule",
+            message: "Switch wallpapers automatically across different times of day.",
+            symbolColor: .accentColor,
+            primary: IllustratedEmptyState.ButtonAction("Get Started", action: enableSchedule),
+            variant: .compact
+        )
+        .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private func conflictBanner(message: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(.red)
+            Text(verbatim: message)
+                .font(.system(size: 11))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
         }
-        .padding(.vertical, 4)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: DesignTokens.Corner.sm)
+                .fill(Color.red.opacity(0.10))
+        )
+        .overlay(
+            HStack(spacing: 0) {
+                Rectangle()
+                    .fill(Color.red.opacity(0.75))
+                    .frame(width: 2)
+                Spacer(minLength: 0)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.Corner.sm))
+        )
+        .transition(.opacity.combined(with: .move(edge: .top)))
     }
 
     // MARK: - Actions
@@ -133,67 +171,71 @@ struct ScheduleSection: View {
     }
 
     private func selectVideo(for slotID: UUID) {
-        pendingSlotID = slotID
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = ResourceUtilities.supportedVideoContentTypes
         panel.prompt = L10n.Panel.setVideo
+        let assign: ([URL]) -> Void = { urls in
+            assignVideo(urls: urls, to: slotID)
+        }
         if let parent = NSApp.keyWindow ?? NSApp.mainWindow {
             panel.beginSheetModal(for: parent) { response in
-                guard response == .OK, !panel.urls.isEmpty else {
-                    pendingSlotID = nil
-                    return
-                }
-                handleImporterResult(.success(panel.urls))
+                guard response == .OK else { return }
+                assign(panel.urls)
             }
         } else {
-            guard panel.runModal() == .OK, !panel.urls.isEmpty else {
-                pendingSlotID = nil
-                return
-            }
-            handleImporterResult(.success(panel.urls))
+            guard panel.runModal() == .OK else { return }
+            assign(panel.urls)
         }
     }
 
-    private func handleImporterResult(_ result: Result<[URL], Error>) {
-        defer { pendingSlotID = nil }
-        switch result {
-        case .success(let urls):
-            guard let url = urls.first, let slotID = pendingSlotID else { return }
-            SettingsManager.shared.saveLastUsedDirectory(url.deletingLastPathComponent())
-            guard let bookmark = ResourceUtilities.createVideoBookmark(for: url),
-                  let index = scheduleSlots.firstIndex(where: { $0.id == slotID }) else { return }
-            screenManager.recordBookmarkDisplayName(bookmark, name: url.lastPathComponent)
-            scheduleSlots[index].videoBookmarkData = bookmark
-            screenManager.updateScheduleSlots(scheduleSlots, for: screen)
-        case .failure(let error):
-            Logger.error("Schedule slot video import failed: \(error.localizedDescription)", category: .fileAccess)
-        }
+    private func assignVideo(urls: [URL], to slotID: UUID) {
+        guard let url = urls.first else { return }
+        SettingsManager.shared.saveLastUsedDirectory(url.deletingLastPathComponent())
+        guard let bookmark = ResourceUtilities.createVideoBookmark(for: url),
+              let index = scheduleSlots.firstIndex(where: { $0.id == slotID }) else { return }
+        screenManager.recordBookmarkDisplayName(bookmark, name: url.lastPathComponent)
+        scheduleSlots[index].videoBookmarkData = bookmark
+        screenManager.updateScheduleSlots(scheduleSlots, for: screen)
     }
 
-    /// Validate a candidate stepper change against other slots; commit if no conflict, otherwise reject and flash a red outline + persistent message.
+    /// Validate a candidate stepper change against other slots; commit if no
+    /// conflict, otherwise reject and flash a red outline + persistent message.
+    /// Zero-length proposals (start == end) are silently rejected.
     private func validateAndCommit(slotID: UUID, start: Int, end: Int) {
         guard let index = scheduleSlots.firstIndex(where: { $0.id == slotID }) else { return }
+        let normStart = ((start % 24) + 24) % 24
+        let normEnd = ((end % 24) + 24) % 24
+        guard normStart != normEnd else {
+            // Reject zero-length silently — stepper just doesn't advance.
+            return
+        }
         var probe = scheduleSlots[index]
-        probe.startHour = start
-        probe.endHour = end
+        probe.startHour = normStart
+        probe.endHour = normEnd
         let others = scheduleSlots.filter { $0.id != slotID }
         let conflicts = SchedulePolicy.conflicts(slot: probe, against: others)
         if conflicts.isEmpty {
-            scheduleSlots[index].startHour = start
-            scheduleSlots[index].endHour = end
+            scheduleSlots[index].startHour = normStart
+            scheduleSlots[index].endHour = normEnd
             screenManager.updateScheduleSlots(scheduleSlots, for: screen)
             withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.2))) { conflictMessage = nil }
             return
         }
         let conflictingLabels = scheduleSlots
             .filter { conflicts.contains($0.id) }
-            .map(\.label)
+            .map(\.localizedLabel)
             .joined(separator: ", ")
+        let format = String(
+            localized: "Time range overlaps with %@",
+            defaultValue: "Time range overlaps with %@",
+            comment: "Schedule conflict message; placeholder is a comma-separated list of overlapping slot labels."
+        )
+        let formatted = String(format: format, conflictingLabels)
         withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.2))) {
-            conflictMessage = "Time range overlaps with: \(conflictingLabels)"
+            conflictMessage = formatted
         }
         var highlighted = conflicts
         highlighted.insert(slotID)
@@ -229,7 +271,12 @@ struct ScheduleSection: View {
 
     private func addSlot() {
         guard let free = SchedulePolicy.findFreeRange(in: scheduleSlots, minHours: 2) else {
-            withAnimation { addSlotErrorMessage = "No free time range. Adjust an existing slot first." }
+            let message = String(
+                localized: "No free time range. Adjust an existing slot first.",
+                defaultValue: "No free time range. Adjust an existing slot first.",
+                comment: "Schedule error shown when Add Slot cannot find a gap of at least 2 hours."
+            )
+            withAnimation { addSlotErrorMessage = message }
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(3))
                 withAnimation { addSlotErrorMessage = nil }
@@ -238,8 +285,8 @@ struct ScheduleSection: View {
         }
         let label = defaultLabel(for: free.start)
         let newSlot = ScheduleSlot(
-            startHour: free.start,
-            endHour: min(free.end, 24) % 24,
+            startHour: free.start % 24,
+            endHour: free.end % 24,
             label: label
         )
         scheduleSlots.append(newSlot)
@@ -269,146 +316,36 @@ struct ScheduleSection: View {
 
 struct ScheduleSlotRow: View {
     @Binding var slot: ScheduleSlot
+    let accent: Color
     let isActive: Bool
     let isHighlightedConflict: Bool
     let videoNameProvider: (Data) -> String?
     let onVideoSelect: () -> Void
     let onClearVideo: () -> Void
     let onRemove: () -> Void
-    /// Called on stepper change with candidate start/end. Parent validates and writes back
-    /// to the binding only on success.
+    /// Called on stepper change with candidate start/end. Parent validates and
+    /// writes back to the binding only on success.
     let onValidateChange: (_ start: Int, _ end: Int) -> Void
 
     @State private var videoName: String?
-    @State private var isEditingTime = false
     @State private var isHovering = false
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
-        VStack(spacing: 4) {
-            HStack(spacing: 8) {
-                Image(systemName: "circle.fill")
-                    .font(.system(size: 8))
-                    .foregroundStyle(isActive ? Color.green : Color.gray.opacity(0.3))
-                    .symbolEffect(.pulse, options: .continuouslyRepeating, isActive: isActive)
-                    .animation(.smooth(duration: 0.3), value: isActive)
-
-                HStack(spacing: 4) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(verbatim: slot.localizedLabel)
-                            .font(.system(size: 12, weight: isActive ? .semibold : .regular))
-                        Text(verbatim: "\(formatHour(slot.startHour)) – \(formatHour(slot.endHour))")
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                    }
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 8))
-                        .foregroundStyle(.tertiary)
-                        .rotationEffect(isEditingTime ? .degrees(90) : .degrees(0))
-                        .animation(.snappy(duration: 0.2), value: isEditingTime)
-                }
-                .frame(width: 90, alignment: .leading)
-                .onTapGesture { withAnimation { isEditingTime.toggle() } }
-                .accessibilityLabel(Text("\(slot.localizedLabel), \(formatHour(slot.startHour)) to \(formatHour(slot.endHour))", comment: "A11y label for a schedule slot. Placeholders are slot label, start time, and end time."))
-                .accessibilityHint(Text("Tap to edit time range"))
-
-                Spacer()
-
-                if let name = videoName {
-                    HStack(spacing: 4) {
-                        Image(systemName: "film.fill")
-                            .font(.system(size: 10))
-                            .foregroundStyle(Color.accentColor)
-                        Text(verbatim: name)
-                            .font(.system(size: 11))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .frame(maxWidth: 80)
-                        Button(action: onClearVideo) {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 10))
-                        }
-                        .buttonStyle(.plain)
-                        .destructiveControlTint()
-                        .accessibilityLabel(Text("Clear video for \(slot.localizedLabel)", comment: "A11y label for clearing a video from a schedule slot. The placeholder is the slot label."))
-                        .accessibilityHint(Text("Removes the assigned video from this schedule slot"))
-                    }
-                } else {
-                    Button(action: onVideoSelect) {
-                        HStack(spacing: 2) {
-                            Image(systemName: "plus.circle")
-                                .font(.system(size: 10))
-                            Text("Set Video")
-                                .font(.system(size: 11))
-                        }
-                        .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(Text("Set video for \(slot.localizedLabel)", comment: "A11y label for setting a video on a schedule slot. The placeholder is the slot label."))
-                    .accessibilityHint(Text("Choose a video for this schedule slot"))
-                }
-
-                Button(action: onRemove) {
-                    Image(systemName: "trash.circle.fill")
-                        .font(.system(size: 13))
-                }
-                .buttonStyle(.plain)
-                .destructiveControlTint()
-                .opacity(isHovering ? 1 : 0)
-                .accessibilityLabel(Text("Remove \(slot.localizedLabel) slot", comment: "A11y label for removing a schedule slot. The placeholder is the slot label."))
-            }
-
-            if isEditingTime {
-                HStack(spacing: 12) {
-                    HStack(spacing: 4) {
-                        Text("From")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                        Stepper(
-                            formatHour(slot.startHour),
-                            value: Binding(
-                                get: { slot.startHour },
-                                set: { onValidateChange(((($0 % 24) + 24) % 24), slot.endHour) }
-                            ),
-                            in: 0...23
-                        )
-                        .font(.system(size: 11))
-                        .frame(width: 100)
-                        .accessibilityLabel(Text("Start hour for \(slot.localizedLabel)", comment: "A11y label for a schedule slot start-hour stepper. The placeholder is the slot label."))
-                        .accessibilityValue(Text(verbatim: formatHour(slot.startHour)))
-                        .accessibilityHint(Text("Adjust the start time of this schedule slot"))
-                    }
-                    HStack(spacing: 4) {
-                        Text("To")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                        Stepper(
-                            formatHour(slot.endHour),
-                            value: Binding(
-                                get: { slot.endHour },
-                                set: { onValidateChange(slot.startHour, ((($0 % 24) + 24) % 24)) }
-                            ),
-                            in: 0...23
-                        )
-                        .font(.system(size: 11))
-                        .frame(width: 100)
-                        .accessibilityLabel(Text("End hour for \(slot.localizedLabel)", comment: "A11y label for a schedule slot end-hour stepper. The placeholder is the slot label."))
-                        .accessibilityValue(Text(verbatim: formatHour(slot.endHour)))
-                        .accessibilityHint(Text("Adjust the end time of this schedule slot"))
-                    }
-                }
-                .padding(.leading, 16)
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
+        VStack(alignment: .leading, spacing: 4) {
+            timeRow
+            videoRow
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 4)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
         .background(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: DesignTokens.Corner.sm)
                 .fill(rowBackground)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(isHighlightedConflict ? Color.red.opacity(0.7) : Color.clear, lineWidth: 1)
+            RoundedRectangle(cornerRadius: DesignTokens.Corner.sm)
+                .strokeBorder(borderColor, lineWidth: 1)
         )
         .animation(.snappy(duration: 0.2), value: isHighlightedConflict)
         .onHover { isHovering = $0 }
@@ -416,10 +353,137 @@ struct ScheduleSlotRow: View {
         .onChange(of: slot.videoBookmarkData) { resolveVideoName() }
     }
 
+    // MARK: Subviews
+
+    @ViewBuilder
+    private var timeRow: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "circle.fill")
+                .font(.system(size: 7))
+                .foregroundStyle(isActive ? accent : Color.secondary.opacity(0.35))
+                .symbolEffect(.pulse, options: .continuouslyRepeating, isActive: isActive)
+                .accessibilityHidden(true)
+
+            Text(verbatim: slot.localizedLabel)
+                .font(.system(size: 12, weight: isActive ? .semibold : .regular))
+                .lineLimit(1)
+
+            Stepper(
+                value: Binding(
+                    get: { slot.startHour },
+                    set: { onValidateChange($0, slot.endHour) }
+                ),
+                in: 0...23
+            ) {
+                Text(verbatim: formatHour(slot.startHour))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 44, alignment: .trailing)
+            }
+            .accessibilityLabel(Text("Start hour for \(slot.localizedLabel)", comment: "A11y label for a schedule slot start-hour stepper. The placeholder is the slot label."))
+            .accessibilityValue(Text(verbatim: formatHour(slot.startHour)))
+
+            Text("—")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
+
+            Stepper(
+                value: Binding(
+                    get: { slot.endHour },
+                    set: { onValidateChange(slot.startHour, $0) }
+                ),
+                in: 0...23
+            ) {
+                Text(verbatim: formatHour(slot.endHour))
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 44, alignment: .trailing)
+            }
+            .accessibilityLabel(Text("End hour for \(slot.localizedLabel)", comment: "A11y label for a schedule slot end-hour stepper. The placeholder is the slot label."))
+            .accessibilityValue(Text(verbatim: formatHour(slot.endHour)))
+
+            Spacer(minLength: 0)
+
+            Button(action: onRemove) {
+                Image(systemName: "trash.circle.fill")
+                    .font(.system(size: 13))
+            }
+            .buttonStyle(.plain)
+            .destructiveControlTint()
+            .opacity(isHovering ? 1 : 0)
+            .accessibilityHidden(!isHovering)
+            .accessibilityLabel(Text("Remove \(slot.localizedLabel) slot", comment: "A11y label for removing a schedule slot. The placeholder is the slot label."))
+        }
+    }
+
+    @ViewBuilder
+    private var videoRow: some View {
+        HStack(spacing: 8) {
+            videoThumbnail
+            if let name = videoName {
+                Text(verbatim: name)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 0)
+                Button(action: onClearVideo) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11))
+                }
+                .buttonStyle(.plain)
+                .destructiveControlTint()
+                .opacity(isHovering ? 1 : 0)
+                .accessibilityHidden(!isHovering)
+                .accessibilityLabel(Text("Clear video for \(slot.localizedLabel)", comment: "A11y label for clearing a video from a schedule slot. The placeholder is the slot label."))
+            } else {
+                Button(action: onVideoSelect) {
+                    HStack(spacing: 3) {
+                        Image(systemName: "plus.circle")
+                            .font(.system(size: 10))
+                        Text("Set Video")
+                            .font(.system(size: 11))
+                    }
+                    .foregroundStyle(.accent)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text("Set video for \(slot.localizedLabel)", comment: "A11y label for setting a video on a schedule slot. The placeholder is the slot label."))
+                .accessibilityHint(Text("Choose a video for this schedule slot"))
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(.leading, 15)
+    }
+
+    @ViewBuilder
+    private var videoThumbnail: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 3)
+                .fill(
+                    LinearGradient(
+                        colors: [accent.opacity(0.55), accent.opacity(0.25)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+            Image(systemName: videoName != nil ? "film.fill" : "film")
+                .font(.system(size: 8))
+                .foregroundStyle(.white.opacity(videoName != nil ? 0.95 : 0.5))
+        }
+        .frame(width: 22, height: 14)
+        .accessibilityHidden(true)
+    }
+
     private var rowBackground: Color {
-        if isHighlightedConflict { return Color.red.opacity(0.06) }
+        if isHighlightedConflict { return Color.red.opacity(0.07) }
         if isHovering { return Color.primary.opacity(0.04) }
-        return Color.clear
+        return Color.primary.opacity(0.025)
+    }
+
+    private var borderColor: Color {
+        if isHighlightedConflict { return Color.red.opacity(0.75) }
+        return Color.primary.opacity(0.06)
     }
 
     private func resolveVideoName() {
@@ -443,60 +507,134 @@ struct ScheduleSlotRow: View {
 struct ScheduleTimelineBar: View {
     let slots: [ScheduleSlot]
     let currentHour: Int
+    let palette: [Color]
 
-    private let slotColors: [Color] = [.blue, .orange, .green, .purple]
+    private let majorHours: [Int] = [0, 6, 12, 18, 24]
 
     /// Splits midnight-wrapping slots into timeline segments.
-    nonisolated static func segments(for slot: ScheduleSlot) -> [(start: Int, end: Int)] {
+    nonisolated static func segments(for slot: ScheduleSlot) -> [(start: Int, end: Int, wraps: Bool)] {
         if slot.startHour == slot.endHour {
             return []
         }
         if slot.startHour < slot.endHour {
-            return [(slot.startHour, slot.endHour)]
+            return [(slot.startHour, slot.endHour, false)]
         }
-        return [(slot.startHour, 24), (0, slot.endHour)]
+        return [(slot.startHour, 24, true), (0, slot.endHour, true)]
     }
 
     private var activeSlotLabel: String {
         if let active = slots.first(where: { $0.containsHour(currentHour) }) {
-            return active.label
+            return active.localizedLabel
         }
         return "no active slot"
     }
 
     var body: some View {
-        GeometryReader { geometry in
-            let width = geometry.size.width
+        VStack(spacing: 4) {
+            GeometryReader { geometry in
+                let width = geometry.size.width
+                ZStack(alignment: .topLeading) {
+                    background
 
-            ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(Color.gray.opacity(0.15))
+                    minorTicks(width: width)
+                    majorTicks(width: width)
 
-                ForEach(Array(slots.enumerated()), id: \.element.id) { index, slot in
-                    ForEach(Array(Self.segments(for: slot).enumerated()), id: \.offset) { _, segment in
-                        let startFraction = CGFloat(segment.start) / 24.0
-                        let endFraction = CGFloat(segment.end) / 24.0
-                        let segmentWidth = (endFraction - startFraction) * width
+                    slotSegments(width: width)
 
-                        if segmentWidth > 0 {
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(slotColors[index % slotColors.count].opacity(0.6))
-                                .frame(width: segmentWidth)
-                                .offset(x: startFraction * width)
-                        }
-                    }
+                    cursor(width: width)
                 }
-
-                let markerX = CGFloat(currentHour) / 24.0 * width
-                Rectangle()
-                    .fill(Color.red)
-                    .frame(width: 1.5)
-                    .offset(x: markerX)
             }
+            .frame(height: 26)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.Corner.sm))
+
+            hourLabels
         }
-        .frame(height: 20)
-        .clipShape(RoundedRectangle(cornerRadius: 4))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text("Schedule timeline, \(slots.count) slots, currently \(currentHour):00, active slot: \(activeSlotLabel)"))
+    }
+
+    @ViewBuilder
+    private var background: some View {
+        RoundedRectangle(cornerRadius: DesignTokens.Corner.sm)
+            .fill(Color.primary.opacity(0.06))
+    }
+
+    @ViewBuilder
+    private func minorTicks(width: CGFloat) -> some View {
+        ForEach(0..<25, id: \.self) { hour in
+            if !majorHours.contains(hour) {
+                Rectangle()
+                    .fill(Color.primary.opacity(0.12))
+                    .frame(width: 0.5, height: 6)
+                    .offset(x: CGFloat(hour) / 24.0 * width, y: 0)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func majorTicks(width: CGFloat) -> some View {
+        ForEach(majorHours, id: \.self) { hour in
+            Rectangle()
+                .fill(Color.primary.opacity(0.28))
+                .frame(width: 0.5, height: 12)
+                .offset(x: CGFloat(hour) / 24.0 * width, y: 0)
+        }
+    }
+
+    @ViewBuilder
+    private func slotSegments(width: CGFloat) -> some View {
+        ForEach(Array(slots.enumerated()), id: \.element.id) { index, slot in
+            let segments = Self.segments(for: slot)
+            ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
+                let startFraction = CGFloat(segment.start) / 24.0
+                let endFraction = CGFloat(segment.end) / 24.0
+                let segmentWidth = max(0, (endFraction - startFraction) * width)
+                if segmentWidth > 0 {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(palette[index % palette.count].opacity(segment.wraps ? 0.55 : 0.65))
+                        .frame(width: segmentWidth, height: 10)
+                        .offset(x: startFraction * width, y: 14)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func cursor(width: CGFloat) -> some View {
+        let markerX = CGFloat(currentHour) / 24.0 * width
+        Rectangle()
+            .fill(Color.accentColor)
+            .frame(width: 2, height: 22)
+            .shadow(color: Color.accentColor.opacity(0.6), radius: 3)
+            .offset(x: markerX - 1, y: 2)
+    }
+
+    @ViewBuilder
+    private var hourLabels: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            ForEach(majorHours, id: \.self) { hour in
+                let fraction = CGFloat(hour) / 24.0
+                let alignment: HorizontalAlignment = (hour == 0) ? .leading : (hour == 24 ? .trailing : .center)
+                Text(verbatim: hourLabel(hour))
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 30, alignment: alignment == .leading ? .leading : (alignment == .trailing ? .trailing : .center))
+                    .offset(
+                        x: fraction * width - (alignment == .leading ? 0 : (alignment == .trailing ? 30 : 15)),
+                        y: 0
+                    )
+            }
+        }
+        .frame(height: 12)
+    }
+
+    private func hourLabel(_ hour: Int) -> String {
+        switch hour {
+        case 0: return "12A"
+        case 12: return "12P"
+        case 24: return "12A"
+        default: return hour < 12 ? "\(hour)A" : "\(hour - 12)P"
+        }
     }
 }
