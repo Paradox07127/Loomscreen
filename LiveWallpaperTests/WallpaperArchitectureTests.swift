@@ -1350,6 +1350,29 @@ struct SchedulePolicyTests {
         #expect(gap?.start == 0)
         #expect(gap?.end == 24)
     }
+
+    @Test("findFreeRange: detects cross-midnight wrap when it is the longest gap")
+    func findFreeRangeWrapsMidnight() {
+        let slots = [
+            ScheduleSlot(startHour: 4, endHour: 7, label: "A"),
+            ScheduleSlot(startHour: 8, endHour: 22, label: "B"),
+        ]
+        let gap = SchedulePolicy.findFreeRange(in: slots, minHours: 2)
+        #expect(gap?.start == 22)
+        #expect(gap?.end == 28)
+        #expect((gap?.end ?? 0) % 24 == 4)
+    }
+
+    @Test("findFreeRange: prefers a longer linear gap over a shorter wrap gap")
+    func findFreeRangeLinearOverWrap() {
+        let slots = [
+            ScheduleSlot(startHour: 1, endHour: 5, label: "A"),
+            ScheduleSlot(startHour: 8, endHour: 23, label: "B"),
+        ]
+        let gap = SchedulePolicy.findFreeRange(in: slots, minHours: 2)
+        #expect(gap?.start == 5)
+        #expect(gap?.end == 8)
+    }
 }
 
 @Suite("Screen runtime ownership")
