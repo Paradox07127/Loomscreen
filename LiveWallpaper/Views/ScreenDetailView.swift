@@ -445,6 +445,10 @@ struct ScreenDetailView: View {
     // MARK: - Helper Methods
     func setupPreviewPlayer() {
         guard let url = resolvePreviewVideoURL() else { return }
+        if let config = screenManager.getConfiguration(for: screen),
+           config.wallpaperType == .video {
+            lastPreviewPosterBookmarkData = config.videoBookmarkData
+        }
         previewController.startPlaybackPreview(from: url, syncTo: screen.videoPlayer?.player)
     }
 
@@ -469,6 +473,21 @@ struct ScreenDetailView: View {
         if config == nil {
             previewController.cleanup()
         }
+
+        // If the preview is currently playing a video and the active wallpaper
+        // bookmark has shifted (user hit Next/Prev/Play Now in the playlist,
+        // rotation timer fired, etc.), restart the preview player against the
+        // new URL. Without this `loadPreviewPosterIfNeeded()` early-exits on
+        // `player != nil` and the inspector keeps showing the previous clip.
+        if previewController.player != nil,
+           let config,
+           config.wallpaperType == .video,
+           let activeBookmark = config.videoBookmarkData,
+           activeBookmark != lastPreviewPosterBookmarkData {
+            setupPreviewPlayer()
+            return
+        }
+
         loadPreviewPosterIfNeeded()
     }
 

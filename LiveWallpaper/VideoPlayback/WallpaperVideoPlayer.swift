@@ -163,19 +163,34 @@ final class WallpaperVideoPlayer {
 
                 let cmDuration = try? await asset.load(.duration)
                 let durationSeconds = Self.usableDuration(from: cmDuration)
-                let bufferDuration = Self.bufferDuration(forDuration: durationSeconds)
 
                 let fileSize = Self.fileSize(of: url)
-                let memoryCached = Self.shouldUseInMemoryCache(
-                    fileSize: fileSize,
-                    duration: durationSeconds
-                )
+                let memoryCached = Self.shouldUseInMemoryCache(fileSize: fileSize)
+                // Differentiated buffer hint: in-memory path doesn't need
+                // to pre-fetch ahead because the bytes are already in RAM,
+                // so we skip the "buffer the entire short clip" behaviour
+                // that exists to absorb loop-wrap disk reads on streaming.
+                // This cuts AVFoundation's per-player buffer state from
+                // ~duration×bitrate to a flat ~2s, which is the dominant
+                // savings on multi-screen same-video setups.
+                let bufferDuration = memoryCached
+                    ? Self.inMemoryBufferDuration
+                    : Self.bufferDuration(forDuration: durationSeconds)
 
                 let activeAsset: AVURLAsset
                 let loader: InMemoryVideoAssetLoader?
                 if memoryCached {
                     do {
-                        let result = try InMemoryVideoAssetLoader.load(from: url)
+                        // Hop off MainActor for the synchronous mmap +
+                        // file-attribute walk inside `load(from:)`. On a
+                        // 4K@60 clip this can touch several hundred MB
+                        // of virtual memory mapping — even when
+                        // `mappedIfSafe` succeeds the syscall cost is
+                        // non-trivial and shouldn't sit on main.
+                        let result = try await Task.detached(priority: .utility) {
+                            try InMemoryVideoAssetLoader.load(from: url)
+                        }.value
+                        try Task.checkCancellation()
                         let memOptions: [String: Any] = [
                             AVURLAssetReferenceRestrictionsKey: AVAssetReferenceRestrictions.forbidAll.rawValue,
                             AVURLAssetAllowsCellularAccessKey: false,
@@ -183,7 +198,7 @@ final class WallpaperVideoPlayer {
                             AVURLAssetAllowsConstrainedNetworkAccessKey: false
                         ]
                         let memAsset = AVURLAsset(url: result.customURL, options: memOptions)
-                        memAsset.resourceLoader.setDelegate(result.loader, queue: .main)
+                        memAsset.resourceLoader.setDelegate(result.loader, queue: Self.resourceLoaderQueue)
                         activeAsset = memAsset
                         loader = result.loader
                         Logger.notice(
@@ -201,8 +216,10 @@ final class WallpaperVideoPlayer {
                 } else {
                     activeAsset = asset
                     loader = nil
+                    let budgetMB = SettingsManager.shared.loadGlobalSettings()
+                        .videoCacheMaxBytesPerScreen / (1024 * 1024)
                     Logger.debug(
-                        "Streaming from disk: \(fileSize / (1024 * 1024)) MB, \(String(format: "%.1f", durationSeconds))s — outside in-memory thresholds",
+                        "Streaming from disk: \(fileSize / (1024 * 1024)) MB exceeds in-memory budget (\(budgetMB) MB). Raise the slider in General Settings to keep this clip in RAM.",
                         category: .videoPlayer
                     )
                 }
@@ -245,11 +262,23 @@ final class WallpaperVideoPlayer {
     /// of buffer per active screen.
     private static let fullBufferCapSeconds: TimeInterval = 60
 
-    /// Duration cap for in-memory caching. Independent of the user-facing
-    /// size slider: a low-bitrate 5-minute clip can squeak under the size
-    /// cap but isn't what "short looped wallpaper" was designed for, so
-    /// keep this implicit and not user-tweakable.
-    private static let inMemoryAssetMaxDuration: TimeInterval = 90
+    /// Forward-buffer hint used when serving from the in-memory loader.
+    /// The underlying bytes are already in RAM (mmap'd), so AVFoundation
+    /// doesn't need the streaming-path "buffer the whole clip" rule —
+    /// but we pick 5s (not lower) to keep clear decoder headroom on
+    /// high-bitrate 4K@60 sources where the wrap-around could otherwise
+    /// briefly chase the decode pipeline.
+    private static let inMemoryBufferDuration: TimeInterval = 5
+
+    /// Serial queue dedicated to in-memory resource-loader callbacks.
+    /// Keeps byte-range responses and `Data(slice)` copies off the main
+    /// queue so a large file (now possible after lifting the duration
+    /// gate) can't stall UI when AVFoundation asks for a chunky range.
+    private static let resourceLoaderQueue = DispatchQueue(
+        label: "app.livewallpaper.video.in-memory-loader",
+        qos: .userInitiated
+    )
+
 
     private static func fileSize(of url: URL) -> Int {
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path(percentEncoded: false)),
@@ -260,14 +289,14 @@ final class WallpaperVideoPlayer {
     }
 
     /// Per-screen cache budget driven by `GlobalSettings.videoCacheMaxBytesPerScreen`.
-    private static func shouldUseInMemoryCache(fileSize: Int, duration: TimeInterval) -> Bool {
+    /// File size is the only real constraint: once a file fits the budget,
+    /// mmap-backed playback works regardless of duration. Users who don't
+    /// want a long low-bitrate clip in RAM should lower the budget slider.
+    private static func shouldUseInMemoryCache(fileSize: Int) -> Bool {
         guard fileSize > 0 else { return false }
         let budget = SettingsManager.shared.loadGlobalSettings().videoCacheMaxBytesPerScreen
         guard budget > 0 else { return false }
-        guard fileSize <= budget else { return false }
-        guard duration > 0 else { return false }
-        guard duration <= inMemoryAssetMaxDuration else { return false }
-        return true
+        return fileSize <= budget
     }
 
     /// Extra headroom appended to the video duration when full-buffer mode

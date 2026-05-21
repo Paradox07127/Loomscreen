@@ -29,7 +29,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
     /// identity.
     public var playlistPrimaryIndex: Int?
     public var setAsLockScreen: Bool
-    public var wallpaperMode: WallpaperMode = .single
+    public var wallpaperMode: WallpaperMode = .playlist
     /// Muted by default so wallpaper videos do not take over audio output.
     public var muted: Bool = true
     /// Per-screen video output level. `muted` stays separate so unmute can
@@ -303,10 +303,8 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
             wallpaperMode = storedMode
         } else if (scheduleSlots?.isEmpty == false) {
             wallpaperMode = .schedule
-        } else if (playlistBookmarks?.isEmpty == false) {
-            wallpaperMode = .playlist
         } else {
-            wallpaperMode = .single
+            wallpaperMode = .playlist
         }
 
         savedHTMLSource = try c.decodeIfPresent(HTMLSource.self, forKey: .savedHTMLSource)

@@ -20,7 +20,6 @@ struct LiteSKUSmokeTests {
         #expect(capabilities.canRender(.html))
         #expect(!capabilities.canRender(.metalShader))
         #expect(!capabilities.canRender(.scene))
-        #expect(capabilities.selectableWallpaperModes.contains(.single))
         #expect(capabilities.selectableWallpaperModes.contains(.playlist))
         #expect(capabilities.selectableWallpaperModes.contains(.schedule))
         #expect(capabilities.enabledFeatures.contains(.appleAerials))

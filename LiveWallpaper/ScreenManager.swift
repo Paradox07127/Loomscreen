@@ -1114,7 +1114,7 @@ final class ScreenManager {
         config.shufflePlaylist = false
         config.playlistRotationMinutes = nil
         config.setAsLockScreen = false
-        config.wallpaperMode = .single
+        config.wallpaperMode = .playlist
         config.muted = true
         config.videoVolume = 1.0
         config.savedHTMLConfig = .default

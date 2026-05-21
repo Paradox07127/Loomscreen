@@ -239,8 +239,6 @@ struct ScreenDetailInspectorPanel: View {
 
                 Group {
                     switch draft.selectedWallpaperMode {
-                    case .single:
-                        EmptyView()
                     case .playlist:
                         if featureCatalog.isEnabled(.playlists) {
                             Divider()
@@ -293,6 +291,9 @@ struct ScreenDetailInspectorPanel: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(wallpaperModeAccessibilityLabel(mode))
+                .accessibilityAddTraits(
+                    draft.selectedWallpaperMode == mode ? .isSelected : []
+                )
             }
         }
         .padding(2)
@@ -301,8 +302,6 @@ struct ScreenDetailInspectorPanel: View {
 
     private func wallpaperModeAccessibilityLabel(_ mode: WallpaperMode) -> Text {
         switch mode {
-        case .single:
-            return Text("Single mode", comment: "A11y label for the single wallpaper mode tab.")
         case .playlist:
             return Text("Playlist mode", comment: "A11y label for the playlist wallpaper mode tab.")
         case .schedule:

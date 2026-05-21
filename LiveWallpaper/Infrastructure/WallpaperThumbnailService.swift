@@ -17,6 +17,11 @@ final class WallpaperThumbnailService {
     private let cache: NSCache<NSString, NSImage> = {
         let c = NSCache<NSString, NSImage>()
         c.countLimit = 256
+        // ~64 MB ceiling. With 480x270 RGBA thumbnails costing ~0.5 MB
+        // each, the count cap alone could pin ~125 MB worst case; the
+        // byte cap kicks in earlier and lets NSCache evict under memory
+        // pressure.
+        c.totalCostLimit = 64 * 1024 * 1024
         return c
     }()
 
@@ -54,7 +59,7 @@ final class WallpaperThumbnailService {
                 let (cgImage, _) = try await generator.image(at: .zero)
                 let size = NSSize(width: cgImage.width, height: cgImage.height)
                 let image = NSImage(cgImage: cgImage, size: size)
-                cache.setObject(image, forKey: cacheKey as NSString)
+                cache.setObject(image, forKey: cacheKey as NSString, cost: Self.estimatedCost(of: cgImage))
                 return image
             } catch {
                 return nil
@@ -65,6 +70,13 @@ final class WallpaperThumbnailService {
         let result = await task.value
         inFlight.removeValue(forKey: cacheKey)
         return result
+    }
+
+    /// Rough byte cost of a decoded `CGImage` — width × height × 4 bytes
+    /// (RGBA). Drives `NSCache.totalCostLimit` so the cache stays bounded
+    /// in MB, not just object count.
+    private static func estimatedCost(of image: CGImage) -> Int {
+        image.width * image.height * 4
     }
 
     /// Returns a snapshot of the rendered HTML source.
@@ -151,10 +163,22 @@ final class WallpaperThumbnailService {
         pendingWebViews.removeValue(forKey: cacheKey)
 
         if let image, didLoad {
-            cache.setObject(image, forKey: cacheKey as NSString)
+            cache.setObject(image, forKey: cacheKey as NSString, cost: Self.estimatedCost(of: image))
             return image
         }
         return nil
+    }
+
+    /// Cost estimate for an `NSImage` snapshot: width × height × 4
+    /// (RGBA). Mirrors the `CGImage` variant above for the WebKit
+    /// snapshot path, where we only see the `NSImage` representation.
+    private static func estimatedCost(of image: NSImage) -> Int {
+        let pixels = image.representations
+            .compactMap { $0 as? NSBitmapImageRep }
+            .map { $0.pixelsWide * $0.pixelsHigh }
+            .max()
+            ?? Int(image.size.width * image.size.height)
+        return pixels * 4
     }
 }
 
