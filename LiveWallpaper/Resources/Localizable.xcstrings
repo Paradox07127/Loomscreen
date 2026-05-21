@@ -120,35 +120,6 @@
         }
       }
     },
-    "%@ fit mode" : {
-      "comment" : "A11y label for a video fit mode button. The placeholder is the mode name.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ fit mode"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ フィットモード"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ 适应模式"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ 適合模式"
-          }
-        }
-      }
-    },
     "%@ is already used by %@." : {
       "comment" : "Shortcut duplicate rejection message. Placeholders are shortcut and action name.",
       "localizations" : {
@@ -6168,7 +6139,7 @@
       }
     },
     "Currently selected" : {
-      "comment" : "A11y hint for the active fit mode button.\nA11y hint for the active shader preset button.",
+      "comment" : "A11y hint for the active shader preset button.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -24017,35 +23988,6 @@
         }
       }
     },
-    "Tap to switch to %@ fit mode" : {
-      "comment" : "A11y hint to switch fit mode. The placeholder is the mode name.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Tap to switch to %@ fit mode"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "タップして %@ 表示モードに切り替え"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "轻点以切换到 %@ 适应模式"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "點一下切換到 %@ 縮放模式"
-          }
-        }
-      }
-    },
     "Text object %@ has no resolvable text" : {
       "comment" : "Wallpaper Engine scene diagnostic. The placeholder is the text object name.",
       "localizations" : {
@@ -26375,6 +26317,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "影片檔案（.mp4、.mov 等）"
+          }
+        }
+      }
+    },
+    "Video fit mode" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Video fit mode"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ビデオフィットモード"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "视频适配方式"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "影片適配方式"
           }
         }
       }

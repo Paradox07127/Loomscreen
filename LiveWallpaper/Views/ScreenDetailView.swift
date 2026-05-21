@@ -232,38 +232,7 @@ struct ScreenDetailView: View {
                                     .shadow(color: Color.black.opacity(0.18), radius: 12, x: 0, y: 4)
                                 }
 
-                                VStack(spacing: 10) {
-                                    HStack(spacing: 8) {
-                                        ForEach(VideoFitMode.allCases) { mode in
-                                            FitModeButton(mode: mode, isSelected: selectedFitMode == mode) {
-                                                withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.2))) {
-                                                    selectedFitMode = mode
-                                                }
-                                                screenManager.updateFitMode(mode, for: screen)
-                                            }
-                                        }
-                                    }
-
-                                    Divider()
-
-                                    HStack(spacing: 10) {
-                                        Text("Speed")
-                                            .font(.system(size: 12, weight: .medium))
-                                            .foregroundStyle(.secondary)
-                                        SegmentedSpeedPicker(selectedSpeed: $playbackSpeed) { speed in
-                                            screen.videoPlayer?.setPlaybackSpeed(speed)
-                                            screenManager.updatePlaybackSpeed(speed, for: screen)
-                                        }
-                                        .frame(maxWidth: .infinity)
-                                    }
-                                }
-                                .padding(.horizontal, 18)
-                                .padding(.vertical, 10)
-                                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
-                                )
+                                videoCommandBar
                             }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .padding(.horizontal, 24)
@@ -311,7 +280,7 @@ struct ScreenDetailView: View {
                 .layoutPriority(1)
                 .overlay {
                     dragHintOverlay
-                        .animation(.smooth(duration: 0.2), value: isDraggingOver)
+                        .animation(DesignTokens.motion(reduceMotion, .smooth(duration: 0.2)), value: isDraggingOver)
                 }
 
                 if showsInspector {
@@ -574,7 +543,7 @@ struct ScreenDetailView: View {
                             }
                         }
                     }
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, DesignTokens.Inspector.horizontalPadding(for: inspectorPanelWidth))
                     .padding(.vertical, 14)
                 }
             }
@@ -646,6 +615,66 @@ struct ScreenDetailView: View {
         withTransaction(transaction, update)
     }
 
+    // MARK: - Video Command Bar
+
+    private var videoCommandBar: some View {
+        AdaptiveGlassContainer(spacing: 10) {
+            HStack(spacing: 10) {
+                Spacer(minLength: 0)
+                commandPill(label: Text("Fit"), accessibility: Text("Video fit mode")) {
+                    Picker(selection: fitModeBinding) {
+                        ForEach(VideoFitMode.allCases) { mode in
+                            Text(mode.titleKey).tag(mode)
+                        }
+                    } label: {
+                        Text("Video fit mode")
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
+                }
+                commandPill(label: Text("Speed"), accessibility: Text("Playback speed")) {
+                    SegmentedSpeedPicker(selectedSpeed: $playbackSpeed) { speed in
+                        screenManager.updatePlaybackSpeed(speed, for: screen)
+                    }
+                    .fixedSize()
+                }
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
+    private func commandPill<Content: View>(
+        label: Text,
+        accessibility: Text,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        HStack(spacing: 8) {
+            label
+                .font(.system(size: 10, weight: .bold))
+                .textCase(.uppercase)
+                .tracking(0.6)
+                .foregroundStyle(.secondary)
+            content()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .adaptiveGlassSurface(.capsule)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibility)
+    }
+
+    private var fitModeBinding: Binding<VideoFitMode> {
+        Binding(
+            get: { selectedFitMode },
+            set: { newValue in
+                guard selectedFitMode != newValue else { return }
+                selectedFitMode = newValue
+                screenManager.updateFitMode(newValue, for: screen)
+            }
+        )
+    }
+
     // MARK: - Drag Hint Overlay
 
     @ViewBuilder
@@ -653,12 +682,16 @@ struct ScreenDetailView: View {
         if isDraggingOver {
             ZStack {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color.accentColor.opacity(0.10))
+                    .fill(.ultraThinMaterial)
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
+                    .fill(Color.accentColor.opacity(0.08))
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(Color.accentColor.opacity(0.85), lineWidth: 1.5)
                 VStack(spacing: 10) {
                     Group {
-                        if #available(macOS 15.0, *) {
+                        if reduceMotion {
+                            Image(systemName: "arrow.down.doc.fill")
+                        } else if #available(macOS 15.0, *) {
                             Image(systemName: "arrow.down.doc.fill")
                                 .symbolEffect(.bounce, options: .repeat(.continuous))
                         } else {
