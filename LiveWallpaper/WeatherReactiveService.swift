@@ -220,10 +220,16 @@ final class WeatherReactiveService {
 
     // MARK: - Weather → Particle Mapping
 
+    /// Maps a weather description to a particle effect for auto-reactive
+    /// mode. Time-of-day–dependent effects (fireflies, stars) and seasonal
+    /// effects (sakura, falling leaves) are intentionally excluded — they
+    /// belong to manual user selection because the weather API exposes
+    /// neither timestamp nor season. `lightning` likewise stays out: a
+    /// surprise full-screen flash imposed without consent is jarring.
     private func mapDescriptionToParticle(_ desc: WeatherDescription) -> ParticleEffect {
         switch desc {
-        case .clear:        return .fireflies
-        case .partlyCloudy: return .none
+        case .clear:        return .none
+        case .partlyCloudy: return .dust
         case .cloudy:       return .none
         case .foggy:        return .none
         case .drizzle:      return .rain
