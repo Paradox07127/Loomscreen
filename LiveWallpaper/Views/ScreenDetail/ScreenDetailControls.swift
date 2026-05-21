@@ -16,46 +16,6 @@ struct InfoBadge: View {
     }
 }
 
-struct SegmentedSpeedPicker: View {
-    @Binding var selectedSpeed: Double
-    var onChange: (Double) -> Void
-    private let speeds: [Double] = [0.5, 0.75, 1.0, 1.5, 2.0]
-
-    var body: some View {
-        Picker(selection: speedBinding) {
-            ForEach(speeds, id: \.self) { speed in
-                Text(label(for: speed)).tag(speed)
-            }
-        } label: {
-            Text("Playback speed", comment: "A11y label for the playback speed picker.")
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .help(Text("Playback speed", comment: "Tooltip for the playback speed picker."))
-        .accessibilityLabel(Text("Playback speed", comment: "A11y label for the playback speed picker."))
-        .accessibilityValue(Text(label(for: selectedSpeed)))
-    }
-
-    private var speedBinding: Binding<Double> {
-        Binding(
-            get: { selectedSpeed },
-            set: { newValue in
-                selectedSpeed = newValue
-                onChange(newValue)
-            }
-        )
-    }
-
-    private func label(for speed: Double) -> String {
-        switch speed {
-        case 0.75: return "0.75x"
-        case 1.0:  return "1x"
-        case 2.0:  return "2x"
-        default:   return "\(String(format: "%.1f", speed))x"
-        }
-    }
-}
-
 struct PlaybackToggleButton: View {
     var isPlaying: Bool
     var action: () -> Void

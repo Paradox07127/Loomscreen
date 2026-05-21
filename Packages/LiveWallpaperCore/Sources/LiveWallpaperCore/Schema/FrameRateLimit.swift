@@ -1,6 +1,8 @@
 import SwiftUI
 
 public enum FrameRateLimit: Int, CaseIterable, Identifiable, Codable, Sendable {
+    case fps15 = 15
+    case fps24 = 24
     case fps30 = 30
     case fps60 = 60
     case unlimited = 0
@@ -15,6 +17,8 @@ public enum FrameRateLimit: Int, CaseIterable, Identifiable, Codable, Sendable {
 
     public var titleKey: LocalizedStringKey {
         switch self {
+        case .fps15: return "15 FPS"
+        case .fps24: return "24 FPS"
         case .fps30: return "30 FPS"
         case .fps60: return "60 FPS"
         case .unlimited: return "Unlimited"
@@ -23,9 +27,26 @@ public enum FrameRateLimit: Int, CaseIterable, Identifiable, Codable, Sendable {
 
     public var iconName: String {
         switch self {
+        case .fps15: return "leaf.fill"
+        case .fps24: return "film"
         case .fps30: return "tortoise"
         case .fps60: return "hare"
         case .unlimited: return "infinity"
+        }
+    }
+
+    /// Whether this limit is worth forcing a compositing pipeline for plain
+    /// (effect-free) playback. Decoding cost is unaffected by frame rate, so
+    /// strapping `AVVideoComposition` onto AVPlayer adds a render pass without
+    /// reducing decode load. Only caps that meaningfully shrink the per-frame
+    /// compositing budget (≤30 fps) pay back that overhead; `fps60` and
+    /// `unlimited` stay on the native pass-through path on plain video. (When
+    /// effects are active the composition is already mandatory — frame rate
+    /// caps cooperate via `VideoEffectsApplicationService` regardless.)
+    public var enforcesCompositionCap: Bool {
+        switch self {
+        case .fps15, .fps24, .fps30: return true
+        case .fps60, .unlimited:     return false
         }
     }
 
@@ -74,7 +95,7 @@ public enum PlainVideoFrameRateCompositionPolicy {
         videoFrameRate: Double,
         screenRefreshRate: Double
     ) -> Float? {
-        guard frameRateLimit == .fps30 else { return nil }
+        guard frameRateLimit.enforcesCompositionCap else { return nil }
 
         let limit = frameRateLimit.getEffectiveLimit(
             videoFrameRate: videoFrameRate,

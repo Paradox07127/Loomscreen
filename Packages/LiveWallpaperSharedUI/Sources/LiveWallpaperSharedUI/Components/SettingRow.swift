@@ -34,7 +34,7 @@ public struct SettingRow<Content: View>: View {
     }
 
     public var body: some View {
-        HStack(alignment: .center, spacing: 10) {
+        HStack(alignment: .center, spacing: 8) {
             ZStack {
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
                     .fill(iconColor.opacity(0.15))
@@ -50,6 +50,7 @@ public struct SettingRow<Content: View>: View {
                     Text(title)
                         .font(.body.weight(.medium))
                         .lineLimit(1)
+                        .truncationMode(.tail)
                     if let info {
                         InfoTooltipButton(text: info)
                     }
@@ -61,8 +62,8 @@ public struct SettingRow<Content: View>: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-
-            Spacer(minLength: 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1)
 
             content
         }

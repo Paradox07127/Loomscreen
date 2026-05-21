@@ -7,9 +7,7 @@ struct ScreenDetailView: View {
     @Environment(ScreenManager.self) private var screenManager
     @Environment(\.featureCatalog) private var featureCatalog
 
-    @State private var playbackSpeed: Double = 1.0
-    @State private var selectedFitMode: VideoFitMode = .aspectFill
-    @State private var selectedVideoDisplayMode: VideoDisplayMode = .perDisplay
+    @State private var draft: ScreenDetailDraftState = .default
     @State private var isLoading: Bool = false
     private var wallpaperSessionSummary: WallpaperSessionSummary {
         screenManager.wallpaperSummary(for: screen)
@@ -21,7 +19,7 @@ struct ScreenDetailView: View {
     @ViewBuilder
     private var runtimeErrorBannerView: some View {
         if let runtimeError {
-            let activeType = screen.runtimeSession?.wallpaperType ?? selectedWallpaperType
+            let activeType = screen.runtimeSession?.wallpaperType ?? draft.selectedWallpaperType
             let canRePick = activeType == .video || activeType == .html
             RuntimeErrorBanner(
                 error: runtimeError,
@@ -31,10 +29,6 @@ struct ScreenDetailView: View {
             )
             .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
         }
-    }
-
-    private var canApplyToAllDisplays: Bool {
-        screenManager.screens.count > 1 && screenManager.getConfiguration(for: screen) != nil
     }
 
     @ViewBuilder
@@ -56,10 +50,10 @@ struct ScreenDetailView: View {
 
     private var wallpaperTypeSelection: Binding<WallpaperType> {
         Binding(
-            get: { selectedWallpaperType },
+            get: { draft.selectedWallpaperType },
             set: { newType in
-                guard selectedWallpaperType != newType else { return }
-                selectedWallpaperType = newType
+                guard draft.selectedWallpaperType != newType else { return }
+                draft.selectedWallpaperType = newType
                 handleWallpaperTypeSelection(newType)
             }
         )
@@ -72,26 +66,14 @@ struct ScreenDetailView: View {
             screenManager.switchToVideoWallpaper(for: screen)
         case .html:
             screenManager.switchToHTMLWallpaper(for: screen)
-        case .metalShader, .scene:
+        case .metalShader:
+            guard featureCatalog.isEnabled(.metalShader) else { return }
+            screenManager.setShaderWallpaper(preset: draft.selectedShaderPreset, for: screen)
+        case .scene:
             break
         }
     }
 
-    @ViewBuilder
-    private var applyToAllButton: some View {
-        if canApplyToAllDisplays {
-            Button {
-                requestApplyToAll()
-            } label: {
-                Image(systemName: "square.on.square")
-            }
-            .help(Text("Apply to All — copy this display's wallpaper and settings to every other display"))
-            .accessibilityLabel(Text("Apply to all displays"))
-            .accessibilityHint(Text("Copies the current wallpaper and settings to every other connected display"))
-            .adaptiveGlassButton(.regular)
-            .controlSize(.regular)
-        }
-    }
     /// Resolved Wallpaper Engine origin metadata for the active wallpaper, or
     /// nil when the user picked content directly. Recomputed on every body
     /// evaluation so save/import flows propagate without local @State.
@@ -99,86 +81,113 @@ struct ScreenDetailView: View {
         screenManager.getConfiguration(for: screen)?.wpeOrigin
     }
 
-    private var sessionStatusText: LocalizedStringKey {
-        guard wallpaperSessionSummary.isConfigured else {
-            return "Not configured"
+    /// Single source of truth for the four overlapping booleans the rest of
+    /// the view used to compute inline (`shouldShowGuideEmptyState`,
+    /// `hasConfigurableWallpaperSurface`, `showsInspector`,
+    /// `showsHeaderWallpaperActions`). Each was reading the same store /
+    /// runtime state and re-deriving partially overlapping conclusions; the
+    /// dependencies were hard to audit. Collapsing them into one computed
+    /// struct keeps the rules in one place and makes downstream wrappers
+    /// trivial three-line passthroughs.
+    private struct DerivedViewState {
+        var showsGuideEmptyState: Bool
+        var hasConfigurableSurface: Bool
+        var showsInspector: Bool
+        var showsHeaderWallpaperActions: Bool
+    }
+
+    private var derivedState: DerivedViewState {
+        let config = screenManager.getConfiguration(for: screen)
+        let hasRuntimeOrPreview = screen.runtimeSession != nil
+            || draft.hasPreviewSource
+            || previewController.hasPreviewContent
+
+        let showsGuide: Bool = !isLoading
+            && config == nil
+            && !hasRuntimeOrPreview
+            && draft.selectedWallpaperType == .video
+
+        let hasConfigurable = !showsGuide && (config != nil || hasRuntimeOrPreview)
+
+        let showsInspector: Bool = {
+            guard hasConfigurable else { return false }
+            switch draft.selectedWallpaperType {
+            case .video:
+                return config?.wallpaperType == .video && (config?.hasConfiguredVideoSource ?? false)
+            case .html:
+                return true
+            case .metalShader, .scene:
+                return false
+            }
+        }()
+
+        return DerivedViewState(
+            showsGuideEmptyState: showsGuide,
+            hasConfigurableSurface: hasConfigurable,
+            showsInspector: showsInspector,
+            showsHeaderWallpaperActions: hasConfigurable
+        )
+    }
+
+    private var shouldShowGuideEmptyState: Bool { derivedState.showsGuideEmptyState }
+    private var hasConfigurableWallpaperSurface: Bool { derivedState.hasConfigurableSurface }
+    private var showsInspector: Bool { derivedState.showsInspector }
+    private var showsHeaderWallpaperActions: Bool { derivedState.showsHeaderWallpaperActions }
+
+    /// User-facing pickerable error states. Each case carries enough context
+    /// to render a meaningful retry / re-pick action instead of a generic
+    /// "OK" dismissal — telling someone "Failed to bookmark" without offering
+    /// a way out is a dead end.
+    private enum DropFailure: Identifiable {
+        case invalidDropType(suggestion: WallpaperType)
+        case videoFormatUnsupported
+        case videoBookmarkFailed
+        case htmlBookmarkFailed
+        case htmlPickerWrongType
+
+        var id: String {
+            switch self {
+            case .invalidDropType:        return "invalidDropType"
+            case .videoFormatUnsupported: return "videoFormatUnsupported"
+            case .videoBookmarkFailed:    return "videoBookmarkFailed"
+            case .htmlBookmarkFailed:     return "htmlBookmarkFailed"
+            case .htmlPickerWrongType:    return "htmlPickerWrongType"
+            }
         }
 
-        return wallpaperSessionSummary.activity == .active ? "Playing" : "Paused"
-    }
-    private var sessionStatusColor: Color {
-        switch wallpaperSessionSummary.activity {
-        case .active:
-            return .green
-        case .paused:
-            return .orange
-        case .inactive:
-            return .secondary
+        var title: LocalizedStringKey {
+            switch self {
+            case .invalidDropType:        return "Unsupported file type"
+            case .videoFormatUnsupported: return "Video format not supported"
+            case .videoBookmarkFailed:    return "Couldn't open video"
+            case .htmlBookmarkFailed:     return "Couldn't open HTML resource"
+            case .htmlPickerWrongType:    return "Pick an HTML file or folder"
+            }
+        }
+
+        var message: LocalizedStringKey {
+            switch self {
+            case .invalidDropType:
+                return "Drop a video file, HTML file, or folder to use it as a wallpaper."
+            case .videoFormatUnsupported:
+                return "Choose an .mp4, .mov, .m4v, or similar video file."
+            case .videoBookmarkFailed:
+                return "macOS couldn't grant the app secure access to that file. Try a different video, or move the file to a folder you own."
+            case .htmlBookmarkFailed:
+                return "macOS couldn't grant the app secure access to that resource. Try moving it to a folder you own."
+            case .htmlPickerWrongType:
+                return "The selection isn't an HTML file or a folder containing an index page."
+            }
         }
     }
 
-    private var hasConfigurableWallpaperSurface: Bool {
-        if shouldShowGuideEmptyState { return false }
-        if screenManager.getConfiguration(for: screen) != nil { return true }
-        if screen.runtimeSession != nil { return true }
-        if hasPreviewSource || previewController.hasPreviewContent { return true }
-        return false
-    }
-
-    private var showsInspector: Bool {
-        guard !shouldShowGuideEmptyState, hasConfigurableWallpaperSurface else {
-            return false
-        }
-        switch selectedWallpaperType {
-        case .video:
-            return hasConfiguredVideoWallpaper
-        case .html:
-            return true
-        case .metalShader, .scene:
-            return false
-        }
-    }
-
-    private var hasConfiguredVideoWallpaper: Bool {
-        guard let config = screenManager.getConfiguration(for: screen),
-              config.wallpaperType == .video else {
-            return false
-        }
-        return config.hasConfiguredVideoSource
-    }
-
-    private var showsHeaderWallpaperActions: Bool {
-        hasConfigurableWallpaperSurface && !shouldShowGuideEmptyState
-    }
-
-    @State private var showErrorAlert = false
-    @State private var errorMessage: LocalizedStringKey = ""
+    @State private var dropFailure: DropFailure?
     @State private var pendingDestructive: PendingDestructive?
     @State private var previewController = InspectorPreviewController()
-    @State private var hasPreviewSource = false
     @State private var lastPreviewPosterBookmarkData: Data?
 
-    @State private var selectedWallpaperType: WallpaperType = .video
-    @State private var selectedWallpaperMode: WallpaperMode = .single
-    @State private var selectedParticleEffect: ParticleEffect = .none
-    @State private var effectConfig = VideoEffectConfig.default
-    @State private var selectedShaderPreset: MetalShaderPreset = .waves
-    @State private var htmlSource: HTMLSource? = nil
-    @State private var htmlConfig: HTMLConfig = .default
-    @State private var setAsLockScreen: Bool = false
-
-    @State private var playlistBookmarks: [Data] = []
-    @State private var shufflePlaylist: Bool = false
-    @State private var playlistRotationMinutes: Int? = nil
-    @State private var scheduleSlots: [ScheduleSlot] = []
-
     @State private var isDraggingOver = false
-    @State private var videoMuted: Bool = true
-    @State private var videoVolume: Double = 1.0
-    @State private var videoColorSpace: VideoColorSpace = .auto
     @State private var lockScreenExtracted: Bool = false
-    @State private var particleDensity: Double = 1.0
-    @State private var selectedFrameRateLimit: FrameRateLimit = .fps60
     @State private var showBookmarks = false
 
     @AppStorage("Inspector.EnvironmentExpanded") private var isEnvironmentExpanded = true
@@ -186,7 +195,6 @@ struct ScreenDetailView: View {
     @AppStorage("Inspector.Width") private var inspectorWidth = Double(DesignTokens.Inspector.defaultWidth)
     @State private var liveInspectorWidth: Double?
 
-    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -198,90 +206,25 @@ struct ScreenDetailView: View {
             Divider()
 
             HStack(spacing: 0) {
-                ZStack {
-                    DesignTokens.Colors.pageBackground
-
-                    if shouldShowGuideEmptyState {
-                        EmptyStateGuideView(
-                            onChooseVideo: triggerVideoGuideAction,
-                            onChooseHTML: triggerHTMLGuideAction,
-                            onChooseShader: triggerShaderGuideAction,
-                            onChooseScene: triggerSceneGuideAction
-                        )
-                    } else if selectedWallpaperType == .video {
-                        if isLoading {
-                            ScreenDetailLoadingView()
-                        } else if hasPreviewSource || previewController.hasPreviewContent {
-                            VStack(spacing: 16) {
-                                #if !LITE_BUILD
-                                if let origin = wpeOrigin, featureCatalog.isEnabled(.wpeImport) {
-                                    WPEOriginBadge(origin: origin) {
-                                        selectedWallpaperType = .scene
-                                    }
-                                }
-                                #endif
-                                if featureCatalog.isEnabled(.inspectorPreview) {
-                                    VideoPreviewSection(
-                                        previewController: previewController,
-                                        hasPreviewSource: hasPreviewSource,
-                                        selectedFitMode: selectedFitMode,
-                                        startPreview: setupPreviewPlayer
-                                    )
-                                    .aspectRatio(16/9, contentMode: .fit)
-                                    .frame(maxWidth: .infinity)
-                                    .shadow(color: Color.black.opacity(0.18), radius: 12, x: 0, y: 4)
-                                }
-
-                                videoCommandBar
-                            }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .padding(.horizontal, 24)
-                            .padding(.vertical, 18)
-                        } else {
-                            ScreenDetailEmptyStateView(
-                                isDraggingOver: isDraggingOver,
-                                selectVideo: showFilePicker
-                            )
-                                .padding(24)
-                        }
-                    } else if selectedWallpaperType == .html {
-                        VStack(spacing: 16) {
-                            #if !LITE_BUILD
-                            if let origin = wpeOrigin, featureCatalog.isEnabled(.wpeImport) {
-                                WPEOriginBadge(origin: origin) {
-                                    selectedWallpaperType = .scene
-                                }
-                            }
-                            #endif
-                            if featureCatalog.isEnabled(.inspectorPreview), htmlSource != nil {
-                                HTMLPreviewSection(source: htmlSource, config: htmlConfig)
-                            }
-                            HTMLSourceSection(
-                                screen: screen,
-                                source: $htmlSource,
-                                config: $htmlConfig
-                            )
-                        }
-                        .padding(24)
-                    } else if selectedWallpaperType == .metalShader,
-                              featureCatalog.isEnabled(.metalShader) {
-                        ShaderWallpaperSection(screen: screen, selectedShaderPreset: $selectedShaderPreset)
-                            .padding(24)
-                    } else if selectedWallpaperType == .scene,
-                              featureCatalog.isEnabled(.scene) {
-                        #if !LITE_BUILD
-                        WPESceneSection(screen: screen)
-                        #else
-                        EmptyView()
-                        #endif
-                    }
-                }
-                .frame(minWidth: DesignTokens.PreviewArea.minWidth, maxWidth: .infinity, maxHeight: .infinity)
-                .layoutPriority(1)
-                .overlay {
-                    dragHintOverlay
-                        .animation(DesignTokens.motion(reduceMotion, .smooth(duration: 0.2)), value: isDraggingOver)
-                }
+                ScreenDetailPreviewArea(
+                    screen: screen,
+                    draft: $draft,
+                    featureCatalog: featureCatalog,
+                    previewController: previewController,
+                    wpeOrigin: wpeOrigin,
+                    isLoading: isLoading,
+                    isDraggingOver: isDraggingOver,
+                    reduceMotion: reduceMotion,
+                    showsGuideEmptyState: shouldShowGuideEmptyState,
+                    onChooseVideo: triggerVideoGuideAction,
+                    onChooseHTML: triggerHTMLGuideAction,
+                    onChooseShader: triggerShaderGuideAction,
+                    onChooseScene: triggerSceneGuideAction,
+                    onSelectVideoFile: showFilePicker,
+                    onStartPreview: setupPreviewPlayer,
+                    onPlaybackSpeedChange: { screenManager.updatePlaybackSpeed($0, for: screen) },
+                    onFitModeChange: { screenManager.updateFitMode($0, for: screen) }
+                )
 
                 if showsInspector {
                     inspectorPanel
@@ -298,7 +241,7 @@ struct ScreenDetailView: View {
                         .layoutPriority(0)
                 }
             }
-            .transaction(value: selectedWallpaperType) { $0.animation = nil }
+            .transaction(value: draft.selectedWallpaperType) { $0.animation = nil }
             .transaction(value: liveInspectorWidth) { $0.animation = nil }
         }
         .background(DesignTokens.Colors.pageBackground)
@@ -319,9 +262,15 @@ struct ScreenDetailView: View {
                   changedID == screen.id else { return }
             scheduleConfigurationLoad()
         }
-        .alert("Error", isPresented: $showErrorAlert) {
-            Button("OK", role: .cancel) { }
-        } message: { Text(errorMessage) }
+        .alert(
+            dropFailure.map { Text($0.title) } ?? Text(""),
+            isPresented: dropFailurePresented,
+            presenting: dropFailure
+        ) { failure in
+            dropFailureButtons(failure)
+        } message: { failure in
+            Text(failure.message)
+        }
         .dropDestination(for: URL.self) { urls, _ in
             handleDrop(urls: urls)
         } isTargeted: { targeted in
@@ -330,228 +279,39 @@ struct ScreenDetailView: View {
     }
 
     private var screenHeader: some View {
-        DetailHeaderBar(
-            systemImage: "display",
-            title: {
-                HStack(spacing: 8) {
-                    Text(verbatim: screen.name)
-
-                    Button(action: { screenManager.reloadWallpaperForScreen(screen) }) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .help(Text("Reload display content"))
-                    .accessibilityLabel(Text("Reload display"))
-                    .accessibilityHint(Text("Reloads the wallpaper content for this screen"))
-                }
-            },
-            metadata: {
-                HStack(spacing: DesignTokens.DetailHeader.metadataSpacing) {
-                    InfoBadge(icon: "arrow.up.left.and.arrow.down.right", text: "\(Int(screen.frame.width))×\(Int(screen.frame.height))")
-                    InfoBadge(icon: "gauge.medium", text: "\(getScreenRefreshRate()) Hz")
-                    if wallpaperSessionSummary.isConfigured {
-                        HStack(spacing: 4) {
-                            Image(systemName: "circle.fill")
-                                .font(.system(size: 6))
-                                .foregroundStyle(sessionStatusColor)
-                                .symbolEffect(.pulse, options: .continuouslyRepeating, isActive: wallpaperSessionSummary.activity == .active)
-                            Text(sessionStatusText)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                }
-            },
-            actions: {
-                HStack(spacing: 8) {
-                    applyToAllButton
-
-                    Button {
-                        showBookmarks = true
-                    } label: {
-                        Image(systemName: "bookmark.fill")
-                    }
-                    .adaptiveGlassButton(.regular)
-                    .controlSize(.regular)
-                    .help(Text("Bookmarks — saved video / HTML / shader shortcuts"))
-                    .accessibilityLabel(Text("Bookmarks"))
-                    .popover(isPresented: $showBookmarks, arrowEdge: .bottom) {
-                        BookmarksPopover(screen: screen)
-                            .environment(screenManager)
-                    }
-
-                    if showsHeaderWallpaperActions {
-                        HStack(spacing: 8) {
-                            if selectedWallpaperType == .video {
-                                Button {
-                                    showFilePicker()
-                                } label: {
-                                    Image(systemName: "folder.badge.plus")
-                                }
-                                .adaptiveGlassButton(.prominent)
-                                .controlSize(.regular)
-                                .help(Text("Select Video — choose a video file for this display"))
-                                .accessibilityLabel(Text("Select video"))
-                                .accessibilityHint(Text("Opens a file picker to choose a wallpaper video"))
-                            }
-
-                            Button(role: .destructive) {
-                                clearCurrentWallpaper()
-                            } label: {
-                                Image(systemName: "trash")
-                            }
-                            .adaptiveGlassButton(.regular)
-                            .destructiveControlTint()
-                            .controlSize(.regular)
-                            .help(Text("Clear Wallpaper — remove the current wallpaper without deleting source files"))
-                            .accessibilityLabel(Text("Clear current wallpaper"))
-                            .accessibilityHint(Text("Removes the current wallpaper from this screen without deleting source files or library items"))
-                        }
-                    }
-                }
-            }
+        ScreenDetailHeader(
+            screen: screen,
+            draft: $draft,
+            screenManager: screenManager,
+            wallpaperSessionSummary: wallpaperSessionSummary,
+            reduceMotion: reduceMotion,
+            showsHeaderWallpaperActions: showsHeaderWallpaperActions,
+            showBookmarks: $showBookmarks,
+            onReload: { screenManager.reloadWallpaperForScreen(screen) },
+            onApplyToAll: requestApplyToAll,
+            onSelectVideo: showFilePicker,
+            onClearWallpaper: clearCurrentWallpaper
         )
     }
 
     @ViewBuilder
     private var inspectorPanel: some View {
         if showsInspector {
-            ScrollView {
-                AdaptiveGlassContainer(spacing: 16) {
-                    VStack(spacing: 16) {
-                        if selectedWallpaperType == .video,
-                           featureCatalog.capabilities.selectableWallpaperModes.count > 1 {
-                            wallpaperModeCard
-                        }
-
-                        CommonPlaybackInspector(
-                            screen: screen,
-                            wallpaperType: selectedWallpaperType,
-                            muted: $videoMuted,
-                            videoVolume: $videoVolume,
-                            videoDisplayMode: $selectedVideoDisplayMode,
-                            frameRateLimit: $selectedFrameRateLimit,
-                            syncToLockScreen: $setAsLockScreen,
-                            htmlConfig: selectedWallpaperType == .html ? $htmlConfig : nil
-                        )
-
-                        if selectedWallpaperType == .html {
-                            HTMLOptionsInspector(
-                                screen: screen,
-                                config: $htmlConfig
-                            )
-
-                            HTMLTransformInspector(
-                                screen: screen,
-                                config: $htmlConfig
-                            )
-
-                            HTMLRenderingDiagnosticsInspector(
-                                screen: screen,
-                                source: htmlSource,
-                                config: htmlConfig
-                            )
-                        }
-
-                        if selectedWallpaperType == .video,
-                           featureCatalog.capabilities.selectableWallpaperModes.count > 1 {
-                            VStack(spacing: 16) {
-                                if featureCatalog.isEnabled(.videoEffects) {
-                                GroupBox {
-                                    CollapsibleSection(
-                                        title: "Environment",
-                                        systemImage: "cloud.sun.rain",
-                                        isExpanded: $isEnvironmentExpanded
-                                    ) {
-                                        VStack(spacing: 8) {
-                                            SettingRow(
-                                                icon: "sparkles",
-                                                iconColor: .purple,
-                                                title: "Particles"
-                                            ) {
-                                                Picker("", selection: particleEffectBinding) {
-                                                    ForEach(ParticleEffect.allCases) { effect in
-                                                        Text(effect.titleKey).tag(effect)
-                                                    }
-                                                }
-                                                .labelsHidden()
-                                                .fixedSize()
-                                                .accessibilityLabel(Text("Particle effect"))
-                                                .accessibilityValue(Text(selectedParticleEffect.titleKey))
-                                            }
-
-                                            if selectedParticleEffect != .none {
-                                                SettingRow(icon: "circle.hexagongrid", iconColor: .purple, title: "Density") {
-                                                    HStack(spacing: 8) {
-                                                        Slider(value: particleDensityBinding, in: 0.2...3.0)
-                                                            .controlSize(.small)
-                                                            .frame(width: 80)
-                                                            .accessibilityLabel(Text("Particle density"))
-                                                            .accessibilityValue(String(format: "%.1f×", particleDensity))
-                                                        Text(String(format: "%.1f", particleDensity))
-                                                            .font(.system(size: 12, design: .monospaced))
-                                                            .foregroundStyle(.secondary)
-                                                            .frame(width: 28, alignment: .trailing)
-                                                    }
-                                                }
-                                            }
-
-                                            Divider()
-
-                                            SettingRow(
-                                                icon: "cloud.sun",
-                                                iconColor: .cyan,
-                                                title: "Weather"
-                                            ) {
-                                                Toggle("", isOn: weatherReactiveBinding)
-                                                    .labelsHidden()
-                                                    .toggleStyle(.switch)
-                                                    .accessibilityLabel(Text("Weather-reactive effects"))
-                                            }
-
-                                            if effectConfig.weatherReactive {
-                                                WeatherStatusBadge(
-                                                    weatherService: screenManager.weatherService,
-                                                    refresh: screenManager.weatherService.refresh
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                                .groupBoxStyle(ContainerGroupBoxStyle())
-
-                                GroupBox {
-                                    CollapsibleSection(
-                                        title: "Color & Filters",
-                                        systemImage: "slider.horizontal.3",
-                                        isExpanded: $isColorExpanded
-                                    ) {
-                                        ColorAdjustmentsView(
-                                            effectConfig: $effectConfig,
-                                            videoColorSpace: $videoColorSpace,
-                                            screen: screen,
-                                            screenManager: screenManager
-                                        )
-                                    }
-                                }
-                                .groupBoxStyle(ContainerGroupBoxStyle())
-
-                                resetDisplayButton
-                                }
-                            }
-                        }
-                    }
-                    .padding(.horizontal, DesignTokens.Inspector.horizontalPadding(for: inspectorPanelWidth))
-                    .padding(.vertical, 14)
-                }
-            }
-            .frame(width: inspectorPanelWidth)
-            .fixedSize(horizontal: true, vertical: false)
-            .background(Color(NSColor.windowBackgroundColor))
-            .clipped()
-            .accessibilityLabel(Text("Wallpaper Properties"))
+            ScreenDetailInspectorPanel(
+                screen: screen,
+                draft: $draft,
+                screenManager: screenManager,
+                featureCatalog: featureCatalog,
+                reduceMotion: reduceMotion,
+                inspectorPanelWidth: inspectorPanelWidth,
+                isEnvironmentExpanded: $isEnvironmentExpanded,
+                isColorExpanded: $isColorExpanded,
+                onParticleEffectChange: { screenManager.updateParticleEffect($0, for: screen) },
+                onParticleDensityChange: { screenManager.updateParticleDensity($0, for: screen) },
+                onWeatherReactiveChange: { screenManager.setWeatherReactive($0, for: screen) },
+                onWallpaperModeChange: { screenManager.updateWallpaperMode($0, for: screen) },
+                onResetDisplaySettings: requestResetDisplaySettings
+            )
         }
     }
 
@@ -559,37 +319,43 @@ struct ScreenDetailView: View {
         clampedInspectorWidth(CGFloat(liveInspectorWidth ?? inspectorWidth))
     }
 
-    private var particleEffectBinding: Binding<ParticleEffect> {
+    private var dropFailurePresented: Binding<Bool> {
         Binding(
-            get: { selectedParticleEffect },
-            set: { newValue in
-                guard selectedParticleEffect != newValue else { return }
-                selectedParticleEffect = newValue
-                screenManager.updateParticleEffect(newValue, for: screen)
-            }
+            get: { dropFailure != nil },
+            set: { if !$0 { dropFailure = nil } }
         )
     }
 
-    private var particleDensityBinding: Binding<Double> {
-        Binding(
-            get: { particleDensity },
-            set: { newValue in
-                guard abs(particleDensity - newValue) > 0.001 else { return }
-                particleDensity = newValue
-                screenManager.updateParticleDensity(newValue, for: screen)
+    @ViewBuilder
+    private func dropFailureButtons(_ failure: DropFailure) -> some View {
+        switch failure {
+        case .invalidDropType(let suggestion):
+            switch suggestion {
+            case .video:
+                Button("Choose Video…") { showFilePicker() }
+            case .html:
+                Button("Choose HTML…") { showHTMLSourcePicker() }
+            case .metalShader, .scene:
+                EmptyView()
             }
-        )
+            Button("Cancel", role: .cancel) { }
+
+        case .videoFormatUnsupported, .videoBookmarkFailed:
+            Button("Choose Different Video…") { showFilePicker() }
+            Button("Cancel", role: .cancel) { }
+
+        case .htmlBookmarkFailed, .htmlPickerWrongType:
+            Button("Choose Different Source…") { showHTMLSourcePicker() }
+            Button("Cancel", role: .cancel) { }
+        }
     }
 
-    private var weatherReactiveBinding: Binding<Bool> {
-        Binding(
-            get: { effectConfig.weatherReactive },
-            set: { newValue in
-                guard effectConfig.weatherReactive != newValue else { return }
-                effectConfig.weatherReactive = newValue
-                screenManager.setWeatherReactive(newValue, for: screen)
-            }
-        )
+    private func requestResetDisplaySettings() {
+        pendingDestructive = PendingDestructive(
+            .resetDisplaySettings(displayName: screen.name)
+        ) {
+            screenManager.resetDisplaySettings(for: screen)
+        }
     }
 
     private func clampedInspectorWidth(_ width: CGFloat) -> CGFloat {
@@ -615,115 +381,6 @@ struct ScreenDetailView: View {
         withTransaction(transaction, update)
     }
 
-    // MARK: - Video Command Bar
-
-    private var videoCommandBar: some View {
-        AdaptiveGlassContainer(spacing: 10) {
-            HStack(spacing: 10) {
-                Spacer(minLength: 0)
-                commandPill(label: Text("Fit"), accessibility: Text("Video fit mode")) {
-                    Picker(selection: fitModeBinding) {
-                        ForEach(VideoFitMode.allCases) { mode in
-                            Text(mode.titleKey).tag(mode)
-                        }
-                    } label: {
-                        Text("Video fit mode")
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .fixedSize()
-                }
-                commandPill(label: Text("Speed"), accessibility: Text("Playback speed")) {
-                    SegmentedSpeedPicker(selectedSpeed: $playbackSpeed) { speed in
-                        screenManager.updatePlaybackSpeed(speed, for: screen)
-                    }
-                    .fixedSize()
-                }
-                Spacer(minLength: 0)
-            }
-        }
-    }
-
-    private func commandPill<Content: View>(
-        label: Text,
-        accessibility: Text,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        HStack(spacing: 8) {
-            label
-                .font(.system(size: 10, weight: .bold))
-                .textCase(.uppercase)
-                .tracking(0.6)
-                .foregroundStyle(.secondary)
-            content()
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .adaptiveGlassSurface(.capsule)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(accessibility)
-    }
-
-    private var fitModeBinding: Binding<VideoFitMode> {
-        Binding(
-            get: { selectedFitMode },
-            set: { newValue in
-                guard selectedFitMode != newValue else { return }
-                selectedFitMode = newValue
-                screenManager.updateFitMode(newValue, for: screen)
-            }
-        )
-    }
-
-    // MARK: - Drag Hint Overlay
-
-    @ViewBuilder
-    private var dragHintOverlay: some View {
-        if isDraggingOver {
-            ZStack {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(.ultraThinMaterial)
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color.accentColor.opacity(0.08))
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(Color.accentColor.opacity(0.85), lineWidth: 1.5)
-                VStack(spacing: 10) {
-                    Group {
-                        if reduceMotion {
-                            Image(systemName: "arrow.down.doc.fill")
-                        } else if #available(macOS 15.0, *) {
-                            Image(systemName: "arrow.down.doc.fill")
-                                .symbolEffect(.bounce, options: .repeat(.continuous))
-                        } else {
-                            Image(systemName: "arrow.down.doc.fill")
-                                .symbolEffect(.pulse, options: .continuouslyRepeating)
-                        }
-                    }
-                    .font(.system(size: 32, weight: .semibold))
-                    .foregroundStyle(Color.accentColor)
-                    Text("Drop to use as wallpaper")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.primary)
-                    Text(dragHintSubtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(20)
-            .transition(.opacity)
-            .allowsHitTesting(false)
-        }
-    }
-
-    private var dragHintSubtitle: LocalizedStringKey {
-        switch selectedWallpaperType {
-        case .video:        return "Video file (.mp4, .mov, …)"
-        case .html:         return "HTML file or folder"
-        case .metalShader:  return "Switch to Video or HTML to drop"
-        case .scene:        return "Switch to Video or HTML to drop"
-        }
-    }
-
     // MARK: - Drag and Drop
     private func handleDrop(urls: [URL]) -> Bool {
         defer { isDraggingOver = false }
@@ -732,13 +389,36 @@ struct ScreenDetailView: View {
             applyHTMLDrop(droppedURL)
             return true
         }
-        guard ResourceUtilities.isSupportedVideoURL(droppedURL) else {
-            errorMessage = "Choose a video file, HTML file, or folder."
-            showErrorAlert = true
+        let videoURLs = urls.filter(ResourceUtilities.isSupportedVideoURL)
+        guard let primaryURL = videoURLs.first else {
+            dropFailure = .invalidDropType(suggestion: draft.selectedWallpaperType)
             return false
         }
-        handleSelectedFile(url: droppedURL)
+        if videoURLs.count == 1 {
+            handleSelectedFile(url: primaryURL)
+        } else {
+            handleMultipleVideoDrop(urls: videoURLs)
+        }
         return true
+    }
+
+    private func handleMultipleVideoDrop(urls: [URL]) {
+        guard let primaryURL = urls.first else { return }
+        let bookmarks = urls.compactMap { ResourceUtilities.createVideoBookmark(for: $0) }
+        guard let primaryBookmark = bookmarks.first, bookmarks.count == urls.count else {
+            handleSelectedFile(url: primaryURL)
+            return
+        }
+        withAnimation(DesignTokens.motion(reduceMotion, .smooth(duration: 0.2))) { isLoading = true }
+        cleanupPreviewPlayer()
+        draft.hasPreviewSource = true
+        lastPreviewPosterBookmarkData = primaryBookmark
+        previewController.startPlaybackPreview(from: primaryURL, syncTo: nil)
+        screenManager.replacePlaylist(ordered: bookmarks, primary: primaryBookmark, for: screen)
+        Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            withAnimation(DesignTokens.motion(reduceMotion, .smooth(duration: 0.2))) { isLoading = false }
+        }
     }
 
     private func isHTMLDrop(_ url: URL) -> Bool {
@@ -752,8 +432,7 @@ struct ScreenDetailView: View {
         let source: HTMLSource?
         if isDirectory.boolValue {
             guard let bookmark = ResourceUtilities.createBookmark(for: url) else {
-                errorMessage = "Failed to bookmark dropped HTML resource."
-                showErrorAlert = true
+                dropFailure = .htmlBookmarkFailed
                 return
             }
             let didStart = url.startAccessingSecurityScopedResource()
@@ -766,12 +445,11 @@ struct ScreenDetailView: View {
         }
 
         guard let resolved = source else {
-            errorMessage = "Failed to bookmark dropped HTML resource."
-            showErrorAlert = true
+            dropFailure = .htmlBookmarkFailed
             return
         }
-        selectedWallpaperType = .html
-        screenManager.setHTMLWallpaper(source: resolved, config: htmlConfig, for: screen)
+        draft.selectedWallpaperType = .html
+        screenManager.setHTMLWallpaper(source: resolved, config: draft.htmlConfig, for: screen)
     }
 
     // MARK: - Helper Methods
@@ -791,60 +469,19 @@ struct ScreenDetailView: View {
     private func loadScreenConfiguration() {
         if lockScreenExtracted { lockScreenExtracted = false }
 
-        if let config = screenManager.getConfiguration(for: screen) {
-            assignIfChanged(playbackSpeed, to: config.playbackSpeed) { playbackSpeed = $0 }
-            assignIfChanged(selectedFitMode, to: config.fitMode) { selectedFitMode = $0 }
-            assignIfChanged(selectedVideoDisplayMode, to: config.videoDisplayMode) { selectedVideoDisplayMode = $0 }
-            assignIfChanged(selectedParticleEffect, to: config.particleEffect) { selectedParticleEffect = $0 }
-            assignIfChanged(effectConfig, to: config.effectConfig) { effectConfig = $0 }
-            assignIfChanged(particleDensity, to: config.effectConfig.particleDensity) { particleDensity = $0 }
-            assignIfChanged(setAsLockScreen, to: config.setAsLockScreen) { setAsLockScreen = $0 }
-            assignIfChanged(videoMuted, to: config.muted) { videoMuted = $0 }
-            assignIfChanged(videoVolume, to: config.videoVolume) { videoVolume = $0 }
-            assignIfChanged(videoColorSpace, to: config.videoColorSpace) { videoColorSpace = $0 }
-            assignIfChanged(selectedFrameRateLimit, to: config.frameRateLimit) { selectedFrameRateLimit = $0 }
-            assignIfChanged(playlistBookmarks, to: config.playlistBookmarks ?? []) { playlistBookmarks = $0 }
-            assignIfChanged(shufflePlaylist, to: config.shufflePlaylist) { shufflePlaylist = $0 }
-            assignIfChanged(playlistRotationMinutes, to: config.playlistRotationMinutes) { playlistRotationMinutes = $0 }
-            assignIfChanged(scheduleSlots, to: config.scheduleSlots ?? []) { scheduleSlots = $0 }
-            if let preset = config.shaderPreset {
-                assignIfChanged(selectedShaderPreset, to: preset) { selectedShaderPreset = $0 }
-            }
-            assignIfChanged(selectedWallpaperType, to: config.wallpaperType) { selectedWallpaperType = $0 }
-            assignIfChanged(selectedWallpaperMode, to: config.wallpaperMode) { selectedWallpaperMode = $0 }
-            assignIfChanged(htmlSource, to: config.htmlSource) { htmlSource = $0 }
-            assignIfChanged(htmlConfig, to: config.htmlConfig ?? .default) { htmlConfig = $0 }
-            assignIfChanged(hasPreviewSource, to: config.wallpaperType == .video && config.hasConfiguredVideoSource) {
-                hasPreviewSource = $0
-            }
-            if config.wallpaperType != .video {
-                assignIfChanged(lastPreviewPosterBookmarkData, to: nil) { lastPreviewPosterBookmarkData = $0 }
-            }
-            loadPreviewPosterIfNeeded()
-        } else {
-            assignIfChanged(playbackSpeed, to: 1.0) { playbackSpeed = $0 }
-            assignIfChanged(selectedFitMode, to: .aspectFill) { selectedFitMode = $0 }
-            assignIfChanged(selectedVideoDisplayMode, to: .perDisplay) { selectedVideoDisplayMode = $0 }
-            assignIfChanged(selectedParticleEffect, to: .none) { selectedParticleEffect = $0 }
-            assignIfChanged(effectConfig, to: .default) { effectConfig = $0 }
-            assignIfChanged(particleDensity, to: 1.0) { particleDensity = $0 }
-            assignIfChanged(setAsLockScreen, to: false) { setAsLockScreen = $0 }
-            assignIfChanged(videoMuted, to: true) { videoMuted = $0 }
-            assignIfChanged(videoVolume, to: 1.0) { videoVolume = $0 }
-            assignIfChanged(selectedFrameRateLimit, to: .fps60) { selectedFrameRateLimit = $0 }
-            assignIfChanged(playlistBookmarks, to: []) { playlistBookmarks = $0 }
-            assignIfChanged(shufflePlaylist, to: false) { shufflePlaylist = $0 }
-            assignIfChanged(playlistRotationMinutes, to: nil) { playlistRotationMinutes = $0 }
-            assignIfChanged(scheduleSlots, to: []) { scheduleSlots = $0 }
-            assignIfChanged(selectedWallpaperType, to: .video) { selectedWallpaperType = $0 }
-            assignIfChanged(selectedWallpaperMode, to: .single) { selectedWallpaperMode = $0 }
-            assignIfChanged(htmlSource, to: nil) { htmlSource = $0 }
-            assignIfChanged(htmlConfig, to: .default) { htmlConfig = $0 }
-            assignIfChanged(hasPreviewSource, to: screen.videoPlayer?.videoURL != nil) { hasPreviewSource = $0 }
+        let config = screenManager.getConfiguration(for: screen)
+        draft = .from(
+            config: config,
+            fallbackHasPreviewSource: screen.videoPlayer?.videoURL != nil
+        )
+
+        if config?.wallpaperType != .video {
             assignIfChanged(lastPreviewPosterBookmarkData, to: nil) { lastPreviewPosterBookmarkData = $0 }
-            previewController.cleanup()
-            loadPreviewPosterIfNeeded()
         }
+        if config == nil {
+            previewController.cleanup()
+        }
+        loadPreviewPosterIfNeeded()
     }
 
     private func assignIfChanged<Value: Equatable>(
@@ -858,6 +495,7 @@ struct ScreenDetailView: View {
 
     private func cleanupPreviewPlayer() {
         lastPreviewPosterBookmarkData = nil
+        draft.hasPreviewSource = false
         previewController.cleanup()
     }
 
@@ -877,14 +515,14 @@ struct ScreenDetailView: View {
 
     /// Routes the banner's "Re-pick" button to the picker matching the current session type.
     private func rePickRuntimeSource() {
-        let activeType = screen.runtimeSession?.wallpaperType ?? selectedWallpaperType
+        let activeType = screen.runtimeSession?.wallpaperType ?? draft.selectedWallpaperType
         switch activeType {
         case .video:
             showFilePicker()
         case .html:
             showHTMLSourcePicker()
         case .metalShader, .scene:
-            selectedWallpaperType = activeType
+            draft.selectedWallpaperType = activeType
         }
     }
 
@@ -897,18 +535,16 @@ struct ScreenDetailView: View {
         panel.prompt = L10n.Panel.useAsWallpaper
         guard panel.runModal() == .OK, let url = panel.url else { return }
         guard isHTMLDrop(url) else {
-            errorMessage = "Choose an HTML file or folder."
-            showErrorAlert = true
+            dropFailure = .htmlPickerWrongType
             return
         }
-        selectedWallpaperType = .html
+        draft.selectedWallpaperType = .html
         applyHTMLDrop(url)
     }
 
     private func handleSelectedFile(url: URL) {
         guard ResourceUtilities.isSupportedVideoURL(url) else {
-            errorMessage = "Choose a supported video file."
-            showErrorAlert = true
+            dropFailure = .videoFormatUnsupported
             return
         }
 
@@ -916,13 +552,12 @@ struct ScreenDetailView: View {
         cleanupPreviewPlayer()
 
         if let bookmarkData = ResourceUtilities.createVideoBookmark(for: url) {
-            hasPreviewSource = true
+            draft.hasPreviewSource = true
             lastPreviewPosterBookmarkData = bookmarkData
             previewController.startPlaybackPreview(from: url, syncTo: nil)
             screenManager.setVideo(url: url, bookmarkData: bookmarkData, for: screen)
         } else {
-            errorMessage = "Error creating secure bookmark. Please try selecting a different video file."
-            showErrorAlert = true
+            dropFailure = .videoBookmarkFailed
         }
 
         Task {
@@ -942,30 +577,6 @@ struct ScreenDetailView: View {
     private func performClearWallpaper() {
         cleanupPreviewPlayer()
         screenManager.clearWallpaperForScreen(screen)
-    }
-
-    private var resetDisplayButton: some View {
-        HStack {
-            Spacer()
-            Button {
-                pendingDestructive = PendingDestructive(
-                    .resetDisplaySettings(displayName: screen.name)
-                ) {
-                    screenManager.resetDisplaySettings(for: screen)
-                }
-            } label: {
-                Label("Reset This Display", systemImage: "arrow.counterclockwise.circle")
-                    .font(.system(size: 12, weight: .medium))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-            }
-            .buttonStyle(.plain)
-            .destructiveControlTint()
-            .adaptiveGlassSurface(.capsule, tint: .red, interactive: true)
-            .help(Text("Reset all playback, color, particle, audio, and layout settings on this display — wallpaper, playlist, and bookmarks stay"))
-            Spacer()
-        }
-        .padding(.top, 8)
     }
 
     private func requestApplyToAll() {
@@ -1018,106 +629,7 @@ struct ScreenDetailView: View {
         return screen.videoPlayer?.videoURL
     }
 
-    private func getScreenRefreshRate() -> Int {
-        screenManager.getScreenRefreshRate(for: screen.id)
-    }
-
-    /// Single card that hosts the wallpaper-mode pill at the top and the
-    /// mode-specific automation content (playlist list / schedule slots) right
-    /// below it, so the user sees the switcher and the surface it controls as
-    /// one decision unit.
-    @ViewBuilder
-    private var wallpaperModeCard: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 12) {
-                wallpaperModePill
-
-                Group {
-                    switch selectedWallpaperMode {
-                    case .single:
-                        EmptyView()
-                    case .playlist:
-                        if featureCatalog.isEnabled(.playlists) {
-                            Divider()
-                            PlaylistSection(
-                                playlistBookmarks: $playlistBookmarks,
-                                shufflePlaylist: $shufflePlaylist,
-                                rotationMinutes: $playlistRotationMinutes,
-                                screen: screen,
-                                screenManager: screenManager
-                            )
-                        }
-                    case .schedule:
-                        if featureCatalog.isEnabled(.scheduleAutomation) {
-                            Divider()
-                            ScheduleSection(
-                                scheduleSlots: $scheduleSlots,
-                                screen: screen,
-                                screenManager: screenManager
-                            )
-                        }
-                    }
-                }
-                .transition(reduceMotion ? .opacity : .asymmetric(
-                    insertion: .opacity.combined(with: .move(edge: .top)),
-                    removal: .opacity
-                ))
-            }
-        }
-        .groupBoxStyle(ContainerGroupBoxStyle())
-    }
-
-    private var wallpaperModePill: some View {
-        HStack(spacing: 0) {
-            ForEach(featureCatalog.capabilities.selectableWallpaperModes) { mode in
-                Button {
-                    withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.18))) {
-                        selectedWallpaperMode = mode
-                    }
-                    screenManager.updateWallpaperMode(mode, for: screen)
-                } label: {
-                    Text(mode.labelKey)
-                        .font(.system(size: 12, weight: selectedWallpaperMode == mode ? .semibold : .regular))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 5)
-                        .background(
-                            Capsule()
-                                .fill(selectedWallpaperMode == mode ? Color.accentColor.opacity(0.35) : Color.clear)
-                        )
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(wallpaperModeAccessibilityLabel(mode))
-            }
-        }
-        .padding(2)
-        .adaptiveGlassSurface(.capsule, interactive: true)
-    }
-
-    private func wallpaperModeAccessibilityLabel(_ mode: WallpaperMode) -> Text {
-        switch mode {
-        case .single:
-            return Text("Single mode", comment: "A11y label for the single wallpaper mode tab.")
-        case .playlist:
-            return Text("Playlist mode", comment: "A11y label for the playlist wallpaper mode tab.")
-        case .schedule:
-            return Text("Schedule mode", comment: "A11y label for the schedule wallpaper mode tab.")
-        }
-    }
-
     // MARK: - Empty State Guide
-
-    /// True when this screen has no persisted configuration, no live runtime
-    /// session, and the user is still on the default Video type. Picking any
-    /// other toolbar segment or guide card exits the first-run guide.
-    private var shouldShowGuideEmptyState: Bool {
-        if isLoading { return false }
-        if selectedWallpaperType != .video { return false }
-        if screenManager.getConfiguration(for: screen) != nil { return false }
-        if screen.runtimeSession != nil { return false }
-        if hasPreviewSource || previewController.hasPreviewContent { return false }
-        return true
-    }
 
     /// Video card opens the existing file picker.
     private func triggerVideoGuideAction() {
@@ -1126,90 +638,15 @@ struct ScreenDetailView: View {
 
     /// HTML / Shader / Scene cards flip the selected type so that type's empty state takes over.
     private func triggerHTMLGuideAction() {
-        selectedWallpaperType = .html
+        draft.selectedWallpaperType = .html
     }
 
     private func triggerShaderGuideAction() {
-        selectedWallpaperType = .metalShader
+        draft.selectedWallpaperType = .metalShader
     }
 
     private func triggerSceneGuideAction() {
-        selectedWallpaperType = .scene
+        draft.selectedWallpaperType = .scene
     }
 }
 
-private struct InspectorResizeHandle: View {
-    static let hitAreaWidth: CGFloat = 28
-
-    let width: CGFloat
-    let minWidth: CGFloat
-    let maxWidth: CGFloat
-    let onPreviewWidthChange: (CGFloat) -> Void
-    let onCommitWidth: (CGFloat) -> Void
-
-    private let handleWidth: CGFloat = 6
-    private let handleHeight: CGFloat = 52
-
-    @State private var dragStartWidth: CGFloat?
-    @State private var isHovering = false
-    @State private var isDragging = false
-
-    var body: some View {
-        ZStack {
-            Color.clear
-                .contentShape(Rectangle())
-
-            Capsule()
-                .fill(.regularMaterial)
-                .overlay(
-                    Capsule()
-                        .strokeBorder(
-                            isActive ? Color.primary.opacity(0.28) : Color.primary.opacity(0.12),
-                            lineWidth: 0.75
-                        )
-                )
-                .frame(width: handleWidth, height: handleHeight)
-                .shadow(color: Color.black.opacity(0.08), radius: 5, x: 0, y: 2)
-                .opacity(isActive ? 0.95 : 0.55)
-        }
-        .frame(width: Self.hitAreaWidth)
-        .frame(maxHeight: .infinity)
-        .animation(.easeOut(duration: 0.12), value: isActive)
-        .gesture(
-            DragGesture(minimumDistance: 2, coordinateSpace: .global)
-                .onChanged { value in
-                    let start = dragStartWidth ?? width
-                    if dragStartWidth == nil {
-                        dragStartWidth = start
-                    }
-                    isDragging = true
-                    onPreviewWidthChange(clamped(start - value.translation.width))
-                }
-                .onEnded { value in
-                    let start = dragStartWidth ?? width
-                    onCommitWidth(clamped(start - value.translation.width))
-                    dragStartWidth = nil
-                    isDragging = false
-                }
-        )
-        .onHover { hovering in
-            isHovering = hovering
-            if hovering {
-                NSCursor.resizeLeftRight.push()
-            } else {
-                NSCursor.pop()
-            }
-        }
-        .help(Text("Drag to resize properties panel"))
-        .accessibilityLabel(Text("Resize properties panel"))
-        .accessibilityHint(Text("Drag horizontally to change the properties panel width"))
-    }
-
-    private var isActive: Bool {
-        isHovering || isDragging
-    }
-
-    private func clamped(_ candidate: CGFloat) -> CGFloat {
-        min(max(candidate, minWidth), maxWidth)
-    }
-}
