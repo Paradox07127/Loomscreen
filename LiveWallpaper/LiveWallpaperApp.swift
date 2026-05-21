@@ -63,7 +63,7 @@ enum SettingsWindowMetrics {
     static let sidebarColumnWidth = DesignTokens.Sidebar.width
     static let sidebarColumnMaxWidth = DesignTokens.Sidebar.maxWidth
     static let defaultContentSize = CGSize(width: 1180, height: 720)
-    static let minimumContentSize = CGSize(width: 1080, height: 650)
+    static let minimumContentSize = CGSize(width: 1080, height: 540)
 }
 
 /// App delegate owns startup and the hand-managed settings/onboarding windows.

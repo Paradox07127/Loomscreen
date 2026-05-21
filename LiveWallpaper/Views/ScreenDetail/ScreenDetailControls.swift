@@ -80,38 +80,3 @@ struct PlaybackToggleButton: View {
     }
 }
 
-struct FitModeButton: View {
-    let mode: VideoFitMode
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 5) {
-                Image(systemName: mode.iconName)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(isSelected ? Color.accentColor : .secondary)
-                    .frame(width: 40, height: 40)
-                    .adaptiveGlassSurface(
-                        .circle,
-                        tint: isSelected ? Color.accentColor : nil,
-                        interactive: true
-                    )
-                            Text(mode.titleKey)
-                                .font(.system(size: 12, weight: isSelected ? .medium : .regular))
-                                .foregroundStyle(isSelected ? .primary : .secondary)
-            }
-            .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.plain)
-        .help(fitModeTooltip)
-        .accessibilityLabel(Text("\(Text(mode.titleKey)) fit mode", comment: "A11y label for a video fit mode button. The placeholder is the mode name."))
-        .accessibilityHint(isSelected
-            ? Text("Currently selected", comment: "A11y hint for the active fit mode button.")
-            : Text("Tap to switch to \(Text(mode.titleKey)) fit mode", comment: "A11y hint to switch fit mode. The placeholder is the mode name."))
-    }
-
-    private var fitModeTooltip: Text {
-        Text(mode.tooltipKey)
-    }
-}
