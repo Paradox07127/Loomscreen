@@ -1,9 +1,10 @@
 import SwiftUI
 import AppKit
-import UniformTypeIdentifiers
+import LiveWallpaperSharedUI
 
-/// Unified playlist UI: primary + extras share one reorderable list, with
-/// star (primary) + pulse (now-playing) badges per row.
+/// Apple Music-style playlist UI: thumbnail rows with double-line title +
+/// subtitle, hover-only ellipsis, leading number↔handle cross-fade, and
+/// `EQPulseBar` for the now-playing row.
 ///
 /// Drag-reorder is built on `DragGesture` + a `PreferenceKey` that tracks
 /// each row's frame. We deliberately avoid SwiftUI's `.draggable` /
@@ -12,9 +13,13 @@ import UniformTypeIdentifiers
 /// were siblings of the same VStack. Hand-rolled gesture has no dependency
 /// on AppKit's dragging-session machinery, so the reorder is deterministic.
 ///
-/// Reorder is intentionally side-effect-free: the visible list order is
-/// the only thing that changes. The starred entry keeps its star at its
-/// new position, the currently-playing video keeps playing, no reload.
+/// The gesture is attached **only** to the leading-handle hit area on each
+/// row so the row body can still receive double-tap to play and right-click
+/// to open a context menu without those gestures racing.
+///
+/// Reorder is intentionally side-effect-free: the visible list order is the
+/// only thing that changes. The starred entry keeps its star at its new
+/// position, the currently-playing video keeps playing, no reload.
 struct PlaylistSection: View {
     @Binding var playlistBookmarks: [Data]
     @Binding var shufflePlaylist: Bool
@@ -27,18 +32,22 @@ struct PlaylistSection: View {
 
     // MARK: Drag-reorder state
     @State private var rowFrames: [PlaylistRowFrame] = []
+    /// Snapshot of `rowFrames` taken at drag start. Used in
+    /// `computeInsertionIndex` instead of live `rowFrames` so the dragged
+    /// row's own `.offset` cannot create a feedback loop where its
+    /// shifting frame perturbs the very index used to decide where it
+    /// should drop.
+    @State private var dragSnapshotFrames: [PlaylistRowFrame]?
     @State private var draggingID: PlaylistEntry.ID?
     @State private var dragOffsetY: CGFloat = 0
     @State private var insertionIndex: Int?
+    @State private var rotatePopoverShown = false
 
-    private let rotationOptions: [(LocalizedStringKey, Int?)] = [
-        ("Off", nil),
-        ("15 min", 15),
-        ("30 min", 30),
-        ("1 hour", 60),
-        ("2 hours", 120),
-        ("4 hours", 240),
-    ]
+    /// Default rotation interval (minutes) when the user enables auto-rotate
+    /// from the `Off` state. 30 mins is a middle-ground that's neither too
+    /// twitchy nor too lazy.
+    private static let defaultRotationMinutes = 30
+    private static let rotationMinutesRange = 1...1440
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -48,69 +57,8 @@ struct PlaylistSection: View {
                 entryList
             }
 
-            HStack(spacing: 6) {
-                Button(action: { screenManager.regressPlaylist(for: screen) }) {
-                    HStack(spacing: 3) {
-                        Image(systemName: "backward.fill")
-                        Text("Prev").lineLimit(1)
-                    }
-                }
-                .buttonStyle(GlassCapsuleButtonStyle(fontSize: 11, horizontalPadding: 6))
-                .disabled(entries.count < 2)
-                .accessibilityLabel(Text("Skip to previous video"))
-
-                Button(action: addVideos) {
-                    HStack(spacing: 3) {
-                        Image(systemName: "plus.circle.fill")
-                        Text("Add").lineLimit(1)
-                    }
-                }
-                .buttonStyle(GlassCapsuleButtonStyle(fontSize: 11, horizontalPadding: 6))
-                .accessibilityLabel(Text("Add videos to playlist"))
-
-                Button(action: { screenManager.advancePlaylist(for: screen) }) {
-                    HStack(spacing: 3) {
-                        Text("Next").lineLimit(1)
-                        Image(systemName: "forward.fill")
-                            .contentTransition(.symbolEffect(.replace))
-                    }
-                }
-                .buttonStyle(GlassCapsuleButtonStyle(fontSize: 11, horizontalPadding: 6))
-                .disabled(entries.count < 2)
-                .accessibilityLabel(Text("Skip to next video"))
-            }
-            .frame(maxWidth: .infinity, alignment: .center)
-
-            if entries.count >= 2 {
-                Divider()
-
-                SettingRow(icon: "timer", iconColor: .orange, title: "Rotate") {
-                    Picker("", selection: Binding(
-                        get: { rotationMinutes },
-                        set: { newValue in
-                            rotationMinutes = newValue
-                            screenManager.updatePlaylistRotationMinutes(newValue, for: screen)
-                        }
-                    )) {
-                        ForEach(rotationOptions, id: \.1) { label, value in
-                            Text(label).tag(value)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 90)
-                    .accessibilityLabel(Text("Rotation interval"))
-                }
-
-                SettingRow(icon: "shuffle", iconColor: .purple, title: "Shuffle") {
-                    Toggle("", isOn: $shufflePlaylist)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .onChange(of: shufflePlaylist) { _, newValue in
-                            screenManager.updateShufflePlaylist(newValue, for: screen)
-                        }
-                        .accessibilityLabel(Text("Shuffle playlist"))
-                }
-            }
+            actionBar
+                .animation(.snappy(duration: 0.18), value: entries.count >= 2)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear { scheduleEntriesLoad() }
@@ -119,6 +67,15 @@ struct PlaylistSection: View {
         }
         .onChange(of: playlistBookmarks) {
             scheduleEntriesLoad()
+        }
+        .onChange(of: entries.count) { _, newCount in
+            // If the user trims the playlist back below two entries while
+            // the rotate popover is open, drop the popover state so it
+            // can't be revived by SwiftUI re-presenting against a now-
+            // hidden anchor button.
+            if newCount < 2, rotatePopoverShown {
+                rotatePopoverShown = false
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .wallpaperConfigurationDidChange)) { notification in
             guard let changedID = notification.userInfo?["screenID"] as? CGDirectDisplayID,
@@ -142,16 +99,217 @@ struct PlaylistSection: View {
     }
 
     @ViewBuilder
+    private var actionBar: some View {
+        // count <= 1: shuffle / prev / next / rotate are all functionally
+        // disabled, so collapse the bar to just a centred `+` button.
+        // Avoids showing four greyed-out controls to users who haven't yet
+        // built up a multi-video playlist.
+        if entries.count < 2 {
+            HStack {
+                Spacer()
+                playlistIconButton(
+                    systemName: "plus",
+                    accessibility: Text("Add videos to playlist"),
+                    help: Text("Add")
+                ) { addVideos() }
+                Spacer()
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 4)
+            .padding(.top, 4)
+        } else {
+            HStack(spacing: 0) {
+                shuffleToggleButton
+
+                Spacer(minLength: 8)
+
+                HStack(spacing: 6) {
+                    playlistIconButton(
+                        systemName: "backward.fill",
+                        accessibility: Text("Skip to previous video"),
+                        help: Text("Prev")
+                    ) { screenManager.regressPlaylist(for: screen) }
+
+                    playlistIconButton(
+                        systemName: "plus",
+                        accessibility: Text("Add videos to playlist"),
+                        help: Text("Add")
+                    ) { addVideos() }
+
+                    playlistIconButton(
+                        systemName: "forward.fill",
+                        accessibility: Text("Skip to next video"),
+                        help: Text("Next")
+                    ) { screenManager.advancePlaylist(for: screen) }
+                }
+
+                Spacer(minLength: 8)
+
+                rotateMenuButton
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 4)
+            .padding(.top, 4)
+        }
+    }
+
+    @ViewBuilder
+    private var shuffleToggleButton: some View {
+        let isOn = shufflePlaylist
+        let disabled = entries.count < 2
+        Button {
+            shufflePlaylist.toggle()
+            screenManager.updateShufflePlaylist(shufflePlaylist, for: screen)
+        } label: {
+            Image(systemName: "shuffle")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(isOn ? Color.white : .secondary)
+                .frame(width: 28, height: 24)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(isOn ? Color.accentColor : Color.clear)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .opacity(disabled ? 0.4 : 1)
+        .help(Text("Shuffle playlist"))
+        .accessibilityLabel(Text("Shuffle playlist"))
+        .accessibilityValue(Text(isOn ? "On" : "Off"))
+    }
+
+    @ViewBuilder
+    private var rotateMenuButton: some View {
+        let isActive = rotationMinutes != nil
+        let disabled = entries.count < 2
+        Button {
+            rotatePopoverShown = true
+        } label: {
+            Image(systemName: "timer")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(isActive ? Color.white : .secondary)
+                .frame(width: 28, height: 24)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(isActive ? Color.accentColor : Color.clear)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .opacity(disabled ? 0.4 : 1)
+        .help(Text("Rotate"))
+        .accessibilityLabel(Text("Rotation interval"))
+        .accessibilityValue(rotateAccessibilityValue)
+        .popover(isPresented: $rotatePopoverShown, arrowEdge: .top) {
+            rotatePopoverContent
+        }
+    }
+
+    private var rotateAccessibilityValue: Text {
+        if let minutes = rotationMinutes {
+            return Text("\(minutes) minutes")
+        }
+        return Text("Off")
+    }
+
+    @ViewBuilder
+    private var rotatePopoverContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Toggle(isOn: autoRotateBinding) {
+                Text("Auto-rotate")
+                    .font(.system(size: 13, weight: .medium))
+            }
+            .toggleStyle(.switch)
+
+            if rotationMinutes != nil {
+                HStack(spacing: 6) {
+                    TextField("", value: rotateIntervalBinding, format: .number)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 60)
+                        .multilineTextAlignment(.center)
+                        .accessibilityLabel(Text("Rotation interval in minutes"))
+                    Stepper("", value: rotateIntervalBinding, in: Self.rotationMinutesRange)
+                        .labelsHidden()
+                        .accessibilityLabel(Text("Adjust rotation interval"))
+                    Text("min")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(14)
+        .frame(minWidth: 200)
+    }
+
+    private var autoRotateBinding: Binding<Bool> {
+        Binding(
+            get: { rotationMinutes != nil },
+            set: { isOn in
+                let next: Int? = isOn
+                    ? max(1, rotationMinutes ?? Self.defaultRotationMinutes)
+                    : nil
+                rotationMinutes = next
+                screenManager.updatePlaylistRotationMinutes(next, for: screen)
+            }
+        )
+    }
+
+    private var rotateIntervalBinding: Binding<Int> {
+        Binding(
+            get: { rotationMinutes ?? Self.defaultRotationMinutes },
+            set: { newValue in
+                let clamped = min(
+                    max(newValue, Self.rotationMinutesRange.lowerBound),
+                    Self.rotationMinutesRange.upperBound
+                )
+                rotationMinutes = clamped
+                screenManager.updatePlaylistRotationMinutes(clamped, for: screen)
+            }
+        )
+    }
+
+    @ViewBuilder
+    private func playlistIconButton(
+        systemName: String,
+        accessibility: Text,
+        help: Text,
+        disabled: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 28, height: 24)
+                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .opacity(disabled ? 0.4 : 1)
+        .help(help)
+        .accessibilityLabel(accessibility)
+    }
+
+    @ViewBuilder
     private var entryList: some View {
         VStack(spacing: 0) {
             ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
                 insertionMarker(showAt: index)
-                rowView(for: entry)
-                    .padding(.vertical, 2)
+                rowView(for: entry, index: index)
+                if index < entries.count - 1 {
+                    // Aligns the divider's left edge with the thumbnail's
+                    // right edge: row padding 8 + handle 28 + spacing 10
+                    // + thumbnail 36 = 82.
+                    Divider()
+                        .opacity(0.08)
+                        .padding(.leading, 82)
+                }
             }
             insertionMarker(showAt: entries.count)
         }
-        .coordinateSpace(name: PlaylistCoordSpace)
+        .coordinateSpace(name: playlistCoordSpaceName)
         .onPreferenceChange(PlaylistRowFramesKey.self) { frames in
             rowFrames = frames
         }
@@ -160,8 +318,9 @@ struct PlaylistSection: View {
 
     @ViewBuilder
     private func insertionMarker(showAt index: Int) -> some View {
+        let isActive = insertionIndex == index && draggingID != nil
         ZStack {
-            if insertionIndex == index, draggingID != nil {
+            if isActive {
                 Capsule()
                     .fill(Color.accentColor)
                     .frame(height: 2)
@@ -170,17 +329,35 @@ struct PlaylistSection: View {
                     .accessibilityHidden(true)
             }
         }
-        .frame(height: 2)
+        .frame(height: isActive ? 2 : 0)
     }
 
     @ViewBuilder
-    private func rowView(for entry: PlaylistEntry) -> some View {
+    private func rowView(for entry: PlaylistEntry, index: Int) -> some View {
         PlaylistRow(
             entry: entry,
+            index: index,
             isBeingDragged: draggingID == entry.id,
             onSetPrimary: { setAsPrimary(entry) },
             onPlayNow: { playNow(entry) },
-            onRemove: { remove(entry) }
+            onRemove: { remove(entry) },
+            onDragChanged: { translationY, locationY in
+                if draggingID != entry.id {
+                    draggingID = entry.id
+                    dragSnapshotFrames = rowFrames
+                }
+                dragOffsetY = translationY
+                insertionIndex = computeInsertionIndex(pointerY: locationY)
+            },
+            onDragEnded: {
+                let sourceID = entry.id
+                let target = insertionIndex
+                draggingID = nil
+                dragOffsetY = 0
+                insertionIndex = nil
+                dragSnapshotFrames = nil
+                if let target { commitReorder(sourceID: sourceID, toIndex: target) }
+            }
         )
         .background(
             GeometryReader { proxy in
@@ -188,50 +365,23 @@ struct PlaylistSection: View {
                     key: PlaylistRowFramesKey.self,
                     value: [PlaylistRowFrame(
                         id: entry.id,
-                        frame: proxy.frame(in: .named(PlaylistCoordSpace))
+                        frame: proxy.frame(in: .named(playlistCoordSpaceName))
                     )]
                 )
             }
         )
         .offset(y: draggingID == entry.id ? dragOffsetY : 0)
         .zIndex(draggingID == entry.id ? 1 : 0)
-        .contextMenu {
-            Button("Set as Primary", systemImage: "star.fill") { setAsPrimary(entry) }
-                .disabled(entry.isPrimary)
-            Button("Play Now", systemImage: "play.fill") { playNow(entry) }
-                .disabled(entry.isPlaying)
-            Divider()
-            Button("Remove", systemImage: "trash", role: .destructive) { remove(entry) }
-        }
-        .gesture(reorderGesture(for: entry))
-    }
-
-    private func reorderGesture(for entry: PlaylistEntry) -> some Gesture {
-        DragGesture(minimumDistance: 4, coordinateSpace: .named(PlaylistCoordSpace))
-            .onChanged { value in
-                if draggingID != entry.id {
-                    draggingID = entry.id
-                }
-                dragOffsetY = value.translation.height
-                insertionIndex = computeInsertionIndex(
-                    draggedID: entry.id,
-                    pointerY: value.location.y
-                )
-            }
-            .onEnded { _ in
-                let sourceID = entry.id
-                let target = insertionIndex
-                draggingID = nil
-                dragOffsetY = 0
-                insertionIndex = nil
-                if let target { commitReorder(sourceID: sourceID, toIndex: target) }
-            }
     }
 
     /// Pick the insertion slot whose midpoint sits just below the pointer.
-    private func computeInsertionIndex(draggedID: PlaylistEntry.ID, pointerY: CGFloat) -> Int {
-        guard !rowFrames.isEmpty else { return 0 }
-        let sorted = rowFrames.sorted { $0.frame.minY < $1.frame.minY }
+    /// Uses `dragSnapshotFrames` (a static snapshot captured at drag start)
+    /// to avoid a feedback loop where the dragged row's live offset shifts
+    /// its own frame and perturbs the index computation.
+    private func computeInsertionIndex(pointerY: CGFloat) -> Int {
+        let frames = dragSnapshotFrames ?? rowFrames
+        guard !frames.isEmpty else { return 0 }
+        let sorted = frames.sorted { $0.frame.minY < $1.frame.minY }
         for (idx, rowFrame) in sorted.enumerated() {
             if pointerY < rowFrame.frame.midY {
                 return idx
@@ -270,14 +420,21 @@ struct PlaylistSection: View {
             return
         }
         let combined = config.combinedPlaylist
-        let cursor = config.playlistCursorIndex ?? 0
-        let activeBookmark = (cursor < combined.count) ? combined[cursor] : primary
-
-        let nextEntries = combined.map { bookmark in
+        let storedCursor = config.playlistCursorIndex ?? 0
+        // `indices.contains(_:)` defends against negative or out-of-bounds
+        // values that could slip through a corrupted persisted config.
+        let cursor = combined.indices.contains(storedCursor) ? storedCursor : 0
+        // Identity by index so duplicate bookmark Data within the same
+        // playlist still produce distinct rows (ForEach IDs, primary /
+        // playing flags). Comparing by Data alone would collapse the
+        // duplicates into a single SwiftUI identity.
+        let primaryIndex = combined.firstIndex(of: primary)
+        let nextEntries = combined.enumerated().map { index, bookmark in
             PlaylistEntry(
+                id: "\(bookmark.base64EncodedString())::\(index)",
                 bookmark: bookmark,
-                isPrimary: bookmark == primary,
-                isPlaying: bookmark == activeBookmark,
+                isPrimary: index == primaryIndex,
+                isPlaying: index == cursor,
                 name: screenManager.bookmarkDisplayName(for: bookmark)
                     ?? String(localized: "Unknown", defaultValue: "Unknown", comment: "Fallback playlist entry name.")
             )
@@ -298,7 +455,11 @@ struct PlaylistSection: View {
             guard !urls.isEmpty else { return }
             SettingsManager.shared.saveLastUsedDirectory(urls[0].deletingLastPathComponent())
 
-            let existingPaths = currentPlaylistResolvedPaths()
+            // Seed with the current playlist's canonical paths, then add
+            // each newly-accepted path so a single panel selection
+            // containing the original file + a symlink (or the same file
+            // twice) collapses to one entry.
+            var existingPaths = currentPlaylistResolvedPaths()
             var skipped = 0
 
             for url in urls {
@@ -310,6 +471,7 @@ struct PlaylistSection: View {
                 if let bookmark = ResourceUtilities.createVideoBookmark(for: url) {
                     screenManager.recordBookmarkDisplayName(bookmark, name: url.lastPathComponent)
                     playlistBookmarks.append(bookmark)
+                    existingPaths.insert(path)
                 }
             }
             screenManager.updatePlaylistBookmarks(playlistBookmarks, for: screen)
@@ -368,7 +530,21 @@ struct PlaylistSection: View {
     private func performRemove(_ entry: PlaylistEntry) {
         var newEntries = entries
         newEntries.removeAll(where: { $0.id == entry.id })
+        Self.invalidateCaches(for: entry.bookmark)
         applyEntriesAfterRemove(newEntries, removedPrimary: entry.isPrimary)
+    }
+
+    /// Free the metadata + thumbnail caches the row was holding. The
+    /// caches are bounded so this isn't a leak fix, but proactively
+    /// dropping entries means bulk-removing a playlist returns the
+    /// memory now rather than waiting for natural eviction.
+    private static func invalidateCaches(for bookmark: Data) {
+        WallpaperThumbnailService.shared.invalidate(
+            cacheKey: AsyncRowThumbnail.cacheKey(for: bookmark)
+        )
+        Task.detached(priority: .utility) {
+            await PlaylistMetadataService.shared.invalidate(bookmark)
+        }
     }
 
     /// Removal path: may promote a new primary if the deleted entry was primary.
@@ -408,10 +584,11 @@ struct PlaylistSection: View {
 // MARK: - PlaylistEntry View Model
 
 struct PlaylistEntry: Identifiable, Equatable {
-    /// Identity is the bookmark — `isPrimary` is a property of the entry, not
-    /// part of its identity, so a row whose primary status flips animates as
-    /// an update rather than a delete + insert.
-    var id: String { bookmark.base64EncodedString() }
+    /// Identity is `<bookmark>::<index>` rather than the bookmark alone so
+    /// duplicate bookmark Data within the same playlist still produces
+    /// distinct rows. `isPrimary` is excluded from identity so a row whose
+    /// star flips animates as an update rather than delete + insert.
+    let id: String
     let bookmark: Data
     var isPrimary: Bool
     var isPlaying: Bool
@@ -420,126 +597,16 @@ struct PlaylistEntry: Identifiable, Equatable {
 
 // MARK: - Row position tracking
 
-private let PlaylistCoordSpace = "playlist.row.space"
+let playlistCoordSpaceName = "playlist.row.space"
 
 struct PlaylistRowFrame: Equatable, Sendable {
     let id: PlaylistEntry.ID
     let frame: CGRect
 }
 
-private struct PlaylistRowFramesKey: PreferenceKey {
+struct PlaylistRowFramesKey: PreferenceKey {
     static let defaultValue: [PlaylistRowFrame] = []
     static func reduce(value: inout [PlaylistRowFrame], nextValue: () -> [PlaylistRowFrame]) {
         value.append(contentsOf: nextValue())
-    }
-}
-
-// MARK: - PlaylistRow
-
-private struct PlaylistRow: View {
-    let entry: PlaylistEntry
-    let isBeingDragged: Bool
-    let onSetPrimary: () -> Void
-    let onPlayNow: () -> Void
-    let onRemove: () -> Void
-
-    @State private var isHovering = false
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "line.3.horizontal")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.tertiary)
-                .frame(width: 14)
-
-            ZStack {
-                if entry.isPlaying {
-                    Image(systemName: "circle.fill")
-                        .font(.system(size: 8))
-                        .foregroundStyle(.green)
-                        .symbolEffect(.pulse, options: .continuouslyRepeating, isActive: true)
-                } else if entry.isPrimary {
-                    Image(systemName: "star.fill")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.yellow)
-                } else {
-                    Image(systemName: "film")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .frame(width: 14)
-
-            Text(verbatim: entry.name)
-                .font(.system(size: 12, weight: entry.isPlaying ? .semibold : .regular))
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .layoutPriority(1)
-                .help(Text(verbatim: entry.name))
-
-            Spacer(minLength: 4)
-
-            if entry.isPrimary {
-                Image(systemName: "star.fill")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.yellow)
-                    .frame(width: 18, height: 18)
-                    .background(Capsule().fill(Color.yellow.opacity(0.15)))
-                    .help(Text("Primary video"))
-            }
-
-            Menu {
-                Button("Set as Primary", systemImage: "star.fill", action: onSetPrimary)
-                    .disabled(entry.isPrimary)
-                Button("Play Now", systemImage: "play.fill", action: onPlayNow)
-                    .disabled(entry.isPlaying)
-                Divider()
-                Button("Remove", systemImage: "trash", role: .destructive, action: onRemove)
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 18, height: 18)
-                    .contentShape(Rectangle())
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .frame(width: 18)
-            .opacity(isHovering ? 1 : 0.6)
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(rowBackground)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(entry.isPlaying ? Color.green.opacity(0.45) : Color.clear, lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(isBeingDragged ? 0.22 : 0), radius: 8, x: 0, y: 4)
-        .contentShape(Rectangle())
-        .onHover { isHovering = $0 }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(accessibilityLabel)
-    }
-
-    private var accessibilityLabel: Text {
-        switch (entry.isPrimary, entry.isPlaying) {
-        case (true, true):
-            return Text("Primary now playing \(entry.name)", comment: "Playlist row a11y label. The placeholder is the video name.")
-        case (true, false):
-            return Text("Primary \(entry.name)", comment: "Playlist row a11y label. The placeholder is the video name.")
-        case (false, true):
-            return Text("Now playing \(entry.name)", comment: "Playlist row a11y label. The placeholder is the video name.")
-        case (false, false):
-            return Text(verbatim: entry.name)
-        }
-    }
-
-    private var rowBackground: Color {
-        if entry.isPlaying { return Color.green.opacity(0.08) }
-        if isHovering { return Color.primary.opacity(0.05) }
-        return Color.clear
     }
 }

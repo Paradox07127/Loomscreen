@@ -93,14 +93,15 @@ public struct ProductCapabilities: Sendable, Equatable {
     }
 
     /// Filtered list of automation modes exposed to the WallpaperMode picker.
-    /// `.single` is always available; `.playlist` and `.schedule` require
-    /// the corresponding features. Lite collapses the picker to a single
-    /// option when both automation features are disabled.
+    /// `.playlist` is the universal default (a single-video setup is just a
+    /// one-entry playlist) and is always available. `.schedule` requires
+    /// the schedule-automation feature. SKUs with neither still get
+    /// `.playlist` so the picker collapses to a single non-selectable
+    /// option rather than disappearing entirely.
     public var selectableWallpaperModes: [WallpaperMode] {
         WallpaperMode.allCases.filter { mode in
             switch mode {
-            case .single:   return true
-            case .playlist: return enabledFeatures.contains(.playlists)
+            case .playlist: return true
             case .schedule: return enabledFeatures.contains(.scheduleAutomation)
             }
         }

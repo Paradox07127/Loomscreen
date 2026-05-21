@@ -94,6 +94,11 @@ final class WallpaperAutomationOrchestrator {
         let oldActive: Data? = oldCursor < oldCombined.count ? oldCombined[oldCursor] : config.videoBookmarkData
 
         let primaryChanged = config.savedVideoBookmarkData != primary
+        // The currently-playing bookmark may have been deleted from the
+        // playlist. If so we must reload so the running player swaps to
+        // the new cursor target — otherwise the config and UI agree but
+        // the wallpaper keeps playing the removed clip.
+        let activeWasRemoved = oldActive.map { !ordered.contains($0) } ?? false
         let extras = ordered.enumerated().compactMap { idx, b -> Data? in
             idx == primaryIndex ? nil : b
         }
@@ -113,7 +118,7 @@ final class WallpaperAutomationOrchestrator {
         }
         saveConfiguration(config)
 
-        if existing == nil || primaryChanged {
+        if existing == nil || primaryChanged || activeWasRemoved {
             reloadWallpaperForScreen(screen)
         }
     }
@@ -181,8 +186,6 @@ final class WallpaperAutomationOrchestrator {
         saveConfiguration(config)
 
         switch mode {
-        case .single:
-            reloadWallpaperForScreen(screen)
         case .playlist:
             let combined = config.combinedPlaylist
             guard !combined.isEmpty else { return }

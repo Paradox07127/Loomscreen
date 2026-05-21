@@ -75,13 +75,24 @@ public struct GlobalSettings: Codable, Sendable {
     /// 150 MB default — covers a typical 30s 1080p clip outright and a 30s
     /// low-bitrate 4K with margin, while keeping the visible memory
     /// footprint under ~200 MB per screen so users glancing at Activity
-    /// Monitor don't see a "壁纸 用了 600 MB" surprise.
+    /// Monitor don't see a "壁纸 用了 600 MB" surprise. Users with high
+    /// bitrate 4K@60 short clips (~150 MB+) can bump this in General
+    /// Settings without recompiling.
     public static let defaultVideoCacheBytes: Int = 150 * 1024 * 1024
 
     /// Hard ceiling exposed by the settings slider. Above this we'd be
     /// either accepting RAM pressure on smaller Macs or quietly enabling
     /// scenarios the auto-policy was meant to filter out.
     public static let maxVideoCacheBytes: Int = 1024 * 1024 * 1024
+
+    /// Normalises any user-supplied or persisted budget into the valid
+    /// range. Negative values fall back to the default; positive values
+    /// are clamped at the hard ceiling. `0` is preserved — it's the
+    /// documented opt-out for in-memory caching.
+    public static func clampedVideoCacheBytes(_ value: Int) -> Int {
+        if value < 0 { return defaultVideoCacheBytes }
+        return min(value, maxVideoCacheBytes)
+    }
 
     public init(
         // Default `false` so a freshly-installed or reset app plays its
@@ -110,7 +121,7 @@ public struct GlobalSettings: Codable, Sendable {
         self.weatherLocation = weatherLocation
         self.globalShortcuts = globalShortcuts
         self.recentWPEImports = recentWPEImports
-        self.videoCacheMaxBytesPerScreen = videoCacheMaxBytesPerScreen
+        self.videoCacheMaxBytesPerScreen = Self.clampedVideoCacheBytes(videoCacheMaxBytesPerScreen)
         self.videoDecoderPreference = videoDecoderPreference
     }
 
@@ -127,11 +138,7 @@ public struct GlobalSettings: Codable, Sendable {
         globalShortcuts = (try? c.decodeIfPresent([GlobalShortcutAction.RawAction: GlobalShortcutBinding?].self, forKey: .globalShortcuts)) ?? [:]
         recentWPEImports = (try? c.decodeIfPresent([WPEHistoryEntry].self, forKey: .recentWPEImports)) ?? []
         let storedCache = (try? c.decodeIfPresent(Int.self, forKey: .videoCacheMaxBytesPerScreen)) ?? GlobalSettings.defaultVideoCacheBytes
-        if storedCache < 0 {
-            videoCacheMaxBytesPerScreen = GlobalSettings.defaultVideoCacheBytes
-        } else {
-            videoCacheMaxBytesPerScreen = min(storedCache, GlobalSettings.maxVideoCacheBytes)
-        }
+        videoCacheMaxBytesPerScreen = GlobalSettings.clampedVideoCacheBytes(storedCache)
         videoDecoderPreference = (try? c.decodeIfPresent(VideoDecoderPreference.self, forKey: .videoDecoderPreference)) ?? .auto
     }
 }

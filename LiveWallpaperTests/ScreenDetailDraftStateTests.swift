@@ -11,7 +11,7 @@ struct ScreenDetailDraftStateTests {
             selectedFitMode: .aspectFill,
             selectedVideoDisplayMode: .perDisplay,
             selectedWallpaperType: .video,
-            selectedWallpaperMode: .single,
+            selectedWallpaperMode: .playlist,
             selectedParticleEffect: .none,
             effectConfig: .default,
             selectedShaderPreset: .waves,

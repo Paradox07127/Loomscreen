@@ -270,15 +270,27 @@ struct MenuBarPlaybackControlTests {
 
 @Suite("PlaylistEntry identity")
 struct PlaylistEntryIdentityTests {
-    @Test("Entry ID is the bookmark's base64 encoding and stays stable when primary/playing flip")
-    func entryIDUsesStableBookmarkEncoding() {
+    @Test("Two entries with the same bookmark but different indices get distinct IDs")
+    func duplicateBookmarkAtDifferentIndicesDiverge() {
         let bookmark = Data([0x01, 0x02, 0x03, 0x04])
+        let first = PlaylistEntry(
+            id: "\(bookmark.base64EncodedString())::0",
+            bookmark: bookmark, isPrimary: true, isPlaying: false, name: "A"
+        )
+        let second = PlaylistEntry(
+            id: "\(bookmark.base64EncodedString())::1",
+            bookmark: bookmark, isPrimary: false, isPlaying: false, name: "A copy"
+        )
+        #expect(first.id != second.id)
+    }
 
-        let primary = PlaylistEntry(bookmark: bookmark, isPrimary: true, isPlaying: false, name: "Primary")
-        let extra = PlaylistEntry(bookmark: bookmark, isPrimary: false, isPlaying: false, name: "Extra")
-        #expect(primary.id == "AQIDBA==")
-        #expect(extra.id == "AQIDBA==")
-        #expect(primary.id == extra.id)
+    @Test("Entry ID is stable across primary/playing flips at the same index")
+    func entryIDStableUnderFlagFlip() {
+        let bookmark = Data([0x05, 0x06])
+        let id = "\(bookmark.base64EncodedString())::2"
+        let before = PlaylistEntry(id: id, bookmark: bookmark, isPrimary: false, isPlaying: false, name: "X")
+        let after = PlaylistEntry(id: id, bookmark: bookmark, isPrimary: true, isPlaying: true, name: "X")
+        #expect(before.id == after.id)
     }
 }
 
@@ -1263,9 +1275,6 @@ struct SchedulePolicyTests {
                 ScheduleSlot(startHour: 6, endHour: 12, videoBookmarkData: scheduled, label: "Morning")
             ]
         )
-
-        configuration.wallpaperMode = .single
-        #expect(SchedulePolicy.decision(for: configuration, hour: 8) == .none)
 
         configuration.wallpaperMode = .playlist
         #expect(SchedulePolicy.decision(for: configuration, hour: 8) == .none)

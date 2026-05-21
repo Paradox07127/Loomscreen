@@ -924,12 +924,11 @@ struct ScreenConfigurationDecoderTests {
 
     @Test("Legacy JSON without wallpaperMode + scheduleSlots → infers .schedule")
     func legacyInferScheduleMode() throws {
-        var config = ScreenConfiguration(
+        let config = ScreenConfiguration(
             screenID: 1,
             videoBookmarkData: Data([0x01]),
             scheduleSlots: [ScheduleSlot(startHour: 6, endHour: 12, label: "Morning")]
         )
-        config.wallpaperMode = .single
         let encoded = try JSONEncoder().encode(config)
         var dict = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
         dict.removeValue(forKey: "wallpaperMode")
@@ -938,24 +937,8 @@ struct ScreenConfigurationDecoderTests {
         #expect(decoded.wallpaperMode == .schedule)
     }
 
-    @Test("Legacy JSON without wallpaperMode + playlistBookmarks → infers .playlist")
-    func legacyInferPlaylistMode() throws {
-        var config = ScreenConfiguration(
-            screenID: 2,
-            videoBookmarkData: Data([0x01]),
-            playlistBookmarks: [Data([0x02])]
-        )
-        config.wallpaperMode = .single
-        let encoded = try JSONEncoder().encode(config)
-        var dict = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
-        dict.removeValue(forKey: "wallpaperMode")
-        let stripped = try JSONSerialization.data(withJSONObject: dict)
-        let decoded = try JSONDecoder().decode(ScreenConfiguration.self, from: stripped)
-        #expect(decoded.wallpaperMode == .playlist)
-    }
-
-    @Test("Legacy JSON without wallpaperMode + neither schedule nor playlist → .single")
-    func legacyInferSingleMode() throws {
+    @Test("Legacy JSON without wallpaperMode (no schedule) → defaults to .playlist")
+    func legacyInferDefaultPlaylistMode() throws {
         let config = ScreenConfiguration(
             screenID: 3,
             videoBookmarkData: Data([0x01])
@@ -965,7 +948,21 @@ struct ScreenConfigurationDecoderTests {
         dict.removeValue(forKey: "wallpaperMode")
         let stripped = try JSONSerialization.data(withJSONObject: dict)
         let decoded = try JSONDecoder().decode(ScreenConfiguration.self, from: stripped)
-        #expect(decoded.wallpaperMode == .single)
+        #expect(decoded.wallpaperMode == .playlist)
+    }
+
+    @Test("Legacy `single` value in stored wallpaperMode rolls forward to .playlist")
+    func legacySingleStringRollsToPlaylist() throws {
+        let config = ScreenConfiguration(
+            screenID: 4,
+            videoBookmarkData: Data([0x01])
+        )
+        let encoded = try JSONEncoder().encode(config)
+        var dict = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
+        dict["wallpaperMode"] = "single"
+        let mutated = try JSONSerialization.data(withJSONObject: dict)
+        let decoded = try JSONDecoder().decode(ScreenConfiguration.self, from: mutated)
+        #expect(decoded.wallpaperMode == .playlist)
     }
 
     @Test("Explicit wallpaperMode field round-trips intact")

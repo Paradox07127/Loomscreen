@@ -77,13 +77,24 @@ final class InMemoryVideoAssetLoader: NSObject, AVAssetResourceLoaderDelegate, @
             } else {
                 end = min(start &+ requested, data.count)
             }
-            if start < end {
-                let slice = data[start..<end]
-                dataRequest.respond(with: Data(slice))
+            // Respond in bounded chunks so a large requested range can't
+            // trigger a single multi-hundred-MB `Data` copy. AVFoundation
+            // accepts repeated `respond(with:)` calls before
+            // `finishLoading()` and stitches them into one fulfilled range.
+            var offset = start
+            while offset < end {
+                let next = min(offset &+ Self.chunkSize, end)
+                dataRequest.respond(with: Data(data[offset..<next]))
+                offset = next
             }
         }
 
         loadingRequest.finishLoading()
         return true
     }
+
+    /// 2 MB per chunk strikes a balance between syscall overhead and
+    /// peak temporary copy size. AVFoundation typically asks for at most
+    /// a few MB at a time, so most requests fulfill in one or two chunks.
+    private static let chunkSize: Int = 2 * 1024 * 1024
 }

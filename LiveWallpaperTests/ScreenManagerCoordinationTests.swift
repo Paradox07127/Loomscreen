@@ -303,7 +303,7 @@ struct ScreenManagerCoordinationTests {
 
             let config = try #require(manager.getConfiguration(for: screen))
             #expect(config.wallpaperType == .html)
-            #expect(config.wallpaperMode == .single)
+            #expect(config.wallpaperMode == .playlist)
             #expect(session.cleanupCount == 0)
             #expect(Self.isSameSession(screen.runtimeSession, session))
             #expect(capture.notifications.isEmpty)

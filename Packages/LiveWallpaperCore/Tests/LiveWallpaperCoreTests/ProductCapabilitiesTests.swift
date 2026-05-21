@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import LiveWallpaperCore
 
@@ -26,14 +27,30 @@ struct ProductCapabilitiesTests {
         #expect(Set(catalog.selectableWallpaperTypes) == Set(WallpaperType.allCases))
     }
 
-    @Test("Lite catalog collapses the mode picker to single")
+    @Test("Lite catalog exposes playlist and schedule automation modes")
     func liteCatalogWallpaperModes() {
-        #expect(ProductCapabilities.lite.selectableWallpaperModes == [.single])
+        #expect(ProductCapabilities.lite.selectableWallpaperModes == [.playlist, .schedule])
     }
 
     @Test("Pro catalog keeps every automation mode")
     func proCatalogWallpaperModes() {
         #expect(Set(ProductCapabilities.pro.selectableWallpaperModes) == Set(WallpaperMode.allCases))
+    }
+
+    @Test("Legacy `single` raw value decodes to .playlist (rollback compat)")
+    func legacySingleDecodesToPlaylist() throws {
+        let data = try JSONEncoder().encode("single")
+        let decoded = try JSONDecoder().decode(WallpaperMode.self, from: data)
+        #expect(decoded == .playlist)
+    }
+
+    @Test("Known WallpaperMode raw values round-trip")
+    func knownModesRoundTrip() throws {
+        for mode in WallpaperMode.allCases {
+            let data = try JSONEncoder().encode(mode)
+            let decoded = try JSONDecoder().decode(WallpaperMode.self, from: data)
+            #expect(decoded == mode)
+        }
     }
 
     @Test("FeatureCatalog wraps capabilities with a Sendable isEnabled query")
@@ -42,9 +59,13 @@ struct ProductCapabilitiesTests {
         #expect(lite.isEnabled(.video))
         #expect(lite.isEnabled(.html))
         #expect(lite.isEnabled(.appleAerials))
+        #expect(lite.isEnabled(.scheduleAutomation))
+        #expect(lite.isEnabled(.systemMonitor))
+        // Pro-only features (Metal shaders, WPE scene wallpapers, developer
+        // tools) must stay off in Lite.
         #expect(!lite.isEnabled(.scene))
-        #expect(!lite.isEnabled(.scheduleAutomation))
-        #expect(!lite.isEnabled(.systemMonitor))
+        #expect(!lite.isEnabled(.metalShader))
+        #expect(!lite.isEnabled(.developerTools))
 
         let pro = FeatureCatalog(capabilities: .pro)
         #expect(pro.isEnabled(.scene))
