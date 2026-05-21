@@ -548,6 +548,25 @@ struct PlainVideoFrameRateCompositionPolicyTests {
     }
 }
 
+@Suite("ParticleEffect Codable")
+struct ParticleEffectCodableTests {
+    @Test("Unknown raw value decodes to .none (forward / rollback compatibility)")
+    func unknownRawValueDecodesToNone() throws {
+        let data = try JSONEncoder().encode("Lightning")
+        let decoded = try JSONDecoder().decode(ParticleEffect.self, from: data)
+        #expect(decoded == .none)
+    }
+
+    @Test("Known raw values still round-trip")
+    func knownRawValuesRoundTrip() throws {
+        for effect in ParticleEffect.allCases {
+            let data = try JSONEncoder().encode(effect)
+            let decoded = try JSONDecoder().decode(ParticleEffect.self, from: data)
+            #expect(decoded == effect)
+        }
+    }
+}
+
 @Suite("FrameRateLimit.enforcesCompositionCap")
 struct FrameRateLimitEnforcesCompositionCapTests {
     @Test("Low-FPS caps force composition")

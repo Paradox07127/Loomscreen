@@ -44,10 +44,6 @@ struct ScreenDetailView: View {
         .accessibilityHint(Text("Choose wallpaper type"))
     }
 
-    private var wallpaperTypeToolbar: some View {
-        wallpaperTypePicker
-    }
-
     private var wallpaperTypeSelection: Binding<WallpaperType> {
         Binding(
             get: { draft.selectedWallpaperType },
@@ -81,17 +77,14 @@ struct ScreenDetailView: View {
         screenManager.getConfiguration(for: screen)?.wpeOrigin
     }
 
-    /// Single source of truth for the four overlapping booleans the rest of
+    /// Single source of truth for the three overlapping booleans the rest of
     /// the view used to compute inline (`shouldShowGuideEmptyState`,
-    /// `hasConfigurableWallpaperSurface`, `showsInspector`,
-    /// `showsHeaderWallpaperActions`). Each was reading the same store /
-    /// runtime state and re-deriving partially overlapping conclusions; the
-    /// dependencies were hard to audit. Collapsing them into one computed
-    /// struct keeps the rules in one place and makes downstream wrappers
-    /// trivial three-line passthroughs.
+    /// `showsInspector`, `showsHeaderWallpaperActions`). Each was reading the
+    /// same store / runtime state and re-deriving partially overlapping
+    /// conclusions; the dependencies were hard to audit. Collapsing them
+    /// into one computed struct keeps the rules in one place.
     private struct DerivedViewState {
         var showsGuideEmptyState: Bool
-        var hasConfigurableSurface: Bool
         var showsInspector: Bool
         var showsHeaderWallpaperActions: Bool
     }
@@ -123,14 +116,12 @@ struct ScreenDetailView: View {
 
         return DerivedViewState(
             showsGuideEmptyState: showsGuide,
-            hasConfigurableSurface: hasConfigurable,
             showsInspector: showsInspector,
             showsHeaderWallpaperActions: hasConfigurable
         )
     }
 
     private var shouldShowGuideEmptyState: Bool { derivedState.showsGuideEmptyState }
-    private var hasConfigurableWallpaperSurface: Bool { derivedState.hasConfigurableSurface }
     private var showsInspector: Bool { derivedState.showsInspector }
     private var showsHeaderWallpaperActions: Bool { derivedState.showsHeaderWallpaperActions }
 
@@ -187,7 +178,6 @@ struct ScreenDetailView: View {
     @State private var lastPreviewPosterBookmarkData: Data?
 
     @State private var isDraggingOver = false
-    @State private var lockScreenExtracted: Bool = false
     @State private var showBookmarks = false
 
     @AppStorage("Inspector.EnvironmentExpanded") private var isEnvironmentExpanded = true
@@ -247,7 +237,7 @@ struct ScreenDetailView: View {
         .background(DesignTokens.Colors.pageBackground)
         .toolbar {
             ToolbarItem(placement: .principal) {
-                wallpaperTypeToolbar
+                wallpaperTypePicker
             }
         }
         .confirmDestructive($pendingDestructive)
@@ -467,30 +457,19 @@ struct ScreenDetailView: View {
     }
 
     private func loadScreenConfiguration() {
-        if lockScreenExtracted { lockScreenExtracted = false }
-
         let config = screenManager.getConfiguration(for: screen)
         draft = .from(
             config: config,
             fallbackHasPreviewSource: screen.videoPlayer?.videoURL != nil
         )
 
-        if config?.wallpaperType != .video {
-            assignIfChanged(lastPreviewPosterBookmarkData, to: nil) { lastPreviewPosterBookmarkData = $0 }
+        if config?.wallpaperType != .video, lastPreviewPosterBookmarkData != nil {
+            lastPreviewPosterBookmarkData = nil
         }
         if config == nil {
             previewController.cleanup()
         }
         loadPreviewPosterIfNeeded()
-    }
-
-    private func assignIfChanged<Value: Equatable>(
-        _ currentValue: Value,
-        to newValue: Value,
-        assign: (Value) -> Void
-    ) {
-        guard currentValue != newValue else { return }
-        assign(newValue)
     }
 
     private func cleanupPreviewPlayer() {

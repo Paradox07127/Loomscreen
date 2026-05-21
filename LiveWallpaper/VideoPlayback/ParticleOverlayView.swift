@@ -97,6 +97,8 @@ final class ParticleOverlayView: NSView {
         case .rain:          return Self.rainPreset
         case .bokeh:         return Self.bokehPreset
         case .fireflies:     return Self.firefliesPreset
+        case .dust:          return Self.dustPreset
+        case .stars:         return Self.starsPreset
         case .fallingLeaves: return Self.leavesPreset
         case .sakura:        return Self.sakuraPreset
         }
@@ -324,6 +326,87 @@ final class ParticleOverlayView: NSView {
             size: { CGSize(width: $0.width * 1.6, height: 0) }
         )
     }()
+
+    // MARK: - Dust
+    //
+    // Sun-shaft motes: tiny warm specks drifting in all directions with a
+    // very slow lift. Three depth layers (near / mid / far) so it reads as
+    // volumetric rather than a flat sprite sheet.
+
+    private static let dustPreset: EmitterPreset = {
+        let warmColor = NSColor(calibratedRed: 1.0, green: 0.94, blue: 0.78, alpha: 1.0).cgColor
+        let createLayer = { (radius: CGFloat, scale: CGFloat, birthRate: Float, alpha: Float, velocity: CGFloat) -> CAEmitterCell in
+            let cell = CAEmitterCell()
+            cell.contents = ParticleTextures.softCircle(radius: radius, color: warmColor)
+            cell.birthRate = birthRate
+            cell.lifetime = 18
+            cell.lifetimeRange = 6
+            cell.velocity = velocity
+            cell.velocityRange = velocity * 0.6
+            cell.emissionRange = .pi * 2
+            cell.scale = scale
+            cell.scaleRange = scale * 0.5
+            cell.alphaRange = alpha * 0.4
+            cell.alphaSpeed = -0.02
+            cell.yAcceleration = -1.5
+            cell.xAcceleration = 0.5
+            cell.color = warmColor.copy(alpha: CGFloat(alpha)) ?? warmColor
+            return cell
+        }
+
+        let near = createLayer(3.0, 1.3, 4,  0.7, 8)
+        let mid  = createLayer(2.0, 0.9, 10, 0.5, 6)
+        let far  = createLayer(1.4, 0.5, 18, 0.3, 4)
+
+        return EmitterPreset(
+            cells: [near, mid, far],
+            shape: .rectangle,
+            renderMode: .additive,
+            position: { CGPoint(x: $0.midX, y: $0.midY) },
+            size: { CGSize(width: $0.width, height: $0.height) }
+        )
+    }()
+
+    // MARK: - Stars
+    //
+    // Nearly stationary points with strong alpha-pulse so the field reads
+    // as a slow twinkle. Cool palette (white-blue) sits well against night
+    // wallpapers without forcing a specific color theme.
+
+    private static let starsPreset: EmitterPreset = {
+        let warmWhite = NSColor(calibratedRed: 1.0, green: 0.98, blue: 0.92, alpha: 1.0).cgColor
+        let coolBlue = NSColor(calibratedRed: 0.85, green: 0.92, blue: 1.0, alpha: 1.0).cgColor
+
+        let createLayer = { (radius: CGFloat, scale: CGFloat, birthRate: Float, color: CGColor) -> CAEmitterCell in
+            let cell = CAEmitterCell()
+            cell.contents = ParticleTextures.softCircle(radius: radius, color: color)
+            cell.birthRate = birthRate
+            cell.lifetime = 10
+            cell.lifetimeRange = 4
+            cell.velocity = 0
+            cell.velocityRange = 0.5
+            cell.emissionRange = .pi * 2
+            cell.scale = scale
+            cell.scaleRange = scale * 0.4
+            cell.alphaRange = 0.45
+            cell.alphaSpeed = -0.15
+            cell.color = color
+            return cell
+        }
+
+        let bright = createLayer(3.5, 1.2, 6,  warmWhite)
+        let mid    = createLayer(2.5, 0.8, 12, coolBlue)
+        let faint  = createLayer(1.5, 0.5, 20, coolBlue)
+
+        return EmitterPreset(
+            cells: [bright, mid, faint],
+            shape: .rectangle,
+            renderMode: .additive,
+            position: { CGPoint(x: $0.midX, y: $0.midY) },
+            size: { CGSize(width: $0.width, height: $0.height) }
+        )
+    }()
+
 }
 
 // MARK: - Particle Texture Factory
