@@ -37,7 +37,7 @@ struct CommonPlaybackInspector: View {
     var body: some View {
         GroupBox {
             CollapsibleSection(
-                title: "Playback & Privacy",
+                title: "Playback",
                 systemImage: "play.circle",
                 isExpanded: $isPlaybackExpanded
             ) {
@@ -119,13 +119,15 @@ struct CommonPlaybackInspector: View {
         SettingRow(
             icon: "gauge.with.dots.needle.bottom.50percent",
             iconColor: .blue,
-            title: "Frame Rate"
+            title: "Frame Rate",
+            info: "Caps below 30 FPS force a compositing pass — useful when effects are active or to extend battery on long sessions. 60 FPS and Unlimited use the native playback path."
         ) {
             Picker("", selection: frameRateBinding) {
                 ForEach(FrameRateLimit.allCases) { limit in
                     Text(limit.titleKey).tag(limit)
                 }
             }
+            .pickerStyle(.menu)
             .labelsHidden()
             .fixedSize()
             .accessibilityLabel(Text("Frame rate limit"))
@@ -135,22 +137,29 @@ struct CommonPlaybackInspector: View {
 
     private var videoDisplayModeRow: some View {
         SettingRow(
-            icon: "rectangle.on.rectangle",
+            icon: "rectangle.split.2x1",
             iconColor: videoDisplayMode == .spanAllDisplays ? .blue : .secondary,
-            title: "Layout",
-            info: "Span uses all connected displays as one virtual video canvas; Per Display gives each screen its own video."
+            title: "Span Displays",
+            info: "When on, all connected displays render one stretched video. When off, each display plays its own copy independently — multi-display sync is not possible."
         ) {
-            Picker("", selection: videoDisplayModeBinding) {
-                ForEach(VideoDisplayMode.allCases) { mode in
-                    Text(mode.titleKey).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-            .accessibilityLabel(Text("Video display layout"))
-            .accessibilityValue(Text(videoDisplayMode.titleKey))
+            Toggle("", isOn: spanDisplaysBinding)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .accessibilityLabel(Text("Span across displays"))
         }
+    }
+
+    private var spanDisplaysBinding: Binding<Bool> {
+        Binding(
+            get: { videoDisplayMode == .spanAllDisplays },
+            set: { newValue in
+                let target: VideoDisplayMode = newValue ? .spanAllDisplays : .perDisplay
+                guard videoDisplayMode != target else { return }
+                videoDisplayMode = target
+                screenManager.updateVideoDisplayMode(target, for: screen)
+            }
+        )
     }
 
     private var syncToLockScreenRow: some View {
@@ -301,17 +310,6 @@ struct CommonPlaybackInspector: View {
                 guard frameRateLimit != newValue else { return }
                 frameRateLimit = newValue
                 screenManager.updateFrameRateLimit(newValue, for: screen)
-            }
-        )
-    }
-
-    private var videoDisplayModeBinding: Binding<VideoDisplayMode> {
-        Binding(
-            get: { videoDisplayMode },
-            set: { newValue in
-                guard videoDisplayMode != newValue else { return }
-                videoDisplayMode = newValue
-                screenManager.updateVideoDisplayMode(newValue, for: screen)
             }
         )
     }

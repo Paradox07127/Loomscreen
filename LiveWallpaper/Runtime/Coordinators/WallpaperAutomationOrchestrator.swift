@@ -82,8 +82,12 @@ final class WallpaperAutomationOrchestrator {
 
     /// Writes the reordered playlist (full visible order) while preserving the active bookmark when only the order changed.
     func replacePlaylist(ordered: [Data], primary: Data, for screen: Screen) {
-        guard var config = configurationStore.get(for: screen.id) else { return }
         guard let primaryIndex = ordered.firstIndex(of: primary) else { return }
+        let existing = configurationStore.get(for: screen.id)
+        var config = existing ?? ScreenConfiguration(
+            screenID: screen.id,
+            videoBookmarkData: primary
+        )
 
         let oldCombined = config.combinedPlaylist
         let oldCursor = config.playlistCursorIndex ?? 0
@@ -109,7 +113,7 @@ final class WallpaperAutomationOrchestrator {
         }
         saveConfiguration(config)
 
-        if primaryChanged {
+        if existing == nil || primaryChanged {
             reloadWallpaperForScreen(screen)
         }
     }

@@ -502,6 +502,66 @@ struct PlainVideoFrameRateCompositionPolicyTests {
 
         #expect(limit == nil)
     }
+
+    @Test("fps15 caps a 60fps source to 15")
+    func fps15CapsHighSourceFPS() {
+        let limit = PlainVideoFrameRateCompositionPolicy.compositionLimit(
+            frameRateLimit: .fps15,
+            videoFrameRate: 60,
+            screenRefreshRate: 60
+        )
+
+        #expect(limit == 15)
+    }
+
+    @Test("fps24 caps a 60fps source to 24")
+    func fps24CapsHighSourceFPS() {
+        let limit = PlainVideoFrameRateCompositionPolicy.compositionLimit(
+            frameRateLimit: .fps24,
+            videoFrameRate: 60,
+            screenRefreshRate: 60
+        )
+
+        #expect(limit == 24)
+    }
+
+    @Test("fps24 skips composition when source is already 24fps cinema")
+    func fps24SkipsForCinematicSource() {
+        let limit = PlainVideoFrameRateCompositionPolicy.compositionLimit(
+            frameRateLimit: .fps24,
+            videoFrameRate: 24,
+            screenRefreshRate: 60
+        )
+
+        #expect(limit == nil)
+    }
+
+    @Test("fps15 skips composition when source is 10fps timelapse")
+    func fps15SkipsForSlowSource() {
+        let limit = PlainVideoFrameRateCompositionPolicy.compositionLimit(
+            frameRateLimit: .fps15,
+            videoFrameRate: 10,
+            screenRefreshRate: 60
+        )
+
+        #expect(limit == nil)
+    }
+}
+
+@Suite("FrameRateLimit.enforcesCompositionCap")
+struct FrameRateLimitEnforcesCompositionCapTests {
+    @Test("Low-FPS caps force composition")
+    func lowFpsCapsForce() {
+        #expect(FrameRateLimit.fps15.enforcesCompositionCap)
+        #expect(FrameRateLimit.fps24.enforcesCompositionCap)
+        #expect(FrameRateLimit.fps30.enforcesCompositionCap)
+    }
+
+    @Test("fps60 and Unlimited stay on the native pass-through")
+    func passThroughCapsSkipComposition() {
+        #expect(!FrameRateLimit.fps60.enforcesCompositionCap)
+        #expect(!FrameRateLimit.unlimited.enforcesCompositionCap)
+    }
 }
 
 // MARK: - ScheduleSlot Tests
@@ -1119,6 +1179,37 @@ struct ResolveCompositionFPSTests {
             screenRefreshRate: 144
         )
         #expect(fps == 30)
+    }
+
+    @Test("24 FPS limit on 60fps source → 24 (cinematic cap)")
+    func fps24AppliedToHighSource() {
+        let fps = FrameRateLimit.resolveCompositionFPS(
+            limit: .fps24,
+            videoFrameRate: 60,
+            screenRefreshRate: 60
+        )
+        #expect(fps == 24)
+    }
+
+    @Test("15 FPS limit on 30fps source → 15 (deep battery saver)")
+    func fps15AppliedToModerateSource() {
+        let fps = FrameRateLimit.resolveCompositionFPS(
+            limit: .fps15,
+            videoFrameRate: 30,
+            screenRefreshRate: 60
+        )
+        #expect(fps == 15)
+    }
+
+    @Test("Legacy raw values 15 and 24 decode to their cases")
+    func legacyRawValuesDecodeToNewCases() throws {
+        let data15 = try JSONEncoder().encode(15)
+        let decoded15 = try JSONDecoder().decode(FrameRateLimit.self, from: data15)
+        #expect(decoded15 == .fps15)
+
+        let data24 = try JSONEncoder().encode(24)
+        let decoded24 = try JSONDecoder().decode(FrameRateLimit.self, from: data24)
+        #expect(decoded24 == .fps24)
     }
 }
 

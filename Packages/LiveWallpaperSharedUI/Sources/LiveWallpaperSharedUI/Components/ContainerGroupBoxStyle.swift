@@ -8,7 +8,7 @@ public struct ContainerGroupBoxStyle: GroupBoxStyle {
             configuration.label
             configuration.content
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 12)
         .padding(.vertical, 12)
         .adaptiveGlassSurface(.roundedRectangle(12))
     }
