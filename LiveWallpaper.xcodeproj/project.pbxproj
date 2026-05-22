@@ -53,6 +53,9 @@
 		0CA00000000000000000B030 /* Exceptions for "LiveWallpaper" folder in "LiveWallpaperLite" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				CustomShaders/CustomShader.swift,
+				CustomShaders/CustomShaderStore.swift,
+				CustomShaders/ShaderThumbnailRenderer.swift,
 				VideoPlayback/MetalWallpaperView.swift,
 				VideoPlayback/Shaders.metal,
 				VideoPlayback/WPEMetalBuiltins.metal,
