@@ -1051,64 +1051,77 @@ struct GlobalSettingsDecoderTests {
     }
 }
 
-// MARK: - ScheduleTimelineBar.segments Tests
+// MARK: - ScheduleSlot.timelineSegments Tests
 //
 // Regression coverage for the bug where slots wrapping midnight (e.g. 22→6)
 // produced negative segment widths and disappeared from the visualization.
+// `timelineSegments` now lives on `ScheduleSlot` so both Pro (LiveWallpaper)
+// and the package tests can share the single source of truth.
 
-@Suite("ScheduleTimelineBar.segments(for:)")
-struct ScheduleTimelineBarSegmentsTests {
+@Suite("ScheduleSlot.timelineSegments()")
+struct ScheduleSlotTimelineSegmentsTests {
 
     @Test("Normal slot produces a single segment")
     func normalSlotSingleSegment() {
         let slot = ScheduleSlot(startHour: 6, endHour: 12, label: "Morning")
-        let segments = ScheduleTimelineBar.segments(for: slot)
+        let segments = slot.timelineSegments()
 
         #expect(segments.count == 1)
         #expect(segments[0].start == 6)
         #expect(segments[0].end == 12)
+        #expect(segments[0].wraps == false)
     }
 
     @Test("Wrapping slot (22→6) produces two segments")
     func wrappingSlotTwoSegments() {
         let slot = ScheduleSlot(startHour: 22, endHour: 6, label: "Night")
-        let segments = ScheduleTimelineBar.segments(for: slot)
+        let segments = slot.timelineSegments()
 
         #expect(segments.count == 2)
         #expect(segments[0].start == 22)
         #expect(segments[0].end == 24)
+        #expect(segments[0].wraps == true)
         #expect(segments[1].start == 0)
         #expect(segments[1].end == 6)
+        #expect(segments[1].wraps == true)
     }
 
     @Test("Zero-length slot produces no segments")
     func zeroLengthSlotIsEmpty() {
         let slot = ScheduleSlot(startHour: 12, endHour: 12, label: "Empty")
-        let segments = ScheduleTimelineBar.segments(for: slot)
-
-        #expect(segments.isEmpty)
+        #expect(slot.timelineSegments().isEmpty)
     }
 
     @Test("All default slots produce non-negative widths")
     func defaultSlotsHaveNonNegativeWidths() {
         for slot in ScheduleSlot.defaultSlots {
-            let segments = ScheduleTimelineBar.segments(for: slot)
-            for segment in segments {
-                #expect(segment.end > segment.start, "Segment \(segment) for slot \(slot.label) has non-positive width")
+            for segment in slot.timelineSegments() {
+                #expect(segment.end > segment.start, "Segment for slot \(slot.label) has non-positive width")
             }
         }
     }
 
-    @Test("Just-after-midnight wrap (1→0) produces two segments")
-    func justAfterMidnightWrap() {
+    @Test("Slot ending at next-day midnight (1→0) collapses to a single segment")
+    func slotEndingAtNextDayMidnight() {
+        // `endHour == 0` with `startHour > 0` semantically wraps to the next
+        // day's midnight — the [0, 0) second half has zero width and is
+        // dropped so the editor never has to filter empty segments.
         let slot = ScheduleSlot(startHour: 1, endHour: 0, label: "Almost full day")
-        let segments = ScheduleTimelineBar.segments(for: slot)
+        let segments = slot.timelineSegments()
 
-        #expect(segments.count == 2)
+        #expect(segments.count == 1)
         #expect(segments[0].start == 1)
         #expect(segments[0].end == 24)
-        #expect(segments[1].start == 0)
-        #expect(segments[1].end == 0)
+        #expect(segments[0].wraps == true)
+    }
+
+    @Test("wraps property matches start > end semantics")
+    func wrapsFlagMatchesStartGtEnd() {
+        #expect(ScheduleSlot(startHour: 6, endHour: 12, label: "x").wraps == false)
+        #expect(ScheduleSlot(startHour: 12, endHour: 6, label: "x").wraps == true)
+        #expect(ScheduleSlot(startHour: 22, endHour: 0, label: "x").wraps == true)
+        // Zero-length is non-wrapping by the start > end definition.
+        #expect(ScheduleSlot(startHour: 12, endHour: 12, label: "x").wraps == false)
     }
 }
 
