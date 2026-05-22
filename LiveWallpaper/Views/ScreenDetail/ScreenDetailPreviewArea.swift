@@ -39,7 +39,7 @@ struct ScreenDetailPreviewArea: View {
             } else if draft.selectedWallpaperType == .metalShader,
                       featureCatalog.isEnabled(.metalShader) {
                 #if !LITE_BUILD
-                ShaderWallpaperSection(screen: screen, selectedShaderPreset: $draft.selectedShaderPreset)
+                ShaderWallpaperSection(screen: screen, selectedShaderSource: $draft.selectedShaderSource)
                     .padding(24)
                 #else
                 EmptyView()

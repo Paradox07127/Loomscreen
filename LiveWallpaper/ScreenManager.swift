@@ -600,8 +600,8 @@ final class ScreenManager {
             applyConfiguration(configuration, to: screen, preservingState: preservingState)
         case .html(let source, let htmlConfig):
             activateAmbientWallpaper(.html(source, htmlConfig), for: screen, configuration: configuration)
-        case .metalShader(let preset):
-            activateAmbientWallpaper(.metalShader(preset), for: screen, configuration: configuration)
+        case .metalShader(let shaderSource):
+            activateAmbientWallpaper(.metalShader(shaderSource), for: screen, configuration: configuration)
         case .scene(let descriptor):
             activateAmbientWallpaper(.scene(descriptor), for: screen, configuration: configuration)
         }
@@ -1299,12 +1299,12 @@ final class ScreenManager {
             let effectiveConfig = htmlCoordinator.runtimeConfig(source: source, config: htmlConfig, for: screen)
             session = ambientSessionBuilder.makeHTMLSession(source: source, config: effectiveConfig, frame: screen.frame)
             Logger.info("Set HTML wallpaper for screen \(screen.id) — \(source.displayName) [leader=\(isLeader)]", category: .screenManager)
-        case .metalShader(let preset):
+        case .metalShader(let shaderSource):
             #if !LITE_BUILD
-            session = ambientSessionBuilder.makeShaderSession(preset: preset, frame: screen.frame)
-            Logger.info("Set shader wallpaper (\(preset.rawValue)) for screen \(screen.id)", category: .screenManager)
+            session = ambientSessionBuilder.makeShaderSession(source: shaderSource, frame: screen.frame)
+            Logger.info("Set shader wallpaper (\(shaderSource)) for screen \(screen.id)", category: .screenManager)
             #else
-            _ = preset
+            _ = shaderSource
             return
             #endif
         case .scene(let descriptor):
@@ -1390,12 +1390,12 @@ final class ScreenManager {
     /// indirectly through `restoreWallpaperSession → activateAmbientWallpaper`
     /// where the `.metalShader` case is gated with `#if !LITE_BUILD`, so this
     /// stays ungated for Lite-side bookmark restore / decode compatibility.
-    func setShaderWallpaper(preset: MetalShaderPreset, for screen: Screen) {
+    func setShaderWallpaper(source: ShaderSource, for screen: Screen) {
         let previousContent = configurationStore.get(for: screen.id)?.activeWallpaper
         var config = configurationStore.get(for: screen.id) ?? ScreenConfiguration(
-            screenID: screen.id, wallpaper: .metalShader(preset)
+            screenID: screen.id, wallpaper: .metalShader(source)
         )
-        config.setShaderWallpaper(preset)
+        config.setShaderWallpaper(source)
         originReconciler.reconcile(
             &config,
             event: .userReplacedActiveWallpaper(previous: previousContent)
@@ -1404,6 +1404,7 @@ final class ScreenManager {
 
         restoreWallpaperSession(for: screen, configuration: config, preservingState: false)
     }
+
 
     // MARK: - Helper Methods
 

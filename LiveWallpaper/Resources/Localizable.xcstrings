@@ -28628,6 +28628,336 @@
           }
         }
       }
+    },
+    "Import custom shader" : {
+      "comment" : "A11y label for the Import card in the shader preset grid.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import custom shader"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カスタムシェーダーをインポート"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导入自定义着色器"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "匯入自訂著色器"
+          }
+        }
+      }
+    },
+    "Import a .lwshader or .metal file from disk." : {
+      "comment" : "Tooltip for the Import shader card.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import a .lwshader or .metal file from disk."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ディスクから .lwshader または .metal ファイルをインポート。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从磁盘导入 .lwshader 或 .metal 文件。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "從磁碟匯入 .lwshader 或 .metal 檔案。"
+          }
+        }
+      }
+    },
+    "Shader Import Failed" : {
+      "comment" : "Alert title for a failed custom-shader import.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shader Import Failed"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "シェーダーのインポートに失敗"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "着色器导入失败"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "著色器匯入失敗"
+          }
+        }
+      }
+    },
+    "Delete Shader?" : {
+      "comment" : "Confirmation dialog title when deleting a custom shader.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete Shader?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "シェーダーを削除しますか？"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除着色器？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "刪除著色器？"
+          }
+        }
+      }
+    },
+    "%@ will be removed from your library. This cannot be undone." : {
+      "comment" : "Confirmation dialog body when deleting a custom shader. %@ = shader name.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ will be removed from your library. This cannot be undone."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ がライブラリから削除されます。この操作は取り消せません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 将从你的库中移除，此操作无法撤销。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 將從你的庫中移除，此操作無法復原。"
+          }
+        }
+      }
+    },
+    "Custom Shader" : {
+      "comment" : "Generic label for a user-imported Metal shader.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Custom Shader"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カスタムシェーダー"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自定义着色器"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自訂著色器"
+          }
+        }
+      }
+    },
+    "Metal is not supported on this device." : {
+      "comment" : "Error shown when Metal device cannot be created.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Metal is not supported on this device."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このデバイスは Metal をサポートしていません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此设备不支持 Metal。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此裝置不支援 Metal。"
+          }
+        }
+      }
+    },
+    "Choose a .lwshader or .metal file that defines `mainImage(uv, time, resolution)`." : {
+      "comment" : "NSOpenPanel message for custom shader import.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose a .lwshader or .metal file that defines `mainImage(uv, time, resolution)`."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`mainImage(uv, time, resolution)` を定義する .lwshader または .metal ファイルを選択してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择一个定义 `mainImage(uv, time, resolution)` 的 .lwshader 或 .metal 文件。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選擇一個定義 `mainImage(uv, time, resolution)` 的 .lwshader 或 .metal 檔案。"
+          }
+        }
+      }
+    },
+    "Custom shaders implement `mainImage(uv, time, resolution)` in Metal Shader Language. The file is compiled on import; errors are surfaced inline." : {
+      "comment" : "Help text under the custom shader grid.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Custom shaders implement `mainImage(uv, time, resolution)` in Metal Shader Language. The file is compiled on import; errors are surfaced inline."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カスタムシェーダーは Metal Shader Language で `mainImage(uv, time, resolution)` を実装します。ファイルはインポート時にコンパイルされ、エラーはインラインで表示されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自定义着色器使用 Metal Shader Language 实现 `mainImage(uv, time, resolution)`。文件在导入时编译，错误会内联显示。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自訂著色器使用 Metal Shader Language 實作 `mainImage(uv, time, resolution)`。檔案在匯入時編譯，錯誤會內嵌顯示。"
+          }
+        }
+      }
+    },
+    "Shader must define `mainImage(uv, time, resolution)`." : {
+      "comment" : "Validation error when imported shader is missing the mainImage entry point.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shader must define `mainImage(uv, time, resolution)`."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "シェーダーは `mainImage(uv, time, resolution)` を定義する必要があります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "着色器必须定义 `mainImage(uv, time, resolution)`。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "著色器必須定義 `mainImage(uv, time, resolution)`。"
+          }
+        }
+      }
+    },
+    "Custom Shaders" : {
+      "comment" : "Section header for user-imported shaders in the shader preset grid.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Custom Shaders"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カスタムシェーダー"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自定义着色器"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自訂著色器"
+          }
+        }
+      }
     }
   },
   "version" : "1.1"

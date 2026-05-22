@@ -138,8 +138,11 @@ public final class BookmarkStore {
             return "Video"
         case .html(let source, _):
             return source.displayName
-        case .metalShader(let preset):
-            return preset.localizedTitle
+        case .metalShader(let source):
+            switch source {
+            case .builtin(let preset): return preset.localizedTitle
+            case .custom:              return String(localized: "Custom Shader", comment: "Bookmark label for a user-imported Metal shader.")
+            }
         case .scene(let descriptor):
             return String(localized: "Scene \(descriptor.workshopID)", comment: "Default bookmark label for a Wallpaper Engine scene. The placeholder is the Workshop ID.")
         }
@@ -151,8 +154,11 @@ public final class BookmarkStore {
             return nil
         case .html(let source, _):
             return source.displayName
-        case .metalShader(let preset):
-            return preset.localizedTitle
+        case .metalShader(let source):
+            switch source {
+            case .builtin(let preset): return preset.localizedTitle
+            case .custom:              return String(localized: "Custom Shader", comment: "Bookmark label for a user-imported Metal shader.")
+            }
         case .scene(let descriptor):
             return String(localized: "Scene \(descriptor.workshopID)", comment: "Default source label for a Wallpaper Engine scene. The placeholder is the Workshop ID.")
         }
@@ -164,8 +170,11 @@ public final class BookmarkStore {
             return ResourceUtilities.resolveBookmarkName(bookmarkData)
         case .html(let source, _):
             return source.displayName
-        case .metalShader(let preset):
-            return preset.localizedTitle
+        case .metalShader(let source):
+            switch source {
+            case .builtin(let preset): return preset.localizedTitle
+            case .custom:              return String(localized: "Custom Shader", comment: "Bookmark label for a user-imported Metal shader.")
+            }
         case .scene(let descriptor):
             return String(localized: "Scene \(descriptor.workshopID)", comment: "Default source label for a Wallpaper Engine scene. The placeholder is the Workshop ID.")
         }

@@ -49,6 +49,19 @@
 		0CABCDEF2D8000010000C48B /* WPEShaderToolchain.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = WPEShaderToolchain.xcframework; path = ThirdParty/WPEShaderToolchain.xcframework; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		0CA00000000000000000B030 /* Exceptions for "LiveWallpaper" folder in "LiveWallpaperLite" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				VideoPlayback/MetalWallpaperView.swift,
+				VideoPlayback/Shaders.metal,
+				VideoPlayback/WPEMetalBuiltins.metal,
+				Views/WallpaperSections.swift,
+			);
+			target = 0CA00000000000000000B001 /* LiveWallpaperLite */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		0C322BF12D6950480033C48B /* LiveWallpaper */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
@@ -69,19 +82,6 @@
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
-
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		0CA00000000000000000B030 /* Exceptions for "LiveWallpaper" folder in "LiveWallpaperLite" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				"VideoPlayback/Shaders.metal",
-				"VideoPlayback/WPEMetalBuiltins.metal",
-				"VideoPlayback/MetalWallpaperView.swift",
-				"Views/WallpaperSections.swift",
-			);
-			target = 0CA00000000000000000B001 /* LiveWallpaperLite */;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		0C322BEC2D6950480033C48B /* Frameworks */ = {

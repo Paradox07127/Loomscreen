@@ -14,7 +14,7 @@ struct ScreenDetailDraftStateTests {
             selectedWallpaperMode: .playlist,
             selectedParticleEffect: .none,
             effectConfig: .default,
-            selectedShaderPreset: .waves,
+            selectedShaderSource: .builtin(.waves),
             htmlSource: nil,
             htmlConfig: .default,
             setAsLockScreen: false,
@@ -107,7 +107,7 @@ struct ScreenDetailDraftStateTests {
         #expect(draft.selectedWallpaperMode == .schedule)
         #expect(draft.selectedParticleEffect == .rain)
         #expect(draft.effectConfig == effectConfig)
-        #expect(draft.selectedShaderPreset == .waves)
+        #expect(draft.selectedShaderSource == .builtin(.waves))
         #expect(draft.htmlSource == nil)
         #expect(draft.htmlConfig == .default)
         #expect(draft.setAsLockScreen == true)
@@ -160,7 +160,7 @@ struct ScreenDetailDraftStateTests {
             fallbackHasPreviewSource: true
         )
 
-        #expect(draft.selectedShaderPreset == .aurora)
+        #expect(draft.selectedShaderSource == .builtin(.aurora))
         #expect(draft.selectedWallpaperType == .metalShader)
         #expect(draft.hasPreviewSource == false)
     }
@@ -177,7 +177,7 @@ struct ScreenDetailDraftStateTests {
             config: config,
             fallbackHasPreviewSource: false
         )
-        #expect(draft.selectedShaderPreset == .plasma)
+        #expect(draft.selectedShaderSource == .builtin(.plasma))
         #expect(draft.videoColorSpace == .rec2020HDR)
 
         draft = .from(
@@ -185,7 +185,7 @@ struct ScreenDetailDraftStateTests {
             fallbackHasPreviewSource: false
         )
 
-        #expect(draft.selectedShaderPreset == .waves)
+        #expect(draft.selectedShaderSource == .builtin(.waves))
         #expect(draft.videoColorSpace == .auto)
         #expect(draft.hasPreviewSource == false)
     }

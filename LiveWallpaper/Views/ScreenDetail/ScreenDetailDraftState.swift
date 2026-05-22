@@ -5,7 +5,7 @@ import LiveWallpaperCore
 /// to inspector controls. Consolidates 21 `@State` properties so a screen
 /// switch can re-fan the view from a single atomic assignment — closing
 /// the C3 finding where the previous "no-config" branch missed
-/// `videoColorSpace`, `selectedShaderPreset`, and `hasPreviewSource` resets.
+/// `videoColorSpace`, `selectedShaderSource`, and `hasPreviewSource` resets.
 struct ScreenDetailDraftState: Sendable, Equatable {
     var playbackSpeed: Double
     var selectedFitMode: VideoFitMode
@@ -14,7 +14,7 @@ struct ScreenDetailDraftState: Sendable, Equatable {
     var selectedWallpaperMode: WallpaperMode
     var selectedParticleEffect: ParticleEffect
     var effectConfig: VideoEffectConfig
-    var selectedShaderPreset: MetalShaderPreset
+    var selectedShaderSource: ShaderSource
     var htmlSource: HTMLSource?
     var htmlConfig: HTMLConfig
     var setAsLockScreen: Bool
@@ -37,7 +37,7 @@ struct ScreenDetailDraftState: Sendable, Equatable {
         selectedWallpaperMode: .playlist,
         selectedParticleEffect: .none,
         effectConfig: .default,
-        selectedShaderPreset: .waves,
+        selectedShaderSource: .builtin(.waves),
         htmlSource: nil,
         htmlConfig: .default,
         setAsLockScreen: false,
@@ -76,7 +76,7 @@ struct ScreenDetailDraftState: Sendable, Equatable {
             selectedWallpaperMode: config.wallpaperMode,
             selectedParticleEffect: config.particleEffect,
             effectConfig: config.effectConfig,
-            selectedShaderPreset: config.shaderPreset ?? Self.default.selectedShaderPreset,
+            selectedShaderSource: config.activeWallpaper.shaderSource ?? Self.default.selectedShaderSource,
             htmlSource: config.htmlSource,
             htmlConfig: config.htmlConfig ?? .default,
             setAsLockScreen: config.setAsLockScreen,

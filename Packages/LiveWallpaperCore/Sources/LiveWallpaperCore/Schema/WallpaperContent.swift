@@ -3,7 +3,7 @@ import Foundation
 public enum WallpaperContent: Equatable, Sendable {
     case video(bookmarkData: Data)
     case html(source: HTMLSource, config: HTMLConfig)
-    case metalShader(MetalShaderPreset)
+    case metalShader(ShaderSource)
     case scene(SceneDescriptor)
 
     public var wallpaperType: WallpaperType {
@@ -34,9 +34,16 @@ public enum WallpaperContent: Equatable, Sendable {
         return config
     }
 
+    public var shaderSource: ShaderSource? {
+        guard case .metalShader(let source) = self else { return nil }
+        return source
+    }
+
+    /// Convenience for the existing UI surface that only cares about the
+    /// builtin preset (e.g. the icon-grid selector). Returns `nil` when a
+    /// custom shader is active.
     public var shaderPreset: MetalShaderPreset? {
-        guard case .metalShader(let preset) = self else { return nil }
-        return preset
+        shaderSource?.builtinPreset
     }
 
     public var sceneDescriptor: SceneDescriptor? {
@@ -92,8 +99,11 @@ extension WallpaperContent: Codable {
         }
 
         if let shaderNested = try? container.nestedContainer(keyedBy: ShaderCodingKeys.self, forKey: .metalShader) {
-            let preset = try shaderNested.decode(MetalShaderPreset.self, forKey: .preset)
-            self = .metalShader(preset)
+            // ShaderSource's Codable handles both the legacy bare-string form
+            // (`"_0": "Waves"`) and the new tagged form
+            // (`"_0": {"builtin": "Waves"}` / `{"custom": "<uuid>"}`).
+            let source = try shaderNested.decode(ShaderSource.self, forKey: .preset)
+            self = .metalShader(source)
             return
         }
 
@@ -121,9 +131,9 @@ extension WallpaperContent: Codable {
             var nested = container.nestedContainer(keyedBy: HTMLCodingKeys.self, forKey: .html)
             try nested.encode(source, forKey: .source)
             try nested.encode(config, forKey: .config)
-        case .metalShader(let preset):
+        case .metalShader(let source):
             var nested = container.nestedContainer(keyedBy: ShaderCodingKeys.self, forKey: .metalShader)
-            try nested.encode(preset, forKey: .preset)
+            try nested.encode(source, forKey: .preset)
         case .scene(let descriptor):
             var nested = container.nestedContainer(keyedBy: SceneCodingKeys.self, forKey: .scene)
             try nested.encode(descriptor, forKey: .descriptor)

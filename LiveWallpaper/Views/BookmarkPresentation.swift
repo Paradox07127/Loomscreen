@@ -20,8 +20,13 @@ extension WallpaperBookmark {
             return Text("Source missing")
         case .html(let source, _):
             return Text(verbatim: source.displayName)
-        case .metalShader(let preset):
-            return Text(verbatim: preset.localizedTitle)
+        case .metalShader(let source):
+            switch source {
+            case .builtin(let preset):
+                return Text(verbatim: preset.localizedTitle)
+            case .custom:
+                return Text("Custom Shader", comment: "Bookmark subtitle for a user-imported Metal shader.")
+            }
         case .scene(let descriptor):
             return Text("Workshop \(descriptor.workshopID)", comment: "Bookmark subtitle for a Workshop scene. The placeholder is the Workshop ID.")
         }
