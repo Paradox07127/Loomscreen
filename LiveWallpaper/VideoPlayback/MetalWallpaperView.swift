@@ -1,6 +1,7 @@
 #if !LITE_BUILD
 import AppKit
 import MetalKit
+import LiveWallpaperCore
 
 struct ShaderUniforms {
     var time: Float
@@ -15,6 +16,25 @@ struct ShaderUniforms {
 /// must match or pipeline-state creation fails at runtime.
 private let kMetalShaderSampleCount: Int = 4
 
+/// Errors surfaced to callers when a custom-shader compile fails. Caller
+/// (the inspector) uses these to drive UI alerts.
+enum CustomShaderCompileError: LocalizedError {
+    case metalUnsupported
+    case missingMainImage
+    case compileFailed(message: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .metalUnsupported:
+            return String(localized: "Metal is not supported on this device.")
+        case .missingMainImage:
+            return String(localized: "Shader must define `mainImage(uv, time, resolution)`.")
+        case .compileFailed(let message):
+            return message
+        }
+    }
+}
+
 final class MetalWallpaperView: NSView, MTKViewDelegate {
 
     // MARK: - Properties
@@ -23,6 +43,16 @@ final class MetalWallpaperView: NSView, MTKViewDelegate {
     private var device: MTLDevice?
     private var commandQueue: MTLCommandQueue?
     private var pipelineState: MTLRenderPipelineState?
+
+    /// The default library that ships with the app (Shaders.metal). Holds
+    /// the builtin fragmentShader / vertexShader pair. Cached so the custom
+    /// shader path can rebuild against it without re-loading.
+    private var defaultLibrary: MTLLibrary?
+
+    /// True when the pipeline currently bound to `pipelineState` was built
+    /// from a runtime-compiled custom-shader library. `draw(in:)` skips the
+    /// shaderType uniform write in that case (custom shaders don't dispatch).
+    private var isUsingCustomPipeline: Bool = false
 
     private var startTime: CFAbsoluteTime = CFAbsoluteTimeGetCurrent()
     private var currentPreset: MetalShaderPreset = .waves
@@ -47,6 +77,7 @@ final class MetalWallpaperView: NSView, MTKViewDelegate {
         }
         self.device = device
         self.commandQueue = device.makeCommandQueue()
+        self.defaultLibrary = device.makeDefaultLibrary()
 
         let mtkView = MTKView(frame: bounds, device: device)
         mtkView.delegate = self
@@ -62,19 +93,42 @@ final class MetalWallpaperView: NSView, MTKViewDelegate {
         addSubview(mtkView)
         self.metalView = mtkView
 
-        buildPipeline(device: device)
+        rebuildBuiltinPipeline()
     }
 
-    private func buildPipeline(device: MTLDevice) {
-        guard let library = device.makeDefaultLibrary() else {
+    private func rebuildBuiltinPipeline() {
+        guard let device, let library = defaultLibrary else {
             Logger.error("Failed to load default Metal library", category: .videoPlayer)
             return
         }
+        do {
+            pipelineState = try Self.makePipeline(
+                device: device,
+                library: library,
+                vertexName: "vertexShader",
+                fragmentName: "fragmentShader"
+            )
+            isUsingCustomPipeline = false
+        } catch {
+            Logger.error("Failed to create builtin Metal pipeline: \(error.localizedDescription)", category: .videoPlayer)
+        }
+    }
 
-        guard let vertexFunction = library.makeFunction(name: "vertexShader"),
-              let fragmentFunction = library.makeFunction(name: "fragmentShader") else {
-            Logger.error("Failed to find shader functions in Metal library", category: .videoPlayer)
-            return
+    private static func makePipeline(
+        device: MTLDevice,
+        library: MTLLibrary,
+        vertexName: String,
+        fragmentName: String
+    ) throws -> MTLRenderPipelineState {
+        guard let vertexFunction = library.makeFunction(name: vertexName) else {
+            throw CustomShaderCompileError.compileFailed(
+                message: "Vertex function `\(vertexName)` not found."
+            )
+        }
+        guard let fragmentFunction = library.makeFunction(name: fragmentName) else {
+            throw CustomShaderCompileError.compileFailed(
+                message: "Fragment function `\(fragmentName)` not found."
+            )
         }
 
         let descriptor = MTLRenderPipelineDescriptor()
@@ -83,17 +137,115 @@ final class MetalWallpaperView: NSView, MTKViewDelegate {
         descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
         descriptor.rasterSampleCount = kMetalShaderSampleCount
 
-        do {
-            pipelineState = try device.makeRenderPipelineState(descriptor: descriptor)
-        } catch {
-            Logger.error("Failed to create Metal pipeline state: \(error.localizedDescription)", category: .videoPlayer)
-        }
+        return try device.makeRenderPipelineState(descriptor: descriptor)
     }
 
     // MARK: - Public API
 
-    func setPreset(_ preset: MetalShaderPreset) {
-        currentPreset = preset
+    /// Apply a `ShaderSource` — switches between builtin preset (default
+    /// metallib) and user-imported shader (runtime compile). For custom
+    /// shaders, throws if the wrapped source fails to compile.
+    func apply(source: ShaderSource) {
+        switch source {
+        case .builtin(let preset):
+            currentPreset = preset
+            rebuildBuiltinPipeline()
+        case .custom(let id):
+            guard let entry = CustomShaderStore.shared.shader(for: id) else {
+                Logger.warning("Custom shader \(id) not found in store — falling back to Waves", category: .videoPlayer)
+                currentPreset = .waves
+                rebuildBuiltinPipeline()
+                return
+            }
+            do {
+                try installCustomShader(source: entry.source, name: entry.displayName)
+            } catch {
+                Logger.error("Custom shader \(entry.displayName) failed to compile: \(error.localizedDescription)", category: .videoPlayer)
+                currentPreset = .waves
+                rebuildBuiltinPipeline()
+            }
+        }
+    }
+
+    /// Compile a user shader source against the canonical wrapper template
+    /// and return the resulting library. Useful for the importer's pre-save
+    /// validation step (the inspector calls this before persisting).
+    static func compileCustomShader(source: String, on device: MTLDevice) throws -> MTLLibrary {
+        guard source.range(of: #"\bmainImage\b"#, options: .regularExpression) != nil else {
+            throw CustomShaderCompileError.missingMainImage
+        }
+
+        let wrapped = Self.wrap(userSource: source)
+        let options = MTLCompileOptions()
+
+        do {
+            return try device.makeLibrary(source: wrapped, options: options)
+        } catch let error as NSError {
+            let message = (error.userInfo["MTLLibraryErrorKey"] as? String)
+                ?? error.localizedDescription
+            throw CustomShaderCompileError.compileFailed(message: message)
+        }
+    }
+
+    private func installCustomShader(source: String, name: String) throws {
+        guard let device else { throw CustomShaderCompileError.metalUnsupported }
+        let library = try Self.compileCustomShader(source: source, on: device)
+        pipelineState = try Self.makePipeline(
+            device: device,
+            library: library,
+            vertexName: "vertexShader",
+            fragmentName: "fragmentShader"
+        )
+        isUsingCustomPipeline = true
+        Logger.info("Loaded custom shader '\(name)'", category: .videoPlayer)
+    }
+
+    /// Canonical wrapper for user shaders. User code must define:
+    ///
+    ///     half4 mainImage(float2 uv, float time, float2 resolution) { ... }
+    ///
+    /// Everything else (vertex shader, uniforms struct, fragment dispatch)
+    /// is supplied by the wrapper so users only write the fragment math.
+    private static func wrap(userSource: String) -> String {
+        """
+        #include <metal_stdlib>
+        using namespace metal;
+
+        struct Uniforms {
+            float  time;
+            float2 resolution;
+            int    shaderType;
+        };
+
+        struct VertexOut {
+            float4 position [[position]];
+            float2 texCoord;
+        };
+
+        vertex VertexOut vertexShader(uint vertexID [[vertex_id]]) {
+            float2 positions[4] = {
+                float2(-1.0, -1.0), float2( 1.0, -1.0),
+                float2(-1.0,  1.0), float2( 1.0,  1.0)
+            };
+            float2 texCoords[4] = {
+                float2(0.0, 1.0), float2(1.0, 1.0),
+                float2(0.0, 0.0), float2(1.0, 0.0)
+            };
+            VertexOut out;
+            out.position = float4(positions[vertexID], 0.0, 1.0);
+            out.texCoord = texCoords[vertexID];
+            return out;
+        }
+
+        // --- USER SHADER ----------------------------------------------------
+        \(userSource)
+        // --- END USER SHADER ------------------------------------------------
+
+        fragment half4 fragmentShader(VertexOut in [[stage_in]],
+                                      constant Uniforms &uniforms [[buffer(0)]]) {
+            return mainImage(in.texCoord, uniforms.time, uniforms.resolution);
+        }
+        """
     }
 
     func applyPerformanceProfile(_ profile: WallpaperPerformanceProfile) {
@@ -129,7 +281,7 @@ final class MetalWallpaperView: NSView, MTKViewDelegate {
         var uniforms = ShaderUniforms(
             time: elapsed,
             resolution: SIMD2<Float>(Float(drawableSize.width), Float(drawableSize.height)),
-            shaderType: shaderTypeIndex(for: currentPreset)
+            shaderType: isUsingCustomPipeline ? 0 : shaderTypeIndex(for: currentPreset)
         )
 
         guard let commandBuffer = commandQueue.makeCommandBuffer(),
@@ -138,9 +290,7 @@ final class MetalWallpaperView: NSView, MTKViewDelegate {
         }
 
         encoder.setRenderPipelineState(pipelineState)
-
         encoder.setFragmentBytes(&uniforms, length: MemoryLayout<ShaderUniforms>.stride, index: 0)
-
         encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
 
         encoder.endEncoding()

@@ -194,7 +194,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
             case .html:
                 .html(source: HTMLSource(legacyString: htmlContent ?? ""), config: .default)
             case .metalShader:
-                .metalShader(shaderPreset ?? .waves)
+                .metalShader(.builtin(shaderPreset ?? .waves))
             case .video:
                 .video(bookmarkData: videoBookmarkData)
             case .scene:
@@ -342,7 +342,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
             if savedHTMLConfig == nil { savedHTMLConfig = .default }
         case .metalShader:
             activeWallpaper = .metalShader(
-                try c.decodeIfPresent(MetalShaderPreset.self, forKey: .shaderPreset) ?? .waves
+                .builtin(try c.decodeIfPresent(MetalShaderPreset.self, forKey: .shaderPreset) ?? .waves)
             )
             savedVideoBookmarkData = legacySavedBookmark
         case .scene:
@@ -445,10 +445,10 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         activeWallpaper = .html(source: source, config: config)
     }
 
-    public mutating func setShaderWallpaper(_ preset: MetalShaderPreset) {
+    public mutating func setShaderWallpaper(_ source: ShaderSource) {
         preserveCurrentVideoBookmarkIfNeeded()
         preserveCurrentHTMLIfNeeded()
-        activeWallpaper = .metalShader(preset)
+        activeWallpaper = .metalShader(source)
     }
 
     @discardableResult

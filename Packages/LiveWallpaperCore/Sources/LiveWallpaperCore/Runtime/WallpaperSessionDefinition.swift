@@ -4,7 +4,7 @@ import Foundation
 public enum WallpaperSessionDefinition: Equatable, Sendable {
     case video(bookmarkData: Data)
     case html(HTMLSource, HTMLConfig)
-    case metalShader(MetalShaderPreset)
+    case metalShader(ShaderSource)
     case scene(SceneDescriptor)
 
     public init?(configuration: ScreenConfiguration) {
@@ -15,8 +15,8 @@ public enum WallpaperSessionDefinition: Equatable, Sendable {
         case .html(let source, let config):
             if case .inline(let raw) = source, raw.isEmpty { return nil }
             self = .html(source, config)
-        case .metalShader(let preset):
-            self = .metalShader(preset)
+        case .metalShader(let shaderSource):
+            self = .metalShader(shaderSource)
         case .scene(let descriptor):
             guard !descriptor.workshopID.isEmpty,
                   !descriptor.cacheRelativePath.isEmpty,
@@ -31,8 +31,11 @@ public enum WallpaperSessionDefinition: Equatable, Sendable {
             return bookmarkNameResolver(bookmarkData)
         case .html(let source, _):
             return source.displayName
-        case .metalShader(let preset):
-            return preset.rawValue
+        case .metalShader(let shaderSource):
+            switch shaderSource {
+            case .builtin(let preset): return preset.rawValue
+            case .custom(let id):      return "Custom (\(id.uuidString.prefix(8)))"
+            }
         case .scene(let descriptor):
             return "Scene \(descriptor.workshopID)"
         }

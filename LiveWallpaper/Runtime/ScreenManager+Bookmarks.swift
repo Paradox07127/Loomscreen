@@ -20,8 +20,8 @@ extension ScreenManager {
             setVideo(url: resolved.url, bookmarkData: resolved.bookmarkData, for: screen)
         case .html(let source, let config):
             setHTMLWallpaper(source: source, config: config, for: screen)
-        case .metalShader(let preset):
-            setShaderWallpaper(preset: preset, for: screen)
+        case .metalShader(let source):
+            setShaderWallpaper(source: source, for: screen)
         case .scene(let descriptor):
             setSceneWallpaper(descriptor: descriptor, origin: bookmark.wpeOrigin, for: screen)
         }
