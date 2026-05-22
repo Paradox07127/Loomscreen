@@ -29,11 +29,13 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
     var summary: WallpaperSessionSummary {
         let activity: WallpaperSessionActivity
         if loadError != nil {
+            activity = .error
+        } else if !isVisible {
+            activity = .off
+        } else if currentProfile == .suspended {
             activity = .paused
-        } else if isVisible && currentProfile != .suspended {
-            activity = .active
         } else {
-            activity = .paused
+            activity = .active
         }
         return WallpaperSessionSummary(
             wallpaperType: .scene,

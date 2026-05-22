@@ -439,6 +439,10 @@ struct LiveWallpaperApp: App {
                 : "display.2"
         case .paused:
             return "pause.rectangle.fill"
+        case .off:
+            return "rectangle.slash"
+        case .error:
+            return "exclamationmark.triangle.fill"
         }
     }
 }

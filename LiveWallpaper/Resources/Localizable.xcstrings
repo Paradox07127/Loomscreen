@@ -581,6 +581,156 @@
         }
       }
     },
+    "%lld× Active" : {
+      "comment" : "URL chip showing the number of screens running the same HTML wallpaper. %lld is the total screen count including the current one.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld× Active"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld× アクティブ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld× 活动"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld× 使用中"
+          }
+        }
+      }
+    },
+    "Built-in trust for the platform's official embed surface — cannot be revoked." : {
+      "comment" : "Info tooltip on the Origin Access row when the origin is a built-in trusted embed domain.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Built-in trust for the platform's official embed surface — cannot be revoked."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プラットフォーム公式の埋め込みドメインに対する組み込み信頼 — 取り消せません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "平台官方嵌入域名的内置信任 — 无法撤销。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "平台官方嵌入網域的內建信任 — 無法撤銷。"
+          }
+        }
+      }
+    },
+    "Local" : {
+      "comment" : "Segment label in the HTML source picker covering both .html files and folders.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Local"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ローカル"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本地"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本機"
+          }
+        }
+      }
+    },
+    "No file or folder chosen" : {
+      "comment" : "Empty-state caption in the HTML local picker before the user has selected anything.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No file or folder chosen"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ファイルまたはフォルダ未選択"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尚未选择文件或文件夹"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尚未選擇檔案或資料夾"
+          }
+        }
+      }
+    },
+    "Paste URL from clipboard" : {
+      "comment" : "Tooltip / a11y label on the paste-button next to the HTML URL field.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paste URL from clipboard"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "クリップボードから URL を貼り付け"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从剪贴板粘贴 URL"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "從剪貼簿貼上 URL"
+          }
+        }
+      }
+    },
     "• %lld display configurations" : {
       "comment" : "Import confirmation bullet: how many displays the bundle includes. xcstrings provides a pluralized variant.",
       "localizations" : {
@@ -1657,34 +1807,6 @@
         }
       }
     },
-    "Allow %@ to run JavaScript" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Allow %@ to run JavaScript"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ に JavaScript の実行を許可"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "允许 %@ 运行 JavaScript"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "允許 %@ 執行 JavaScript"
-          }
-        }
-      }
-    },
     "Already saved as “%@”" : {
       "comment" : "Tooltip when an identical plan is already bookmarked. The placeholder is the existing bookmark's label.",
       "extractionState" : "manual",
@@ -2393,34 +2515,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "音訊"
-          }
-        }
-      }
-    },
-    "Audio is locked to the first screen. GPU cost scales with screen count — consider a different source per display." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Audio is locked to the first screen. GPU cost scales with screen count — consider a different source per display."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "オーディオは最初の画面に固定されます。GPU 負荷は画面数に応じて増えるため、ディスプレイごとに別のソースを使うことを検討してください。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "音频固定在第一个屏幕。GPU 开销会随屏幕数量增加——建议每个显示器使用不同来源。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "音訊會固定在第一個螢幕。GPU 負載會隨螢幕數量增加 — 建議每台顯示器使用不同來源。"
           }
         }
       }
@@ -11598,6 +11692,66 @@
         }
       }
     },
+    "HTTP" : {
+      "comment" : "URL chip text indicating insecure HTTP transport.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HTTP"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HTTP"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HTTP"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HTTP"
+          }
+        }
+      }
+    },
+    "HTTP origins cannot be trusted. Use HTTPS instead." : {
+      "comment" : "Info tooltip on the Origin Access row when the origin is HTTP and cannot be trusted.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HTTP origins cannot be trusted. Use HTTPS instead."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HTTP オリジンは信頼できません。HTTPS を使用してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不可信任 HTTP 来源。请改用 HTTPS。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不可信任 HTTP 來源。請改用 HTTPS。"
+          }
+        }
+      }
+    },
     "HTTPS is added automatically when no scheme is given." : {
       "localizations" : {
         "en" : {
@@ -12110,6 +12264,36 @@
         }
       }
     },
+    "Insecure HTTP — content cannot be verified." : {
+      "comment" : "Tooltip on the URL chip when the source is insecure HTTP.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Insecure HTTP — content cannot be verified."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安全でない HTTP — コンテンツを検証できません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HTTP 不安全 — 内容无法验证。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HTTP 不安全 — 內容無法驗證。"
+          }
+        }
+      }
+    },
     "Invalid bookmark" : {
       "comment" : "Subtitle shown on a schedule slot whose stored bookmark can no longer be resolved.",
       "extractionState" : "manual",
@@ -12313,30 +12497,62 @@
         }
       }
     },
-    "JavaScript disabled for untrusted source." : {
+    "JavaScript allowed for this origin." : {
+      "comment" : "Tooltip on the trusted URL chip.",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "JavaScript disabled for untrusted source."
+            "value" : "JavaScript allowed for this origin."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "信頼されていないソースでは JavaScript が無効です。"
+            "value" : "このオリジンで JavaScript が許可されています。"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "已为不受信任的来源禁用 JavaScript。"
+            "value" : "此来源允许 JavaScript。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "已為不受信任的來源停用 JavaScript。"
+            "value" : "此來源允許 JavaScript。"
+          }
+        }
+      }
+    },
+    "JavaScript runs on this origin. Revoke to disable script execution." : {
+      "comment" : "Info tooltip on the Origin Access row when the origin is trusted.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "JavaScript runs on this origin. Revoke to disable script execution."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このオリジンで JavaScript が実行できます。スクリプトを無効にするには取り消してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此来源可运行 JavaScript。撤销以禁用脚本执行。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此來源可執行 JavaScript。撤銷以停用腳本執行。"
           }
         }
       }
@@ -13301,34 +13517,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "手動：%@"
-          }
-        }
-      }
-    },
-    "Maps window.innerWidth to physical pixels (Wallpaper Engine compatibility). Auto-enabled for folders containing project.json." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Maps window.innerWidth to physical pixels (Wallpaper Engine compatibility). Auto-enabled for folders containing project.json."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "window.innerWidth を物理ピクセルにマッピングします（Wallpaper Engine 互換性）。project.json を含むフォルダでは自動で有効になります。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "将 window.innerWidth 映射到物理像素（Wallpaper Engine 兼容性）。对于包含 project.json 的文件夹自动启用。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "將 window.innerWidth 對應到實體像素（Wallpaper Engine 相容性）。包含 project.json 的資料夾會自動啟用。"
           }
         }
       }
@@ -15925,6 +16113,36 @@
         }
       }
     },
+    "Origin Access" : {
+      "comment" : "Row title in Content Security inspector for per-origin script execution permission.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Origin Access"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "オリジンアクセス"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "来源访问"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "來源存取"
+          }
+        }
+      }
+    },
     "Over 1 GB" : {
       "localizations" : {
         "en" : {
@@ -17133,62 +17351,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "選擇不同來源"
-          }
-        }
-      }
-    },
-    "Pick one .html file. Choose Folder when the page needs sibling JS, CSS, or images." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Pick one .html file. Choose Folder when the page needs sibling JS, CSS, or images."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "1 つの .html ファイルを選択してください。ページが同階層の JS、CSS、画像を必要とする場合は「フォルダ」を選択します。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "选择一个 .html 文件；如果页面需要同级 JS、CSS 或图片，请选择文件夹。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "選擇一個 .html 檔案。若頁面需要同層 JS、CSS 或圖片，請選擇「資料夾」。"
-          }
-        }
-      }
-    },
-    "Pick or drop a folder containing index.html plus any JS, CSS, or images it loads." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Pick or drop a folder containing index.html plus any JS, CSS, or images it loads."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "index.html と、それが読み込む JS、CSS、画像を含むフォルダを選択またはドロップしてください。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "选择或拖放一个包含 index.html 及其加载的 JS、CSS 或图片的文件夹。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "選擇或拖放包含 index.html 以及其載入的任何 JS、CSS 或圖片的資料夾。"
           }
         }
       }
@@ -19112,36 +19274,6 @@
         }
       }
     },
-    "Remove %@ from trusted origins" : {
-      "comment" : "A button that revokes a trusted origin.",
-      "isCommentAutoGenerated" : true,
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Remove %@ from trusted origins"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ を信頼済みオリジンから削除"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "从受信任的来源中移除 %@"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "從信任的來源中移除 %@"
-          }
-        }
-      }
-    },
     "Remove Bookmark" : {
       "localizations" : {
         "en" : {
@@ -20292,35 +20424,6 @@
         }
       }
     },
-    "Reset Transform" : {
-      "comment" : "Button label that resets scale/translate/rotation back to identity.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Reset Transform"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "トランスフォームをリセット"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重置变换"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重置變換"
-          }
-        }
-      }
-    },
     "Resize properties panel" : {
       "localizations" : {
         "en" : {
@@ -21010,34 +21113,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "櫻花"
-          }
-        }
-      }
-    },
-    "Same wallpaper is running on %lld other screen%@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Same wallpaper is running on %1$lld other screen%2$@"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "同じ壁紙がほかの %1$lld 画面で実行中%2$@"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "相同壁纸正在 %1$lld 个其他屏幕上运行%2$@"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "相同桌布正在其他 %1$lld 個螢幕上執行%2$@"
           }
         }
       }
@@ -21901,6 +21976,66 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "可用時，螢幕點數會取自即時內容檢視。底層像素會使用 AppKit 的 convertToBacking 路徑。"
+          }
+        }
+      }
+    },
+    "Scripts disabled. Manage in Content Security panel." : {
+      "comment" : "Tooltip on the untrusted URL chip — directs the user to manage trust in the inspector.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scripts disabled. Manage in Content Security panel."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スクリプトは無効です。コンテンツセキュリティパネルで管理してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "脚本已禁用。在“内容安全”面板中管理。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "腳本已停用。在「內容安全」面板中管理。"
+          }
+        }
+      }
+    },
+    "Scripts disabled. Trust this origin to allow JavaScript execution." : {
+      "comment" : "Info tooltip on the Origin Access row when the origin is HTTPS and untrusted.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scripts disabled. Trust this origin to allow JavaScript execution."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スクリプトは無効です。JavaScript を有効にするにはこのオリジンを信頼してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "脚本已禁用。信任此来源以允许 JavaScript 执行。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "腳本已停用。信任此來源以允許 JavaScript 執行。"
           }
         }
       }
@@ -23713,6 +23848,36 @@
         }
       }
     },
+    "Style overrides active" : {
+      "comment" : "Subtitle on the Custom CSS row when a stylesheet override is in effect.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Style overrides active"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スタイルオーバーライド有効"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "样式覆盖已生效"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "樣式覆寫生效中"
+          }
+        }
+      }
+    },
     "Subscribe to %@ and %lld more in Steam, then re-import." : {
       "comment" : "Scene dependency recovery hint. Placeholders are Workshop IDs and the remaining count.",
       "localizations" : {
@@ -24845,6 +25010,36 @@
         }
       }
     },
+    "This allows the wallpaper to run scripts, use local storage, and access WebGPU. Only trust origins you recognize." : {
+      "comment" : "Body text of the Trust confirmation dialog.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This allows the wallpaper to run scripts, use local storage, and access WebGPU. Only trust origins you recognize."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "壁紙がスクリプトの実行、ローカルストレージの使用、WebGPU へのアクセスを行えるようになります。信頼できるオリジンのみを許可してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这将允许壁纸运行脚本、使用本地存储和访问 WebGPU。仅信任你信赖的来源。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這將允許桌布執行腳本、使用本機儲存空間並存取 WebGPU。只信任你信賴的來源。"
+          }
+        }
+      }
+    },
     "This configuration is for a different app (%@). Expected %@." : {
       "comment" : "Import failure: bundle identifier doesn't match.",
       "extractionState" : "manual",
@@ -24989,34 +25184,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此場景使用了渲染器無法轉譯為 Metal 的自訂著色器。請嘗試在 Steam 中重新下載此專案。"
-          }
-        }
-      }
-    },
-    "This URL uses HTTP. Content cannot be verified — prefer HTTPS when possible." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "This URL uses HTTP. Content cannot be verified — prefer HTTPS when possible."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "この URL は HTTP を使用しています。内容を検証できません。可能な場合は HTTPS を使用してください。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "此 URL 使用 HTTP。内容无法验证——请尽量使用 HTTPS。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "此 URL 使用 HTTP。內容無法驗證；請盡可能使用 HTTPS。"
           }
         }
       }
@@ -25772,14 +25939,44 @@
         }
       }
     },
-    "Trust this origin" : {
-      "comment" : "A button that trusts a website to run JavaScript.",
-      "isCommentAutoGenerated" : true,
+    "Trust %@ for JavaScript?" : {
+      "comment" : "Title of the Trust confirmation dialog. %@ is the origin host.",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Trust this origin"
+            "value" : "Trust %@ for JavaScript?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ で JavaScript の実行を信頼しますか？"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "信任 %@ 运行 JavaScript？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "信任 %@ 執行 JavaScript？"
+          }
+        }
+      }
+    },
+    "Trust Origin" : {
+      "comment" : "Primary confirm button in the Trust confirmation dialog.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Trust Origin"
           }
         },
         "ja" : {
@@ -25802,30 +25999,62 @@
         }
       }
     },
-    "Trusted — JavaScript runs as configured." : {
+    "Trust…" : {
+      "comment" : "Button in the Origin Access row that opens the trust confirmation dialog. Ellipsis signals an intermediate confirmation.",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Trusted — JavaScript runs as configured."
+            "value" : "Trust…"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "信頼済み。JavaScript は構成どおりに実行されます。"
+            "value" : "信頼…"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "已信任——JavaScript 按配置运行。"
+            "value" : "信任…"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "已信任；JavaScript 會依設定執行。"
+            "value" : "信任…"
+          }
+        }
+      }
+    },
+    "Trusted" : {
+      "comment" : "URL chip text indicating the origin is in the trust store.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Trusted"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "信頼済み"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已信任"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已信任"
           }
         }
       }
@@ -26142,6 +26371,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未測試"
+          }
+        }
+      }
+    },
+    "Untrusted" : {
+      "comment" : "URL chip text indicating the origin is not in the trust store.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Untrusted"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未信頼"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未信任"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未信任"
           }
         }
       }
@@ -27917,34 +28176,6 @@
         }
       }
     },
-    "Web pages, Shadertoy, CodePen demos, or any URL." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Web pages, Shadertoy, CodePen demos, or any URL."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Web ページ、Shadertoy、CodePen デモ、または任意の URL。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "网页、Shadertoy、CodePen 演示或任何 URL。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "網頁、Shadertoy、CodePen 示範或任何 URL。"
-          }
-        }
-      }
-    },
     "Web Preview Not Available" : {
       "localizations" : {
         "en" : {
@@ -28606,6 +28837,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "你的 Wallpaper Engine 安裝資料夾"
+          }
+        }
+      }
+    },
+    "Renders WebGL content at retina resolution so character art and Spine wallpapers stop looking soft. Auto-enabled for Wallpaper Engine folders." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Renders WebGL content at retina resolution so character art and Spine wallpapers stop looking soft. Auto-enabled for Wallpaper Engine folders."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "WebGL コンテンツを Retina 解像度でレンダリングし、キャラクターアートや Spine ウォールペーパーがぼやけて見えるのを防ぎます。Wallpaper Engine フォルダでは自動で有効になります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "以 Retina 分辨率渲染 WebGL 内容，避免角色立绘和 Spine 壁纸看起来发软。Wallpaper Engine 文件夹会自动启用。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "以 Retina 解析度算繪 WebGL 內容，避免角色立繪與 Spine 桌布看起來偏軟。Wallpaper Engine 資料夾會自動啟用。"
           }
         }
       }

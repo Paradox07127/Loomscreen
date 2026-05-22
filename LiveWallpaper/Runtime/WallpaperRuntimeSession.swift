@@ -78,6 +78,11 @@ protocol WallpaperPlaybackControllable: WallpaperRuntimeSession {
 final class VideoWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackControllable {
     private var player: WallpaperVideoPlayer?
     private var wasPlayingBeforeSuspend: Bool?
+    /// Mirrors `player.setWindowVisible(_:)`. When `false` the wallpaper
+    /// window is `orderOut`-ed (master switch off), so the desktop shows
+    /// nothing behind it — distinct from `.paused`, where the last frame
+    /// stays visible.
+    private var isVisible = true
     private(set) var runtimeError: WallpaperRuntimeError? {
         didSet {
             guard oldValue != runtimeError else { return }
@@ -98,10 +103,19 @@ final class VideoWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackCon
 
     var summary: WallpaperSessionSummary {
         guard let player else { return .notConfigured }
-        let isHealthy = runtimeError == nil
+        let activity: WallpaperSessionActivity
+        if runtimeError != nil {
+            activity = .error
+        } else if !isVisible {
+            activity = .off
+        } else if player.isPlaying {
+            activity = .active
+        } else {
+            activity = .paused
+        }
         return WallpaperSessionSummary(
             wallpaperType: .video,
-            activity: isHealthy && player.isPlaying ? .active : .paused,
+            activity: activity,
             supportsPlaybackControl: true,
             subtitle: runtimeError?.userMessage
         )
@@ -132,10 +146,12 @@ final class VideoWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackCon
     }
 
     func show() {
+        isVisible = true
         player?.setWindowVisible(true)
     }
 
     func hide() {
+        isVisible = false
         player?.setWindowVisible(false)
     }
 
@@ -224,8 +240,16 @@ final class AmbientWallpaperSession: WallpaperRuntimeSession, HTMLWallpaperConfi
     }
 
     var summary: WallpaperSessionSummary {
-        let isHealthy = runtimeError == nil
-        let activity: WallpaperSessionActivity = isHealthy && isVisible && currentProfile != .suspended ? .active : .paused
+        let activity: WallpaperSessionActivity
+        if runtimeError != nil {
+            activity = .error
+        } else if !isVisible {
+            activity = .off
+        } else if currentProfile == .suspended {
+            activity = .paused
+        } else {
+            activity = .active
+        }
         return WallpaperSessionSummary(
             wallpaperType: wallpaperType,
             activity: activity,

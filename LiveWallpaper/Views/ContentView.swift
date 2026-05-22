@@ -423,6 +423,8 @@ struct ScreenRow: View {
         switch summary.activity {
         case .active:   return .green
         case .paused:   return .orange
+        case .off:      return .secondary
+        case .error:    return .red
         case .inactive: return nil
         }
     }

@@ -32,6 +32,10 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
     /// and the HTML side retries them on every loop tick. Logging each retry
     /// at warning level spams the console; we log once and stay quiet after.
     private var reportedMissingResources: Set<String> = []
+    /// Same dedupe pattern for Ogg → mp3/m4a substitutions — logged once per
+    /// requested filename per session so the user can see the workaround
+    /// happened without the console drowning in repeat entries.
+    private var reportedOggSubstitutions: Set<String> = []
 
     /// Updated each time `HTMLWallpaperView.loadSource(.folder)` swaps content.
     /// Setting `nil` (or any different folder) immediately cancels in-flight
@@ -43,6 +47,7 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
             if activeFolderURL != newValue {
                 cancelAllActiveTasks()
                 reportedMissingResources.removeAll()
+                reportedOggSubstitutions.removeAll()
             }
             activeFolderURL = newValue
             sessionNonce = newValue == nil ? nil : UUID().uuidString
@@ -73,12 +78,26 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
             return
         }
 
-        let fileURL: URL
+        let primaryURL: URL
         do {
-            fileURL = try Self.resolvedFileURL(for: url, inside: folderURL)
+            primaryURL = try Self.resolvedFileURL(for: url, inside: folderURL)
         } catch {
             urlSchemeTask.didFailWithError(error)
             return
+        }
+
+        let fileURL: URL
+        if let fallback = Self.oggFallbackURL(for: primaryURL) {
+            if !reportedOggSubstitutions.contains(primaryURL.lastPathComponent) {
+                reportedOggSubstitutions.insert(primaryURL.lastPathComponent)
+                Logger.info(
+                    "FolderScheme: serving \(fallback.lastPathComponent) for \(primaryURL.lastPathComponent) (macOS WebKit Ogg/Opus decoder workaround)",
+                    category: .screenManager
+                )
+            }
+            fileURL = fallback
+        } else {
+            fileURL = primaryURL
         }
 
         let mime = Self.mimeType(for: fileURL)
@@ -132,12 +151,7 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
                     && ((error as NSError).code == NSFileReadNoSuchFileError
                         || (error as NSError).code == NSFileNoSuchFileError)
                 if isMissingFile {
-                    await MainActor.run { [weak self] in
-                        guard let self else { return }
-                        if self.reportedMissingResources.insert(fileURL.lastPathComponent).inserted {
-                            Logger.info("FolderScheme: \(fileURL.lastPathComponent) not found in project (HTML 404 — wallpaper content issue, not app)", category: .screenManager)
-                        }
-                    }
+                    await self?.logMissingResource(fileURL: fileURL, requestURL: url)
                 } else {
                     Logger.warning("FolderScheme: \(fileURL.lastPathComponent) — \(error.localizedDescription)", category: .screenManager)
                 }
@@ -153,6 +167,56 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
         if delivery.hasTerminated {
             activeTasks.removeValue(forKey: taskID)
         }
+    }
+
+    /// Diagnostic log for the "file not found" branch. The lightweight version
+    /// only printed `lastPathComponent`, which makes it impossible to tell
+    /// apart "wallpaper truly missing asset" from "our path resolution dropped
+    /// a subfolder". We now log the request path, the resolved fs path, a
+    /// `FileManager.fileExists` confirmation, a peek at the parent directory
+    /// so the actual filename surfaces if it's a near-miss, and a codec hint
+    /// for OGG/Opus (WebKit's media stack is historically flaky on these so
+    /// users sometimes assume the file is "missing" when it's a decoder
+    /// problem — though a decoder failure would not normally reach us as a
+    /// filesystem 404). One log entry per filename per folder session.
+    @MainActor
+    private func logMissingResource(fileURL: URL, requestURL: URL) {
+        guard reportedMissingResources.insert(fileURL.lastPathComponent).inserted else { return }
+
+        let fm = FileManager.default
+        let exists = fm.fileExists(atPath: fileURL.path)
+        let parent = fileURL.deletingLastPathComponent()
+        var siblingPreview = ""
+        if let entries = try? fm.contentsOfDirectory(atPath: parent.path) {
+            let sorted = entries.sorted()
+            let head = sorted.prefix(10)
+            let extra = sorted.count > 10 ? " (+\(sorted.count - 10) more)" : ""
+            siblingPreview = head.isEmpty
+                ? " | parentEmpty"
+                : " | parent=[\(head.joined(separator: ", "))]\(extra)"
+        } else {
+            siblingPreview = " | parentUnreadable"
+        }
+
+        let codecHint: String
+        switch fileURL.pathExtension.lowercased() {
+        case "ogg", "oga", "opus":
+            codecHint = " | hint=Ogg/Opus has historically poor WebKit support on macOS — convert to .mp3 / .aac if 404 persists"
+        case "webm":
+            codecHint = " | hint=WebM audio/video has limited WebKit support on macOS"
+        default:
+            codecHint = ""
+        }
+
+        Logger.info(
+            """
+            FolderScheme 404: \(fileURL.lastPathComponent) \
+            requested=\(requestURL.path) \
+            resolved=\(fileURL.path) \
+            onDisk=\(exists)\(siblingPreview)\(codecHint)
+            """,
+            category: .screenManager
+        )
     }
 
     func webView(_ webView: WKWebView, stop urlSchemeTask: any WKURLSchemeTask) {
@@ -199,6 +263,33 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
     }
 
     // MARK: - Helpers
+
+    /// macOS WebKit's Ogg/Vorbis/Opus decoder has well-known issues that
+    /// don't reproduce in Chrome / Firefox (which bundle their own ffmpeg):
+    /// playback stalls on granulepos jumps, multi-stream Ogg goes silent,
+    /// and pre-macOS-14 there is no Opus support at all. Additionally,
+    /// Wallpaper Engine authors frequently hardcode `.ogg` in their JS but
+    /// ship only `.mp3` in the published package.
+    ///
+    /// Both cases collapse to the same fix: when an Ogg-family URL is
+    /// requested, prefer a same-name sibling in a reliably-supported
+    /// container if one exists. Returns `nil` when no substitution applies.
+    private static let oggFallbackExtensions: [String] = ["mp3", "m4a", "aac", "wav", "flac"]
+
+    nonisolated static func oggFallbackURL(for primary: URL) -> URL? {
+        let ext = primary.pathExtension.lowercased()
+        guard ext == "ogg" || ext == "oga" || ext == "opus" else { return nil }
+        let parent = primary.deletingLastPathComponent()
+        let baseName = primary.deletingPathExtension().lastPathComponent
+        let fm = FileManager.default
+        for candidateExt in oggFallbackExtensions {
+            let candidate = parent.appendingPathComponent("\(baseName).\(candidateExt)")
+            if fm.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+        }
+        return nil
+    }
 
     nonisolated static func resolvedFileURL(for requestURL: URL, inside folderURL: URL) throws -> URL {
         let rootURL = folderURL.standardizedFileURL.resolvingSymlinksInPath()

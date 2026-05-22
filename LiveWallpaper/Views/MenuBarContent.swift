@@ -343,6 +343,10 @@ struct MenuBarContent: View {
             return .active
         case .paused:
             return .paused
+        case .off:
+            return .off
+        case .error:
+            return .error
         case .inactive:
             return .inactive
         }
@@ -449,12 +453,16 @@ private enum MenuBarMetrics {
 private enum DisplayVisualState: Equatable {
     case active
     case paused
+    case off
+    case error
     case inactive
 
     var tint: Color {
         switch self {
         case .active:   return .green
         case .paused:   return .orange
+        case .off:      return .secondary
+        case .error:    return .red
         case .inactive: return .secondary
         }
     }
@@ -465,6 +473,10 @@ private enum DisplayVisualState: Equatable {
             return "active"
         case .paused:
             return "paused"
+        case .off:
+            return "off"
+        case .error:
+            return "error"
         case .inactive:
             return "idle"
         }
