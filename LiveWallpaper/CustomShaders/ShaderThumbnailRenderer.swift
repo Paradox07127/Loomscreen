@@ -11,93 +11,156 @@ import MetalKit
 ///
 /// Two key choices:
 /// 1. Time is fixed at `1.5s` rather than 0 — most procedural shaders look
-///    flat / monochromatic at t=0 (Aurora bands haven't moved yet, Plasma
-///    metaballs are stacked at center, etc.); 1.5 seconds is enough warmup
-///    for each preset to look visually distinct without being far enough
-///    out that they all blur into mid-cycle noise.
+///    flat / monochromatic at t=0; 1.5s is enough warmup for each preset
+///    to look visually distinct without drifting into mid-cycle noise.
 /// 2. No MSAA on thumbnails — the destination texture is BGRA8Unorm with
-///    `rasterSampleCount = 1`. Pipeline reuse with the live renderer would
-///    require samplers that match its 4× MSAA, but the thumbnail is shown
-///    at 88pt × 60pt where MSAA buys nothing.
+///    `rasterSampleCount = 1`. The thumbnail is shown at 88×60pt where
+///    supersampling buys nothing.
+///
+/// Concurrency: `cachedThumbnail(...)` runs on MainActor (sync NSCache
+/// lookup). `renderThumbnail(...)` is async and offloads compile +
+/// readback to a `Task.detached`, then publishes the result back to
+/// MainActor for SwiftUI to observe.
 @MainActor
 final class ShaderThumbnailRenderer {
     static let shared = ShaderThumbnailRenderer()
 
-    /// Logical card size used by the picker grid. Backing-store size is
-    /// `cardSize × NSScreen.main.backingScaleFactor` so the bitmap reads
-    /// crisp on retina.
+    /// Logical card size used by the picker grid.
     static let cardSize = CGSize(width: 88, height: 60)
 
+    /// Result cache: one `NSImage` per (source, backing-store size) pair.
+    /// NSCache is thread-safe so the render helper can read/write from any
+    /// thread; the MainActor view just reads it.
+    private let imageCache = NSCache<NSString, NSImage>()
+
+    /// Shared render helper that owns the Metal device + pipeline cache.
+    /// Lives off MainActor so render work doesn't block UI.
+    @ObservationIgnored
+    private let helper = ThumbnailRenderHelper()
+
+    init() {
+        imageCache.countLimit = 64
+    }
+
+    // MARK: - Public API
+
+    /// Returns a cached thumbnail if present. Cheap; safe to call from
+    /// SwiftUI `body`.
+    func cachedThumbnail(for source: ShaderSource, pointSize: CGSize, scale: CGFloat) -> NSImage? {
+        let (pixelWidth, pixelHeight) = pixelDimensions(pointSize: pointSize, scale: scale)
+        return imageCache.object(forKey: cacheKey(for: source, pixelWidth: pixelWidth, pixelHeight: pixelHeight) as NSString)
+    }
+
+    /// Renders a thumbnail off-main. Returns the cached image when one
+    /// exists, otherwise schedules a background render and yields the
+    /// resulting `NSImage` (or `nil` on compile / Metal failure).
+    func renderThumbnail(for source: ShaderSource, pointSize: CGSize, scale: CGFloat) async -> NSImage? {
+        if let cached = cachedThumbnail(for: source, pointSize: pointSize, scale: scale) {
+            return cached
+        }
+
+        let (pixelWidth, pixelHeight) = pixelDimensions(pointSize: pointSize, scale: scale)
+        // Resolve the custom shader's source on MainActor before detaching;
+        // the helper runs off MainActor and cannot touch the @Observable
+        // store directly.
+        let customSource = source.customID.flatMap { CustomShaderStore.shared.shader(for: $0)?.source }
+
+        let request = ThumbnailRequest(
+            source: source,
+            customSource: customSource,
+            pixelWidth: pixelWidth,
+            pixelHeight: pixelHeight
+        )
+
+        let helper = self.helper
+        let image = await Task.detached(priority: .userInitiated) {
+            helper.render(request)
+        }.value
+
+        guard let image else { return nil }
+        image.size = pointSize
+        imageCache.setObject(
+            image,
+            forKey: cacheKey(for: source, pixelWidth: pixelWidth, pixelHeight: pixelHeight) as NSString
+        )
+        return image
+    }
+
+    /// Drop every cached entry for the given source. Called when a custom
+    /// shader is re-imported or deleted so the next request re-renders.
+    func invalidate(_ source: ShaderSource) {
+        helper.invalidate(source)
+        imageCache.removeAllObjects()
+    }
+
+    // MARK: - Helpers
+
+    private func pixelDimensions(pointSize: CGSize, scale: CGFloat) -> (Int, Int) {
+        (
+            max(1, Int((pointSize.width  * scale).rounded())),
+            max(1, Int((pointSize.height * scale).rounded()))
+        )
+    }
+
+    private func cacheKey(for source: ShaderSource, pixelWidth: Int, pixelHeight: Int) -> String {
+        "\(ThumbnailRenderHelper.pipelineKey(for: source))_\(pixelWidth)x\(pixelHeight)"
+    }
+}
+
+// MARK: - ThumbnailRenderHelper (nonisolated)
+
+/// One Metal device + pipeline cache shared across thumbnail renders.
+/// Marked `@unchecked Sendable` because mutation of `pipelineCache` is
+/// serialized through `lock`; everything else is value-typed or already
+/// thread-safe (`MTLDevice`/`MTLLibrary`/`MTLCommandQueue` are Sendable in
+/// the macOS 14+ Metal headers).
+fileprivate final class ThumbnailRenderHelper: @unchecked Sendable {
     private let device: MTLDevice?
     private let commandQueue: MTLCommandQueue?
     private let defaultLibrary: MTLLibrary?
 
-    /// Result cache: one `NSImage` per (source, backing-store size) pair.
-    /// Sized in pixels (post-DPR) so the same source rendered at 2× and 3×
-    /// don't fight for a single slot.
-    private let imageCache = NSCache<NSString, NSImage>()
-
-    /// Compiled pipelines, keyed by source. Custom shaders compile lazily
-    /// and stay cached until `invalidate(_:)` evicts them (e.g. on delete).
+    private let lock = NSLock()
     private var pipelineCache: [String: MTLRenderPipelineState] = [:]
+    /// LRU ordering — oldest first. Eviction trims to `pipelineCacheLimit`.
+    private var pipelineOrder: [String] = []
+    private let pipelineCacheLimit = 32
 
     init() {
         let device = MTLCreateSystemDefaultDevice()
         self.device = device
         self.commandQueue = device?.makeCommandQueue()
         self.defaultLibrary = device?.makeDefaultLibrary()
-        imageCache.countLimit = 64
     }
 
-    // MARK: - Public API
-
-    /// Returns a cached thumbnail or renders one synchronously. Returns
-    /// `nil` only when Metal is unsupported or the custom shader's source
-    /// fails to compile (caller falls back to an SF Symbol).
-    func thumbnail(for source: ShaderSource, pointSize: CGSize, scale: CGFloat) -> NSImage? {
-        let pixelWidth  = max(1, Int((pointSize.width  * scale).rounded()))
-        let pixelHeight = max(1, Int((pointSize.height * scale).rounded()))
-        let cacheKey = key(for: source, pixelWidth: pixelWidth, pixelHeight: pixelHeight) as NSString
-        if let cached = imageCache.object(forKey: cacheKey) {
-            return cached
+    static func pipelineKey(for source: ShaderSource) -> String {
+        switch source {
+        case .builtin(let preset): return "builtin:\(preset.rawValue)"
+        case .custom(let id):      return "custom:\(id.uuidString)"
         }
-        guard let image = render(source: source, pixelWidth: pixelWidth, pixelHeight: pixelHeight) else {
-            return nil
-        }
-        image.size = pointSize
-        imageCache.setObject(image, forKey: cacheKey)
-        return image
     }
 
-    /// Drop every cached entry (image + pipeline) for the given source.
-    /// Called when a custom shader is re-imported or deleted so the next
-    /// `thumbnail(for:)` returns a fresh render.
     func invalidate(_ source: ShaderSource) {
-        let pipelineKey = pipelineCacheKey(for: source)
-        pipelineCache.removeValue(forKey: pipelineKey)
-
-        // NSCache lacks key enumeration; remove all and let the picker
-        // re-warm. For 5 builtins + N customs this is cheap enough.
-        imageCache.removeAllObjects()
+        let key = Self.pipelineKey(for: source)
+        lock.lock()
+        defer { lock.unlock() }
+        pipelineCache.removeValue(forKey: key)
+        pipelineOrder.removeAll { $0 == key }
     }
 
-    // MARK: - Render
-
-    private func render(source: ShaderSource, pixelWidth: Int, pixelHeight: Int) -> NSImage? {
+    func render(_ request: ThumbnailRequest) -> NSImage? {
         guard let device, let commandQueue else { return nil }
 
         let pipeline: MTLRenderPipelineState
         do {
-            pipeline = try resolvePipeline(for: source, device: device)
+            pipeline = try resolvePipeline(for: request, device: device)
         } catch {
-            Logger.warning("Shader thumbnail compile failed: \(error.localizedDescription)", category: .videoPlayer)
             return nil
         }
 
         let textureDescriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .bgra8Unorm,
-            width: pixelWidth,
-            height: pixelHeight,
+            width: request.pixelWidth,
+            height: request.pixelHeight,
             mipmapped: false
         )
         textureDescriptor.usage = [.renderTarget, .shaderRead]
@@ -117,8 +180,8 @@ final class ShaderThumbnailRenderer {
 
         var uniforms = ShaderUniforms(
             time: 1.5,
-            resolution: SIMD2<Float>(Float(pixelWidth), Float(pixelHeight)),
-            shaderType: source.builtinPreset.map(Self.shaderTypeIndex(for:)) ?? 0
+            resolution: SIMD2<Float>(Float(request.pixelWidth), Float(request.pixelHeight)),
+            shaderType: request.source.builtinPreset?.shaderTypeIndex ?? 0
         )
 
         encoder.setRenderPipelineState(pipeline)
@@ -129,25 +192,34 @@ final class ShaderThumbnailRenderer {
         buffer.commit()
         buffer.waitUntilCompleted()
 
-        return makeImage(from: texture, width: pixelWidth, height: pixelHeight)
+        return makeImage(from: texture, width: request.pixelWidth, height: request.pixelHeight)
     }
 
-    private func resolvePipeline(for source: ShaderSource, device: MTLDevice) throws -> MTLRenderPipelineState {
-        let key = pipelineCacheKey(for: source)
-        if let cached = pipelineCache[key] { return cached }
+    private func resolvePipeline(for request: ThumbnailRequest, device: MTLDevice) throws -> MTLRenderPipelineState {
+        let key = Self.pipelineKey(for: request.source)
+
+        lock.lock()
+        if let cached = pipelineCache[key] {
+            // Move to MRU end of the LRU list.
+            pipelineOrder.removeAll { $0 == key }
+            pipelineOrder.append(key)
+            lock.unlock()
+            return cached
+        }
+        lock.unlock()
 
         let library: MTLLibrary
-        switch source {
+        switch request.source {
         case .builtin:
             guard let defaultLibrary else {
                 throw CustomShaderCompileError.metalUnsupported
             }
             library = defaultLibrary
-        case .custom(let id):
-            guard let shader = CustomShaderStore.shared.shader(for: id) else {
+        case .custom:
+            guard let customSource = request.customSource else {
                 throw CustomShaderCompileError.compileFailed(message: "Shader not found")
             }
-            library = try MetalWallpaperView.compileCustomShader(source: shader.source, on: device)
+            library = try MetalWallpaperView.compileCustomShader(source: customSource, on: device)
         }
 
         guard let vertexFunction = library.makeFunction(name: "vertexShader"),
@@ -162,7 +234,15 @@ final class ShaderThumbnailRenderer {
         pipelineDescriptor.rasterSampleCount = 1
 
         let pipeline = try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
+
+        lock.lock()
+        defer { lock.unlock() }
         pipelineCache[key] = pipeline
+        pipelineOrder.append(key)
+        if pipelineOrder.count > pipelineCacheLimit {
+            let evict = pipelineOrder.removeFirst()
+            pipelineCache.removeValue(forKey: evict)
+        }
         return pipeline
     }
 
@@ -201,28 +281,14 @@ final class ShaderThumbnailRenderer {
 
         return NSImage(cgImage: cgImage, size: NSSize(width: width, height: height))
     }
+}
 
-    // MARK: - Keys
-
-    private func key(for source: ShaderSource, pixelWidth: Int, pixelHeight: Int) -> String {
-        "\(pipelineCacheKey(for: source))_\(pixelWidth)x\(pixelHeight)"
-    }
-
-    private func pipelineCacheKey(for source: ShaderSource) -> String {
-        switch source {
-        case .builtin(let preset): return "builtin:\(preset.rawValue)"
-        case .custom(let id):      return "custom:\(id.uuidString)"
-        }
-    }
-
-    private static func shaderTypeIndex(for preset: MetalShaderPreset) -> Int32 {
-        switch preset {
-        case .waves:    return 0
-        case .plasma:   return 1
-        case .gradient: return 2
-        case .noise:    return 3
-        case .aurora:   return 4
-        }
-    }
+/// Immutable render request — `Sendable` so it crosses into `Task.detached`
+/// without compiler warnings under Swift 6 strict concurrency.
+fileprivate struct ThumbnailRequest: Sendable {
+    let source: ShaderSource
+    let customSource: String?
+    let pixelWidth: Int
+    let pixelHeight: Int
 }
 #endif

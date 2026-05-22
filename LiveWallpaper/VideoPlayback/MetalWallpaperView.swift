@@ -114,7 +114,7 @@ final class MetalWallpaperView: NSView, MTKViewDelegate {
         }
     }
 
-    private static func makePipeline(
+    nonisolated static func makePipeline(
         device: MTLDevice,
         library: MTLLibrary,
         vertexName: String,
@@ -143,8 +143,9 @@ final class MetalWallpaperView: NSView, MTKViewDelegate {
     // MARK: - Public API
 
     /// Apply a `ShaderSource` — switches between builtin preset (default
-    /// metallib) and user-imported shader (runtime compile). For custom
-    /// shaders, throws if the wrapped source fails to compile.
+    /// metallib) and user-imported shader (runtime compile). Builtin
+    /// pipelines are pre-compiled, so the switch is synchronous; custom
+    /// shaders compile off-main and swap the pipeline once ready.
     func apply(source: ShaderSource) {
         switch source {
         case .builtin(let preset):
@@ -157,20 +158,59 @@ final class MetalWallpaperView: NSView, MTKViewDelegate {
                 rebuildBuiltinPipeline()
                 return
             }
+            scheduleCustomShaderInstall(source: entry.source, name: entry.displayName)
+        }
+    }
+
+    private func scheduleCustomShaderInstall(source: String, name: String) {
+        guard let device else {
+            currentPreset = .waves
+            rebuildBuiltinPipeline()
+            return
+        }
+        let compileGeneration = nextCompileGeneration()
+        Task.detached(priority: .userInitiated) { [weak self] in
             do {
-                try installCustomShader(source: entry.source, name: entry.displayName)
+                let library = try Self.compileCustomShader(source: source, on: device)
+                let pipeline = try Self.makePipeline(
+                    device: device,
+                    library: library,
+                    vertexName: "vertexShader",
+                    fragmentName: "fragmentShader"
+                )
+                await self?.adoptCustomPipeline(pipeline, name: name, generation: compileGeneration)
             } catch {
-                Logger.error("Custom shader \(entry.displayName) failed to compile: \(error.localizedDescription)", category: .videoPlayer)
-                currentPreset = .waves
-                rebuildBuiltinPipeline()
+                Logger.error("Custom shader \(name) failed to compile: \(error.localizedDescription)", category: .videoPlayer)
+                await self?.fallbackToWaves(generation: compileGeneration)
             }
         }
+    }
+
+    private func adoptCustomPipeline(_ pipeline: MTLRenderPipelineState, name: String, generation: Int) {
+        guard generation == compileGeneration else { return }
+        pipelineState = pipeline
+        isUsingCustomPipeline = true
+        Logger.info("Loaded custom shader '\(name)'", category: .videoPlayer)
+    }
+
+    private func fallbackToWaves(generation: Int) {
+        guard generation == compileGeneration else { return }
+        currentPreset = .waves
+        rebuildBuiltinPipeline()
+    }
+
+    /// Monotonic token so an in-flight compile that finishes after the
+    /// user has switched to another shader doesn't clobber the new state.
+    private var compileGeneration: Int = 0
+    private func nextCompileGeneration() -> Int {
+        compileGeneration += 1
+        return compileGeneration
     }
 
     /// Compile a user shader source against the canonical wrapper template
     /// and return the resulting library. Useful for the importer's pre-save
     /// validation step (the inspector calls this before persisting).
-    static func compileCustomShader(source: String, on device: MTLDevice) throws -> MTLLibrary {
+    nonisolated static func compileCustomShader(source: String, on device: MTLDevice) throws -> MTLLibrary {
         guard source.range(of: #"\bmainImage\b"#, options: .regularExpression) != nil else {
             throw CustomShaderCompileError.missingMainImage
         }
@@ -187,26 +227,13 @@ final class MetalWallpaperView: NSView, MTKViewDelegate {
         }
     }
 
-    private func installCustomShader(source: String, name: String) throws {
-        guard let device else { throw CustomShaderCompileError.metalUnsupported }
-        let library = try Self.compileCustomShader(source: source, on: device)
-        pipelineState = try Self.makePipeline(
-            device: device,
-            library: library,
-            vertexName: "vertexShader",
-            fragmentName: "fragmentShader"
-        )
-        isUsingCustomPipeline = true
-        Logger.info("Loaded custom shader '\(name)'", category: .videoPlayer)
-    }
-
     /// Canonical wrapper for user shaders. User code must define:
     ///
     ///     half4 mainImage(float2 uv, float time, float2 resolution) { ... }
     ///
     /// Everything else (vertex shader, uniforms struct, fragment dispatch)
     /// is supplied by the wrapper so users only write the fragment math.
-    private static func wrap(userSource: String) -> String {
+    nonisolated private static func wrap(userSource: String) -> String {
         """
         #include <metal_stdlib>
         using namespace metal;
@@ -281,7 +308,7 @@ final class MetalWallpaperView: NSView, MTKViewDelegate {
         var uniforms = ShaderUniforms(
             time: elapsed,
             resolution: SIMD2<Float>(Float(drawableSize.width), Float(drawableSize.height)),
-            shaderType: isUsingCustomPipeline ? 0 : shaderTypeIndex(for: currentPreset)
+            shaderType: isUsingCustomPipeline ? 0 : currentPreset.shaderTypeIndex
         )
 
         guard let commandBuffer = commandQueue.makeCommandBuffer(),
@@ -296,18 +323,6 @@ final class MetalWallpaperView: NSView, MTKViewDelegate {
         encoder.endEncoding()
         commandBuffer.present(drawable)
         commandBuffer.commit()
-    }
-
-    // MARK: - Helpers
-
-    private func shaderTypeIndex(for preset: MetalShaderPreset) -> Int32 {
-        switch preset {
-        case .waves:    return 0
-        case .plasma:   return 1
-        case .gradient: return 2
-        case .noise:    return 3
-        case .aurora:   return 4
-        }
     }
 
     // MARK: - Layout

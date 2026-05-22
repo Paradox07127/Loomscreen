@@ -5,13 +5,13 @@ import UniformTypeIdentifiers
 
 /// Shader preset gallery — embedded in `ScreenDetailPreviewArea` when the
 /// user picks the shader wallpaper type. Renders 5 builtin presets plus the
-/// user's imported `.lwshader` library; the Import button at the end of the
-/// custom grid opens an `NSOpenPanel`, validates by attempting a Metal
-/// compile, and either saves the entry or surfaces the diagnostic in an
-/// alert. Picking any card swaps the `selectedShaderSource` binding and
-/// notifies the screen manager. Each card shows a real first-frame
-/// thumbnail of the shader instead of an SF Symbol so users see what they
-/// are picking before they apply it.
+/// user's imported `.lwshader` library; the Import button opens an
+/// `NSOpenPanel` (presented as a sheet, not a modal run loop), validates by
+/// attempting a Metal compile, and either saves the entry or surfaces the
+/// diagnostic in an alert. Picking any card swaps the
+/// `selectedShaderSource` binding and notifies the screen manager. Each
+/// card shows a real first-frame thumbnail rendered off-main with an SF
+/// Symbol placeholder while the GPU work is in flight.
 struct ShaderWallpaperSection: View {
     var screen: Screen
     @Binding var selectedShaderSource: ShaderSource
@@ -22,9 +22,15 @@ struct ShaderWallpaperSection: View {
     @State private var store = CustomShaderStore.shared
     @State private var importError: ImportErrorAlert?
     @State private var pendingDeletion: CustomShader?
+    @State private var thumbnails: [String: NSImage] = [:]
+
+    /// Maximum size of an importable shader source file. 256 KB is well
+    /// over what a hand-written fragment shader needs (most are < 4 KB)
+    /// while bounding malicious / accidentally-pasted-binary files.
+    private static let maxImportBytes = 256 * 1024
 
     private static let presetColumns = [
-        GridItem(.adaptive(minimum: 110, maximum: 200), spacing: 12, alignment: .top)
+        GridItem(.adaptive(minimum: 88, maximum: 140), spacing: 12, alignment: .top)
     ]
 
     private static let thumbnailCornerRadius: CGFloat = 8
@@ -41,6 +47,12 @@ struct ShaderWallpaperSection: View {
             .padding(14)
         }
         .groupBoxStyle(ContainerGroupBoxStyle())
+        .task {
+            await loadThumbnails(for: MetalShaderPreset.allCases.map(ShaderSource.builtin))
+        }
+        .task(id: store.shaders.map(\.id)) {
+            await loadThumbnails(for: store.shaders.map { ShaderSource.custom($0.id) })
+        }
         .alert(item: $importError) { alert in
             Alert(
                 title: Text("Shader Import Failed"),
@@ -52,7 +64,7 @@ struct ShaderWallpaperSection: View {
             Alert(
                 title: Text("Delete Shader?"),
                 message: Text("\(shader.displayName) will be removed from your library. This cannot be undone."),
-                primaryButton: .destructive(Text("Delete")) { perform(deletion: shader) },
+                primaryButton: .destructive(Text("Delete")) { Task { await perform(deletion: shader) } },
                 secondaryButton: .cancel()
             )
         }
@@ -204,11 +216,12 @@ struct ShaderWallpaperSection: View {
     ) -> some View {
         let size = ShaderThumbnailRenderer.cardSize
         let cornerShape = RoundedRectangle(cornerRadius: Self.thumbnailCornerRadius, style: .continuous)
-        let image = ShaderThumbnailRenderer.shared.thumbnail(
-            for: source,
-            pointSize: size,
-            scale: max(displayScale, 1.0)
-        )
+        let image = thumbnails[thumbnailKey(source)]
+            ?? ShaderThumbnailRenderer.shared.cachedThumbnail(
+                for: source,
+                pointSize: size,
+                scale: max(displayScale, 1.0)
+            )
 
         Group {
             if let image {
@@ -243,6 +256,31 @@ struct ShaderWallpaperSection: View {
         )
     }
 
+    // MARK: - Thumbnail loading
+
+    private func thumbnailKey(_ source: ShaderSource) -> String {
+        switch source {
+        case .builtin(let preset): return "builtin:\(preset.rawValue)"
+        case .custom(let id):      return "custom:\(id.uuidString)"
+        }
+    }
+
+    private func loadThumbnails(for sources: [ShaderSource]) async {
+        let scale = max(displayScale, 1.0)
+        let size = ShaderThumbnailRenderer.cardSize
+        for source in sources {
+            let key = thumbnailKey(source)
+            if thumbnails[key] != nil { continue }
+            if let image = await ShaderThumbnailRenderer.shared.renderThumbnail(
+                for: source,
+                pointSize: size,
+                scale: scale
+            ) {
+                thumbnails[key] = image
+            }
+        }
+    }
+
     // MARK: - Actions
 
     private func applyShader(_ source: ShaderSource) {
@@ -258,15 +296,40 @@ struct ShaderWallpaperSection: View {
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
         panel.allowedContentTypes = Self.allowedContentTypes
-        panel.allowsOtherFileTypes = true
+        panel.allowsOtherFileTypes = false
         panel.message = String(localized: "Choose a .lwshader or .metal file that defines `mainImage(uv, time, resolution)`.")
         panel.prompt = String(localized: "Import")
 
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        importShader(from: url)
+        let window = NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.windows.first
+        let completion: (NSApplication.ModalResponse) -> Void = { response in
+            guard response == .OK, let url = panel.url else { return }
+            Task { await importShader(from: url) }
+        }
+        if let window {
+            panel.beginSheetModal(for: window, completionHandler: completion)
+        } else {
+            panel.begin(completionHandler: completion)
+        }
     }
 
-    private func importShader(from url: URL) {
+    private func importShader(from url: URL) async {
+        let didStart = url.startAccessingSecurityScopedResource()
+        defer { if didStart { url.stopAccessingSecurityScopedResource() } }
+
+        // Size check first — refuse oversized files before reading.
+        do {
+            let resourceValues = try url.resourceValues(forKeys: [.fileSizeKey])
+            if let size = resourceValues.fileSize, size > Self.maxImportBytes {
+                importError = ImportErrorAlert(message: String(
+                    localized: "Shader file is too large to import (limit \(Self.maxImportBytes / 1024) KB)."
+                ))
+                return
+            }
+        } catch {
+            importError = ImportErrorAlert(message: error.localizedDescription)
+            return
+        }
+
         let source: String
         do {
             source = try String(contentsOf: url, encoding: .utf8)
@@ -280,8 +343,12 @@ struct ShaderWallpaperSection: View {
             return
         }
 
+        // Validate compile off-main so a pathological shader doesn't lock
+        // the UI during import.
         do {
-            _ = try MetalWallpaperView.compileCustomShader(source: source, on: device)
+            try await Task.detached(priority: .userInitiated) {
+                _ = try MetalWallpaperView.compileCustomShader(source: source, on: device)
+            }.value
         } catch {
             importError = ImportErrorAlert(message: error.localizedDescription)
             return
@@ -290,7 +357,7 @@ struct ShaderWallpaperSection: View {
         let name = url.deletingPathExtension().lastPathComponent
         let shader = CustomShader(name: name.isEmpty ? "Untitled" : name, source: source)
         do {
-            let saved = try store.save(shader)
+            let saved = try await store.save(shader)
             ShaderThumbnailRenderer.shared.invalidate(.custom(saved.id))
             applyShader(.custom(saved.id))
         } catch {
@@ -298,11 +365,12 @@ struct ShaderWallpaperSection: View {
         }
     }
 
-    private func perform(deletion shader: CustomShader) {
+    private func perform(deletion shader: CustomShader) async {
         let wasSelected = selectedShaderSource == .custom(shader.id)
         do {
-            try store.delete(shader.id)
+            try await store.delete(shader.id)
             ShaderThumbnailRenderer.shared.invalidate(.custom(shader.id))
+            thumbnails.removeValue(forKey: thumbnailKey(.custom(shader.id)))
         } catch {
             importError = ImportErrorAlert(message: error.localizedDescription)
             return

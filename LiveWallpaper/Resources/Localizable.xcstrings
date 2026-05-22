@@ -28930,6 +28930,36 @@
           }
         }
       }
+    },
+    "Shader file is too large to import (limit %lld KB)." : {
+      "comment" : "Import error when the chosen file exceeds the configured byte cap. %lld = max size in KB.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shader file is too large to import (limit %lld KB)."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "シェーダーファイルが大きすぎます（上限 %lld KB）。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "着色器文件过大，无法导入（上限 %lld KB）。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "著色器檔案過大，無法匯入（上限 %lld KB）。"
+          }
+        }
+      }
     }
   },
   "version" : "1.1"
