@@ -1,12 +1,14 @@
 import SwiftUI
 import AppKit
+import LiveWallpaperSharedUI
 
 /// Shared playback / privacy controls that sit above the type-specific
 /// inspector panel (video / HTML / shader / scene). The component is the
 /// resolution of plan U-L1: keep "Mute" / "Frame Rate" / "Sync to Lock Screen"
-/// / "Ephemeral Storage" / "Block Trackers" in a positionally stable spot
-/// regardless of `wallpaperType`, so users don't hunt for the same toggle
-/// after a content-type switch.
+/// in a positionally stable spot regardless of `wallpaperType`, so users
+/// don't hunt for the same toggle after a content-type switch. HTML-only
+/// privacy controls live in `ContentSecurityInspector` so the playback
+/// section's mental model stays uniform across types.
 ///
 /// Bindings flow back to the parent (`ScreenDetailView`) for in-memory state,
 /// and changes are committed to `ScreenManager` here so persistence happens
@@ -26,13 +28,16 @@ struct CommonPlaybackInspector: View {
     @Binding var frameRateLimit: FrameRateLimit
     @Binding var syncToLockScreen: Bool
     /// Optional binding present only when `wallpaperType == .html`. Drives
-    /// the HTML-specific extras (`useEphemeralStorage`, `blockTrackers`)
-    /// AND the audio path so HTML's `WKWebView` actually mutes its media
+    /// the audio path so HTML's `WKWebView` actually mutes its media
     /// elements — `AVPlayer.muted` is a no-op for HTML wallpapers.
     var htmlConfig: Binding<HTMLConfig>?
 
     @AppStorage("Inspector.PlaybackExpanded") private var isPlaybackExpanded = true
     @State private var lockScreenExtracted = false
+    /// Monotonic counter that lets a late "clear ✓" Task drop itself when a
+    /// newer toggle gesture has already taken over the visual feedback —
+    /// same pattern as `ScheduleSection.conflictHighlightGeneration`.
+    @State private var lockScreenFeedbackGeneration = 0
 
     var body: some View {
         GroupBox {
@@ -55,12 +60,6 @@ struct CommonPlaybackInspector: View {
                         Divider()
                         syncToLockScreenRow
                     }
-                    if let htmlConfig {
-                        Divider()
-                        ephemeralStorageRow(htmlConfig)
-                        Divider()
-                        trackerBlockingRow(htmlConfig)
-                    }
                 }
             }
         }
@@ -76,8 +75,15 @@ struct CommonPlaybackInspector: View {
         }
     }
 
+    /// Stays visible for video regardless of display count so the persisted
+    /// `.spanAllDisplays` state never silently hides itself when the second
+    /// display unplugs — the row goes disabled with a subtitle instead.
     private var showsVideoDisplayModeRow: Bool {
-        wallpaperType == .video && screenManager.screens.count > 1
+        wallpaperType == .video
+    }
+
+    private var hasMultipleDisplays: Bool {
+        screenManager.screens.count > 1
     }
 
     private var showsSyncToLockScreenRow: Bool {
@@ -89,11 +95,12 @@ struct CommonPlaybackInspector: View {
     /// First N% of the slider is a mute "dead zone" — prevents a stray drag
     /// from leaking a 1-2% audio level. Past this threshold the slider's
     /// position maps linearly to the [0,1] internal volume.
-    private static let audioDeadZone: Double = 0.10
+    private static let audioDeadZone: Double = 0.04
 
     private var audioRow: some View {
         let mutedBinding = audioMutedBinding
         let isMuted = mutedBinding.wrappedValue
+        let percent = videoVolumePercent
         return SettingRow(
             icon: isMuted ? "speaker.slash" : "speaker.wave.2",
             iconColor: isMuted ? .secondary : .blue,
@@ -104,15 +111,32 @@ struct CommonPlaybackInspector: View {
                     .controlSize(.small)
                     .frame(width: 96)
                     .accessibilityLabel(Text("Audio"))
-                    .accessibilityValue(Text(verbatim: isMuted ? "Muted" : "\(videoVolumePercent)%"))
+                    .accessibilityValue(audioAccessibilityValue(isMuted: isMuted, percent: percent))
 
-                Text(verbatim: isMuted ? "Muted" : "\(videoVolumePercent)%")
+                audioLevelLabel(isMuted: isMuted, percent: percent)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(.secondary)
                     .frame(width: 44, alignment: .trailing)
                     .monospacedDigit()
             }
         }
+    }
+
+    @ViewBuilder
+    private func audioLevelLabel(isMuted: Bool, percent: Int) -> some View {
+        if isMuted {
+            Text("Muted", comment: "Audio level display when the wallpaper is muted")
+        } else {
+            // Digit % is universal; ASCII renders identically across locales.
+            Text(verbatim: "\(percent)%")
+        }
+    }
+
+    private func audioAccessibilityValue(isMuted: Bool, percent: Int) -> Text {
+        if isMuted {
+            return Text("Muted", comment: "Audio level display when the wallpaper is muted")
+        }
+        return Text("\(percent) percent", comment: "Audio level accessibility value, e.g. \"35 percent\".")
     }
 
     private var frameRateRow: some View {
@@ -140,13 +164,18 @@ struct CommonPlaybackInspector: View {
             icon: "rectangle.split.2x1",
             iconColor: videoDisplayMode == .spanAllDisplays ? .blue : .secondary,
             title: "Span Displays",
+            subtitle: hasMultipleDisplays ? nil : "Connect another display to enable",
             info: "When on, all connected displays render one stretched video. When off, each display plays its own copy independently — multi-display sync is not possible."
         ) {
             Toggle("", isOn: spanDisplaysBinding)
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .controlSize(.small)
+                .disabled(!hasMultipleDisplays)
                 .accessibilityLabel(Text("Span across displays"))
+                .accessibilityHint(hasMultipleDisplays
+                    ? Text("")
+                    : Text("Disabled — connect another display to enable"))
         }
     }
 
@@ -174,41 +203,13 @@ struct CommonPlaybackInspector: View {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(.green)
                         .transition(.scale.combined(with: .opacity))
+                        .accessibilityHidden(true)
                 }
                 Toggle("", isOn: syncToLockScreenBinding)
                     .labelsHidden()
                     .toggleStyle(.switch)
                     .accessibilityLabel(Text("Set current frame as desktop picture"))
             }
-        }
-    }
-
-    @ViewBuilder
-    private func ephemeralStorageRow(_ htmlConfig: Binding<HTMLConfig>) -> some View {
-        SettingRow(
-            icon: "archivebox",
-            iconColor: .purple,
-            title: "Clear Data on Exit",
-            info: "When on, the wallpaper's WKWebView starts fresh each session — cookies, localStorage, and cache are not persisted."
-        ) {
-            Toggle("", isOn: htmlConfigBinding(htmlConfig, keyPath: \.useEphemeralStorage))
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .accessibilityLabel(Text("Ephemeral browsing data"))
-        }
-    }
-
-    @ViewBuilder
-    private func trackerBlockingRow(_ htmlConfig: Binding<HTMLConfig>) -> some View {
-        SettingRow(
-            icon: "shield",
-            iconColor: .red,
-            title: "Block Trackers"
-        ) {
-            Toggle("", isOn: htmlConfigBinding(htmlConfig, keyPath: \.blockTrackers))
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .accessibilityLabel(Text("Block trackers"))
         }
     }
 
@@ -233,14 +234,11 @@ struct CommonPlaybackInspector: View {
     }
 
     /// Single binding driving the audio slider. Slider position [0, 1] maps to:
-    ///   - [0, deadZone)  → muted (volume 0 displayed)
-    ///   - [deadZone, 1]  → unmuted; internal volume = (pos - deadZone) / (1 - deadZone)
+    ///   - [0, deadZone]  → muted (volume 0 displayed)
+    ///   - (deadZone, 1]  → unmuted; internal volume = (pos - deadZone) / (1 - deadZone)
     ///
-    /// HTML and video paths share the same UI semantics. For HTML the level
-    /// writes back to `HTMLConfig.audioVolume`, which the master-audio JS
-    /// controller propagates to every `<audio>` / `<video>` element and to
-    /// any active `AudioContext` graphs. The "no granular volume" caveat
-    /// that used to live here is gone since the JS controller now covers it.
+    /// `<=` on the dead-zone boundary closes the previous `muted: false,
+    /// volume: 0` edge state where the slider sat at exactly `deadZone`.
     private var unifiedAudioBinding: Binding<Double> {
         Binding(
             get: {
@@ -249,7 +247,7 @@ struct CommonPlaybackInspector: View {
                 return deadZone + Self.clampedVolume(currentVolume) * (1 - deadZone)
             },
             set: { sliderValue in
-                let shouldMute = sliderValue < Self.audioDeadZone
+                let shouldMute = sliderValue <= Self.audioDeadZone
                 let mutedBinding = audioMutedBinding
 
                 if shouldMute {
@@ -270,8 +268,6 @@ struct CommonPlaybackInspector: View {
         )
     }
 
-    /// Reads volume from the right backing store: HTML wallpapers store it
-    /// per-config, video sessions on `ScreenConfiguration.videoVolume`.
     private var currentVolume: Double {
         if let htmlConfig {
             return htmlConfig.wrappedValue.audioVolume
@@ -279,7 +275,6 @@ struct CommonPlaybackInspector: View {
         return videoVolume
     }
 
-    /// Routes a slider-set volume back to the same store `currentVolume` reads from.
     private func applyVolume(_ value: Double) {
         if let htmlConfig {
             guard abs(htmlConfig.wrappedValue.audioVolume - value) > 0.001 else { return }
@@ -321,13 +316,24 @@ struct CommonPlaybackInspector: View {
                 guard syncToLockScreen != newValue else { return }
                 syncToLockScreen = newValue
                 screenManager.updateSetAsDesktopPicture(newValue, for: screen)
-                guard newValue else { return }
-                screenManager.extractLockScreenFrame(for: screen)
+                guard newValue else {
+                    // Bump generation so any pending "clear ✓" Task spawned
+                    // by a previous on→off→on doesn't show stale feedback.
+                    lockScreenFeedbackGeneration += 1
+                    lockScreenExtracted = false
+                    return
+                }
+                // Only show ✓ if a frame was actually queued — guards against
+                // showing success when the player isn't ready yet.
+                guard screenManager.extractLockScreenFrame(for: screen) else { return }
+                lockScreenFeedbackGeneration += 1
+                let generation = lockScreenFeedbackGeneration
                 withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.25))) {
                     lockScreenExtracted = true
                 }
-                Task {
+                Task { @MainActor in
                     try? await Task.sleep(for: .seconds(2))
+                    guard generation == lockScreenFeedbackGeneration else { return }
                     withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.25))) {
                         lockScreenExtracted = false
                     }
@@ -348,6 +354,77 @@ struct CommonPlaybackInspector: View {
                 var next = htmlConfig.wrappedValue
                 next[keyPath: keyPath] = newValue
                 htmlConfig.wrappedValue = next
+                screenManager.updateHTMLConfig(next, for: screen)
+            }
+        )
+    }
+}
+
+/// HTML-only privacy controls broken out of `CommonPlaybackInspector` so the
+/// playback section's mental model stays consistent across wallpaper types
+/// (audio / frame rate / desktop picture are all media-side concerns; data
+/// persistence and tracker blocking are content-security concerns).
+struct ContentSecurityInspector: View {
+    var screen: Screen
+    @Binding var htmlConfig: HTMLConfig
+
+    @Environment(ScreenManager.self) private var screenManager
+    @AppStorage("Inspector.ContentSecurityExpanded") private var isExpanded = true
+
+    var body: some View {
+        GroupBox {
+            CollapsibleSection(
+                title: "Content Security",
+                systemImage: "lock.shield",
+                isExpanded: $isExpanded
+            ) {
+                VStack(spacing: 8) {
+                    ephemeralStorageRow
+                    Divider()
+                    trackerBlockingRow
+                }
+            }
+        }
+        .groupBoxStyle(ContainerGroupBoxStyle())
+    }
+
+    private var ephemeralStorageRow: some View {
+        SettingRow(
+            icon: "archivebox",
+            iconColor: .purple,
+            title: "Clear Data on Exit",
+            info: "When on, the wallpaper's WKWebView starts fresh each session — cookies, localStorage, and cache are not persisted."
+        ) {
+            Toggle("", isOn: htmlConfigBinding(\.useEphemeralStorage))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .accessibilityLabel(Text("Ephemeral browsing data"))
+        }
+    }
+
+    private var trackerBlockingRow: some View {
+        SettingRow(
+            icon: "shield",
+            iconColor: .red,
+            title: "Block Trackers"
+        ) {
+            Toggle("", isOn: htmlConfigBinding(\.blockTrackers))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .accessibilityLabel(Text("Block trackers"))
+        }
+    }
+
+    private func htmlConfigBinding<Value: Equatable>(
+        _ keyPath: WritableKeyPath<HTMLConfig, Value>
+    ) -> Binding<Value> {
+        Binding(
+            get: { htmlConfig[keyPath: keyPath] },
+            set: { newValue in
+                guard htmlConfig[keyPath: keyPath] != newValue else { return }
+                var next = htmlConfig
+                next[keyPath: keyPath] = newValue
+                htmlConfig = next
                 screenManager.updateHTMLConfig(next, for: screen)
             }
         )
