@@ -321,6 +321,35 @@
         }
       }
     },
+    "%@, %@ wallpaper bookmark" : {
+      "comment" : "Bookmark tile accessibility label. %1$@ is the bookmark name, %2$@ is the localized wallpaper type (Video / HTML / Shader / Scene).",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@, %2$@ wallpaper bookmark"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@、%2$@ 壁紙のブックマーク"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@，%2$@ 壁纸书签"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@，%2$@ 桌布書籤"
+          }
+        }
+      }
+    },
     "%@, %@ wallpaper, already bookmarked" : {
       "comment" : "Workshop gallery card a11y label for an already-bookmarked project. Placeholders are project title and project type.",
       "localizations" : {

@@ -1,6 +1,13 @@
 import SwiftUI
 
 /// Sidebar-routed full-page browser for saved wallpaper bookmarks.
+///
+/// Layout: dense Apple Music / Photos style gallery — 16:9 thumbnail tile
+/// dominates the card, label sits underneath in plain text. Hover lifts the
+/// tile and reveals a primary Apply button + secondary ellipsis menu, so
+/// secondary chrome (rename / delete buttons) doesn't compete with the
+/// thumbnail for visual weight. Rename runs inline; delete confirms via
+/// `PendingDestructive`.
 struct BookmarksLibraryView: View {
     @Environment(ScreenManager.self) private var screenManager
     @State private var store = BookmarkStore.shared
@@ -9,7 +16,7 @@ struct BookmarksLibraryView: View {
     @State private var searchText: String = ""
     @State private var pendingDestructive: PendingDestructive?
 
-    private let columns = [GridItem(.adaptive(minimum: 260), spacing: 12)]
+    private let columns = [GridItem(.adaptive(minimum: 200), spacing: 14)]
 
     var body: some View {
         DetailPageScaffold(
@@ -61,9 +68,9 @@ struct BookmarksLibraryView: View {
             )
         } else {
             ScrollView {
-                LazyVGrid(columns: columns, spacing: 12) {
+                LazyVGrid(columns: columns, spacing: 22) {
                     ForEach(filteredBookmarks) { bookmark in
-                        BookmarkCard(
+                        BookmarkTile(
                             bookmark: bookmark,
                             screens: screenManager.screens,
                             isRenaming: renamingID == bookmark.id,
@@ -87,7 +94,8 @@ struct BookmarksLibraryView: View {
                         )
                     }
                 }
-                .padding(20)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
             }
         }
     }
@@ -122,9 +130,9 @@ struct BookmarksLibraryView: View {
     }
 }
 
-// MARK: - Card
+// MARK: - Tile
 
-private struct BookmarkCard: View {
+private struct BookmarkTile: View {
     let bookmark: WallpaperBookmark
     let screens: [Screen]
     let isRenaming: Bool
@@ -138,91 +146,270 @@ private struct BookmarkCard: View {
 
     @State private var isHovering = false
     @State private var thumbnail: NSImage?
-    @State private var thumbnailDidAttempt = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            thumbnailView
-            header
-            footer
+        VStack(alignment: .leading, spacing: 7) {
+            thumbnailTile
+            metadata
         }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(.regularMaterial)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(Color.primary.opacity(isHovering ? 0.18 : 0.06), lineWidth: 1)
-        )
-        .scaleEffect(isHovering ? 1.01 : 1.0)
-        .animation(.spring(response: 0.25, dampingFraction: 0.85), value: isHovering)
-        .onHover { isHovering = $0 }
         .contextMenu { contextMenu }
-        .onAppear { loadThumbnailIfNeeded() }
-        .onChange(of: bookmark.id) { _, _ in
-            thumbnail = nil
-            thumbnailDidAttempt = false
-            loadThumbnailIfNeeded()
+        .task(id: bookmark.id) { await loadThumbnail() }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityActions {
+            if screens.count == 1, let only = screens.first {
+                Button("Apply") { onApply(only) }
+            } else if screens.count > 1 {
+                Button("Apply to All Displays", action: onApplyToAll)
+            }
+            Button("Rename", action: onStartRename)
+        }
+        .accessibilityAction(.delete, onDelete)
+    }
+
+    private var accessibilityLabel: Text {
+        // %1$@ bookmark label, %2$@ localized wallpaper type.
+        Text("\(bookmark.label), \(Text(bookmark.wallpaperType.titleKey)) wallpaper bookmark",
+             comment: "Bookmark tile accessibility label. %1$@ is the bookmark name, %2$@ is the localized wallpaper type (Video / HTML / Shader / Scene).")
+    }
+
+    // MARK: Thumbnail tile
+
+    private var thumbnailTile: some View {
+        ZStack {
+            tileBackground
+            tileContent
+            typeBadge
+            hoverOverlay
+        }
+        .aspectRatio(16.0 / 9.0, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.Corner.md, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: DesignTokens.Corner.md, style: .continuous)
+                .strokeBorder(Color.primary.opacity(isHovering ? 0.14 : 0.07), lineWidth: DesignTokens.Card.strokeWidth)
+        }
+        .shadow(color: .black.opacity(isHovering ? DesignTokens.Card.shadowOpacity : 0.0),
+                radius: DesignTokens.Card.shadowRadius, x: 0, y: DesignTokens.Card.shadowYOffset)
+        .scaleEffect(isHovering ? 1.02 : 1.0)
+        .animation(.spring(response: 0.28, dampingFraction: 0.85), value: isHovering)
+        .onHover { isHovering = $0 }
+    }
+
+    private var tileBackground: some View {
+        Rectangle()
+            .fill(bookmark.presentationTint.opacity(0.12))
+    }
+
+    @ViewBuilder
+    private var tileContent: some View {
+        if let thumbnail {
+            Image(nsImage: thumbnail)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFill()
+        } else {
+            Image(systemName: bookmark.iconName)
+                .font(.system(size: 30, weight: .light))
+                .foregroundStyle(bookmark.presentationTint.opacity(0.85))
         }
     }
 
-    private var thumbnailView: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 8)
-                .fill(bookmark.presentationTint.opacity(0.10))
-
-            if let thumbnail {
-                Image(nsImage: thumbnail)
-                    .resizable()
-                    .interpolation(.high)
-                    .scaledToFill()
-            } else {
+    /// Small icon-only chip in the top-leading corner, only shown when a real
+    /// thumbnail is loaded — the SF Symbol fallback already conveys the type
+    /// when there's no thumbnail, so the badge would be redundant noise there.
+    private var typeBadge: some View {
+        VStack {
+            HStack {
                 Image(systemName: bookmark.iconName)
-                    .font(.system(size: 28, weight: .light))
-                    .foregroundStyle(bookmark.presentationTint.opacity(0.8))
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 20, height: 20)
+                    .background(
+                        Circle().fill(bookmark.presentationTint.opacity(0.92))
+                    )
+                    .overlay(Circle().strokeBorder(Color.white.opacity(0.25), lineWidth: 0.5))
+                    .shadow(color: .black.opacity(0.2), radius: 2, y: 1)
+                    .padding(7)
+                Spacer()
+            }
+            Spacer()
+        }
+        .opacity(thumbnail == nil ? 0 : 1)
+        .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private var hoverOverlay: some View {
+        if isHovering, !isRenaming {
+            VStack {
+                HStack {
+                    Spacer()
+                    moreMenu
+                }
+                Spacer()
+                HStack {
+                    Spacer()
+                    primaryApplyButton
+                }
+            }
+            .padding(8)
+            .transition(.opacity)
+        }
+    }
+
+    @ViewBuilder
+    private var primaryApplyButton: some View {
+        if let only = screens.first, screens.count == 1 {
+            Button {
+                onApply(only)
+            } label: {
+                Image(systemName: "play.fill")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 32, height: 32)
+                    .background(
+                        Circle().fill(bookmark.presentationTint.opacity(0.95))
+                    )
+                    .overlay(Circle().strokeBorder(Color.white.opacity(0.35), lineWidth: 0.5))
+                    .shadow(color: .black.opacity(0.25), radius: 4, y: 1)
+            }
+            .buttonStyle(.plain)
+            .help(Text("Apply"))
+        } else if !screens.isEmpty {
+            Menu {
+                ForEach(screens, id: \.id) { screen in
+                    Button("Apply to \(screen.name)") { onApply(screen) }
+                }
+                if screens.count > 1 {
+                    Divider()
+                    Button("Apply to All Displays", action: onApplyToAll)
+                }
+            } label: {
+                Image(systemName: "play.fill")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 32, height: 32)
+                    .background(
+                        Circle().fill(bookmark.presentationTint.opacity(0.95))
+                    )
+                    .overlay(Circle().strokeBorder(Color.white.opacity(0.35), lineWidth: 0.5))
+                    .shadow(color: .black.opacity(0.25), radius: 4, y: 1)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help(Text("Apply"))
+        }
+    }
+
+    private var moreMenu: some View {
+        Menu {
+            if !screens.isEmpty, screens.count > 1 {
+                ForEach(screens, id: \.id) { screen in
+                    Button("Apply to \(screen.name)") { onApply(screen) }
+                }
+                Button("Apply to All Displays", action: onApplyToAll)
+                Divider()
+            }
+            Button("Rename", action: onStartRename)
+            Button("Delete", role: .destructive, action: onDelete)
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 22, height: 22)
+                .background(Circle().fill(Color.black.opacity(0.55)))
+                .overlay(Circle().strokeBorder(Color.white.opacity(0.25), lineWidth: 0.5))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(Text("More actions"))
+    }
+
+    // MARK: Metadata
+
+    private var metadata: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            if isRenaming {
+                renameField
+            } else {
+                Text(verbatim: bookmark.label)
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                bookmark.subtitleText
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
         }
-        .frame(height: 96)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
-        )
+        .padding(.horizontal, 2)
     }
 
-    private func loadThumbnailIfNeeded() {
-        guard thumbnail == nil, !thumbnailDidAttempt else { return }
-        thumbnailDidAttempt = true
+    private var renameField: some View {
+        HStack(spacing: 4) {
+            TextField("Name", text: $renameDraft)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 12))
+                .onSubmit(onCommitRename)
+                .onExitCommand(perform: onCancelRename)
+            Button(action: onCommitRename) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.tint)
+            }
+            .buttonStyle(.borderless)
+            .keyboardShortcut(.defaultAction)
+            .help(Text("Save"))
+            Button(action: onCancelRename) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.borderless)
+            .help(Text("Cancel"))
+        }
+    }
+
+    // MARK: Thumbnail loader
+
+    /// Run via `.task(id: bookmark.id)` — SwiftUI cancels this when the bookmark
+    /// id changes or the tile leaves the viewport, freeing the thumbnail decode
+    /// work + security-scoped bookmark resolve when the user fast-scrolls the
+    /// gallery.
+    @MainActor
+    private func loadThumbnail() async {
+        thumbnail = nil
 
         if let cached = WallpaperThumbnailService.shared.cachedThumbnail(forKey: bookmarkCacheKey) {
             thumbnail = cached
             return
         }
 
-        Task { @MainActor in
-            switch bookmark.content {
-            case .video(let bookmarkData):
-                guard case .success(let resolved) = SecurityScopedBookmarkResolver.shared.resolve(
-                    bookmarkData,
-                    target: .transient
-                ) else { return }
-                if let image = await WallpaperThumbnailService.shared.videoPosterImage(
-                    for: resolved.url,
-                    cacheKey: bookmarkCacheKey
-                ) {
-                    thumbnail = image
-                }
-            case .html(let source, _):
-                if let image = await HTMLPreviewKey.fetchSnapshot(
-                    for: source,
-                    cacheKey: bookmarkCacheKey
-                ) {
-                    thumbnail = image
-                }
-            case .metalShader, .scene:
-                break
+        switch bookmark.content {
+        case .video(let bookmarkData):
+            guard case .success(let resolved) = SecurityScopedBookmarkResolver.shared.resolve(
+                bookmarkData,
+                target: .transient
+            ) else { return }
+            guard !Task.isCancelled else { return }
+            if let image = await WallpaperThumbnailService.shared.videoPosterImage(
+                for: resolved.url,
+                cacheKey: bookmarkCacheKey
+            ), !Task.isCancelled {
+                thumbnail = image
             }
+        case .html(let source, _):
+            if let image = await HTMLPreviewKey.fetchSnapshot(
+                for: source,
+                cacheKey: bookmarkCacheKey
+            ), !Task.isCancelled {
+                thumbnail = image
+            }
+        case .metalShader, .scene:
+            break
         }
     }
 
@@ -230,95 +417,7 @@ private struct BookmarkCard: View {
         "bookmark::" + bookmark.id.uuidString
     }
 
-    private var header: some View {
-        HStack(spacing: 10) {
-            ZStack {
-                Circle()
-                    .fill(bookmark.presentationTint.opacity(0.15))
-                    .frame(width: 38, height: 38)
-                Image(systemName: bookmark.iconName)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(bookmark.presentationTint)
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                if isRenaming {
-                    TextField("Name", text: $renameDraft)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(size: 13))
-                        .onSubmit(onCommitRename)
-                } else {
-                    Text(verbatim: bookmark.label)
-                        .font(.system(size: 13, weight: .semibold))
-                        .lineLimit(1)
-                }
-                bookmark.subtitleText
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-
-            Spacer()
-        }
-    }
-
-    private var footer: some View {
-        HStack(spacing: 6) {
-            applyMenu
-            Spacer()
-            if isRenaming {
-                Button("Save", action: onCommitRename)
-                    .controlSize(.mini)
-                    .keyboardShortcut(.defaultAction)
-                Button("Cancel", role: .cancel, action: onCancelRename)
-                    .controlSize(.mini)
-            } else {
-                Button(action: onStartRename) {
-                    Image(systemName: "pencil")
-                }
-                .buttonStyle(.borderless)
-                .help(Text("Rename"))
-
-                Button(role: .destructive, action: onDelete) {
-                    Image(systemName: "trash")
-                }
-                .buttonStyle(.borderless)
-                .destructiveControlTint()
-                .help(Text("Delete bookmark"))
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var applyMenu: some View {
-        if screens.count <= 1, let only = screens.first {
-            Button {
-                onApply(only)
-            } label: {
-                Label("Apply", systemImage: "play.fill")
-                    .font(.system(size: 11, weight: .medium))
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-        } else if !screens.isEmpty {
-            Menu {
-                ForEach(screens, id: \.id) { screen in
-                    Button("Apply to \(screen.name)") { onApply(screen) }
-                }
-                Divider()
-                Button("Apply to All Displays", action: onApplyToAll)
-            } label: {
-                Label("Apply", systemImage: "play.fill")
-                    .font(.system(size: 11, weight: .medium))
-            }
-            .menuStyle(.borderlessButton)
-            .controlSize(.small)
-            .fixedSize()
-        } else {
-            Text("No display").font(.caption2).foregroundStyle(.secondary)
-        }
-    }
+    // MARK: Context menu
 
     @ViewBuilder
     private var contextMenu: some View {
@@ -334,5 +433,4 @@ private struct BookmarkCard: View {
         Button("Rename", action: onStartRename)
         Button("Delete", role: .destructive, action: onDelete)
     }
-
 }
