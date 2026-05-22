@@ -180,7 +180,6 @@ private struct BookmarkTile: View {
             tileBackground
             tileContent
             typeBadge
-            actionChip
         }
         .aspectRatio(16.0 / 9.0, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.Corner.md, style: .continuous))
@@ -238,39 +237,6 @@ private struct BookmarkTile: View {
         .accessibilityHidden(true)
     }
 
-    /// Persistent bottom-trailing chip with Apply + Edit icons. Always
-    /// visible (no hover gating) so the actions never feel hidden. Sits on
-    /// a translucent dark capsule so it stays legible on any thumbnail
-    /// content. Delete stays in the contextMenu — it's destructive and
-    /// shouldn't be one click away by default.
-    @ViewBuilder
-    private var actionChip: some View {
-        if !isRenaming {
-            VStack {
-                Spacer()
-                HStack {
-                    Spacer()
-                    HStack(spacing: 4) {
-                        applyControl
-                        editButton
-                    }
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 4)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(.thinMaterial.opacity(0.95))
-                    )
-                    .overlay(
-                        Capsule(style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.25), lineWidth: 0.5)
-                    )
-                    .shadow(color: .black.opacity(0.25), radius: 4, y: 1)
-                }
-            }
-            .padding(7)
-        }
-    }
-
     @ViewBuilder
     private var applyControl: some View {
         if screens.count == 1, let only = screens.first {
@@ -294,37 +260,57 @@ private struct BookmarkTile: View {
 
     private var applyIcon: some View {
         Image(systemName: "play.fill")
-            .font(.system(size: 11, weight: .bold))
+            .font(.system(size: 11, weight: .semibold))
             .foregroundStyle(.white)
             .frame(width: 22, height: 22)
             .background(Circle().fill(bookmark.presentationTint.opacity(0.95)))
-            .overlay(Circle().strokeBorder(Color.white.opacity(0.3), lineWidth: 0.5))
+            .overlay(Circle().strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
     }
 
-    private var editButton: some View {
-        Button(action: onStartRename) {
-            Image(systemName: "pencil")
+    private var deleteButton: some View {
+        Button(role: .destructive, action: onDelete) {
+            Image(systemName: "trash")
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(.secondary)
                 .frame(width: 22, height: 22)
-                .background(Circle().fill(Color.black.opacity(0.55)))
-                .overlay(Circle().strokeBorder(Color.white.opacity(0.2), lineWidth: 0.5))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(Text("Rename"))
+        .help(Text("Delete bookmark"))
     }
 
     // MARK: Metadata
 
     private var metadata: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            if isRenaming {
-                renameField
-            } else {
-                Text(verbatim: bookmark.label)
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+        HStack(alignment: .center, spacing: 8) {
+            textBlock
+            Spacer(minLength: 4)
+            if !isRenaming {
+                HStack(spacing: 4) {
+                    applyControl
+                    deleteButton
+                }
+            }
+        }
+        .padding(.horizontal, 2)
+    }
+
+    @ViewBuilder
+    private var textBlock: some View {
+        if isRenaming {
+            renameField
+        } else {
+            VStack(alignment: .leading, spacing: 1) {
+                Button(action: onStartRename) {
+                    Text(verbatim: bookmark.label)
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(Text("Rename"))
                 bookmark.subtitleText
                     .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
@@ -332,7 +318,6 @@ private struct BookmarkTile: View {
                     .truncationMode(.middle)
             }
         }
-        .padding(.horizontal, 2)
     }
 
     private var renameField: some View {
