@@ -9,12 +9,15 @@ import UniformTypeIdentifiers
 /// custom grid opens an `NSOpenPanel`, validates by attempting a Metal
 /// compile, and either saves the entry or surfaces the diagnostic in an
 /// alert. Picking any card swaps the `selectedShaderSource` binding and
-/// notifies the screen manager.
+/// notifies the screen manager. Each card shows a real first-frame
+/// thumbnail of the shader instead of an SF Symbol so users see what they
+/// are picking before they apply it.
 struct ShaderWallpaperSection: View {
     var screen: Screen
     @Binding var selectedShaderSource: ShaderSource
     @Environment(ScreenManager.self) private var screenManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.displayScale) private var displayScale
 
     @State private var store = CustomShaderStore.shared
     @State private var importError: ImportErrorAlert?
@@ -23,6 +26,8 @@ struct ShaderWallpaperSection: View {
     private static let presetColumns = [
         GridItem(.adaptive(minimum: 110, maximum: 200), spacing: 12, alignment: .top)
     ]
+
+    private static let thumbnailCornerRadius: CGFloat = 8
 
     var body: some View {
         GroupBox {
@@ -53,7 +58,7 @@ struct ShaderWallpaperSection: View {
         }
     }
 
-    // MARK: - Builtin row
+    // MARK: - Sections
 
     private var builtinSection: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -68,8 +73,6 @@ struct ShaderWallpaperSection: View {
             }
         }
     }
-
-    // MARK: - Custom row
 
     private var customSection: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -102,7 +105,8 @@ struct ShaderWallpaperSection: View {
             applyShader(.builtin(preset))
         } label: {
             shaderCardLabel(
-                icon: preset.iconName,
+                source: .builtin(preset),
+                fallbackIcon: preset.iconName,
                 title: Text(preset.titleKey),
                 isSelected: isSelected
             )
@@ -126,7 +130,8 @@ struct ShaderWallpaperSection: View {
             applyShader(.custom(shader.id))
         } label: {
             shaderCardLabel(
-                icon: "sparkles.rectangle.stack",
+                source: .custom(shader.id),
+                fallbackIcon: "sparkles.rectangle.stack",
                 title: Text(verbatim: shader.displayName),
                 isSelected: isSelected
             )
@@ -145,10 +150,24 @@ struct ShaderWallpaperSection: View {
     private var importCard: some View {
         Button(action: triggerImport) {
             VStack(spacing: 6) {
-                Image(systemName: "plus")
-                    .font(.title2)
-                    .frame(width: 44, height: 44)
-                    .adaptiveGlassSurface(.circle, tint: nil, interactive: true)
+                ZStack {
+                    RoundedRectangle(cornerRadius: Self.thumbnailCornerRadius, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.06))
+                        .frame(
+                            width: ShaderThumbnailRenderer.cardSize.width,
+                            height: ShaderThumbnailRenderer.cardSize.height
+                        )
+                        .overlay {
+                            RoundedRectangle(cornerRadius: Self.thumbnailCornerRadius, style: .continuous)
+                                .strokeBorder(
+                                    Color.accentColor.opacity(0.35),
+                                    style: StrokeStyle(lineWidth: 1, dash: [4, 3])
+                                )
+                        }
+                    Image(systemName: "plus")
+                        .font(.title3.weight(.medium))
+                        .foregroundStyle(.secondary)
+                }
                 Text("Import")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -161,19 +180,13 @@ struct ShaderWallpaperSection: View {
     }
 
     private func shaderCardLabel(
-        icon: String,
+        source: ShaderSource,
+        fallbackIcon: String,
         title: Text,
         isSelected: Bool
     ) -> some View {
         VStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.title2)
-                .frame(width: 44, height: 44)
-                .adaptiveGlassSurface(
-                    .circle,
-                    tint: isSelected ? Color.accentColor : nil,
-                    interactive: true
-                )
+            thumbnailView(for: source, fallbackIcon: fallbackIcon, isSelected: isSelected)
             title
                 .font(.caption2)
                 .foregroundStyle(isSelected ? .primary : .secondary)
@@ -181,6 +194,53 @@ struct ShaderWallpaperSection: View {
                 .truncationMode(.tail)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private func thumbnailView(
+        for source: ShaderSource,
+        fallbackIcon: String,
+        isSelected: Bool
+    ) -> some View {
+        let size = ShaderThumbnailRenderer.cardSize
+        let cornerShape = RoundedRectangle(cornerRadius: Self.thumbnailCornerRadius, style: .continuous)
+        let image = ShaderThumbnailRenderer.shared.thumbnail(
+            for: source,
+            pointSize: size,
+            scale: max(displayScale, 1.0)
+        )
+
+        Group {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: size.width, height: size.height)
+                    .clipShape(cornerShape)
+            } else {
+                cornerShape
+                    .fill(Color.secondary.opacity(0.18))
+                    .frame(width: size.width, height: size.height)
+                    .overlay {
+                        Image(systemName: fallbackIcon)
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                    }
+            }
+        }
+        .overlay {
+            cornerShape
+                .strokeBorder(
+                    isSelected ? Color.accentColor : Color.primary.opacity(0.08),
+                    lineWidth: isSelected ? 2 : 1
+                )
+        }
+        .shadow(
+            color: isSelected ? Color.accentColor.opacity(0.3) : Color.black.opacity(0.12),
+            radius: isSelected ? 5 : 2,
+            x: 0,
+            y: 1
+        )
     }
 
     // MARK: - Actions
@@ -231,6 +291,7 @@ struct ShaderWallpaperSection: View {
         let shader = CustomShader(name: name.isEmpty ? "Untitled" : name, source: source)
         do {
             let saved = try store.save(shader)
+            ShaderThumbnailRenderer.shared.invalidate(.custom(saved.id))
             applyShader(.custom(saved.id))
         } catch {
             importError = ImportErrorAlert(message: error.localizedDescription)
@@ -241,6 +302,7 @@ struct ShaderWallpaperSection: View {
         let wasSelected = selectedShaderSource == .custom(shader.id)
         do {
             try store.delete(shader.id)
+            ShaderThumbnailRenderer.shared.invalidate(.custom(shader.id))
         } catch {
             importError = ImportErrorAlert(message: error.localizedDescription)
             return

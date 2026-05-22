@@ -203,6 +203,36 @@
         }
       }
     },
+    "%@ shader" : {
+      "comment" : "A11y label for a shader preset button. %@ = preset name (e.g. Waves).",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ shader"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@シェーダー"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@着色器"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@著色器"
+          }
+        }
+      }
+    },
     "%@ usage" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -228,6 +258,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ 使用量"
+          }
+        }
+      }
+    },
+    "%@ will be removed from your library. This cannot be undone." : {
+      "comment" : "Confirmation dialog body when deleting a custom shader. %@ = shader name.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ will be removed from your library. This cannot be undone."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ がライブラリから削除されます。この操作は取り消せません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 将从你的库中移除，此操作无法撤销。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 將從你的庫中移除，此操作無法復原。"
           }
         }
       }
@@ -607,126 +667,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld× 使用中"
-          }
-        }
-      }
-    },
-    "Built-in trust for the platform's official embed surface — cannot be revoked." : {
-      "comment" : "Info tooltip on the Origin Access row when the origin is a built-in trusted embed domain.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Built-in trust for the platform's official embed surface — cannot be revoked."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "プラットフォーム公式の埋め込みドメインに対する組み込み信頼 — 取り消せません。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "平台官方嵌入域名的内置信任 — 无法撤销。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "平台官方嵌入網域的內建信任 — 無法撤銷。"
-          }
-        }
-      }
-    },
-    "Local" : {
-      "comment" : "Segment label in the HTML source picker covering both .html files and folders.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Local"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ローカル"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "本地"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "本機"
-          }
-        }
-      }
-    },
-    "No file or folder chosen" : {
-      "comment" : "Empty-state caption in the HTML local picker before the user has selected anything.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No file or folder chosen"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ファイルまたはフォルダ未選択"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "尚未选择文件或文件夹"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "尚未選擇檔案或資料夾"
-          }
-        }
-      }
-    },
-    "Paste URL from clipboard" : {
-      "comment" : "Tooltip / a11y label on the paste-button next to the HTML URL field.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Paste URL from clipboard"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "クリップボードから URL を貼り付け"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "从剪贴板粘贴 URL"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "從剪貼簿貼上 URL"
           }
         }
       }
@@ -3571,6 +3511,36 @@
         }
       }
     },
+    "Built-in trust for the platform's official embed surface — cannot be revoked." : {
+      "comment" : "Info tooltip on the Origin Access row when the origin is a built-in trusted embed domain.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Built-in trust for the platform's official embed surface — cannot be revoked."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プラットフォーム公式の埋め込みドメインに対する組み込み信頼 — 取り消せません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "平台官方嵌入域名的内置信任 — 无法撤销。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "平台官方嵌入網域的內建信任 — 無法撤銷。"
+          }
+        }
+      }
+    },
     "Cache" : {
       "localizations" : {
         "en" : {
@@ -4110,6 +4080,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "更改或忘記所選的 Steam 創意工坊資料夾"
+          }
+        }
+      }
+    },
+    "Choose a .lwshader or .metal file that defines `mainImage(uv, time, resolution)`." : {
+      "comment" : "NSOpenPanel message for custom shader import.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose a .lwshader or .metal file that defines `mainImage(uv, time, resolution)`."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`mainImage(uv, time, resolution)` を定義する .lwshader または .metal ファイルを選択してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择一个定义 `mainImage(uv, time, resolution)` 的 .lwshader 或 .metal 文件。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選擇一個定義 `mainImage(uv, time, resolution)` 的 .lwshader 或 .metal 檔案。"
           }
         }
       }
@@ -6345,6 +6345,96 @@
         }
       }
     },
+    "Custom Shader" : {
+      "comment" : "Generic label for a user-imported Metal shader.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Custom Shader"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カスタムシェーダー"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自定义着色器"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自訂著色器"
+          }
+        }
+      }
+    },
+    "Custom Shaders" : {
+      "comment" : "Section header for user-imported shaders in the shader preset grid.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Custom Shaders"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カスタムシェーダー"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自定义着色器"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自訂著色器"
+          }
+        }
+      }
+    },
+    "Custom shaders implement `mainImage(uv, time, resolution)` in Metal Shader Language. The file is compiled on import; errors are surfaced inline." : {
+      "comment" : "Help text under the custom shader grid.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Custom shaders implement `mainImage(uv, time, resolution)` in Metal Shader Language. The file is compiled on import; errors are surfaced inline."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カスタムシェーダーは Metal Shader Language で `mainImage(uv, time, resolution)` を実装します。ファイルはインポート時にコンパイルされ、エラーはインラインで表示されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自定义着色器使用 Metal Shader Language 实现 `mainImage(uv, time, resolution)`。文件在导入时编译，错误会内联显示。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自訂著色器使用 Metal Shader Language 實作 `mainImage(uv, time, resolution)`。檔案在匯入時編譯，錯誤會內嵌顯示。"
+          }
+        }
+      }
+    },
     "Custom…" : {
       "comment" : "Add Slot menu: insert a slot at the next free time range, not a preset.",
       "extractionState" : "manual",
@@ -6487,6 +6577,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "刪除書籤"
+          }
+        }
+      }
+    },
+    "Delete Shader?" : {
+      "comment" : "Confirmation dialog title when deleting a custom shader.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete Shader?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "シェーダーを削除しますか？"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除着色器？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "刪除著色器？"
           }
         }
       }
@@ -11047,34 +11167,6 @@
         }
       }
     },
-    "GPU-rendered procedural animations" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "GPU-rendered procedural animations"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "GPU でレンダリングするプロシージャルアニメーション"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "GPU 渲染的程序化动画"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "GPU 渲染的程序化動畫"
-          }
-        }
-      }
-    },
     "Gradient" : {
       "comment" : "Metal shader preset name.",
       "extractionState" : "manual",
@@ -11977,6 +12069,36 @@
         }
       }
     },
+    "Import a .lwshader or .metal file from disk." : {
+      "comment" : "Tooltip for the Import shader card.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import a .lwshader or .metal file from disk."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ディスクから .lwshader または .metal ファイルをインポート。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从磁盘导入 .lwshader 或 .metal 文件。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "從磁碟匯入 .lwshader 或 .metal 檔案。"
+          }
+        }
+      }
+    },
     "Import Configuration" : {
       "localizations" : {
         "en" : {
@@ -12031,6 +12153,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "要匯入設定嗎？"
+          }
+        }
+      }
+    },
+    "Import custom shader" : {
+      "comment" : "A11y label for the Import card in the shader preset grid.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Import custom shader"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カスタムシェーダーをインポート"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导入自定义着色器"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "匯入自訂著色器"
           }
         }
       }
@@ -13008,6 +13160,36 @@
         }
       }
     },
+    "Local" : {
+      "comment" : "Segment label in the HTML source picker covering both .html files and folders.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Local"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ローカル"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本地"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本機"
+          }
+        }
+      }
+    },
     "Location Denied" : {
       "comment" : "Weather location status.",
       "localizations" : {
@@ -13515,6 +13697,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "套用到 %@"
+          }
+        }
+      }
+    },
+    "Metal is not supported on this device." : {
+      "comment" : "Error shown when Metal device cannot be created.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Metal is not supported on this device."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このデバイスは Metal をサポートしていません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此设备不支持 Metal。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此裝置不支援 Metal。"
           }
         }
       }
@@ -14563,6 +14775,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未選擇檔案"
+          }
+        }
+      }
+    },
+    "No file or folder chosen" : {
+      "comment" : "Empty-state caption in the HTML local picker before the user has selected anything.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No file or folder chosen"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ファイルまたはフォルダ未選択"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尚未选择文件或文件夹"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尚未選擇檔案或資料夾"
           }
         }
       }
@@ -16597,6 +16839,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "局部多雲"
+          }
+        }
+      }
+    },
+    "Paste URL from clipboard" : {
+      "comment" : "Tooltip / a11y label on the paste-button next to the HTML URL field.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paste URL from clipboard"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "クリップボードから URL を貼り付け"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从剪贴板粘贴 URL"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "從剪貼簿貼上 URL"
           }
         }
       }
@@ -19698,6 +19970,34 @@
         }
       }
     },
+    "Renders WebGL content at retina resolution so character art and Spine wallpapers stop looking soft. Auto-enabled for Wallpaper Engine folders." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Renders WebGL content at retina resolution so character art and Spine wallpapers stop looking soft. Auto-enabled for Wallpaper Engine folders."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "WebGL コンテンツを Retina 解像度でレンダリングし、キャラクターアートや Spine ウォールペーパーがぼやけて見えるのを防ぎます。Wallpaper Engine フォルダでは自動で有効になります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "以 Retina 分辨率渲染 WebGL 内容，避免角色立绘和 Spine 壁纸看起来发软。Wallpaper Engine 文件夹会自动启用。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "以 Retina 解析度算繪 WebGL 內容，避免角色立繪與 Spine 桌布看起來偏軟。Wallpaper Engine 資料夾會自動啟用。"
+          }
+        }
+      }
+    },
     "Report a Bug" : {
       "comment" : "Button label opening the bug-report sheet.",
       "localizations" : {
@@ -22462,6 +22762,66 @@
         }
       }
     },
+    "Shader Import Failed" : {
+      "comment" : "Alert title for a failed custom-shader import.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shader Import Failed"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "シェーダーのインポートに失敗"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "着色器导入失败"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "著色器匯入失敗"
+          }
+        }
+      }
+    },
+    "Shader must define `mainImage(uv, time, resolution)`." : {
+      "comment" : "Validation error when imported shader is missing the mainImage entry point.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shader must define `mainImage(uv, time, resolution)`."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "シェーダーは `mainImage(uv, time, resolution)` を定義する必要があります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "着色器必须定义 `mainImage(uv, time, resolution)`。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "著色器必須定義 `mainImage(uv, time, resolution)`。"
+          }
+        }
+      }
+    },
     "Shader wallpaper" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -23869,6 +24229,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已暫停"
+          }
+        }
+      }
+    },
+    "Switch to %@ shader" : {
+      "comment" : "A11y hint for a shader preset button. %@ = preset name (e.g. Waves).",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Switch to %@ shader"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@シェーダーに切り替え"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切换到%@着色器"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切換到%@著色器"
           }
         }
       }
@@ -28537,424 +28927,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "你的 Wallpaper Engine 安裝資料夾"
-          }
-        }
-      }
-    },
-    "Renders WebGL content at retina resolution so character art and Spine wallpapers stop looking soft. Auto-enabled for Wallpaper Engine folders." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Renders WebGL content at retina resolution so character art and Spine wallpapers stop looking soft. Auto-enabled for Wallpaper Engine folders."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "WebGL コンテンツを Retina 解像度でレンダリングし、キャラクターアートや Spine ウォールペーパーがぼやけて見えるのを防ぎます。Wallpaper Engine フォルダでは自動で有効になります。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "以 Retina 分辨率渲染 WebGL 内容，避免角色立绘和 Spine 壁纸看起来发软。Wallpaper Engine 文件夹会自动启用。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "以 Retina 解析度算繪 WebGL 內容，避免角色立繪與 Spine 桌布看起來偏軟。Wallpaper Engine 資料夾會自動啟用。"
-          }
-        }
-      }
-    },
-    "%@ shader" : {
-      "comment" : "A11y label for a shader preset button. %@ = preset name (e.g. Waves).",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ shader"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@シェーダー"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@着色器"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@著色器"
-          }
-        }
-      }
-    },
-    "Switch to %@ shader" : {
-      "comment" : "A11y hint for a shader preset button. %@ = preset name (e.g. Waves).",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Switch to %@ shader"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@シェーダーに切り替え"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "切换到%@着色器"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "切換到%@著色器"
-          }
-        }
-      }
-    },
-    "Import custom shader" : {
-      "comment" : "A11y label for the Import card in the shader preset grid.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Import custom shader"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "カスタムシェーダーをインポート"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "导入自定义着色器"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "匯入自訂著色器"
-          }
-        }
-      }
-    },
-    "Import a .lwshader or .metal file from disk." : {
-      "comment" : "Tooltip for the Import shader card.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Import a .lwshader or .metal file from disk."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ディスクから .lwshader または .metal ファイルをインポート。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "从磁盘导入 .lwshader 或 .metal 文件。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "從磁碟匯入 .lwshader 或 .metal 檔案。"
-          }
-        }
-      }
-    },
-    "Shader Import Failed" : {
-      "comment" : "Alert title for a failed custom-shader import.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Shader Import Failed"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "シェーダーのインポートに失敗"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "着色器导入失败"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "著色器匯入失敗"
-          }
-        }
-      }
-    },
-    "Delete Shader?" : {
-      "comment" : "Confirmation dialog title when deleting a custom shader.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Delete Shader?"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "シェーダーを削除しますか？"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "删除着色器？"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "刪除著色器？"
-          }
-        }
-      }
-    },
-    "%@ will be removed from your library. This cannot be undone." : {
-      "comment" : "Confirmation dialog body when deleting a custom shader. %@ = shader name.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ will be removed from your library. This cannot be undone."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ がライブラリから削除されます。この操作は取り消せません。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ 将从你的库中移除，此操作无法撤销。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ 將從你的庫中移除，此操作無法復原。"
-          }
-        }
-      }
-    },
-    "Custom Shader" : {
-      "comment" : "Generic label for a user-imported Metal shader.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Custom Shader"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "カスタムシェーダー"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "自定义着色器"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "自訂著色器"
-          }
-        }
-      }
-    },
-    "Metal is not supported on this device." : {
-      "comment" : "Error shown when Metal device cannot be created.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Metal is not supported on this device."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "このデバイスは Metal をサポートしていません。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "此设备不支持 Metal。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "此裝置不支援 Metal。"
-          }
-        }
-      }
-    },
-    "Choose a .lwshader or .metal file that defines `mainImage(uv, time, resolution)`." : {
-      "comment" : "NSOpenPanel message for custom shader import.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Choose a .lwshader or .metal file that defines `mainImage(uv, time, resolution)`."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "`mainImage(uv, time, resolution)` を定義する .lwshader または .metal ファイルを選択してください。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "选择一个定义 `mainImage(uv, time, resolution)` 的 .lwshader 或 .metal 文件。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "選擇一個定義 `mainImage(uv, time, resolution)` 的 .lwshader 或 .metal 檔案。"
-          }
-        }
-      }
-    },
-    "Custom shaders implement `mainImage(uv, time, resolution)` in Metal Shader Language. The file is compiled on import; errors are surfaced inline." : {
-      "comment" : "Help text under the custom shader grid.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Custom shaders implement `mainImage(uv, time, resolution)` in Metal Shader Language. The file is compiled on import; errors are surfaced inline."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "カスタムシェーダーは Metal Shader Language で `mainImage(uv, time, resolution)` を実装します。ファイルはインポート時にコンパイルされ、エラーはインラインで表示されます。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "自定义着色器使用 Metal Shader Language 实现 `mainImage(uv, time, resolution)`。文件在导入时编译，错误会内联显示。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "自訂著色器使用 Metal Shader Language 實作 `mainImage(uv, time, resolution)`。檔案在匯入時編譯，錯誤會內嵌顯示。"
-          }
-        }
-      }
-    },
-    "Shader must define `mainImage(uv, time, resolution)`." : {
-      "comment" : "Validation error when imported shader is missing the mainImage entry point.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Shader must define `mainImage(uv, time, resolution)`."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "シェーダーは `mainImage(uv, time, resolution)` を定義する必要があります。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "着色器必须定义 `mainImage(uv, time, resolution)`。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "著色器必須定義 `mainImage(uv, time, resolution)`。"
-          }
-        }
-      }
-    },
-    "Custom Shaders" : {
-      "comment" : "Section header for user-imported shaders in the shader preset grid.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Custom Shaders"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "カスタムシェーダー"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "自定义着色器"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "自訂著色器"
           }
         }
       }
