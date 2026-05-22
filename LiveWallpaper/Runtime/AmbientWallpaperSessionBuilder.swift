@@ -79,6 +79,7 @@ final class AmbientWallpaperSessionBuilder {
         return session
     }
 
+    #if !LITE_BUILD
     func makeShaderSession(preset: MetalShaderPreset, frame: CGRect) -> AmbientWallpaperSession {
         let window = VideoWallpaperWindow(frame: frame)
         let metalView = MetalWallpaperView(frame: frame)
@@ -87,6 +88,7 @@ final class AmbientWallpaperSessionBuilder {
         window.orderBack(nil)
         return AmbientWallpaperSession(window: window, wallpaperType: .metalShader, performanceTarget: metalView)
     }
+    #endif
 
     #if !LITE_BUILD
     /// Builds a scene wallpaper session.

@@ -38,8 +38,12 @@ struct ScreenDetailPreviewArea: View {
                 htmlContent
             } else if draft.selectedWallpaperType == .metalShader,
                       featureCatalog.isEnabled(.metalShader) {
+                #if !LITE_BUILD
                 ShaderWallpaperSection(screen: screen, selectedShaderPreset: $draft.selectedShaderPreset)
                     .padding(24)
+                #else
+                EmptyView()
+                #endif
             } else if draft.selectedWallpaperType == .scene,
                       featureCatalog.isEnabled(.scene) {
                 #if !LITE_BUILD
