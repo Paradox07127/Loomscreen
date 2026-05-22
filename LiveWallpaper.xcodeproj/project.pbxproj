@@ -52,6 +52,9 @@
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		0C322BF12D6950480033C48B /* LiveWallpaper */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				0CA00000000000000000B030 /* Exceptions for "LiveWallpaper" folder in "LiveWallpaperLite" target */,
+			);
 			path = LiveWallpaper;
 			sourceTree = "<group>";
 		};
@@ -66,6 +69,19 @@
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		0CA00000000000000000B030 /* Exceptions for "LiveWallpaper" folder in "LiveWallpaperLite" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				"VideoPlayback/Shaders.metal",
+				"VideoPlayback/WPEMetalBuiltins.metal",
+				"VideoPlayback/MetalWallpaperView.swift",
+				"Views/WallpaperSections.swift",
+			);
+			target = 0CA00000000000000000B001 /* LiveWallpaperLite */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		0C322BEC2D6950480033C48B /* Frameworks */ = {
