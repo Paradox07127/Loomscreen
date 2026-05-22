@@ -1,79 +1,33 @@
+#if !LITE_BUILD
 import SwiftUI
 
-// MARK: - Wallpaper Type Picker
-
-struct WallpaperTypePicker: View {
-    var screen: Screen
-    @Binding var selectedWallpaperType: WallpaperType
-    @Environment(ScreenManager.self) private var screenManager
-    @Environment(\.featureCatalog) private var featureCatalog
-
-    var body: some View {
-        Picker("Wallpaper Type", selection: $selectedWallpaperType) {
-            ForEach(featureCatalog.capabilities.selectableWallpaperTypes) { type in
-                Label(type.titleKey, systemImage: type.iconName).tag(type)
-            }
-        }
-        .pickerStyle(.segmented)
-        .padding(.bottom, 4)
-        .onChange(of: selectedWallpaperType) { _, newType in
-            if newType == .video {
-                screenManager.switchToVideoWallpaper(for: screen)
-            }
-        }
-    }
-}
-
-// MARK: - Shader Wallpaper Section
-
+/// Shader preset gallery — embedded in `ScreenDetailPreviewArea` when the
+/// user picks the shader wallpaper type. Single section so no collapse
+/// chrome; presets sit in a `LazyVGrid` so the cards stay readable from the
+/// 480pt preview-area minimum up to wide windows.
 struct ShaderWallpaperSection: View {
     var screen: Screen
     @Binding var selectedShaderPreset: MetalShaderPreset
     @Environment(ScreenManager.self) private var screenManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private static let presetColumns = [
+        GridItem(.adaptive(minimum: 110, maximum: 200), spacing: 12, alignment: .top)
+    ]
+
     var body: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 12) {
                 Label("Shader Wallpaper", systemImage: "wand.and.stars")
-                    .font(.headline)
-
-                Divider()
+                    .font(.system(size: 13, weight: .semibold))
 
                 Text("GPU-rendered procedural animations")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                AdaptiveGlassContainer(spacing: 10) {
-                    HStack(spacing: 10) {
-                        ForEach(MetalShaderPreset.allCases) { preset in
-                            Button {
-                                withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.2))) {
-                                    selectedShaderPreset = preset
-                                }
-                                screenManager.setShaderWallpaper(preset: preset, for: screen)
-                            } label: {
-                                VStack(spacing: 6) {
-                                    Image(systemName: preset.iconName)
-                                        .font(.title2)
-                                        .frame(width: 44, height: 44)
-                                        .adaptiveGlassSurface(
-                                            .circle,
-                                            tint: selectedShaderPreset == preset ? Color.accentColor : nil,
-                                            interactive: true
-                                        )
-                                    Text(preset.titleKey)
-                                        .font(.caption2)
-                                        .foregroundStyle(selectedShaderPreset == preset ? .primary : .secondary)
-                                }
-                                .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(shaderPresetAccessibilityLabel(preset))
-                            .accessibilityHint(selectedShaderPreset == preset
-                                ? Text("Currently selected", comment: "A11y hint for the active shader preset button.")
-                                : shaderPresetSwitchHint(preset))
-                        }
+                LazyVGrid(columns: Self.presetColumns, spacing: 12) {
+                    ForEach(MetalShaderPreset.allCases) { preset in
+                        presetButton(preset)
                     }
                 }
             }
@@ -82,33 +36,40 @@ struct ShaderWallpaperSection: View {
         .groupBoxStyle(ContainerGroupBoxStyle())
     }
 
-    private func shaderPresetAccessibilityLabel(_ preset: MetalShaderPreset) -> Text {
-        switch preset {
-        case .waves:
-            return Text("Waves shader", comment: "A11y label for the Waves shader preset button.")
-        case .plasma:
-            return Text("Plasma shader", comment: "A11y label for the Plasma shader preset button.")
-        case .gradient:
-            return Text("Gradient shader", comment: "A11y label for the Gradient shader preset button.")
-        case .noise:
-            return Text("Noise shader", comment: "A11y label for the Noise shader preset button.")
-        case .aurora:
-            return Text("Aurora shader", comment: "A11y label for the Aurora shader preset button.")
+    private func presetButton(_ preset: MetalShaderPreset) -> some View {
+        let isSelected = selectedShaderPreset == preset
+        return Button {
+            withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.2))) {
+                selectedShaderPreset = preset
+            }
+            screenManager.setShaderWallpaper(preset: preset, for: screen)
+        } label: {
+            VStack(spacing: 6) {
+                Image(systemName: preset.iconName)
+                    .font(.title2)
+                    .frame(width: 44, height: 44)
+                    .adaptiveGlassSurface(
+                        .circle,
+                        tint: isSelected ? Color.accentColor : nil,
+                        interactive: true
+                    )
+                Text(preset.titleKey)
+                    .font(.caption2)
+                    .foregroundStyle(isSelected ? .primary : .secondary)
+            }
+            .frame(maxWidth: .infinity)
         }
-    }
-
-    private func shaderPresetSwitchHint(_ preset: MetalShaderPreset) -> Text {
-        switch preset {
-        case .waves:
-            return Text("Switch to Waves shader", comment: "A11y hint for the Waves shader preset button.")
-        case .plasma:
-            return Text("Switch to Plasma shader", comment: "A11y hint for the Plasma shader preset button.")
-        case .gradient:
-            return Text("Switch to Gradient shader", comment: "A11y hint for the Gradient shader preset button.")
-        case .noise:
-            return Text("Switch to Noise shader", comment: "A11y hint for the Noise shader preset button.")
-        case .aurora:
-            return Text("Switch to Aurora shader", comment: "A11y hint for the Aurora shader preset button.")
-        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(
+            "\(preset.localizedTitle) shader",
+            comment: "A11y label for a shader preset button. %@ = preset name (e.g. Waves)."
+        ))
+        .accessibilityHint(isSelected
+            ? Text("Currently selected", comment: "A11y hint for the active shader preset button.")
+            : Text(
+                "Switch to \(preset.localizedTitle) shader",
+                comment: "A11y hint for a shader preset button. %@ = preset name (e.g. Waves)."
+            ))
     }
 }
+#endif

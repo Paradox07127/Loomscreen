@@ -1,3 +1,4 @@
+#if !LITE_BUILD
 import AppKit
 import MetalKit
 
@@ -6,6 +7,13 @@ struct ShaderUniforms {
     var resolution: SIMD2<Float>
     var shaderType: Int32
 }
+
+/// MSAA sample count. 4x is the sweet spot — kills smoothstep edge aliasing
+/// on procedural shaders (Aurora bands, Waves foam, Noise transitions) at
+/// retina backing-store rates without doubling shader cost like 8x would.
+/// Tied to the pipeline `rasterSampleCount` and `MTKView.sampleCount`; both
+/// must match or pipeline-state creation fails at runtime.
+private let kMetalShaderSampleCount: Int = 4
 
 final class MetalWallpaperView: NSView, MTKViewDelegate {
 
@@ -46,6 +54,7 @@ final class MetalWallpaperView: NSView, MTKViewDelegate {
         mtkView.colorPixelFormat = .bgra8Unorm
         mtkView.clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
         mtkView.autoresizingMask = [.width, .height]
+        mtkView.sampleCount = kMetalShaderSampleCount
 
         mtkView.wantsLayer = true
         mtkView.layer?.isOpaque = true
@@ -72,6 +81,7 @@ final class MetalWallpaperView: NSView, MTKViewDelegate {
         descriptor.vertexFunction = vertexFunction
         descriptor.fragmentFunction = fragmentFunction
         descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+        descriptor.rasterSampleCount = kMetalShaderSampleCount
 
         do {
             pipelineState = try device.makeRenderPipelineState(descriptor: descriptor)
@@ -160,3 +170,4 @@ final class MetalWallpaperView: NSView, MTKViewDelegate {
 }
 
 extension MetalWallpaperView: WallpaperPerformanceConfigurable {}
+#endif

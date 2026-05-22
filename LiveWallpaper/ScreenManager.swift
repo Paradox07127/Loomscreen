@@ -1300,8 +1300,13 @@ final class ScreenManager {
             session = ambientSessionBuilder.makeHTMLSession(source: source, config: effectiveConfig, frame: screen.frame)
             Logger.info("Set HTML wallpaper for screen \(screen.id) — \(source.displayName) [leader=\(isLeader)]", category: .screenManager)
         case .metalShader(let preset):
+            #if !LITE_BUILD
             session = ambientSessionBuilder.makeShaderSession(preset: preset, frame: screen.frame)
             Logger.info("Set shader wallpaper (\(preset.rawValue)) for screen \(screen.id)", category: .screenManager)
+            #else
+            _ = preset
+            return
+            #endif
         case .scene(let descriptor):
             #if !LITE_BUILD
             let dependencyMounts = WPEDependencyMountResolver().mounts(
@@ -1380,6 +1385,11 @@ final class ScreenManager {
 
     // MARK: - Metal Shader Wallpaper
 
+    /// Matches `setSceneWallpaper` — the body only touches Core schema +
+    /// session restore. The Pro-only `makeShaderSession` call is reached
+    /// indirectly through `restoreWallpaperSession → activateAmbientWallpaper`
+    /// where the `.metalShader` case is gated with `#if !LITE_BUILD`, so this
+    /// stays ungated for Lite-side bookmark restore / decode compatibility.
     func setShaderWallpaper(preset: MetalShaderPreset, for screen: Screen) {
         let previousContent = configurationStore.get(for: screen.id)?.activeWallpaper
         var config = configurationStore.get(for: screen.id) ?? ScreenConfiguration(
