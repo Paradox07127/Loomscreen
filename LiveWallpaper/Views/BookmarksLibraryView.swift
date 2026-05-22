@@ -180,7 +180,7 @@ private struct BookmarkTile: View {
             tileBackground
             tileContent
             typeBadge
-            hoverOverlay
+            actionChip
         }
         .aspectRatio(16.0 / 9.0, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.Corner.md, style: .continuous))
@@ -238,63 +238,53 @@ private struct BookmarkTile: View {
         .accessibilityHidden(true)
     }
 
+    /// Persistent bottom-trailing chip with Apply + Edit icons. Always
+    /// visible (no hover gating) so the actions never feel hidden. Sits on
+    /// a translucent dark capsule so it stays legible on any thumbnail
+    /// content. Delete stays in the contextMenu — it's destructive and
+    /// shouldn't be one click away by default.
     @ViewBuilder
-    private var hoverOverlay: some View {
-        if isHovering, !isRenaming {
+    private var actionChip: some View {
+        if !isRenaming {
             VStack {
-                HStack {
-                    Spacer()
-                    moreMenu
-                }
                 Spacer()
                 HStack {
                     Spacer()
-                    primaryApplyButton
+                    HStack(spacing: 4) {
+                        applyControl
+                        editButton
+                    }
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(.thinMaterial.opacity(0.95))
+                    )
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.25), lineWidth: 0.5)
+                    )
+                    .shadow(color: .black.opacity(0.25), radius: 4, y: 1)
                 }
             }
-            .padding(8)
-            .transition(.opacity)
+            .padding(7)
         }
     }
 
     @ViewBuilder
-    private var primaryApplyButton: some View {
-        if let only = screens.first, screens.count == 1 {
-            Button {
-                onApply(only)
-            } label: {
-                Image(systemName: "play.fill")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 32, height: 32)
-                    .background(
-                        Circle().fill(bookmark.presentationTint.opacity(0.95))
-                    )
-                    .overlay(Circle().strokeBorder(Color.white.opacity(0.35), lineWidth: 0.5))
-                    .shadow(color: .black.opacity(0.25), radius: 4, y: 1)
-            }
+    private var applyControl: some View {
+        if screens.count == 1, let only = screens.first {
+            Button { onApply(only) } label: { applyIcon }
             .buttonStyle(.plain)
             .help(Text("Apply"))
-        } else if !screens.isEmpty {
+        } else if screens.count > 1 {
             Menu {
                 ForEach(screens, id: \.id) { screen in
                     Button("Apply to \(screen.name)") { onApply(screen) }
                 }
-                if screens.count > 1 {
-                    Divider()
-                    Button("Apply to All Displays", action: onApplyToAll)
-                }
-            } label: {
-                Image(systemName: "play.fill")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 32, height: 32)
-                    .background(
-                        Circle().fill(bookmark.presentationTint.opacity(0.95))
-                    )
-                    .overlay(Circle().strokeBorder(Color.white.opacity(0.35), lineWidth: 0.5))
-                    .shadow(color: .black.opacity(0.25), radius: 4, y: 1)
-            }
+                Divider()
+                Button("Apply to All Displays", action: onApplyToAll)
+            } label: { applyIcon }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
@@ -302,29 +292,26 @@ private struct BookmarkTile: View {
         }
     }
 
-    private var moreMenu: some View {
-        Menu {
-            if !screens.isEmpty, screens.count > 1 {
-                ForEach(screens, id: \.id) { screen in
-                    Button("Apply to \(screen.name)") { onApply(screen) }
-                }
-                Button("Apply to All Displays", action: onApplyToAll)
-                Divider()
-            }
-            Button("Rename", action: onStartRename)
-            Button("Delete", role: .destructive, action: onDelete)
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 11, weight: .bold))
+    private var applyIcon: some View {
+        Image(systemName: "play.fill")
+            .font(.system(size: 11, weight: .bold))
+            .foregroundStyle(.white)
+            .frame(width: 22, height: 22)
+            .background(Circle().fill(bookmark.presentationTint.opacity(0.95)))
+            .overlay(Circle().strokeBorder(Color.white.opacity(0.3), lineWidth: 0.5))
+    }
+
+    private var editButton: some View {
+        Button(action: onStartRename) {
+            Image(systemName: "pencil")
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 22, height: 22)
                 .background(Circle().fill(Color.black.opacity(0.55)))
-                .overlay(Circle().strokeBorder(Color.white.opacity(0.25), lineWidth: 0.5))
+                .overlay(Circle().strokeBorder(Color.white.opacity(0.2), lineWidth: 0.5))
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help(Text("More actions"))
+        .buttonStyle(.plain)
+        .help(Text("Rename"))
     }
 
     // MARK: Metadata
