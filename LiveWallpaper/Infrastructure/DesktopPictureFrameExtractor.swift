@@ -4,12 +4,18 @@ import CoreGraphics
 
 @MainActor
 enum DesktopPictureFrameExtractor {
+    /// Kicks off an async extraction + write. Returns `true` when the
+    /// synchronous preconditions hold (player has a `currentItem` to sample);
+    /// async failures inside the spawned task only surface in the log. UI
+    /// callers gate their "✓ captured" feedback on this Bool so a wallpaper
+    /// that isn't ready can't produce a false success indicator.
+    @discardableResult
     static func applyCurrentFrame(
         from player: AVPlayer,
         screenID: CGDirectDisplayID,
         nsScreen: NSScreen?
-    ) {
-        guard let currentItem = player.currentItem else { return }
+    ) -> Bool {
+        guard let currentItem = player.currentItem else { return false }
 
         let imageGenerator = AVAssetImageGenerator(asset: currentItem.asset)
         imageGenerator.appliesPreferredTrackTransform = true
@@ -54,5 +60,7 @@ enum DesktopPictureFrameExtractor {
                 }
             }
         }
+
+        return true
     }
 }

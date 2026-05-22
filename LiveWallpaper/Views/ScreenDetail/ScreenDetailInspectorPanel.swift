@@ -39,6 +39,11 @@ struct ScreenDetailInspectorPanel: View {
                     )
 
                     if draft.selectedWallpaperType == .html {
+                        ContentSecurityInspector(
+                            screen: screen,
+                            htmlConfig: $draft.htmlConfig
+                        )
+
                         HTMLOptionsInspector(
                             screen: screen,
                             config: $draft.htmlConfig

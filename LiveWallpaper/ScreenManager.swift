@@ -1192,10 +1192,14 @@ final class ScreenManager {
         saveConfiguration(config)
     }
 
-    func extractLockScreenFrame(for screen: Screen) {
-        guard let player = screen.videoPlayer?.player else { return }
+    /// Returns `true` when a frame extraction request was actually issued
+    /// (player exists with a `currentItem`). Callers use the result to gate
+    /// UI feedback so a silent no-op can't show a false success indicator.
+    @discardableResult
+    func extractLockScreenFrame(for screen: Screen) -> Bool {
+        guard let player = screen.videoPlayer?.player else { return false }
 
-        DesktopPictureFrameExtractor.applyCurrentFrame(
+        return DesktopPictureFrameExtractor.applyCurrentFrame(
             from: player,
             screenID: screen.id,
             nsScreen: displayRegistry.findNSScreen(for: screen.id)
