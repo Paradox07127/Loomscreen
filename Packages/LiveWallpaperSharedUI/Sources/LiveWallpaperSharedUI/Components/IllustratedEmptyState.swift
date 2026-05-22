@@ -15,8 +15,11 @@ public struct IllustratedEmptyState: View {
 
     public enum Variant {
         case standard
-        /// Renders the dashed drop-target border permanently so the affordance
+        /// Renders a solid accent-tinted drop-target frame so the affordance
         /// is discoverable without dragging anything onto the area first.
+        /// Pairs with the active `dragHintOverlay` in `ScreenDetailPreviewArea`
+        /// — the empty state is the ambient/idle state, the overlay is the
+        /// stronger activated state, sharing the same shape and accent.
         case dropTarget
         /// Compact (denser padding, smaller icon) for use inside inspector rows.
         case compact
@@ -96,15 +99,12 @@ public struct IllustratedEmptyState: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background {
             if case .dropTarget = variant {
-                RoundedRectangle(cornerRadius: DesignTokens.Corner.lg, style: .continuous)
-                    .strokeBorder(
-                        Color.accentColor.opacity(0.55),
-                        style: StrokeStyle(lineWidth: 1.5, dash: [6, 5])
-                    )
-                    .background(
-                        RoundedRectangle(cornerRadius: DesignTokens.Corner.lg, style: .continuous)
-                            .fill(Color.accentColor.opacity(0.05))
-                    )
+                ZStack {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.04))
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .strokeBorder(Color.accentColor.opacity(0.32), lineWidth: 1)
+                }
             }
         }
         .accessibilityElement(children: .combine)
