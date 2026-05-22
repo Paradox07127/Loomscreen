@@ -117,16 +117,21 @@ struct ScreenDetailHeader: View {
     }
 
     private var sessionStatusText: LocalizedStringKey {
-        guard wallpaperSessionSummary.isConfigured else {
-            return "Not configured"
+        switch wallpaperSessionSummary.activity {
+        case .active:   return "Playing"
+        case .paused:   return "Paused"
+        case .off:      return "Off"
+        case .error:    return "Error"
+        case .inactive: return "Not configured"
         }
-        return wallpaperSessionSummary.activity == .active ? "Playing" : "Paused"
     }
 
     private var sessionStatusColor: Color {
         switch wallpaperSessionSummary.activity {
         case .active:   return .green
         case .paused:   return .orange
+        case .off:      return .secondary
+        case .error:    return .red
         case .inactive: return .secondary
         }
     }

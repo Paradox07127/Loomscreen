@@ -34,8 +34,39 @@ public final class TrustedHostStore {
     /// settings cleanup and older tests; values are now origin strings.
     public var hosts: [String] { origins.map(\.rawValue) }
 
-    public var originSet: Set<TrustedHTMLOrigin> { Set(origins) }
-    public var hostSet: Set<String> { Set(hosts) }
+    /// Always-trusted origins. These are the *embed-only* surfaces of major
+    /// video / media platforms — designed by the platform to be loaded inside
+    /// third-party players, with no SSO / general-web JavaScript attack
+    /// surface beyond the embedded player itself. We pre-trust them because:
+    ///   1. `HTMLSource.normalizingForWallpaper(_:)` actively *rewrites*
+    ///      user-typed YouTube watch / shorts / share URLs to these origins,
+    ///      so requiring the user to manually trust them would break the
+    ///      "just paste a URL" UX.
+    ///   2. The risk of pre-trusting them is bounded — these domains serve
+    ///      nothing but their own embed pages.
+    /// Kept distinct from user-trusted origins so they can never be revoked
+    /// and never persist (a future macOS update shipping with no built-ins
+    /// would not strand stale entries in user defaults).
+    public static let builtInTrustedOrigins: Set<TrustedHTMLOrigin> = {
+        let raw = [
+            "https://www.youtube-nocookie.com",
+            "https://youtube-nocookie.com",
+            "https://player.vimeo.com",
+        ]
+        return Set(raw.compactMap(TrustedHTMLOrigin.init(persistedValue:)))
+    }()
+
+    /// Effective trust set = user-saved origins ∪ built-in embed origins.
+    public var originSet: Set<TrustedHTMLOrigin> {
+        Set(origins).union(Self.builtInTrustedOrigins)
+    }
+    public var hostSet: Set<String> { Set(originSet.map(\.rawValue)) }
+
+    /// True when `origin` is on the immutable built-in allowlist. UI uses
+    /// this to hide / disable the Revoke control for built-ins.
+    public func isBuiltInTrusted(_ origin: TrustedHTMLOrigin) -> Bool {
+        Self.builtInTrustedOrigins.contains(origin)
+    }
 
     public func contains(_ host: String) -> Bool {
         guard let origin = TrustedHTMLOrigin(persistedValue: host) else { return false }
@@ -73,7 +104,8 @@ public final class TrustedHostStore {
 
     @discardableResult
     public func revoke(_ origin: TrustedHTMLOrigin) -> Bool {
-        guard originSet.contains(origin) else { return false }
+        guard !Self.builtInTrustedOrigins.contains(origin) else { return false }
+        guard origins.contains(origin) else { return false }
         origins.removeAll { $0 == origin }
         persist()
         return true

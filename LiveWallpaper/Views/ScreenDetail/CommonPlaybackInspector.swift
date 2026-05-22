@@ -360,15 +360,22 @@ struct CommonPlaybackInspector: View {
     }
 }
 
-/// HTML-only privacy controls broken out of `CommonPlaybackInspector` so the
-/// playback section's mental model stays consistent across wallpaper types
-/// (audio / frame rate / desktop picture are all media-side concerns; data
-/// persistence and tracker blocking are content-security concerns).
+/// HTML-only privacy + origin-trust controls. Lives directly under the
+/// playback section in the inspector column so all "what is the WKWebView
+/// allowed to do" decisions sit together — ephemeral data, tracker blocking,
+/// and (for remote URLs) the per-origin script execution grant moved here
+/// from the source banner column.
 struct ContentSecurityInspector: View {
     var screen: Screen
+    var source: HTMLSource?
     @Binding var htmlConfig: HTMLConfig
 
     @Environment(ScreenManager.self) private var screenManager
+    @State private var trustStore = TrustedHostStore.shared
+    /// Holds the origin the user clicked "Trust…" for. Tracking the origin
+    /// (not a bare Bool) prevents a source change while the dialog is open
+    /// from re-targeting the confirmation at a different host.
+    @State private var pendingTrustOrigin: TrustedHTMLOrigin?
     @AppStorage("Inspector.ContentSecurityExpanded") private var isExpanded = true
 
     var body: some View {
@@ -382,6 +389,10 @@ struct ContentSecurityInspector: View {
                     ephemeralStorageRow
                     Divider()
                     trackerBlockingRow
+                    if let origin = remoteOrigin {
+                        Divider()
+                        originTrustRow(for: origin)
+                    }
                 }
             }
         }
@@ -412,6 +423,110 @@ struct ContentSecurityInspector: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .accessibilityLabel(Text("Block trackers"))
+        }
+    }
+
+    private var remoteOrigin: TrustedHTMLOrigin? {
+        guard let source else { return nil }
+        switch HTMLTrust.evaluate(source: source, trustedOrigins: trustStore.originSet) {
+        case .trustedRemote(let origin), .untrustedRemote(let origin):
+            return origin
+        case .localContent:
+            return nil
+        }
+    }
+
+    @ViewBuilder
+    private func originTrustRow(for origin: TrustedHTMLOrigin) -> some View {
+        let isTrusted = trustStore.originSet.contains(origin)
+        // `LocalizedStringKey(origin.displayName)` is used here intentionally
+        // for the subtitle: when no translation exists (host names never have
+        // one) it falls back to the raw host string — the literal user data
+        // we want to show. The xcstrings extractor will simply skip it.
+        SettingRow(
+            icon: isTrusted ? "checkmark.shield.fill" : "exclamationmark.shield",
+            iconColor: isTrusted ? .green : .orange,
+            title: "Origin Access",
+            subtitle: LocalizedStringKey(origin.displayName),
+            info: trustRowInfo(for: origin, isTrusted: isTrusted)
+        ) {
+            trustRowAction(for: origin, isTrusted: isTrusted)
+        }
+    }
+
+    private func trustRowInfo(for origin: TrustedHTMLOrigin, isTrusted: Bool) -> LocalizedStringKey {
+        if trustStore.isBuiltInTrusted(origin) {
+            return "Built-in trust for the platform's official embed surface — cannot be revoked."
+        }
+        if isTrusted {
+            return "JavaScript runs on this origin. Revoke to disable script execution."
+        }
+        if origin.isSecure {
+            return "Scripts disabled. Trust this origin to allow JavaScript execution."
+        }
+        return "HTTP origins cannot be trusted. Use HTTPS instead."
+    }
+
+    @ViewBuilder
+    private func trustRowAction(for origin: TrustedHTMLOrigin, isTrusted: Bool) -> some View {
+        if trustStore.isBuiltInTrusted(origin) {
+            // Built-in trust (e.g. youtube-nocookie.com) — can't be revoked,
+            // show a static "Built-in" badge instead of a Revoke button.
+            Text("Built-in")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.secondary.opacity(0.15), in: Capsule())
+                .fixedSize()
+        } else if isTrusted {
+            Button("Revoke") {
+                guard let source else { return }
+                _ = trustStore.revoke(origin)
+                screenManager.setHTMLWallpaper(
+                    source: source,
+                    config: htmlConfig,
+                    forceReload: true,
+                    for: screen
+                )
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .fixedSize()
+        } else if origin.isSecure {
+            Button("Trust…") {
+                pendingTrustOrigin = origin
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .fixedSize()
+            .confirmationDialog(
+                Text("Trust \(origin.displayName) for JavaScript?"),
+                isPresented: Binding(
+                    get: { pendingTrustOrigin == origin },
+                    set: { if !$0 { pendingTrustOrigin = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("Trust Origin") {
+                    defer { pendingTrustOrigin = nil }
+                    // Source may have changed while the dialog was open; only
+                    // grant trust if the current row's origin still matches.
+                    guard let source, remoteOrigin == origin else { return }
+                    _ = trustStore.trust(origin)
+                    screenManager.setHTMLWallpaper(
+                        source: source,
+                        config: htmlConfig,
+                        forceReload: true,
+                        for: screen
+                    )
+                }
+                Button("Cancel", role: .cancel) {
+                    pendingTrustOrigin = nil
+                }
+            } message: {
+                Text("This allows the wallpaper to run scripts, use local storage, and access WebGPU. Only trust origins you recognize.")
+            }
         }
     }
 
@@ -508,9 +623,7 @@ private struct HTMLRenderingDiagnostics {
         backingPixelSizeText = Self.pixelSizeText(geometry.backingPixelSize)
         scaleText = Self.scalePairText(x: scaleX, y: scaleY, suffix: true)
         viewportText = Self.cssViewportText(viewportSize)
-        devicePixelRatioText = usesPhysicalPixels
-            ? "1 (pinned)"
-            : "\(Self.scalePairText(x: scaleX, y: scaleY, suffix: false)) (native)"
+        devicePixelRatioText = "\(Self.scalePairText(x: scaleX, y: scaleY, suffix: false)) (native)"
         modeText = if usesPhysicalPixels {
             config.physicalPixelLayout ? "Physical pixels" : "Physical pixels (auto)"
         } else {

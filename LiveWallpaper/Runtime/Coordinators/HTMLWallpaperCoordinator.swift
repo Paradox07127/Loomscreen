@@ -92,21 +92,28 @@ final class HTMLWallpaperCoordinator {
         forceReload: Bool = false,
         for screen: Screen
     ) {
+        var persistedConfig = config
+        if !persistedConfig.physicalPixelLayout,
+           HTMLWallpaperCompatibilityPolicy.looksLikeWallpaperEngineFolder(source) {
+            persistedConfig.physicalPixelLayout = true
+            Logger.info("HTML wallpaper: auto-enabling physical-pixel layout for Wallpaper Engine folder on screen \(screen.id)", category: .screenManager)
+        }
+
         var configuration = configurationStore.get(for: screen.id) ?? ScreenConfiguration(
             screenID: screen.id,
-            wallpaper: .html(source: source, config: config)
+            wallpaper: .html(source: source, config: persistedConfig)
         )
         if !forceReload,
            case .html(let existingSource, let existingConfig) = configuration.activeWallpaper,
            existingSource == source,
-           existingConfig == config,
+           existingConfig == persistedConfig,
            screen.runtimeSession?.wallpaperType == .html {
             Logger.info("HTML wallpaper unchanged for screen \(screen.id); keeping existing WKWebView session", category: .screenManager)
             return
         }
 
         let previousContent = configurationStore.get(for: screen.id)?.activeWallpaper
-        configuration.setHTMLWallpaper(source: source, config: config)
+        configuration.setHTMLWallpaper(source: source, config: persistedConfig)
         originReconciler.reconcile(
             &configuration,
             event: .userReplacedActiveWallpaper(previous: previousContent)

@@ -1,39 +1,41 @@
 import SwiftUI
 import AppKit
-import UniformTypeIdentifiers
+import LiveWallpaperCore
+import LiveWallpaperSharedUI
 
-/// Picker and options for URL, file, or folder-backed HTML wallpapers.
+/// Picker and options for URL- or locally-backed HTML wallpapers. The
+/// File vs. Folder distinction collapsed into a single "Local" segment —
+/// picking a single .html alone leaves sibling JS/CSS/images unreachable,
+/// so we always bookmark the parent folder and use the picked file name
+/// as the index, matching folder-mode behavior. Legacy `.file` saves keep
+/// loading via their original bookmark for back-compat.
 struct HTMLSourceSection: View {
     var screen: Screen
     @Binding var source: HTMLSource?
     @Binding var config: HTMLConfig
 
     @Environment(ScreenManager.self) private var screenManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var trustStore = TrustedHostStore.shared
 
-    @State private var selectedKind: HTMLSourceKind = .url
+    @State private var selectedSegment: SourceSegment = .url
     @State private var urlInput: String = ""
 
     var body: some View {
         GroupBox {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Spacer(minLength: 0)
-                    HTMLSourceKindPicker(selection: $selectedKind)
-                        .frame(maxWidth: 280)
+                    sourceSegmentPicker
+                        .frame(maxWidth: 200)
                     Spacer(minLength: 0)
                 }
 
                 sourcePane
-                    .animation(.snappy(duration: 0.18), value: selectedKind)
-
-                if let source, source.isInsecureURL {
-                    insecureURLBanner
-                }
-                if let source { trustBanner(for: source) }
-                if let source { multiInstanceBanner(for: source) }
+                    .animation(.snappy(duration: 0.18), value: selectedSegment)
             }
-            .padding(14)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
         }
         .groupBoxStyle(ContainerGroupBoxStyle())
         .onAppear { scheduleBindingSync() }
@@ -42,17 +44,55 @@ struct HTMLSourceSection: View {
         }
     }
 
+    // MARK: - Segment Picker
+
+    private enum SourceSegment: String, CaseIterable, Identifiable {
+        case url, local
+        var id: String { rawValue }
+
+        var labelKey: LocalizedStringKey {
+            switch self {
+            case .url: return "URL"
+            case .local: return "Local"
+            }
+        }
+    }
+
+    private var sourceSegmentPicker: some View {
+        HStack(spacing: 0) {
+            ForEach(SourceSegment.allCases) { segment in
+                Button {
+                    let animation = DesignTokens.motion(reduceMotion, .snappy(duration: 0.18))
+                    withAnimation(animation) {
+                        selectedSegment = segment
+                    }
+                } label: {
+                    Text(segment.labelKey)
+                        .font(.system(size: 12, weight: selectedSegment == segment ? .semibold : .regular))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 3)
+                        .background(
+                            Capsule()
+                                .fill(selectedSegment == segment ? Color.accentColor.opacity(0.35) : Color.clear)
+                        )
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text(segment.labelKey))
+                .accessibilityAddTraits(selectedSegment == segment ? .isSelected : [])
+            }
+        }
+        .padding(2)
+        .adaptiveGlassSurface(.capsule, interactive: true)
+    }
+
     // MARK: - Source Pane
 
     @ViewBuilder
     private var sourcePane: some View {
-        switch selectedKind {
-        case .url:
-            urlField
-        case .file:
-            filePickerRow
-        case .folder:
-            folderPickerRow
+        switch selectedSegment {
+        case .url: urlField
+        case .local: localPickerRow
         }
     }
 
@@ -63,47 +103,64 @@ struct HTMLSourceSection: View {
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { commitURL() }
 
+                Button(action: pasteFromClipboard) {
+                    Image(systemName: "doc.on.clipboard")
+                }
+                .buttonStyle(.bordered)
+                .help(Text("Paste URL from clipboard"))
+                .accessibilityLabel(Text("Paste URL from clipboard"))
+
                 Button("Use") { commitURL() }
                     .adaptiveGlassButton(.prominent)
                     .disabled(urlInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-            Text("Web pages, Shadertoy, CodePen demos, or any URL.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+
+            urlChipsRow
         }
     }
 
-    private var filePickerRow: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                summaryLine(
-                    icon: "doc.richtext",
-                    text: source.flatMap(fileSummary).map { Text(verbatim: $0) } ?? Text("No file chosen")
-                )
-                Spacer()
-                Button("Choose…") { pickFile() }
-                    .buttonStyle(.bordered)
-            }
-            Text("Pick one .html file. Choose Folder when the page needs sibling JS, CSS, or images.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+    /// Reads a URL/host string off the system pasteboard and offers it as the
+    /// next URL input. Commits immediately when the pasted value already
+    /// parses as a valid `HTMLSource.url`; otherwise just populates the field
+    /// so the user can edit before clicking Use.
+    private func pasteFromClipboard() {
+        guard let raw = NSPasteboard.general.string(forType: .string) else { return }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        urlInput = trimmed
+        if case .url = HTMLSource(userInput: trimmed) {
+            commitURL()
         }
     }
 
-    private var folderPickerRow: some View {
+    private var localPickerRow: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 summaryLine(
-                    icon: "folder",
-                    text: source.flatMap(folderSummary).map { Text(verbatim: $0) } ?? Text("No folder chosen")
+                    icon: localIconName,
+                    text: localSummary.map { Text(verbatim: $0) } ?? Text("No file or folder chosen")
                 )
                 Spacer()
-                Button("Choose…") { pickFolder() }
+                Button("Choose…") { pickLocal() }
                     .buttonStyle(.bordered)
             }
-            Text("Pick or drop a folder containing index.html plus any JS, CSS, or images it loads.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+
+            sourceChipsRow
+        }
+    }
+
+    private var localIconName: String {
+        switch source {
+        case .file: return "doc.richtext"
+        case .folder: return "folder"
+        default: return "doc.richtext"
+        }
+    }
+
+    private var localSummary: String? {
+        switch source {
+        case .file, .folder: return source?.displayName
+        default: return nil
         }
     }
 
@@ -119,103 +176,107 @@ struct HTMLSourceSection: View {
         }
     }
 
-    private var insecureURLBanner: some View {
-        Label("This URL uses HTTP. Content cannot be verified — prefer HTTPS when possible.", systemImage: "exclamationmark.shield")
-            .font(.caption)
-            .foregroundStyle(.orange)
-            .padding(.vertical, 4)
-            .padding(.horizontal, 8)
-            .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
-    }
+    // MARK: - Chips
 
     @ViewBuilder
-    private func multiInstanceBanner(for source: HTMLSource) -> some View {
-        let others = screenManager.screensRunningSameHTMLSource(as: source, excluding: screen.id)
-        if !others.isEmpty {
-            let names = others.map(\.name).joined(separator: ", ")
-            HStack(spacing: 8) {
-                Image(systemName: "rectangle.on.rectangle.angled")
-                    .foregroundStyle(.indigo)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Same wallpaper is running on \(others.count) other screen\(others.count == 1 ? "" : "s")")
-                        .font(.caption)
-                    Text("Audio is locked to the first screen. GPU cost scales with screen count — consider a different source per display.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
+    private var urlChipsRow: some View {
+        if let source {
+            HStack(spacing: 6) {
+                if source.isInsecureURL {
+                    insecureChip
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .help(Text("Also active on: \(names)"))
+                trustStatusChip(for: source)
+                multiInstanceChip(for: source)
+                Spacer(minLength: 0)
             }
-            .padding(.vertical, 4)
-            .padding(.horizontal, 8)
-            .background(Color.indigo.opacity(0.10), in: RoundedRectangle(cornerRadius: 6))
         }
     }
 
     @ViewBuilder
-    private func trustBanner(for source: HTMLSource) -> some View {
+    private var sourceChipsRow: some View {
+        if let source {
+            HStack(spacing: 6) {
+                multiInstanceChip(for: source)
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
+    private var insecureChip: some View {
+        chip(
+            symbol: "exclamationmark.shield",
+            text: "HTTP",
+            color: .orange,
+            help: "Insecure HTTP — content cannot be verified."
+        )
+    }
+
+    @ViewBuilder
+    private func trustStatusChip(for source: HTMLSource) -> some View {
         let trust = HTMLTrust.evaluate(source: source, trustedOrigins: trustStore.originSet)
         switch trust {
         case .localContent:
             EmptyView()
-        case .trustedRemote(let origin):
-            HStack(spacing: 8) {
-                Image(systemName: "checkmark.shield.fill")
-                    .foregroundStyle(.green)
-                Text("Trusted — JavaScript runs as configured.")
-                    .font(.caption)
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Button("Revoke") {
-                    _ = trustStore.revoke(origin)
-                    screenManager.setHTMLWallpaper(source: source, config: config, forceReload: true, for: screen)
-                }
-                    .buttonStyle(.bordered)
-                    .controlSize(.mini)
-                    .help(Text("Remove \(origin.displayName) from trusted origins"))
-                    .fixedSize()
-            }
-            .padding(.vertical, 4)
-            .padding(.horizontal, 8)
-            .background(Color.green.opacity(0.10), in: RoundedRectangle(cornerRadius: 6))
-        case .untrustedRemote(let origin):
-            HStack(spacing: 8) {
-                Image(systemName: "exclamationmark.shield")
-                    .foregroundStyle(.orange)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("JavaScript disabled for untrusted source.")
-                        .font(.caption)
-                        .lineLimit(2)
-                    Text(trustMessage(for: origin))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                if origin.isSecure {
-                    Button("Trust this origin") {
-                        _ = trustStore.trust(origin)
-                        screenManager.setHTMLWallpaper(source: source, config: config, forceReload: true, for: screen)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.mini)
-                    .help(Text("Allow \(origin.displayName) to run JavaScript"))
-                    .fixedSize()
-                }
-            }
-            .padding(.vertical, 4)
-            .padding(.horizontal, 8)
-            .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+        case .trustedRemote:
+            chip(
+                symbol: "checkmark.shield.fill",
+                text: "Trusted",
+                color: .green,
+                help: "JavaScript allowed for this origin."
+            )
+        case .untrustedRemote:
+            chip(
+                symbol: "exclamationmark.shield",
+                text: "Untrusted",
+                color: .orange,
+                help: "Scripts disabled. Manage in Content Security panel."
+            )
         }
     }
 
-    private func trustMessage(for origin: TrustedHTMLOrigin) -> String {
-        if origin.isSecure {
-            return "\(origin.displayName) can run scripts only after you trust this exact origin."
+    @ViewBuilder
+    private func multiInstanceChip(for source: HTMLSource) -> some View {
+        let others = screenManager.screensRunningSameHTMLSource(as: source, excluding: screen.id)
+        if !others.isEmpty {
+            let names = others.map(\.name).joined(separator: ", ")
+            let total = others.count + 1
+            chip(
+                symbol: "rectangle.on.rectangle.angled",
+                label: Text("\(total)× Active", comment: "URL chip showing the number of screens running the same HTML wallpaper."),
+                color: .indigo,
+                help: Text("Also active on: \(names)")
+            )
         }
-        return "HTTP origins cannot be trusted for JavaScript. Use HTTPS when possible."
+    }
+
+    @ViewBuilder
+    private func chip(
+        symbol: String,
+        text: LocalizedStringKey,
+        color: Color,
+        help: LocalizedStringKey
+    ) -> some View {
+        chip(symbol: symbol, label: Text(text), color: color, help: Text(help))
+    }
+
+    @ViewBuilder
+    private func chip(
+        symbol: String,
+        label: Text,
+        color: Color,
+        help: Text
+    ) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: symbol)
+                .font(.system(size: 9, weight: .semibold))
+            label
+                .font(.system(size: 10, weight: .semibold))
+        }
+        .foregroundStyle(color)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(color.opacity(0.15), in: Capsule())
+        .help(help)
     }
 
     // MARK: - Actions
@@ -234,94 +295,71 @@ struct HTMLSourceSection: View {
         screenManager.setHTMLWallpaper(source: parsed, config: config, for: screen)
     }
 
-    private func pickFile() {
+    /// Single panel that accepts either a `.html` file or a folder. When the
+    /// user picks a file we delegate to `htmlSourceFromPickedFile` so the
+    /// bookmark can be promoted to the parent folder (granting sibling JS /
+    /// CSS / image access); a folder selection falls through to the index
+    /// inference path. Either way the resulting `HTMLSource` is committed.
+    private func pickLocal() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
-        panel.canChooseDirectories = false
+        panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = ResourceUtilities.supportedHTMLContentTypes
         panel.prompt = L10n.Panel.useAsWallpaper
         guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        var isDirectory: ObjCBool = false
+        let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+        guard exists else { return }
+
+        if isDirectory.boolValue {
+            guard let bookmark = ResourceUtilities.createBookmark(for: url) else { return }
+            let indexFileName = inferIndexFileName(in: url)
+            screenManager.setHTMLWallpaper(
+                source: .folder(bookmarkData: bookmark, indexFileName: indexFileName),
+                config: config,
+                for: screen
+            )
+            return
+        }
+
         guard let source = ResourceUtilities.htmlSourceFromPickedFile(url) else { return }
         screenManager.setHTMLWallpaper(source: source, config: config, for: screen)
-    }
-
-    private func pickFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.prompt = L10n.Panel.useAsWallpaper
-        guard panel.runModal() == .OK, let folderURL = panel.url else { return }
-        guard let bookmark = ResourceUtilities.createBookmark(for: folderURL) else { return }
-        let indexFileName = inferIndexFileName(in: folderURL)
-        screenManager.setHTMLWallpaper(
-            source: .folder(bookmarkData: bookmark, indexFileName: indexFileName),
-            config: config,
-            for: screen
-        )
-    }
-
-    private func commitConfig() {
-        screenManager.updateHTMLConfig(config, for: screen)
     }
 
     // MARK: - Helpers
 
     private func syncFromBinding() {
         guard let source else {
-            if selectedKind != .url { selectedKind = .url }
+            if selectedSegment != .url { selectedSegment = .url }
             if !urlInput.isEmpty { urlInput = "" }
             return
         }
         switch source {
         case .url(let url):
-            if selectedKind != .url { selectedKind = .url }
+            if selectedSegment != .url { selectedSegment = .url }
             if urlInput != url.absoluteString { urlInput = url.absoluteString }
-        case .file:
-            if selectedKind != .file { selectedKind = .file }
-        case .folder:
-            if selectedKind != .folder { selectedKind = .folder }
+        case .file, .folder:
+            if selectedSegment != .local { selectedSegment = .local }
         case .inline(let html):
-            if selectedKind != .url { selectedKind = .url }
+            if selectedSegment != .url { selectedSegment = .url }
             if urlInput != html { urlInput = html }
         }
-    }
-
-    private func fileSummary(_ source: HTMLSource) -> String? {
-        guard case .file = source else { return nil }
-        return source.displayName
-    }
-
-    private func folderSummary(_ source: HTMLSource) -> String? {
-        guard case .folder = source else { return nil }
-        return source.displayName
     }
 
     private func inferIndexFileName(in folder: URL) -> String {
         let didStart = folder.startAccessingSecurityScopedResource()
         defer { if didStart { folder.stopAccessingSecurityScopedResource() } }
-        for candidate in ["index.html", "index.htm"] {
-            if FileManager.default.fileExists(atPath: folder.appendingPathComponent(candidate).path) {
-                return candidate
-            }
-        }
-        if let entries = try? FileManager.default.contentsOfDirectory(atPath: folder.path),
-           let firstHTML = entries.first(where: { $0.lowercased().hasSuffix(".html") }) {
-            return firstHTML
-        }
-        return "index.html"
+        let entries = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+        return ResourceUtilities.inferHTMLIndexFileName(from: entries)
     }
 }
 
-/// HTML-side analog of the Video inspector groups: lives in the right-hand
-/// inspector column, slots in directly under `CommonPlaybackInspector` so
-/// "Playback & Privacy" → "HTML Options" form the same vertical rhythm
-/// Video's panel has with Particles / Color & Filters / Environment.
-///
-/// The source picker (URL / File / Folder) stays in the main panel on the
-/// left — only the *option* toggles move here, mirroring how Video keeps
-/// its display-mode picker on the left and inspector toggles on the right.
+/// HTML-side analog of the Video inspector groups. Lives in the right-hand
+/// inspector column directly under `ContentSecurityInspector`; toggle-style
+/// behavior settings stay visually separate from the continuous geometry
+/// controls in `HTMLTransformInspector`.
 struct HTMLOptionsInspector: View {
     var screen: Screen
     @Binding var config: HTMLConfig
@@ -362,17 +400,11 @@ struct HTMLOptionsInspector: View {
             iconColor: .orange,
             title: "JavaScript"
         ) {
-            Toggle("", isOn: Binding(
-                get: { config.allowJavaScript },
-                set: { newValue in
-                    config.allowJavaScript = newValue
-                    commitConfig()
-                }
-            ))
-            .labelsHidden()
-            .accessibilityLabel(Text("JavaScript"))
-            .toggleStyle(.switch)
-            .controlSize(.small)
+            Toggle("", isOn: configBinding(\.allowJavaScript))
+                .labelsHidden()
+                .accessibilityLabel(Text("JavaScript"))
+                .toggleStyle(.switch)
+                .controlSize(.small)
         }
     }
 
@@ -383,17 +415,11 @@ struct HTMLOptionsInspector: View {
             title: "Mouse Interaction",
             info: "When on, clicks and scrolls reach the wallpaper but desktop icons and the Dock become unclickable. Off lets you use Finder normally."
         ) {
-            Toggle("", isOn: Binding(
-                get: { config.allowMouseInteraction },
-                set: { newValue in
-                    config.allowMouseInteraction = newValue
-                    commitConfig()
-                }
-            ))
-            .labelsHidden()
-            .accessibilityLabel(Text("Mouse Interaction"))
-            .toggleStyle(.switch)
-            .controlSize(.small)
+            Toggle("", isOn: configBinding(\.allowMouseInteraction))
+                .labelsHidden()
+                .accessibilityLabel(Text("Mouse Interaction"))
+                .toggleStyle(.switch)
+                .controlSize(.small)
         }
     }
 
@@ -402,23 +428,15 @@ struct HTMLOptionsInspector: View {
             icon: "rectangle.split.2x1",
             iconColor: .indigo,
             title: "Physical-pixel layout",
-            info: "Maps window.innerWidth to physical pixels (Wallpaper Engine compatibility). Auto-enabled for folders containing project.json."
+            info: "Renders WebGL content at retina resolution so character art and Spine wallpapers stop looking soft. Auto-enabled for Wallpaper Engine folders."
         ) {
-            Toggle("", isOn: Binding(
-                get: { config.physicalPixelLayout },
-                set: { newValue in
-                    config.physicalPixelLayout = newValue
-                    commitConfig()
-                }
-            ))
-            .labelsHidden()
-            .accessibilityLabel(Text("Physical-pixel layout"))
-            .toggleStyle(.switch)
-            .controlSize(.small)
+            Toggle("", isOn: configBinding(\.physicalPixelLayout))
+                .labelsHidden()
+                .accessibilityLabel(Text("Physical-pixel layout"))
+                .toggleStyle(.switch)
+                .controlSize(.small)
         }
     }
-
-    // MARK: - Auto-refresh + Transform rows
 
     /// Refresh interval picker. `0` (Off) is the default — most wallpaper
     /// content is animation/canvas-driven and doesn't benefit from a reload.
@@ -430,15 +448,10 @@ struct HTMLOptionsInspector: View {
             title: "Auto Refresh",
             info: "Reloads the page at the chosen interval. Useful for dashboards or feeds; off keeps the page rendering continuously without reloads."
         ) {
-            Picker("", selection: Binding(
-                get: { config.refreshIntervalSeconds },
-                set: { newValue in
-                    let clamped = HTMLConfig.clampedRefreshInterval(newValue)
-                    guard config.refreshIntervalSeconds != clamped else { return }
-                    config.refreshIntervalSeconds = clamped
-                    commitConfig()
-                }
-            )) {
+            Picker(
+                "",
+                selection: configBinding(\.refreshIntervalSeconds, normalize: HTMLConfig.clampedRefreshInterval)
+            ) {
                 Text("Off").tag(0)
                 Text("Every 1 min").tag(60)
                 Text("Every 5 min").tag(300)
@@ -452,21 +465,27 @@ struct HTMLOptionsInspector: View {
         }
     }
 
-    /// Custom CSS row — the editor itself opens in a popover instead of
-    /// expanding inline so the inspector list stays compact while the user
-    /// still gets a comfortable multi-line editing surface.
+    /// Custom CSS row — the editor opens in a popover so the inspector list
+    /// stays compact while still giving the user a comfortable multi-line
+    /// editing surface. Subtitle + filled icon signal the active state.
+    /// `.fixedSize()` keeps the `Edit…` label readable when the title +
+    /// subtitle column squeezes the trailing button area.
     private var customCSSRow: some View {
-        SettingRow(
-            icon: "paintbrush",
+        let isActive = !(config.customCSS ?? "").isEmpty
+        return SettingRow(
+            icon: isActive ? "paintbrush.fill" : "paintbrush",
             iconColor: .pink,
-            title: "Custom CSS"
+            title: "Custom CSS",
+            subtitle: isActive ? "Style overrides active" : nil
         ) {
             Button {
                 customCSSPresented = true
             } label: {
                 Text("Edit…")
             }
+            .buttonStyle(.bordered)
             .controlSize(.small)
+            .fixedSize()
             .popover(isPresented: $customCSSPresented, arrowEdge: .leading) {
                 customCSSEditor
             }
@@ -502,8 +521,11 @@ struct HTMLOptionsInspector: View {
                     .keyboardShortcut(.cancelAction)
 
                 Button("Apply") {
-                    config.customCSS = draftCustomCSS.isEmpty ? nil : draftCustomCSS
-                    commitConfig()
+                    let next = draftCustomCSS.isEmpty ? nil : draftCustomCSS
+                    if config.customCSS != next {
+                        config.customCSS = next
+                        screenManager.updateHTMLConfig(config, for: screen)
+                    }
                     customCSSPresented = false
                 }
                 .controlSize(.small)
@@ -515,11 +537,26 @@ struct HTMLOptionsInspector: View {
         .padding(14)
     }
 
-    // MARK: - Helpers
+    // MARK: - Bindings
 
-    private func commitConfig() {
-        screenManager.updateHTMLConfig(config, for: screen)
+    private func configBinding<Value: Equatable>(
+        _ keyPath: WritableKeyPath<HTMLConfig, Value>,
+        normalize: @escaping (Value) -> Value = { $0 }
+    ) -> Binding<Value> {
+        Binding(
+            get: { config[keyPath: keyPath] },
+            set: { rawValue in
+                let newValue = normalize(rawValue)
+                guard config[keyPath: keyPath] != newValue else { return }
+                var next = config
+                next[keyPath: keyPath] = newValue
+                config = next
+                screenManager.updateHTMLConfig(next, for: screen)
+            }
+        )
     }
+
+    // MARK: - Helpers
 
     private func scheduleCustomCSSDraftSync(_ customCSS: String?) {
         DispatchQueue.main.async {
@@ -533,10 +570,9 @@ struct HTMLOptionsInspector: View {
     }
 }
 
-/// Transform inspector — Scale / Translate / Rotation live in their own
-/// GroupBox sibling to HTMLOptionsInspector so the toggle-style options
-/// (JavaScript, mouse interaction, refresh interval, custom CSS) stay
-/// visually distinct from the continuous geometry controls.
+/// Transform inspector — Scale / Translate / Rotation. Reset lives in the
+/// CollapsibleSection trailing accessory so a destructive action stays
+/// reachable from any scroll position without crowding the value rows.
 struct HTMLTransformInspector: View {
     var screen: Screen
     @Binding var config: HTMLConfig
@@ -549,7 +585,8 @@ struct HTMLTransformInspector: View {
             CollapsibleSection(
                 title: "Transform",
                 systemImage: "slider.horizontal.3",
-                isExpanded: $isExpanded
+                isExpanded: $isExpanded,
+                trailingAccessory: { resetAccessory }
             ) {
                 VStack(spacing: 8) {
                     scaleRow
@@ -557,15 +594,27 @@ struct HTMLTransformInspector: View {
                     translateRow
                     Divider()
                     rotationRow
-                    Divider()
-                    resetButtonRow
                 }
             }
         }
         .groupBoxStyle(ContainerGroupBoxStyle())
     }
 
-    /// Scale row: a single slider plus a numeric readout.
+    @ViewBuilder
+    private var resetAccessory: some View {
+        if isTransformActive {
+            Button(action: resetTransform) {
+                Image(systemName: "arrow.counterclockwise")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.red)
+            }
+            .buttonStyle(.borderless)
+            .help(Text("Reset scale, translate, and rotation"))
+            .accessibilityLabel(Text("Reset transform"))
+            .transition(.opacity)
+        }
+    }
+
     private var scaleRow: some View {
         SettingRow(
             icon: "arrow.up.left.and.arrow.down.right",
@@ -575,14 +624,10 @@ struct HTMLTransformInspector: View {
         ) {
             HStack(spacing: 4) {
                 Slider(
-                    value: Binding(
-                        get: { config.transformScale },
-                        set: { newValue in
-                            let clamped = HTMLConfig.clampedTransformScale(newValue)
-                            guard abs(config.transformScale - clamped) > 0.001 else { return }
-                            config.transformScale = clamped
-                            commitConfig()
-                        }
+                    value: configDoubleBinding(
+                        \.transformScale,
+                        epsilon: 0.001,
+                        clamp: HTMLConfig.clampedTransformScale
                     ),
                     in: HTMLConfig.minTransformScale...HTMLConfig.maxTransformScale
                 )
@@ -599,29 +644,11 @@ struct HTMLTransformInspector: View {
         }
     }
 
-    /// Dedicated reset row at the bottom of the Transform group. Mirrors the
-    /// "Reset Color & Filters" pattern in ColorAdjustmentsView so the
-    /// destructive action sits visually apart from the value controls.
-    private var resetButtonRow: some View {
-        HStack {
-            Spacer()
-            Button(action: resetTransform) {
-                Label("Reset Transform", systemImage: "arrow.counterclockwise")
-            }
-            .buttonStyle(.bordered)
-            .tint(.red)
-            .controlSize(.small)
-            .disabled(!isTransformActive)
-            .help(Text("Reset scale, translate, and rotation"))
-            .accessibilityLabel(Text("Reset transform"))
-            Spacer()
-        }
-    }
-
     /// Two stacked sliders — X and Y in CSS pixels — sharing one row so
-    /// translate stays a single conceptual control. A draggable slider beats
-    /// a stepper for "find a good position" tasks; the numeric readout still
-    /// shows the exact pixel value for fine adjustments.
+    /// translate stays a single conceptual control. The slider uses an
+    /// epsilon-guarded binding (drags emit many near-duplicate values); the
+    /// text field bypasses the epsilon so typing `100` over a current `99.6`
+    /// commits cleanly instead of snapping back.
     private var translateRow: some View {
         SettingRow(
             icon: "arrow.up.and.down.and.arrow.left.and.right",
@@ -632,27 +659,27 @@ struct HTMLTransformInspector: View {
             VStack(alignment: .trailing, spacing: 4) {
                 translateAxisSlider(
                     axisLabel: "X",
-                    value: Binding(
-                        get: { config.transformTranslateX },
-                        set: { newValue in
-                            let clamped = HTMLConfig.clampedTransformTranslate(newValue)
-                            guard abs(config.transformTranslateX - clamped) > 0.5 else { return }
-                            config.transformTranslateX = clamped
-                            commitConfig()
-                        }
+                    sliderValue: configDoubleBinding(
+                        \.transformTranslateX,
+                        epsilon: 0.5,
+                        clamp: HTMLConfig.clampedTransformTranslate
+                    ),
+                    fieldValue: configExactDoubleBinding(
+                        \.transformTranslateX,
+                        clamp: HTMLConfig.clampedTransformTranslate
                     ),
                     accessibilityLabel: "Translate X"
                 )
                 translateAxisSlider(
                     axisLabel: "Y",
-                    value: Binding(
-                        get: { config.transformTranslateY },
-                        set: { newValue in
-                            let clamped = HTMLConfig.clampedTransformTranslate(newValue)
-                            guard abs(config.transformTranslateY - clamped) > 0.5 else { return }
-                            config.transformTranslateY = clamped
-                            commitConfig()
-                        }
+                    sliderValue: configDoubleBinding(
+                        \.transformTranslateY,
+                        epsilon: 0.5,
+                        clamp: HTMLConfig.clampedTransformTranslate
+                    ),
+                    fieldValue: configExactDoubleBinding(
+                        \.transformTranslateY,
+                        clamp: HTMLConfig.clampedTransformTranslate
                     ),
                     accessibilityLabel: "Translate Y"
                 )
@@ -663,16 +690,17 @@ struct HTMLTransformInspector: View {
     @ViewBuilder
     private func translateAxisSlider(
         axisLabel: String,
-        value: Binding<Double>,
+        sliderValue: Binding<Double>,
+        fieldValue: Binding<Double>,
         accessibilityLabel: LocalizedStringKey
     ) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 6) {
             Text(verbatim: axisLabel)
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
 
             Slider(
-                value: value,
+                value: sliderValue,
                 in: -HTMLConfig.maxTransformTranslate...HTMLConfig.maxTransformTranslate
             )
             .controlSize(.small)
@@ -681,15 +709,15 @@ struct HTMLTransformInspector: View {
 
             TextField(
                 "",
-                value: value,
+                value: fieldValue,
                 format: .number.precision(.fractionLength(0))
             )
-            .textFieldStyle(.plain)
+            .textFieldStyle(.roundedBorder)
             .font(.system(size: 11, design: .monospaced))
             .foregroundStyle(.primary)
             .multilineTextAlignment(.trailing)
             .monospacedDigit()
-            .frame(width: 42)
+            .frame(width: 56)
             .accessibilityLabel(Text(accessibilityLabel))
             .accessibilityHint(Text("Type a value in CSS pixels."))
         }
@@ -707,14 +735,10 @@ struct HTMLTransformInspector: View {
         ) {
             HStack(spacing: 4) {
                 Slider(
-                    value: Binding(
-                        get: { config.transformRotationDegrees },
-                        set: { newValue in
-                            let clamped = HTMLConfig.clampedTransformRotation(newValue)
-                            guard abs(config.transformRotationDegrees - clamped) > 0.1 else { return }
-                            config.transformRotationDegrees = clamped
-                            commitConfig()
-                        }
+                    value: configDoubleBinding(
+                        \.transformRotationDegrees,
+                        epsilon: 0.1,
+                        clamp: HTMLConfig.clampedTransformRotation
                     ),
                     in: -180...180
                 )
@@ -740,14 +764,55 @@ struct HTMLTransformInspector: View {
 
     private func resetTransform() {
         guard isTransformActive else { return }
-        config.transformScale = 1.0
-        config.transformTranslateX = 0
-        config.transformTranslateY = 0
-        config.transformRotationDegrees = 0
-        commitConfig()
+        var next = config
+        next.transformScale = 1.0
+        next.transformTranslateX = 0
+        next.transformTranslateY = 0
+        next.transformRotationDegrees = 0
+        config = next
+        screenManager.updateHTMLConfig(next, for: screen)
     }
 
-    private func commitConfig() {
-        screenManager.updateHTMLConfig(config, for: screen)
+    // MARK: - Bindings
+
+    private func configDoubleBinding(
+        _ keyPath: WritableKeyPath<HTMLConfig, Double>,
+        epsilon: Double,
+        clamp: @escaping (Double) -> Double
+    ) -> Binding<Double> {
+        Binding(
+            get: { config[keyPath: keyPath] },
+            set: { rawValue in
+                let newValue = clamp(rawValue)
+                guard abs(config[keyPath: keyPath] - newValue) > epsilon else { return }
+                applyConfigChange(keyPath, value: newValue)
+            }
+        )
+    }
+
+    /// Identity-guarded but epsilon-free — text-field entries near the current
+    /// rounded display value must commit instead of being filtered out.
+    private func configExactDoubleBinding(
+        _ keyPath: WritableKeyPath<HTMLConfig, Double>,
+        clamp: @escaping (Double) -> Double
+    ) -> Binding<Double> {
+        Binding(
+            get: { config[keyPath: keyPath] },
+            set: { rawValue in
+                let newValue = clamp(rawValue)
+                guard config[keyPath: keyPath] != newValue else { return }
+                applyConfigChange(keyPath, value: newValue)
+            }
+        )
+    }
+
+    private func applyConfigChange<Value: Equatable>(
+        _ keyPath: WritableKeyPath<HTMLConfig, Value>,
+        value: Value
+    ) {
+        var next = config
+        next[keyPath: keyPath] = value
+        config = next
+        screenManager.updateHTMLConfig(next, for: screen)
     }
 }

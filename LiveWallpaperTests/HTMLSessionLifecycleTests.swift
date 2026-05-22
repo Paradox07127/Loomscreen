@@ -229,13 +229,20 @@ struct FolderURLSchemeHandlerLifecycleTests {
 
 @Suite("HTML wallpaper runtime scripts")
 struct HTMLWallpaperRuntimeScriptTests {
-    @Test("Physical-pixel script can hot-patch loaded pages")
-    func physicalPixelScriptHotPatchesLoadedPages() {
-        let script = HTMLWallpaperRuntimeScript.physicalPixelState(enabled: true, backingScale: 2)
+    @Test("Physical-pixel script exposes the native device pixel ratio and toggle flag")
+    func physicalPixelScriptExposesNativeDevicePixelRatio() {
+        let enabled = HTMLWallpaperRuntimeScript.physicalPixelState(enabled: true, backingScale: 2)
 
-        #expect(script.contains("__liveWallpaperPhysicalPixelLayout"))
-        #expect(script.contains("get: function () { return 1; }"))
-        #expect(script.contains("dispatchEvent(new Event('resize'))"))
+        #expect(enabled.contains("__liveWallpaperNativeDevicePixelRatio = 2"))
+        #expect(enabled.contains("__liveWallpaperPhysicalPixelLayout = true"))
+        // The DPR-override path was removed: the canvas backing-store upgrader
+        // now does the work, and forging devicePixelRatio = 1 broke DPR-aware
+        // renderers like spine-player. The script must NOT touch devicePixelRatio.
+        #expect(!enabled.contains("Object.defineProperty(window, 'devicePixelRatio'"))
+        #expect(!enabled.contains("dispatchEvent(new Event('resize'))"))
+
+        let disabled = HTMLWallpaperRuntimeScript.physicalPixelState(enabled: false, backingScale: 2)
+        #expect(disabled.contains("__liveWallpaperPhysicalPixelLayout = false"))
     }
 
     @Test("Wallpaper Engine general properties script sends fps")

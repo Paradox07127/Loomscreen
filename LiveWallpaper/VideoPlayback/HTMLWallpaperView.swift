@@ -126,14 +126,32 @@ enum HTMLWallpaperRuntimeScript {
                 try { window.Audio = PatchedAudio; } catch (e) {}
             }
 
+            function findOriginalDestinationGetter(proto) {
+                // `destination` lives on BaseAudioContext.prototype, NOT on
+                // the AudioContext / webkitAudioContext subclass directly.
+                // `getOwnPropertyDescriptor` only inspects the given object,
+                // so walk the prototype chain until we find the getter.
+                var cursor = proto;
+                while (cursor && cursor !== Object.prototype) {
+                    try {
+                        var d = Object.getOwnPropertyDescriptor(cursor, 'destination');
+                        if (d && typeof d.get === 'function') return d.get;
+                    } catch (e) {}
+                    cursor = Object.getPrototypeOf(cursor);
+                }
+                return null;
+            }
+
             function patchAudioContext(Ctor) {
                 if (!Ctor || !Ctor.prototype) return;
-                var desc;
-                try { desc = Object.getOwnPropertyDescriptor(Ctor.prototype, 'destination'); }
-                catch (e) { return; }
-                if (!desc || typeof desc.get !== 'function') return;
-                var originalGetter = desc.get;
+                var originalGetter = findOriginalDestinationGetter(Ctor.prototype);
+                if (!originalGetter) return;
                 try {
+                    // Define on Ctor.prototype (most-derived) so we shadow the
+                    // inherited getter for this specific class without touching
+                    // BaseAudioContext directly — patching BaseAudioContext
+                    // would cause infinite recursion when subclasses also try
+                    // to install their own wrapper.
                     Object.defineProperty(Ctor.prototype, 'destination', {
                         configurable: true,
                         get: function () {
@@ -156,6 +174,8 @@ enum HTMLWallpaperRuntimeScript {
             }
             patchAudioContext(window.AudioContext);
             patchAudioContext(window.webkitAudioContext);
+            patchAudioContext(window.OfflineAudioContext);
+            patchAudioContext(window.webkitOfflineAudioContext);
 
             window.__lwUpdateAudio__ = function (volume, muted) {
                 if (typeof volume === 'number' && isFinite(volume)) {
@@ -244,29 +264,243 @@ enum HTMLWallpaperRuntimeScript {
         """
     }
 
+    /// Forces `antialias: true` on every WebGL / WebGL 2 context created by
+    /// the page. WPE Spine workshop boilerplates routinely do
+    /// `canvas.getContext('webgl', { alpha: false })` without an explicit
+    /// `antialias` field — on WebKit this lands as MSAA-off, leaving harsh
+    /// polygon-edge aliasing on Spine character meshes. Patching `getContext`
+    /// at `documentStart` lets us flip the default without modifying any
+    /// wallpaper code. No-op for 2D / bitmaprenderer contexts; idempotent
+    /// across page navigations.
+    static func webglMSAAForcer() -> String {
+        return """
+        (function () {
+            if (window.__lwWebGLMSAAInstalled__) return;
+            window.__lwWebGLMSAAInstalled__ = true;
+            try {
+                var proto = HTMLCanvasElement && HTMLCanvasElement.prototype;
+                if (!proto || !proto.getContext) return;
+                var orig = proto.getContext;
+                proto.getContext = function (type, attrs) {
+                    if (type === 'webgl' || type === 'webgl2' || type === 'experimental-webgl') {
+                        var merged = {};
+                        if (attrs && typeof attrs === 'object') {
+                            for (var k in attrs) {
+                                if (Object.prototype.hasOwnProperty.call(attrs, k)) merged[k] = attrs[k];
+                            }
+                        }
+                        merged.antialias = true;
+                        return orig.call(this, type, merged);
+                    }
+                    return orig.apply(this, arguments);
+                };
+            } catch (e) {}
+        })();
+        """
+    }
+
+    /// Upgrades the WebGL backing store to physical pixels for CSS-naive
+    /// canvases. WPE Spine workshop boilerplates do
+    /// `canvas.width = window.innerWidth`, which on retina macOS leaves the
+    /// backing store at half the physical resolution — WebKit's compositor
+    /// then bilinear-upsamples, producing the characteristic Spine blur.
+    ///
+    /// Mechanism:
+    ///   1. Intercept `HTMLCanvasElement.width / height` setters. Always stash
+    ///      the requested logical value; only multiply the backing store by
+    ///      DPR when the canvas has been claimed for WebGL rendering AND the
+    ///      requested value matches CSS-pixel space (≤ the canvas's CSS
+    ///      width × 1.05). DPR-aware callers (spine-player, PIXI v8, modern
+    ///      Spine 4.2 `SceneRenderer`) set `canvas.width = clientWidth × DPR`
+    ///      directly; we recognise that and pass through untouched so we
+    ///      don't double-scale them.
+    ///   2. Intercept `HTMLCanvasElement.getContext`. On a WebGL request, mark
+    ///      the canvas, re-run the size setter so the backing store gets
+    ///      upgraded before the context is allocated, then forward.
+    ///   3. Intercept `WebGLRenderingContext.viewport / scissor`. When the
+    ///      bound framebuffer is the default and the canvas was upgraded,
+    ///      multiply the rect by the same scale factor so the rendered
+    ///      triangles fill the enlarged backing store.
+    ///   4. Track `bindFramebuffer` so user-created FBOs keep author-specified
+    ///      viewports.
+    ///
+    /// 2D canvases (overlays, sprite work buffers) never see the upgrade —
+    /// their `ctx.clearRect(0, 0, c.width, c.height)` etc. stays consistent
+    /// with the backing store. Same for canvases that only get used for
+    /// `toDataURL` / `getImageData`.
+    static func canvasBackingStoreUpgrader() -> String {
+        return """
+        (function () {
+            if (window.__lwCanvasUpgraderInstalled__) return;
+            window.__lwCanvasUpgraderInstalled__ = true;
+
+            function nativeDPR() {
+                var v = window.__liveWallpaperNativeDevicePixelRatio;
+                if (typeof v === 'number' && v > 0) return v;
+                v = window.devicePixelRatio;
+                return (typeof v === 'number' && v > 0) ? v : 1;
+            }
+
+            if (nativeDPR() <= 1) return;
+
+            var wDesc, hDesc;
+            try {
+                wDesc = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'width');
+                hDesc = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'height');
+                if (!wDesc || !wDesc.set || !hDesc || !hDesc.set) return;
+            } catch (e) { return; }
+
+            try {
+                function installSetter(propName, desc, axis) {
+                    var ownedKey = (axis === 'w') ? '__lwOwnedStyleW__' : '__lwOwnedStyleH__';
+                    function adoptStyle(canvas, value) {
+                        // Only touch inline style if it's empty OR we last wrote it ourselves.
+                        // Author CSS (e.g. `canvas { width: 100vw }`) and manual
+                        // `canvas.style.width = …` stay authoritative.
+                        var current = canvas.style[propName];
+                        if (current !== '' && current !== canvas[ownedKey]) return;
+                        canvas.style[propName] = value;
+                        canvas[ownedKey] = value;
+                    }
+                    function releaseStyle(canvas) {
+                        if (canvas.style[propName] === canvas[ownedKey]) {
+                            canvas.style[propName] = '';
+                        }
+                        canvas[ownedKey] = undefined;
+                    }
+                    Object.defineProperty(HTMLCanvasElement.prototype, propName, {
+                        configurable: true,
+                        enumerable: desc.enumerable,
+                        get: function () {
+                            var stash = (axis === 'w') ? this.__lwLogicalW__ : this.__lwLogicalH__;
+                            return (typeof stash === 'number') ? stash : desc.get.call(this);
+                        },
+                        set: function (v) {
+                            var n = Number(v) || 0;
+                            if (axis === 'w') this.__lwLogicalW__ = n;
+                            else              this.__lwLogicalH__ = n;
+                            if (n <= 0 || !this.__lwIsWebGL__) {
+                                this.__lwScale__ = 1;
+                                releaseStyle(this);
+                                desc.set.call(this, n);
+                                return;
+                            }
+                            var dpr = nativeDPR();
+                            if (dpr <= 1) {
+                                this.__lwScale__ = 1;
+                                releaseStyle(this);
+                                desc.set.call(this, n);
+                                return;
+                            }
+                            // CSS-naive vs DPR-aware detection.
+                            // Page set `canvas.width = clientWidth * dpr` → already physical pixels, skip.
+                            // Page set `canvas.width = clientWidth` (or innerWidth) → upgrade.
+                            var clientSize = (axis === 'w') ? this.clientWidth : this.clientHeight;
+                            var innerSize  = (axis === 'w') ? window.innerWidth : window.innerHeight;
+                            var ref = Math.max(clientSize || 0, innerSize || 0, 1);
+                            if (n > ref * 1.05) {
+                                this.__lwScale__ = 1;
+                                releaseStyle(this);
+                                desc.set.call(this, n);
+                                return;
+                            }
+                            this.__lwScale__ = dpr;
+                            adoptStyle(this, n + 'px');
+                            desc.set.call(this, Math.round(n * dpr));
+                        }
+                    });
+                }
+                installSetter('width',  wDesc, 'w');
+                installSetter('height', hDesc, 'h');
+            } catch (e) {}
+
+            try {
+                var origGetContext = HTMLCanvasElement.prototype.getContext;
+                HTMLCanvasElement.prototype.getContext = function (type, attrs) {
+                    if (type === 'webgl' || type === 'webgl2' || type === 'experimental-webgl') {
+                        if (!this.__lwIsWebGL__) {
+                            this.__lwIsWebGL__ = true;
+                            var w = (typeof this.__lwLogicalW__ === 'number')
+                                ? this.__lwLogicalW__ : wDesc.get.call(this);
+                            var h = (typeof this.__lwLogicalH__ === 'number')
+                                ? this.__lwLogicalH__ : hDesc.get.call(this);
+                            this.width  = w;
+                            this.height = h;
+                        }
+                    }
+                    return origGetContext.apply(this, arguments);
+                };
+            } catch (e) {}
+
+            function hookContextPrototype(proto) {
+                if (!proto || proto.__lwGLHookInstalled__) return;
+                proto.__lwGLHookInstalled__ = true;
+                var origViewport     = proto.viewport;
+                var origScissor      = proto.scissor;
+                var origBindFB       = proto.bindFramebuffer;
+                var FRAMEBUFFER      = 0x8D40;
+                var DRAW_FRAMEBUFFER = 0x8CA9;
+
+                proto.bindFramebuffer = function (target, fb) {
+                    if (target === FRAMEBUFFER || target === DRAW_FRAMEBUFFER) {
+                        this.__lwBoundFB__ = fb;
+                    }
+                    return origBindFB.call(this, target, fb);
+                };
+
+                function scaledRect(ctx, x, y, w, h) {
+                    var canvas = ctx.canvas;
+                    var bound = ctx.__lwBoundFB__;
+                    if (bound != null) return null;
+                    var s = canvas && canvas.__lwScale__;
+                    if (!s || s === 1) return null;
+                    return [
+                        Math.round(x * s),
+                        Math.round(y * s),
+                        Math.round(w * s),
+                        Math.round(h * s)
+                    ];
+                }
+
+                proto.viewport = function (x, y, w, h) {
+                    var r = scaledRect(this, x, y, w, h);
+                    if (r) return origViewport.call(this, r[0], r[1], r[2], r[3]);
+                    return origViewport.call(this, x, y, w, h);
+                };
+
+                proto.scissor = function (x, y, w, h) {
+                    var r = scaledRect(this, x, y, w, h);
+                    if (r) return origScissor.call(this, r[0], r[1], r[2], r[3]);
+                    return origScissor.call(this, x, y, w, h);
+                };
+            }
+
+            try {
+                if (typeof WebGLRenderingContext !== 'undefined') {
+                    hookContextPrototype(WebGLRenderingContext.prototype);
+                }
+                if (typeof WebGL2RenderingContext !== 'undefined') {
+                    hookContextPrototype(WebGL2RenderingContext.prototype);
+                }
+            } catch (e) {}
+        })();
+        """
+    }
+
+    /// Records the host display's backing-scale factor on `window` so the
+    /// `canvasBackingStoreUpgrader` script can multiply by it regardless of
+    /// page-side `devicePixelRatio` manipulation. We deliberately do NOT
+    /// override `window.devicePixelRatio` — DPR-aware renderers like
+    /// `spine-player` derive their camera viewport size from
+    /// `clientWidth × devicePixelRatio`, so lying to them about DPR breaks
+    /// the world-space sizing and pushes content out of frame.
     static func physicalPixelState(enabled: Bool, backingScale: CGFloat) -> String {
         let scale = max(Double(backingScale), 1.0)
         let scaleLiteral = String(format: "%.6f", locale: Locale(identifier: "en_US_POSIX"), scale)
-        let dprGetter = enabled
-            ? "get: function () { return 1; }"
-            : "get: function () { return window.__liveWallpaperNativeDevicePixelRatio || \(scaleLiteral); }"
-
         return """
         (function () {
             window.__liveWallpaperNativeDevicePixelRatio = \(scaleLiteral);
             window.__liveWallpaperPhysicalPixelLayout = \(enabled ? "true" : "false");
-            try {
-                Object.defineProperty(window, 'devicePixelRatio', {
-                    configurable: true,
-                    \(dprGetter)
-                });
-            } catch (e) {}
-            try { window.dispatchEvent(new Event('resize')); } catch (e) {}
-            try {
-                if (window.visualViewport) {
-                    window.visualViewport.dispatchEvent(new Event('resize'));
-                }
-            } catch (e) {}
         })();
         """
     }
@@ -297,6 +531,13 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     private let webView: HTMLWebView
     private let folderHandler: FolderURLSchemeHandler
     private var allowMouseInteraction = false
+    /// Re-entry guard for trackpad-gesture forwarders. When we forward
+    /// `scrollWheel/swipe/magnify/rotate` to `webView`, AppKit propagates
+    /// the unhandled event up through the responder chain — and our nextResponder
+    /// for `webView` is `self`, which would re-invoke this override and
+    /// recurse until the stack overflows (`EXC_BAD_ACCESS` in `magnify`
+    /// was the first reproducer; the other three were latent).
+    private var isForwardingGesture = false
     private var compiledTrackerRuleList: WKContentRuleList?
     private var hasTrackerRulesAttached = false
     private var trackerBlockingRequested = false
@@ -392,6 +633,9 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
                 backingScale: effectiveBackingScaleFactor
             )
             : ""
+        let canvasUpgrader = (config?.physicalPixelLayout ?? false)
+            ? HTMLWallpaperRuntimeScript.canvasBackingStoreUpgrader()
+            : ""
 
         let audioController = HTMLWallpaperRuntimeScript.masterAudioController(
             initialVolume: config?.audioVolume ?? 1.0,
@@ -404,9 +648,13 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             rotation: config?.transformRotationDegrees ?? 0
         )
 
+        let msaaForcer = HTMLWallpaperRuntimeScript.webglMSAAForcer()
+
         let baseline = """
+        \(msaaForcer)
         (function () {
             \(physicalPixelBootstrap)
+            \(canvasUpgrader)
 
             function bootstrap() {
                 if (!document.documentElement) return;
@@ -473,30 +721,55 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             super.scrollWheel(with: event)
             return
         }
-        webView.scrollWheel(with: event)
+
+        // `webView.scrollWheel(with:)` forwarding was unreliable at our
+        // wallpaper window level (events sometimes never reach WKWebView's
+        // internal scroller, and when WKWebView bubbled the unhandled event
+        // back up the responder chain it landed on this very override —
+        // the source of the `magnify` stack overflow we just fixed).
+        //
+        // Drive the document scroll through JavaScript instead: it works
+        // regardless of how the event was hit-tested, requires no responder
+        // dance, and matches the user's natural-scroll direction.
+        let scale: CGFloat = event.hasPreciseScrollingDeltas ? 1.0 : 40.0
+        let dx = -Double(event.scrollingDeltaX * scale)
+        let dy = -Double(event.scrollingDeltaY * scale)
+        guard abs(dx) > 0.1 || abs(dy) > 0.1 else { return }
+        let dxLit = HTMLWallpaperRuntimeScript.jsNumber(dx)
+        let dyLit = HTMLWallpaperRuntimeScript.jsNumber(dy)
+        webView.evaluateJavaScript(
+            "window.scrollBy(\(dxLit), \(dyLit));",
+            completionHandler: nil
+        )
     }
 
     override func swipe(with event: NSEvent) {
-        guard allowMouseInteraction else {
+        guard allowMouseInteraction, !isForwardingGesture else {
             super.swipe(with: event)
             return
         }
+        isForwardingGesture = true
+        defer { isForwardingGesture = false }
         webView.swipe(with: event)
     }
 
     override func magnify(with event: NSEvent) {
-        guard allowMouseInteraction else {
+        guard allowMouseInteraction, !isForwardingGesture else {
             super.magnify(with: event)
             return
         }
+        isForwardingGesture = true
+        defer { isForwardingGesture = false }
         webView.magnify(with: event)
     }
 
     override func rotate(with event: NSEvent) {
-        guard allowMouseInteraction else {
+        guard allowMouseInteraction, !isForwardingGesture else {
             super.rotate(with: event)
             return
         }
+        isForwardingGesture = true
+        defer { isForwardingGesture = false }
         webView.rotate(with: event)
     }
 
@@ -537,10 +810,6 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             applyTrackerBlocking(enabled: config.blockTrackers)
         }
 
-        if previous?.physicalPixelLayout != config.physicalPixelLayout {
-            applyPhysicalPixelZoom()
-        }
-
         if previous?.refreshIntervalSeconds != config.refreshIntervalSeconds {
             applyRefreshInterval(config.refreshIntervalSeconds)
         }
@@ -549,7 +818,17 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             host.makeFirstResponder(webView)
         }
 
+        let physicalPixelToggleChanged = previous != nil
+            && previous?.physicalPixelLayout != config.physicalPixelLayout
         lastAppliedConfig = config
+
+        if physicalPixelToggleChanged {
+            // The canvas-upgrader hooks must attach at `documentStart` before
+            // the page calls `getContext('webgl')`. Hot-toggling on a loaded
+            // page can't retroactively install them, so reload the page to
+            // re-run the user scripts we just re-registered.
+            reloadCurrentSource()
+        }
     }
 
     func applyHTMLConfig(_ config: HTMLConfig) -> Bool {
@@ -952,35 +1231,21 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         webView.frame = bounds
     }
 
-    /// Re-apply pageZoom whenever the host display's backing scale changes (window dragged across screens, resolution changed, Spaces switched).
+    /// Re-pushes `__liveWallpaperNativeDevicePixelRatio` whenever the host
+    /// display's backing scale changes (window dragged across screens,
+    /// resolution changed, Spaces switched) so the canvas backing-store
+    /// upgrader keeps multiplying by the right factor.
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
-        applyPhysicalPixelZoom()
         applyPhysicalPixelRuntimeStateIfNeeded()
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        applyPhysicalPixelZoom()
         applyPhysicalPixelRuntimeStateIfNeeded()
     }
 
     // MARK: - Physical-pixel layout (WPE compatibility)
-
-    /// Maps logical points → physical pixels for `window.innerWidth/Height`.
-    private func applyPhysicalPixelZoom() {
-        let enabled = lastAppliedConfig?.physicalPixelLayout ?? false
-        let scale = effectiveBackingScaleFactor
-        guard enabled, scale > 0 else {
-            if webView.pageZoom != 1.0 { webView.pageZoom = 1.0 }
-            return
-        }
-        let target = 1.0 / scale
-        if abs(webView.pageZoom - target) > 0.001 {
-            Logger.info("HTML wallpaper pageZoom → \(target) (backingScale=\(scale))", category: .screenManager)
-            webView.pageZoom = target
-        }
-    }
 
     private var effectiveBackingScaleFactor: CGFloat {
         webView.window?.backingScaleFactor
