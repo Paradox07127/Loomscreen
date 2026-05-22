@@ -43,4 +43,17 @@ public enum MetalShaderPreset: String, Codable, CaseIterable, Identifiable, Send
         case .aurora: return "sparkle"
         }
     }
+
+    /// Fragment dispatch index — must stay in sync with the switch in
+    /// `Shaders.metal::fragmentShader`. Exposing it on the enum keeps the
+    /// live renderer and the thumbnail renderer from drifting apart.
+    public var shaderTypeIndex: Int32 {
+        switch self {
+        case .waves:    return 0
+        case .plasma:   return 1
+        case .gradient: return 2
+        case .noise:    return 3
+        case .aurora:   return 4
+        }
+    }
 }
