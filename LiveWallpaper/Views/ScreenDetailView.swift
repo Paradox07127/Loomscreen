@@ -403,7 +403,7 @@ struct ScreenDetailView: View {
         cleanupPreviewPlayer()
         draft.hasPreviewSource = true
         lastPreviewPosterBookmarkData = primaryBookmark
-        previewController.startPlaybackPreview(from: primaryURL, syncTo: nil)
+        previewController.loadPoster(from: primaryURL, syncTime: nil)
         screenManager.replacePlaylist(ordered: bookmarks, primary: primaryBookmark, for: screen)
         Task {
             try? await Task.sleep(for: .milliseconds(500))
@@ -552,7 +552,7 @@ struct ScreenDetailView: View {
         if let bookmarkData = ResourceUtilities.createVideoBookmark(for: url) {
             draft.hasPreviewSource = true
             lastPreviewPosterBookmarkData = bookmarkData
-            previewController.startPlaybackPreview(from: url, syncTo: nil)
+            previewController.loadPoster(from: url, syncTime: nil)
             screenManager.setVideo(url: url, bookmarkData: bookmarkData, for: screen)
         } else {
             dropFailure = .videoBookmarkFailed
