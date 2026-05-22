@@ -328,7 +328,7 @@ final class PlaybackCoordinator {
         )
 
         if isSameURL, screen.videoPlayer != nil {
-            configurationStore.save(configuration)
+            save(configuration)
             applyConfiguration(configuration, to: screen, preservingState: true)
             reportRuntimeError(screen.id, nil)
             return
@@ -347,11 +347,11 @@ final class PlaybackCoordinator {
                     guard let self,
                           self.transition.isCurrentTransition(generation, for: screenID),
                           let liveScreen = self.screensProvider().first(where: { $0.id == screenID }) else { return }
-                    self.configurationStore.save(configuration)
+                    self.save(configuration)
                     guard SettingsManager.shared.validateConfiguration(for: screenID) else {
                         Logger.error("Failed to save video configuration for screen \(screenID)", category: .screenManager)
                         if let existing {
-                            self.configurationStore.save(existing)
+                            self.save(existing)
                         } else {
                             self.configurationStore.remove(for: screenID)
                         }

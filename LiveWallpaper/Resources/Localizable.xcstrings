@@ -14724,34 +14724,6 @@
         }
       }
     },
-    "No display" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No display"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ディスプレイなし"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无显示器"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "沒有顯示器"
-          }
-        }
-      }
-    },
     "No displays detected" : {
       "localizations" : {
         "en" : {
@@ -22791,6 +22763,36 @@
         }
       }
     },
+    "Shader file is too large to import (limit %lld KB)." : {
+      "comment" : "Import error when the chosen file exceeds the configured byte cap. %lld = max size in KB.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shader file is too large to import (limit %lld KB)."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "シェーダーファイルが大きすぎます（上限 %lld KB）。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "着色器文件过大，无法导入（上限 %lld KB）。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "著色器檔案過大，無法匯入（上限 %lld KB）。"
+          }
+        }
+      }
+    },
     "Shader Import Failed" : {
       "comment" : "Alert title for a failed custom-shader import.",
       "extractionState" : "manual",
@@ -28956,36 +28958,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "你的 Wallpaper Engine 安裝資料夾"
-          }
-        }
-      }
-    },
-    "Shader file is too large to import (limit %lld KB)." : {
-      "comment" : "Import error when the chosen file exceeds the configured byte cap. %lld = max size in KB.",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Shader file is too large to import (limit %lld KB)."
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "シェーダーファイルが大きすぎます（上限 %lld KB）。"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "着色器文件过大，无法导入（上限 %lld KB）。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "著色器檔案過大，無法匯入（上限 %lld KB）。"
           }
         }
       }
