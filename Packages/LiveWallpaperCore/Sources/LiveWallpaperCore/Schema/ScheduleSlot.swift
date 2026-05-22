@@ -21,12 +21,19 @@ public struct ScheduleSlot: Codable, Equatable, Identifiable, Sendable {
         self.label = label
     }
 
-    public static let defaultSlots: [ScheduleSlot] = [
-        ScheduleSlot(startHour: 6, endHour: 12, label: "Morning"),
-        ScheduleSlot(startHour: 12, endHour: 18, label: "Afternoon"),
-        ScheduleSlot(startHour: 18, endHour: 22, label: "Evening"),
-        ScheduleSlot(startHour: 22, endHour: 6, label: "Night"),
-    ]
+    /// Fresh template every access — a `static let` would freeze the four
+    /// UUIDs at app launch and hand them to every screen that calls
+    /// `enableSchedule()`, so two displays would share identical slot IDs.
+    /// `ForEach` then can't distinguish their rows, and per-row `@State`
+    /// (e.g. `videoName` in `ScheduleSlotRow`) leaks across screen swaps.
+    public static var defaultSlots: [ScheduleSlot] {
+        [
+            ScheduleSlot(startHour: 6, endHour: 12, label: "Morning"),
+            ScheduleSlot(startHour: 12, endHour: 18, label: "Afternoon"),
+            ScheduleSlot(startHour: 18, endHour: 22, label: "Evening"),
+            ScheduleSlot(startHour: 22, endHour: 6, label: "Night"),
+        ]
+    }
 
     public func containsHour(_ hour: Int) -> Bool {
         if startHour <= endHour {
@@ -36,10 +43,52 @@ public struct ScheduleSlot: Codable, Equatable, Identifiable, Sendable {
         }
     }
 
+    /// True when the slot crosses midnight (e.g. 22 → 6). Zero-length slots
+    /// are reported as non-wrapping; callers reject them upstream.
+    public var wraps: Bool {
+        startHour > endHour
+    }
+
+    /// Slot decomposed into clipped `[start, end)` half-open ranges within
+    /// the visible 0–24 timeline. A non-wrapping slot returns one segment;
+    /// a wrapping slot returns one or two (`[start, 24)` + `[0, end)` when
+    /// both halves have non-zero width); zero-length returns none. Single
+    /// source of truth for timeline rendering and offline tests; empty
+    /// halves (e.g. slot `1 → 0` whose second half would be `[0, 0)`) are
+    /// filtered so consumers never need to skip them.
+    public func timelineSegments() -> [TimelineSegment] {
+        if startHour == endHour { return [] }
+        if startHour < endHour {
+            return [TimelineSegment(start: startHour, end: endHour, wraps: false)]
+        }
+        var segments: [TimelineSegment] = []
+        if startHour < 24 {
+            segments.append(TimelineSegment(start: startHour, end: 24, wraps: true))
+        }
+        if endHour > 0 {
+            segments.append(TimelineSegment(start: 0, end: endHour, wraps: true))
+        }
+        return segments
+    }
+
+    public struct TimelineSegment: Equatable, Sendable {
+        public let start: Int
+        public let end: Int
+        public let wraps: Bool
+
+        public init(start: Int, end: Int, wraps: Bool) {
+            self.start = start
+            self.end = end
+            self.wraps = wraps
+        }
+    }
+
     public var localizedLabel: String {
         switch label {
         case "Morning":
             return String(localized: "Morning", defaultValue: "Morning", comment: "Default schedule slot name.")
+        case "Midday":
+            return String(localized: "Midday", defaultValue: "Midday", comment: "Default schedule slot name.")
         case "Afternoon":
             return String(localized: "Afternoon", defaultValue: "Afternoon", comment: "Default schedule slot name.")
         case "Evening":
