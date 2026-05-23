@@ -36,10 +36,13 @@ actor WPEWebGLAssetProvider: WPEAssetProvider {
         if let cached = imageCache[relativePath] {
             return WPEAssetResponse(bytes: cached, mimeType: "image/png", cacheControl: "max-age=3600")
         }
+        if let cached = videoCache[relativePath] {
+            return cached
+        }
 
-        let cgImage: CGImage
+        let resolution: CascadeResolution
         do {
-            cgImage = try resolveImageCascade(relativePath: relativePath)
+            resolution = try resolveImageCascade(relativePath: relativePath)
         } catch SceneResourceResolver.ResolveError.fileMissing {
             return nil
         } catch SceneResourceResolver.ResolveError.unsupportedTexture {
@@ -47,16 +50,22 @@ actor WPEWebGLAssetProvider: WPEAssetProvider {
             return nil
         }
 
-        guard let pngData = WPEWebGLAssetProvider.encodePNG(cgImage) else {
-            throw NSError(
-                domain: "WPEWebGLAssetProvider",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "PNG encoding failed for \(relativePath)"]
-            )
+        switch resolution {
+        case .image(let cgImage):
+            guard let pngData = WPEWebGLAssetProvider.encodePNG(cgImage) else {
+                throw NSError(
+                    domain: "WPEWebGLAssetProvider",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "PNG encoding failed for \(relativePath)"]
+                )
+            }
+            imageCache[relativePath] = pngData
+            return WPEAssetResponse(bytes: pngData, mimeType: "image/png", cacheControl: "max-age=3600")
+        case .video(let bytes):
+            let response = WPEAssetResponse(bytes: bytes, mimeType: "video/mp4", cacheControl: "max-age=3600")
+            videoCache[relativePath] = response
+            return response
         }
-
-        imageCache[relativePath] = pngData
-        return WPEAssetResponse(bytes: pngData, mimeType: "image/png", cacheControl: "max-age=3600")
     }
 
     // WPE material payloads reference textures by bare name
@@ -68,10 +77,18 @@ actor WPEWebGLAssetProvider: WPEAssetProvider {
     // to the magenta placeholder.
     private static let textureSearchSuffixes = ["tex", "png", "jpg", "jpeg", "gif", "webp"]
 
-    private func resolveImageCascade(relativePath: String) throws -> CGImage {
+    private enum CascadeResolution {
+        case image(CGImage)
+        /// MP4 bytes lifted out of a `.tex` container whose payload is an
+        /// animated video. The TS-side TextureManager routes this through
+        /// the `<video>` element pipeline.
+        case video(Data)
+    }
+
+    private func resolveImageCascade(relativePath: String) throws -> CascadeResolution {
         let ext = (relativePath as NSString).pathExtension.lowercased()
         if !ext.isEmpty {
-            return try resolver.resolveImage(relativePath: relativePath)
+            return .image(try resolver.resolveImage(relativePath: relativePath))
         }
 
         let candidates: [String] = [
@@ -82,14 +99,34 @@ actor WPEWebGLAssetProvider: WPEAssetProvider {
         var lastError: Error = SceneResourceResolver.ResolveError.fileMissing
         for candidate in candidates {
             do {
-                return try resolver.resolveImage(relativePath: candidate)
+                let image = try resolver.resolveImage(relativePath: candidate)
+                Logger.info("WPEWebGLAssetProvider cascade HIT '\(relativePath)' → '\(candidate)' (image)", category: .screenManager)
+                return .image(image)
             } catch SceneResourceResolver.ResolveError.fileMissing {
+                Logger.info("WPEWebGLAssetProvider cascade miss '\(candidate)': fileMissing", category: .screenManager)
                 continue
+            } catch SceneResourceResolver.ResolveError.texture(.unsupportedAnimation) {
+                // .tex container wraps an MP4 (WPE's animated-texture
+                // format). Re-decode via the texture-payload path to lift
+                // the raw bytes and serve them as video.
+                if let videoBytes = try? extractAnimatedVideoBytes(relativePath: candidate) {
+                    Logger.info("WPEWebGLAssetProvider cascade HIT '\(relativePath)' → '\(candidate)' (video, \(videoBytes.count) bytes)", category: .screenManager)
+                    return .video(videoBytes)
+                }
+                Logger.info("WPEWebGLAssetProvider cascade miss '\(candidate)': unsupportedAnimation (no video payload)", category: .screenManager)
+                lastError = SceneResourceResolver.ResolveError.texture(.unsupportedAnimation)
             } catch {
+                Logger.info("WPEWebGLAssetProvider cascade miss '\(candidate)': \(error)", category: .screenManager)
                 lastError = error
             }
         }
+        Logger.warning("WPEWebGLAssetProvider cascade exhausted for '\(relativePath)', last error: \(lastError)", category: .screenManager)
         throw lastError
+    }
+
+    private func extractAnimatedVideoBytes(relativePath: String) throws -> Data? {
+        let payload = try resolver.resolveTexturePayload(relativePath: relativePath)
+        return payload.videoPayload?.bytes
     }
 
     private func resolveVideo(relativePath: String, extension ext: String) throws -> WPEAssetResponse? {
