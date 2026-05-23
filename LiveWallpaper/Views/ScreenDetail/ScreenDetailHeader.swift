@@ -76,32 +76,35 @@ struct ScreenDetailHeader: View {
                     }
 
                     if showsHeaderWallpaperActions {
-                        HStack(spacing: 8) {
-                            if draft.selectedWallpaperType == .video {
-                                Button(action: onSelectVideo) {
-                                    Image(systemName: "folder.badge.plus")
-                                }
-                                .adaptiveGlassButton(.prominent)
-                                .controlSize(.regular)
-                                .help(Text("Select Video — choose a video file for this display"))
-                                .accessibilityLabel(Text("Select video"))
-                                .accessibilityHint(Text("Opens a file picker to choose a wallpaper video"))
-                            }
-
-                            Button(role: .destructive, action: onClearWallpaper) {
-                                Image(systemName: "trash")
-                            }
-                            .adaptiveGlassButton(.regular)
-                            .destructiveControlTint()
-                            .controlSize(.regular)
-                            .help(Text("Clear Wallpaper — remove the current wallpaper without deleting source files"))
-                            .accessibilityLabel(Text("Clear current wallpaper"))
-                            .accessibilityHint(Text("Removes the current wallpaper from this screen without deleting source files or library items"))
-                        }
+                        overflowMenu
                     }
                 }
             }
         )
+    }
+
+    private var overflowMenu: some View {
+        Menu {
+            if draft.selectedWallpaperType == .video {
+                Button(action: onSelectVideo) {
+                    Label("Select Video File…", systemImage: "folder.badge.plus")
+                }
+                Divider()
+            }
+
+            Button(role: .destructive, action: onClearWallpaper) {
+                Label("Clear Wallpaper", systemImage: "trash")
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .adaptiveGlassButton(.regular)
+        .controlSize(.regular)
+        .help(Text("More actions for this display"))
+        .accessibilityLabel(Text("More display actions"))
     }
 
     @ViewBuilder

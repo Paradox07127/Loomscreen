@@ -30,6 +30,7 @@ public enum DestructiveAction: Identifiable, Equatable {
     case applyConfigurationToAllDisplays(otherCount: Int)
     case clearCurrentWallpaper(displayName: String)
     case resetDisplaySettings(displayName: String)
+    case disconnectAerialsLibrary
 
     public var id: String {
         switch self {
@@ -52,6 +53,7 @@ public enum DestructiveAction: Identifiable, Equatable {
         case .applyConfigurationToAllDisplays(let c): return "applyConfigurationToAllDisplays-\(c)"
         case .clearCurrentWallpaper(let n): return "clearCurrentWallpaper-\(n)"
         case .resetDisplaySettings(let n): return "resetDisplaySettings-\(n)"
+        case .disconnectAerialsLibrary: return "disconnectAerialsLibrary"
         }
     }
 
@@ -77,6 +79,7 @@ public enum DestructiveAction: Identifiable, Equatable {
         case .applyConfigurationToAllDisplays: return "Apply this wallpaper to every other display?"
         case .clearCurrentWallpaper:     return "Clear current wallpaper?"
         case .resetDisplaySettings:      return "Reset this display's settings?"
+        case .disconnectAerialsLibrary:  return "Disconnect Apple Aerials library?"
         }
     }
 
@@ -122,6 +125,8 @@ public enum DestructiveAction: Identifiable, Equatable {
             return "Only removes the current wallpaper from \(displayName). Source files, bookmarks, and library items are not deleted."
         case .resetDisplaySettings(let displayName):
             return "Restores playback, color, particle, audio, and layout settings on \(displayName) to defaults. The wallpaper itself, playlist bookmarks, and library items stay."
+        case .disconnectAerialsLibrary:
+            return "LiveWallpaper will release its read access to the local Apple Aerials folder. Existing aerial wallpapers stay applied; you'll need to reconnect to browse the library again."
         }
     }
 
@@ -147,6 +152,7 @@ public enum DestructiveAction: Identifiable, Equatable {
         case .applyConfigurationToAllDisplays: return "Apply to All Displays"
         case .clearCurrentWallpaper:     return "Clear Wallpaper"
         case .resetDisplaySettings:      return "Reset Settings"
+        case .disconnectAerialsLibrary:  return "Disconnect"
         }
     }
 }
