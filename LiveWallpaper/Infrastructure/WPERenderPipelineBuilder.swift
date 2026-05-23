@@ -293,11 +293,140 @@ private struct WPEShaderSourceLoader: Sendable {
         )
         let requiredRemoved = commentRequireDirectives(in: expanded)
         let macroNeutralized = stripPreludeMacroRedefines(in: requiredRemoved)
+        let implicitDefines = implicitConditionalDefines(
+            in: macroNeutralized,
+            knownCombos: comboValues
+        )
         let stageSource = stage == .fragment
             ? macroNeutralized.replacingOccurrences(of: "gl_FragColor", with: "out_FragColor")
             : macroNeutralized
-        return shaderPrelude(comboValues: comboValues, stage: stage) + stageSource
+        return shaderPrelude(comboValues: comboValues, stage: stage)
+            + implicitDefines
+            + stageSource
     }
+
+    // WPE's runtime treats an undefined combo as `0` inside `#if/#elif`
+    // expressions; the WebGL2 (ANGLE) preprocessor instead raises
+    // "unexpected token after conditional expression" for an unknown
+    // identifier. Scan the expanded source for uppercase identifiers
+    // referenced in preprocessor conditionals and emit `#define X 0` for
+    // any that the prelude / combo values / shader body itself hasn't
+    // already defined.
+    private func implicitConditionalDefines(
+        in source: String,
+        knownCombos: [String: Int]
+    ) -> String {
+        let referenced = Self.collectConditionalIdentifiers(in: source)
+        guard !referenced.isEmpty else { return "" }
+
+        var knownComboNames = Set<String>()
+        for key in knownCombos.keys {
+            knownComboNames.insert(key)
+            knownComboNames.insert(key.uppercased())
+        }
+
+        let existing = Self.collectDefinedMacroNames(in: source)
+            .union(knownComboNames)
+            .union(Self.preludeReservedMacros)
+            .union(Self.builtinPreprocessorTokens)
+
+        let missing = referenced.subtracting(existing).sorted()
+        guard !missing.isEmpty else { return "" }
+
+        return missing
+            .map { "#define \($0) 0" }
+            .joined(separator: "\n") + "\n"
+    }
+
+    private static func collectDefinedMacroNames(in source: String) -> Set<String> {
+        var defines: Set<String> = []
+        for line in source.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("#define") else { continue }
+            let after = trimmed.dropFirst("#define".count)
+                .drop(while: { $0 == " " || $0 == "\t" })
+            let name = after.prefix(while: {
+                $0.isLetter || $0.isNumber || $0 == "_"
+            })
+            if !name.isEmpty {
+                defines.insert(String(name))
+            }
+        }
+        return defines
+    }
+
+    private static func collectConditionalIdentifiers(in source: String) -> Set<String> {
+        var refs: Set<String> = []
+        for line in source.components(separatedBy: .newlines) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("#") else { continue }
+            let directive = trimmed.dropFirst().drop(while: { $0 == " " || $0 == "\t" })
+            let head = directive.prefix(while: { $0.isLetter })
+            // Only `#if` and `#elif` evaluate the operand as an integer
+            // expression, so they're the only ones that need missing
+            // identifiers to be `#define`d to 0. `#ifdef` / `#ifndef`
+            // only check whether the name is defined — auto-defining
+            // would flip those branches.
+            guard head == "if" || head == "elif" else { continue }
+            let expression = Self.stripDefinedOperator(in: String(directive))
+            refs.formUnion(Self.uppercaseIdentifiers(in: expression))
+        }
+        return refs
+    }
+
+    // Identifiers inside `defined(X)` / `defined X` are existence
+    // checks, not value reads. Remove them before scanning for
+    // identifiers that need auto-defines.
+    private static func stripDefinedOperator(in expression: String) -> String {
+        var result = expression
+        result = result.replacingOccurrences(
+            of: #"defined\s*\(\s*[A-Za-z_]\w*\s*\)"#,
+            with: " ",
+            options: .regularExpression
+        )
+        result = result.replacingOccurrences(
+            of: #"defined\s+[A-Za-z_]\w*"#,
+            with: " ",
+            options: .regularExpression
+        )
+        return result
+    }
+
+    private static func uppercaseIdentifiers(in expression: String) -> Set<String> {
+        var result: Set<String> = []
+        var current = ""
+        let chars = Array(expression)
+        var index = 0
+        while index < chars.count {
+            let ch = chars[index]
+            if ch.isLetter || ch.isNumber || ch == "_" {
+                current.append(ch)
+            } else {
+                if Self.isUppercaseMacroToken(current) {
+                    result.insert(current)
+                }
+                current = ""
+            }
+            index += 1
+        }
+        if Self.isUppercaseMacroToken(current) {
+            result.insert(current)
+        }
+        return result
+    }
+
+    private static func isUppercaseMacroToken(_ token: String) -> Bool {
+        guard token.count >= 2 else { return false }
+        guard let first = token.first, first.isLetter || first == "_" else { return false }
+        for ch in token {
+            if ch.isLowercase { return false }
+        }
+        return true
+    }
+
+    private static let builtinPreprocessorTokens: Set<String> = [
+        "defined", "GLSL", "GL_ES", "VERSION", "__VERSION__", "GL_FRAGMENT_PRECISION_HIGH"
+    ]
 
     // GLSL ES 3.00 treats `#define X A` after `#define X B` as a hard
     // error when the token sequences differ. Our prelude already defines
@@ -701,6 +830,24 @@ private struct WPEShaderSourceLoader: Sendable {
             #ifndef LIVEWALLPAPER_WPE_COMMON_BLUR_H
             #define LIVEWALLPAPER_WPE_COMMON_BLUR_H
             #define wpe_common_blur_included 1
+            #endif
+            """
+        case "common_vertex.h":
+            // Workshop authors `#include` this header but rarely depend
+            // on its content; WPE's stock file exposes a handful of
+            // vertex-shader convenience macros. A guarded empty stub is
+            // enough to satisfy resolution without polluting the prelude.
+            return """
+            #ifndef LIVEWALLPAPER_WPE_COMMON_VERTEX_H
+            #define LIVEWALLPAPER_WPE_COMMON_VERTEX_H
+            #define wpe_common_vertex_included 1
+            #endif
+            """
+        case "common_fragment.h":
+            return """
+            #ifndef LIVEWALLPAPER_WPE_COMMON_FRAGMENT_H
+            #define LIVEWALLPAPER_WPE_COMMON_FRAGMENT_H
+            #define wpe_common_fragment_included 1
             #endif
             """
         case "common_blending.h":
