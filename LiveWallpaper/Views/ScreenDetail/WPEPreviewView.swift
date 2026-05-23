@@ -127,7 +127,14 @@ private struct AspectFillImage: NSViewRepresentable {
 
         if let cached = WPEPreviewDataCache.shared.object(forKey: url as NSURL) {
             let ok = nsView.setImage(data: cached as Data)
-            onLoadResult(ok)
+            // Defer the binding callback to the next runloop tick — this
+            // updateNSView runs inside SwiftUI's view-update pass, so a
+            // synchronous `onLoadResult(ok)` would mutate the parent's
+            // `loadFailed` @State while the parent is still rendering and
+            // trip "Modifying state during view update" undefined-behavior
+            // warnings. The async path below is already deferred via Task.
+            let resultHandler = onLoadResult
+            Task { @MainActor in resultHandler(ok) }
             return
         }
 
