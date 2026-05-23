@@ -13,7 +13,10 @@ struct WPEOriginBadge: View {
             HStack(spacing: 8) {
                 Image(systemName: "cube.transparent")
                     .foregroundStyle(.orange)
-                Text("Wallpaper Engine: \(origin.title)")
+                Text(
+                    "Wallpaper Engine: \(origin.title)",
+                    comment: "Origin badge label on top of the Video/HTML inspector. The placeholder is the WPE workshop project title."
+                )
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Image(systemName: "chevron.right")
@@ -26,7 +29,10 @@ struct WPEOriginBadge: View {
             .adaptiveGlassSurface(.capsule, interactive: true)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(Text("Wallpaper from Wallpaper Engine: \(origin.title)"))
+        .accessibilityLabel(Text(
+            "Wallpaper from Wallpaper Engine: \(origin.title)",
+            comment: "A11y label for the WPE origin badge. The placeholder is the workshop project title."
+        ))
         .accessibilityHint(Text("Tap to manage in the Scene tab"))
     }
 }
