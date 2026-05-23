@@ -1,22 +1,26 @@
 import SwiftUI
+import LiveWallpaperCore
 
 /// Sidebar-routed full-page browser for saved wallpaper bookmarks.
 ///
-/// Layout: dense Apple Music / Photos style gallery — 16:9 thumbnail tile
-/// dominates the card, label sits underneath in plain text. Hover lifts the
-/// tile and reveals a primary Apply button + secondary ellipsis menu, so
-/// secondary chrome (rename / delete buttons) doesn't compete with the
-/// thumbnail for visual weight. Rename runs inline; delete confirms via
-/// `PendingDestructive`.
+/// Layout follows the unified library shell: identity-only `DetailHeaderBar`,
+/// `LibraryFilterBar` underneath (search capsule + optional type chips when
+/// the library is large), then a dense Apple Music / Photos style gallery.
 struct BookmarksLibraryView: View {
     @Environment(ScreenManager.self) private var screenManager
     @State private var store = BookmarkStore.shared
     @State private var renamingID: UUID? = nil
     @State private var renameDraft: String = ""
     @State private var searchText: String = ""
+    @State private var typeFilter: BookmarkTypeFilter = .all
     @State private var pendingDestructive: PendingDestructive?
 
     private let columns = [GridItem(.adaptive(minimum: 220), spacing: 14)]
+
+    /// Bookmarks gallery stays clean (no type chips) under this threshold;
+    /// once the library outgrows a single screen of cards the chip row earns
+    /// its keep. Matches the antigravity "progressive disclosure" guidance.
+    private static let typeChipsThreshold = 6
 
     var body: some View {
         DetailPageScaffold(
@@ -31,9 +35,7 @@ struct BookmarksLibraryView: View {
     private var header: some View {
         DetailHeaderBar(
             systemImage: "bookmark.fill",
-            title: {
-                Text("Bookmarks")
-            },
+            title: { Text("Bookmarks") },
             metadata: {
                 HStack(spacing: 6) {
                     Text("\(store.bookmarks.count)")
@@ -45,12 +47,7 @@ struct BookmarksLibraryView: View {
                     Text("saved wallpapers")
                 }
             },
-            actions: {
-                TextField("Search…", text: $searchText)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 220)
-                    .accessibilityLabel(Text("Search bookmarks"))
-            }
+            actions: { EmptyView() }
         )
     }
 
@@ -60,7 +57,38 @@ struct BookmarksLibraryView: View {
     private var content: some View {
         if store.bookmarks.isEmpty {
             emptyState
-        } else if filteredBookmarks.isEmpty {
+        } else {
+            VStack(spacing: 0) {
+                filterBar
+                gallery
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var filterBar: some View {
+        if showsTypeChips {
+            LibraryFilterBar(
+                searchText: $searchText,
+                searchPrompt: "Search bookmarks",
+                resultCount: filteredBookmarks.count,
+                totalCount: store.bookmarks.count
+            ) {
+                typeChipRow
+            }
+        } else {
+            LibraryFilterBar(
+                searchText: $searchText,
+                searchPrompt: "Search bookmarks",
+                resultCount: filteredBookmarks.count,
+                totalCount: store.bookmarks.count
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var gallery: some View {
+        if filteredBookmarks.isEmpty {
             IllustratedEmptyState(
                 symbol: "magnifyingglass",
                 title: "No bookmarks match your search",
@@ -100,6 +128,22 @@ struct BookmarksLibraryView: View {
         }
     }
 
+    private var typeChipRow: some View {
+        HStack(spacing: 6) {
+            FilterChip(title: Text("All"),
+                       isSelected: typeFilter == .all,
+                       action: { typeFilter = .all })
+
+            ForEach(WallpaperType.allCases) { type in
+                if availableTypes.contains(type) {
+                    FilterChip(title: Text(type.titleKey),
+                               isSelected: typeFilter == .type(type),
+                               action: { typeFilter = .type(type) })
+                }
+            }
+        }
+    }
+
     private var emptyState: some View {
         IllustratedEmptyState(
             symbol: "bookmark",
@@ -108,12 +152,30 @@ struct BookmarksLibraryView: View {
         )
     }
 
+    // MARK: - Filtering
+
+    private var showsTypeChips: Bool {
+        store.bookmarks.count > Self.typeChipsThreshold && availableTypes.count > 1
+    }
+
+    private var availableTypes: Set<WallpaperType> {
+        Set(store.bookmarks.map(\.wallpaperType))
+    }
+
     private var filteredBookmarks: [WallpaperBookmark] {
-        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return store.bookmarks }
-        return store.bookmarks.filter {
-            $0.label.localizedCaseInsensitiveContains(trimmed)
+        var result = store.bookmarks
+        // Only honor the type filter while the chip row is visible AND that
+        // type is still present — otherwise the user can land in an invisible
+        // filter (e.g. they pick "HTML", delete bookmarks until count ≤ 6 or
+        // until no HTML bookmarks remain, and the grid silently goes blank).
+        if showsTypeChips, case .type(let type) = typeFilter, availableTypes.contains(type) {
+            result = result.filter { $0.wallpaperType == type }
         }
+        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            result = result.filter { $0.label.localizedCaseInsensitiveContains(trimmed) }
+        }
+        return result
     }
 
     // MARK: - Apply
@@ -128,6 +190,13 @@ struct BookmarksLibraryView: View {
             apply(bookmark, to: screen)
         }
     }
+}
+
+// MARK: - Type filter
+
+private enum BookmarkTypeFilter: Hashable {
+    case all
+    case type(WallpaperType)
 }
 
 // MARK: - Tile
