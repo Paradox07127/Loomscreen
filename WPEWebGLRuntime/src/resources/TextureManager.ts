@@ -127,7 +127,11 @@ export class TextureManager {
       if (stamp === entry.lastFrameStamp) continue;
       entry.lastFrameStamp = stamp;
       gl.bindTexture(gl.TEXTURE_2D, entry.texture);
-      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      // WPE shaders are authored against OpenGL's bottom-up texture
+      // convention (texcoord (0,0) → bottom-left). HTML5 `<video>`
+      // frames arrive top-down, so flipping at upload time keeps the
+      // image right-side-up under the workshop shader's sampling math.
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
       gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, v);
     }
@@ -294,7 +298,9 @@ export class TextureManager {
     const tex = gl.createTexture();
     if (!tex) throw new Error("TextureManager: createTexture returned null");
     gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    // Match WPE's OpenGL bottom-up texture origin (see refreshVideoFrames
+    // for the long-form rationale).
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, bitmap);
     const isPoT = isPowerOfTwo(bitmap.width) && isPowerOfTwo(bitmap.height);
