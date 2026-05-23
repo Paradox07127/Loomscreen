@@ -62,12 +62,14 @@ struct ScreenDetailHeader: View {
                     Button {
                         showBookmarks = true
                     } label: {
-                        Image(systemName: "bookmark.fill")
+                        Image(systemName: isCurrentBookmarked ? "bookmark.fill" : "bookmark")
                     }
                     .adaptiveGlassButton(.regular)
                     .controlSize(.regular)
-                    .help(Text("Bookmarks — saved video / HTML / shader shortcuts"))
-                    .accessibilityLabel(Text("Bookmarks"))
+                    .help(Text(isCurrentBookmarked
+                        ? "Bookmarked — click to rename or remove"
+                        : "Bookmark this wallpaper"))
+                    .accessibilityLabel(Text(isCurrentBookmarked ? "Bookmarked" : "Bookmark"))
                     .popover(isPresented: $showBookmarks, arrowEdge: .bottom) {
                         BookmarksPopover(screen: screen)
                             .environment(screenManager)
@@ -134,5 +136,13 @@ struct ScreenDetailHeader: View {
         case .error:    return .red
         case .inactive: return .secondary
         }
+    }
+
+    /// True when the current wallpaper plan is already saved as a bookmark.
+    /// Drives the bookmark.fill ↔ bookmark icon swap so the inspector
+    /// header conveys saved state at a glance without opening the popover.
+    private var isCurrentBookmarked: Bool {
+        guard let content = screenManager.getConfiguration(for: screen)?.activeWallpaper else { return false }
+        return BookmarkStore.shared.equivalentBookmark(content: content) != nil
     }
 }
