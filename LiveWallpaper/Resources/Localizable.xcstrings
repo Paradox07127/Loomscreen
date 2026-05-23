@@ -18174,6 +18174,35 @@
         }
       }
     },
+    "Preview unavailable. Tap to retry." : {
+      "comment" : "Tooltip on the WPE preview retry badge that surfaces when the preview image failed to load.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Preview unavailable. Tap to retry."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "プレビューを読み込めませんでした。タップして再試行。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "预览不可用，点按重试。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "預覽不可用，點按重試。"
+          }
+        }
+      }
+    },
     "Preview Unavailable" : {
       "comment" : "Scene pause reason.",
       "localizations" : {
@@ -27984,6 +28013,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "天氣"
+          }
+        }
+      }
+    },
+    "Weather fetch error (paths and tokens scrubbed)" : {
+      "comment" : "Tooltip on the weather badge's sanitized error caption. Hovering the truncated error line surfaces this hint that PII has been redacted before display.",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Weather fetch error (paths and tokens scrubbed)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "天気の取得エラー（パスとトークンを除去済み）"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "天气获取错误（路径和令牌已脱敏）"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "天氣取得錯誤（路徑與權杖已遮蔽）"
           }
         }
       }

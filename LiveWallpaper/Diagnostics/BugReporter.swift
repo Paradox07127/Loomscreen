@@ -197,6 +197,26 @@ enum BugReporter {
             with: "file://<redacted>",
             options: .regularExpression
         )
+        // Defense-in-depth for Weather (and any future) errors that bring
+        // precise location coordinates or auth fragments through as plain
+        // localizedDescription text rather than a full URL. The query-string
+        // scrub above catches "https://api?latitude=…", but `error` strings
+        // can be re-thrown without the host, e.g. "URL Error -1009: lat=37.7…".
+        result = result.replacingOccurrences(
+            of: #"(?i)\b(lat(?:itude)?|lon(?:gitude)?)\s*[=:]\s*-?\d{1,3}(?:\.\d+)?"#,
+            with: "$1=<redacted>",
+            options: .regularExpression
+        )
+        result = result.replacingOccurrences(
+            of: #"(?i)\b(token|api[_-]?key|access[_-]?token|refresh[_-]?token|secret|password)\s*[=:]\s*([^&\s'"]+)"#,
+            with: "$1=<redacted>",
+            options: .regularExpression
+        )
+        result = result.replacingOccurrences(
+            of: #"(?i)\b(Bearer|Token)\s+[A-Za-z0-9._~+/=-]+"#,
+            with: "$1 <redacted>",
+            options: .regularExpression
+        )
         return result
     }
 

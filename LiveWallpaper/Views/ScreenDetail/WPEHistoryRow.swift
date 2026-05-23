@@ -2,8 +2,9 @@
 import SwiftUI
 import AppKit
 
-/// Single recent-import card in the Scene tab grid. 160×240pt,
-/// glass-effect background, hover lift, context menu for Finder/remove.
+/// Single recent-import card in the Scene tab grid. Adaptive width
+/// (160-240pt) × height (240-320pt) per `wpeProjectCardChrome`, glass-effect
+/// background, hover lift, context menu for Finder/remove.
 struct WPEHistoryRow: View {
     let entry: WPEHistoryEntry
     let isActive: Bool
@@ -11,6 +12,7 @@ struct WPEHistoryRow: View {
     let onRemove: () -> Void
 
     @State private var isHovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Button(action: onTap) {
@@ -19,7 +21,6 @@ struct WPEHistoryRow: View {
                     imageURL: previewURL,
                     securityScopedBookmarkData: entry.origin.sourceFolderBookmark
                 )
-                    .wpeCardPreviewClip()
                     .overlay(alignment: .topTrailing) {
                         if let badge = compatibilityBadge {
                             Text(badge.titleKey)
@@ -33,9 +34,11 @@ struct WPEHistoryRow: View {
                         }
                     }
 
+                Divider()
+
                 VStack(alignment: .leading, spacing: 8) {
                     Text(verbatim: entry.origin.title)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(size: 13, weight: .semibold))
                         .lineLimit(2)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -67,9 +70,12 @@ struct WPEHistoryRow: View {
             }
         }
         .buttonStyle(.plain)
-        .wpeProjectCardChrome(isHovering: isHovering)
+        .wpeProjectCardChrome(isHovering: isHovering, reduceMotion: reduceMotion)
         .onHover { isHovering = $0 }
-        .accessibilityLabel(Text("Wallpaper Engine project: \(entry.origin.title)"))
+        .accessibilityLabel(Text(
+            "Wallpaper Engine project: \(entry.origin.title)",
+            comment: "A11y label for a WPE history row card. The placeholder is the WPE project title."
+        ))
         .accessibilityHint(isActive
             ? Text("Currently in use. Tap to reactivate.", comment: "A11y hint for a WPE history row that is the active wallpaper.")
             : Text("Tap to apply", comment: "A11y hint for a WPE history row that can be applied."))
