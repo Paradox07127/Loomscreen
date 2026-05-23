@@ -1405,6 +1405,20 @@ final class ScreenManager {
         restoreWallpaperSession(for: screen, configuration: config, preservingState: false)
     }
 
+    /// Counterpart to `switchToVideoWallpaper` / `switchToHTMLWallpaper` for
+    /// the shader tab. Never auto-activates a shader the user didn't pick:
+    /// if a shader is already running this is a no-op (idempotent re-entry);
+    /// if the active wallpaper is something else (video / html / scene) the
+    /// tab swap is honored visually — the shader gallery shows in the
+    /// preview area — but no shader runtime spins up until the user clicks
+    /// a preset card. Matches the "saved restore" pattern the other tabs
+    /// use: silent when there's nothing to restore.
+    func switchToShaderWallpaper(for screen: Screen) {
+        guard let config = configurationStore.get(for: screen.id) else { return }
+        if case .metalShader = config.activeWallpaper { return }
+        // Intentional no-op when active wallpaper is video / html / scene.
+    }
+
 
     // MARK: - Helper Methods
 

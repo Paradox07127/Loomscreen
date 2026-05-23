@@ -64,7 +64,7 @@ struct ScreenDetailView: View {
             screenManager.switchToHTMLWallpaper(for: screen)
         case .metalShader:
             guard featureCatalog.isEnabled(.metalShader) else { return }
-            screenManager.setShaderWallpaper(source: draft.selectedShaderSource, for: screen)
+            screenManager.switchToShaderWallpaper(for: screen)
         case .scene:
             break
         }
