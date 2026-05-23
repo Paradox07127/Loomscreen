@@ -103,30 +103,50 @@ actor WPEWebGLAssetProvider: WPEAssetProvider {
                 Logger.info("WPEWebGLAssetProvider cascade HIT '\(relativePath)' → '\(candidate)' (image)", category: .screenManager)
                 return .image(image)
             } catch SceneResourceResolver.ResolveError.fileMissing {
-                Logger.info("WPEWebGLAssetProvider cascade miss '\(candidate)': fileMissing", category: .screenManager)
+                resolver.popLastTraceEvent()
                 continue
             } catch SceneResourceResolver.ResolveError.texture(.unsupportedAnimation) {
                 // .tex container wraps an MP4 (WPE's animated-texture
                 // format). Re-decode via the texture-payload path to lift
-                // the raw bytes and serve them as video.
+                // the raw bytes and serve them as video. The previous
+                // resolveImage attempt already recorded a probe miss —
+                // discard it so the user-visible tracer only shows the
+                // final success.
+                resolver.popLastTraceEvent()
                 if let videoBytes = try? extractAnimatedVideoBytes(relativePath: candidate) {
                     Logger.info("WPEWebGLAssetProvider cascade HIT '\(relativePath)' → '\(candidate)' (video, \(videoBytes.count) bytes)", category: .screenManager)
                     return .video(videoBytes)
                 }
-                Logger.info("WPEWebGLAssetProvider cascade miss '\(candidate)': unsupportedAnimation (no video payload)", category: .screenManager)
                 lastError = SceneResourceResolver.ResolveError.texture(.unsupportedAnimation)
             } catch {
-                Logger.info("WPEWebGLAssetProvider cascade miss '\(candidate)': \(error)", category: .screenManager)
+                resolver.popLastTraceEvent()
                 lastError = error
             }
         }
         Logger.warning("WPEWebGLAssetProvider cascade exhausted for '\(relativePath)', last error: \(lastError)", category: .screenManager)
+        // Cascade ran out of candidates — surface a single tracer event
+        // under the original (bare) request path so the diagnostic panel
+        // names what the renderer was actually looking for.
+        resolver.recordTraceEvent(
+            relativePath: relativePath,
+            attempt: WPEResolutionAttempt(origin: .scene, outcome: outcome(for: lastError)),
+            finalOutcome: outcome(for: lastError)
+        )
         throw lastError
     }
 
     private func extractAnimatedVideoBytes(relativePath: String) throws -> Data? {
         let payload = try resolver.resolveTexturePayload(relativePath: relativePath)
         return payload.videoPayload?.bytes
+    }
+
+    private nonisolated func outcome(for error: Error) -> WPEResolutionOutcome {
+        switch error {
+        case SceneResourceResolver.ResolveError.fileMissing:
+            return .fileMissing
+        default:
+            return .otherError("\(error)")
+        }
     }
 
     private func resolveVideo(relativePath: String, extension ext: String) throws -> WPEAssetResponse? {
