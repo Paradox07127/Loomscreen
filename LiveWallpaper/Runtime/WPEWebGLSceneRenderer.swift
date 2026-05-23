@@ -344,7 +344,13 @@ final class WPEWebGLSceneRenderer: NSObject, WPESceneRenderer, WKNavigationDeleg
             layer: error.passID ?? error.stage,
             message: "WebGL load failed [\(error.stage)]: \(error.message)"
         )
-        loadDiagnostics = diagnostic
+        // JS emits both a specific failure (`shader-fragment` with the
+        // full GLSL error) and a generic `render-graph-load` wrapper.
+        // Keep the first one — overwriting loses the rich GLSL info the
+        // corpus harness needs for triage.
+        if loadDiagnostics == nil {
+            loadDiagnostics = diagnostic
+        }
         Logger.warning("WPE-WebGL load_failed [\(error.stage)] pass=\(error.passID ?? "nil"): \(error.message)", category: .screenManager)
         if let continuation = sceneLoadContinuation {
             sceneLoadContinuation = nil
