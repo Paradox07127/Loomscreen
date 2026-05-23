@@ -12,6 +12,11 @@ import SwiftUI
 /// 3. Already bookmarked → name field pre-filled + Update / Remove
 struct BookmarksPopover: View {
     let screen: Screen
+    /// Content the inspector is currently showing — passed in so a video
+    /// already bookmarked doesn't light up the button when the user has
+    /// switched to the HTML tab. nil = "no content for this tab yet"
+    /// (renders the guidance message).
+    let candidateContent: WallpaperContent?
 
     @Environment(ScreenManager.self) private var screenManager
     @Environment(\.dismiss) private var dismiss
@@ -23,8 +28,8 @@ struct BookmarksPopover: View {
 
     var body: some View {
         Group {
-            if let content = currentContent() {
-                form(for: content)
+            if let candidateContent {
+                form(for: candidateContent)
             } else {
                 emptyState
             }
@@ -164,10 +169,6 @@ struct BookmarksPopover: View {
     }
 
     // MARK: - Data sources
-
-    private func currentContent() -> WallpaperContent? {
-        screenManager.getConfiguration(for: screen)?.activeWallpaper
-    }
 
     /// Snapshot the screen's full playback + effect state so the bookmark captures a complete plan, not just the content pointer.
     private func currentPlaybackSettings() -> BookmarkPlaybackSettings? {

@@ -71,7 +71,7 @@ struct ScreenDetailHeader: View {
                         : "Bookmark this wallpaper"))
                     .accessibilityLabel(Text(isCurrentBookmarked ? "Bookmarked" : "Bookmark"))
                     .popover(isPresented: $showBookmarks, arrowEdge: .bottom) {
-                        BookmarksPopover(screen: screen)
+                        BookmarksPopover(screen: screen, candidateContent: inspectorContent)
                             .environment(screenManager)
                     }
 
@@ -138,11 +138,39 @@ struct ScreenDetailHeader: View {
         }
     }
 
-    /// True when the current wallpaper plan is already saved as a bookmark.
-    /// Drives the bookmark.fill ↔ bookmark icon swap so the inspector
-    /// header conveys saved state at a glance without opening the popover.
+    /// Bookmarkable content for the inspector tab currently in view — not
+    /// the committed `activeWallpaper`. Switching the inspector to a tab
+    /// that has no content (e.g. HTML tab when no source has been set yet)
+    /// returns nil, so the bookmark icon doesn't bleed state across types.
+    private var inspectorContent: WallpaperContent? {
+        let config = screenManager.getConfiguration(for: screen)
+        switch draft.selectedWallpaperType {
+        case .video:
+            if case .video(let bookmark)? = config?.activeWallpaper {
+                return .video(bookmarkData: bookmark)
+            }
+            if let saved = config?.savedVideoBookmarkData {
+                return .video(bookmarkData: saved)
+            }
+            return nil
+        case .html:
+            guard let source = draft.htmlSource else { return nil }
+            return .html(source: source, config: draft.htmlConfig)
+        case .metalShader:
+            return .metalShader(draft.selectedShaderSource)
+        case .scene:
+            if case .scene(let descriptor)? = config?.activeWallpaper {
+                return .scene(descriptor)
+            }
+            return nil
+        }
+    }
+
+    /// True when the inspector's current tab content matches an existing
+    /// bookmark. Drives the bookmark.fill ↔ bookmark icon swap and the
+    /// .prominent ↔ .regular glass-button chrome toggle.
     private var isCurrentBookmarked: Bool {
-        guard let content = screenManager.getConfiguration(for: screen)?.activeWallpaper else { return false }
+        guard let content = inspectorContent else { return false }
         return BookmarkStore.shared.equivalentBookmark(content: content) != nil
     }
 }
