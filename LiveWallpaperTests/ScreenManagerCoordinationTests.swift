@@ -548,6 +548,30 @@ struct ScreenManagerCoordinationTests {
         }
     }
 
+    @Test("Updating Wallpaper Engine project property overrides hot-applies without rebuilding the session")
+    func updateHTMLConfigProjectPropertiesHotAppliesWithoutRebuild() async throws {
+        try await Self.runWithHTMLConfiguration { manager, screen in
+            let session = TestRuntimeSession(wallpaperType: .html)
+            screen.installRuntimeSession(session)
+
+            var updated = HTMLConfig.default
+            updated.wallpaperEngineProjectProperties = [
+                "mouseactions": .bool(true),
+                "bgmvolume": .number(35),
+                "modelresolution": .string("4k")
+            ]
+
+            try await Self.expectChange(notificationFor: screen) {
+                manager.updateHTMLConfig(updated, for: screen)
+            }
+
+            #expect(session.cleanupCount == 0)
+            #expect(Self.isSameSession(screen.runtimeSession, session))
+            #expect(session.appliedHTMLConfigs == [updated])
+            #expect(manager.getConfiguration(for: screen)?.htmlConfig == updated)
+        }
+    }
+
     @Test("Switching to HTML while the same HTML wallpaper is already active keeps the live session")
     func switchToHTMLWhenAlreadyActiveKeepsSession() async throws {
         try await Self.runWithHTMLConfiguration { manager, screen in

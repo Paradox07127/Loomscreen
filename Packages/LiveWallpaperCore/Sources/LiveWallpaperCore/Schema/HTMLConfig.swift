@@ -64,6 +64,13 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
     /// exhausted the runtime surfaces the error in the screen-detail banner.
     public var maxRetries: Int = 3
 
+    /// Per-project Wallpaper Engine web user property overrides. These are
+    /// intentionally separate from the generic HTML runtime controls above:
+    /// `audioVolume`, `allowMouseInteraction`, and `transformScale` control
+    /// the WebView container, while these values are delivered to the
+    /// wallpaper's own `applyUserProperties` callback.
+    public var wallpaperEngineProjectProperties: [String: WallpaperEngineProjectPropertyValue] = [:]
+
     public static let `default` = HTMLConfig()
 
     /// Bounds for `audioVolume`. Defined on the type so UI sliders and
@@ -104,6 +111,7 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
         case physicalPixelLayout
         case useEphemeralStorage
         case maxRetries
+        case wallpaperEngineProjectProperties
     }
 
     public init(
@@ -120,7 +128,8 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
         transformRotationDegrees: Double = 0,
         physicalPixelLayout: Bool = false,
         useEphemeralStorage: Bool = false,
-        maxRetries: Int = 3
+        maxRetries: Int = 3,
+        wallpaperEngineProjectProperties: [String: WallpaperEngineProjectPropertyValue] = [:]
     ) {
         self.allowJavaScript = allowJavaScript
         self.allowMouseInteraction = allowMouseInteraction
@@ -136,6 +145,7 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
         self.physicalPixelLayout = physicalPixelLayout
         self.useEphemeralStorage = useEphemeralStorage
         self.maxRetries = maxRetries
+        self.wallpaperEngineProjectProperties = wallpaperEngineProjectProperties
     }
 
     public init(from decoder: Decoder) throws {
@@ -161,6 +171,22 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
         useEphemeralStorage = try c.decodeIfPresent(Bool.self, forKey: .useEphemeralStorage) ?? false
         let decodedRetries = try c.decodeIfPresent(Int.self, forKey: .maxRetries) ?? 3
         maxRetries = min(max(0, decodedRetries), 10)
+        do {
+            wallpaperEngineProjectProperties = try c.decodeIfPresent(
+                [String: WallpaperEngineProjectPropertyValue].self,
+                forKey: .wallpaperEngineProjectProperties
+            ) ?? [:]
+        } catch {
+            // Defensive fallback so a malformed override payload from an
+            // older or hand-edited config does not poison the rest of the
+            // wallpaper. Logged at warning so the maintainer can spot it
+            // in `runtime.log`; legitimate authors should never hit this.
+            Logger.warning(
+                "HTMLConfig: dropping unreadable wallpaperEngineProjectProperties (\(error.localizedDescription))",
+                category: .settings
+            )
+            wallpaperEngineProjectProperties = [:]
+        }
     }
 
     public static func clampedAudioVolume(_ value: Double) -> Double {

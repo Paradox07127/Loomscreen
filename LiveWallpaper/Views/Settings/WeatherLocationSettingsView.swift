@@ -36,6 +36,10 @@ struct WeatherLocationSettingsView: View {
                 Text(verbatim: sourceExplanation)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                if preference.source == .ipGeolocation {
+                    ipGeolocationPrivacyCallout
+                }
             } header: {
                 Text("Location Source")
             }
@@ -61,6 +65,28 @@ struct WeatherLocationSettingsView: View {
             }
         }
         .settingsFormChrome(minWidth: 500, minHeight: 400)
+    }
+
+    /// Surfaces the upstream endpoint and what leaves the device whenever
+    /// the user picks the IP source. macOS hides the request inside an
+    /// otherwise innocuous setting; the callout makes the implicit network
+    /// call explicit so the user can decide.
+    private var ipGeolocationPrivacyCallout: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "lock.shield")
+                .foregroundStyle(.orange)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Privacy: this contacts ipapi.co over HTTPS to derive a city-level location from your public IP.", comment: "IP geolocation privacy callout — first line — in Weather Location settings.")
+                Text("No precise location data is stored or sent to LiveWallpaper.", comment: "IP geolocation privacy callout — second line — in Weather Location settings.")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .combine)
     }
 
     private var sourceExplanation: String {
@@ -203,6 +229,7 @@ final class LocationCompleterModel: NSObject, ObservableObject, MKLocalSearchCom
     @Published var results: [MKLocalSearchCompletion] = []
 
     private let completer: MKLocalSearchCompleter
+    private var debounceTask: Task<Void, Never>?
 
     override init() {
         completer = MKLocalSearchCompleter()
@@ -211,13 +238,30 @@ final class LocationCompleterModel: NSObject, ObservableObject, MKLocalSearchCom
         completer.resultTypes = [.address, .pointOfInterest]
     }
 
+    deinit {
+        debounceTask?.cancel()
+    }
+
+    /// Coalesces typing bursts so the city search fires at most every
+    /// 300 ms. Without this each keystroke pushes a fresh
+    /// `queryFragment` and MapKit dispatches a network request — common
+    /// editing patterns yielded 4-5 round-trips per word.
     func update(query: String) {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        debounceTask?.cancel()
         if trimmed.isEmpty {
             results = []
+            completer.queryFragment = ""
             return
         }
-        completer.queryFragment = trimmed
+        debounceTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard let self else { return }
+                self.completer.queryFragment = trimmed
+            }
+        }
     }
 
     nonisolated func completerDidUpdateResults(_ completer: MKLocalSearchCompleter) {
