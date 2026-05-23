@@ -39,7 +39,7 @@ actor WPEWebGLAssetProvider: WPEAssetProvider {
 
         let cgImage: CGImage
         do {
-            cgImage = try resolver.resolveImage(relativePath: relativePath)
+            cgImage = try resolveImageCascade(relativePath: relativePath)
         } catch SceneResourceResolver.ResolveError.fileMissing {
             return nil
         } catch SceneResourceResolver.ResolveError.unsupportedTexture {
@@ -57,6 +57,39 @@ actor WPEWebGLAssetProvider: WPEAssetProvider {
 
         imageCache[relativePath] = pngData
         return WPEAssetResponse(bytes: pngData, mimeType: "image/png", cacheControl: "max-age=3600")
+    }
+
+    // WPE material payloads reference textures by bare name
+    // ("neco arc ship with grain"). `SceneResourceResolver` only walks
+    // the material-include chain when the input path already ends in
+    // `.json`; bare names get returned as-is and miss the asset on disk.
+    // Mirror the WPE lookup order on this side so the playback path
+    // surfaces the actual `.tex` / image file instead of falling through
+    // to the magenta placeholder.
+    private static let textureSearchSuffixes = ["tex", "png", "jpg", "jpeg", "gif", "webp"]
+
+    private func resolveImageCascade(relativePath: String) throws -> CGImage {
+        let ext = (relativePath as NSString).pathExtension.lowercased()
+        if !ext.isEmpty {
+            return try resolver.resolveImage(relativePath: relativePath)
+        }
+
+        let candidates: [String] = [
+            relativePath,
+            "materials/\(relativePath).json"
+        ] + Self.textureSearchSuffixes.map { "materials/\(relativePath).\($0)" }
+
+        var lastError: Error = SceneResourceResolver.ResolveError.fileMissing
+        for candidate in candidates {
+            do {
+                return try resolver.resolveImage(relativePath: candidate)
+            } catch SceneResourceResolver.ResolveError.fileMissing {
+                continue
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError
     }
 
     private func resolveVideo(relativePath: String, extension ext: String) throws -> WPEAssetResponse? {
