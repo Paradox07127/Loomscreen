@@ -100,6 +100,13 @@ public enum DesignTokens {
         public static let shadowRadius: CGFloat = 12
         public static let shadowOpacity: Double = 0.18
         public static let shadowYOffset: CGFloat = 4
+
+        /// Resting elevation values for gallery tiles — keep a faint always-on
+        /// shadow so hover smoothly interpolates instead of popping from flat.
+        /// Matches the macOS News / Photos Memories resting profile.
+        public static let restShadowRadius: CGFloat = 3
+        public static let restShadowOpacity: Double = 0.05
+        public static let restShadowYOffset: CGFloat = 1
     }
 
     /// Returns the supplied animation when motion is allowed, otherwise nil so the change applies instantly.
