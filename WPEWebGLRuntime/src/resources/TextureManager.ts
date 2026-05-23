@@ -161,6 +161,17 @@ export class TextureManager {
         sendDiagnostic("texture-fetch-failed", `HTTP ${response.status} for ${url}`);
         return null;
       }
+      // WPE `.tex` files can wrap an animated MP4. Swift lifts the MP4
+      // bytes and serves them with `video/mp4` even when the URL has no
+      // `.mp4` suffix, so check the response MIME and route to the
+      // `<video>` pipeline using a blob URL (avoids a second fetch
+      // through the scheme handler).
+      const mimeType = (response.headers.get("content-type") || "").toLowerCase();
+      if (mimeType.startsWith("video/")) {
+        const blob = await response.blob();
+        const blobURL = URL.createObjectURL(blob);
+        return this.loadVideo(url, blobURL);
+      }
       const blob = await response.blob();
       const bitmap = await createImageBitmap(blob, { colorSpaceConversion: "none" });
       const entry = this.uploadBitmap(bitmap);
@@ -181,7 +192,11 @@ export class TextureManager {
   // metadata + frames are available. Returning a placeholder keeps
   // `executor.load()` from blocking on video decode (which can take
   // hundreds of ms in WebKit).
-  private loadVideo(url: string): TextureEntry {
+  //
+  // `srcOverride` lets `loadImage` reuse already-fetched MP4 bytes via a
+  // blob URL instead of letting the `<video>` element re-fetch through
+  // the wpe-asset scheme handler.
+  private loadVideo(url: string, srcOverride?: string): TextureEntry {
     const gl = this.gl;
     const tex = gl.createTexture();
     if (!tex) {
@@ -234,7 +249,7 @@ export class TextureManager {
       const code = video.error?.code ?? -1;
       sendDiagnostic("video-load-failed", `<video> error ${code} for ${url}`);
     };
-    video.src = url;
+    video.src = srcOverride ?? url;
     void video.play().catch((err) => {
       sendDiagnostic("video-play-blocked", `${url}: ${err instanceof Error ? err.message : String(err)}`);
     });
