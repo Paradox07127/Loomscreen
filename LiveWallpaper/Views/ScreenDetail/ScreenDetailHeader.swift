@@ -64,7 +64,7 @@ struct ScreenDetailHeader: View {
                     } label: {
                         Image(systemName: isCurrentBookmarked ? "bookmark.fill" : "bookmark")
                     }
-                    .adaptiveGlassButton(.regular)
+                    .adaptiveGlassButton(isCurrentBookmarked ? .prominent : .regular)
                     .controlSize(.regular)
                     .help(Text(isCurrentBookmarked
                         ? "Bookmarked — click to rename or remove"
