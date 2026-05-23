@@ -77,7 +77,9 @@ enum WPEBuiltinFrameworkAssets {
         "models/util/fullscreenlayer.json",
         "models/util/projectlayer.json",
         "models/util/solidlayer.json",
-        "models/util/solidlayer_depthtest.json"
+        "models/util/solidlayer_depthtest.json",
+        "shaders/effectcomposebackground.frag",
+        "shaders/effectcomposebackground.vert"
     ]
 }
 #endif
