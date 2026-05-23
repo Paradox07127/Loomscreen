@@ -4,10 +4,15 @@ import Foundation
 struct WPERenderPipelineBuilder: Sendable {
     private let shaderLoader: WPEShaderSourceLoader
 
-    init(cacheRootURL: URL, engineAssetsRootURL: URL? = nil) {
+    init(
+        cacheRootURL: URL,
+        engineAssetsRootURL: URL? = nil,
+        tracer: WPEResolutionTracer? = nil
+    ) {
         self.shaderLoader = WPEShaderSourceLoader(
             cacheRootURL: cacheRootURL,
-            engineAssetsRootURL: engineAssetsRootURL
+            engineAssetsRootURL: engineAssetsRootURL,
+            tracer: tracer
         )
     }
 
@@ -60,11 +65,16 @@ private struct WPEShaderUniformAnnotation {
 private struct WPEShaderSourceLoader: Sendable {
     private let resolver: WPEMultiRootResourceResolver
 
-    init(cacheRootURL: URL, engineAssetsRootURL: URL? = nil) {
+    init(
+        cacheRootURL: URL,
+        engineAssetsRootURL: URL? = nil,
+        tracer: WPEResolutionTracer? = nil
+    ) {
         self.resolver = WPEMultiRootResourceResolver(
             primaryRootURL: cacheRootURL,
             dependencyMounts: [],
-            engineAssetsRootURL: engineAssetsRootURL
+            engineAssetsRootURL: engineAssetsRootURL,
+            tracer: tracer
         )
     }
 
@@ -282,11 +292,45 @@ private struct WPEShaderSourceLoader: Sendable {
             includeStack: includeStack
         )
         let requiredRemoved = commentRequireDirectives(in: expanded)
+        let macroNeutralized = stripPreludeMacroRedefines(in: requiredRemoved)
         let stageSource = stage == .fragment
-            ? requiredRemoved.replacingOccurrences(of: "gl_FragColor", with: "out_FragColor")
-            : requiredRemoved
+            ? macroNeutralized.replacingOccurrences(of: "gl_FragColor", with: "out_FragColor")
+            : macroNeutralized
         return shaderPrelude(comboValues: comboValues, stage: stage) + stageSource
     }
+
+    // GLSL ES 3.00 treats `#define X A` after `#define X B` as a hard
+    // error when the token sequences differ. Our prelude already defines
+    // these compat symbols (HLSL aliases + math constants); workshop
+    // shaders frequently restate them with different precision (e.g.
+    // `M_PI` to 32 digits vs our 20) which the compiler rejects even
+    // though both collapse to the same single-precision float. Strip the
+    // user-side redefines and let the prelude win.
+    private func stripPreludeMacroRedefines(in source: String) -> String {
+        let neutralized = source.components(separatedBy: .newlines).map { line -> String in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("#define") else { return line }
+            let afterDefine = trimmed.dropFirst("#define".count)
+                .drop(while: { $0 == " " || $0 == "\t" })
+            let macroName = afterDefine.prefix(while: {
+                $0.isLetter || $0.isNumber || $0 == "_"
+            })
+            guard !macroName.isEmpty else { return line }
+            guard Self.preludeReservedMacros.contains(String(macroName)) else {
+                return line
+            }
+            return "// disabled redefine of prelude macro: \(macroName)"
+        }
+        return neutralized.joined(separator: "\n")
+    }
+
+    private static let preludeReservedMacros: Set<String> = [
+        "M_PI", "M_PI_2", "M_PI_4", "M_E",
+        "mul", "lerp", "frac", "saturate",
+        "texSample2D", "texSample2DLod", "texture2D",
+        "ddx", "ddy", "fmod",
+        "CAST2", "CAST3", "CAST4", "CAST3X3"
+    ]
 
     private func expandIncludes(
         in source: String,
@@ -588,6 +632,7 @@ private struct WPEShaderSourceLoader: Sendable {
             "#define ddx dFdx",
             "#define ddy dFdy",
             "#define fmod(x, y) ((x) - (y) * trunc((x) / (y)))",
+            "#define atan2(y, x) atan((y), (x))",
             "#define CAST2(x) (vec2(x))",
             "#define CAST3(x) (vec3(x))",
             "#define CAST4(x) (vec4(x))",
@@ -613,6 +658,21 @@ private struct WPEShaderSourceLoader: Sendable {
             lines.append("out vec4 out_FragColor;")
             lines.append("#define varying in")
         }
+        // HLSL-flavored WPE shaders freely mix int/float in calls like
+        // `max(0, baseSize)` / `min(fragLV, 1)`. GLSL ES 3.00 demands
+        // matching argument types, but DOES support function overloading
+        // by signature — so we cover the common int/float pairings via
+        // float-returning shims (also a vec2 max with int scalar that
+        // shows up in audio visualizers).
+        lines.append(contentsOf: [
+            "float max(int a, float b) { return max(float(a), b); }",
+            "float max(float a, int b) { return max(a, float(b)); }",
+            "float min(int a, float b) { return min(float(a), b); }",
+            "float min(float a, int b) { return min(a, float(b)); }",
+            "float clamp(float v, int lo, int hi) { return clamp(v, float(lo), float(hi)); }",
+            "float clamp(float v, int lo, float hi) { return clamp(v, float(lo), hi); }",
+            "float clamp(float v, float lo, int hi) { return clamp(v, lo, float(hi)); }"
+        ])
         for key in comboValues.keys.sorted() {
             guard let value = comboValues[key] else { continue }
             lines.append("#define \(key) \(value)")
