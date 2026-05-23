@@ -823,13 +823,64 @@ private struct WPEShaderSourceLoader: Sendable {
                 float s = sin(angle);
                 return v * c + cross(axis, v) * s + axis * dot(axis, v) * (1.0 - c);
             }
+
+            // WPE common normal-map decompressor. Workshop normal effects
+            // pack `xy` into the lo bits and reconstruct `z` from the
+            // length constraint; this matches the standard tangent-space
+            // unpack used in `effects/refract.frag` and `effects/lightshafts.frag`.
+            vec3 DecompressNormal(vec4 packed) {
+                vec2 nxy = packed.xy * 2.0 - 1.0;
+                float nz = sqrt(max(0.0, 1.0 - dot(nxy, nxy)));
+                return vec3(nxy, nz);
+            }
+
+            vec3 DecompressNormal(vec3 packed) {
+                return DecompressNormal(vec4(packed, 0.0));
+            }
             #endif
             """
         case "common_blur.h":
+            // Stock WPE `blur*a` separable-Gaussian helpers. WPE's
+            // shipped `common_blur.h` ships these with a fixed
+            // `g_Texture0` sampler bind because every blur pass in the
+            // editor pipes the previous frame into slot 0; mirror the
+            // same convention. Weights match the Sigg/Hadwiger 2005
+            // formulation that WPE's `blur_precise_gaussian.frag`
+            // expects.
             return """
             #ifndef LIVEWALLPAPER_WPE_COMMON_BLUR_H
             #define LIVEWALLPAPER_WPE_COMMON_BLUR_H
             #define wpe_common_blur_included 1
+
+            // g_Texture0 is declared by the including shader (every WPE
+            // blur pass binds previous-frame at slot 0). Declaring it
+            // here too would trip GLSL ES 3.00 single-scope
+            // redeclaration rules.
+
+            vec4 blur13a(vec2 uv, vec2 direction) {
+                vec4 color = texSample2D(g_Texture0, uv) * 0.1964825501511404;
+                color += texSample2D(g_Texture0, uv + direction * 1.411764705882353) * 0.2969069646728344;
+                color += texSample2D(g_Texture0, uv - direction * 1.411764705882353) * 0.2969069646728344;
+                color += texSample2D(g_Texture0, uv + direction * 3.2941176470588234) * 0.09447039785044732;
+                color += texSample2D(g_Texture0, uv - direction * 3.2941176470588234) * 0.09447039785044732;
+                color += texSample2D(g_Texture0, uv + direction * 5.176470588235294) * 0.010381362401148057;
+                color += texSample2D(g_Texture0, uv - direction * 5.176470588235294) * 0.010381362401148057;
+                return color;
+            }
+
+            vec4 blur7a(vec2 uv, vec2 direction) {
+                vec4 color = texSample2D(g_Texture0, uv) * 0.3829;
+                color += texSample2D(g_Texture0, uv + direction * 1.3846153846) * 0.30857;
+                color += texSample2D(g_Texture0, uv - direction * 1.3846153846) * 0.30857;
+                return color;
+            }
+
+            vec4 blur3a(vec2 uv, vec2 direction) {
+                vec4 color = texSample2D(g_Texture0, uv) * 0.5;
+                color += texSample2D(g_Texture0, uv + direction) * 0.25;
+                color += texSample2D(g_Texture0, uv - direction) * 0.25;
+                return color;
+            }
             #endif
             """
         case "common_vertex.h":
@@ -895,6 +946,18 @@ private struct WPEShaderSourceLoader: Sendable {
                 // mode-specific alpha policy is Phase 5 work.
                 return mix(a, max(a, b), opacity);
             }
+
+            // `BlendOpacity(base, overlay, mode, opacity)` is the WPE
+            // shader-side convenience wrapper around ApplyBlending. The
+            // overlay parameter is either a vec3 colour or a scalar
+            // luminance (broadcast to vec3); workshop authors use both.
+            vec3 BlendOpacity(vec3 A, vec3 B, int blendMode, float opacity) {
+                return ApplyBlending(blendMode, A, B, opacity);
+            }
+
+            vec3 BlendOpacity(vec3 A, float b, int blendMode, float opacity) {
+                return ApplyBlending(blendMode, A, vec3(b), opacity);
+            }
             #endif
             """
         case "common_composite.h":
@@ -924,10 +987,38 @@ private struct WPEShaderSourceLoader: Sendable {
             #endif
             """
         case "common_perspective.h":
+            // WPE workshop perspective effects (waterripple, waterwaves,
+            // lightshafts, auto_sway, refract) build a 3×3 homography
+            // by inverting the matrix that maps the unit square corners
+            // to four screen-space points. Both `squareToQuad` and the
+            // mat3 form of `inverse` ship in WPE's stock header; ours
+            // were empty before, so every call surfaced as "no matching
+            // overloaded function found".
             return """
             #ifndef LIVEWALLPAPER_WPE_COMMON_PERSPECTIVE_H
             #define LIVEWALLPAPER_WPE_COMMON_PERSPECTIVE_H
             #define wpe_common_perspective_included 1
+
+            mat3 squareToQuad(vec2 p0, vec2 p1, vec2 p2, vec2 p3) {
+                vec2 d1 = p1 - p2;
+                vec2 d2 = p3 - p2;
+                vec2 s  = p0 - p1 + p2 - p3;
+                float det = d1.x * d2.y - d2.x * d1.y;
+                float g = (s.x * d2.y - d2.x * s.y) / det;
+                float h = (d1.x * s.y - s.x * d1.y) / det;
+                return mat3(
+                    p1.x - p0.x + g * p1.x, p1.y - p0.y + g * p1.y, g,
+                    p3.x - p0.x + h * p3.x, p3.y - p0.y + h * p3.y, h,
+                    p0.x,                   p0.y,                   1.0
+                );
+            }
+
+            // WPE shaders also feed `vec3` corner points (homogeneous
+            // padding) into the same call. Delegate to the vec2 form so
+            // both signatures resolve.
+            mat3 squareToQuad(vec3 p0, vec3 p1, vec3 p2, vec3 p3) {
+                return squareToQuad(p0.xy, p1.xy, p2.xy, p3.xy);
+            }
             #endif
             """
         default:
