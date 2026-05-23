@@ -333,7 +333,7 @@ struct WorkshopGalleryView: View {
                         noFilteredResultsView
                     } else {
                         LazyVGrid(
-                            columns: [GridItem(.adaptive(minimum: 160, maximum: 160), spacing: 16)],
+                            columns: [GridItem(.adaptive(minimum: 160, maximum: 220), spacing: 16)],
                             alignment: .leading,
                             spacing: 16
                         ) {
@@ -940,6 +940,7 @@ private struct WorkshopGalleryCard: View {
     let onToggleBookmark: () -> Void
 
     @State private var isHovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 0) {
@@ -947,11 +948,12 @@ private struct WorkshopGalleryCard: View {
                 imageURL: project.previewURL,
                 securityScopedBookmarkData: project.libraryRootBookmarkData
             )
-                .wpeCardPreviewClip()
                 .overlay(alignment: .topTrailing) {
                     typeBadge
                         .padding(8)
                 }
+
+            Divider()
 
             VStack(alignment: .leading, spacing: 8) {
                 Text(verbatim: project.title)
@@ -965,7 +967,7 @@ private struct WorkshopGalleryCard: View {
             .padding(12)
             .frame(maxHeight: .infinity, alignment: .top)
         }
-        .wpeProjectCardChrome(isHovering: isHovering)
+        .wpeProjectCardChrome(isHovering: isHovering, reduceMotion: reduceMotion)
         .onHover { isHovering = $0 }
     }
 
