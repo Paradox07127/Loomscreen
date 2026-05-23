@@ -16,7 +16,7 @@ struct BookmarksLibraryView: View {
     @State private var searchText: String = ""
     @State private var pendingDestructive: PendingDestructive?
 
-    private let columns = [GridItem(.adaptive(minimum: 200), spacing: 14)]
+    private let columns = [GridItem(.adaptive(minimum: 220), spacing: 14)]
 
     var body: some View {
         DetailPageScaffold(
