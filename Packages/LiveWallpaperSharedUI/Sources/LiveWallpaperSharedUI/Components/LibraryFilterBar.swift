@@ -40,7 +40,10 @@ public struct LibraryFilterBar<Filters: View>: View {
 
             Spacer(minLength: DesignTokens.LibraryFilterBar.contentSpacing)
 
-            if let resultCount, let totalCount {
+            // Only surface the counter when filtering actually narrowed the
+            // result set — an unfiltered "12" sitting on the right just
+            // duplicates the header's own count.
+            if let resultCount, let totalCount, resultCount != totalCount {
                 resultCounter(resultCount, totalCount)
             }
         }

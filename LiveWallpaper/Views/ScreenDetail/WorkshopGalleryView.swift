@@ -178,9 +178,12 @@ struct WorkshopGalleryView: View {
                             Button {
                                 dismiss()
                             } label: {
-                                Label("Done", systemImage: "checkmark")
+                                Image(systemName: "checkmark")
                             }
-                            .buttonStyle(WorkshopToolbarButtonStyle(tint: .secondary))
+                            .adaptiveGlassButton(.regular)
+                            .controlSize(.regular)
+                            .help(Text("Done"))
+                            .accessibilityLabel(Text("Done"))
                             .keyboardShortcut(.cancelAction)
                         } else if hasLibraryRoot {
                             targetScreenPicker
@@ -192,7 +195,8 @@ struct WorkshopGalleryView: View {
                             } label: {
                                 Image(systemName: "arrow.clockwise")
                             }
-                            .buttonStyle(WorkshopToolbarButtonStyle())
+                            .adaptiveGlassButton(.regular)
+                            .controlSize(.regular)
                             .help(Text("Rescan — re-scan the workshop folder for new projects"))
                             .accessibilityLabel(Text("Rescan workshop"))
                             .accessibilityHint(Text("Re-scan the workshop folder for new projects"))
@@ -472,7 +476,8 @@ struct WorkshopGalleryView: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .buttonStyle(WorkshopToolbarButtonStyle(tint: .secondary))
+        .adaptiveGlassButton(.regular)
+        .controlSize(.regular)
         .help(Text("More Workshop actions"))
         .accessibilityLabel(Text("More Workshop actions"))
         .disabled(isBusy)
@@ -1057,45 +1062,4 @@ private struct WorkshopGalleryCard: View {
     }
 }
 
-private struct WorkshopToolbarButtonStyle: ButtonStyle {
-    var tint: Color = .accentColor
-    var fontSize: CGFloat = 13
-    var horizontalPadding: CGFloat = 15
-    var verticalPadding: CGFloat = 7
-
-    func makeBody(configuration: Configuration) -> some View {
-        StyledLabel(
-            configuration: configuration,
-            tint: tint,
-            fontSize: fontSize,
-            horizontalPadding: horizontalPadding,
-            verticalPadding: verticalPadding
-        )
-    }
-
-    private struct StyledLabel: View {
-        let configuration: Configuration
-        let tint: Color
-        let fontSize: CGFloat
-        let horizontalPadding: CGFloat
-        let verticalPadding: CGFloat
-
-        @Environment(\.isEnabled) private var isEnabled
-
-        var body: some View {
-            let effectiveTint = isEnabled ? tint : Color.secondary
-            configuration.label
-                .font(.system(size: fontSize, weight: .semibold))
-                .labelStyle(.titleAndIcon)
-                .foregroundStyle(effectiveTint)
-                .padding(.horizontal, horizontalPadding)
-                .padding(.vertical, verticalPadding)
-                .frame(minHeight: 34)
-                .adaptiveGlassSurface(.capsule, tint: effectiveTint, interactive: true)
-                .contentShape(Capsule())
-                .scaleEffect(configuration.isPressed ? 0.97 : 1)
-                .opacity(isEnabled ? 1 : 0.46)
-        }
-    }
-}
 #endif
