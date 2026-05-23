@@ -182,8 +182,7 @@ export class ShaderCompiler {
       rewritten = rewritten.replace(/\bvarying\b/g, "out");
     }
 
-    rewritten = rewriteModAssign(rewritten);
-    rewritten = coerceIntLiteralsToFloat(rewritten);
+    rewritten = applyGLSLEsCompat(rewritten);
     return rewritten;
   }
 
@@ -217,93 +216,160 @@ function compileShader(
   return shader;
 }
 
-// `fragLV %= 2;` is a desktop-GLSL idiom that doesn't exist in GLSL ES
-// 3.00 — `%=` applies only to integer types there. WPE workshop shaders
-// commonly use it on floats, so rewrite to `var = mod(var, float(rhs))`.
-function rewriteModAssign(line: string): string {
-  return line.replace(
-    /(\b[A-Za-z_][\w.]*)\s*%=\s*([^;]+);/g,
-    (_match, lhs: string, rhs: string) => `${lhs} = mod(${lhs}, float(${rhs.trim()}));`
-  );
-}
-
 // GLSL ES 3.00 has no implicit int → float promotion and forbids
 // overloading built-in functions (so we can't ship a `max(int, float)`
 // shim). WPE workshop shaders are written for desktop GLSL / HLSL where
-// `max(0, baseSize)`, `M_PI * 2`, `1 - mDist`, etc. are accepted, so we
-// rewrite bare integer literals to floats in every expression context.
+// `max(0, baseSize)`, `M_PI * 2`, `1 - mDist`, `fragLV %= 2` are
+// accepted. We apply three surgical rewrites in order:
 //
-// Skipped contexts (where int literals must stay int):
-//   - preprocessor lines (`#define X 5`, `#if (DEBUG == 1)`)
-//   - for-loop headers (`for (int i = 0; i < 10; i++)`)
-//   - integer-typed declarations (`int n = 4;`, `ivec2 sz = ivec2(8, 8);`)
-//   - array subscripts (`arr[2]`)
-//   - integer-typed constructors (`int(...)`, `uint(...)`, `ivec*(...)`,
-//     `uvec*(...)`) so they keep receiving int args
-//   - line comments (`// ...`)
+//   1. `%=` (float modulo-assign idiom) → `var = mod(var, float(rhs))`
+//   2. `<int> [+\-*/] <id|(>` and `<id|)|]> [+\-*/] <int>` → cast int
+//      side to float. Catches `M_PI * 2`, `1 - mDist`, etc. Skips
+//      comparisons / bitwise / assignment so loop counters keep working.
+//   3. Inside calls to whitelisted float-only built-ins (`max`, `min`,
+//      `clamp`, `mix`, `mod`, etc.), cast bare int literal args to
+//      float so `max(0, x)` resolves to `max(float, float)`.
 //
-// Runtime `int == int` comparisons in non-declaration lines will become
-// `int == float` and fail — that pattern is rare in WPE shaders (the
-// engine uses `#if` for combo dispatch) and would already be broken by
-// any conversion strategy. We accept it as a known limitation.
-function coerceIntLiteralsToFloat(line: string): string {
+// Skipped at the line level: `#` directives, `//` comments, `for(...)`
+// headers, integer-typed declarations (`int n = 4;`).
+function applyGLSLEsCompat(line: string): string {
   const trimmed = line.trimStart();
   if (trimmed.startsWith("#") || trimmed.startsWith("//")) return line;
   if (/^for\s*\(/.test(trimmed)) return line;
   if (/^(const\s+)?(int|uint|ivec[234]|uvec[234])\s+[A-Za-z_]/.test(trimmed)) return line;
 
+  let out = line;
+
+  out = out.replace(
+    /(\b[A-Za-z_][\w.]*)\s*%=\s*([^;]+);/g,
+    (_match, lhs: string, rhs: string) => `${lhs} = mod(${lhs}, float(${rhs.trim()}));`
+  );
+
+  out = castIntsInArithmetic(out);
+
+  out = castIntArgsInFloatCalls(out);
+
+  return out;
+}
+
+// Apply the arithmetic int → float cast outside of contexts where ints
+// must stay int: array subscripts (`arr[i * 2]`) and runtime condition
+// parens (`if (n > 0)`, `while (count > 0)`). Casting inside those
+// would break `int < int` comparisons or float-typed subscripts.
+function castIntsInArithmetic(line: string): string {
   let out = "";
+  let buffer = "";
+  const flush = () => {
+    if (!buffer) return;
+    let s = buffer;
+    s = s.replace(
+      /(^|[^\w.])(\d+)(\s*[+\-*/]\s*)(?=[A-Za-z_(])/g,
+      (_m, pre: string, num: string, op: string) => `${pre}${num}.0${op}`
+    );
+    s = s.replace(
+      /(?<=[A-Za-z_)\]])(\s*[+\-*/]\s*)(\d+)(?![\w.])/g,
+      (_m, op: string, num: string) => `${op}${num}.0`
+    );
+    out += s;
+    buffer = "";
+  };
   let i = 0;
-  const len = line.length;
-
-  while (i < len) {
+  while (i < line.length) {
     const ch: string = line[i] ?? "";
-
-    if (ch === "/" && line[i + 1] === "/") {
-      out += line.substring(i);
-      break;
-    }
-
     if (ch === "[") {
+      flush();
       const close = matchClose(line, i, "[", "]");
       out += line.substring(i, close + 1);
       i = close + 1;
       continue;
     }
-
-    const intCtor = /^(int|uint|ivec[234]|uvec[234])(\s*)\(/.exec(line.substring(i));
-    if (intCtor) {
-      const parenIdx = i + intCtor[0].length - 1;
+    const condHead = /^(if|while|switch)\s*\(/.exec(line.substring(i));
+    if (condHead) {
+      flush();
+      const parenIdx = i + condHead[0].length - 1;
       const close = matchClose(line, parenIdx, "(", ")");
       out += line.substring(i, close + 1);
       i = close + 1;
       continue;
     }
+    buffer += ch;
+    i++;
+  }
+  flush();
+  return out;
+}
 
+const FLOAT_BUILT_INS = new Set([
+  "max", "min", "clamp", "mix", "smoothstep", "step", "abs", "sign",
+  "pow", "exp", "exp2", "log", "log2", "sqrt", "inversesqrt",
+  "floor", "ceil", "fract", "trunc", "round", "roundEven", "mod",
+  "sin", "cos", "tan", "asin", "acos", "atan", "sinh", "cosh", "tanh",
+  "length", "distance", "dot", "cross", "normalize",
+  "reflect", "refract", "faceforward",
+  "radians", "degrees"
+]);
+
+function castIntArgsInFloatCalls(line: string): string {
+  const callRe = /\b([A-Za-z_]\w*)\s*\(/g;
+  const slices: Array<{ start: number; end: number; replacement: string }> = [];
+  let match: RegExpExecArray | null;
+  while ((match = callRe.exec(line)) !== null) {
+    const funcName = match[1] ?? "";
+    if (!FLOAT_BUILT_INS.has(funcName)) continue;
+    const openIdx = match.index + match[0].length - 1;
+    const closeIdx = matchClose(line, openIdx, "(", ")");
+    if (closeIdx <= openIdx) continue;
+    // The arg walker handles nested calls implicitly (it casts every
+    // bare int literal it sees). Skipping nested float-built-ins keeps
+    // the slice list non-overlapping so the reverse-order rewrite is
+    // safe.
+    if (slices.some((s) => match!.index >= s.start && closeIdx <= s.end)) continue;
+    const args = line.substring(openIdx + 1, closeIdx);
+    const rewritten = castBareIntLiterals(args);
+    if (rewritten !== args) {
+      slices.push({ start: openIdx + 1, end: closeIdx, replacement: rewritten });
+    }
+  }
+  for (let i = slices.length - 1; i >= 0; i--) {
+    const slice = slices[i]!;
+    line = line.substring(0, slice.start) + slice.replacement + line.substring(slice.end);
+  }
+  return line;
+}
+
+// Walk `text` character-by-character, casting bare integer literals to
+// floats. Used to process arguments inside a single function call; the
+// caller has already established that we are in a float-accepting
+// context, so we still skip int-typed contexts (subscripts, int ctors).
+function castBareIntLiterals(text: string): string {
+  let out = "";
+  let i = 0;
+  const len = text.length;
+  while (i < len) {
+    const ch: string = text[i] ?? "";
+    if (ch === "[") {
+      const close = matchClose(text, i, "[", "]");
+      out += text.substring(i, close + 1);
+      i = close + 1;
+      continue;
+    }
+    const intCtor = /^(int|uint|ivec[234]|uvec[234])(\s*)\(/.exec(text.substring(i));
+    if (intCtor) {
+      const parenIdx = i + intCtor[0].length - 1;
+      const close = matchClose(text, parenIdx, "(", ")");
+      out += text.substring(i, close + 1);
+      i = close + 1;
+      continue;
+    }
     if (ch >= "0" && ch <= "9") {
-      const rest = line.substring(i);
+      const rest = text.substring(i);
       const hex = /^0[xX][0-9a-fA-F]+[uU]?/.exec(rest);
-      if (hex) {
-        out += hex[0];
-        i += hex[0].length;
-        continue;
-      }
+      if (hex) { out += hex[0]; i += hex[0].length; continue; }
       const float = /^(\d+\.\d*(?:[eE][+-]?\d+)?[fF]?|\d+[eE][+-]?\d+[fF]?|\d+[fF])/.exec(rest);
-      if (float) {
-        out += float[0];
-        i += float[0].length;
-        continue;
-      }
+      if (float) { out += float[0]; i += float[0].length; continue; }
       const uintLit = /^\d+[uU]/.exec(rest);
-      if (uintLit) {
-        out += uintLit[0];
-        i += uintLit[0].length;
-        continue;
-      }
+      if (uintLit) { out += uintLit[0]; i += uintLit[0].length; continue; }
       const intLit = /^\d+/.exec(rest)!;
-      // Don't cast when the literal is part of an identifier (e.g. `vec3`)
-      // — only happens when previous emitted char is a letter / underscore /
-      // digit (identifier continuation).
       const prev: string = out.length > 0 ? out[out.length - 1] ?? "" : "";
       if (/[A-Za-z_]/.test(prev)) {
         out += intLit[0];
@@ -313,11 +379,9 @@ function coerceIntLiteralsToFloat(line: string): string {
       i += intLit[0].length;
       continue;
     }
-
     out += ch;
     i++;
   }
-
   return out;
 }
 
