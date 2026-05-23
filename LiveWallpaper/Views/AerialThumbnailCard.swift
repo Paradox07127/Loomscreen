@@ -51,9 +51,11 @@ private final class AerialThumbnailCache {
     }
 }
 
-/// Card for a single Apple Aerial asset. Click applies the aerial; for multi-
-/// display setups the click presents a SwiftUI Menu (matches `BookmarksLibraryView`
-/// — no more AppKit `NSMenu.popUp(at:)` shim).
+/// Card for a single Apple Aerial asset — mirrors `BookmarksLibraryView`'s
+/// `BookmarkTile`: 16:9 thumbnail with its own stroke + hover lift, and a
+/// metadata row beneath the tile carrying the title, category, and a small
+/// apply control on the trailing edge. Aerials are managed by macOS so there
+/// is no rename / delete affordance; tapping the tile is a no-op.
 struct AerialThumbnailCard: View {
     let asset: AerialAsset
     let screens: [Screen]
@@ -61,106 +63,72 @@ struct AerialThumbnailCard: View {
     let onApplyToAll: () -> Void
 
     @State private var isHovering = false
-    @FocusState private var isFocused: Bool
     @State private var thumbnail: NSImage?
     @State private var formatInfo: VideoFormatInfo?
 
-    private var cornerRadius: CGFloat { DesignTokens.Corner.md }
-
     var body: some View {
-        actionWrapper
-            .focused($isFocused)
-            .scaleEffect(isLifted ? 1.02 : 1.0)
-            .shadow(
-                color: .black.opacity(isLifted ? 0.22 : 0.06),
-                radius: isLifted ? 10 : 4,
-                y: isLifted ? 4 : 2
-            )
-            .animation(.spring(response: 0.28, dampingFraction: 0.85), value: isHovering)
-            .animation(.spring(response: 0.28, dampingFraction: 0.85), value: isFocused)
-            .onHover { hovering in
-                guard !screens.isEmpty else { return }
-                isHovering = hovering
-            }
-            .task { await loadThumbnailIfNeeded() }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(accessibilityText)
-            .accessibilityActions {
-                if screens.count == 1, let only = screens.first {
-                    Button("Apply") { onApply(only) }
-                } else if screens.count > 1 {
-                    ForEach(screens, id: \.id) { screen in
-                        Button("Apply to \(screen.name)") { onApply(screen) }
-                    }
-                    Button("Apply to All Displays", action: onApplyToAll)
-                }
-            }
-    }
-
-    /// Hover / focus lift is suppressed when there's no display to apply to —
-    /// non-interactive tiles shouldn't animate as if they were clickable.
-    private var isLifted: Bool {
-        guard !screens.isEmpty else { return false }
-        return isHovering || isFocused
-    }
-
-    @ViewBuilder
-    private var actionWrapper: some View {
-        if screens.count == 1, let only = screens.first {
-            Button { onApply(only) } label: { card }
-                .buttonStyle(.plain)
-        } else if screens.count > 1 {
-            Menu {
+        VStack(alignment: .leading, spacing: 7) {
+            thumbnailTile
+            metadata
+        }
+        .contextMenu { contextMenu }
+        .task { await loadThumbnailIfNeeded() }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityText)
+        .accessibilityActions {
+            if screens.count == 1, let only = screens.first {
+                Button("Apply") { onApply(only) }
+            } else if screens.count > 1 {
                 ForEach(screens, id: \.id) { screen in
                     Button("Apply to \(screen.name)") { onApply(screen) }
                 }
-                Divider()
                 Button("Apply to All Displays", action: onApplyToAll)
-            } label: { card }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-        } else {
-            card.opacity(0.55)
-        }
-    }
-
-    private var card: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            thumbnailContainer
-                .aspectRatio(16.0 / 9.0, contentMode: .fit)
-                .overlay(alignment: .topTrailing) {
-                    formatBadgeRow.padding(8)
-                }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(verbatim: asset.displayName)
-                    .font(.system(size: 12, weight: .semibold))
-                    .lineLimit(1)
-                    .foregroundStyle(.primary)
-
-                if let category = asset.category, !category.isEmpty {
-                    Text(verbatim: category)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.regularMaterial)
         }
-        .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
 
-    private var accessibilityText: Text {
-        if let category = asset.category, !category.isEmpty {
-            return Text("Aerial: \(asset.displayName), \(category)", comment: "Aerial thumbnail a11y label. Placeholders are aerial display name and category.")
+    // MARK: Thumbnail tile
+
+    private var thumbnailTile: some View {
+        ZStack {
+            tileBackground
+            tileContent
+            formatBadgeRow
+                .padding(8)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
         }
-        return Text("Aerial: \(asset.displayName)", comment: "Aerial thumbnail a11y label. The placeholder is the aerial display name.")
+        .aspectRatio(16.0 / 9.0, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.Corner.md, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: DesignTokens.Corner.md, style: .continuous)
+                .strokeBorder(Color.primary.opacity(isHovering ? 0.14 : 0.07), lineWidth: DesignTokens.Card.strokeWidth)
+        }
+        .shadow(color: .black.opacity(isHovering ? DesignTokens.Card.shadowOpacity : 0.0),
+                radius: DesignTokens.Card.shadowRadius, x: 0, y: DesignTokens.Card.shadowYOffset)
+        .scaleEffect(isHovering ? 1.02 : 1.0)
+        .animation(.spring(response: 0.28, dampingFraction: 0.85), value: isHovering)
+        .onHover { hovering in
+            guard !screens.isEmpty else { return }
+            isHovering = hovering
+        }
+    }
+
+    private var tileBackground: some View {
+        Rectangle().fill(Color.accentColor.opacity(0.12))
+    }
+
+    @ViewBuilder
+    private var tileContent: some View {
+        if let thumbnail {
+            Image(nsImage: thumbnail)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFill()
+        } else {
+            Image(systemName: "sparkles.tv")
+                .font(.system(size: 30, weight: .light))
+                .foregroundStyle(Color.accentColor.opacity(0.85))
+        }
     }
 
     @ViewBuilder
@@ -181,23 +149,90 @@ struct AerialThumbnailCard: View {
         }
     }
 
-    @ViewBuilder
-    private var thumbnailContainer: some View {
-        ZStack {
-            Rectangle()
-                .fill(.regularMaterial)
+    // MARK: Metadata
 
-            if let img = thumbnail {
-                Image(nsImage: img)
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                Image(systemName: "sparkles.tv")
-                    .font(.system(size: 28))
+    private var metadata: some View {
+        HStack(alignment: .center, spacing: 8) {
+            textBlock
+            Spacer(minLength: 4)
+            applyControl
+        }
+        .padding(.horizontal, 2)
+    }
+
+    private var textBlock: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(verbatim: asset.displayName)
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            if let category = asset.category, !category.isEmpty {
+                Text(verbatim: category)
+                    .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
         }
     }
+
+    @ViewBuilder
+    private var applyControl: some View {
+        if screens.count == 1, let only = screens.first {
+            Button { onApply(only) } label: { applyIcon }
+            .buttonStyle(.plain)
+            .help(Text("Apply"))
+        } else if screens.count > 1 {
+            Menu {
+                ForEach(screens, id: \.id) { screen in
+                    Button("Apply to \(screen.name)") { onApply(screen) }
+                }
+                Divider()
+                Button("Apply to All Displays", action: onApplyToAll)
+            } label: { applyIcon }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help(Text("Apply"))
+        }
+    }
+
+    private var applyIcon: some View {
+        Image(systemName: "play.fill")
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: 22, height: 22)
+            .background(Circle().fill(Color.accentColor.opacity(0.95)))
+            .overlay(Circle().strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
+    }
+
+    // MARK: Context menu
+
+    @ViewBuilder
+    private var contextMenu: some View {
+        if !screens.isEmpty {
+            ForEach(screens, id: \.id) { screen in
+                Button("Apply to \(screen.name)") { onApply(screen) }
+            }
+            if screens.count > 1 {
+                Divider()
+                Button("Apply to All Displays", action: onApplyToAll)
+            }
+        }
+    }
+
+    // MARK: Accessibility
+
+    private var accessibilityText: Text {
+        if let category = asset.category, !category.isEmpty {
+            return Text("Aerial: \(asset.displayName), \(category)", comment: "Aerial thumbnail a11y label. Placeholders are aerial display name and category.")
+        }
+        return Text("Aerial: \(asset.displayName)", comment: "Aerial thumbnail a11y label. The placeholder is the aerial display name.")
+    }
+
+    // MARK: Thumbnail loader
 
     @MainActor
     private func loadThumbnailIfNeeded() async {
