@@ -13704,64 +13704,6 @@
         }
       }
     },
-    "menu.apply_to_all_displays" : {
-      "comment" : "Apply Aerial wallpaper to all connected displays.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Apply to All Displays"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "すべてのディスプレイに適用"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "应用到所有显示器"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "套用到所有顯示器"
-          }
-        }
-      }
-    },
-    "menu.apply_to_screen" : {
-      "comment" : "Apply Aerial wallpaper menu item; %@ is the display name.",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Apply to %@"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ に適用"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "应用到 %@"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "套用到 %@"
-          }
-        }
-      }
-    },
     "Metal is not supported on this device." : {
       "comment" : "Error shown when Metal device cannot be created.",
       "extractionState" : "manual",

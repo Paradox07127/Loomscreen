@@ -158,9 +158,12 @@ struct AppleAerialsLibraryView: View {
 
                 LazyVGrid(columns: columns, spacing: 14) {
                     ForEach(library.assets) { asset in
-                        AerialThumbnailCard(asset: asset) {
-                            applyAsset(asset)
-                        }
+                        AerialThumbnailCard(
+                            asset: asset,
+                            screens: screenManager.screens,
+                            onApply: { screen in apply(asset, to: screen) },
+                            onApplyToAll: { applyToAll(asset) }
+                        )
                     }
                 }
             }
@@ -168,53 +171,24 @@ struct AppleAerialsLibraryView: View {
         }
     }
 
-    private func applyAsset(_ asset: AerialAsset) {
-        let displays = screenManager.screens
-        guard !displays.isEmpty else { return }
+    // MARK: - Apply
 
-        guard let scopedURL = resolveScopedURL(asset.bookmarkData) else {
+    private func apply(_ asset: AerialAsset, to screen: Screen) {
+        guard let url = resolveScopedURL(asset.bookmarkData) else {
             Logger.error("Failed to resolve aerial bookmark; user may need to reconnect", category: .fileAccess)
             return
         }
+        screenManager.setVideo(url: url, bookmarkData: asset.bookmarkData, for: screen)
+    }
 
-        if displays.count == 1, let screen = displays.first {
-            screenManager.setVideo(url: scopedURL, bookmarkData: asset.bookmarkData, for: screen)
+    private func applyToAll(_ asset: AerialAsset) {
+        guard let url = resolveScopedURL(asset.bookmarkData) else {
+            Logger.error("Failed to resolve aerial bookmark; user may need to reconnect", category: .fileAccess)
             return
         }
-
-        let menu = NSMenu()
-        ApplyMenuRouter.shared.screenManager = screenManager
-
-        for screen in displays {
-            let item = NSMenuItem(
-                title: String(
-                    localized: "menu.apply_to_screen",
-                    defaultValue: "Apply to \(screen.name)",
-                    comment: "Apply Aerial wallpaper menu item; %@ is the display name."
-                ),
-                action: #selector(ApplyMenuRouter.applyFromMenu(_:)),
-                keyEquivalent: ""
-            )
-            item.representedObject = ApplyTarget(asset: asset, screen: screen, resolvedURL: scopedURL)
-            item.target = ApplyMenuRouter.shared
-            menu.addItem(item)
+        for screen in screenManager.screens {
+            screenManager.setVideo(url: url, bookmarkData: asset.bookmarkData, for: screen)
         }
-
-        menu.addItem(NSMenuItem.separator())
-        let allItem = NSMenuItem(
-            title: String(
-                localized: "menu.apply_to_all_displays",
-                defaultValue: "Apply to All Displays",
-                comment: "Apply Aerial wallpaper to all connected displays."
-            ),
-            action: #selector(ApplyMenuRouter.applyToAllFromMenu(_:)),
-            keyEquivalent: ""
-        )
-        allItem.representedObject = ApplyAllTarget(asset: asset, screens: displays, resolvedURL: scopedURL)
-        allItem.target = ApplyMenuRouter.shared
-        menu.addItem(allItem)
-
-        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
     }
 
     private func resolveScopedURL(_ bookmarkData: Data) -> URL? {
@@ -230,40 +204,6 @@ struct AppleAerialsLibraryView: View {
     private func openWallpaperSettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.Wallpaper-Settings.extension") {
             NSWorkspace.shared.open(url)
-        }
-    }
-}
-
-// MARK: - Apply Menu Router
-
-private struct ApplyTarget {
-    let asset: AerialAsset
-    let screen: Screen
-    let resolvedURL: URL
-}
-
-private struct ApplyAllTarget {
-    let asset: AerialAsset
-    let screens: [Screen]
-    let resolvedURL: URL
-}
-
-@MainActor
-private final class ApplyMenuRouter: NSObject {
-    static let shared = ApplyMenuRouter()
-    weak var screenManager: ScreenManager?
-
-    @objc fileprivate func applyFromMenu(_ sender: NSMenuItem) {
-        guard let target = sender.representedObject as? ApplyTarget,
-              let manager = screenManager else { return }
-        manager.setVideo(url: target.resolvedURL, bookmarkData: target.asset.bookmarkData, for: target.screen)
-    }
-
-    @objc fileprivate func applyToAllFromMenu(_ sender: NSMenuItem) {
-        guard let target = sender.representedObject as? ApplyAllTarget,
-              let manager = screenManager else { return }
-        for screen in target.screens {
-            manager.setVideo(url: target.resolvedURL, bookmarkData: target.asset.bookmarkData, for: screen)
         }
     }
 }
