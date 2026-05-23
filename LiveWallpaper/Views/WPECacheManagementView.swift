@@ -24,10 +24,19 @@ struct WPECacheManagementView: View {
             Section {
                 summaryRow
             } header: {
-                Text("Wallpaper Engine Cache")
+                HStack {
+                    Text("Wallpaper Engine Cache")
+                    Spacer()
+                    if let stats {
+                        Text(verbatim: "\(byteFormatter.string(fromByteCount: Int64(stats.totalBytes))) · \(stats.entries.count)")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel(Text("Cache totals \(byteFormatter.string(fromByteCount: Int64(stats.totalBytes))) across \(stats.entries.count) projects"))
+                    }
+                }
             } footer: {
                 if let last = lastFreedBytes, last > 0 {
-                    Text("Freed \(byteFormatter.string(fromByteCount: Int64(last))).")
+                    Text("Freed \(Int64(last), format: .byteCount(style: .file)).", comment: "WPE cache management footer shown after a purge. Placeholder is the freed byte total, rendered through SwiftUI's byteCount format style.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

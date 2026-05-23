@@ -1,13 +1,13 @@
 #if !LITE_BUILD
-#if DEBUG
 import SwiftUI
 import AppKit
 
-/// DEBUG-only Phase A.3 corpus playback test menu. Streams a
+/// Pro-only diagnostic surface gated at runtime by the Developer Mode
+/// toggle in Settings → General → Advanced. The sidebar entry is hidden
+/// by default and only appears once the user opts in, so end users never
+/// see this view unless they go looking for it. Streams a
 /// `WPECorpusPlaybackHarness` run, surfaces per-scene outcomes in a table,
 /// and lets the maintainer export the resulting JSON report for triage.
-/// Compiled out of Release so end users never see (and the bundle never
-/// carries) this UI.
 struct DeveloperToolsView: View {
     @State private var isRunning = false
     @State private var progressLabel: String = ""
@@ -54,7 +54,7 @@ struct DeveloperToolsView: View {
             Text(verbatim: summaryLabel(summary, total: lastReport?.total ?? entries.count))
                 .foregroundStyle(.secondary)
         } else {
-            Text("Phase A.3 — Corpus playback test")
+            Text("Visible while Developer Mode is on. Disable it in Settings → General → Advanced.", comment: "Developer Tools header subtitle explaining the runtime gate.")
                 .foregroundStyle(.secondary)
         }
     }
@@ -345,5 +345,4 @@ struct DeveloperToolsView: View {
         return lines.isEmpty ? entry.title : lines.joined(separator: "\n")
     }
 }
-#endif
 #endif
