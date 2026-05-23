@@ -17,10 +17,10 @@ struct BookmarksLibraryView: View {
 
     private let columns = [GridItem(.adaptive(minimum: 220), spacing: 14)]
 
-    /// Bookmarks gallery stays clean (no type chips) under this threshold;
-    /// once the library outgrows a single screen of cards the chip row earns
-    /// its keep. Matches the antigravity "progressive disclosure" guidance.
-    private static let typeChipsThreshold = 6
+    // Type chips appear as soon as the library mixes types — a single-type
+    // collection has nothing to filter, but mixed collections benefit from
+    // the chips even at low counts (otherwise the user wonders why the
+    // filter never shows up).
 
     var body: some View {
         DetailPageScaffold(
@@ -147,7 +147,7 @@ struct BookmarksLibraryView: View {
     // MARK: - Filtering
 
     private var showsTypeChips: Bool {
-        store.bookmarks.count > Self.typeChipsThreshold && availableTypes.count > 1
+        availableTypes.count > 1
     }
 
     private var availableTypes: Set<WallpaperType> {
