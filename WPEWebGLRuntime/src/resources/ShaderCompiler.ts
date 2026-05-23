@@ -183,7 +183,7 @@ export class ShaderCompiler {
     }
 
     rewritten = rewriteModAssign(rewritten);
-    rewritten = castArithmeticIntLiterals(rewritten);
+    rewritten = coerceIntLiteralsToFloat(rewritten);
     return rewritten;
   }
 
@@ -227,24 +227,110 @@ function rewriteModAssign(line: string): string {
   );
 }
 
-// Inject explicit float casts on bare integer literals that participate
-// in `+ - * /` against an identifier or parenthesized expression. WPE
-// authors expect HLSL/desktop-GLSL implicit promotion (`M_PI * 2`,
-// `1 - mDist`); GLSL ES 3.00 rejects those. Comparison / bitwise / `=`
-// stay untouched so int-typed loop counters and `#if (DEBUG == 1)` (and
-// runtime equivalents) keep working.
-function castArithmeticIntLiterals(line: string): string {
-  // <int> <op> <identifier|`(`>
-  let out = line.replace(
-    /(^|[^\w.])(\d+)(\s*[+\-*/]\s*)(?=[A-Za-z_(])/g,
-    (_m, pre: string, num: string, op: string) => `${pre}${num}.0${op}`
-  );
-  // <identifier|`)`|`]`> <op> <int>
-  out = out.replace(
-    /(?<=[A-Za-z_)\]])(\s*[+\-*/]\s*)(\d+)(?![\w.])/g,
-    (_m, op: string, num: string) => `${op}${num}.0`
-  );
+// GLSL ES 3.00 has no implicit int → float promotion and forbids
+// overloading built-in functions (so we can't ship a `max(int, float)`
+// shim). WPE workshop shaders are written for desktop GLSL / HLSL where
+// `max(0, baseSize)`, `M_PI * 2`, `1 - mDist`, etc. are accepted, so we
+// rewrite bare integer literals to floats in every expression context.
+//
+// Skipped contexts (where int literals must stay int):
+//   - preprocessor lines (`#define X 5`, `#if (DEBUG == 1)`)
+//   - for-loop headers (`for (int i = 0; i < 10; i++)`)
+//   - integer-typed declarations (`int n = 4;`, `ivec2 sz = ivec2(8, 8);`)
+//   - array subscripts (`arr[2]`)
+//   - integer-typed constructors (`int(...)`, `uint(...)`, `ivec*(...)`,
+//     `uvec*(...)`) so they keep receiving int args
+//   - line comments (`// ...`)
+//
+// Runtime `int == int` comparisons in non-declaration lines will become
+// `int == float` and fail — that pattern is rare in WPE shaders (the
+// engine uses `#if` for combo dispatch) and would already be broken by
+// any conversion strategy. We accept it as a known limitation.
+function coerceIntLiteralsToFloat(line: string): string {
+  const trimmed = line.trimStart();
+  if (trimmed.startsWith("#") || trimmed.startsWith("//")) return line;
+  if (/^for\s*\(/.test(trimmed)) return line;
+  if (/^(const\s+)?(int|uint|ivec[234]|uvec[234])\s+[A-Za-z_]/.test(trimmed)) return line;
+
+  let out = "";
+  let i = 0;
+  const len = line.length;
+
+  while (i < len) {
+    const ch: string = line[i] ?? "";
+
+    if (ch === "/" && line[i + 1] === "/") {
+      out += line.substring(i);
+      break;
+    }
+
+    if (ch === "[") {
+      const close = matchClose(line, i, "[", "]");
+      out += line.substring(i, close + 1);
+      i = close + 1;
+      continue;
+    }
+
+    const intCtor = /^(int|uint|ivec[234]|uvec[234])(\s*)\(/.exec(line.substring(i));
+    if (intCtor) {
+      const parenIdx = i + intCtor[0].length - 1;
+      const close = matchClose(line, parenIdx, "(", ")");
+      out += line.substring(i, close + 1);
+      i = close + 1;
+      continue;
+    }
+
+    if (ch >= "0" && ch <= "9") {
+      const rest = line.substring(i);
+      const hex = /^0[xX][0-9a-fA-F]+[uU]?/.exec(rest);
+      if (hex) {
+        out += hex[0];
+        i += hex[0].length;
+        continue;
+      }
+      const float = /^(\d+\.\d*(?:[eE][+-]?\d+)?[fF]?|\d+[eE][+-]?\d+[fF]?|\d+[fF])/.exec(rest);
+      if (float) {
+        out += float[0];
+        i += float[0].length;
+        continue;
+      }
+      const uintLit = /^\d+[uU]/.exec(rest);
+      if (uintLit) {
+        out += uintLit[0];
+        i += uintLit[0].length;
+        continue;
+      }
+      const intLit = /^\d+/.exec(rest)!;
+      // Don't cast when the literal is part of an identifier (e.g. `vec3`)
+      // — only happens when previous emitted char is a letter / underscore /
+      // digit (identifier continuation).
+      const prev: string = out.length > 0 ? out[out.length - 1] ?? "" : "";
+      if (/[A-Za-z_]/.test(prev)) {
+        out += intLit[0];
+      } else {
+        out += `${intLit[0]}.0`;
+      }
+      i += intLit[0].length;
+      continue;
+    }
+
+    out += ch;
+    i++;
+  }
+
   return out;
+}
+
+function matchClose(s: string, start: number, open: string, close: string): number {
+  let depth = 0;
+  for (let i = start; i < s.length; i++) {
+    if (s[i] === open) depth++;
+    else if (s[i] === close) {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return s.length - 1;
 }
 
 function hashString(s: string): string {

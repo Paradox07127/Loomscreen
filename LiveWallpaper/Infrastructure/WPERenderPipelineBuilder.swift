@@ -658,21 +658,6 @@ private struct WPEShaderSourceLoader: Sendable {
             lines.append("out vec4 out_FragColor;")
             lines.append("#define varying in")
         }
-        // HLSL-flavored WPE shaders freely mix int/float in calls like
-        // `max(0, baseSize)` / `min(fragLV, 1)`. GLSL ES 3.00 demands
-        // matching argument types, but DOES support function overloading
-        // by signature — so we cover the common int/float pairings via
-        // float-returning shims (also a vec2 max with int scalar that
-        // shows up in audio visualizers).
-        lines.append(contentsOf: [
-            "float max(int a, float b) { return max(float(a), b); }",
-            "float max(float a, int b) { return max(a, float(b)); }",
-            "float min(int a, float b) { return min(float(a), b); }",
-            "float min(float a, int b) { return min(a, float(b)); }",
-            "float clamp(float v, int lo, int hi) { return clamp(v, float(lo), float(hi)); }",
-            "float clamp(float v, int lo, float hi) { return clamp(v, float(lo), hi); }",
-            "float clamp(float v, float lo, int hi) { return clamp(v, lo, float(hi)); }"
-        ])
         for key in comboValues.keys.sorted() {
             guard let value = comboValues[key] else { continue }
             lines.append("#define \(key) \(value)")
