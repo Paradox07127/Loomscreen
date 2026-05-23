@@ -637,9 +637,12 @@ struct GeneralSettingsView: View {
                     systemImage: "sparkles",
                     accent: .purple,
                     action: {
-                        if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
-                            appDelegate.showOnboarding()
-                        }
+                        // `NSApplication.shared.delegate` is `SwiftUI.AppDelegate`
+                        // (an internal wrapper around `@NSApplicationDelegateAdaptor`),
+                        // so casting to our own `AppDelegate` fails. Route the
+                        // request via NotificationCenter instead — AppDelegate
+                        // observes `.showOnboarding` and triggers the window.
+                        NotificationCenter.default.post(name: .showOnboarding, object: nil)
                     }
                 )
             }

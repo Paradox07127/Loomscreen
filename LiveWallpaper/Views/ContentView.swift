@@ -29,9 +29,6 @@ struct ContentView: View {
                     guard let screenID = notification.userInfo?["screenID"] as? CGDirectDisplayID else { return }
                     scheduleNavigationChange { selectedNavigation = .screen(screenID) }
                 }
-                .onReceive(NotificationCenter.default.publisher(for: .openAppleAerials)) { _ in
-                    scheduleNavigationChange { selectedNavigation = .appleAerials }
-                }
                 .onReceive(NotificationCenter.default.publisher(for: .promptAddWallpaper)) { notification in
                     handleAddWallpaperPrompt(notification: notification)
                 }

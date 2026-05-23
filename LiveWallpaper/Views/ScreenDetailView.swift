@@ -70,13 +70,6 @@ struct ScreenDetailView: View {
         }
     }
 
-    /// Resolved Wallpaper Engine origin metadata for the active wallpaper, or
-    /// nil when the user picked content directly. Recomputed on every body
-    /// evaluation so save/import flows propagate without local @State.
-    private var wpeOrigin: WPEOrigin? {
-        screenManager.getConfiguration(for: screen)?.wpeOrigin
-    }
-
     /// Single source of truth for the three overlapping booleans the rest of
     /// the view used to compute inline (`shouldShowGuideEmptyState`,
     /// `showsInspector`, `showsHeaderWallpaperActions`). Each was reading the
@@ -201,7 +194,6 @@ struct ScreenDetailView: View {
                     draft: $draft,
                     featureCatalog: featureCatalog,
                     previewController: previewController,
-                    wpeOrigin: wpeOrigin,
                     isLoading: isLoading,
                     isDraggingOver: isDraggingOver,
                     reduceMotion: reduceMotion,

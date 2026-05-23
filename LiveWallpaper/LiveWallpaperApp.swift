@@ -77,6 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @ObservationIgnored private var onboardingWindowController: NSWindowController?
     /// See `WeatherReactiveService.preferenceObserver` — same pattern.
     @ObservationIgnored nonisolated(unsafe) private var dockVisibilityObserver: NSObjectProtocol?
+    @ObservationIgnored nonisolated(unsafe) private var showOnboardingObserver: NSObjectProtocol?
     @ObservationIgnored private var globalShortcutManager: GlobalShortcutManager?
     /// True between the first `.terminateLater` reply and the matching
     /// `reply(toApplicationShouldTerminate:)`. Re-entrant termination
@@ -114,6 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         applyDockVisibility()
         observeDockVisibilityChanges()
+        observeShowOnboardingRequests()
 
         if !runtimeOptions.isTesting,
            manager.featureCatalog.isEnabled(.globalShortcuts) {
@@ -142,6 +144,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let observer = dockVisibilityObserver {
             NotificationCenter.default.removeObserver(observer)
         }
+        if let observer = showOnboardingObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     // MARK: - Dock Visibility
@@ -161,6 +166,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.applyDockVisibility()
+            }
+        }
+    }
+
+    private func observeShowOnboardingRequests() {
+        showOnboardingObserver = NotificationCenter.default.addObserver(
+            forName: .showOnboarding,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.showOnboarding()
             }
         }
     }
@@ -312,9 +329,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Onboarding Window
 
-    /// Shows the first-run onboarding flow.
+    /// Shows the first-run onboarding flow. Also used by the General Settings
+    /// "Welcome Tour" tile to re-trigger the tour after first-run.
     func showOnboarding() {
+        Logger.info("Onboarding window requested", category: .ui)
+
         if let controller = onboardingWindowController {
+            Logger.info("Onboarding window reused", category: .ui)
             NSApp.activate(ignoringOtherApps: true)
             controller.window?.makeKeyAndOrderFront(nil)
             controller.window?.orderFrontRegardless()
@@ -322,7 +343,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 580),
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 540),
             styleMask: [.titled, .fullSizeContentView, .closable],
             backing: .buffered,
             defer: false
@@ -349,6 +370,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     .appLanguageScoped()
             )
         } else {
+            Logger.warning("Onboarding shown without ScreenManager — Pro picker will fail to render", category: .ui)
             window.contentView = NSHostingView(rootView: flow.appLanguageScoped())
         }
 
@@ -359,6 +381,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
         window.orderFrontRegardless()
+        Logger.info("Onboarding window shown", category: .ui)
     }
 }
 
