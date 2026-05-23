@@ -37,15 +37,7 @@ struct BookmarksLibraryView: View {
             systemImage: "bookmark.fill",
             title: { Text("Bookmarks") },
             metadata: {
-                HStack(spacing: 6) {
-                    Text("\(store.bookmarks.count)")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 1)
-                        .background(Capsule().fill(Color.secondary.opacity(0.15)))
-                    Text("saved wallpapers")
-                }
+                Text("\(store.bookmarks.count) saved wallpapers")
             },
             actions: { EmptyView() }
         )
