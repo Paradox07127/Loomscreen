@@ -1,9 +1,17 @@
+import LiveWallpaperCore
 import SwiftUI
+
+private enum OnboardingStep: Int, CaseIterable {
+    case welcome
+    case pick
+    case done
+}
 
 struct OnboardingFlow: View {
     @AppStorage("Onboarding.Completed") private var hasCompletedOnboarding: Bool = false
-    @State private var currentStep: Int = 0
+    @State private var currentStep: OnboardingStep = .welcome
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.featureCatalog) private var featureCatalog
 
     let onClose: () -> Void
 
@@ -18,8 +26,12 @@ struct OnboardingFlow: View {
                     .padding(.bottom, 32)
             }
         }
-        .frame(width: 520, height: 580)
+        .frame(width: 520, height: 540)
         .animation(.spring(response: 0.4, dampingFraction: 0.85), value: currentStep)
+    }
+
+    private var policy: OnboardingPathPolicy {
+        OnboardingPathPolicy(capabilities: featureCatalog.capabilities)
     }
 
     private var background: some View {
@@ -42,11 +54,11 @@ struct OnboardingFlow: View {
     private var stepContent: some View {
         Group {
             switch currentStep {
-            case 0:
+            case .welcome:
                 OnboardingStepWelcome(nextStep: nextStep)
-            case 1:
-                OnboardingStepFirstWallpaper(nextStep: nextStep, skip: skip)
-            default:
+            case .pick:
+                OnboardingStepFirstWallpaper(policy: policy, nextStep: nextStep, skip: skip)
+            case .done:
                 OnboardingStepDone(finish: finish)
             }
         }
@@ -63,25 +75,27 @@ struct OnboardingFlow: View {
     }
 
     private var progressIndicator: some View {
-        HStack(spacing: 8) {
-            ForEach(0..<3) { index in
+        let totalSteps = OnboardingStep.allCases.count
+        return HStack(spacing: 8) {
+            ForEach(0..<totalSteps, id: \.self) { index in
+                let isCurrent = index == currentStep.rawValue
                 Capsule()
-                    .fill(index == currentStep ? Color.accentColor : Color.secondary.opacity(0.28))
-                    .frame(width: index == currentStep ? 22 : 8, height: 6)
+                    .fill(isCurrent ? Color.accentColor : Color.secondary.opacity(0.28))
+                    .frame(width: isCurrent ? 22 : 8, height: 6)
                     .animation(.spring(response: 0.35, dampingFraction: 0.85), value: currentStep)
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text("Step \(currentStep + 1) of 3"))
+        .accessibilityLabel(Text("Step \(currentStep.rawValue + 1) of \(totalSteps)"))
     }
 
     private func nextStep() {
-        guard currentStep < 2 else { return }
-        withAnimation { currentStep += 1 }
+        guard let next = OnboardingStep(rawValue: currentStep.rawValue + 1) else { return }
+        withAnimation { currentStep = next }
     }
 
     private func skip() {
-        withAnimation { currentStep = 2 }
+        withAnimation { currentStep = .done }
     }
 
     private func finish() {

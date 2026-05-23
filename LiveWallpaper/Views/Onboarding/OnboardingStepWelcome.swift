@@ -5,24 +5,24 @@ struct OnboardingStepWelcome: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Spacer().frame(height: 60)
+            Spacer().frame(height: 36)
 
             appIcon
-                .frame(width: 128, height: 128)
+                .frame(width: 120, height: 120)
                 .shadow(color: .black.opacity(0.18), radius: 18, y: 8)
 
-            Spacer().frame(height: 32)
+            Spacer().frame(height: 26)
 
             VStack(spacing: 10) {
                 Text("Welcome to LiveWallpaper")
                     .font(.system(size: 26, weight: .bold, design: .rounded))
                     .accessibilityAddTraits(.isHeader)
 
-                Text("Bring your desktop to life with stunning dynamic wallpapers across every display.")
+                Text("Bring your desktop to life with dynamic wallpapers — video, web pages, shaders, and more — across every display.")
                     .font(.system(size: 14))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 48)
+                    .padding(.horizontal, 40)
             }
 
             Spacer()
