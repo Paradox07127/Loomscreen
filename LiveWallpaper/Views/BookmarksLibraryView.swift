@@ -68,7 +68,7 @@ struct BookmarksLibraryView: View {
             )
         } else {
             ScrollView {
-                LazyVGrid(columns: columns, spacing: 22) {
+                LazyVGrid(columns: columns, spacing: 18) {
                     ForEach(filteredBookmarks) { bookmark in
                         BookmarkTile(
                             bookmark: bookmark,
@@ -182,15 +182,7 @@ private struct BookmarkTile: View {
             typeBadge
         }
         .aspectRatio(16.0 / 9.0, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.Corner.md, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: DesignTokens.Corner.md, style: .continuous)
-                .strokeBorder(Color.primary.opacity(isHovering ? 0.14 : 0.07), lineWidth: DesignTokens.Card.strokeWidth)
-        }
-        .shadow(color: .black.opacity(isHovering ? DesignTokens.Card.shadowOpacity : 0.0),
-                radius: DesignTokens.Card.shadowRadius, x: 0, y: DesignTokens.Card.shadowYOffset)
-        .scaleEffect(isHovering ? 1.02 : 1.0)
-        .animation(.spring(response: 0.28, dampingFraction: 0.85), value: isHovering)
+        .galleryTileChrome(isHovering: isHovering)
         .onHover { isHovering = $0 }
     }
 
@@ -216,6 +208,8 @@ private struct BookmarkTile: View {
     /// Small icon-only chip in the top-leading corner, only shown when a real
     /// thumbnail is loaded — the SF Symbol fallback already conveys the type
     /// when there's no thumbnail, so the badge would be redundant noise there.
+    /// Forced-dark `ultraThinMaterial` mirrors the Photos / Apple TV metadata
+    /// chip language so the badge sits on the artwork without competing with it.
     private var typeBadge: some View {
         VStack {
             HStack {
@@ -223,11 +217,9 @@ private struct BookmarkTile: View {
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(width: 20, height: 20)
-                    .background(
-                        Circle().fill(bookmark.presentationTint.opacity(0.92))
-                    )
-                    .overlay(Circle().strokeBorder(Color.white.opacity(0.25), lineWidth: 0.5))
-                    .shadow(color: .black.opacity(0.2), radius: 2, y: 1)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .environment(\.colorScheme, .dark)
+                    .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
                     .padding(7)
                 Spacer()
             }

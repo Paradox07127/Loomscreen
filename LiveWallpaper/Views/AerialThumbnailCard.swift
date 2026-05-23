@@ -98,15 +98,7 @@ struct AerialThumbnailCard: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
         }
         .aspectRatio(16.0 / 9.0, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.Corner.md, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: DesignTokens.Corner.md, style: .continuous)
-                .strokeBorder(Color.primary.opacity(isHovering ? 0.14 : 0.07), lineWidth: DesignTokens.Card.strokeWidth)
-        }
-        .shadow(color: .black.opacity(isHovering ? DesignTokens.Card.shadowOpacity : 0.0),
-                radius: DesignTokens.Card.shadowRadius, x: 0, y: DesignTokens.Card.shadowYOffset)
-        .scaleEffect(isHovering ? 1.02 : 1.0)
-        .animation(.spring(response: 0.28, dampingFraction: 0.85), value: isHovering)
+        .galleryTileChrome(isHovering: isHovering)
         .onHover { hovering in
             guard !screens.isEmpty else { return }
             isHovering = hovering
