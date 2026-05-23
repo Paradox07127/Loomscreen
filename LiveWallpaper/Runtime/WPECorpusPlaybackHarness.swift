@@ -14,6 +14,38 @@ struct WPECorpusPlaybackReport: Codable, Sendable {
     let total: Int
     let summary: Summary
     let entries: [Entry]
+    /// Which renderer produced this report. Phase 9 prerequisite: the
+    /// harness routes through `WPERuntimeSelection.current`, so the same
+    /// run that flips the DEBUG flag in DeveloperToolsView produces a
+    /// WebGL report instead of a Metal one. Old archives without this
+    /// field decode as `"metal"` (the historical default).
+    let renderer: String
+
+    init(
+        generatedAt: Date,
+        perSceneTimeoutSeconds: Double,
+        total: Int,
+        summary: Summary,
+        entries: [Entry],
+        renderer: String
+    ) {
+        self.generatedAt = generatedAt
+        self.perSceneTimeoutSeconds = perSceneTimeoutSeconds
+        self.total = total
+        self.summary = summary
+        self.entries = entries
+        self.renderer = renderer
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        generatedAt = try container.decode(Date.self, forKey: .generatedAt)
+        perSceneTimeoutSeconds = try container.decode(Double.self, forKey: .perSceneTimeoutSeconds)
+        total = try container.decode(Int.self, forKey: .total)
+        summary = try container.decode(Summary.self, forKey: .summary)
+        entries = try container.decode([Entry].self, forKey: .entries)
+        renderer = try container.decodeIfPresent(String.self, forKey: .renderer) ?? "metal"
+    }
 
     struct Summary: Codable, Sendable {
         let passCount: Int
@@ -52,10 +84,13 @@ struct WPECorpusPlaybackReport: Codable, Sendable {
     }
 }
 
-/// Headless driver that runs `WPEMetalSceneRenderer.load()` against every
-/// imported scene workshop project and aggregates the outcome. Phase A.3:
-/// turns "57 unknown scenes" into "P pass / F fail / T timeout" with per-
-/// scene resolution diagnostics so Phase B has a target list.
+/// Headless driver that runs `WPESceneRenderer.load()` against every
+/// imported scene workshop project and aggregates the outcome. The
+/// concrete renderer (Metal or WebGL2) is selected per
+/// `WPERuntimeSelection.current`, so flipping the DEBUG flag in
+/// DeveloperToolsView changes which pipeline this harness exercises.
+/// Phase A.3: turns "57 unknown scenes" into "P pass / F fail / T timeout"
+/// with per-scene resolution diagnostics so Phase B has a target list.
 ///
 /// The harness owns the renderer lifetime per scene — it builds the same
 /// `VideoWallpaperWindow` + renderer combo `AmbientWallpaperSessionBuilder`
@@ -93,11 +128,14 @@ final class WPECorpusPlaybackHarness {
 
     private enum HarnessError: Error, LocalizedError, Sendable {
         case metalUnavailable
+        case webGLBundleMissing
 
         var errorDescription: String? {
             switch self {
             case .metalUnavailable:
                 return "Metal is unavailable on this Mac."
+            case .webGLBundleMissing:
+                return "WPE WebGL runtime bundle is missing — run `npm run build` in WPEWebGLRuntime/."
             }
         }
     }
@@ -304,6 +342,15 @@ final class WPECorpusPlaybackHarness {
                 startedAt: startedAt,
                 failureMessage: HarnessError.metalUnavailable.errorDescription
             )
+        } catch HarnessError.webGLBundleMissing {
+            return makeFallbackEntry(
+                discovered: discovered,
+                capabilityTier: capabilityTier,
+                preflightTier: preflightTier,
+                result: .skipped,
+                startedAt: startedAt,
+                failureMessage: HarnessError.webGLBundleMissing.errorDescription
+            )
         } catch {
             return makeFallbackEntry(
                 discovered: discovered,
@@ -321,19 +368,37 @@ final class WPECorpusPlaybackHarness {
         dependencyMounts: [WPEAssetMount],
         engineAssetsRoot: URL?
     ) throws -> HeadlessSession {
-        guard let device = MTLCreateSystemDefaultDevice() else {
-            throw HarnessError.metalUnavailable
+        let frame = CGRect(origin: .zero, size: configuration.rendererFrame)
+        let cacheURL = applicationSupportCacheURL(for: descriptor)
+
+        let renderer: WPESceneRenderer
+        switch WPERuntimeSelection.current {
+        case .webGL:
+            do {
+                renderer = try WPEWebGLSceneRenderer(
+                    descriptor: descriptor,
+                    cacheRootURL: cacheURL,
+                    dependencyMounts: dependencyMounts,
+                    engineAssetsRootURL: engineAssetsRoot,
+                    frame: frame
+                )
+            } catch SceneRenderingError.parseFailed {
+                throw HarnessError.webGLBundleMissing
+            }
+        case .metal:
+            guard let device = MTLCreateSystemDefaultDevice() else {
+                throw HarnessError.metalUnavailable
+            }
+            renderer = try WPEMetalSceneRenderer(
+                descriptor: descriptor,
+                cacheRootURL: cacheURL,
+                dependencyMounts: dependencyMounts,
+                engineAssetsRootURL: engineAssetsRoot,
+                frame: frame,
+                device: device
+            )
         }
 
-        let frame = CGRect(origin: .zero, size: configuration.rendererFrame)
-        let renderer = try WPEMetalSceneRenderer(
-            descriptor: descriptor,
-            cacheRootURL: applicationSupportCacheURL(for: descriptor),
-            dependencyMounts: dependencyMounts,
-            engineAssetsRootURL: engineAssetsRoot,
-            frame: frame,
-            device: device
-        )
         let window = VideoWallpaperWindow(frame: frame)
         window.contentView = renderer.nsView
         window.alphaValue = 0
@@ -410,7 +475,8 @@ final class WPECorpusPlaybackHarness {
             perSceneTimeoutSeconds: configuration.perSceneTimeoutSeconds,
             total: total,
             summary: Self.summary(for: entries),
-            entries: entries
+            entries: entries,
+            renderer: WPERuntimeSelection.current.rawValue
         )
     }
 

@@ -138,23 +138,39 @@ final class AmbientWallpaperSessionBuilder {
         }
 
         let rendererFrame = CGRect(origin: .zero, size: frame.size)
-        guard let device = MTLCreateSystemDefaultDevice() else {
-            Logger.warning("Metal scene renderer requested but Metal is unavailable", category: .screenManager)
-            return nil
-        }
         let renderer: WPESceneRenderer
-        do {
-            renderer = try WPEMetalSceneRenderer(
-                descriptor: descriptor,
-                cacheRootURL: cacheURL,
-                dependencyMounts: dependencyMounts,
-                engineAssetsRootURL: engineAssetsRootURL,
-                frame: rendererFrame,
-                device: device
-            )
-        } catch {
-            Logger.warning("Metal scene renderer could not be created: \(error.localizedDescription)", category: .screenManager)
-            return nil
+        switch WPERuntimeSelection.current {
+        case .webGL:
+            do {
+                renderer = try WPEWebGLSceneRenderer(
+                    descriptor: descriptor,
+                    cacheRootURL: cacheURL,
+                    dependencyMounts: dependencyMounts,
+                    engineAssetsRootURL: engineAssetsRootURL,
+                    frame: rendererFrame
+                )
+            } catch {
+                Logger.warning("WebGL scene renderer could not be created: \(error.localizedDescription)", category: .screenManager)
+                return nil
+            }
+        case .metal:
+            guard let device = MTLCreateSystemDefaultDevice() else {
+                Logger.warning("Metal scene renderer requested but Metal is unavailable", category: .screenManager)
+                return nil
+            }
+            do {
+                renderer = try WPEMetalSceneRenderer(
+                    descriptor: descriptor,
+                    cacheRootURL: cacheURL,
+                    dependencyMounts: dependencyMounts,
+                    engineAssetsRootURL: engineAssetsRootURL,
+                    frame: rendererFrame,
+                    device: device
+                )
+            } catch {
+                Logger.warning("Metal scene renderer could not be created: \(error.localizedDescription)", category: .screenManager)
+                return nil
+            }
         }
 
         let window = VideoWallpaperWindow(frame: frame)

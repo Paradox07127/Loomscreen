@@ -50,8 +50,8 @@ struct DeveloperToolsView: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
-        } else if let summary = lastReport?.summary {
-            Text(verbatim: summaryLabel(summary, total: lastReport?.total ?? entries.count))
+        } else if let report = lastReport {
+            Text(verbatim: "[\(report.renderer)] \(summaryLabel(report.summary, total: report.total))")
                 .foregroundStyle(.secondary)
         } else {
             Text("Phase A.3 — Corpus playback test")
@@ -105,7 +105,9 @@ struct DeveloperToolsView: View {
 
     private var configurationSection: some View {
         GroupBox(label: Text("Configuration").font(.headline)) {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 12) {
+                wpeRuntimeToggle
+                Divider()
                 HStack {
                     Text("Per-scene timeout")
                     Slider(value: $perSceneTimeout, in: 3...30, step: 1)
@@ -115,11 +117,37 @@ struct DeveloperToolsView: View {
                         .monospacedDigit()
                         .frame(width: 36, alignment: .trailing)
                 }
-                Text("Iterates every imported scene workshop project, runs `WPEMetalSceneRenderer.load()` headlessly with the configured timeout, and aggregates pass/fail/timeout outcomes plus resolution diagnostics. The test window is held at alpha 0 behind the desktop — nothing flashes on screen.")
+                Text("Iterates every imported scene workshop project, runs `WPESceneRenderer.load()` headlessly with the configured timeout, and aggregates pass/fail/timeout outcomes plus resolution diagnostics. Uses the active renderer (Metal or WebGL2 — controlled by the toggle above). The test window is held at alpha 0 behind the desktop — nothing flashes on screen.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             .padding(.vertical, 4)
+        }
+    }
+
+    @State private var useWebGLRuntime: Bool = UserDefaults.standard.bool(forKey: WPERuntimeSelection.defaultsKey)
+
+    @ViewBuilder
+    private var wpeRuntimeToggle: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle(isOn: Binding(
+                get: { useWebGLRuntime },
+                set: { newValue in
+                    guard useWebGLRuntime != newValue else { return }
+                    useWebGLRuntime = newValue
+                    UserDefaults.standard.set(newValue, forKey: WPERuntimeSelection.defaultsKey)
+                }
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Use WebGL2 scene runtime")
+                    Text(verbatim: "Mirror of `defaults write Taijia.LiveWallpaper \(WPERuntimeSelection.defaultsKey)`.  Off → Metal + SPIRV-Cross (current default).  On → WKWebView + GLSL ES 3.00.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Text("Takes effect on the next scene-wallpaper load — already-running scenes keep the renderer they started with. DEBUG-only; Release builds are pinned to Metal until Phase 11 cutover.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
         }
     }
 
