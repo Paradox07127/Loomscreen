@@ -534,6 +534,49 @@ final class ScreenManager {
         notifyWallpaperSessionChanged()
     }
 
+    /// Clear only one wallpaper type for this screen — drops that type's saved
+    /// state (saved video bookmark, saved HTML source, etc.). If the
+    /// currently-active wallpaper is the type being cleared, falls back to
+    /// the next saved type (video → html) so the screen doesn't blank out
+    /// while the user still has a usable picks from another tab; only when
+    /// no fallback exists does this collapse to a full `clearWallpaperForScreen`.
+    func clearWallpaperOfType(_ type: WallpaperType, for screen: Screen) {
+        guard var config = configurationStore.get(for: screen.id) else { return }
+
+        let wasActive = (config.activeWallpaper.wallpaperType == type)
+
+        switch type {
+        case .video:
+            config.savedVideoBookmarkData = nil
+            config.playlistBookmarks = nil
+            config.playlistPrimaryIndex = nil
+        case .html:
+            config.savedHTMLSource = nil
+            config.savedHTMLConfig = nil
+        case .metalShader, .scene:
+            break
+        }
+
+        guard wasActive else {
+            saveConfiguration(config)
+            return
+        }
+
+        if type != .video, config.activateSavedVideoWallpaper() {
+            saveConfiguration(config)
+            restoreWallpaperSession(for: screen, configuration: config, preservingState: false)
+            return
+        }
+
+        if type != .html, config.activateSavedHTMLWallpaper() {
+            saveConfiguration(config)
+            restoreWallpaperSession(for: screen, configuration: config, preservingState: false)
+            return
+        }
+
+        clearWallpaperForScreen(screen)
+    }
+
     /// Tears down the live runtime session for a screen without touching persistence.
     private func releaseRuntimeSession(_ screen: Screen) {
         bumpTransition(for: screen.id)

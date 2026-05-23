@@ -111,13 +111,23 @@ struct ShaderWallpaperSection: View {
 
     // MARK: - Cards
 
+    /// The shader currently rendering on this screen — drives the card
+    /// "selected" highlight directly from runtime state rather than from
+    /// draft `selectedShaderSource` so the visual only lights up while a
+    /// shader is actually active. Nil when the screen is on video / html
+    /// / scene / nothing.
+    private var activeShaderSource: ShaderSource? {
+        screenManager.getConfiguration(for: screen)?.activeWallpaper.shaderSource
+    }
+
     private func presetButton(_ preset: MetalShaderPreset) -> some View {
-        let isSelected = selectedShaderSource == .builtin(preset)
+        let source: ShaderSource = .builtin(preset)
+        let isSelected = activeShaderSource == source
         return Button {
-            applyShader(.builtin(preset))
+            applyShader(source)
         } label: {
             shaderCardLabel(
-                source: .builtin(preset),
+                source: source,
                 fallbackIcon: preset.iconName,
                 title: Text(preset.titleKey),
                 isSelected: isSelected
@@ -129,7 +139,7 @@ struct ShaderWallpaperSection: View {
             comment: "A11y label for a shader preset button. %@ = preset name (e.g. Waves)."
         ))
         .accessibilityHint(isSelected
-            ? Text("Currently selected", comment: "A11y hint for the active shader preset button.")
+            ? Text("Currently active. Tap again to stop.", comment: "A11y hint for the active shader card — tapping toggles it off.")
             : Text(
                 "Switch to \(preset.localizedTitle) shader",
                 comment: "A11y hint for a shader preset button. %@ = preset name (e.g. Waves)."
@@ -137,12 +147,13 @@ struct ShaderWallpaperSection: View {
     }
 
     private func customCard(_ shader: CustomShader) -> some View {
-        let isSelected = selectedShaderSource == .custom(shader.id)
+        let source: ShaderSource = .custom(shader.id)
+        let isSelected = activeShaderSource == source
         return Button {
-            applyShader(.custom(shader.id))
+            applyShader(source)
         } label: {
             shaderCardLabel(
-                source: .custom(shader.id),
+                source: source,
                 fallbackIcon: "sparkles.rectangle.stack",
                 title: Text(verbatim: shader.displayName),
                 isSelected: isSelected
@@ -283,7 +294,14 @@ struct ShaderWallpaperSection: View {
 
     // MARK: - Actions
 
+    /// First click on a card: activate that shader. Second click on the
+    /// same active card: stop the shader (falls back to whatever else is
+    /// saved on the screen, or clears entirely if nothing else is saved).
     private func applyShader(_ source: ShaderSource) {
+        if activeShaderSource == source {
+            screenManager.clearWallpaperOfType(.metalShader, for: screen)
+            return
+        }
         withAnimation(DesignTokens.motion(reduceMotion, .snappy(duration: 0.2))) {
             selectedShaderSource = source
         }

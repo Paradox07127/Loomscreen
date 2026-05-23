@@ -572,9 +572,13 @@ struct ScreenDetailView: View {
         }
     }
 
+    /// Per-type clear: only drops the saved state for the tab the user is on
+    /// (Video / HTML / Shader / Scene) and stops the matching runtime. Other
+    /// tabs' saved picks are preserved. Falls back to whatever other type is
+    /// still saved before resorting to a full screen clear.
     private func performClearWallpaper() {
         cleanupPreviewPlayer()
-        screenManager.clearWallpaperForScreen(screen)
+        screenManager.clearWallpaperOfType(draft.selectedWallpaperType, for: screen)
     }
 
     private func requestApplyToAll() {
