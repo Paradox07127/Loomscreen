@@ -7,6 +7,7 @@ import SwiftUI
 struct WPESceneSection: View {
     let screen: Screen
     @Environment(ScreenManager.self) private var screenManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var recentImports: [WPEHistoryEntry] = []
     @State private var selectedHistoryEntry: WPEHistoryEntry?
@@ -25,7 +26,7 @@ struct WPESceneSection: View {
                 historyList
             }
         }
-        .animation(.default, value: recentImports.isEmpty)
+        .animation(reduceMotion ? nil : .default, value: recentImports.isEmpty)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
             Task { @MainActor in reloadHistory() }
@@ -124,7 +125,7 @@ struct WPESceneSection: View {
                 }
 
                 LazyVGrid(
-                    columns: Array(repeating: GridItem(.fixed(160), spacing: 16), count: 4),
+                    columns: [GridItem(.adaptive(minimum: 160, maximum: 220), spacing: 16)],
                     alignment: .leading,
                     spacing: 16
                 ) {
