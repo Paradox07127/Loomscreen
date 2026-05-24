@@ -137,38 +137,31 @@ struct ScreenDetailInspectorPanel: View {
               let descriptor = draft.sceneDescriptor else {
             return "hidden"
         }
-        return "\(screen.id):scene:\(descriptor.workshopID)"
+        // `wpeOrigin` flips when re-imported under a fresh bookmark; reloading
+        // then is required because the cache may still be stale.
+        let originFingerprint = draft.wpeOrigin?.sourceFolderBookmark.count.description ?? "-"
+        return "\(screen.id):scene:\(descriptor.workshopID):\(originFingerprint)"
     }
 
     @MainActor
     private func loadWPESceneCustomSettingsSchema() async {
         guard draft.selectedWallpaperType == .scene,
-              let descriptor = draft.sceneDescriptor,
-              WPEPathSafety.isSafeCacheRelativePath(descriptor.cacheRelativePath) else {
+              let descriptor = draft.sceneDescriptor else {
             wpeSceneCustomSettingsSchema = nil
             return
         }
 
-        let cacheRelativePath = descriptor.cacheRelativePath
-
-        let schema: WallpaperEngineProjectPropertySchema? = await Task.detached(priority: .userInitiated) {
-            guard let supportRoot = try? FileManager.default.url(
-                for: .applicationSupportDirectory,
-                in: .userDomainMask,
-                appropriateFor: nil,
-                create: false
-            ) else { return nil }
-            let folderURL = supportRoot
-                .appendingPathComponent("LiveWallpaper", isDirectory: true)
-                .appendingPathComponent(cacheRelativePath, isDirectory: true)
-            return try? WallpaperEngineProjectPropertySchema.read(
-                from: folderURL,
-                includeSchemeColor: true
-            )
-        }.value
-
+        let outcome = await WPESceneProjectSchemaLoader.load(
+            descriptor: descriptor,
+            wpeOrigin: draft.wpeOrigin
+        )
         guard !Task.isCancelled else { return }
-        wpeSceneCustomSettingsSchema = schema
+        if outcome.schema != nil || outcome.isExpectedAbsence {
+            Logger.info("WPESceneCustomSettings: \(outcome.log)", category: .screenManager)
+        } else {
+            Logger.warning("WPESceneCustomSettings: \(outcome.log)", category: .screenManager)
+        }
+        wpeSceneCustomSettingsSchema = outcome.schema
     }
     #endif
 

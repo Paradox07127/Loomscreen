@@ -233,7 +233,12 @@ final class WallpaperEngineImportService {
                 return .rejected(reason: "Extraction failed")
             }
 
-            return finishSceneImport(project: project, cacheURL: cacheURL, sourceBookmark: sourceBookmark)
+            return finishSceneImport(
+                project: project,
+                cacheURL: cacheURL,
+                sourceFolderURL: folderURL,
+                sourceBookmark: sourceBookmark
+            )
         }
 
         guard let entryURL = resourceURL(root: folderURL, relativePath: project.entryFile),
@@ -252,14 +257,28 @@ final class WallpaperEngineImportService {
             return .rejected(reason: "Directory mirror failed")
         }
 
-        return finishSceneImport(project: project, cacheURL: cacheURL, sourceBookmark: sourceBookmark)
+        return finishSceneImport(
+            project: project,
+            cacheURL: cacheURL,
+            sourceFolderURL: folderURL,
+            sourceBookmark: sourceBookmark
+        )
     }
 
     private func finishSceneImport(
         project: WallpaperEngineProject,
         cacheURL: URL,
+        sourceFolderURL: URL,
         sourceBookmark: Data
     ) -> ImportResult {
+        // `scene.pkg` archives never carry `project.json` (it lives next to
+        // them in the workshop folder), so the .pkg extraction path leaves
+        // the cache without authoring metadata. Top it up here so the
+        // inspector schema loader and downstream readers find it without
+        // re-opening the source bookmark on every cold start.
+        copyProjectManifestIfNeeded(from: sourceFolderURL, to: cacheURL)
+
+
         guard let entryURL = resourceURL(root: cacheURL, relativePath: project.entryFile),
               fileManager.fileExists(atPath: entryURL.path) else {
             return .rejected(reason: "Missing scene entry \(project.entryFile)")
@@ -391,6 +410,21 @@ final class WallpaperEngineImportService {
 
     private func cacheRelativePath(for project: WallpaperEngineProject) -> String {
         "wpe-cache/\(project.workshopID)"
+    }
+
+    private func copyProjectManifestIfNeeded(from sourceFolder: URL, to cacheURL: URL) {
+        let destination = cacheURL.appendingPathComponent("project.json")
+        if fileManager.fileExists(atPath: destination.path) { return }
+        let source = sourceFolder.appendingPathComponent("project.json")
+        guard fileManager.fileExists(atPath: source.path) else { return }
+        do {
+            try fileManager.copyItem(at: source, to: destination)
+        } catch {
+            Logger.warning(
+                "WPE cache: failed to copy project.json into cache (\(error.localizedDescription))",
+                category: .screenManager
+            )
+        }
     }
 
     private func resourceURL(root: URL, relativePath: String) -> URL? {
