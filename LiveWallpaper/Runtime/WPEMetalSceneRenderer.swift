@@ -579,6 +579,38 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         )
     }
 
+    /// Best-effort `.tex-json` sidecar lookup. The atlas slicing
+    /// metadata WPE ships next to each `.tex` (cols/rows derived from
+    /// the sequence frame size, plus the pixel format) lives in
+    /// `<path>.tex-json` — we try the same set of probe paths the main
+    /// texture resolver tried (with `.tex` stripped, `materials/`
+    /// prefix optional), then read + parse the JSON.
+    ///
+    /// Returns `nil` when the sidecar is absent or malformed; the
+    /// caller then treats the texture as a single-frame static sprite.
+    private func parseParticleSpriteSheet(
+        texturePath: String,
+        atlasPixelSize: (width: Int, height: Int)
+    ) -> WPEParticleSpriteSheet? {
+        let probes = textureCandidates(for: texturePath).map { candidate -> String in
+            // Each candidate already covers ".tex", ".png", etc. — turn
+            // them into ".tex-json" siblings.
+            let stripped = (candidate as NSString).deletingPathExtension
+            return "\(stripped).tex-json"
+        }
+        var seen = Set<String>()
+        for probe in probes where seen.insert(probe).inserted {
+            guard let url = try? resourceResolver.resolveExistingFileURL(relativePath: probe),
+                  let data = try? Data(contentsOf: url) else {
+                continue
+            }
+            if let sheet = WPEParticleSpriteSheetParser.parse(data: data, atlasPixelSize: atlasPixelSize) {
+                return sheet
+            }
+        }
+        return nil
+    }
+
     private func makeParticleSceneTransform(for object: WPESceneParticleObject) -> WPEParticleSceneTransform {
         WPEParticleSceneTransform(
             sceneSize: SIMD2<Float>(Float(sceneRenderSize.width), Float(sceneRenderSize.height)),
@@ -608,12 +640,6 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
                 .flatMap(parseParticleMaterial(at:))
             let blendMode = material?.blendMode ?? .translucent
             let sceneTransform = makeParticleSceneTransform(for: object)
-            guard let system = WPEParticleSystem(
-                definition: definition,
-                device: executor.textureSourceDevice,
-                blendMode: blendMode,
-                sceneTransform: sceneTransform
-            ) else { continue }
             guard let texturePath = material?.firstTexturePath else {
                 debugStage("particle", "skip \(object.name) — material missing texture binding")
                 continue
@@ -636,6 +662,17 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
                 debugStage("particle", "skip \(object.name) — dynamic source yielded no texture")
                 continue
             }
+            let spriteSheet = parseParticleSpriteSheet(
+                texturePath: texturePath,
+                atlasPixelSize: (width: resolved.width, height: resolved.height)
+            )
+            guard let system = WPEParticleSystem(
+                definition: definition,
+                device: executor.textureSourceDevice,
+                blendMode: blendMode,
+                sceneTransform: sceneTransform,
+                spriteSheet: spriteSheet
+            ) else { continue }
             // Spread `startDelay + 2s` worth of spawn/integration across
             // the first frame so the user doesn't see a one-particle-
             // per-frame cold start — matches WPE's behaviour where the
@@ -644,6 +681,17 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             system.prewarm(simulatedSeconds: prewarmSeconds)
             particleSystems.append(system)
             particleTextures[ObjectIdentifier(system)] = resolved
+            let textureLabel = resolved.label ?? "<unlabeled>"
+            let sheetDescription: String
+            if let sheet = spriteSheet {
+                sheetDescription = "sheet=\(sheet.cols)x\(sheet.rows)×\(sheet.frameCount) mask=\(sheet.isAlphaMask)"
+            } else {
+                sheetDescription = "sheet=none"
+            }
+            debugStage(
+                "particle.binding",
+                "\(object.name) blend=\(blendMode.rawValue) texturePath=\(texturePath) texture=\(textureLabel) \(sheetDescription)"
+            )
         }
     }
 

@@ -171,6 +171,14 @@ final class WPEMetalRenderExecutor {
             encoder.setRenderPipelineState(pipelineState)
             encoder.setVertexBuffer(system.instanceBuffer, offset: 0, index: 1)
             encoder.setVertexBytes(&projection, length: MemoryLayout<WPEParticleProjection>.stride, index: 2)
+            var sprite = WPEParticleSpriteParams(grid: SIMD4<Float>(
+                Float(system.spriteSheet?.cols ?? 1),
+                Float(system.spriteSheet?.rows ?? 1),
+                Float(system.spriteSheet?.frameCount ?? 1),
+                (system.spriteSheet?.isAlphaMask ?? false) ? 1 : 0
+            ))
+            encoder.setVertexBytes(&sprite, length: MemoryLayout<WPEParticleSpriteParams>.stride, index: 3)
+            encoder.setFragmentBytes(&sprite, length: MemoryLayout<WPEParticleSpriteParams>.stride, index: 0)
             encoder.setFragmentTexture(texture, index: 0)
             encoder.drawPrimitives(
                 type: .triangleStrip,
@@ -182,6 +190,15 @@ final class WPEMetalRenderExecutor {
         encoder.endEncoding()
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()
+    }
+
+    /// Mirrors `WPEParticleSpriteParams` in `WPEMetalBuiltins.metal` —
+    /// `grid.xy = (cols, rows)`, `grid.z = frameCount` (loop modulo),
+    /// `grid.w = 1` flags an r8 alpha-mask atlas (fog particles) so the
+    /// fragment shader pulls colour from the per-particle tint and uses
+    /// the texture sample only as the opacity.
+    struct WPEParticleSpriteParams {
+        var grid: SIMD4<Float>
     }
 
     /// Phase 2D-N: composite a list of pre-rasterized text overlays on top of the supplied output texture.

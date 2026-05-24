@@ -110,6 +110,10 @@ final class WPEParticleSystem {
     let blendMode: WPEParticleBlendMode
     let sceneTransform: WPEParticleSceneTransform
     let instanceBuffer: MTLBuffer
+    /// Atlas slicing metadata for the sprite texture. `nil` ⇒ single-
+    /// frame static texture, the executor binds a full-UV pass-through
+    /// sprite-sheet uniform (cols=rows=frames=1, mask=0).
+    let spriteSheet: WPEParticleSpriteSheet?
 
     private var aliveCount: Int = 0
     private var particles: [Particle]
@@ -146,11 +150,13 @@ final class WPEParticleSystem {
         definition: WPEParticleDefinition,
         device: MTLDevice,
         blendMode: WPEParticleBlendMode = .translucent,
-        sceneTransform: WPEParticleSceneTransform = .identity
+        sceneTransform: WPEParticleSceneTransform = .identity,
+        spriteSheet: WPEParticleSpriteSheet? = nil
     ) {
         self.definition = definition
         self.blendMode = blendMode
         self.sceneTransform = sceneTransform
+        self.spriteSheet = spriteSheet
         let cap = max(1, min(definition.maxCount, Self.absoluteCap))
         self.capacity = cap
         self.particles = .init(repeating: Particle(
@@ -218,6 +224,15 @@ final class WPEParticleSystem {
     func tick(now: Double) {
         advance(now: now)
         let pointer = instanceBuffer.contents().bindMemory(to: WPEParticleInstance.self, capacity: capacity)
+        let frameRate: Float
+        let frameCount: Float
+        if let sheet = spriteSheet {
+            frameRate = Float(sheet.baseFrameRate * definition.sequenceMultiplier)
+            frameCount = Float(sheet.frameCount)
+        } else {
+            frameRate = 0
+            frameCount = 1
+        }
         var written = 0
         for index in 0..<capacity {
             guard particles[index].age != .greatestFiniteMagnitude else { continue }
@@ -225,12 +240,23 @@ final class WPEParticleSystem {
             let envelope = fadeEnvelope(age: particle.age, lifetime: particle.lifetime)
             let alpha = particle.alphaBase * envelope
             let lifetimeFraction = particle.lifetime > 0 ? min(1, max(0, particle.age / particle.lifetime)) : 0
+            // Sprite-sheet frame index = age × frameRate, modulo total
+            // frames (loop the animation if a particle outlives one
+            // sweep). `frameCount = 1` collapses to frame 0 for non-
+            // animated atlases.
+            let frameIndex: Float
+            if frameRate > 0 && frameCount > 1 {
+                let raw = particle.age * frameRate
+                frameIndex = raw.truncatingRemainder(dividingBy: frameCount)
+            } else {
+                frameIndex = 0
+            }
             pointer[written] = WPEParticleInstance(
                 positionAndSize: SIMD4<Float>(
                     particle.position.x, particle.position.y, particle.position.z, particle.size
                 ),
                 color: SIMD4<Float>(particle.color.x, particle.color.y, particle.color.z, alpha),
-                rotationAndLife: SIMD4<Float>(particle.rotationZ, lifetimeFraction, 0, 0)
+                rotationAndLife: SIMD4<Float>(particle.rotationZ, lifetimeFraction, frameIndex, 0)
             )
             written += 1
         }

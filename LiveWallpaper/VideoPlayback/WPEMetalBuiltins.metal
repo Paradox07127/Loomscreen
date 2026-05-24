@@ -255,7 +255,7 @@ struct WPEGenericParticleUniforms {
 struct WPEParticleInstance {
     float4 positionAndSize;   // x, y, z (unused), size in pixels
     float4 color;             // rgb 0..1, a = current alpha
-    float4 rotationAndLife;   // x = rotationZ rad, y = lifetimeFraction, z/w reserved
+    float4 rotationAndLife;   // x = rotationZ rad, y = lifetimeFraction, z = spriteFrameIndex, w reserved
 };
 
 struct WPEParticleVertexOut {
@@ -269,19 +269,27 @@ struct WPEParticleProjection {
     float4 padding;           // reserved for future world transform
 };
 
+// Sprite-sheet slice + format hint. `grid.w == 1` means the atlas is an
+// r8 single-channel alpha mask (fog particles), and the fragment shader
+// reads colour from the per-particle tint instead of the texture.
+struct WPEParticleSpriteParams {
+    float4 grid;              // x=cols, y=rows, z=frameCount, w=isAlphaMask
+};
+
 vertex WPEParticleVertexOut wpe_particle_vertex(
     uint vertexID [[vertex_id]],
     uint instanceID [[instance_id]],
     constant WPEParticleInstance* instances [[buffer(1)]],
-    constant WPEParticleProjection& projection [[buffer(2)]]
+    constant WPEParticleProjection& projection [[buffer(2)]],
+    constant WPEParticleSpriteParams& sprite [[buffer(3)]]
 ) {
     float2 corner;
-    float2 uv;
+    float2 unitUV;
     switch (vertexID) {
-        case 0: corner = float2(-0.5, -0.5); uv = float2(0.0, 1.0); break;
-        case 1: corner = float2( 0.5, -0.5); uv = float2(1.0, 1.0); break;
-        case 2: corner = float2(-0.5,  0.5); uv = float2(0.0, 0.0); break;
-        default: corner = float2( 0.5,  0.5); uv = float2(1.0, 0.0); break;
+        case 0: corner = float2(-0.5, -0.5); unitUV = float2(0.0, 1.0); break;
+        case 1: corner = float2( 0.5, -0.5); unitUV = float2(1.0, 1.0); break;
+        case 2: corner = float2(-0.5,  0.5); unitUV = float2(0.0, 0.0); break;
+        default: corner = float2( 0.5,  0.5); unitUV = float2(1.0, 0.0); break;
     }
     WPEParticleInstance instance = instances[instanceID];
     // Spin the quad in screen space around its center. Z is the only
@@ -301,21 +309,40 @@ vertex WPEParticleVertexOut wpe_particle_vertex(
     );
     float2 cornerNDC = rotatedCorner * (instance.positionAndSize.w * 2.0)
         / float2(halfWidth * 2.0, halfHeight * 2.0);
+
+    // Sprite-sheet sub-rect: map the [0,1] unit UV into the cell for
+    // the current frame index. `grid.x/y = (cols, rows)`; with both 1
+    // we degenerate to the full atlas (single-frame sprites).
+    float cols = max(sprite.grid.x, 1.0);
+    float rows = max(sprite.grid.y, 1.0);
+    float2 frameUVScale = float2(1.0 / cols, 1.0 / rows);
+    uint frameIdx = uint(instance.rotationAndLife.z);
+    uint colsI = uint(cols);
+    uint col = frameIdx % max(colsI, 1u);
+    uint row = frameIdx / max(colsI, 1u);
+    float2 uvOrigin = float2(float(col), float(row)) * frameUVScale;
+
     WPEParticleVertexOut out;
     out.position = float4(centerNDC + cornerNDC, 0.0, 1.0);
-    out.uv = uv;
+    out.uv = uvOrigin + unitUV * frameUVScale;
     out.color = instance.color;
     return out;
 }
 
 fragment half4 wpe_particle_instanced_fragment(
     WPEParticleVertexOut in [[stage_in]],
-    texture2d<half, access::sample> texture0 [[texture(0)]]
+    texture2d<half, access::sample> texture0 [[texture(0)]],
+    constant WPEParticleSpriteParams& sprite [[buffer(0)]]
 ) {
     constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
     float4 sampled = float4(texture0.sample(linearSampler, in.uv));
-    float3 rgb = sampled.rgb * in.color.rgb;
-    float alpha = sampled.a * in.color.a;
+    // Single-channel alpha-mask atlases (WPE fog particles, format=r8)
+    // pack the sprite shape into the R channel only — the texture has
+    // no RGB content of its own. The particle's per-instance tint
+    // becomes the colour, the texture sample becomes the opacity.
+    bool isMask = sprite.grid.w > 0.5;
+    float3 rgb = isMask ? in.color.rgb : (sampled.rgb * in.color.rgb);
+    float alpha = (isMask ? sampled.r : sampled.a) * in.color.a;
     // Straight (non-premultiplied) alpha. The Metal pipeline state's
     // blend factors handle the translucent/additive/normal split set
     // up by `particlePipelineState` — keeping the shader factor-agnostic

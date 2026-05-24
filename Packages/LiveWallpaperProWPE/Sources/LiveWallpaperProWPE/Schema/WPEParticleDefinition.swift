@@ -72,6 +72,11 @@ public struct WPEParticleDefinition: Equatable, Sendable {
     public let turbulenceOffset: Double
     public let turbulencePhaseMin: Double
     public let turbulencePhaseMax: Double
+    /// `sequencemultiplier` from the particle JSON. Multiplies the
+    /// texture's `.tex-json` baseline `frames/duration` rate so the
+    /// runtime can pick a sub-frame index every tick. `1` is the
+    /// WPE default; `0` freezes on frame 0.
+    public let sequenceMultiplier: Double
 
     public init(
         materialRelativePath: String?,
@@ -108,7 +113,8 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         turbulenceTimescale: Double = 0.01,
         turbulenceOffset: Double = 0,
         turbulencePhaseMin: Double = 0,
-        turbulencePhaseMax: Double = 0
+        turbulencePhaseMax: Double = 0,
+        sequenceMultiplier: Double = 1
     ) {
         self.materialRelativePath = materialRelativePath
         self.maxCount = maxCount
@@ -145,6 +151,7 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         self.turbulenceOffset = turbulenceOffset
         self.turbulencePhaseMin = min(turbulencePhaseMin, turbulencePhaseMax)
         self.turbulencePhaseMax = max(turbulencePhaseMin, turbulencePhaseMax)
+        self.sequenceMultiplier = max(0, sequenceMultiplier)
     }
 
     public static let empty = WPEParticleDefinition(
@@ -186,6 +193,7 @@ public enum WPEParticleDefinitionParser {
             ?? (json["maxcount"] as? Double).map { Int($0) }
             ?? 0
         let startDelay = WPEValueParser.double(json["starttime"]) ?? 0
+        let sequenceMultiplier = WPEValueParser.double(json["sequencemultiplier"]) ?? 1
 
         var rate: Double = 0
         var origin: SIMD3<Double> = SIMD3(0, 0, 0)
@@ -350,7 +358,8 @@ public enum WPEParticleDefinitionParser {
             turbulenceTimescale: turbulenceTimescale,
             turbulenceOffset: turbulenceOffset,
             turbulencePhaseMin: turbulencePhaseMin,
-            turbulencePhaseMax: turbulencePhaseMax
+            turbulencePhaseMax: turbulencePhaseMax,
+            sequenceMultiplier: sequenceMultiplier
         )
     }
 }
