@@ -20,12 +20,11 @@ public enum WPEParticleBlendMode: String, Sendable, CaseIterable, Equatable {
 }
 
 /// Lean particle-system descriptor parsed from a WPE `particles/*.json`
-/// file. We model just enough of the emitter/initializer/operator DSL to
-/// drive a CPU emitter that produces visually-present results — full
-/// fidelity (every operator, ribbon renderer, audio reactivity) waits on
-/// later phases. The runtime can render any system that fits this
-/// schema; missing fields fall back to sensible defaults so a partial
-/// match doesn't drop the entire emitter.
+/// file. Fields cover the subset of the WPE DSL the runtime actually
+/// drives — emitter geometry, the random initializers, and the operator
+/// parameters that affect frame-by-frame motion (movement, alphafade,
+/// angular movement). Anything not in the JSON falls back to a safe
+/// default so partial schemas still produce a working emitter.
 public struct WPEParticleDefinition: Equatable, Sendable {
     public let materialRelativePath: String?
     public let maxCount: Int
@@ -43,7 +42,26 @@ public struct WPEParticleDefinition: Equatable, Sendable {
     public let velocityMax: SIMD3<Double>
     public let colorMin: SIMD3<Double>
     public let colorMax: SIMD3<Double>
+    /// Per-particle base alpha sampled on spawn (alpharandom). The
+    /// fade-in/out envelope multiplies this value at draw time.
+    public let alphaMin: Double
+    public let alphaMax: Double
+    /// Euler rotation ranges; only the Z component drives the 2D quad
+    /// orientation today, but we keep the full vec3 so a future 3D
+    /// renderer can hook in without another schema break.
+    public let rotationMin: SIMD3<Double>
+    public let rotationMax: SIMD3<Double>
+    /// Angular-velocity initializer (radians/s); Z drives 2D spin.
+    public let angularVelocityMin: SIMD3<Double>
+    public let angularVelocityMax: SIMD3<Double>
     public let fadeInSeconds: Double
+    public let fadeOutSeconds: Double
+    /// `operator: movement.gravity` (world units / s²) and drag scalar.
+    public let gravity: SIMD3<Double>
+    public let drag: Double
+    /// `operator: angularmovement` — applied on rotationZ.
+    public let angularForceZ: Double
+    public let angularDrag: Double
 
     public init(
         materialRelativePath: String?,
@@ -62,7 +80,18 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         colorMin: SIMD3<Double>,
         colorMax: SIMD3<Double>,
         fadeInSeconds: Double,
-        directionMask: SIMD3<Double> = SIMD3<Double>(1, 1, 1)
+        directionMask: SIMD3<Double> = SIMD3<Double>(1, 1, 1),
+        alphaMin: Double = 1,
+        alphaMax: Double = 1,
+        rotationMin: SIMD3<Double> = SIMD3<Double>(0, 0, 0),
+        rotationMax: SIMD3<Double> = SIMD3<Double>(0, 0, 0),
+        angularVelocityMin: SIMD3<Double> = SIMD3<Double>(0, 0, 0),
+        angularVelocityMax: SIMD3<Double> = SIMD3<Double>(0, 0, 0),
+        fadeOutSeconds: Double = 0,
+        gravity: SIMD3<Double> = SIMD3<Double>(0, 0, 0),
+        drag: Double = 0,
+        angularForceZ: Double = 0,
+        angularDrag: Double = 0
     ) {
         self.materialRelativePath = materialRelativePath
         self.maxCount = maxCount
@@ -80,7 +109,18 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         self.velocityMax = velocityMax
         self.colorMin = colorMin
         self.colorMax = colorMax
+        self.alphaMin = alphaMin
+        self.alphaMax = alphaMax
+        self.rotationMin = rotationMin
+        self.rotationMax = rotationMax
+        self.angularVelocityMin = angularVelocityMin
+        self.angularVelocityMax = angularVelocityMax
         self.fadeInSeconds = fadeInSeconds
+        self.fadeOutSeconds = fadeOutSeconds
+        self.gravity = gravity
+        self.drag = drag
+        self.angularForceZ = angularForceZ
+        self.angularDrag = angularDrag
     }
 
     public static let empty = WPEParticleDefinition(
@@ -147,6 +187,12 @@ public enum WPEParticleDefinitionParser {
         var velocityMax = def.velocityMax
         var colorMin = def.colorMin
         var colorMax = def.colorMax
+        var alphaMin: Double = def.alphaMin
+        var alphaMax: Double = def.alphaMax
+        var rotationMin: SIMD3<Double> = def.rotationMin
+        var rotationMax: SIMD3<Double> = def.rotationMax
+        var angularVelocityMin: SIMD3<Double> = def.angularVelocityMin
+        var angularVelocityMax: SIMD3<Double> = def.angularVelocityMax
 
         if let initializers = json["initializer"] as? [[String: Any]] {
             for entry in initializers {
@@ -180,6 +226,23 @@ public enum WPEParticleDefinitionParser {
                     if let v = WPEValueParser.vector3(entry["value"]) {
                         colorMin = v; colorMax = v
                     }
+                case "alpharandom":
+                    alphaMin = WPEValueParser.double(entry["min"]) ?? alphaMin
+                    alphaMax = WPEValueParser.double(entry["max"]) ?? alphaMax
+                case "alpha":
+                    if let v = WPEValueParser.double(entry["value"]) {
+                        alphaMin = v; alphaMax = v
+                    }
+                case "rotationrandom":
+                    // WPE default range for `rotationrandom` is (0,0,0)..
+                    // (2π,2π,2π) when min/max are absent — the runtime
+                    // wants a full random rotation, not a flat zero.
+                    let fallbackMax = SIMD3<Double>(2 * .pi, 2 * .pi, 2 * .pi)
+                    rotationMin = WPEValueParser.vector3(entry["min"]) ?? SIMD3(0, 0, 0)
+                    rotationMax = WPEValueParser.vector3(entry["max"]) ?? fallbackMax
+                case "angularvelocityrandom":
+                    angularVelocityMin = WPEValueParser.vector3(entry["min"]) ?? angularVelocityMin
+                    angularVelocityMax = WPEValueParser.vector3(entry["max"]) ?? angularVelocityMax
                 default:
                     break
                 }
@@ -187,11 +250,28 @@ public enum WPEParticleDefinitionParser {
         }
 
         var fadeInSeconds: Double = 0.1
+        var fadeOutSeconds: Double = 0
+        var gravity: SIMD3<Double> = SIMD3(0, 0, 0)
+        var drag: Double = 0
+        var angularForceZ: Double = 0
+        var angularDrag: Double = 0
         if let operators = json["operator"] as? [[String: Any]] {
             for entry in operators {
                 guard let name = (entry["name"] as? String)?.lowercased() else { continue }
-                if name == "alphafade" {
+                switch name {
+                case "alphafade":
                     fadeInSeconds = WPEValueParser.double(entry["fadeintime"]) ?? fadeInSeconds
+                    fadeOutSeconds = WPEValueParser.double(entry["fadeouttime"]) ?? fadeOutSeconds
+                case "movement":
+                    gravity = WPEValueParser.vector3(entry["gravity"]) ?? gravity
+                    drag = WPEValueParser.double(entry["drag"]) ?? drag
+                case "angularmovement":
+                    if let force = WPEValueParser.vector3(entry["force"]) {
+                        angularForceZ = force.z
+                    }
+                    angularDrag = WPEValueParser.double(entry["drag"]) ?? angularDrag
+                default:
+                    break
                 }
             }
         }
@@ -213,7 +293,18 @@ public enum WPEParticleDefinitionParser {
             colorMin: colorMin,
             colorMax: colorMax,
             fadeInSeconds: max(0, fadeInSeconds),
-            directionMask: directionMask
+            directionMask: directionMask,
+            alphaMin: max(0, min(alphaMin, alphaMax)),
+            alphaMax: max(alphaMin, alphaMax),
+            rotationMin: rotationMin,
+            rotationMax: rotationMax,
+            angularVelocityMin: angularVelocityMin,
+            angularVelocityMax: angularVelocityMax,
+            fadeOutSeconds: max(0, fadeOutSeconds),
+            gravity: gravity,
+            drag: max(0, drag),
+            angularForceZ: angularForceZ,
+            angularDrag: max(0, angularDrag)
         )
     }
 }

@@ -636,6 +636,12 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
                 debugStage("particle", "skip \(object.name) — dynamic source yielded no texture")
                 continue
             }
+            // Spread `startDelay + 2s` worth of spawn/integration across
+            // the first frame so the user doesn't see a one-particle-
+            // per-frame cold start — matches WPE's behaviour where the
+            // scene loads with a populated emitter.
+            let prewarmSeconds = max(0, definition.startDelay) + 2.0
+            system.prewarm(simulatedSeconds: prewarmSeconds)
             particleSystems.append(system)
             particleTextures[ObjectIdentifier(system)] = resolved
         }

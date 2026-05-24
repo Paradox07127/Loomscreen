@@ -255,6 +255,7 @@ struct WPEGenericParticleUniforms {
 struct WPEParticleInstance {
     float4 positionAndSize;   // x, y, z (unused), size in pixels
     float4 color;             // rgb 0..1, a = current alpha
+    float4 rotationAndLife;   // x = rotationZ rad, y = lifetimeFraction, z/w reserved
 };
 
 struct WPEParticleVertexOut {
@@ -283,13 +284,22 @@ vertex WPEParticleVertexOut wpe_particle_vertex(
         default: corner = float2( 0.5,  0.5); uv = float2(1.0, 0.0); break;
     }
     WPEParticleInstance instance = instances[instanceID];
+    // Spin the quad in screen space around its center. Z is the only
+    // rotation axis we honour for 2D sprite particles; X/Y would need
+    // a perspective particle pipeline (flags & 4 in the WPE JSON) that
+    // we don't render yet.
+    float rot = instance.rotationAndLife.x;
+    float c = cos(rot);
+    float s = sin(rot);
+    float2 rotatedCorner = float2(c * corner.x - s * corner.y,
+                                  s * corner.x + c * corner.y);
     float halfWidth = max(projection.sceneSize.x, 1.0) * 0.5;
     float halfHeight = max(projection.sceneSize.y, 1.0) * 0.5;
     float2 centerNDC = float2(
         instance.positionAndSize.x / halfWidth,
         instance.positionAndSize.y / halfHeight
     );
-    float2 cornerNDC = corner * (instance.positionAndSize.w * 2.0)
+    float2 cornerNDC = rotatedCorner * (instance.positionAndSize.w * 2.0)
         / float2(halfWidth * 2.0, halfHeight * 2.0);
     WPEParticleVertexOut out;
     out.position = float4(centerNDC + cornerNDC, 0.0, 1.0);

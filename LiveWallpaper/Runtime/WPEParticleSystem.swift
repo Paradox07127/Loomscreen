@@ -7,8 +7,9 @@ import simd
 /// Per-instance attributes the GPU vertex stage reads from. Layout MUST
 /// match `WPEParticleInstance` in `WPEMetalBuiltins.metal` exactly.
 struct WPEParticleInstance {
-    var positionAndSize: SIMD4<Float> // x, y in centered scene pixels ; z (unused, reserved); w = size
-    var color: SIMD4<Float>           // rgb 0…1, a = current alpha
+    var positionAndSize: SIMD4<Float>   // x, y in centered scene pixels ; z (unused, reserved); w = size
+    var color: SIMD4<Float>             // rgb 0…1, a = current alpha (base × fade envelope)
+    var rotationAndLife: SIMD4<Float>   // x = rotationZ radians ; y = lifetimeFraction [0,1] ; z,w reserved
 }
 
 /// One-shot world-space placement applied to a `WPEParticleSystem` at
@@ -80,13 +81,16 @@ struct WPEParticleSceneTransform {
 ///
 /// Lifecycle:
 ///   - `init` clamps capacity, allocates the persistent GPU instance
-///     buffer, and bakes the scene transform once. Subsequent ticks
-///     spawn directly into world-space coordinates so the vertex shader
-///     only needs the centered ortho projection.
+///     buffer, and bakes the scene transform once.
+///   - `prewarm(simulatedSeconds:)` (optional, after load) runs the
+///     simulator forward without writing the GPU buffer so the first
+///     frame the renderer presents already has the spawn population
+///     spread out, killing the cold-start "one-particle-per-second"
+///     visual stutter.
 ///   - `tick(now:)` advances every alive particle by the elapsed delta
 ///     since the last tick, recycles dead ones, and emits new ones at
 ///     the configured rate.
-///   - `aliveInstances` returns the slice the renderer should bind.
+///   - `liveInstanceCount` returns the slice the renderer should bind.
 final class WPEParticleSystem {
     let definition: WPEParticleDefinition
     let capacity: Int
@@ -100,9 +104,13 @@ final class WPEParticleSystem {
     private var lastTickTime: Double?
     private var firstTickTime: Double?
     private var rng: SystemRandomNumberGenerator
+    /// Cached gravity in render space (Y-up). Mirrors the velocity rule
+    /// (no Y-flip) so a JSON `gravity = "0 -50 0"` actually pulls down
+    /// on screen.
+    private let gravity: SIMD3<Float>
 
     /// Hard ceiling so a single emitter can't blow the GPU memory budget.
-    /// 8K particles × 32 bytes = 256 KB per system, comfortably bounded.
+    /// 8K particles × 48 bytes = 384 KB per system.
     static let absoluteCap = 8192
 
     private struct Particle {
@@ -110,6 +118,9 @@ final class WPEParticleSystem {
         var velocity: SIMD3<Float>
         var size: Float
         var color: SIMD3<Float>
+        var rotationZ: Float
+        var angularVelocityZ: Float
+        var alphaBase: Float
         var lifetime: Float
         var age: Float       // Float.greatestFiniteMagnitude when slot is free
     }
@@ -130,6 +141,9 @@ final class WPEParticleSystem {
             velocity: .zero,
             size: 0,
             color: SIMD3(1, 1, 1),
+            rotationZ: 0,
+            angularVelocityZ: 0,
+            alphaBase: 1,
             lifetime: 0,
             age: .greatestFiniteMagnitude
         ), count: cap)
@@ -142,6 +156,11 @@ final class WPEParticleSystem {
         buffer.label = "WPE particle instances"
         self.instanceBuffer = buffer
         self.rng = SystemRandomNumberGenerator()
+        self.gravity = SIMD3<Float>(
+            Float(definition.gravity.x),
+            Float(definition.gravity.y),
+            Float(definition.gravity.z)
+        )
     }
 
     private func uniform(_ low: Double, _ high: Double) -> Double {
@@ -158,7 +177,50 @@ final class WPEParticleSystem {
         )
     }
 
+    /// Advance the simulator without writing the GPU instance buffer.
+    /// Called once after scene load so the first real `tick(now:)`
+    /// presents a population that's already past `startDelay` and has
+    /// a few seconds of spread. `step` is the per-substep delta — pick
+    /// something close to a frame (~16ms) so spawn/integration math
+    /// stays accurate.
+    func prewarm(simulatedSeconds: Double, step: Double = 1.0 / 60) {
+        guard simulatedSeconds > 0, definition.rate > 0 else { return }
+        let substeps = Int((simulatedSeconds / step).rounded(.up))
+        var virtualNow: Double = 0
+        for _ in 0..<substeps {
+            virtualNow += step
+            advance(now: virtualNow)
+        }
+    }
+
     func tick(now: Double) {
+        advance(now: now)
+        let pointer = instanceBuffer.contents().bindMemory(to: WPEParticleInstance.self, capacity: capacity)
+        var written = 0
+        for index in 0..<capacity {
+            guard particles[index].age != .greatestFiniteMagnitude else { continue }
+            let particle = particles[index]
+            let envelope = fadeEnvelope(age: particle.age, lifetime: particle.lifetime)
+            let alpha = particle.alphaBase * envelope
+            let lifetimeFraction = particle.lifetime > 0 ? min(1, max(0, particle.age / particle.lifetime)) : 0
+            pointer[written] = WPEParticleInstance(
+                positionAndSize: SIMD4<Float>(
+                    particle.position.x, particle.position.y, particle.position.z, particle.size
+                ),
+                color: SIMD4<Float>(particle.color.x, particle.color.y, particle.color.z, alpha),
+                rotationAndLife: SIMD4<Float>(particle.rotationZ, lifetimeFraction, 0, 0)
+            )
+            written += 1
+        }
+        aliveCount = written
+    }
+
+    var liveInstanceCount: Int { aliveCount }
+
+    /// Integrate every alive particle and spawn new ones. Split from
+    /// `tick(now:)` so `prewarm` can advance the simulator without
+    /// touching the GPU buffer.
+    private func advance(now: Double) {
         defer { lastTickTime = now }
         if firstTickTime == nil { firstTickTime = now }
         let dt: Float
@@ -168,6 +230,9 @@ final class WPEParticleSystem {
             dt = 0
         }
         let elapsed = now - (firstTickTime ?? now)
+        let dragScalar: Float = max(0, 1 - Float(definition.drag) * dt)
+        let angularDragScalar: Float = max(0, 1 - Float(definition.angularDrag) * dt)
+        let angularForce = Float(definition.angularForceZ)
 
         for index in 0..<capacity {
             guard particles[index].age != .greatestFiniteMagnitude else { continue }
@@ -176,7 +241,14 @@ final class WPEParticleSystem {
                 particles[index].age = .greatestFiniteMagnitude
                 continue
             }
+            // Linear motion with gravity + drag.
+            particles[index].velocity += gravity * dt
+            if dragScalar < 1 { particles[index].velocity *= dragScalar }
             particles[index].position += particles[index].velocity * dt
+            // Angular motion with force + drag.
+            particles[index].angularVelocityZ += angularForce * dt
+            if angularDragScalar < 1 { particles[index].angularVelocityZ *= angularDragScalar }
+            particles[index].rotationZ += particles[index].angularVelocityZ * dt
         }
 
         if elapsed >= definition.startDelay && definition.rate > 0 {
@@ -187,31 +259,27 @@ final class WPEParticleSystem {
                 spawn(into: slot)
             }
         }
-
-        let pointer = instanceBuffer.contents().bindMemory(to: WPEParticleInstance.self, capacity: capacity)
-        var written = 0
-        for index in 0..<capacity {
-            guard particles[index].age != .greatestFiniteMagnitude else { continue }
-            let particle = particles[index]
-            let fadeIn = max(0.0001, Float(definition.fadeInSeconds))
-            let fadeOutStart = particle.lifetime * 0.75
-            var alpha: Float = 1
-            if particle.age < fadeIn {
-                alpha = particle.age / fadeIn
-            } else if particle.age > fadeOutStart {
-                let tail = max(0.0001, particle.lifetime - fadeOutStart)
-                alpha = max(0, 1 - (particle.age - fadeOutStart) / tail)
-            }
-            pointer[written] = WPEParticleInstance(
-                positionAndSize: SIMD4<Float>(particle.position.x, particle.position.y, particle.position.z, particle.size),
-                color: SIMD4<Float>(particle.color.x, particle.color.y, particle.color.z, alpha)
-            )
-            written += 1
-        }
-        aliveCount = written
     }
 
-    var liveInstanceCount: Int { aliveCount }
+    /// alphafade.fadeintime / fadeouttime are *seconds* (WPE absolute
+    /// time, not lifetime fraction). When both are 0 we keep the base
+    /// alpha for the whole lifespan — matches WPE's "no fade".
+    private func fadeEnvelope(age: Float, lifetime: Float) -> Float {
+        let fadeIn = Float(definition.fadeInSeconds)
+        let fadeOut = Float(definition.fadeOutSeconds)
+        var value: Float = 1
+        if fadeIn > 0 && age < fadeIn {
+            value = max(0, age / fadeIn)
+        }
+        if fadeOut > 0 {
+            let tailStart = max(0, lifetime - fadeOut)
+            if age > tailStart {
+                let tailDuration = max(0.0001, lifetime - tailStart)
+                value = min(value, max(0, 1 - (age - tailStart) / tailDuration))
+            }
+        }
+        return value
+    }
 
     private func nextFreeSlot() -> Int? {
         for index in 0..<capacity {
@@ -244,6 +312,9 @@ final class WPEParticleSystem {
         let size = Float(uniform(definition.sizeMin, definition.sizeMax)) * sizeScale
         let rawColor = uniformVector(definition.colorMin, definition.colorMax)
         let lifetime = Float(uniform(definition.lifetimeMin, definition.lifetimeMax))
+        let alpha = Float(uniform(definition.alphaMin, definition.alphaMax))
+        let rotationVec = uniformVector(definition.rotationMin, definition.rotationMax)
+        let angularVec = uniformVector(definition.angularVelocityMin, definition.angularVelocityMax)
         particles[slot] = Particle(
             position: position,
             velocity: velocity,
@@ -253,6 +324,9 @@ final class WPEParticleSystem {
                 min(max(rawColor.y / 255, 0), 1),
                 min(max(rawColor.z / 255, 0), 1)
             ),
+            rotationZ: rotationVec.z,
+            angularVelocityZ: angularVec.z,
+            alphaBase: min(max(alpha, 0), 1),
             lifetime: max(0.0001, lifetime),
             age: 0
         )
