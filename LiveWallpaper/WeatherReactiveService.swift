@@ -94,7 +94,7 @@ final class WeatherReactiveService {
         locationProvider.requestCoreLocationAuthorizationIfNeeded()
 
         updateTask?.cancel()
-        startFetch(invalidateIPCache: false)
+        startFetch()
         updateTask = Task { [weak self] in
             while !Task.isCancelled {
                 do {
@@ -103,7 +103,7 @@ final class WeatherReactiveService {
                     return
                 }
                 await MainActor.run {
-                    self?.startFetch(invalidateIPCache: false)
+                    self?.startFetch()
                 }
             }
         }
@@ -117,14 +117,11 @@ final class WeatherReactiveService {
     }
 
     func refresh() {
-        startFetch(invalidateIPCache: true)
+        startFetch()
     }
 
     /// Single-flight fetch — supersedes any in-flight fetch so refresh taps don't pile up overlapping requests.
-    private func startFetch(invalidateIPCache: Bool) {
-        if invalidateIPCache {
-            locationProvider.invalidateIPGeolocationCache()
-        }
+    private func startFetch() {
         fetchTask?.cancel()
         fetchTask = Task { [weak self] in
             await self?.fetchWeatherIfPossible()
@@ -149,6 +146,21 @@ final class WeatherReactiveService {
     // MARK: - Weather Fetch (Open-Meteo)
 
     private func fetchWeatherIfPossible() async {
+        // Off means the entire weather-reactive pipeline is dormant: no
+        // location query, no Open-Meteo request, no observable updates.
+        // We still clear the cached state so a previously-rendered
+        // particle effect stops driving the wallpaper.
+        let preference = SettingsManager.shared.loadGlobalSettings().weatherLocation
+        if preference.source == .off {
+            currentCondition = nil
+            currentParticleEffect = .none
+            currentEffectAdjustments = .neutral
+            activeLocationLabel = nil
+            lastError = nil
+            locationStatus = .notDetermined
+            return
+        }
+
         locationStatus = .fetching
 
         let resolution = await locationProvider.resolveCoordinate()

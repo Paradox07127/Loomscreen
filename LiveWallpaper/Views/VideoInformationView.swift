@@ -19,7 +19,7 @@ struct VideoInformationOverlay: View {
     @State private var videoResolution: (width: Int, height: Int)? = nil
     @State private var videoFrameRate: Double = 0
     @State private var fileSize: String = ""
-    @State private var formatBadges: [String] = []
+    @State private var formatBadges: [VideoFormatBadge] = []
 
     @ViewBuilder
     var body: some View {
@@ -36,7 +36,7 @@ struct VideoInformationOverlay: View {
             if !formatBadges.isEmpty {
                 HStack(spacing: 4) {
                     ForEach(formatBadges, id: \.self) { badge in
-                        Text(verbatim: badge)
+                        Text(verbatim: badge.displayLabel)
                             .font(.system(size: 10, weight: .bold, design: .rounded))
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)

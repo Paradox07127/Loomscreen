@@ -157,67 +157,13 @@ enum BugReporter {
 
     /// Pulls the most recent WARNING/ERROR/FAULT lines from `LogFileSink`
     /// (which holds the lock so we never observe a torn write or stale
-    /// rotation), then runs each line through `sanitize(_:)` to strip
-    /// `/Users/<name>` segments and file:// URLs before they leave the
-    /// process.
+    /// rotation), then runs each line through `PIISanitizer.scrub` so home
+    /// paths, URL queries, lat/lon, and bearer/basic/token fragments are
+    /// masked before they leave the process.
     private static func sanitizedRecentLogLines() -> [String] {
         LogFileSink.shared
             .recentDiagnosticLines(maxLines: recentLogLineCount, maxLineLength: maxLogLineLength)
-            .map(sanitize)
-    }
-
-    /// Best-effort PII scrub. Existing app log lines embed full paths,
-    /// `file://` URLs, and occasionally HTTP query strings; we mask the
-    /// home-directory prefix and replace the username so a publicly-posted
-    /// snippet cannot identify the user, while keeping the relative path
-    /// useful for triage.
-    static func sanitize(_ line: String) -> String {
-        var result = line
-
-        if let home = ProcessInfo.processInfo.environment["HOME"], !home.isEmpty {
-            result = result.replacingOccurrences(of: home, with: "~")
-        }
-        // Catch any other absolute home path even if HOME isn't set or the
-        // line came from another process snapshot. Replaces
-        // `/Users/<name>` (or `/Volumes/.../Users/<name>`) with `/Users/<redacted>`.
-        result = result.replacingOccurrences(
-            of: #"/Users/[^/\s'"]+"#,
-            with: "/Users/<redacted>",
-            options: .regularExpression
-        )
-        // Strip query strings from URL-shaped substrings so signed CDN
-        // links, tokens, and email-shaped query params can't leak.
-        result = result.replacingOccurrences(
-            of: #"(https?://[^\s'"]+)\?[^\s'"]*"#,
-            with: "$1?<query-redacted>",
-            options: .regularExpression
-        )
-        result = result.replacingOccurrences(
-            of: #"file://[^\s'"]+"#,
-            with: "file://<redacted>",
-            options: .regularExpression
-        )
-        // Defense-in-depth for Weather (and any future) errors that bring
-        // precise location coordinates or auth fragments through as plain
-        // localizedDescription text rather than a full URL. The query-string
-        // scrub above catches "https://api?latitude=…", but `error` strings
-        // can be re-thrown without the host, e.g. "URL Error -1009: lat=37.7…".
-        result = result.replacingOccurrences(
-            of: #"(?i)\b(lat(?:itude)?|lon(?:gitude)?)\s*[=:]\s*-?\d{1,3}(?:\.\d+)?"#,
-            with: "$1=<redacted>",
-            options: .regularExpression
-        )
-        result = result.replacingOccurrences(
-            of: #"(?i)\b(token|api[_-]?key|access[_-]?token|refresh[_-]?token|secret|password)\s*[=:]\s*([^&\s'"]+)"#,
-            with: "$1=<redacted>",
-            options: .regularExpression
-        )
-        result = result.replacingOccurrences(
-            of: #"(?i)\b(Bearer|Token)\s+[A-Za-z0-9._~+/=-]+"#,
-            with: "$1 <redacted>",
-            options: .regularExpression
-        )
-        return result
+            .map(PIISanitizer.scrub)
     }
 
     // MARK: - Side-effecting helpers (called from the sheet's button actions)

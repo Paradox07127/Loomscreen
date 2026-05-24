@@ -8,18 +8,24 @@ import AppKit
 struct ShortcutsSettingsView: View {
     @State private var bindings: [GlobalShortcutAction.RawAction: GlobalShortcutBinding?] = [:]
     @State private var rejectionMessage: String?
+    @State private var globalShortcutsEnabled: Bool
 
     init() {
-        _bindings = State(initialValue: SettingsManager.shared.loadGlobalSettings().globalShortcuts)
+        let settings = SettingsManager.shared.loadGlobalSettings()
+        _bindings = State(initialValue: settings.globalShortcuts)
+        _globalShortcutsEnabled = State(initialValue: settings.globalShortcutsEnabled)
     }
 
     var body: some View {
         Form {
+            masterEnableSection
+
             Section {
                 ForEach(GlobalShortcutAction.allCases) { action in
                     ShortcutRow(
                         action: action,
                         binding: bindingFor(action),
+                        isEnabled: globalShortcutsEnabled,
                         onCapture: { newBinding in updateBinding(newBinding, for: action) },
                         onClear: { updateBinding(nil, for: action) },
                         onReset: { resetToDefault(action) }
@@ -36,8 +42,49 @@ struct ShortcutsSettingsView: View {
             } footer: {
                 shortcutFooter
             }
+            .disabled(!globalShortcutsEnabled)
         }
         .settingsFormChrome(minWidth: 500, minHeight: 400)
+        .onReceive(NotificationCenter.default.publisher(for: .globalShortcutsDidChange)) { _ in
+            // Pick up reset / import side-effects fired from elsewhere in
+            // the app so neither the toggle nor the row bindings get
+            // overwritten by a stale local @State on the next save.
+            let latest = SettingsManager.shared.loadGlobalSettings()
+            var didResync = false
+            if globalShortcutsEnabled != latest.globalShortcutsEnabled {
+                globalShortcutsEnabled = latest.globalShortcutsEnabled
+                didResync = true
+            }
+            if bindings != latest.globalShortcuts {
+                bindings = latest.globalShortcuts
+                didResync = true
+            }
+            if didResync { rejectionMessage = nil }
+        }
+    }
+
+    /// Single-line toggle row. The explanation lives in the section
+    /// footer rather than repeating itself as a subtitle inside the row.
+    private var masterEnableSection: some View {
+        Section {
+            Toggle("Enable Global Shortcuts", isOn: masterEnableBinding)
+                .toggleStyle(.switch)
+                .accessibilityHint(Text("Master switch for every global shortcut. Bindings are preserved while off."))
+        }
+    }
+
+    /// Identity-set guarded binding so a noisy reconcile pass cannot fire
+    /// `persistSettings` repeatedly (CLAUDE.md §8).
+    private var masterEnableBinding: Binding<Bool> {
+        Binding(
+            get: { globalShortcutsEnabled },
+            set: { newValue in
+                guard globalShortcutsEnabled != newValue else { return }
+                globalShortcutsEnabled = newValue
+                rejectionMessage = nil
+                persistSettings()
+            }
+        )
     }
 
     /// Compact bullet list replaces the original long-paragraph footer so
@@ -72,6 +119,9 @@ struct ShortcutsSettingsView: View {
     }
 
     private func updateBinding(_ newBinding: GlobalShortcutBinding?, for action: GlobalShortcutAction) {
+        // If the master switch flipped off mid-capture, drop the result
+        // rather than persisting a binding the user can no longer trigger.
+        guard globalShortcutsEnabled else { return }
         if let newBinding {
             switch validate(newBinding, for: action) {
             case .valid:
@@ -89,18 +139,23 @@ struct ShortcutsSettingsView: View {
             rejectionMessage = nil
         }
         bindings[action.rawAction] = newBinding
-        persistBindings()
+        persistSettings()
     }
 
     private func resetToDefault(_ action: GlobalShortcutAction) {
         rejectionMessage = nil
         bindings.removeValue(forKey: action.rawAction)
-        persistBindings()
+        persistSettings()
     }
 
-    private func persistBindings() {
+    /// Writes the bindings dictionary AND the master enable flag in a
+    /// single save so a toggle flip can never race with a binding edit.
+    /// `GlobalShortcutManager` re-evaluates both on
+    /// `.globalShortcutsDidChange`.
+    private func persistSettings() {
         var settings = SettingsManager.shared.loadGlobalSettings()
         settings.globalShortcuts = bindings
+        settings.globalShortcutsEnabled = globalShortcutsEnabled
         SettingsManager.shared.saveGlobalSettings(settings)
         Task { @MainActor in
             NotificationCenter.default.post(name: .globalShortcutsDidChange, object: nil)
@@ -125,6 +180,10 @@ struct ShortcutsSettingsView: View {
 private struct ShortcutRow: View {
     let action: GlobalShortcutAction
     let binding: GlobalShortcutBinding?
+    /// Driven by the master enable toggle. When false the capture field
+    /// and per-row menu are dimmed and unclickable, but the row stays
+    /// visible so the user sees their saved combinations.
+    let isEnabled: Bool
     let onCapture: (GlobalShortcutBinding) -> Void
     let onClear: () -> Void
     let onReset: () -> Void
@@ -150,6 +209,13 @@ private struct ShortcutRow: View {
                     onCapture: onCapture
                 )
                 .frame(width: 140)
+                .disabled(!isEnabled)
+                .opacity(isEnabled ? 1 : 0.55)
+                .onChange(of: isEnabled) { _, enabled in
+                    // If the master switch flips off mid-capture, drop
+                    // the listener so we don't trap the next key event.
+                    if !enabled { isCapturing = false }
+                }
 
                 Menu {
                     Button("Clear", role: .destructive) { onClear() }
@@ -159,6 +225,8 @@ private struct ShortcutRow: View {
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
+                .disabled(!isEnabled)
+                .opacity(isEnabled ? 1 : 0.55)
                 .accessibilityLabel(Text("More options for \(action.displayName)", comment: "Shortcut row menu a11y label. The placeholder is the shortcut action name."))
             }
         }

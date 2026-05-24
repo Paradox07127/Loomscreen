@@ -41,15 +41,38 @@ extension VideoFormatInfo {
 
     /// Ordered list of badges to display, longest-edge resolution first so
     /// "4K HDR ProRes" reads naturally.
-    public var badges: [String] {
-        var result: [String] = []
+    public var badges: [VideoFormatBadge] {
+        var result: [VideoFormatBadge] = []
         if is8K {
-            result.append("8K")
+            result.append(.resolution8K)
         } else if is4K {
-            result.append("4K")
+            result.append(.resolution4K)
         }
-        if isHDR { result.append("HDR") }
-        if isProRes { result.append("ProRes") }
+        if isHDR { result.append(.hdr) }
+        if isProRes { result.append(.proRes) }
         return result
+    }
+}
+
+/// Type-safe representation of the badge taxonomy surfaced by
+/// `VideoFormatInfo.badges`. Each case maps to a short, verbatim glyph
+/// label ("4K", "HDR", "ProRes") that — per Apple HIG — is not translated,
+/// but having an enum unlocks exhaustive switching, Equatable comparison
+/// in tests, and a single rename surface if the visual representation
+/// changes later.
+public enum VideoFormatBadge: Equatable, Hashable, Sendable {
+    case resolution4K
+    case resolution8K
+    case hdr
+    case proRes
+
+    /// Verbatim glyph shown in the inspector capsule and aerial card.
+    public var displayLabel: String {
+        switch self {
+        case .resolution4K: return "4K"
+        case .resolution8K: return "8K"
+        case .hdr:          return "HDR"
+        case .proRes:       return "ProRes"
+        }
     }
 }

@@ -126,15 +126,28 @@ struct WPECacheManagementView: View {
 
     @ViewBuilder
     private func cacheRow(for entry: WPECacheStats.Entry) -> some View {
+        let title = displayTitle(for: entry.workshopID)
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(displayTitle(for: entry.workshopID))
+                // Workshop names can be 60+ chars; without explicit
+                // truncation a single long entry forces every row in the
+                // list to expand to the longest title's width and wraps,
+                // breaking the dense table feel.
+                Text(verbatim: title)
                     .font(.system(size: 13, weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(Text(verbatim: title))
                 Text(rowSubtitle(for: entry))
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
-            Spacer()
+            .layoutPriority(1)
+
+            Spacer(minLength: 8)
+
             Button(role: .destructive) {
                 confirmPurge(entry: entry)
             } label: {
