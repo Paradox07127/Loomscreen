@@ -22,6 +22,13 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
     /// exclusive rendering takeover). 1fps keeps the timer alive so we can
     /// bounce back when throttling is released.
     static let throttledPreferredFPS = 1
+    /// Above this raw-bytes footprint, eager-upload a multi-frame `.tex`
+    /// would burn far more VRAM than the runtime needs at any one moment
+    /// — route through `WPETexLazyAnimatedTextureSource` instead. Threshold
+    /// chosen to keep small (≤2-3 frame) workshop sprite-sheets on the
+    /// fast eager path while sending workshop 3725117707-class assets
+    /// (60 × 122 MB raw) to the streaming source.
+    private static let lazyAnimationRawByteThreshold = 200_000_000
 
     private let descriptor: SceneDescriptor
     private let cacheRootURL: URL
@@ -80,6 +87,19 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
     private(set) var renderGraph: WPERenderGraph?
     private(set) var renderPipeline: WPEPreparedRenderPipeline?
     private(set) var lastRuntimeUniforms: WPEMetalRuntimeUniforms?
+
+    /// Temporary diagnostic: emit one structured per-frame summary every
+    /// ~1s so we can see (a) time advancing, (b) dynamic texture sources
+    /// swapping frames, (c) output texture size. Used to validate the
+    /// Metal path for multi-frame `.tex` scenes (3725117707 repro).
+    private var lastHeartbeatTime: TimeInterval = -1
+
+    /// Temporary investigation flag: when true, the per-frame particle
+    /// draw is skipped. Reads
+    /// `UserDefaults.standard.bool(forKey: "WPEMetalSkipParticles")`
+    /// at scene load. Toggle via the shell + relaunch the app.
+    private let skipParticleRendering: Bool =
+        UserDefaults.standard.bool(forKey: "WPEMetalSkipParticles")
     var renderedTexture: MTLTexture? { outputTexture }
     /// CGImage readback of the most recent rendered frame; populated at the
     /// end of `performLoad()` so `WPESceneDetailView` can show a thumbnail
@@ -296,6 +316,33 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         }.value
         let passCount = pipeline.layers.reduce(0) { $0 + $1.passes.count }
         debugStage("pipeline.build.done", "passes=\(passCount)")
+        for layer in pipeline.layers {
+            for preparedPass in layer.passes {
+                let p = preparedPass.pass
+                let target: String = {
+                    switch p.target {
+                    case .scene: return "scene"
+                    case .layerComposite(let n): return "comp:\(n)"
+                    case .fbo(let n): return "fbo:\(n)"
+                    }
+                }()
+                let source: String = {
+                    switch p.source {
+                    case .image(let v): return "img:\(v)"
+                    case .asset(let v): return "asset:\(v)"
+                    case .fbo(let v): return "fbo:\(v)"
+                    case .previous: return "previous"
+                    }
+                }()
+                let combos = p.combos.isEmpty
+                    ? "-"
+                    : p.combos.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ",")
+                debugStage(
+                    "pipeline.pass",
+                    "layer=\(layer.graphLayer.objectName) id=\(p.id) shader=\(p.shader) src=\(source) tgt=\(target) blend=\(p.blending) combos=\(combos)"
+                )
+            }
+        }
         try Task.checkCancellation()
 
         renderGraph = graph
@@ -316,7 +363,10 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         debugStage("particles.load", "begin")
         onProgress?("Loading particle systems")
         await loadParticleSystems(from: document)
-        debugStage("particles.load.done", "systems=\(particleSystems.count)")
+        debugStage(
+            "particles.load.done",
+            "systems=\(particleSystems.count) skipParticleRendering=\(skipParticleRendering)"
+        )
         try Task.checkCancellation()
 
         debugStage("text.load", "begin")
@@ -385,7 +435,12 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             runtimeUniforms: uniforms,
             cameraUniforms: cameraUniforms
         )
-        if !particleSystems.isEmpty {
+        // Temporary scene-isolation switch for the 3725117707 visual
+        // investigation. Defaults to false (particles render normally).
+        // Flip via `defaults write Taijia.LiveWallpaper WPEMetalSkipParticles -bool YES`
+        // and relaunch — relaunch is required because we cache the value
+        // at scene load.
+        if !particleSystems.isEmpty && !skipParticleRendering {
             for system in particleSystems {
                 system.tick(now: uniforms.time)
             }
@@ -757,6 +812,18 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             do {
                 if shouldTryTexturePayload(candidate) {
                     do {
+                        if let streaming = try resolveStreamingPayloadIfHeavy(candidate) {
+                            let source = try textureLoader.makeLazyAnimatedTextureSource(
+                                from: streaming,
+                                label: label
+                            )
+                            Logger.info(
+                                "WPE Metal lazy .tex animation '\(candidate)' raw=\(streaming.totalUncompressedImageBytes)B frames=\(streaming.frames.count)",
+                                category: .screenManager
+                            )
+                            return .dynamicSource(source)
+                        }
+
                         let payload = try resourceResolver.resolveTexturePayload(relativePath: candidate)
 
                         if payload.videoPayload != nil {
@@ -783,6 +850,70 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             }
         }
         throw lastError ?? WPEMetalRenderExecutorError.missingTexture(.image(relativePath))
+    }
+
+    /// Returns a streaming payload only when the source is a `.tex` whose
+    /// total raw image footprint clears the lazy threshold. Anything
+    /// smaller falls through to the eager path so single-frame textures
+    /// and tiny sprite-sheets don't pay the per-frame decompression cost.
+    /// Accepts both `.tex`-suffixed candidates and bare names (probes
+    /// `<bare>` and `materials/<bare>.tex` in the same order the eager
+    /// path uses).
+    private func resolveStreamingPayloadIfHeavy(_ candidate: String) throws -> WPETexStreamingPayload? {
+        let probeCandidates: [String]
+        let ext = (candidate as NSString).pathExtension.lowercased()
+        if ext == "tex" {
+            probeCandidates = [candidate]
+        } else if ext.isEmpty {
+            let stripped = (candidate as NSString).deletingPathExtension
+            probeCandidates = [candidate, "materials/\(stripped).tex"]
+        } else {
+            return nil
+        }
+
+        for probe in probeCandidates {
+            let payload: WPETexStreamingPayload
+            do {
+                payload = try resourceResolver.resolveStreamingTexturePayload(relativePath: probe)
+            } catch let SceneResourceResolver.ResolveError.texture(decodeError) {
+                switch decodeError {
+                case .unsupportedAnimation, .unsupportedFormat:
+                    debugStage(
+                        "tex.lazy.skip",
+                        "probe=\(probe) reason=\(decodeError)"
+                    )
+                    continue
+                default:
+                    debugStage(
+                        "tex.lazy.skip",
+                        "probe=\(probe) decodeError=\(decodeError)"
+                    )
+                    continue
+                }
+            } catch SceneResourceResolver.ResolveError.fileMissing,
+                    SceneResourceResolver.ResolveError.unsupportedTexture {
+                continue
+            } catch {
+                debugStage(
+                    "tex.lazy.skip",
+                    "probe=\(probe) error=\(error)"
+                )
+                continue
+            }
+            if payload.totalUncompressedImageBytes <= Self.lazyAnimationRawByteThreshold {
+                debugStage(
+                    "tex.lazy.skip",
+                    "probe=\(probe) raw=\(payload.totalUncompressedImageBytes)B below threshold"
+                )
+                continue
+            }
+            debugStage(
+                "tex.lazy.hit",
+                "probe=\(probe) raw=\(payload.totalUncompressedImageBytes)B images=\(payload.compressedImages.count) frames=\(payload.frames.count)"
+            )
+            return payload
+        }
+        return nil
     }
 
     /// Phase 2E: stages MP4 bytes into the per-process video cache and constructs a `WPEVideoTextureSource` bound to the executor's MTLDevice.
@@ -837,11 +968,26 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
     /// Phase 2E: pulls fresh `MTLTexture`s from any dynamic sources before every render call.
     private func texturesForCurrentFrame(time: TimeInterval) -> [String: MTLTexture] {
         var textures = loadedTextures
+        var dynamicFrameLog: [String] = []
         for (path, source) in dynamicTextureSources {
             if let texture = source.texture(at: time) {
                 textures[path] = texture
                 loadedTextures[path] = texture
+                if let animated = source as? WPETexAnimatedTextureSource {
+                    dynamicFrameLog.append("\(path)#\(animated.frameIndex(at: time))")
+                } else if let lazy = source as? WPETexLazyAnimatedTextureSource {
+                    dynamicFrameLog.append("\(path) \(lazy.debugFrameDescription(at: time))")
+                } else {
+                    dynamicFrameLog.append("\(path)#?")
+                }
             }
+        }
+        if time - lastHeartbeatTime >= 1.0 || lastHeartbeatTime < 0 {
+            lastHeartbeatTime = time
+            let scene = "\(Int(sceneRenderSize.width))x\(Int(sceneRenderSize.height))"
+            let output = outputTexture.map { "\($0.width)x\($0.height)" } ?? "nil"
+            let dyn = dynamicFrameLog.isEmpty ? "none" : dynamicFrameLog.joined(separator: " ")
+            debugStage("heartbeat", "t=\(String(format: "%.2f", time))s scene=\(scene) output=\(output) dynamic=\(dyn)")
         }
         return textures
     }

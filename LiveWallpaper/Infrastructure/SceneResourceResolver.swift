@@ -102,6 +102,36 @@ struct SceneResourceResolver: Sendable {
         }
     }
 
+    /// Returns a streaming payload (compressed bytes + TEXS schedule)
+    /// for `WPETexLazyAnimatedTextureSource`. The file is mmap'd so the
+    /// 60-image multi-frame `.tex` files (>700 MB on disk) never fully
+    /// materialize in resident memory.
+    func resolveStreamingTexturePayload(relativePath: String) throws -> WPETexStreamingPayload {
+        guard !relativePath.isEmpty else { throw ResolveError.fileMissing }
+        let resolvedPath = try resolveImageReference(relativePath: relativePath, depth: 0)
+        let target = try resolveURL(for: resolvedPath)
+
+        guard fileManager.fileExists(atPath: target.path) else {
+            throw ResolveError.fileMissing
+        }
+        guard target.pathExtension.lowercased() == "tex" else {
+            throw ResolveError.unsupportedTexture
+        }
+
+        let payload: Data
+        do {
+            payload = try Data(contentsOf: target, options: [.mappedIfSafe])
+        } catch {
+            throw ResolveError.fileMissing
+        }
+        switch decoder.extractStreamingPayload(data: payload) {
+        case .success(let streaming):
+            return streaming
+        case .failure(let error):
+            throw ResolveError.texture(error)
+        }
+    }
+
     /// Walks WPE's image-reference chain until it produces a path to a real asset (`.tex` / `.png` / `.jpg` / `.gif`).
     private func resolveImageReference(relativePath: String, depth: Int) throws -> String {
         let lowered = (relativePath as NSString).pathExtension.lowercased()

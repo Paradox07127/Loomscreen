@@ -149,6 +149,37 @@ struct WPETexDecoderTests {
         }
     }
 
+    @Test("Streaming extraction preserves TEXS sub-rects and compressed image payloads")
+    func streamingExtractionPreservesSubRectsAndCompressedPayloads() throws {
+        let width = 4
+        let height = 4
+        let raw0 = Data(repeating: 0x11, count: width * height * 4)
+        let raw1 = Data(repeating: 0x22, count: width * height * 4)
+        let compressed0 = try lz4RawCompress(raw0)
+        let compressed1 = try lz4RawCompress(raw1)
+        let buffer = makeStreamingTestImage(
+            width: width,
+            height: height,
+            compressedPayloads: [compressed0, compressed1],
+            decompressedByteCount: width * height * 4
+        )
+
+        let payload = try WPETexDecoder().extractStreamingPayload(data: buffer).get()
+
+        #expect(payload.compressedImages.count == 2)
+        #expect(payload.compressedImages[0].payloads[0].compressedBytes == compressed0)
+        #expect(payload.compressedImages[0].payloads[0].isCompressed == true)
+        #expect(payload.compressedImages[0].payloads[0].decompressedByteCount == width * height * 4)
+        #expect(payload.frames.count == 4)
+        #expect(payload.frames[0].imageID == 0)
+        #expect(payload.frames[0].subRect == CGRect(x: 0, y: 0, width: 4, height: 2))
+        #expect(payload.frames[1].imageID == 0)
+        #expect(payload.frames[1].subRect == CGRect(x: 0, y: 2, width: 4, height: 2))
+        #expect(payload.frames[2].imageID == 1)
+        #expect(payload.frameRate > 0)
+        #expect(payload.loop == true)
+    }
+
     // MARK: - Fixture helpers
 
     /// Synthesises a TEXV0005 / TEXI0001 / TEXB0003 buffer carrying a uniform-colour RGBA8888 mipmap.
@@ -261,6 +292,64 @@ struct WPETexDecoderTests {
     private func appendUInt32(_ data: inout Data, _ value: UInt32) {
         var le = value.littleEndian
         withUnsafeBytes(of: &le) { data.append(contentsOf: $0) }
+    }
+
+    private func appendFloat32(_ data: inout Data, _ value: Float) {
+        var bits = value.bitPattern.littleEndian
+        withUnsafeBytes(of: &bits) { data.append(contentsOf: $0) }
+    }
+
+    private func makeStreamingTestImage(
+        width: Int,
+        height: Int,
+        compressedPayloads: [Data],
+        decompressedByteCount: Int
+    ) -> Data {
+        var buffer = Data()
+        appendMagic(&buffer, magic: "TEXV0005")
+        appendMagic(&buffer, magic: "TEXI0001")
+        appendInt32(&buffer, Int32(WPETexFormat.rgba8888.rawValue))
+        appendUInt32(&buffer, 0)
+        appendInt32(&buffer, Int32(width))
+        appendInt32(&buffer, Int32(height))
+        appendInt32(&buffer, Int32(width))
+        appendInt32(&buffer, Int32(height))
+        appendInt32(&buffer, 0)
+
+        appendMagic(&buffer, magic: "TEXB0004")
+        appendInt32(&buffer, Int32(compressedPayloads.count))
+        appendInt32(&buffer, -1)
+        appendInt32(&buffer, 0)
+        for payload in compressedPayloads {
+            appendInt32(&buffer, 1)
+            appendInt32(&buffer, Int32(width))
+            appendInt32(&buffer, Int32(height))
+            appendUInt32(&buffer, 1)
+            appendUInt32(&buffer, UInt32(decompressedByteCount))
+            appendUInt32(&buffer, UInt32(payload.count))
+            buffer.append(payload)
+        }
+
+        appendMagic(&buffer, magic: "TEXS0003")
+        appendInt32(&buffer, 4)
+        appendInt32(&buffer, Int32(width))
+        appendInt32(&buffer, Int32(height))
+        for (imageID, rect) in [
+            (0, (Float(0), Float(0), Float(width), Float(height / 2))),
+            (0, (Float(0), Float(height / 2), Float(width), Float(height / 2))),
+            (1, (Float(0), Float(0), Float(width), Float(height / 2))),
+            (1, (Float(0), Float(height / 2), Float(width), Float(height / 2)))
+        ] {
+            appendInt32(&buffer, Int32(imageID))
+            appendFloat32(&buffer, 0.03)
+            appendFloat32(&buffer, rect.0)
+            appendFloat32(&buffer, rect.1)
+            appendFloat32(&buffer, rect.2)
+            appendFloat32(&buffer, 0)
+            appendFloat32(&buffer, 0)
+            appendFloat32(&buffer, rect.3)
+        }
+        return buffer
     }
 
     /// Compresses `data` using LZ4 raw.

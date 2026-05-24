@@ -40,6 +40,23 @@ struct WPETexDecoder: Sendable {
         }
     }
 
+    /// Lazy streaming path. Parses the container headers + TEXS schedule
+    /// but leaves each frame's mipmap payload in its on-disk compressed
+    /// form; the caller (`WPETexLazyAnimatedTextureSource`) decompresses
+    /// one image at a time during playback. Replaces the eager 60 ×
+    /// full-image upload that `extractTexturePayload` would otherwise
+    /// produce for multi-frame scenes such as workshop 3725117707.
+    func extractStreamingPayload(data: Data) -> Result<WPETexStreamingPayload, WPETexDecodeError> {
+        do {
+            let parsed = try parse(data: data)
+            return .success(try makeStreamingPayload(from: parsed))
+        } catch let error as WPETexDecodeError {
+            return .failure(error)
+        } catch {
+            return .failure(.decodeFailed(mipmap: 0, detail: error.localizedDescription))
+        }
+    }
+
     /// Metal path.
     func extractTexturePayload(data: Data) -> Result<WPETexTexturePayload, WPETexDecodeError> {
         do {
@@ -97,21 +114,50 @@ struct WPETexDecoder: Sendable {
     }
 
     private func makeAnimationTrack(from parsed: ParsedTex) throws -> WPETexAnimationTrack? {
-        guard parsed.bitmap.frames.count > 1 else { return nil }
+        let texsFrames = parsed.frameInfo?.frames ?? []
+        guard parsed.bitmap.frames.count > 1 || !texsFrames.isEmpty else { return nil }
 
-        let frameInfos = parsed.frameInfo?.frames
         let defaultDuration = 1.0 / WPETexAnimationTrack.defaultFrameRate
+        let info = parsed.info
 
-        let frames = try parsed.bitmap.frames.enumerated().map { index, _ in
-            let frameInfo = frameInfos?[safe: index]
-            let imageID = frameInfo?.imageID ?? index
+        struct Descriptor {
+            let fallbackIndex: Int
+            let frameInfo: WPETexFrameInfo?
+        }
+        let descriptors: [Descriptor]
+        if texsFrames.isEmpty {
+            descriptors = parsed.bitmap.frames.indices.map { Descriptor(fallbackIndex: $0, frameInfo: nil) }
+        } else {
+            descriptors = texsFrames.enumerated().map { Descriptor(fallbackIndex: $0.offset, frameInfo: $0.element) }
+        }
+
+        // TEXS routinely re-uses a single source image across multiple
+        // animation frames (workshop 3725117707 = 180 frames sourced from
+        // 60 images). Decompressing the mipmap fresh per frame allocates
+        // ~120 MB × frame-count of duplicate RGBA — fast path to OOM.
+        // Cache the per-image normalized bytes and share them by
+        // reference across frames.
+        var mipmapsByImageID: [Int: [WPETexTextureMipmap]] = [:]
+        func mipmaps(for sourceIndex: Int) throws -> [WPETexTextureMipmap] {
+            if let cached = mipmapsByImageID[sourceIndex] { return cached }
+            let materialized = try normalizedTextureMipmaps(parsed.bitmap.frames[sourceIndex], info: info)
+            mipmapsByImageID[sourceIndex] = materialized
+            return materialized
+        }
+
+        let frames = try descriptors.map { descriptor -> WPETexAnimationFrame in
+            let frameInfo = descriptor.frameInfo
+            let requestedID = frameInfo?.imageID ?? descriptor.fallbackIndex
+            let sourceIndex = parsed.bitmap.frames.indices.contains(requestedID)
+                ? requestedID
+                : min(descriptor.fallbackIndex, max(parsed.bitmap.frames.count - 1, 0))
             let frameTime = frameInfo?.frameTime ?? 0
             let duration = frameTime > 0 ? frameTime : defaultDuration
-            let sourceIndex = parsed.bitmap.frames.indices.contains(imageID) ? imageID : index
             return WPETexAnimationFrame(
                 imageID: sourceIndex,
                 duration: duration,
-                mipmaps: try normalizedTextureMipmaps(parsed.bitmap.frames[sourceIndex], info: parsed.info)
+                mipmaps: try mipmaps(for: sourceIndex),
+                subRect: frameInfo?.subRect(textureWidth: info.width, textureHeight: info.height)
             )
         }
 
@@ -136,6 +182,92 @@ struct WPETexDecoder: Sendable {
             return nil
         }
         return WPETexVideoPayload(bytes: mip.payload)
+    }
+
+    private func makeStreamingPayload(from parsed: ParsedTex) throws -> WPETexStreamingPayload {
+        guard !parsed.bitmap.isVideoPayload else {
+            throw WPETexDecodeError.unsupportedAnimation
+        }
+        // Any uncompressed-or-BC format that Metal samples natively. The
+        // lazy source resolves the concrete `MTLPixelFormat` per-upload
+        // via `WPEMetalTextureFormatMapper`, so we can leave block-
+        // compressed payloads compressed all the way to the GPU.
+        guard let format = parsed.info.format else {
+            throw WPETexDecodeError.unsupportedFormat(code: parsed.info.textureFormatCode)
+        }
+        switch format {
+        case .rgba8888, .r8, .rg88, .dxt1, .dxt3, .dxt5, .bc7:
+            break
+        case .rgba1010102:
+            throw WPETexDecodeError.unsupportedFormat(code: parsed.info.textureFormatCode)
+        }
+        let texsFrames = parsed.frameInfo?.frames ?? []
+        guard parsed.bitmap.frames.count > 1 || !texsFrames.isEmpty else {
+            throw WPETexDecodeError.unsupportedAnimation
+        }
+
+        let compressedImages: [WPETexCompressedImage] = try parsed.bitmap.frames.map { mipmaps in
+            guard let largest = mipmaps.first else {
+                throw WPETexDecodeError.missingBitmapBlock
+            }
+            let payloads = mipmaps.map { mipmap in
+                WPETexCompressedMipmap(
+                    index: mipmap.index,
+                    width: mipmap.width,
+                    height: mipmap.height,
+                    isCompressed: mipmap.isCompressed,
+                    compressedBytes: mipmap.payload,
+                    decompressedByteCount: mipmap.decompressedByteCount
+                        ?? format.expectedByteCount(width: mipmap.width, height: mipmap.height)
+                )
+            }
+            return WPETexCompressedImage(
+                width: largest.width,
+                height: largest.height,
+                payloads: payloads
+            )
+        }
+
+        let defaultDuration = 1.0 / WPETexAnimationTrack.defaultFrameRate
+        let info = parsed.info
+        let frames: [WPETexStreamingFrame]
+        if texsFrames.isEmpty {
+            frames = parsed.bitmap.frames.indices.map { imageID in
+                WPETexStreamingFrame(
+                    imageID: imageID,
+                    subRect: CGRect(x: 0, y: 0, width: info.width, height: info.height),
+                    duration: defaultDuration
+                )
+            }
+        } else {
+            frames = texsFrames.enumerated().map { offset, frameInfo in
+                let imageID = parsed.bitmap.frames.indices.contains(frameInfo.imageID)
+                    ? frameInfo.imageID
+                    : min(offset, max(parsed.bitmap.frames.count - 1, 0))
+                let duration = frameInfo.frameTime > 0 ? frameInfo.frameTime : defaultDuration
+                return WPETexStreamingFrame(
+                    imageID: imageID,
+                    subRect: frameInfo.subRect(textureWidth: info.width, textureHeight: info.height),
+                    duration: duration
+                )
+            }
+        }
+
+        let validDurations = frames.map(\.duration).filter { $0 > 0 }
+        let averageDuration = validDurations.isEmpty
+            ? defaultDuration
+            : validDurations.reduce(0, +) / Double(validDurations.count)
+        let frameRate = averageDuration > 0
+            ? 1.0 / averageDuration
+            : WPETexAnimationTrack.defaultFrameRate
+
+        return WPETexStreamingPayload(
+            info: info,
+            compressedImages: compressedImages,
+            frames: frames,
+            frameRate: frameRate,
+            loop: true
+        )
     }
 
     // MARK: - Parsing
@@ -166,6 +298,21 @@ struct WPETexDecoder: Sendable {
         let widthY: Float
         let heightX: Float
         let height: Float
+
+        /// Clamp the TEXS sub-rect to texture-pixel bounds. Some
+        /// published scenes leave width/height at zero or push the
+        /// last cell slightly past the texture edge.
+        func subRect(textureWidth: Int, textureHeight: Int) -> CGRect {
+            let maxW = CGFloat(max(textureWidth, 1))
+            let maxH = CGFloat(max(textureHeight, 1))
+            let originX = min(max(CGFloat(x), 0), maxW - 1)
+            let originY = min(max(CGFloat(y), 0), maxH - 1)
+            let rawW = width > 0 ? CGFloat(width) : maxW
+            let rawH = height > 0 ? CGFloat(height) : maxH
+            let clampedW = min(max(rawW, 1), maxW - originX)
+            let clampedH = min(max(rawH, 1), maxH - originY)
+            return CGRect(x: originX, y: originY, width: clampedW, height: clampedH)
+        }
     }
 
     private func parseHeader(data: Data) throws -> WPETexInfo {

@@ -96,6 +96,17 @@ struct WPEMultiRootResourceResolver: Sendable {
         }
     }
 
+    func resolveStreamingTexturePayload(relativePath: String) throws -> WPETexStreamingPayload {
+        if let dependency = dependencyReference(relativePath) {
+            return try resolveDependency(relativePath: relativePath, dependency: dependency) { resolver, path in
+                try resolver.resolveStreamingTexturePayload(relativePath: path)
+            }
+        }
+        return try resolveWithFallbacks(relativePath: relativePath) { resolver, path in
+            try resolver.resolveStreamingTexturePayload(relativePath: path)
+        }
+    }
+
     /// Tries the primary resolver first; on `.fileMissing` falls through to the app-bundled built-ins, then to the optional engine-assets resolver.
     private func resolveWithFallbacks<T>(
         relativePath: String,

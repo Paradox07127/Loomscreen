@@ -217,11 +217,111 @@ public struct WPETexAnimationFrame: Sendable, Equatable {
     public let imageID: Int
     public let duration: TimeInterval
     public let mipmaps: [WPETexTextureMipmap]
+    /// Source-image sub-rect this animation frame maps to. `nil` means
+    /// "use the whole image" (legacy/back-compat for `.tex` files that
+    /// omit a TEXS block).
+    public let subRect: CGRect?
 
-    public init(imageID: Int, duration: TimeInterval, mipmaps: [WPETexTextureMipmap]) {
+    public init(
+        imageID: Int,
+        duration: TimeInterval,
+        mipmaps: [WPETexTextureMipmap],
+        subRect: CGRect? = nil
+    ) {
         self.imageID = imageID
         self.duration = duration
         self.mipmaps = mipmaps
+        self.subRect = subRect
+    }
+}
+
+/// Single mipmap level held in its on-disk compressed form. The lazy
+/// streaming source decompresses these on demand so the runtime never
+/// materializes every animation frame upfront.
+public struct WPETexCompressedMipmap: Sendable, Equatable {
+    public let index: Int
+    public let width: Int
+    public let height: Int
+    public let isCompressed: Bool
+    public let compressedBytes: Data
+    public let decompressedByteCount: Int
+
+    public init(
+        index: Int,
+        width: Int,
+        height: Int,
+        isCompressed: Bool,
+        compressedBytes: Data,
+        decompressedByteCount: Int
+    ) {
+        self.index = index
+        self.width = width
+        self.height = height
+        self.isCompressed = isCompressed
+        self.compressedBytes = compressedBytes
+        self.decompressedByteCount = decompressedByteCount
+    }
+}
+
+public struct WPETexCompressedImage: Sendable, Equatable {
+    public let width: Int
+    public let height: Int
+    public let payloads: [WPETexCompressedMipmap]
+
+    public init(width: Int, height: Int, payloads: [WPETexCompressedMipmap]) {
+        self.width = width
+        self.height = height
+        self.payloads = payloads
+    }
+}
+
+public struct WPETexStreamingFrame: Sendable, Equatable {
+    public let imageID: Int
+    public let subRect: CGRect
+    public let duration: TimeInterval
+
+    public init(imageID: Int, subRect: CGRect, duration: TimeInterval) {
+        self.imageID = imageID
+        self.subRect = subRect
+        self.duration = duration
+    }
+}
+
+/// Lazy-decode counterpart to `WPETexTexturePayload`. Holds compressed
+/// per-image bytes plus the TEXS sub-rect schedule; consumers stream
+/// frames out one at a time, keeping a small LRU cache of recently
+/// decompressed images resident in RAM (consumer-controlled — see
+/// `WPETexLazyAnimatedTextureSource.decompressedImageCacheCapacity`).
+/// Peak CPU footprint is therefore the compressed `.tex` file size plus
+/// `cacheCapacity × image-bytes`, not the full eager-decode total.
+public struct WPETexStreamingPayload: Sendable, Equatable {
+    public let info: WPETexInfo
+    public let compressedImages: [WPETexCompressedImage]
+    public let frames: [WPETexStreamingFrame]
+    public let frameRate: Double
+    public let loop: Bool
+
+    public init(
+        info: WPETexInfo,
+        compressedImages: [WPETexCompressedImage],
+        frames: [WPETexStreamingFrame],
+        frameRate: Double,
+        loop: Bool
+    ) {
+        self.info = info
+        self.compressedImages = compressedImages
+        self.frames = frames
+        self.frameRate = frameRate
+        self.loop = loop
+    }
+
+    /// Decision input for `WPEMetalSceneRenderer`: route to the lazy
+    /// source when the eager raw-bytes footprint would exceed budget.
+    public var totalUncompressedImageBytes: Int {
+        compressedImages.reduce(0) { total, image in
+            total + (image.payloads.first?.decompressedByteCount
+                ?? max(image.width, 1) * max(image.height, 1) * 4)
+        }
     }
 }
 

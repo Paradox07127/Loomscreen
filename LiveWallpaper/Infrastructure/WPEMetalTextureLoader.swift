@@ -41,6 +41,18 @@ struct WPEMetalTextureLoader {
         }
     }
 
+    /// Lazy LZ4 streaming source for multi-frame `.tex` animations that
+    /// would otherwise saturate VRAM if every frame were pre-uploaded.
+    /// See `WPETexLazyAnimatedTextureSource` for the on-demand decode +
+    /// sub-rect crop + rotating-texture rationale.
+    @MainActor
+    func makeLazyAnimatedTextureSource(
+        from payload: WPETexStreamingPayload,
+        label: String
+    ) throws -> WPETexLazyAnimatedTextureSource {
+        try WPETexLazyAnimatedTextureSource(payload: payload, device: device, label: label)
+    }
+
     /// Phase 2E: pre-uploads every animation frame to GPU as a separate `MTLTexture` and hands the pre-baked array to `WPETexAnimatedTextureSource`.
     @MainActor
     func makeAnimatedTextureSource(
