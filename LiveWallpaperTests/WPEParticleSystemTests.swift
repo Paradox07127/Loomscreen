@@ -356,6 +356,47 @@ struct WPEParticleSystemTests {
         #expect(sqrt(dx * dx + dy * dy) > 0.5)
     }
 
+    @Test("alphafade timings are lifetime fractions, not seconds")
+    func fadeTimingsAreLifetimeFractions() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        // leaves2-style: lifetime 10s, fadeintime 0.1 (= 10% lifetime = 1s).
+        // At t≈1s (right after fade-in completes) alpha should be ~1.0.
+        // If the implementation treats `0.1` as seconds we would see alpha
+        // already at 1.0 by t=0.15s, but also have age==fadeInSeconds=0.1
+        // mean "fully visible" — different from the fraction semantics that
+        // demand alpha≈0.45 at age=0.45s. The test below pins the fraction
+        // behaviour at the boundary where the two interpretations diverge.
+        let def = WPEParticleDefinition(
+            materialRelativePath: nil, maxCount: 1,
+            rate: 1000, startDelay: 0,
+            lifetimeMin: 10, lifetimeMax: 10,
+            sizeMin: 1, sizeMax: 1,
+            originOffset: SIMD3(0, 0, 0),
+            dispersalMin: 0, dispersalMax: 0,
+            velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
+            colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
+            fadeInSeconds: 0.1, // 10% lifetime
+            fadeOutSeconds: 0.0
+        )
+        let system = try #require(WPEParticleSystem(definition: def, device: device))
+        // First tick spawns, second tick advances ~0.05s (~0.5% lifetime).
+        system.tick(now: 0)
+        system.tick(now: 0.05)
+        let mid = system.instanceBuffer.contents()
+            .bindMemory(to: WPEParticleInstance.self, capacity: 1)[0].color.w
+        // age ≈ 0.05s, lifetime 10s, fraction ≈ 0.005, fadeInFrac 0.1
+        // → alpha ≈ 0.005 / 0.1 = 0.05. If the impl treated 0.1 as seconds
+        // we'd see alpha ≈ 0.5. Tolerance is generous around the boundary.
+        #expect(mid < 0.15)
+        // Now ramp to ~10% lifetime (age=1.0s) — fade-in should be done.
+        for step in 2...22 {
+            system.tick(now: Double(step) * 0.05)
+        }
+        let full = system.instanceBuffer.contents()
+            .bindMemory(to: WPEParticleInstance.self, capacity: 1)[0].color.w
+        #expect(full > 0.95)
+    }
+
     @Test("Pre-warm advances simulation without prior tick")
     func prewarmAdvancesPopulation() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())

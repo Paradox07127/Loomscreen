@@ -286,22 +286,23 @@ final class WPEParticleSystem {
         }
     }
 
-    /// alphafade.fadeintime / fadeouttime are *seconds* (WPE absolute
-    /// time, not lifetime fraction). When both are 0 we keep the base
-    /// alpha for the whole lifespan — matches WPE's "no fade".
+    /// alphafade.fadeintime / fadeouttime are **lifetime fractions** in
+    /// the WPE schema — `fadeintime=0.1` means "fade-in completes at
+    /// 10% of lifetime"; `fadeouttime=0.9` means "fade-out begins at
+    /// 90% of lifetime". When both are 0 we keep the base alpha for
+    /// the whole lifespan — matches WPE's "no fade".
     private func fadeEnvelope(age: Float, lifetime: Float) -> Float {
-        let fadeIn = Float(definition.fadeInSeconds)
-        let fadeOut = Float(definition.fadeOutSeconds)
+        guard lifetime > 0 else { return 1 }
+        let fraction = max(0, min(1, age / lifetime))
+        let fadeInFrac = Float(min(max(definition.fadeInSeconds, 0), 1))
+        let fadeOutFrac = Float(min(max(definition.fadeOutSeconds, 0), 1))
         var value: Float = 1
-        if fadeIn > 0 && age < fadeIn {
-            value = max(0, age / fadeIn)
+        if fadeInFrac > 0 && fraction < fadeInFrac {
+            value = max(0, fraction / fadeInFrac)
         }
-        if fadeOut > 0 {
-            let tailStart = max(0, lifetime - fadeOut)
-            if age > tailStart {
-                let tailDuration = max(0.0001, lifetime - tailStart)
-                value = min(value, max(0, 1 - (age - tailStart) / tailDuration))
-            }
+        if fadeOutFrac > 0 && fraction > fadeOutFrac {
+            let span = max(0.0001, 1 - fadeOutFrac)
+            value = min(value, max(0, 1 - (fraction - fadeOutFrac) / span))
         }
         return value
     }

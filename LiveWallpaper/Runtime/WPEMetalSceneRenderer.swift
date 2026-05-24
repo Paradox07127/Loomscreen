@@ -680,14 +680,25 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             : Self.defaultPreferredFPS
     }
 
+    /// True when something on stage actually changes between frames — a
+    /// dynamic texture (animated `.tex` / video) or a live particle
+    /// system. Static-scene + particle combos must NOT short-circuit
+    /// MTKView into the paused/on-demand path or particles freeze after
+    /// the first frame (the operator and turbulence updates would never
+    /// run again).
+    private var needsContinuousFrames: Bool {
+        if !dynamicTextureSources.isEmpty { return true }
+        if !particleSystems.isEmpty && !skipParticleRendering { return true }
+        return false
+    }
+
     func applyPerformanceProfile(_ profile: WallpaperPerformanceProfile) {
         currentProfile = profile
         dynamicTextureSources.values.forEach { $0.applyPerformanceProfile(profile) }
         switch profile {
         case .quality:
-            let hasDynamic = !dynamicTextureSources.isEmpty
-            mtkView.isPaused = !hasDynamic
-            mtkView.enableSetNeedsDisplay = !hasDynamic
+            mtkView.isPaused = !needsContinuousFrames
+            mtkView.enableSetNeedsDisplay = !needsContinuousFrames
             mtkView.preferredFramesPerSecond = isThrottled
                 ? Self.throttledPreferredFPS
                 : Self.defaultPreferredFPS
@@ -735,12 +746,12 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             guard let self, didLoad else { return }
             do {
                 let textureToPresent: MTLTexture?
-                if dynamicTextureSources.isEmpty {
-                    textureToPresent = outputTexture
-                } else {
+                if needsContinuousFrames {
                     let frame = try renderCurrentFrame()
                     outputTexture = frame
                     textureToPresent = frame
+                } else {
+                    textureToPresent = outputTexture
                 }
                 guard let texture = textureToPresent else { return }
                 _ = try executor.present(texture: texture, in: view)
