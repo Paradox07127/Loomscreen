@@ -13,16 +13,38 @@ struct WPEParticleInstance {
 }
 
 /// One-shot world-space placement applied to a `WPEParticleSystem` at
-/// load time. Mirrors `CParticle::setup()` in linux-wallpaperengine:
-/// the WPE authoring frame is top-left + Y-down pixels; the renderer
-/// works in a centered + Y-up frame. We bake that conversion together
-/// with the scene-object transform (origin / scale / angles.z) so the
-/// hot tick loop stays in one coordinate space.
+/// load time. Mirrors `CParticle::setup() + updateMatrices()` in
+/// linux-wallpaperengine — the canonical WPE behaviour:
+///
+///   - scene-object `origin` is the only transform Y-flipped from the
+///     top-left author frame to the centered Y-up render frame
+///     (`setup()` does this once at load time).
+///   - emitter `origin`, emitter `directions.y`, per-particle `velocity.y`
+///     and `gravity.y` are each Y-flipped once at spawn time so the
+///     simulator can integrate in the Y-up frame.
+///   - the per-frame model matrix that wraps everything is
+///         T(renderOrigin) · Rz(-angles.z) · Ry(+angles.y) · Rx(-angles.x) · S(scale)
+///     (note the **negation on X and Z rotations** — that's the bit that
+///     makes scenes with non-trivial angles render the right way around).
+///
+/// We bake all of that here so the hot tick loop stays in one frame.
 struct WPEParticleSceneTransform {
-    var sceneSize: SIMD2<Float>
-    var objectOrigin: SIMD3<Float>
+    /// Scene-object origin in the centered + Y-up render frame. WPE's
+    /// `CParticle::setup()` computes this once from the screen size and
+    /// the top-left author origin; we do the same.
+    var renderOrigin: SIMD3<Float>
     var objectScale: SIMD3<Float>
     var objectAngleZ: Float
+
+    init(sceneSize: SIMD2<Float>, objectOrigin: SIMD3<Float>, objectScale: SIMD3<Float>, objectAngleZ: Float) {
+        self.renderOrigin = SIMD3<Float>(
+            objectOrigin.x - sceneSize.x * 0.5,
+            sceneSize.y * 0.5 - objectOrigin.y,
+            objectOrigin.z
+        )
+        self.objectScale = objectScale
+        self.objectAngleZ = objectAngleZ
+    }
 
     static let identity = WPEParticleSceneTransform(
         sceneSize: SIMD2<Float>(1, 1),
@@ -31,38 +53,29 @@ struct WPEParticleSceneTransform {
         objectAngleZ: 0
     )
 
-    func worldOrigin(localOffset: SIMD3<Float>) -> SIMD3<Float> {
-        let scaled = SIMD3<Float>(
-            localOffset.x * objectScale.x,
-            localOffset.y * objectScale.y,
-            localOffset.z * objectScale.z
-        )
-        let cosA = cos(objectAngleZ)
-        let sinA = sin(objectAngleZ)
-        let rotated = SIMD3<Float>(
+    /// Apply the scene-object model matrix `T(renderOrigin) · Rz(-angleZ) · S(scale)`
+    /// to a point already expressed in the emitter's local Y-up frame
+    /// (i.e. emitter origin has already had its Y flipped, dispersal
+    /// directions likewise).
+    func applyModelMatrix(toLocalPoint p: SIMD3<Float>) -> SIMD3<Float> {
+        let scaled = SIMD3<Float>(p.x * objectScale.x, p.y * objectScale.y, p.z * objectScale.z)
+        let cosA = cos(-objectAngleZ)
+        let sinA = sin(-objectAngleZ)
+        return renderOrigin + SIMD3<Float>(
             scaled.x * cosA - scaled.y * sinA,
             scaled.x * sinA + scaled.y * cosA,
             scaled.z
         )
-        // WPE author space (top-left origin, Y-down) → centered (Y-up).
-        let worldX = (objectOrigin.x + rotated.x) - sceneSize.x * 0.5
-        let worldY = sceneSize.y * 0.5 - (objectOrigin.y + rotated.y)
-        return SIMD3<Float>(worldX, worldY, objectOrigin.z + rotated.z)
     }
 
-    func worldVelocity(_ local: SIMD3<Float>) -> SIMD3<Float> {
-        // WPE only Y-flips *position* origin (CParticle::setup) — velocity
-        // is consumed verbatim, so a negative vy in JSON translates to
-        // "position.y decreases" in our Y-up render frame, which the
-        // author intended as "falls down on screen". Mirroring velocity
-        // here would flip the wind direction for every scene.
-        let scaled = SIMD3<Float>(
-            local.x * objectScale.x,
-            local.y * objectScale.y,
-            local.z * objectScale.z
-        )
-        let cosA = cos(objectAngleZ)
-        let sinA = sin(objectAngleZ)
+    /// Apply only the rotation + scale block of the model matrix to a
+    /// direction vector (velocity, gravity, …) already Y-flipped into
+    /// the local Y-up frame. The translation part is skipped because
+    /// velocity is not a position.
+    func applyModelDirection(_ v: SIMD3<Float>) -> SIMD3<Float> {
+        let scaled = SIMD3<Float>(v.x * objectScale.x, v.y * objectScale.y, v.z * objectScale.z)
+        let cosA = cos(-objectAngleZ)
+        let sinA = sin(-objectAngleZ)
         return SIMD3<Float>(
             scaled.x * cosA - scaled.y * sinA,
             scaled.x * sinA + scaled.y * cosA,
@@ -162,9 +175,12 @@ final class WPEParticleSystem {
         buffer.label = "WPE particle instances"
         self.instanceBuffer = buffer
         self.rng = SystemRandomNumberGenerator()
+        // WPE Y-flips gravity once at spawn so the simulator stays in
+        // the Y-up frame (see CParticle.cpp ~1043). Bake the flip into
+        // the cached vector — every per-particle integration step uses it.
         self.gravity = SIMD3<Float>(
             Float(definition.gravity.x),
-            Float(definition.gravity.y),
+            -Float(definition.gravity.y),
             Float(definition.gravity.z)
         )
     }
@@ -320,20 +336,30 @@ final class WPEParticleSystem {
         let theta = Double.random(in: 0..<2 * .pi, using: &rng)
         let phi = Double.random(in: 0..<(.pi), using: &rng)
         let radius = uniform(definition.dispersalMin, definition.dispersalMax)
+        // WPE flips the Y component of `directions` once at the emitter
+        // factory (linux-wallpaperengine CParticle.cpp ~409). Magnitude
+        // stays the same; sign reverses to land in the Y-up frame.
         let mask = definition.directionMask
         let dispersal = SIMD3<Float>(
             Float(radius * sin(phi) * cos(theta) * mask.x),
-            Float(radius * sin(phi) * sin(theta) * mask.y),
+            Float(radius * sin(phi) * sin(theta) * (-mask.y)),
             Float(radius * cos(phi) * mask.z)
         )
-        let localOrigin = SIMD3<Float>(
+        // emitter `origin` is in author Y-down space; flip Y once so it
+        // composes correctly with the dispersal vector (which is now in
+        // Y-up local space).
+        let emitterOriginLocal = SIMD3<Float>(
             Float(definition.originOffset.x),
-            Float(definition.originOffset.y),
+            -Float(definition.originOffset.y),
             Float(definition.originOffset.z)
-        ) + dispersal
-        let localVelocity = uniformVector(definition.velocityMin, definition.velocityMax)
-        let position = sceneTransform.worldOrigin(localOffset: localOrigin)
-        let velocity = sceneTransform.worldVelocity(localVelocity)
+        )
+        let localPoint = emitterOriginLocal + dispersal
+        // velocity initializer is also in author Y-down space — same
+        // one-time Y-flip rule (createVelocityRandomInitializer, line ~793).
+        let sampledVelocity = uniformVector(definition.velocityMin, definition.velocityMax)
+        let localVelocity = SIMD3<Float>(sampledVelocity.x, -sampledVelocity.y, sampledVelocity.z)
+        let position = sceneTransform.applyModelMatrix(toLocalPoint: localPoint)
+        let velocity = sceneTransform.applyModelDirection(localVelocity)
         let sizeScale = sceneTransform.worldSizeMultiplier()
         let size = Float(uniform(definition.sizeMin, definition.sizeMax)) * sizeScale
         let rawColor = uniformVector(definition.colorMin, definition.colorMax)
