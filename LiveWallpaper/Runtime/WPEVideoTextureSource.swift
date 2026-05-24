@@ -192,12 +192,17 @@ final class WPEVideoTextureSource: @unchecked Sendable {
     /// `load(.duration)` are explicit. We block the reader queue here because
     /// the rest of the loop already pulls samples synchronously — promoting
     /// the loop to async is a wider refactor scheduled for a later phase.
+    ///
+    /// Caller runs on the `.userInitiated` `queue`; the detached task must
+    /// match that priority or the semaphore wait below causes a priority
+    /// inversion (high-QoS thread blocked on a default-QoS thread). The
+    /// runtime emits a thread-performance warning for that pattern.
     nonisolated private static func loadVideoTrackAndDuration(asset: AVURLAsset) throws -> (AVAssetTrack, Double) {
         let semaphore = DispatchSemaphore(value: 0)
         nonisolated(unsafe) var result: Result<(AVAssetTrack, Double), Error> =
             .failure(WPEMetalTextureLoaderError.malformedPayload("Asset load did not complete"))
 
-        Task.detached {
+        Task.detached(priority: .userInitiated) {
             do {
                 let tracks = try await asset.loadTracks(withMediaType: .video)
                 guard let track = tracks.first else {
