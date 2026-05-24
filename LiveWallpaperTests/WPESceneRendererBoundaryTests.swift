@@ -36,6 +36,20 @@ struct WPESceneRendererBoundaryTests {
     @Test("Ambient builder uses the Metal renderer for scene wallpapers")
     func ambientBuilderUsesMetalRenderer() async throws {
         _ = try #require(MTLCreateSystemDefaultDevice())
+        // The Phase-11 router defaults to `.automatic` in DEBUG, which
+        // routes pure-RGBA scenes to WebGL. Pin Metal for the duration of
+        // this test so the assertion keeps describing the Metal-path wiring.
+        let defaults = UserDefaults.standard
+        let originalSelection = defaults.string(forKey: WPERuntimeSelection.defaultsKey)
+        defaults.set(WPERuntimeSelection.metal.rawValue, forKey: WPERuntimeSelection.defaultsKey)
+        defer {
+            if let originalSelection {
+                defaults.set(originalSelection, forKey: WPERuntimeSelection.defaultsKey)
+            } else {
+                defaults.removeObject(forKey: WPERuntimeSelection.defaultsKey)
+            }
+        }
+
         let fixture = try SceneFixture.cacheBackedSolidColorScene()
         defer { fixture.cleanup() }
 

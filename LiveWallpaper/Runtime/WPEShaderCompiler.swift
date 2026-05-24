@@ -4,12 +4,12 @@ import Metal
 
 /// Boundary type for the WPE → MSL shader pipeline.
 ///
-/// The runtime calls a `WPEShaderCompiling` to convert a preprocessed WPE
-/// shader pair into a Metal library. Swap implementations to stage the
-/// rollout: today the only shipping implementation is `WPEStubShaderCompiler`
-/// which fails with `.backendUnavailable` — that keeps the dispatch path
-/// intact so the executor can route custom shaders here without crashing
-/// while the C++ backend (glslang + SPIRV-Cross) is being vendored.
+/// `WPESwiftShaderCompiler` is the only shipping implementation; it wraps
+/// the pure-Swift `WPEShaderTranspiler` (Phase-12 dual-backend strategy
+/// retired the SPIRV-Cross/glslang XCFramework). Shaders the transpiler
+/// can't handle throw `.translationFailed`, which surfaces as
+/// `SceneRenderingError.metalRendererUnsupported` and trips the WebGL
+/// fallback in `SceneWallpaperSession`.
 protocol WPEShaderCompiling: Sendable {
     func compile(_ request: WPEShaderCompileRequest) throws -> WPEShaderCompileResult
 }
@@ -53,30 +53,12 @@ struct WPEShaderCompileResult: @unchecked Sendable {
 }
 
 enum WPEShaderCompilerError: Error, Sendable, Equatable {
-    /// Raised by `WPEStubShaderCompiler` until the C++ backend lands.
-    /// Phase 2 unblocker: vendor glslang + SPIRV-Cross, add a Swift wrapper
-    /// that conforms to `WPEShaderCompiling`, and swap it in via
-    /// `WPEMetalSceneRenderer`'s init seam. The dispatcher already routes
-    /// custom shaders through this path, so the change becomes a one-line
-    /// swap once the toolchain is integrated.
+    /// Retained for backwards compatibility on archived diagnostics; the
+    /// Phase-12 shipping path never raises this — `WPESwiftShaderCompiler`
+    /// throws `.translationFailed` instead when it can't handle a shader.
     case backendUnavailable(String)
     case glslPreprocessFailed(String)
     case translationFailed(String)
     case mslLibraryFailed(String)
-}
-
-/// Default shipping implementation. Always fails — the executor catches the
-/// failure and downgrades the pass to a placeholder visual, surfacing a
-/// diagnostic so the UI can show "needs shader translation". The non-throwing
-/// init means the renderer can construct one in any environment, including
-/// tests, without dragging in C++ symbols.
-struct WPEStubShaderCompiler: WPEShaderCompiling {
-    init() {}
-
-    func compile(_ request: WPEShaderCompileRequest) throws -> WPEShaderCompileResult {
-        throw WPEShaderCompilerError.backendUnavailable(
-            "WPE shader translator not vendored yet — '\(request.shaderName)' deferred. See ThirdParty/WPEShaderToolchain (planned)."
-        )
-    }
 }
 #endif
