@@ -870,6 +870,15 @@ final class WPEMetalRenderExecutor {
                 )
             )
         } catch let error as WPEShaderCompilerError {
+            WPESceneDebugArtifacts.shared.recordShaderFailure(
+                shaderName: program.name,
+                originalVertex: program.vertexSource,
+                processedVertex: nil,
+                originalFragment: program.fragmentSource,
+                processedFragment: nil,
+                translatedMSL: nil,
+                errorText: "preprocess failed: \(String(describing: error))"
+            )
             throw WPEMetalRenderExecutorError.shaderTranslatorUnavailable(
                 name: program.name,
                 reason: String(describing: error)
@@ -888,6 +897,18 @@ final class WPEMetalRenderExecutor {
                  .glslPreprocessFailed(let reason),
                  .translationFailed(let reason),
                  .mslLibraryFailed(let reason):
+                // The compiler already dumped processed sources; tack on the
+                // pre-preprocess originals so a maintainer can diff to see
+                // exactly which fixup turned the source unparseable.
+                WPESceneDebugArtifacts.shared.recordShaderFailure(
+                    shaderName: program.name,
+                    originalVertex: program.vertexSource,
+                    processedVertex: request.processedVertexSource,
+                    originalFragment: program.fragmentSource,
+                    processedFragment: request.processedFragmentSource,
+                    translatedMSL: nil,
+                    errorText: "compile failed: \(reason)"
+                )
                 throw WPEMetalRenderExecutorError.shaderTranslatorUnavailable(
                     name: program.name,
                     reason: reason

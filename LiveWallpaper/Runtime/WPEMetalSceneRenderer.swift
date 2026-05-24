@@ -146,12 +146,44 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
 
     func load() async throws {
         guard !didLoad else { return }
+        let descriptorSummary = "\(descriptor.workshopID) tier=\(descriptor.capabilityTier.rawValue) entry=\(descriptor.entryFile)"
+        WPESceneDebugArtifacts.shared.beginSession(
+            workshopID: descriptor.workshopID,
+            descriptor: descriptorSummary
+        )
+        WPESceneDebugArtifacts.shared.appendLog(
+            "load() began for \(descriptorSummary)",
+            level: .info
+        )
+        Logger.debug(
+            "[WPE-DEBUG][scene:\(descriptor.workshopID)][stage:load.begin] \(descriptorSummary)",
+            category: .wpeRender
+        )
         do {
             try await performLoad()
             loadDiagnostics = nil
+            WPESceneDebugArtifacts.shared.appendLog(
+                "load() succeeded; presented first frame",
+                level: .notice
+            )
+            if let snapshot = cachedSnapshot {
+                WPESceneDebugArtifacts.shared.recordFirstFrame(image: snapshot)
+            }
+            WPESceneDebugArtifacts.shared.endSession()
         } catch {
             loadDiagnostics = diagnostic(for: error)
             logSceneFailureDiagnostics(error: error)
+            WPESceneDebugArtifacts.shared.appendLog(
+                "load() failed: \(error)",
+                level: .error
+            )
+            if let snapshot = cachedSnapshot {
+                WPESceneDebugArtifacts.shared.recordFirstFrame(image: snapshot)
+            }
+            // Keep session open if the scene swaps to WebGL; the WebGL
+            // session will overwrite scene-info but its dumps land in a
+            // sibling folder so the Metal artifacts stay intact.
+            WPESceneDebugArtifacts.shared.endSession()
             if let reason = Self.metalFallbackReason(for: error) {
                 throw SceneRenderingError.metalRendererUnsupported(reason: reason)
             }
@@ -226,6 +258,9 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
     }
 
     private func performLoad() async throws {
+        let id = descriptor.workshopID
+
+        debugStage("read.entry", "resolving \(descriptor.entryFile)")
         onProgress?("Reading scene")
         try Task.checkCancellation()
         let entryURL = try entryResolver.resolveExistingFileURL(relativePath: descriptor.entryFile)
@@ -233,8 +268,10 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             let data = try Data(contentsOf: entryURL)
             return try WPESceneDocumentParser.parse(data: data)
         }.value
+        debugStage("read.entry.done", "imageObjects=\(document.imageObjects.count) particles=\(document.particleObjects.count) text=\(document.textObjects.count) sound=\(document.soundObjects.count)")
         try Task.checkCancellation()
 
+        debugStage("graph.build", "begin")
         onProgress?("Building render graph")
         let cacheRoot = cacheRootURL
         let mounts = dependencyMounts
@@ -246,8 +283,10 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
                 engineAssetsRootURL: engineRoot
             ).build(document: document)
         }.value
+        debugStage("graph.build.done", "layers=\(graph.layers.count)")
         try Task.checkCancellation()
 
+        debugStage("pipeline.build", "begin")
         onProgress?("Preparing render pipeline")
         let pipeline = try await Task.detached(priority: .userInitiated) {
             try WPERenderPipelineBuilder(
@@ -255,6 +294,8 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
                 engineAssetsRootURL: engineRoot
             ).build(graph: graph)
         }.value
+        let passCount = pipeline.layers.reduce(0) { $0 + $1.passes.count }
+        debugStage("pipeline.build.done", "passes=\(passCount)")
         try Task.checkCancellation()
 
         renderGraph = graph
@@ -264,23 +305,33 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             sceneCamera: document.camera
         )
         sceneRenderSize = cameraUniforms.renderSize
+        debugStage("camera", "renderSize=\(Int(sceneRenderSize.width))x\(Int(sceneRenderSize.height))")
 
+        debugStage("textures.load", "begin (pipeline-driven)")
         onProgress?("Loading textures")
         try await loadTextures(for: pipeline)
+        debugStage("textures.load.done", "loaded=\(loadedTextures.count) dynamic=\(dynamicTextureSources.count)")
         try Task.checkCancellation()
 
+        debugStage("particles.load", "begin")
         onProgress?("Loading particle systems")
         await loadParticleSystems(from: document)
+        debugStage("particles.load.done", "systems=\(particleSystems.count)")
         try Task.checkCancellation()
 
+        debugStage("text.load", "begin")
         onProgress?("Loading text overlays")
         loadTextOverlays(from: document)
+        debugStage("text.load.done", "objects=\(textObjects.count)")
         try Task.checkCancellation()
 
+        debugStage("audio.start", "begin")
         onProgress?("Starting audio runtime")
         startSoundRuntime(from: document)
+        debugStage("audio.start.done", "runtime=\(soundRuntime == nil ? "absent" : "active")")
         try Task.checkCancellation()
 
+        debugStage("render.firstFrame", "begin")
         onProgress?("Rendering scene")
         outputTexture = try renderCurrentFrame()
         if let outputTexture {
@@ -290,6 +341,21 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         didLoad = true
         applyPerformanceProfile(currentProfile)
         mtkView.setNeedsDisplay(mtkView.bounds)
+        debugStage("render.firstFrame.done", "size=\(outputTexture?.width ?? 0)x\(outputTexture?.height ?? 0) snapshot=\(cachedSnapshot == nil ? "none" : "saved")")
+        _ = id
+    }
+
+    /// One-shot debug breadcrumb shared by every load-path stage. Emits to
+    /// the `wpeRender` os.Logger category AND mirrors into the per-scene
+    /// `scene.log` so the file artifact stays self-contained without the
+    /// reader having to cross-reference Console.app.
+    private func debugStage(_ stage: String, _ detail: String) {
+        let id = descriptor.workshopID
+        Logger.debug(
+            "[WPE-DEBUG][scene:\(id)][stage:\(stage)] \(detail)",
+            category: .wpeRender
+        )
+        WPESceneDebugArtifacts.shared.appendLog("[\(stage)] \(detail)")
     }
 
     /// Computes one frame's runtime uniforms (clock, daytime, brightness, pointer) and submits the render pipeline with both runtime and camera uniforms.

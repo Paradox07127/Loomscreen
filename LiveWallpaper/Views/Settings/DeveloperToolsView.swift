@@ -18,6 +18,8 @@ struct DeveloperToolsView: View {
     @State private var perSceneTimeout: Double = 8
     @State private var cancelRequested = false
     @State private var runTask: Task<Void, Never>?
+    @State private var singleSceneWorkshopID: String = ""
+    @State private var singleSceneStatus: String = ""
 
     var body: some View {
         DetailPageScaffold(
@@ -91,6 +93,7 @@ struct DeveloperToolsView: View {
     private var content: some View {
         VStack(alignment: .leading, spacing: 16) {
             configurationSection
+            sceneDebugSection
             if let startupError {
                 errorBanner(startupError)
             }
@@ -101,6 +104,52 @@ struct DeveloperToolsView: View {
             resultsTable
         }
         .padding(16)
+    }
+
+    /// Per-scene debug iteration loop. Runs `WPECorpusPlaybackHarness` with
+    /// a single-workshop filter so the maintainer gets one fully-traced
+    /// load — every shader compile failure, FBO miss, first-frame snapshot,
+    /// and pipeline-state error lands under
+    /// `~/Library/Application Support/LiveWallpaper/scene-debug/<ts>-<id>/`.
+    @ViewBuilder
+    private var sceneDebugSection: some View {
+        GroupBox(label: Text("Single-scene debug").font(.headline)) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    TextField(
+                        "Workshop ID",
+                        text: $singleSceneWorkshopID
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .disableAutocorrection(true)
+                    .frame(maxWidth: 200)
+                    .disabled(isRunning)
+
+                    Button {
+                        runSingleSceneDebug()
+                    } label: {
+                        Label("Run debug load", systemImage: "play.fill")
+                    }
+                    .disabled(isRunning || singleSceneWorkshopID.trimmingCharacters(in: .whitespaces).isEmpty)
+
+                    Button {
+                        revealDebugArtifacts()
+                    } label: {
+                        Label("Reveal artifacts in Finder", systemImage: "folder")
+                    }
+                    .disabled(WPESceneDebugArtifacts.rootURL == nil)
+                }
+                if !singleSceneStatus.isEmpty {
+                    Text(verbatim: singleSceneStatus)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Text("Headless single-scene load with full pipeline tracing. Every shader compile error, FBO miss, first-frame snapshot lands under scene-debug as `<timestamp>-<workshopID>/`.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 4)
+        }
     }
 
     private var configurationSection: some View {
@@ -221,6 +270,64 @@ struct DeveloperToolsView: View {
             }
         }
         .frame(minHeight: 280)
+    }
+
+    // MARK: - Single-scene debug
+
+    private func runSingleSceneDebug() {
+        let trimmed = singleSceneWorkshopID.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, !isRunning else { return }
+
+        isRunning = true
+        cancelRequested = false
+        startupError = nil
+        entries.removeAll()
+        lastReport = nil
+        progressFraction = 0
+        singleSceneStatus = "Loading \(trimmed)…"
+        progressLabel = singleSceneStatus
+
+        var config = WPECorpusPlaybackHarness.Configuration(
+            perSceneTimeoutSeconds: perSceneTimeout
+        )
+        config.workshopIDFilter = [trimmed]
+        let harness = WPECorpusPlaybackHarness(configuration: config)
+
+        runTask = Task { @MainActor in
+            await harness.run(
+                progress: handleProgress,
+                isCancelled: { self.cancelRequested }
+            )
+            self.isRunning = false
+            if let path = WPESceneDebugArtifacts.rootURL?.path {
+                self.singleSceneStatus = "Done — artifacts under \(path)/<timestamp>-\(trimmed)/"
+            } else {
+                self.singleSceneStatus = "Done — artifacts directory unavailable"
+            }
+        }
+    }
+
+    private func revealDebugArtifacts() {
+        guard let root = WPESceneDebugArtifacts.rootURL else { return }
+        let fm = FileManager.default
+        // Try to surface the most recent session for the entered workshop
+        // ID; fall back to the parent folder when nothing's there yet.
+        let trimmed = singleSceneWorkshopID.trimmingCharacters(in: .whitespaces)
+        if !trimmed.isEmpty,
+           let children = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.contentModificationDateKey], options: []),
+           let latest = children
+            .filter({ $0.lastPathComponent.contains(trimmed) })
+            .sorted(by: { lhs, rhs in
+                let l = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                let r = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                return l > r
+            })
+            .first {
+            NSWorkspace.shared.activateFileViewerSelecting([latest])
+            return
+        }
+        try? fm.createDirectory(at: root, withIntermediateDirectories: true)
+        NSWorkspace.shared.activateFileViewerSelecting([root])
     }
 
     // MARK: - Run lifecycle

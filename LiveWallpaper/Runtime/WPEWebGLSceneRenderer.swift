@@ -140,12 +140,40 @@ final class WPEWebGLSceneRenderer: NSObject, WPESceneRenderer, WKNavigationDeleg
     }
 
     private func runLoad(isReload: Bool) async throws {
+        // Open a debug session only if no other renderer already owns one
+        // (the Metal renderer opens first when the router picks Metal and
+        // we fall back; in that case we want to keep the Metal artifacts).
+        let openedDebugSession = WPESceneDebugArtifacts.shared.activeSessionFolder == nil
+        if openedDebugSession {
+            WPESceneDebugArtifacts.shared.beginSession(
+                workshopID: descriptor.workshopID,
+                descriptor: "webgl tier=\(descriptor.capabilityTier.rawValue) entry=\(descriptor.entryFile) reload=\(isReload)"
+            )
+        }
+        WPESceneDebugArtifacts.shared.appendLog(
+            "[webgl.load.begin] reload=\(isReload)",
+            level: .info
+        )
         do {
             try await loadInternal(isReload: isReload)
             loadDiagnostics = nil
+            WPESceneDebugArtifacts.shared.appendLog(
+                "[webgl.load.done] frame presented=\(hasPresentedFrame)",
+                level: .notice
+            )
+            if openedDebugSession {
+                WPESceneDebugArtifacts.shared.endSession()
+            }
         } catch {
             if loadDiagnostics == nil {
                 loadDiagnostics = diagnostic(for: error)
+            }
+            WPESceneDebugArtifacts.shared.appendLog(
+                "[webgl.load.fail] \(error.localizedDescription)",
+                level: .error
+            )
+            if openedDebugSession {
+                WPESceneDebugArtifacts.shared.endSession()
             }
             assetSchemeHandler.setActive(nonce: nil, provider: nil)
             assetProvider = nil
@@ -354,6 +382,15 @@ final class WPEWebGLSceneRenderer: NSObject, WPESceneRenderer, WKNavigationDeleg
             loadDiagnostics = diagnostic
         }
         Logger.warning("WPE-WebGL load_failed [\(error.stage)] pass=\(error.passID ?? "nil"): \(error.message)", category: .screenManager)
+        WPESceneDebugArtifacts.shared.recordShaderFailure(
+            shaderName: "webgl-\(error.stage)-\(error.passID ?? "anonymous")",
+            originalVertex: nil,
+            processedVertex: nil,
+            originalFragment: nil,
+            processedFragment: nil,
+            translatedMSL: nil,
+            errorText: "WebGL load_failed [\(error.stage)] pass=\(error.passID ?? "nil"):\n\n\(error.message)"
+        )
         if let continuation = sceneLoadContinuation {
             sceneLoadContinuation = nil
             continuation.resume(throwing: SceneRenderingError.resourceFailed(diagnostic))

@@ -52,6 +52,18 @@ final class WPEMetalPipelineCache {
         do {
             state = try device.makeRenderPipelineState(descriptor: descriptor)
         } catch {
+            let detail = """
+            fragment: \(fragmentName)
+            blend: \(normalizedBlend)
+            colorFormat: \(colorPixelFormat.rawValue)
+            depthFormat: \(depthPixelFormat.rawValue)
+            error: \(error.localizedDescription)
+            """
+            WPESceneDebugArtifacts.shared.recordPipelineFailure(
+                fragmentName: fragmentName,
+                blendMode: normalizedBlend,
+                detail: detail
+            )
             throw WPEMetalRenderExecutorError.pipelineStateBuildFailed(
                 name: fragmentName,
                 detail: error.localizedDescription

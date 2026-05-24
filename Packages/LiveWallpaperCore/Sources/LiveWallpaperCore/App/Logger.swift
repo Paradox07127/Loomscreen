@@ -17,6 +17,7 @@ public final class Logger {
         case lifecycle = "Lifecycle"
         case memory = "Memory"
         case wpeResolver = "WPEResolver"
+        case wpeRender = "WPERender"
 
         public static let subsystem = "com.livewallpaper"
 
