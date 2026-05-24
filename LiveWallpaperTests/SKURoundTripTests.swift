@@ -144,14 +144,13 @@ struct SKURoundTripTests {
         )
         config.wpeOrigin = origin
 
-        var reconciler: any OriginReconciler = PreservingOriginReconciler()
+        let reconciler: any OriginReconciler = PreservingOriginReconciler()
         reconciler.reconcile(
             &config,
             event: .userReplacedActiveWallpaper(previous: .video(bookmarkData: Data([0x00])))
         )
 
         #expect(config.wpeOrigin == origin)
-        _ = reconciler
     }
 
     @Test("PreservingOriginReconciler drops origins whose resourceLocation is .unsupported")
