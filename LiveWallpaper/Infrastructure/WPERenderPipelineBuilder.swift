@@ -139,8 +139,54 @@ private struct WPEShaderSourceLoader: Sendable {
             guard WPEBuiltinShaderName.isGenericImageShader(shaderName) else {
                 return nil
             }
+            return genericImageProgram(shaderName: shaderName, combos: combos)
+        }
+    }
+
+    /// WPE's `genericimage*` family with the SPRITESHEET combo on: the
+    /// vertex shader must derive UVs from `g_Texture0Translation` +
+    /// `g_Texture0Rotation` so the runtime can slice a single texture into
+    /// N animation frames. Without the combo, fall back to the trivial
+    /// copy program (the historical behaviour).
+    private func genericImageProgram(shaderName: String, combos: [String: Int]) -> WPEShaderProgram {
+        let usesSpriteSheet = combos.contains { key, value in
+            key.uppercased() == "SPRITESHEET" && value != 0
+        }
+        guard usesSpriteSheet else {
             return copyProgram(shaderName: shaderName, combos: combos)
         }
+
+        let vertex = """
+        attribute vec3 a_Position;
+        attribute vec2 a_TexCoord;
+        uniform vec2 g_Texture0Translation;
+        uniform vec4 g_Texture0Rotation;
+        varying vec2 v_TexCoord;
+
+        void main() {
+            gl_Position = vec4(a_Position, 1.0);
+            v_TexCoord = g_Texture0Translation
+                + a_TexCoord.x * g_Texture0Rotation.xy
+                + a_TexCoord.y * g_Texture0Rotation.zw;
+        }
+        """
+        let fragment = """
+        uniform sampler2D g_Texture0;
+        varying vec2 v_TexCoord;
+
+        void main() {
+            gl_FragColor = texSample2D(g_Texture0, v_TexCoord);
+        }
+        """
+        return WPEShaderProgram(
+            name: shaderName,
+            vertexSource: shaderPrelude(comboValues: combos, stage: .vertex) + vertex,
+            fragmentSource: shaderPrelude(comboValues: combos, stage: .fragment) + fragment.replacingOccurrences(
+                of: "gl_FragColor",
+                with: "out_FragColor"
+            ),
+            isBuiltin: true
+        )
     }
 
     private func solidLayerProgram(shaderName: String, combos: [String: Int]) -> WPEShaderProgram {

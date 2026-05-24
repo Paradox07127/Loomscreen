@@ -17,6 +17,10 @@ import { TextureManager } from "../resources/TextureManager";
 // a stale or unrelated texture (Phase 3 audit Medium).
 const PLACEHOLDER_UNIT = 14;
 const AUDIO_UNIT = 15;
+// Frame cadence WPE's tooling defaults to for sprite-sheet textures. The
+// Swift WPETexAnimationTrack.defaultFrameRate is the same constant — keep
+// them aligned so Metal and WebGL backends advance frames in lockstep.
+const SPRITESHEET_FRAME_RATE = 25;
 
 interface PreparedPass {
   pass: RenderPassPayload;
@@ -30,6 +34,12 @@ interface PreparedLayer {
   parallaxDepth: number;
   localFBOs: RenderFBOPayload[];
   passes: PreparedPass[];
+}
+
+interface BoundTexture {
+  texture: WebGLTexture | null;
+  width: number;
+  height: number;
 }
 
 export class RenderGraphExecutor {
@@ -167,6 +177,7 @@ export class RenderGraphExecutor {
 
         const sourceResolved = this.resolveBoundTexture(layer.objectID, pass.source, currentSceneFBO, sceneSize);
         this.bindTextureSlot(program, 0, sourceResolved.texture, "g_Texture0", { width: sourceResolved.width, height: sourceResolved.height });
+        this.uploadSpriteSheetUniforms(program, sourceResolved, sceneSize, time);
         boundSamplers.add("g_Texture0");
 
         const textures = pass.textures ?? {};
@@ -373,6 +384,72 @@ export class RenderGraphExecutor {
     }
   }
 
+  // WPE's SPRITESHEET-combo shaders read UVs through `g_Texture0Translation`
+  // and `g_Texture0Rotation`. Compute the frame layout from the bound
+  // source texture vs the scene's render target — for vertical strips
+  // (the dominant WPE convention) framesY = round(texH / sceneH); a
+  // horizontal strip falls through to framesX. The uniform names mirror
+  // genericimage.vert in /assets/shaders so the existing WPE shader
+  // sources work unmodified.
+  private uploadSpriteSheetUniforms(
+    program: WebGLProgram,
+    sourceTex: BoundTexture | null,
+    sceneSize: { width: number; height: number },
+    time: number
+  ): void {
+    const gl = this.gl;
+    const translationLoc = gl.getUniformLocation(program, "g_Texture0Translation");
+    const rotationLoc = gl.getUniformLocation(program, "g_Texture0Rotation");
+    if (!translationLoc && !rotationLoc) return;
+
+    const uploadIdentity = (): void => {
+      if (translationLoc) gl.uniform2f(translationLoc, 0, 0);
+      if (rotationLoc) gl.uniform4f(rotationLoc, 1, 0, 0, 1);
+    };
+
+    if (
+      !sourceTex ||
+      !sourceTex.texture ||
+      sourceTex.width <= 0 ||
+      sourceTex.height <= 0 ||
+      sceneSize.width <= 0 ||
+      sceneSize.height <= 0
+    ) {
+      uploadIdentity();
+      return;
+    }
+
+    const framesX = Math.max(1, Math.round(sourceTex.width / sceneSize.width));
+    const framesY = Math.max(1, Math.round(sourceTex.height / sceneSize.height));
+    if (framesX === 1 && framesY === 1) {
+      uploadIdentity();
+      return;
+    }
+
+    if (framesY > 1) {
+      const frame = this.spriteSheetFrame(time, framesY);
+      // TextureManager uploads with UNPACK_FLIP_Y_WEBGL = true, so v = 0
+      // maps to the image's bottom row and v = 1 maps to the top. Sprite
+      // sheets store frame 0 at the top of the source image, so the
+      // first-frame texture window is [v = (N-1)/N, v = 1]. Translating
+      // by `(N - 1 - frame) / N` plays the strip forward in time.
+      const offset = framesY - 1 - frame;
+      if (translationLoc) gl.uniform2f(translationLoc, 0, offset / framesY);
+      if (rotationLoc) gl.uniform4f(rotationLoc, 1, 0, 0, 1 / framesY);
+      return;
+    }
+
+    const frame = this.spriteSheetFrame(time, framesX);
+    if (translationLoc) gl.uniform2f(translationLoc, frame / framesX, 0);
+    if (rotationLoc) gl.uniform4f(rotationLoc, 1 / framesX, 0, 0, 1);
+  }
+
+  private spriteSheetFrame(time: number, framesTotal: number): number {
+    const frameCount = Math.max(1, framesTotal);
+    const raw = Math.floor(time * SPRITESHEET_FRAME_RATE) % frameCount;
+    return (raw + frameCount) % frameCount;
+  }
+
   private uploadConstants(program: WebGLProgram, constants: Record<string, ConstantValue>): void {
     const gl = this.gl;
     for (const key of Object.keys(constants)) {
@@ -408,7 +485,7 @@ export class RenderGraphExecutor {
     ref: TextureReference,
     currentScene: PoolFBO | null,
     sceneSize: { width: number; height: number }
-  ): { texture: WebGLTexture | null; width: number; height: number } {
+  ): BoundTexture {
     if (ref.kind === "image" || ref.kind === "asset") {
       const key = ref.value ?? "(unnamed)";
       if (key !== "(unnamed)") {
