@@ -177,7 +177,16 @@ export class TextureManager {
         return this.loadVideo(url, blobURL);
       }
       const blob = await response.blob();
-      const bitmap = await createImageBitmap(blob, { colorSpaceConversion: "none" });
+      // Pre-flip at decode time. macOS WebKit ignores the
+      // UNPACK_FLIP_Y_WEBGL pixelStorei for ImageBitmap-sourced uploads
+      // on at least Safari 17/18, so toggling that flag at upload time
+      // produces no observable change in texture orientation. Letting
+      // createImageBitmap apply the flip is reliable across the
+      // implementations we ship to.
+      const bitmap = await createImageBitmap(blob, {
+        colorSpaceConversion: "none",
+        imageOrientation: "flipY"
+      });
       const entry = this.uploadBitmap(bitmap);
       bitmap.close();
       this.insertWithEviction(url, entry);
@@ -298,9 +307,12 @@ export class TextureManager {
     const tex = gl.createTexture();
     if (!tex) throw new Error("TextureManager: createTexture returned null");
     gl.bindTexture(gl.TEXTURE_2D, tex);
-    // Match WPE's OpenGL bottom-up texture origin (see refreshVideoFrames
-    // for the long-form rationale).
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    // Orientation is handled at decode time via createImageBitmap's
+    // `imageOrientation: "flipY"` option — pixelStorei FLIP_Y is
+    // unreliable on macOS WebKit for ImageBitmap uploads (3725117707
+    // Y-flip repro, 2026-05-24). Explicit `false` here documents that
+    // upload-time flipping is intentionally off.
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, bitmap);
     const isPoT = isPowerOfTwo(bitmap.width) && isPowerOfTwo(bitmap.height);

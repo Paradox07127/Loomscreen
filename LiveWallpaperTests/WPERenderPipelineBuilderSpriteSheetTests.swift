@@ -16,10 +16,15 @@ struct WPERenderPipelineBuilderSpriteSheetTests {
         let spriteVertex = try #require(spritePipeline.layers.first?.passes.first?.shader?.vertexSource)
 
         #expect(spriteVertex.contains("uniform vec2 g_Texture0Translation"))
+        #expect(spriteVertex.contains("uniform vec2 g_Texture0TranslationNext"))
         #expect(spriteVertex.contains("uniform vec4 g_Texture0Rotation"))
         #expect(spriteVertex.contains("a_TexCoord.x * g_Texture0Rotation.xy"))
         #expect(spriteVertex.contains("a_TexCoord.y * g_Texture0Rotation.zw"))
         #expect(spriteVertex.contains("#define SPRITESHEET 1"))
+
+        let spriteFragment = try #require(spritePipeline.layers.first?.passes.first?.shader?.fragmentSource)
+        #expect(spriteFragment.contains("uniform float g_SpriteFrameBlend"))
+        #expect(spriteFragment.contains("mix("))
 
         let plainPipeline = try builder.build(graph: makeGraph(combos: [:]))
         let plainVertex = try #require(plainPipeline.layers.first?.passes.first?.shader?.vertexSource)

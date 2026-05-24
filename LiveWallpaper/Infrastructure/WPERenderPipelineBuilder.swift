@@ -144,10 +144,13 @@ private struct WPEShaderSourceLoader: Sendable {
     }
 
     /// WPE's `genericimage*` family with the SPRITESHEET combo on: the
-    /// vertex shader must derive UVs from `g_Texture0Translation` +
-    /// `g_Texture0Rotation` so the runtime can slice a single texture into
-    /// N animation frames. Without the combo, fall back to the trivial
-    /// copy program (the historical behaviour).
+    /// vertex shader derives UVs from `g_Texture0Translation` (current
+    /// frame) plus `g_Texture0TranslationNext` (next frame), both sharing
+    /// the `g_Texture0Rotation` per-frame UV transform. The fragment
+    /// samples both and mixes by `g_SpriteFrameBlend` (0..1) so a 3-frame
+    /// strip animates as a smooth crossfade instead of a 25Hz strobe —
+    /// matches WPE's `common_particles.h` `ComputeSpriteFrame` pattern.
+    /// Without the combo, fall back to the trivial copy program.
     private func genericImageProgram(shaderName: String, combos: [String: Int]) -> WPEShaderProgram {
         let usesSpriteSheet = combos.contains { key, value in
             key.uppercased() == "SPRITESHEET" && value != 0
@@ -160,22 +163,29 @@ private struct WPEShaderSourceLoader: Sendable {
         attribute vec3 a_Position;
         attribute vec2 a_TexCoord;
         uniform vec2 g_Texture0Translation;
+        uniform vec2 g_Texture0TranslationNext;
         uniform vec4 g_Texture0Rotation;
         varying vec2 v_TexCoord;
+        varying vec2 v_TexCoordNext;
 
         void main() {
             gl_Position = vec4(a_Position, 1.0);
-            v_TexCoord = g_Texture0Translation
-                + a_TexCoord.x * g_Texture0Rotation.xy
+            vec2 frameBasis = a_TexCoord.x * g_Texture0Rotation.xy
                 + a_TexCoord.y * g_Texture0Rotation.zw;
+            v_TexCoord     = g_Texture0Translation     + frameBasis;
+            v_TexCoordNext = g_Texture0TranslationNext + frameBasis;
         }
         """
         let fragment = """
         uniform sampler2D g_Texture0;
+        uniform float g_SpriteFrameBlend;
         varying vec2 v_TexCoord;
+        varying vec2 v_TexCoordNext;
 
         void main() {
-            gl_FragColor = texSample2D(g_Texture0, v_TexCoord);
+            vec4 a = texSample2D(g_Texture0, v_TexCoord);
+            vec4 b = texSample2D(g_Texture0, v_TexCoordNext);
+            gl_FragColor = mix(a, b, g_SpriteFrameBlend);
         }
         """
         return WPEShaderProgram(

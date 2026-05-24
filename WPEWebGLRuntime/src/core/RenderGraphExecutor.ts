@@ -17,9 +17,11 @@ import { TextureManager } from "../resources/TextureManager";
 // a stale or unrelated texture (Phase 3 audit Medium).
 const PLACEHOLDER_UNIT = 14;
 const AUDIO_UNIT = 15;
-// Frame cadence WPE's tooling defaults to for sprite-sheet textures. The
-// Swift WPETexAnimationTrack.defaultFrameRate is the same constant — keep
-// them aligned so Metal and WebGL backends advance frames in lockstep.
+// Frame cadence for sprite-sheet textures sampled by genericimage4-style
+// passes. Aligned with Swift's `WPETexAnimationTrack.defaultFrameRate`
+// so the WebGL and Metal backends agree. The fragment shader cross-fades
+// between consecutive frames via `g_SpriteFrameBlend`, so a 3-frame
+// vertical strip animates smoothly at this cadence rather than strobing.
 const SPRITESHEET_FRAME_RATE = 25;
 
 interface PreparedPass {
@@ -399,12 +401,16 @@ export class RenderGraphExecutor {
   ): void {
     const gl = this.gl;
     const translationLoc = gl.getUniformLocation(program, "g_Texture0Translation");
+    const translationNextLoc = gl.getUniformLocation(program, "g_Texture0TranslationNext");
     const rotationLoc = gl.getUniformLocation(program, "g_Texture0Rotation");
-    if (!translationLoc && !rotationLoc) return;
+    const blendLoc = gl.getUniformLocation(program, "g_SpriteFrameBlend");
+    if (!translationLoc && !rotationLoc && !translationNextLoc && !blendLoc) return;
 
     const uploadIdentity = (): void => {
       if (translationLoc) gl.uniform2f(translationLoc, 0, 0);
+      if (translationNextLoc) gl.uniform2f(translationNextLoc, 0, 0);
       if (rotationLoc) gl.uniform4f(rotationLoc, 1, 0, 0, 1);
+      if (blendLoc) gl.uniform1f(blendLoc, 0);
     };
 
     if (
@@ -426,31 +432,34 @@ export class RenderGraphExecutor {
       return;
     }
 
+    const frameCount = framesY > 1 ? framesY : framesX;
+    const subFrame = Math.max(0, time) * SPRITESHEET_FRAME_RATE;
+    const current = ((Math.floor(subFrame) % frameCount) + frameCount) % frameCount;
+    const next = (current + 1) % frameCount;
+    const blend = subFrame - Math.floor(subFrame);
+
     if (framesY > 1) {
-      const frame = this.spriteSheetFrame(time, framesY);
-      // TextureManager uploads with UNPACK_FLIP_Y_WEBGL = true, so v = 0
-      // maps to the image's bottom row and v = 1 maps to the top. Sprite
-      // sheets store frame 0 at the top of the source image, so the
-      // first-frame texture window is [v = (N-1)/N, v = 1]. Translating
-      // by `(N - 1 - frame) / N` plays the strip forward in time.
-      const offset = framesY - 1 - frame;
-      if (translationLoc) gl.uniform2f(translationLoc, 0, offset / framesY);
+      // ImageBitmap is pre-flipped via createImageBitmap({imageOrientation:
+      // "flipY"}), so v = 0 reads the original image's bottom row. Sprite
+      // sheets store frame 0 at the source image top, so frame F lives in
+      // texture v ∈ [(N-1-F)/N, (N-F)/N]. Both the current and next
+      // translations follow the same offset formula; the wrap from frame
+      // N-1 → 0 happens via the `current/next` modulo above so the
+      // crossfade is continuous across the loop boundary.
+      if (translationLoc) gl.uniform2f(translationLoc, 0, (framesY - 1 - current) / framesY);
+      if (translationNextLoc) gl.uniform2f(translationNextLoc, 0, (framesY - 1 - next) / framesY);
       if (rotationLoc) gl.uniform4f(rotationLoc, 1, 0, 0, 1 / framesY);
+      if (blendLoc) gl.uniform1f(blendLoc, blend);
       return;
     }
 
-    const frame = this.spriteSheetFrame(time, framesX);
-    if (translationLoc) gl.uniform2f(translationLoc, frame / framesX, 0);
+    if (translationLoc) gl.uniform2f(translationLoc, current / framesX, 0);
+    if (translationNextLoc) gl.uniform2f(translationNextLoc, next / framesX, 0);
     if (rotationLoc) gl.uniform4f(rotationLoc, 1 / framesX, 0, 0, 1);
+    if (blendLoc) gl.uniform1f(blendLoc, blend);
   }
 
-  private spriteSheetFrame(time: number, framesTotal: number): number {
-    const frameCount = Math.max(1, framesTotal);
-    const raw = Math.floor(time * SPRITESHEET_FRAME_RATE) % frameCount;
-    return (raw + frameCount) % frameCount;
-  }
-
-  private uploadConstants(program: WebGLProgram, constants: Record<string, ConstantValue>): void {
+private uploadConstants(program: WebGLProgram, constants: Record<string, ConstantValue>): void {
     const gl = this.gl;
     for (const key of Object.keys(constants)) {
       const value = constants[key];

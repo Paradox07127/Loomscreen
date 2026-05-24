@@ -419,7 +419,7 @@ final class WPEWebGLSceneRenderer: NSObject, WPESceneRenderer, WKNavigationDeleg
     func setThrottled(_ throttled: Bool) {
         isThrottledFlag = throttled
         let payload = WPERuntimeStatePayload(
-            time: 0,
+            time: nil,
             pointer: nil,
             audioSpectrum: nil,
             visibility: throttled ? .occluded : .active
@@ -431,7 +431,7 @@ final class WPEWebGLSceneRenderer: NSObject, WPESceneRenderer, WKNavigationDeleg
         currentProfile = profile
         let visibility: WPERuntimeStatePayload.WPEVisibility = profile == .suspended ? .background : .active
         let payload = WPERuntimeStatePayload(
-            time: 0,
+            time: nil,
             pointer: nil,
             audioSpectrum: nil,
             visibility: visibility

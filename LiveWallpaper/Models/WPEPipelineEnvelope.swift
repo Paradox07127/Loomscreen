@@ -359,7 +359,13 @@ struct WPEWebGLIncomingMessage: Decodable, Sendable {
 }
 
 struct WPERuntimeStatePayload: Encodable, Sendable {
-    var time: Double
+    /// Optional — when nil, the JS runtime keeps using its own
+    /// `performance.now()`-based clock. Pushing a non-nil value here
+    /// pins JS-side `g_Time` to whatever Swift dictates and freezes
+    /// shader animation until the next push, which is rarely the
+    /// caller's intent. Both lifecycle pushes (`setThrottled`,
+    /// `applyPerformanceProfile`) leave this nil.
+    var time: Double?
     var pointer: SIMDPoint?
     var audioSpectrum: [Float]?
     var visibility: WPEVisibility?

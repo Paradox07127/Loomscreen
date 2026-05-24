@@ -171,7 +171,9 @@ function normalizePass(raw: unknown): RenderPassPayload {
 }
 
 export interface RuntimeStatePayload {
-  time: number;
+  // Null means "host did not specify a time — keep using the local clock".
+  // Pinning to a number freezes shader animation until the next push.
+  time: number | null;
   pointer?: { x: number; y: number; click: number; hover: number } | null;
   audioSpectrum?: number[] | null;
   visibility?: "active" | "occluded" | "background" | null;
@@ -214,7 +216,10 @@ export function normalizeRuntimeState(raw: unknown): RuntimeStatePayload {
   const pointerRaw = r.pointer as Record<string, number> | undefined | null;
   const audio = r.audio_spectrum ?? r.audioSpectrum;
   return {
-    time: (r.time as number) ?? 0,
+    // Preserve null/undefined — `tick()` uses the local clock when this
+    // is null. A lifecycle push that only intends to change visibility
+    // must not accidentally pin time to 0 and freeze every shader.
+    time: typeof r.time === "number" ? r.time : null,
     pointer: pointerRaw
       ? {
           x: pointerRaw.x ?? 0,
