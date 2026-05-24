@@ -42,7 +42,7 @@ struct WeatherStatusBadge: View {
                 }
 
                 if let error = weatherService.lastError {
-                    Text(verbatim: BugReporter.sanitize(error))
+                    Text(verbatim: PIISanitizer.scrub(error))
                         .font(.caption2)
                         .foregroundStyle(.red)
                         .lineLimit(1)

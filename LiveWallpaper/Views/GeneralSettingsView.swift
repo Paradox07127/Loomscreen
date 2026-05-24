@@ -27,6 +27,10 @@ struct GeneralSettingsView: View {
     /// `WKWebView.isInspectable` on HTML wallpapers. Hidden in Lite via
     /// `#if !LITE_BUILD` + capability gate so the row never renders.
     @State private var developerModeEnabled: Bool
+    /// Weather-reactive location source + manual city. Lives on General
+    /// (rather than a dedicated tab) because the surface is tiny and
+    /// only relevant to users who run weather-reactive particle effects.
+    @State private var weatherLocation: WeatherLocationPreference
 
     @State private var pendingDestructive: PendingDestructive?
     @State private var pendingBugReport: BugReport?
@@ -58,6 +62,7 @@ struct GeneralSettingsView: View {
         _videoCacheBudgetMB = State(initialValue: Double(settings.videoCacheMaxBytesPerScreen) / Double(1024 * 1024))
         _videoDecoderPreference = State(initialValue: settings.videoDecoderPreference)
         _developerModeEnabled = State(initialValue: settings.developerModeEnabled)
+        _weatherLocation = State(initialValue: settings.weatherLocation)
     }
 
     var body: some View {
@@ -67,9 +72,6 @@ struct GeneralSettingsView: View {
 
             ShortcutsSettingsView()
                 .tabItem { Label("Shortcuts", systemImage: "command") }
-
-            WeatherLocationSettingsView()
-                .tabItem { Label("Weather", systemImage: "cloud.sun") }
 
             #if !LITE_BUILD
             if featureCatalog.isEnabled(.wpeImport) {
@@ -211,6 +213,7 @@ struct GeneralSettingsView: View {
         showInDock = settings.showInDock
         videoDecoderPreference = settings.videoDecoderPreference
         developerModeEnabled = settings.developerModeEnabled
+        weatherLocation = settings.weatherLocation
         postSettingsNotificationAsync(.developerModeDidChange)
 
         let feedback = importFeedbackMessage(for: summary)
@@ -344,9 +347,9 @@ struct GeneralSettingsView: View {
 
             performanceSection
 
-            powerSavingSection
+            powerSection
 
-            batteryThresholdSection
+            weatherSection
 
             advancedSection
 
@@ -499,8 +502,67 @@ struct GeneralSettingsView: View {
         "Higher = fewer disk reads, more RAM. Lower = less RAM, video re-reads disk on every loop."
     }
 
+    /// Weather-reactive location source. Inlined here so the user does
+    /// not need to hunt across tabs for a tiny picker. Persists straight
+    /// into `GlobalSettings.weatherLocation` and broadcasts the change
+    /// notification through the same coordinator path used by every
+    /// other GlobalSettings field.
     @ViewBuilder
-    private var powerSavingSection: some View {
+    private var weatherSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 8) {
+                Picker("Source", selection: weatherSourceBinding) {
+                    Text("Off").tag(WeatherLocationPreference.Source.off)
+                    Text("System").tag(WeatherLocationPreference.Source.coreLocation)
+                    Text("Manual").tag(WeatherLocationPreference.Source.manual)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .accessibilityLabel(Text("Weather location source"))
+
+                Text("Used by weather-reactive effects like rain, snow, and fog.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if weatherLocation.source == .manual {
+                    ManualLocationPicker(
+                        currentSelection: weatherLocation.manual,
+                        onCommit: { manual in
+                            weatherLocation.manual = manual
+                            persistWeatherLocation()
+                        }
+                    )
+                }
+            }
+        } header: {
+            Text("Weather")
+        }
+    }
+
+    private var weatherSourceBinding: Binding<WeatherLocationPreference.Source> {
+        Binding(
+            get: { weatherLocation.source },
+            set: { newValue in
+                guard weatherLocation.source != newValue else { return }
+                weatherLocation.source = newValue
+                persistWeatherLocation()
+            }
+        )
+    }
+
+    private func persistWeatherLocation() {
+        var settings = SettingsManager.shared.loadGlobalSettings()
+        settings.weatherLocation = weatherLocation
+        SettingsManager.shared.saveGlobalSettings(settings)
+        postSettingsNotificationAsync(.weatherLocationPreferenceDidChange)
+    }
+
+    /// Power-related preferences in a single section. Previously split
+    /// into "Power Saving" + "Battery Threshold" — they cover the same
+    /// surface (battery behavior) and reading them as two separate cards
+    /// implied a deeper distinction than actually exists.
+    @ViewBuilder
+    private var powerSection: some View {
         Section {
             SettingRow(icon: "bolt.circle.fill", iconColor: .yellow, title: "Pause on battery", subtitle: "Switch wallpapers to a static frame when your Mac is unplugged") {
                 Toggle("", isOn: $globalPauseOnBattery)
@@ -510,14 +572,7 @@ struct GeneralSettingsView: View {
                     .accessibilityLabel(Text("Pause on battery"))
                     .accessibilityHint(Text("Switch wallpapers to a static frame when your Mac is unplugged"))
             }
-        } header: {
-            Text("Power Saving")
-        }
-    }
 
-    @ViewBuilder
-    private var batteryThresholdSection: some View {
-        Section {
             SettingRow(icon: "battery.50", iconColor: .orange, title: "Use battery threshold", subtitle: "Pause videos when battery drops below a specific level") {
                 Toggle("", isOn: $useBatteryThreshold)
                     .labelsHidden()
@@ -569,11 +624,10 @@ struct GeneralSettingsView: View {
                 }
                 .padding(.leading, 52)
                 .padding(.bottom, 8)
-                .disabled(!useBatteryThreshold)
                 .animation(.snappy(duration: 0.2), value: useBatteryThreshold)
             }
         } header: {
-            Text("Battery Threshold")
+            Text("Power")
         }
     }
 
@@ -929,6 +983,7 @@ struct GeneralSettingsView: View {
         showInDock = false
         videoDecoderPreference = .auto
         developerModeEnabled = false
+        weatherLocation = .default
 
         postSettingsNotificationAsync(.dockVisibilityDidChange)
         postSettingsNotificationAsync(.globalShortcutsDidChange)

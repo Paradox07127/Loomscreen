@@ -55,6 +55,14 @@ public struct GlobalSettings: Codable, Sendable {
     /// User preferences for the weather location pipeline. See
     /// `WeatherLocationPreference` for the full source-resolution chain.
     public var weatherLocation: WeatherLocationPreference
+    /// Master switch for the global hot-key surface. When false,
+    /// `GlobalShortcutManager` unregisters every Carbon hot key and refuses
+    /// to re-register, but the per-action `globalShortcuts` bindings stay
+    /// persisted so flipping the switch back on restores the user's
+    /// previous combinations without re-asking. Default `true` preserves
+    /// pre-existing behavior for installs that predate this flag.
+    public var globalShortcutsEnabled: Bool = true
+
     /// User-customised global keyboard shortcuts. `nil` value means the
     /// shortcut is unbound; missing key means default binding still applies.
     public var globalShortcuts: [GlobalShortcutAction.RawAction: GlobalShortcutBinding?]
@@ -112,6 +120,7 @@ public struct GlobalSettings: Codable, Sendable {
         pauseOnFullScreen: Bool = true,
         showInDock: Bool = false,
         weatherLocation: WeatherLocationPreference = .default,
+        globalShortcutsEnabled: Bool = true,
         globalShortcuts: [GlobalShortcutAction.RawAction: GlobalShortcutBinding?] = [:],
         recentWPEImports: [WPEHistoryEntry] = [],
         videoCacheMaxBytesPerScreen: Int = GlobalSettings.defaultVideoCacheBytes,
@@ -126,6 +135,7 @@ public struct GlobalSettings: Codable, Sendable {
         self.pauseOnFullScreen = pauseOnFullScreen
         self.showInDock = showInDock
         self.weatherLocation = weatherLocation
+        self.globalShortcutsEnabled = globalShortcutsEnabled
         self.globalShortcuts = globalShortcuts
         self.recentWPEImports = recentWPEImports
         self.videoCacheMaxBytesPerScreen = Self.clampedVideoCacheBytes(videoCacheMaxBytesPerScreen)
@@ -143,6 +153,7 @@ public struct GlobalSettings: Codable, Sendable {
         pauseOnFullScreen = try c.decodeIfPresent(Bool.self, forKey: .pauseOnFullScreen) ?? true
         showInDock = try c.decodeIfPresent(Bool.self, forKey: .showInDock) ?? false
         weatherLocation = (try? c.decodeIfPresent(WeatherLocationPreference.self, forKey: .weatherLocation)) ?? .default
+        globalShortcutsEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .globalShortcutsEnabled)) ?? true
         globalShortcuts = (try? c.decodeIfPresent([GlobalShortcutAction.RawAction: GlobalShortcutBinding?].self, forKey: .globalShortcuts)) ?? [:]
         recentWPEImports = (try? c.decodeIfPresent([WPEHistoryEntry].self, forKey: .recentWPEImports)) ?? []
         let storedCache = (try? c.decodeIfPresent(Int.self, forKey: .videoCacheMaxBytesPerScreen)) ?? GlobalSettings.defaultVideoCacheBytes
