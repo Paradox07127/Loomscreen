@@ -102,7 +102,14 @@ struct ScreenDetailView: View {
                 return config?.wallpaperType == .video && (config?.hasConfiguredVideoSource ?? false)
             case .html:
                 return true
-            case .metalShader, .scene:
+            case .scene:
+                // Mount the panel once a real scene config is loaded so the
+                // WPE Project Custom Settings card can surface
+                // author-defined properties (schemecolor, sliders, etc.).
+                // CommonPlaybackInspector + InspectorPanel already gate
+                // their video-only rows internally.
+                return config?.wallpaperType == .scene
+            case .metalShader:
                 return false
             }
         }()
