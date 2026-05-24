@@ -209,6 +209,10 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
             "Metal scene load failed (\(reason)); retrying with WebGL fallback",
             category: .screenManager
         )
+        WPESceneDebugArtifacts.shared.appendLog(
+            "[fallback] Metal → WebGL: \(reason)",
+            level: .warning
+        )
         renderer?.cleanup()
         renderer = nil
         guard let next = factory() else { return nil }

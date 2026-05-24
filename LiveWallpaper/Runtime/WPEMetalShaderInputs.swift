@@ -47,9 +47,14 @@ enum WPEMetalShaderInputs {
             if let aliased = resolveAliasedNamedTexture(name: name, frameState: frameState) {
                 return aliased
             }
+            let availableKeys = Array(frameState.latestNamedTextures.keys).sorted().joined(separator: ", ")
             Logger.warning(
-                "WPE Metal: named FBO '\(name)' miss — declared targets: \(Array(frameState.latestNamedTextures.keys).sorted().joined(separator: ", "))",
+                "WPE Metal: named FBO '\(name)' miss — declared targets: \(availableKeys)",
                 category: .screenManager
+            )
+            WPESceneDebugArtifacts.shared.appendLog(
+                "[fbo.miss] '\(name)' — available: \(availableKeys)",
+                level: .warning
             )
             throw WPEMetalRenderExecutorError.missingTexture(reference)
 
