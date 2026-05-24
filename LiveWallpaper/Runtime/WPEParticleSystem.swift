@@ -15,19 +15,27 @@ struct WPEParticleInstance {
 /// One-shot world-space placement applied to a `WPEParticleSystem` at
 /// load time.
 ///
-/// Author-space convention: **WPE editor exposes a Y-up, bottom-left
-/// origin coordinate system to authors** (artist-friendly, like every
-/// modeling/animation tool). The native render frame on Metal is also
-/// Y-up centered (`Rz(+angle)` rotates the same direction the author
-/// drew the rotation handle), so no Y-flip is needed anywhere in the
-/// pipeline. Almamu's linux-wallpaperengine inserts Y-flips on
-/// origin/velocity/gravity/directions and negates `angles.x/z`, but
-/// the strong evidence in real workshop scenes (`leaves2.json`
-/// velocity range `(-100..-15)` interpreted as "drift down on screen",
-/// fog origin `y=440` visually appearing in the lower half of the
-/// composition) shows the WPE author space is Y-up, and Almamu's flips
-/// are a re-compensation for a misread convention. We mirror the
-/// Y-up-no-flips reading instead.
+/// **Mixed coordinate convention** (empirically derived from
+/// workshop 3725117707 + smoke/vapor presets):
+///
+///   - **Scene-object `origin`** is in WPE editor's artist-friendly
+///     Y-up bottom-left frame (so `(0,0)` is the bottom-left corner
+///     of the scene, +Y rises). We just center it (`-W/2, -H/2`).
+///   - **Everything inside the emitter** (emitter `origin`, emitter
+///     `directions.y`, per-particle `velocity.y`, `gravity.y`, plus
+///     `angles.x/z` on the scene-object's rotation) follows the
+///     graphics-traditional Y-down top-left convention that lines up
+///     with D3D/Win32 coordinates. We Y-flip those once at spawn so
+///     the simulator runs in a single Y-up frame, and we negate
+///     `angles.x/z` on the rotation matrix to match.
+///
+/// The data: scene-object `fog y=440` visually appears in the LOWER
+/// 18% of the scene (Y-up reading); but `leaves2` emitter origin
+/// `(350, 750)` rotated by `angles.z = 2.77 rad` produces leaves that
+/// drift the *correct* way (top → bottom) only if the emitter
+/// internals are read Y-down with Almamu's rotation sign convention.
+/// Almamu Y-flips *both* layers; we Y-flip only the inner one. This
+/// produces the visual behaviour the workshop authors clearly tuned for.
 struct WPEParticleSceneTransform {
     /// Scene-object origin in the centered render frame.
     var renderOrigin: SIMD3<Float>
@@ -51,12 +59,13 @@ struct WPEParticleSceneTransform {
         objectAngleZ: 0
     )
 
-    /// Apply the scene-object model matrix `T(renderOrigin) · Rz(angleZ) · S(scale)`
-    /// to a point in the emitter's local frame.
+    /// Apply the scene-object model matrix
+    /// `T(renderOrigin) · Rz(-angleZ) · S(scale)` to a point already
+    /// in the emitter's Y-down-flipped-to-Y-up local frame.
     func applyModelMatrix(toLocalPoint p: SIMD3<Float>) -> SIMD3<Float> {
         let scaled = SIMD3<Float>(p.x * objectScale.x, p.y * objectScale.y, p.z * objectScale.z)
-        let cosA = cos(objectAngleZ)
-        let sinA = sin(objectAngleZ)
+        let cosA = cos(-objectAngleZ)
+        let sinA = sin(-objectAngleZ)
         return renderOrigin + SIMD3<Float>(
             scaled.x * cosA - scaled.y * sinA,
             scaled.x * sinA + scaled.y * cosA,
@@ -65,11 +74,12 @@ struct WPEParticleSceneTransform {
     }
 
     /// Same rotation + scale chain, no translation — for velocity,
-    /// gravity, or other free vectors.
+    /// gravity, or other free vectors that already had their Y flipped
+    /// at spawn time.
     func applyModelDirection(_ v: SIMD3<Float>) -> SIMD3<Float> {
         let scaled = SIMD3<Float>(v.x * objectScale.x, v.y * objectScale.y, v.z * objectScale.z)
-        let cosA = cos(objectAngleZ)
-        let sinA = sin(objectAngleZ)
+        let cosA = cos(-objectAngleZ)
+        let sinA = sin(-objectAngleZ)
         return SIMD3<Float>(
             scaled.x * cosA - scaled.y * sinA,
             scaled.x * sinA + scaled.y * cosA,
@@ -175,12 +185,12 @@ final class WPEParticleSystem {
         buffer.label = "WPE particle instances"
         self.instanceBuffer = buffer
         self.rng = SystemRandomNumberGenerator()
-        // Author writes gravity in the same Y-up frame as everything
-        // else: positive `gy` lifts particles up on screen, negative
-        // pulls them down. No flip.
+        // Emitter-internal Y-down: author writes `+gy` for "pull down
+        // on screen" (Win32 graphics convention). Y-flip once into the
+        // Y-up simulator.
         self.gravity = SIMD3<Float>(
             Float(definition.gravity.x),
-            Float(definition.gravity.y),
+            -Float(definition.gravity.y),
             Float(definition.gravity.z)
         )
     }
@@ -218,14 +228,22 @@ final class WPEParticleSystem {
     func tick(now: Double) {
         advance(now: now)
         let pointer = instanceBuffer.contents().bindMemory(to: WPEParticleInstance.self, capacity: capacity)
-        let frameRate: Float
+        // Sprite-sheet animation is **lifetime-relative**: a particle
+        // sees `sequenceMultiplier` full atlas cycles over the course
+        // of its life, regardless of `duration`. Almamu's wall-clock
+        // reading (90 fps for leaves7) produces visible flicker even
+        // with cross-fade; the lifetime-relative reading gives the
+        // smooth ~10 fps "leaves slowly rotating as they fall" pace
+        // workshop authors clearly tuned for. `frameCount = 1`
+        // collapses to a static sprite.
         let frameCount: Float
-        if let sheet = spriteSheet {
-            frameRate = Float(sheet.baseFrameRate * definition.sequenceMultiplier)
+        let cyclesPerLifetime: Float
+        if let sheet = spriteSheet, sheet.frameCount > 1 {
             frameCount = Float(sheet.frameCount)
+            cyclesPerLifetime = max(0.0001, Float(definition.sequenceMultiplier))
         } else {
-            frameRate = 0
             frameCount = 1
+            cyclesPerLifetime = 0
         }
         var written = 0
         for index in 0..<capacity {
@@ -234,13 +252,9 @@ final class WPEParticleSystem {
             let envelope = fadeEnvelope(age: particle.age, lifetime: particle.lifetime)
             let alpha = particle.alphaBase * envelope
             let lifetimeFraction = particle.lifetime > 0 ? min(1, max(0, particle.age / particle.lifetime)) : 0
-            // Sprite-sheet frame index = age × frameRate, modulo total
-            // frames (loop the animation if a particle outlives one
-            // sweep). `frameCount = 1` collapses to frame 0 for non-
-            // animated atlases.
             let frameIndex: Float
-            if frameRate > 0 && frameCount > 1 {
-                let raw = particle.age * frameRate
+            if cyclesPerLifetime > 0 {
+                let raw = lifetimeFraction * cyclesPerLifetime * frameCount
                 frameIndex = raw.truncatingRemainder(dividingBy: frameCount)
             } else {
                 frameIndex = 0
@@ -356,21 +370,24 @@ final class WPEParticleSystem {
         let theta = Double.random(in: 0..<2 * .pi, using: &rng)
         let phi = Double.random(in: 0..<(.pi), using: &rng)
         let radius = uniform(definition.dispersalMin, definition.dispersalMax)
-        // directions is a per-axis enable mask in the same Y-up frame
-        // as the rest of the spawn math; just clamp to magnitude.
+        // Emitter-internal Y-down → Y-up Y-flip on everything that lives
+        // inside the emitter local frame: directions.y, emitter origin,
+        // per-particle velocity. Scene-object origin (the outer T term
+        // in the model matrix) is NOT flipped — see WPEParticleSceneTransform.
         let mask = definition.directionMask
         let dispersal = SIMD3<Float>(
             Float(radius * sin(phi) * cos(theta) * mask.x),
-            Float(radius * sin(phi) * sin(theta) * mask.y),
+            Float(radius * sin(phi) * sin(theta) * (-mask.y)),
             Float(radius * cos(phi) * mask.z)
         )
         let emitterOriginLocal = SIMD3<Float>(
             Float(definition.originOffset.x),
-            Float(definition.originOffset.y),
+            -Float(definition.originOffset.y),
             Float(definition.originOffset.z)
         )
         let localPoint = emitterOriginLocal + dispersal
-        let localVelocity = uniformVector(definition.velocityMin, definition.velocityMax)
+        let sampledVelocity = uniformVector(definition.velocityMin, definition.velocityMax)
+        let localVelocity = SIMD3<Float>(sampledVelocity.x, -sampledVelocity.y, sampledVelocity.z)
         let position = sceneTransform.applyModelMatrix(toLocalPoint: localPoint)
         let velocity = sceneTransform.applyModelDirection(localVelocity)
         let sizeScale = sceneTransform.worldSizeMultiplier()

@@ -29,7 +29,9 @@ struct WPEParticleCoordinateTests {
         )
     }
 
-    @Test("Scene-object origin centers without Y-flip (author Y-up)")
+    // MARK: - Scene-object Y-up (no flip)
+
+    @Test("Scene-object origin centers without Y-flip (Y-up bottom-left)")
     func sceneObjectOriginCentersWithoutFlip() throws {
         let transform = WPEParticleSceneTransform(
             sceneSize: SIMD2<Float>(3840, 2160),
@@ -37,29 +39,32 @@ struct WPEParticleCoordinateTests {
             objectScale: SIMD3<Float>(1, 1, 1),
             objectAngleZ: 0
         )
-        // Author (0,0) bottom-left → centered (-1920, -1080) Y-up.
+        // Author (0,0) bottom-left → centered (-W/2, -H/2).
         #expect(abs(transform.renderOrigin.x - (-1920)) < 0.0001)
         #expect(abs(transform.renderOrigin.y - (-1080)) < 0.0001)
     }
 
-    @Test("applyModelMatrix maps local zero to centered origin (no flip)")
-    func applyModelToZeroReturnsCenteredOrigin() {
+    @Test("Fog-shape origin (1997, 440) lands in lower half (NDC y < 0)")
+    func fogOriginInLowerHalf() {
         let transform = WPEParticleSceneTransform(
-            sceneSize: SIMD2<Float>(3840, 2160),
-            objectOrigin: SIMD3<Float>(2019.58, 1280.80, 0),
+            sceneSize: SIMD2<Float>(4216, 2416),
+            objectOrigin: SIMD3<Float>(1997, 440, 0),
             objectScale: SIMD3<Float>(1, 1, 1),
             objectAngleZ: 0
         )
-        let p = transform.applyModelMatrix(toLocalPoint: SIMD3<Float>(0, 0, 0))
-        // Author (2019.58, 1280.80) → centered (99.58, 200.80).
-        #expect(abs(p.x - 99.58) < 0.01)
-        #expect(abs(p.y - 200.80) < 0.01)
+        // y = 440 - 1208 = -768 → NDC ≈ -0.636 → bottom 64% of screen.
+        #expect(transform.renderOrigin.y < 0)
+        #expect(abs(transform.renderOrigin.y - (-768)) < 0.01)
     }
 
-    @Test("angles.z rotates in the same direction the author drew it")
-    func angleZRotatesAuthorDirection() {
-        // Author rotates the emitter +90° around its centre. A point at
-        // local (+1, 0) should swing to (0, +1) in the render frame.
+    // MARK: - Emitter local Y-down (flips applied at spawn)
+
+    @Test("angles.z is negated in model matrix (emitter local Y-down convention)")
+    func angleZIsNegated() {
+        // A 90° turn around +Z in the WPE author frame maps to Rz(-π/2)
+        // in the Y-up render frame (Win32 clockwise → Y-up
+        // counterclockwise is -1 sign). Point (1, 0) should swing to
+        // (0, -1) under this convention.
         let transform = WPEParticleSceneTransform(
             sceneSize: SIMD2<Float>(1920, 1080),
             objectOrigin: SIMD3<Float>(960, 540, 0), // renderOrigin (0,0)
@@ -67,9 +72,8 @@ struct WPEParticleCoordinateTests {
             objectAngleZ: .pi * 0.5
         )
         let p = transform.applyModelMatrix(toLocalPoint: SIMD3<Float>(1, 0, 0))
-        // Rz(+π/2) on (1,0) → (0, 1).
         #expect(abs(p.x) < 0.0001)
-        #expect(abs(p.y - 1) < 0.0001)
+        #expect(abs(p.y - (-1)) < 0.0001)
     }
 
     @Test("applyModelDirection rotates without translating")
@@ -81,8 +85,8 @@ struct WPEParticleCoordinateTests {
             objectAngleZ: 0
         )
         let v = transform.applyModelDirection(SIMD3<Float>(10, -7, 0))
-        #expect(abs(v.x - 20) < 0.0001)   // 10 * 2
-        #expect(abs(v.y - (-21)) < 0.0001) // -7 * 3 — no Y mirror
+        #expect(abs(v.x - 20) < 0.0001)
+        #expect(abs(v.y - (-21)) < 0.0001)
     }
 
     @Test("Object scale amplifies size through worldSizeMultiplier")
@@ -96,13 +100,15 @@ struct WPEParticleCoordinateTests {
         #expect(abs(transform.worldSizeMultiplier() - 3) < 0.0001)
     }
 
-    @Test("Spawn places emitter at scene origin + emitter origin (Y-up)")
-    func systemSpawnInWorldSpace() throws {
+    @Test("Emitter origin Y is flipped at spawn (Y-down emitter convention)")
+    func emitterOriginYFlippedAtSpawn() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
+        // Author emitter origin (100, 200) in Y-down local frame
+        // → Y-flipped to (100, -200) before composition.
         let def = makeDefinition(originOffset: SIMD3(100, 200, 0))
         let transform = WPEParticleSceneTransform(
             sceneSize: SIMD2<Float>(1920, 1080),
-            objectOrigin: SIMD3<Float>(1000, 540, 0),
+            objectOrigin: SIMD3<Float>(1000, 540, 0), // renderOrigin (40, 0)
             objectScale: SIMD3<Float>(1, 1, 1),
             objectAngleZ: 0
         )
@@ -115,27 +121,28 @@ struct WPEParticleCoordinateTests {
         system.tick(now: 0)
         system.tick(now: 0.05)
         #expect(system.liveInstanceCount > 0)
-        let instances = system.instanceBuffer.contents()
-            .bindMemory(to: WPEParticleInstance.self, capacity: 4)
-        // renderOrigin = (1000 - 960, 540 - 540) = (40, 0)
-        // emitter origin (100, 200) — no Y flip — sum (140, 200).
-        #expect(abs(instances[0].positionAndSize.x - 140) < 0.5)
-        #expect(abs(instances[0].positionAndSize.y - 200) < 0.5)
+        let inst = system.instanceBuffer.contents()
+            .bindMemory(to: WPEParticleInstance.self, capacity: 4)[0]
+        // renderOrigin (40, 0) + emitter origin Y-flipped (100, -200) = (140, -200).
+        #expect(abs(inst.positionAndSize.x - 140) < 0.5)
+        #expect(abs(inst.positionAndSize.y - (-200)) < 0.5)
     }
 
-    @Test("Velocity is consumed verbatim (no Y mirror)")
-    func velocityNotMirrored() throws {
+    @Test("Velocity Y is flipped at spawn (emitter-local Y-down convention)")
+    func velocityIsYFlipped() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
-        // Negative vy in author Y-up frame = "drift down on screen".
-        // After two small ticks position.y should be lower than spawn.
+        // sceneObject origin (960, 540) → renderOrigin (0, 0)
+        // emitter origin (0,0,0) → emitter-local Y-flipped (0,0)
+        // velocity (0, -50) → Y-flipped (0, +50)
+        // spawn position = (0, 0); after ~0.2s of integration → y ≈ +10
         let def = makeDefinition(
-            originOffset: SIMD3(960, 540, 0),
-            velocityMin: SIMD3(0, -200, 0),
-            velocityMax: SIMD3(0, -200, 0)
+            originOffset: SIMD3(0, 0, 0),
+            velocityMin: SIMD3(0, -50, 0),
+            velocityMax: SIMD3(0, -50, 0)
         )
         let transform = WPEParticleSceneTransform(
             sceneSize: SIMD2<Float>(1920, 1080),
-            objectOrigin: SIMD3<Float>(0, 0, 0),
+            objectOrigin: SIMD3<Float>(960, 540, 0),
             objectScale: SIMD3<Float>(1, 1, 1),
             objectAngleZ: 0
         )
@@ -150,8 +157,9 @@ struct WPEParticleCoordinateTests {
         }
         let inst = system.instanceBuffer.contents()
             .bindMemory(to: WPEParticleInstance.self, capacity: 4)[0]
-        // Initial spawn ~ (0, 0); after 0.2s of -200/s drift, y ≈ -40 or so.
-        #expect(inst.positionAndSize.y < -5)
+        // y > 0 confirms the Y-flip on velocity put the particle into
+        // the upper half despite the JSON's negative vy.
+        #expect(inst.positionAndSize.y > 5)
     }
 
     @Test("Parser captures directions mask")
