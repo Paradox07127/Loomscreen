@@ -155,7 +155,7 @@ struct WeatherLocationProviderFallbackTests {
         #expect(resolution.displayName?.contains("London") == true)
     }
 
-    @Test("Manual without saved coord falls back to error message")
+    @Test("Manual without saved coord reports an actionable error and no coordinate")
     func manualWithoutSavedCoordReportsError() async {
         let original = SettingsManager.shared.loadGlobalSettings()
         defer { SettingsManager.shared.saveGlobalSettings(original) }
@@ -164,11 +164,34 @@ struct WeatherLocationProviderFallbackTests {
         settings.weatherLocation = WeatherLocationPreference(source: .manual, manual: nil)
         SettingsManager.shared.saveGlobalSettings(settings)
 
-        let session = URLSession(configuration: .ephemeral)
-        let provider = WeatherLocationProvider(urlSession: session)
+        let provider = WeatherLocationProvider()
         let resolution = await provider.resolveCoordinate()
 
-        #expect(resolution.resolvedSource == .manual || resolution.resolvedSource == .ipGeolocation)
+        #expect(resolution.resolvedSource == .manual)
+        #expect(resolution.coordinate == nil)
+        #expect(resolution.error != nil)
+    }
+
+    @Test("Off source short-circuits to unresolved without touching any backend")
+    func offSourceReturnsUnresolved() async {
+        let original = SettingsManager.shared.loadGlobalSettings()
+        defer { SettingsManager.shared.saveGlobalSettings(original) }
+
+        var settings = original
+        settings.weatherLocation = WeatherLocationPreference(source: .off, manual: nil)
+        SettingsManager.shared.saveGlobalSettings(settings)
+
+        let provider = WeatherLocationProvider()
+        let resolution = await provider.resolveCoordinate()
+
+        #expect(resolution == .unresolved)
+    }
+
+    @Test("Legacy ipGeolocation rawValue migrates to coreLocation on decode")
+    func legacyIPGeolocationMigratesToCoreLocation() throws {
+        let legacyJSON = #"{"source":"ipGeolocation"}"#.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(WeatherLocationPreference.self, from: legacyJSON)
+        #expect(decoded.source == .coreLocation)
     }
 
     @Test("Resolution equality compares coordinates with epsilon")

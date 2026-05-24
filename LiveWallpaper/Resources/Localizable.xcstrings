@@ -2857,34 +2857,6 @@
         }
       }
     },
-    "Battery Threshold": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Battery Threshold"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "バッテリーしきい値"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "电池阈值"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "電池臨界值"
-          }
-        }
-      }
-    },
     "Battery at %@": {
       "comment": "Power source accessibility summary. The placeholder is the formatted battery percent.",
       "extractionState": "manual",
@@ -4663,6 +4635,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "選擇…"
+          }
+        }
+      }
+    },
+    "City, region, or place": {
+      "comment": "Placeholder text for the Manual weather location TextField.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "City, region, or place"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "都市、地域、場所"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "城市、地区或地点"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "城市、地區或地點"
           }
         }
       }
@@ -7673,6 +7675,36 @@
         }
       }
     },
+    "Enable Global Shortcuts": {
+      "comment": "Master toggle label at the top of Settings → Shortcuts. Turning it off unregisters every global hot key without erasing the user's saved bindings.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enable Global Shortcuts"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "グローバルショートカットを有効化"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "启用全局快捷键"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "啟用全域快捷鍵"
+          }
+        }
+      }
+    },
     "End hour": {
       "comment": "A11y label for the end-hour picker in the schedule time editor.",
       "extractionState": "manual",
@@ -9936,63 +9968,6 @@
         }
       }
     },
-    "IP Geolocation": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "IP Geolocation"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "IP 位置情報"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "IP 地理定位"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "IP 地理定位"
-          }
-        }
-      }
-    },
-    "IP location: %@": {
-      "comment": "Weather source label. The placeholder is the inferred city or region.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "IP location: %@"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "IP 位置：%@"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "IP 位置：%@"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "IP 位置：%@"
-          }
-        }
-      }
-    },
     "Idle": {
       "comment": "Scene renderer accessibility state.\nScene renderer state.",
       "localizations": {
@@ -10048,34 +10023,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "若被系統或其他 App 攔截，請改用其他組合。"
-          }
-        }
-      }
-    },
-    "If your preferred source is unavailable (e.g. Location Services denied), the app will automatically fall back to IP geolocation so weather effects keep working.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "If your preferred source is unavailable (e.g. Location Services denied), the app will automatically fall back to IP geolocation so weather effects keep working."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "優先するソースを使用できない場合（例：位置情報サービスが拒否された場合）、天気エフェクトが動作し続けるように、アプリは自動的に IP 位置情報へフォールバックします。"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "如果你的首选来源不可用（例如定位服务被拒绝），App 会自动改用 IP 地理定位，让天气效果继续工作。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "如果偏好的來源無法使用（例如定位服務遭拒），App 會自動改用 IP 地理定位，讓天氣效果繼續運作。"
           }
         }
       }
@@ -11376,59 +11323,32 @@
         }
       }
     },
-    "Location Source": {
+    "Location unavailable. Allow Location Services or pick Manual in Settings → Weather.": {
+      "comment": "Weather error shown when System location is selected but Core Location did not yield a coordinate and no manual city is set.",
+      "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Location Source"
+            "value": "Location unavailable. Allow Location Services or pick Manual in Settings → Weather."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "位置情報ソース"
+            "value": "位置情報を取得できません。「設定 → 天気」で位置情報サービスを許可するか「手動」を選択してください。"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "位置来源"
+            "value": "无法获取位置。请在「设置 → 天气」中允许定位服务或改为「手动」。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "位置來源"
-          }
-        }
-      }
-    },
-    "Looks up an approximate location from your IP address. Coarse — typically city-level.": {
-      "comment": "Weather location source explanation.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Looks up an approximate location from your IP address. Coarse — typically city-level."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "IP アドレスからおおよその位置を調べます。粗い精度 — 通常は市区町村レベルです。"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "根据 IP 地址查找大致位置。精度较粗，通常到城市级。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "從你的 IP 位址查詢大略位置。精度較粗 — 通常到城市層級。"
+            "value": "無法取得位置。請在「設定 → 天氣」中允許定位服務或改為「手動」。"
           }
         }
       }
@@ -11664,58 +11584,62 @@
         }
       }
     },
-    "Manual City": {
+    "Manual": {
+      "comment": "Segmented option (Weather → Location) — short label for the manually entered city source.",
+      "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Manual City"
+            "value": "Manual"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "手動設定の都市"
+            "value": "手動"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "手动城市"
+            "value": "手动"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "手動指定城市"
+            "value": "手動"
           }
         }
       }
     },
-    "Manual Location": {
+    "Manual location not set. Type a city in Settings → Weather.": {
+      "comment": "Weather error shown when Manual source is selected but the user has not typed a city yet.",
+      "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Manual Location"
+            "value": "Manual location not set. Type a city in Settings → Weather."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "手動設定の位置"
+            "value": "手動の位置情報が未設定です。「設定 → 天気」で都市を入力してください。"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "手动位置"
+            "value": "尚未设置手动位置。请在「设置 → 天气」中输入城市。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "手動位置"
+            "value": "尚未設定手動位置。請在「設定 → 天氣」中輸入城市。"
           }
         }
       }
@@ -11775,6 +11699,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "主音訊已靜音；專案音量選項仍會更新桌布。"
+          }
+        }
+      }
+    },
+    "Master switch for every global shortcut. Bindings are preserved while off.": {
+      "comment": "Accessibility hint for the master enable toggle at the top of Settings → Shortcuts. Explains that flipping off does not erase saved bindings.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Master switch for every global shortcut. Bindings are preserved while off."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "すべてのグローバルショートカットを一括で制御します。オフでも設定したキー組み合わせは保持されます。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全部全局快捷键的总开关。关闭后已设置的组合键不会被清除。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "所有全域快捷鍵的總開關。關閉後已設定的組合鍵不會被清除。"
           }
         }
       }
@@ -13022,36 +12976,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "沒有符合的專案"
-          }
-        }
-      }
-    },
-    "No precise location data is stored or sent to LiveWallpaper.": {
-      "comment": "IP geolocation privacy callout — second line — in Weather Location settings.",
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No precise location data is stored or sent to LiveWallpaper."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "LiveWallpaper は正確な位置データを保存・送信しません。"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "LiveWallpaper 不会记录或发送精确位置数据。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "LiveWallpaper 不會記錄或傳送精確位置資料。"
           }
         }
       }
@@ -15709,34 +15633,6 @@
         }
       }
     },
-    "Power Saving": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Power Saving"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "省電力"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "节能"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "省電"
-          }
-        }
-      }
-    },
     "Power source": {
       "extractionState": "manual",
       "localizations": {
@@ -16048,36 +15944,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "主條目"
-          }
-        }
-      }
-    },
-    "Privacy: this contacts ipapi.co over HTTPS to derive a city-level location from your public IP.": {
-      "comment": "IP geolocation privacy callout — first line — in Weather Location settings.",
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Privacy: this contacts ipapi.co over HTTPS to derive a city-level location from your public IP."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "プライバシー：このオプションは HTTPS 経由で ipapi.co に接続し、あなたの公開 IP から市区町村レベルの位置を推定します。"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "隐私说明：此选项通过 HTTPS 联系 ipapi.co，使用你的公网 IP 推断城市级位置。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "隱私說明：此選項透過 HTTPS 聯繫 ipapi.co，使用你的公網 IP 推斷城市級位置。"
           }
         }
       }
@@ -20022,34 +19888,6 @@
         }
       }
     },
-    "Search city or place": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Search city or place"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "市区町村または場所を検索"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "搜索城市或地点"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "搜尋城市或地點"
-          }
-        }
-      }
-    },
     "Select Video": {
       "extractionState": "manual",
       "localizations": {
@@ -22074,30 +21912,32 @@
         }
       }
     },
-    "System Location": {
+    "System": {
+      "comment": "Segmented option (Weather → Location) — short label for the CoreLocation source.",
+      "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "System Location"
+            "value": "System"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "システムの位置情報"
+            "value": "システム"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "系统位置"
+            "value": "系统"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "系統位置"
+            "value": "系統"
           }
         }
       }
@@ -23854,35 +23694,6 @@
         }
       }
     },
-    "Type a city below. No network or location permission needed.": {
-      "comment": "Weather location source explanation.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Type a city below. No network or location permission needed."
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "下に都市を入力してください。ネットワークや位置情報の権限は不要です。"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "在下方输入城市。不需要网络定位权限。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "在下方輸入城市。不需要網路或位置權限。"
-          }
-        }
-      }
-    },
     "Type a value in CSS pixels.": {
       "comment": "HTML transform text field accessibility hint.",
       "localizations": {
@@ -24514,60 +24325,32 @@
         }
       }
     },
-    "Uses macOS Location Services. You'll be asked to allow access the first time. Most accurate.": {
-      "comment": "Weather location source explanation.",
+    "Used by weather-reactive effects like rain, snow, and fog.": {
+      "comment": "Single-line subtitle under the Location source picker explaining what the choice drives.",
+      "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Uses macOS Location Services. You'll be asked to allow access the first time. Most accurate."
+            "value": "Used by weather-reactive effects like rain, snow, and fog."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "macOS 位置情報サービスを使用します。初回にアクセス許可を求められます。最も正確です。"
+            "value": "雨・雪・霧などの天気連動エフェクトで使用します。"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "使用 macOS 定位服务。首次使用时会请求访问权限，精度最高。"
+            "value": "用于雨、雪、雾等随天气联动的特效。"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "使用 macOS 定位服務。首次使用時會要求允許存取。最準確。"
-          }
-        }
-      }
-    },
-    "Using IP location (Core Location unavailable)": {
-      "comment": "Weather source label when Core Location is unavailable.",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Using IP location (Core Location unavailable)"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "IP 位置情報を使用中（Core Location は利用不可）"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "正在使用 IP 位置（Core Location 不可用）"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "正在使用 IP 位置（Core Location 無法使用）"
+            "value": "用於雨、雪、霧等隨天氣連動的特效。"
           }
         }
       }
@@ -25747,6 +25530,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "天氣取得錯誤（路徑與權杖已遮蔽）"
+          }
+        }
+      }
+    },
+    "Weather location source": {
+      "comment": "Accessibility label for the segmented control that picks the weather location source.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Weather location source"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "天気の位置情報ソース"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "天气位置数据源"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "天氣位置資料來源"
           }
         }
       }

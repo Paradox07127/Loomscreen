@@ -2,115 +2,19 @@ import SwiftUI
 import MapKit
 import AppKit
 
-/// Settings tab that lets users pick how the weather pipeline gets a
-/// location. Three sources, in order of decreasing privacy intrusion:
+/// Weather location UI primitives shared by `GeneralSettingsView`'s
+/// inline `weatherSection`. The dedicated Settings tab that used to
+/// host these was removed because the surface is small enough to live
+/// next to the other GlobalSettings rows.
 ///
-/// - **System Location** – the existing CoreLocation flow.
-/// - **Manual** – type a city; we use `MKLocalSearchCompleter` to suggest
-///   completions and `MKLocalSearch` to convert the completion into a
-///   coordinate. No geocoder API key required.
-/// - **IP Geolocation** – HTTPS call to ipapi.co; coarse but zero-permission.
-struct WeatherLocationSettingsView: View {
-    @State private var preference: WeatherLocationPreference
+/// `ManualLocationPicker` renders the "type a city" affordance — a
+/// full-width TextField with an inline completion list backed by
+/// `MKLocalSearchCompleter` + `MKLocalSearch`. `LocationCompleterModel`
+/// wraps the AppKit-flavoured completer for SwiftUI consumption and
+/// coalesces typing bursts so the upstream MapKit call doesn't fire on
+/// every keystroke.
 
-    init() {
-        _preference = State(initialValue: SettingsManager.shared.loadGlobalSettings().weatherLocation)
-    }
-
-    var body: some View {
-        Form {
-            Section {
-                Picker("Source", selection: Binding(
-                    get: { preference.source },
-                    set: { newValue in
-                        preference.source = newValue
-                        persist()
-                    }
-                )) {
-                    Text("System Location").tag(WeatherLocationPreference.Source.coreLocation)
-                    Text("Manual City").tag(WeatherLocationPreference.Source.manual)
-                    Text("IP Geolocation").tag(WeatherLocationPreference.Source.ipGeolocation)
-                }
-                .pickerStyle(.segmented)
-
-                Text(verbatim: sourceExplanation)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                if preference.source == .ipGeolocation {
-                    ipGeolocationPrivacyCallout
-                }
-            } header: {
-                Text("Location Source")
-            }
-
-            if preference.source == .manual {
-                Section {
-                    ManualLocationPicker(
-                        currentSelection: preference.manual,
-                        onCommit: { manual in
-                            preference.manual = manual
-                            persist()
-                        }
-                    )
-                } header: {
-                    Text("Manual Location")
-                }
-            }
-
-            Section {
-                Text("If your preferred source is unavailable (e.g. Location Services denied), the app will automatically fall back to IP geolocation so weather effects keep working.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .settingsFormChrome(minWidth: 500, minHeight: 400)
-    }
-
-    /// Surfaces the upstream endpoint and what leaves the device whenever
-    /// the user picks the IP source. macOS hides the request inside an
-    /// otherwise innocuous setting; the callout makes the implicit network
-    /// call explicit so the user can decide.
-    private var ipGeolocationPrivacyCallout: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "lock.shield")
-                .foregroundStyle(.orange)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Privacy: this contacts ipapi.co over HTTPS to derive a city-level location from your public IP.", comment: "IP geolocation privacy callout — first line — in Weather Location settings.")
-                Text("No precise location data is stored or sent to LiveWallpaper.", comment: "IP geolocation privacy callout — second line — in Weather Location settings.")
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-        .accessibilityElement(children: .combine)
-    }
-
-    private var sourceExplanation: String {
-        switch preference.source {
-        case .coreLocation:
-            return String(localized: "Uses macOS Location Services. You'll be asked to allow access the first time. Most accurate.", defaultValue: "Uses macOS Location Services. You'll be asked to allow access the first time. Most accurate.", comment: "Weather location source explanation.")
-        case .manual:
-            return String(localized: "Type a city below. No network or location permission needed.", defaultValue: "Type a city below. No network or location permission needed.", comment: "Weather location source explanation.")
-        case .ipGeolocation:
-            return String(localized: "Looks up an approximate location from your IP address. Coarse — typically city-level.", defaultValue: "Looks up an approximate location from your IP address. Coarse — typically city-level.", comment: "Weather location source explanation.")
-        }
-    }
-
-    private func persist() {
-        var settings = SettingsManager.shared.loadGlobalSettings()
-        settings.weatherLocation = preference
-        SettingsManager.shared.saveGlobalSettings(settings)
-        Task { @MainActor in
-            NotificationCenter.default.post(name: .weatherLocationPreferenceDidChange, object: nil)
-        }
-    }
-}
-
-private struct ManualLocationPicker: View {
+struct ManualLocationPicker: View {
     let currentSelection: WeatherLocationPreference.ManualLocation?
     let onCommit: (WeatherLocationPreference.ManualLocation?) -> Void
 
@@ -122,26 +26,33 @@ private struct ManualLocationPicker: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let current = currentSelection {
-                HStack {
+                HStack(spacing: 6) {
                     Image(systemName: "mappin.and.ellipse")
                         .foregroundStyle(.green)
                     Text(verbatim: current.name)
                         .font(.system(size: 13, weight: .medium))
-                    Spacer()
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 8)
                     Button("Clear") {
                         onCommit(nil)
                     }
                     .buttonStyle(.borderless)
                     .destructiveControlTint()
                 }
-                .padding(.bottom, 4)
             }
 
-            TextField("Search city or place", text: $query)
-                .textFieldStyle(.roundedBorder)
-                .onChange(of: query) { _, newValue in
-                    completer.update(query: newValue)
-                }
+            // Full-width input — the placeholder doubles as the prompt
+            // so we do not need a separate labelled row that would
+            // squash the TextField into a narrow strip.
+            TextField(text: $query) {
+                Text("City, region, or place")
+            }
+            .textFieldStyle(.roundedBorder)
+            .frame(maxWidth: .infinity)
+            .onChange(of: query) { _, newValue in
+                completer.update(query: newValue)
+            }
 
             if !completer.results.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {

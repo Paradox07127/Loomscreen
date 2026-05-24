@@ -5,10 +5,11 @@ import CoreLocation
 /// user-preferred chain of `WeatherLocationPreference.Source` values.
 ///
 /// `WeatherReactiveService` calls into this provider; the provider does
-/// **not** keep a persistent reference to the service. That keeps the
-/// fallback logic isolated and testable: each source is a tiny pure-ish
-/// function that either returns a coordinate or fails fast so the caller
-/// can try the next link in the chain.
+/// **not** keep a persistent reference to the service. There is no IP-
+/// geolocation source: the only ways to obtain a coordinate are macOS
+/// Core Location (with explicit user permission) or a manually-typed
+/// city. Choosing `.off` short-circuits the whole resolve so no location
+/// is touched at all.
 @MainActor
 protocol WeatherLocationProviding: AnyObject {
     /// Pull the latest known location preference and resolve it.
@@ -16,9 +17,6 @@ protocol WeatherLocationProviding: AnyObject {
 
     /// Triggers a CoreLocation authorisation prompt if the user has chosen `.coreLocation` and we haven't asked yet.
     func requestCoreLocationAuthorizationIfNeeded()
-
-    /// Drops any cached IP-derived coordinate so a future resolve hits the network again.
-    func invalidateIPGeolocationCache()
 }
 
 /// What a location resolution actually produced. The status mirrors the
@@ -27,8 +25,7 @@ protocol WeatherLocationProviding: AnyObject {
 struct WeatherLocationResolution: Equatable {
     /// Successful coordinate, or `nil` if every source in the chain failed.
     var coordinate: CLLocationCoordinate2D?
-    /// What actually produced (or attempted to produce) the coordinate. Lets
-    /// the UI show "Using IP location — Core Location denied".
+    /// What actually produced (or attempted to produce) the coordinate.
     var resolvedSource: WeatherLocationPreference.Source?
     /// Human-readable label for the source — used by the status badge.
     var displayName: String?
@@ -57,21 +54,8 @@ final class WeatherLocationProvider: NSObject, WeatherLocationProviding, CLLocat
     /// firing a second `requestLocation()` (which would fail with
     /// kCLErrorLocationUnknown on macOS when a request is already pending).
     private var coreLocationRequestInFlight = false
-    private var ipCache: IPGeoCacheEntry?
-    private let urlSession: URLSession
 
-    private struct IPGeoCacheEntry {
-        let coordinate: CLLocationCoordinate2D
-        let label: String
-        let timestamp: Date
-
-        var isFresh: Bool {
-            Date().timeIntervalSince(timestamp) < 60 * 60 * 24
-        }
-    }
-
-    init(urlSession: URLSession = .shared) {
-        self.urlSession = urlSession
+    override init() {
         super.init()
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyKilometer
@@ -83,36 +67,35 @@ final class WeatherLocationProvider: NSObject, WeatherLocationProviding, CLLocat
         let preference = SettingsManager.shared.loadGlobalSettings().weatherLocation
 
         switch preference.source {
+        case .off:
+            return .unresolved
+
         case .coreLocation:
             if let resolved = await tryCoreLocation() { return resolved }
-            if let resolved = await tryIPGeolocation(noteCoreLocationFallback: true) { return resolved }
-            return tryManual(preference)
-                ?? WeatherLocationResolution(
-                    coordinate: nil,
-                    resolvedSource: .coreLocation,
-                    displayName: nil,
-                    error: "Location unavailable. Enable Location Services or set a manual city in Settings → Weather."
+            if let resolved = tryManual(preference) { return resolved }
+            return WeatherLocationResolution(
+                coordinate: nil,
+                resolvedSource: .coreLocation,
+                displayName: nil,
+                error: String(
+                    localized: "Location unavailable. Allow Location Services or pick Manual in Settings → Weather.",
+                    defaultValue: "Location unavailable. Allow Location Services or pick Manual in Settings → Weather.",
+                    comment: "Weather error shown when System location is selected but Core Location did not yield a coordinate and no manual city is set."
                 )
+            )
 
         case .manual:
             if let resolved = tryManual(preference) { return resolved }
-            if let resolved = await tryIPGeolocation(noteCoreLocationFallback: false) { return resolved }
             return WeatherLocationResolution(
                 coordinate: nil,
                 resolvedSource: .manual,
                 displayName: nil,
-                error: "Manual location not set."
-            )
-
-        case .ipGeolocation:
-            if let resolved = await tryIPGeolocation(noteCoreLocationFallback: false) { return resolved }
-            return tryManual(preference)
-                ?? WeatherLocationResolution(
-                    coordinate: nil,
-                    resolvedSource: .ipGeolocation,
-                    displayName: nil,
-                    error: "IP geolocation unavailable. Check your internet connection."
+                error: String(
+                    localized: "Manual location not set. Type a city in Settings → Weather.",
+                    defaultValue: "Manual location not set. Type a city in Settings → Weather.",
+                    comment: "Weather error shown when Manual source is selected but the user has not typed a city yet."
                 )
+            )
         }
     }
 
@@ -123,10 +106,6 @@ final class WeatherLocationProvider: NSObject, WeatherLocationProviding, CLLocat
         if locationManager.authorizationStatus == .notDetermined {
             locationManager.requestWhenInUseAuthorization()
         }
-    }
-
-    func invalidateIPGeolocationCache() {
-        ipCache = nil
     }
 
     // MARK: - CoreLocation
@@ -158,7 +137,11 @@ final class WeatherLocationProvider: NSObject, WeatherLocationProviding, CLLocat
         return WeatherLocationResolution(
             coordinate: location.coordinate,
             resolvedSource: .coreLocation,
-            displayName: String(localized: "System location", defaultValue: "System location", comment: "Weather source label for macOS Core Location."),
+            displayName: String(
+                localized: "System location",
+                defaultValue: "System location",
+                comment: "Weather source label for macOS Core Location."
+            ),
             error: nil
         )
     }
@@ -194,64 +177,6 @@ final class WeatherLocationProvider: NSObject, WeatherLocationProviding, CLLocat
         continuation?.resume(returning: nil)
     }
 
-    // MARK: - IP Geolocation
-
-    private struct IPGeoResponse: Decodable {
-        let latitude: Double
-        let longitude: Double
-        let city: String?
-        let country_name: String?
-    }
-
-    private func tryIPGeolocation(noteCoreLocationFallback: Bool) async -> WeatherLocationResolution? {
-        if let cache = ipCache, cache.isFresh {
-            return WeatherLocationResolution(
-                coordinate: cache.coordinate,
-                resolvedSource: .ipGeolocation,
-                displayName: noteCoreLocationFallback
-                    ? String(localized: "Using IP location (Core Location unavailable)", defaultValue: "Using IP location (Core Location unavailable)", comment: "Weather source label when Core Location is unavailable.")
-                    : String(localized: "IP location: \(cache.label)", comment: "Weather source label. The placeholder is the inferred city or region."),
-                error: nil
-            )
-        }
-
-        guard let url = URL(string: "https://ipapi.co/json/") else { return nil }
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 8)
-        request.setValue("LiveWallpaper/1.0", forHTTPHeaderField: "User-Agent")
-
-        do {
-            let (data, response) = try await urlSession.data(for: request)
-            guard
-                let http = response as? HTTPURLResponse,
-                (200...299).contains(http.statusCode)
-            else {
-                return nil
-            }
-            let decoded = try JSONDecoder().decode(IPGeoResponse.self, from: data)
-            guard let coord = validatedCoordinate(latitude: decoded.latitude, longitude: decoded.longitude) else {
-                Logger.warning("IP geolocation returned invalid coordinate", category: .screenManager)
-                return nil
-            }
-            let label: String = {
-                let parts = [decoded.city, decoded.country_name].compactMap(sanitizedLabelPart)
-                return parts.isEmpty ? "your network area" : parts.joined(separator: ", ")
-            }()
-            ipCache = IPGeoCacheEntry(coordinate: coord, label: label, timestamp: Date())
-
-            return WeatherLocationResolution(
-                coordinate: coord,
-                resolvedSource: .ipGeolocation,
-                displayName: noteCoreLocationFallback
-                    ? String(localized: "Using IP location (Core Location unavailable)", defaultValue: "Using IP location (Core Location unavailable)", comment: "Weather source label when Core Location is unavailable.")
-                    : String(localized: "IP location: \(label)", comment: "Weather source label. The placeholder is the inferred city or region."),
-                error: nil
-            )
-        } catch {
-            Logger.warning("IP geolocation failed: \(error.localizedDescription)", category: .screenManager)
-            return nil
-        }
-    }
-
     // MARK: - Manual
 
     private func tryManual(_ preference: WeatherLocationPreference) -> WeatherLocationResolution? {
@@ -259,25 +184,11 @@ final class WeatherLocationProvider: NSObject, WeatherLocationProviding, CLLocat
         return WeatherLocationResolution(
             coordinate: manual.coordinate,
             resolvedSource: .manual,
-            displayName: String(localized: "Manual: \(manual.name)", comment: "Weather source label. The placeholder is the user-selected location name."),
+            displayName: String(
+                localized: "Manual: \(manual.name)",
+                comment: "Weather source label. The placeholder is the user-selected location name."
+            ),
             error: nil
         )
-    }
-
-    // MARK: - Defensive Validation
-
-    private func validatedCoordinate(latitude: Double, longitude: Double) -> CLLocationCoordinate2D? {
-        guard latitude.isFinite, longitude.isFinite,
-              (-90...90).contains(latitude),
-              (-180...180).contains(longitude) else { return nil }
-        return CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
-    }
-
-    private func sanitizedLabelPart(_ value: String?) -> String? {
-        guard let value else { return nil }
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        let filtered = trimmed.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }
-        let limited = String(String.UnicodeScalarView(filtered.prefix(80)))
-        return limited.isEmpty ? nil : limited
     }
 }
