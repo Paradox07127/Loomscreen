@@ -1,5 +1,0 @@
-glslang: 15.4.0
-spirv-tools: vulkan-sdk-1.4.313.0
-spirv-cross: vulkan-sdk-1.4.313.0
-deployment-target: 14.0
-framework-sha256: b266c170e85e7d368f4e8edae0d76db156897bdfe7a52576f79178f120ac4021

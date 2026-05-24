@@ -44,6 +44,13 @@ enum WPEMetalShaderInputs {
             if Self.isSceneAliasName(name) {
                 return frameState.latestSceneTexture ?? frameState.output
             }
+            if let aliased = resolveAliasedNamedTexture(name: name, frameState: frameState) {
+                return aliased
+            }
+            Logger.warning(
+                "WPE Metal: named FBO '\(name)' miss — declared targets: \(Array(frameState.latestNamedTextures.keys).sorted().joined(separator: ", "))",
+                category: .screenManager
+            )
             throw WPEMetalRenderExecutorError.missingTexture(reference)
 
         case .previous:
@@ -52,6 +59,34 @@ enum WPEMetalShaderInputs {
             }
             return texture
         }
+    }
+
+    /// Best-effort fuzzy lookup when an `.fbo(name)` reference misses the
+    /// exact `latestNamedTextures` key. WPE pass authoring is loose about
+    /// `_rt_` prefixes and case; rather than fail the whole scene, try a
+    /// short list of common transformations and accept the first hit.
+    /// Returns `nil` when no fuzzy candidate matches (caller then logs the
+    /// available keys and throws).
+    static func resolveAliasedNamedTexture(
+        name: String,
+        frameState: WPEMetalFrameState
+    ) -> MTLTexture? {
+        let candidates: [String] = [
+            "_rt_" + name,
+            name.hasPrefix("_rt_") ? String(name.dropFirst(4)) : nil,
+            name.hasPrefix("_") ? String(name.dropFirst()) : nil
+        ].compactMap { $0 }
+        for candidate in candidates {
+            if let texture = frameState.latestNamedTextures[candidate] {
+                return texture
+            }
+        }
+        let lowercased = name.lowercased()
+        for (key, texture) in frameState.latestNamedTextures
+        where key != name && key.lowercased() == lowercased {
+            return texture
+        }
+        return nil
     }
 
     /// True for `_rt_*` names that WPE's runtime aliases to the live scene texture rather than a discrete FBO allocation.

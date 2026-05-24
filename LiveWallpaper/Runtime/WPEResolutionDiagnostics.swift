@@ -96,5 +96,17 @@ final class WPEResolutionTracer: @unchecked Sendable {
         events.removeAll(keepingCapacity: true)
         lock.unlock()
     }
+
+    /// Drop the most recently recorded event. Used by callers that
+    /// probe multiple resolution candidates (e.g. WebGL cascade) and
+    /// want to keep only the final, user-visible outcome in the
+    /// snapshot — intermediate probe failures aren't real misses.
+    func popLastEvent() {
+        lock.lock()
+        if !events.isEmpty {
+            events.removeLast()
+        }
+        lock.unlock()
+    }
 }
 #endif
