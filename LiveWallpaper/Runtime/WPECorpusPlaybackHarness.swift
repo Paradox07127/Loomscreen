@@ -110,6 +110,11 @@ final class WPECorpusPlaybackHarness {
     struct Configuration: Sendable {
         var perSceneTimeoutSeconds: Double = 8
         var rendererFrame: CGSize = CGSize(width: 1920, height: 1080)
+        /// When non-nil, only workshop IDs in this set are exercised. Used
+        /// by the Developer Tools single-scene debug button so a maintainer
+        /// can iterate on one failing scene without burning through the
+        /// whole corpus run.
+        var workshopIDFilter: Set<String>? = nil
     }
 
     enum Progress: Sendable {
@@ -176,9 +181,14 @@ final class WPECorpusPlaybackHarness {
 
         let projects: [WallpaperEngineLibraryScanner.DiscoveredProject]
         do {
-            projects = try await WallpaperEngineLibraryScanner()
+            let scanned = try await WallpaperEngineLibraryScanner()
                 .scan(rootBookmarkData: rootBookmarkData, alreadyImportedWorkshopIDs: [])
                 .filter { $0.type == .scene && $0.hasScenePackage }
+            if let allow = configuration.workshopIDFilter {
+                projects = scanned.filter { allow.contains($0.workshopID) }
+            } else {
+                projects = scanned
+            }
         } catch {
             let message = Self.describe(error)
             Logger.error("WPE corpus playback scan failed: \(message)", category: .screenManager)

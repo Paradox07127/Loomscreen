@@ -24,8 +24,26 @@ struct WPESwiftShaderCompiler: WPEShaderCompiling {
                 preprocessedSource: request.processedFragmentSource
             )
         } catch let err as WPEShaderCompilerError {
+            WPESceneDebugArtifacts.shared.recordShaderFailure(
+                shaderName: request.shaderName,
+                originalVertex: nil,
+                processedVertex: request.processedVertexSource,
+                originalFragment: nil,
+                processedFragment: request.processedFragmentSource,
+                translatedMSL: nil,
+                errorText: "translation failed: \(String(describing: err))"
+            )
             throw err
         } catch {
+            WPESceneDebugArtifacts.shared.recordShaderFailure(
+                shaderName: request.shaderName,
+                originalVertex: nil,
+                processedVertex: request.processedVertexSource,
+                originalFragment: nil,
+                processedFragment: request.processedFragmentSource,
+                translatedMSL: nil,
+                errorText: "transpiler crashed: \(error)"
+            )
             throw WPEShaderCompilerError.translationFailed(
                 "transpiler crashed for '\(request.shaderName)': \(error)"
             )
@@ -37,6 +55,15 @@ struct WPESwiftShaderCompiler: WPEShaderCompiling {
             options.languageVersion = .version3_0
             library = try device.makeLibrary(source: translation.mslSource, options: options)
         } catch {
+            WPESceneDebugArtifacts.shared.recordShaderFailure(
+                shaderName: request.shaderName,
+                originalVertex: nil,
+                processedVertex: request.processedVertexSource,
+                originalFragment: nil,
+                processedFragment: request.processedFragmentSource,
+                translatedMSL: translation.mslSource,
+                errorText: "Metal rejected MSL: \(error.localizedDescription)"
+            )
             throw WPEShaderCompilerError.mslLibraryFailed(
                 "Metal rejected translated MSL for '\(request.shaderName)': \(error.localizedDescription). MSL was: \(translation.mslSource.prefix(800))"
             )

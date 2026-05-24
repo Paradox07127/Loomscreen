@@ -9729,6 +9729,36 @@
         }
       }
     },
+    "Headless single-scene load with full pipeline tracing. Every shader compile error, FBO miss, first-frame snapshot lands under scene-debug as `<timestamp>-<workshopID>/`.": {
+      "comment": "Developer tools description for the single-scene debug section.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Headless single-scene load with full pipeline tracing. Every shader compile error, FBO miss, first-frame snapshot lands under scene-debug as `<timestamp>-<workshopID>/`."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ヘッドレスで単一シーンを読み込み、パイプライン全体をトレースします。シェーダーコンパイルエラー、FBO ミス、最初のフレームのスナップショットがすべて scene-debug の `<timestamp>-<workshopID>/` に書き出されます。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无界面单场景加载，全流水线追踪。所有 shader 编译错误、FBO 未命中、首帧快照都会落到 scene-debug 下的 `<timestamp>-<workshopID>/`。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無介面單一場景載入，全流水線追蹤。所有 shader 編譯錯誤、FBO 未命中、首幀快照都會落入 scene-debug 下的 `<timestamp>-<workshopID>/`。"
+          }
+        }
+      }
+    },
     "Heavy Rain": {
       "comment": "Weather condition.",
       "localizations": {
@@ -18782,6 +18812,36 @@
         }
       }
     },
+    "Reveal artifacts in Finder": {
+      "comment": "Developer tools button that opens the scene-debug folder in Finder.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reveal artifacts in Finder"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finder で成果物を表示"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 Finder 中显示产物"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 Finder 中顯示產物"
+          }
+        }
+      }
+    },
     "Reveals diagnostic tools and HTML web inspector. Off by default.": {
       "comment": "Accessibility hint for the Developer Mode toggle.",
       "extractionState": "manual",
@@ -19008,6 +19068,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "執行語料播放測試"
+          }
+        }
+      }
+    },
+    "Run debug load": {
+      "comment": "Developer tools button that runs a single-scene debug load with full pipeline tracing.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Run debug load"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "デバッグ読み込みを実行"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "运行调试加载"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "執行偵錯載入"
           }
         }
       }
@@ -21000,6 +21090,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "簡體中文"
+          }
+        }
+      }
+    },
+    "Single-scene debug": {
+      "comment": "Developer tools section header for single-scene debug iteration.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Single-scene debug"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "単一シーンデバッグ"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "单场景调试"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "單一場景偵錯"
           }
         }
       }
