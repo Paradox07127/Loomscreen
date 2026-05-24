@@ -3,7 +3,7 @@ import SwiftUI
 import AppKit
 import ImageIO
 
-/// 16:9 preview tile for a Wallpaper Engine project.
+/// Square (1:1) preview tile for a Wallpaper Engine project.
 ///
 /// Renders into a CALayer with `contentsGravity = .resizeAspectFill` so
 /// previews of any source aspect (square — WPE editor's 512×512 default,
@@ -39,40 +39,61 @@ struct WPEPreviewView: View {
                     }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                if loadFailed {
-                    retryOverlay
-                }
             }
         }
         .aspectRatio(1, contentMode: .fit)
         .clipped()
+        .overlay(alignment: .bottomTrailing) {
+            if loadFailed {
+                retryBadge
+                    .padding(6)
+            }
+        }
         .onChange(of: imageURL) { _, _ in
             loadFailed = false
         }
     }
 
+    /// Non-blocking corner chip so the failed-load state is visible without
+    /// hiding whatever fragment of the preview did manage to render. Modeled
+    /// as a tap-gesture'd view (not a `Button`) because the parent grid cell
+    /// is itself a `Button` and AppKit-bridged buttons nested inside another
+    /// SwiftUI button race for hit-tests + confuse VoiceOver focus.
     @ViewBuilder
-    private var retryOverlay: some View {
-        VStack(spacing: 6) {
+    private var retryBadge: some View {
+        HStack(spacing: 4) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 18, weight: .medium))
                 .foregroundStyle(.orange)
-            Text("Preview unavailable")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Button {
-                loadFailed = false
-                loadAttempt &+= 1
-            } label: {
-                Label("Retry", systemImage: "arrow.clockwise")
-            }
-            .adaptiveGlassButton(.regular)
-            .controlSize(.small)
-            .accessibilityHint(Text("Re-attempt to load this preview"))
+            Image(systemName: "arrow.clockwise")
         }
-        .padding(12)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .font(.system(size: 10, weight: .semibold))
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .adaptiveGlassSurface(.capsule, interactive: true)
+        .contentShape(Capsule())
+        .onTapGesture {
+            retryLoad()
+        }
+        .help(Text(
+            "Preview unavailable. Tap to retry.",
+            comment: "Tooltip on the WPE preview retry badge that surfaces when the preview image failed to load."
+        ))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text(
+            "Retry preview",
+            comment: "A11y label for the corner badge that retries a failed preview load."
+        ))
+        .accessibilityHint(Text(
+            "Re-attempt to load this preview",
+            comment: "A11y hint describing what the retry preview badge does."
+        ))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { retryLoad() }
+    }
+
+    private func retryLoad() {
+        loadFailed = false
+        loadAttempt &+= 1
     }
 }
 
@@ -127,7 +148,14 @@ private struct AspectFillImage: NSViewRepresentable {
 
         if let cached = WPEPreviewDataCache.shared.object(forKey: url as NSURL) {
             let ok = nsView.setImage(data: cached as Data)
-            onLoadResult(ok)
+            // Defer the binding callback to the next runloop tick — this
+            // updateNSView runs inside SwiftUI's view-update pass, so a
+            // synchronous `onLoadResult(ok)` would mutate the parent's
+            // `loadFailed` @State while the parent is still rendering and
+            // trip "Modifying state during view update" undefined-behavior
+            // warnings. The async path below is already deferred via Task.
+            let resultHandler = onLoadResult
+            Task { @MainActor in resultHandler(ok) }
             return
         }
 

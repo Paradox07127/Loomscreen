@@ -34,12 +34,34 @@ struct ShortcutsSettingsView: View {
             } header: {
                 Text("Global Shortcuts")
             } footer: {
-                Text("These shortcuts work even when LiveWallpaper is in the background. Bare keys without a modifier are rejected (they would steal regular typing), and two actions can't share the same combination. Conflicts with system or other-app shortcuts will silently take whichever app registers first — pick a different combination if a shortcut doesn't trigger.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                shortcutFooter
             }
         }
         .settingsFormChrome(minWidth: 500, minHeight: 400)
+    }
+
+    /// Compact bullet list replaces the original long-paragraph footer so
+    /// each rule scans independently. Symbols are leading icons rather than
+    /// inline emoji so the type styling stays consistent across the row.
+    private var shortcutFooter: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            shortcutFooterRow(systemImage: "moon.circle", text: "Works even when LiveWallpaper is in the background.")
+            shortcutFooterRow(systemImage: "command", text: "Must include at least one modifier (⌃ ⌥ ⇧ ⌘).")
+            shortcutFooterRow(systemImage: "arrow.left.arrow.right", text: "Two actions can't share the same combination.")
+            shortcutFooterRow(systemImage: "exclamationmark.triangle", text: "If a system or other-app shortcut wins, pick a different combination.")
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+    }
+
+    private func shortcutFooterRow(systemImage: String, text: LocalizedStringKey) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: systemImage)
+                .frame(width: 14, alignment: .center)
+                .accessibilityHidden(true)
+            Text(text)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private func bindingFor(_ action: GlobalShortcutAction) -> GlobalShortcutBinding? {

@@ -174,53 +174,37 @@ struct WorkshopGalleryView: View {
             actions: {
                 AdaptiveGlassContainer(spacing: 8) {
                     HStack(spacing: 8) {
-                        if hasLibraryRoot {
-                            if allowsTargetSelection {
-                                targetScreenPicker
+                        if !allowsTargetSelection {
+                            Button {
+                                dismiss()
+                            } label: {
+                                Image(systemName: "checkmark")
                             }
+                            .adaptiveGlassButton(.regular)
+                            .controlSize(.regular)
+                            .help(Text("Done"))
+                            .accessibilityLabel(Text("Done"))
+                            .keyboardShortcut(.cancelAction)
+                        } else if hasLibraryRoot {
+                            targetScreenPicker
+                        }
 
+                        if hasLibraryRoot {
                             Button {
                                 Task { await refreshScan() }
                             } label: {
                                 Image(systemName: "arrow.clockwise")
                             }
-                            .buttonStyle(WorkshopToolbarButtonStyle())
+                            .adaptiveGlassButton(.regular)
+                            .controlSize(.regular)
                             .help(Text("Rescan — re-scan the workshop folder for new projects"))
                             .accessibilityLabel(Text("Rescan workshop"))
                             .accessibilityHint(Text("Re-scan the workshop folder for new projects"))
                             .disabled(isBusy)
-
-                            Menu {
-                                Button {
-                                    presentFolderGrant()
-                                } label: {
-                                    Label("Change Library Folder...", systemImage: "folder.badge.gearshape")
-                                }
-
-                                Button(role: .destructive) {
-                                    confirmDisconnectLibraryRoot()
-                                } label: {
-                                    Label("Forget Library Folder", systemImage: "xmark.circle")
-                                }
-                            } label: {
-                                Label("Library Folder", systemImage: "folder")
-                            }
-                            .menuStyle(.button)
-                            .buttonStyle(WorkshopToolbarButtonStyle(tint: .secondary))
-                            .accessibilityHint(Text("Change or forget the selected Steam Workshop folder"))
-                            .disabled(isBusy)
                         }
 
-                        engineAssetsMenu
-
-                        if !allowsTargetSelection {
-                            Button {
-                                dismiss()
-                            } label: {
-                                Label("Done", systemImage: "checkmark")
-                            }
-                            .buttonStyle(WorkshopToolbarButtonStyle(tint: .secondary))
-                            .keyboardShortcut(.cancelAction)
+                        if hasLibraryRoot {
+                            overflowMenu
                         }
                     }
                 }
@@ -318,22 +302,43 @@ struct WorkshopGalleryView: View {
         if projects.isEmpty {
             emptyResultsView
         } else {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    WorkshopGalleryFilterBar(
-                        searchText: $searchText,
-                        typeFilter: $typeFilter,
-                        sortOrder: $sortOrder,
-                        resultCount: visibleProjects.count,
-                        totalCount: projects.count,
-                        isDisabled: isBusy
-                    )
+            VStack(spacing: 0) {
+                LibraryFilterBar(
+                    searchText: $searchText,
+                    searchPrompt: "Search Workshop",
+                    resultCount: visibleProjects.count,
+                    totalCount: projects.count,
+                    isDisabled: isBusy
+                ) {
+                    Picker("Type", selection: $typeFilter) {
+                        ForEach(WorkshopProjectTypeFilter.allCases) { filter in
+                            Text(verbatim: filter.title).tag(filter)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .controlSize(.small)
+                    .frame(width: 118)
+                    .help(Text("Filter by project type"))
 
-                    if visibleProjects.isEmpty {
-                        noFilteredResultsView
-                    } else {
+                    Picker("Sort", selection: $sortOrder) {
+                        ForEach(WorkshopProjectSortOrder.allCases) { order in
+                            Text(verbatim: order.title).tag(order)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .controlSize(.small)
+                    .frame(width: 132)
+                    .help(Text("Sort workshop projects"))
+                }
+
+                if visibleProjects.isEmpty {
+                    noFilteredResultsView
+                } else {
+                    ScrollView {
                         LazyVGrid(
-                            columns: [GridItem(.adaptive(minimum: 160, maximum: 160), spacing: 16)],
+                            columns: [GridItem(.adaptive(minimum: 160, maximum: 220), spacing: 16)],
                             alignment: .leading,
                             spacing: 16
                         ) {
@@ -349,9 +354,9 @@ struct WorkshopGalleryView: View {
                                 )
                             }
                         }
+                        .padding(20)
                     }
                 }
-                .padding(20)
             }
         }
     }
@@ -425,37 +430,56 @@ struct WorkshopGalleryView: View {
     /// resolver falls through to for shared framework files
     /// (`materials/util/composelayer.json`, `models/util/*.json`, …).
     @ViewBuilder
-    private var engineAssetsMenu: some View {
+    private var overflowMenu: some View {
         Menu {
-            if isEngineAssetsAuthorized {
-                if let displayName = engineAssetsDisplayName {
-                    Text("Granted: \(displayName)")
-                }
+            Section("Library Folder") {
                 Button {
-                    presentEngineAssetsGrant()
+                    presentFolderGrant()
                 } label: {
-                    Label("Change Engine Folder...", systemImage: "folder.badge.gearshape")
+                    Label("Change Library Folder...", systemImage: "folder.badge.gearshape")
                 }
+
                 Button(role: .destructive) {
-                    confirmDisconnectEngineAssets()
+                    confirmDisconnectLibraryRoot()
                 } label: {
-                    Label("Forget Engine Folder", systemImage: "xmark.circle")
+                    Label("Forget Library Folder", systemImage: "xmark.circle")
                 }
-            } else {
-                Text("Most scenes ship the files they need. Link a Wallpaper Engine install only if you have one and want extra coverage.")
-                Divider()
-                Button {
-                    presentEngineAssetsGrant()
-                } label: {
-                    Label("Grant Engine Folder…", systemImage: "folder.badge.plus")
+            }
+
+            Section("Wallpaper Engine Assets") {
+                if isEngineAssetsAuthorized {
+                    if let displayName = engineAssetsDisplayName {
+                        Text("Granted: \(displayName)")
+                    }
+                    Button {
+                        presentEngineAssetsGrant()
+                    } label: {
+                        Label("Change Engine Folder…", systemImage: "folder.badge.gearshape")
+                    }
+                    Button(role: .destructive) {
+                        confirmDisconnectEngineAssets()
+                    } label: {
+                        Label("Forget Engine Folder", systemImage: "xmark.circle")
+                    }
+                } else {
+                    Text("Most scenes ship the files they need. Link a Wallpaper Engine install only for extra coverage.")
+                    Button {
+                        presentEngineAssetsGrant()
+                    } label: {
+                        Label("Grant Engine Folder…", systemImage: "folder.badge.plus")
+                    }
                 }
             }
         } label: {
-            Label("Advanced: WPE Folder", systemImage: isEngineAssetsAuthorized ? "puzzlepiece.extension.fill" : "puzzlepiece.extension")
+            Image(systemName: "ellipsis.circle")
         }
-        .menuStyle(.button)
-        .buttonStyle(WorkshopToolbarButtonStyle(tint: .secondary))
-        .accessibilityHint(Text("Optional: link a Wallpaper Engine install folder for additional framework asset coverage. Most scenes don't need this."))
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .adaptiveGlassButton(.regular)
+        .controlSize(.regular)
+        .help(Text("More Workshop actions"))
+        .accessibilityLabel(Text("More Workshop actions"))
         .disabled(isBusy)
     }
 
@@ -851,83 +875,6 @@ struct WorkshopGalleryView: View {
     }
 }
 
-// MARK: - Browse Controls
-
-private struct WorkshopGalleryFilterBar: View {
-    @Binding var searchText: String
-    @Binding var typeFilter: WorkshopProjectTypeFilter
-    @Binding var sortOrder: WorkshopProjectSortOrder
-
-    let resultCount: Int
-    let totalCount: Int
-    let isDisabled: Bool
-
-    var body: some View {
-        HStack(spacing: 10) {
-            searchField
-
-            Picker("Type", selection: $typeFilter) {
-                ForEach(WorkshopProjectTypeFilter.allCases) { filter in
-                    Text(verbatim: filter.title).tag(filter)
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .controlSize(.small)
-            .frame(width: 118)
-            .help(Text("Filter by project type"))
-
-            Picker("Sort", selection: $sortOrder) {
-                ForEach(WorkshopProjectSortOrder.allCases) { order in
-                    Text(verbatim: order.title).tag(order)
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .controlSize(.small)
-            .frame(width: 132)
-            .help(Text("Sort workshop projects"))
-
-            Spacer(minLength: 10)
-
-            Text(verbatim: "\(resultCount)/\(totalCount)")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-                .help(Text("Visible projects"))
-        }
-        .disabled(isDisabled)
-    }
-
-    private var searchField: some View {
-        HStack(spacing: 7) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.secondary)
-
-            TextField("Search Workshop", text: $searchText)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12))
-
-            if !searchText.isEmpty {
-                Button {
-                    searchText = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help(Text("Clear search"))
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 7)
-        .frame(minWidth: 220, idealWidth: 280, maxWidth: 360)
-        .adaptiveGlassSurface(.capsule, interactive: true)
-    }
-}
-
 // MARK: - Card
 
 private struct WorkshopGalleryCard: View {
@@ -940,6 +887,7 @@ private struct WorkshopGalleryCard: View {
     let onToggleBookmark: () -> Void
 
     @State private var isHovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 0) {
@@ -947,11 +895,12 @@ private struct WorkshopGalleryCard: View {
                 imageURL: project.previewURL,
                 securityScopedBookmarkData: project.libraryRootBookmarkData
             )
-                .wpeCardPreviewClip()
                 .overlay(alignment: .topTrailing) {
                     typeBadge
                         .padding(8)
                 }
+
+            Divider()
 
             VStack(alignment: .leading, spacing: 8) {
                 Text(verbatim: project.title)
@@ -965,7 +914,7 @@ private struct WorkshopGalleryCard: View {
             .padding(12)
             .frame(maxHeight: .infinity, alignment: .top)
         }
-        .wpeProjectCardChrome(isHovering: isHovering)
+        .wpeProjectCardChrome(isHovering: isHovering, reduceMotion: reduceMotion)
         .onHover { isHovering = $0 }
     }
 
@@ -1115,45 +1064,4 @@ private struct WorkshopGalleryCard: View {
     }
 }
 
-private struct WorkshopToolbarButtonStyle: ButtonStyle {
-    var tint: Color = .accentColor
-    var fontSize: CGFloat = 13
-    var horizontalPadding: CGFloat = 15
-    var verticalPadding: CGFloat = 7
-
-    func makeBody(configuration: Configuration) -> some View {
-        StyledLabel(
-            configuration: configuration,
-            tint: tint,
-            fontSize: fontSize,
-            horizontalPadding: horizontalPadding,
-            verticalPadding: verticalPadding
-        )
-    }
-
-    private struct StyledLabel: View {
-        let configuration: Configuration
-        let tint: Color
-        let fontSize: CGFloat
-        let horizontalPadding: CGFloat
-        let verticalPadding: CGFloat
-
-        @Environment(\.isEnabled) private var isEnabled
-
-        var body: some View {
-            let effectiveTint = isEnabled ? tint : Color.secondary
-            configuration.label
-                .font(.system(size: fontSize, weight: .semibold))
-                .labelStyle(.titleAndIcon)
-                .foregroundStyle(effectiveTint)
-                .padding(.horizontal, horizontalPadding)
-                .padding(.vertical, verticalPadding)
-                .frame(minHeight: 34)
-                .adaptiveGlassSurface(.capsule, tint: effectiveTint, interactive: true)
-                .contentShape(Capsule())
-                .scaleEffect(configuration.isPressed ? 0.97 : 1)
-                .opacity(isEnabled ? 1 : 0.46)
-        }
-    }
-}
 #endif

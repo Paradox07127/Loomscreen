@@ -1,4 +1,5 @@
 import Foundation
+import LiveWallpaperCore
 
 /// SettingsManager-backed entry points for the Core `ConfigurationPorter`.
 /// Stays in the main target — Core stays free of the SettingsManager and
@@ -35,7 +36,15 @@ extension ConfigurationPorter {
         }
 
         if let global = bundle.globalSettings {
-            manager.saveGlobalSettings(global)
+            // Developer Mode is a per-machine opt-in for diagnostics, not a
+            // user preference that should ride along with a backup. Strip
+            // it on import so a bundle from another machine cannot silently
+            // light up `WKWebView.isInspectable` or the Developer Tools
+            // sidebar entry on this install. The user can flip it back on
+            // in Settings → General → Advanced if they want.
+            var sanitizedGlobal = global
+            sanitizedGlobal.developerModeEnabled = false
+            manager.saveGlobalSettings(sanitizedGlobal)
             summary.didRestoreGlobalSettings = true
         }
 

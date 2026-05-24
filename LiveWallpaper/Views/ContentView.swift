@@ -1,10 +1,13 @@
 import SwiftUI
 import AppKit
+import LiveWallpaperCore
+import LiveWallpaperSharedUI
 import UniformTypeIdentifiers
 
 struct ContentView: View {
     @Environment(ScreenManager.self) private var screenManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.featureCatalog) private var featureCatalog
     @State private var selectedNavigation: Navigation?
     @State private var didConsumeInitialAddWallpaperPrompt = false
     /// Sidebar visibility binding. Exists so the view can drive a one-shot
@@ -15,6 +18,11 @@ struct ContentView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var didPrewarmSidebar = false
     @State private var isReloading = false
+    /// Cached `GlobalSettings.developerModeEnabled` mirror. Lifted to
+    /// `ContentView` so both `Sidebar` and `DetailContent` see the same
+    /// value — without this, a stale `.developerTools` selection could
+    /// mount the detail view even with the toggle off.
+    @State private var developerModeEnabled: Bool = ContentView.loadDeveloperModeEnabled()
     private let initialAddWallpaperPromptKind: String?
 
     init(initialNavigation: Navigation? = nil, initialAddWallpaperPromptKind: String? = nil) {
@@ -22,21 +30,37 @@ struct ContentView: View {
         self.initialAddWallpaperPromptKind = initialAddWallpaperPromptKind
     }
 
+    /// Reads the persisted Developer Mode flag in Pro. Pinned to `false`
+    /// in Lite so a settings import can never auto-light the Developer
+    /// Tools surface inside the lightweight runtime.
+    private static func loadDeveloperModeEnabled() -> Bool {
+        #if !LITE_BUILD
+        return SettingsManager.shared.loadGlobalSettings().developerModeEnabled
+        #else
+        return false
+        #endif
+    }
+
+    private var canShowDeveloperTools: Bool {
+        #if !LITE_BUILD
+        return developerModeEnabled && featureCatalog.isEnabled(.developerTools)
+        #else
+        return false
+        #endif
+    }
+
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
-            Sidebar(selection: $selectedNavigation)
+            Sidebar(selection: $selectedNavigation, developerModeEnabled: developerModeEnabled)
                 .onReceive(NotificationCenter.default.publisher(for: .selectScreenInSettings)) { notification in
                     guard let screenID = notification.userInfo?["screenID"] as? CGDirectDisplayID else { return }
                     scheduleNavigationChange { selectedNavigation = .screen(screenID) }
-                }
-                .onReceive(NotificationCenter.default.publisher(for: .openAppleAerials)) { _ in
-                    scheduleNavigationChange { selectedNavigation = .appleAerials }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .promptAddWallpaper)) { notification in
                     handleAddWallpaperPrompt(notification: notification)
                 }
         } detail: {
-            DetailContent(selection: $selectedNavigation)
+            DetailContent(selection: $selectedNavigation, canShowDeveloperTools: canShowDeveloperTools)
         }
         .navigationSplitViewStyle(.balanced)
         .toolbar { toolbarContent }
@@ -50,7 +74,11 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .screensRefreshed)) { _ in
             scheduleDefaultDisplaySelection()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .developerModeDidChange)) { _ in
+            refreshDeveloperModeStateAndSelection()
+        }
         .onAppear {
+            refreshDeveloperModeStateAndSelection()
             scheduleDefaultDisplaySelection()
             consumeInitialAddWallpaperPromptIfNeeded()
             prewarmSidebarIfNeeded()
@@ -131,6 +159,19 @@ struct ContentView: View {
         Task { @MainActor in
             apply()
         }
+    }
+
+    /// Re-reads Developer Mode from disk and falls the selection back to
+    /// `.general` if the user just disabled the toggle while sitting on
+    /// the Developer Tools page. Centralised so the notification handler
+    /// and any startup re-entry use the same logic.
+    private func refreshDeveloperModeStateAndSelection() {
+        developerModeEnabled = ContentView.loadDeveloperModeEnabled()
+        #if !LITE_BUILD
+        if !canShowDeveloperTools, selectedNavigation == .developerTools {
+            scheduleNavigationChange { selectedNavigation = .general }
+        }
+        #endif
     }
 
     private func selectDefaultDisplayIfNeeded() {
@@ -261,7 +302,7 @@ enum Navigation: Hashable {
     case appleAerials
     case bookmarks
     case workshop
-    #if DEBUG
+    #if !LITE_BUILD
     case developerTools
     #endif
 }
@@ -269,6 +310,9 @@ enum Navigation: Hashable {
 // MARK: - Sidebar View
 struct Sidebar: View {
     @Binding var selection: Navigation?
+    /// Owned by `ContentView` so the sidebar entry stays in lock-step
+    /// with `DetailContent`'s runtime gate.
+    let developerModeEnabled: Bool
     @Environment(ScreenManager.self) private var screenManager
     @Environment(\.featureCatalog) private var featureCatalog
 
@@ -312,12 +356,16 @@ struct Sidebar: View {
                     .accessibilityHint(Text("Browse Wallpaper Engine workshop projects"))
                 }
 
-                #if DEBUG
-                if featureCatalog.isEnabled(.developerTools) {
+                #if !LITE_BUILD
+                if featureCatalog.isEnabled(.developerTools), developerModeEnabled {
                     NavigationLink(value: Navigation.developerTools) {
-                        Label("Developer Tools", systemImage: "wrench.and.screwdriver")
+                        HStack {
+                            Label("Developer Tools", systemImage: "wrench.and.screwdriver")
+                            Spacer()
+                            DevPill()
+                        }
                     }
-                    .accessibilityHint(Text("DEBUG-only: corpus playback test and diagnostics"))
+                    .accessibilityHint(Text("Diagnostic harness. Only visible while Developer Mode is on."))
                 }
                 #endif
             } header: {
@@ -474,6 +522,10 @@ struct ScreenRow: View {
 // MARK: - Detail Content
 struct DetailContent: View {
     @Binding var selection: Navigation?
+    /// Runtime gate for Developer Tools detail mount. Owned by
+    /// `ContentView` so a stale or restored `.developerTools` selection
+    /// can't bring the diagnostic surface back without the toggle.
+    let canShowDeveloperTools: Bool
     @Environment(ScreenManager.self) private var screenManager
 
     var body: some View {
@@ -505,13 +557,16 @@ struct DetailContent: View {
                 EmptyView()
                 #endif
 
-            #if DEBUG
+            #if !LITE_BUILD
             case .developerTools:
-                #if !LITE_BUILD
-                DeveloperToolsView()
-                #else
-                EmptyView()
-                #endif
+                if canShowDeveloperTools {
+                    DeveloperToolsView()
+                } else {
+                    EmptyStateView(
+                        icon: "wrench.and.screwdriver",
+                        message: "Developer Mode is off. Enable it in Settings → General → Advanced."
+                    )
+                }
             #endif
 
             case .none:

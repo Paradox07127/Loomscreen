@@ -4,6 +4,8 @@ import AppKit
 struct AppleAerialsLibraryView: View {
     private let library = AppleAerialsLibrary.shared
     @Environment(ScreenManager.self) private var screenManager
+    @State private var searchText: String = ""
+    @State private var pendingDestructive: PendingDestructive?
 
     private let columns = [GridItem(.adaptive(minimum: 220), spacing: 14)]
 
@@ -19,10 +21,11 @@ struct AppleAerialsLibraryView: View {
                 } else if library.assets.isEmpty {
                     emptyState
                 } else {
-                    galleryGrid
+                    galleryWithFilter
                 }
             }
         )
+        .confirmDestructive($pendingDestructive)
         .task {
             if library.isAuthorized && library.assets.isEmpty {
                 await library.refresh()
@@ -59,9 +62,7 @@ struct AppleAerialsLibraryView: View {
     private var inlineHeader: some View {
         DetailHeaderBar(
             systemImage: "sparkles.tv",
-            title: {
-                Text("Apple Aerials")
-            },
+            title: { Text("Apple Aerials") },
             metadata: {
                 HStack(spacing: DesignTokens.DetailHeader.metadataSpacing) {
                     Text("\(library.assets.count) downloaded videos")
@@ -83,18 +84,52 @@ struct AppleAerialsLibraryView: View {
                     .accessibilityLabel(Text("Refresh Aerials library"))
                     .disabled(library.isScanning)
 
-                    Button {
-                        library.clearAccess()
-                    } label: {
-                        Image(systemName: "xmark.circle")
-                    }
-                    .adaptiveGlassButton(.regular)
-                    .destructiveControlTint()
-                    .controlSize(.regular)
-                    .help(Text("Disconnect Aerials library"))
+                    overflowMenu
                 }
             }
         )
+    }
+
+    private var overflowMenu: some View {
+        Menu {
+            Button(role: .destructive) {
+                pendingDestructive = PendingDestructive(.disconnectAerialsLibrary) {
+                    library.clearAccess()
+                }
+            } label: {
+                Label("Disconnect Aerials Library", systemImage: "xmark.circle")
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .adaptiveGlassButton(.regular)
+        .controlSize(.regular)
+        .help(Text("More Aerials actions"))
+        .accessibilityLabel(Text("More Aerials actions"))
+    }
+
+    private var galleryWithFilter: some View {
+        VStack(spacing: 0) {
+            LibraryFilterBar(
+                searchText: $searchText,
+                searchPrompt: "Search aerials",
+                resultCount: filteredAssets.count,
+                totalCount: library.assets.count
+            )
+            galleryGrid
+        }
+    }
+
+    private var filteredAssets: [AerialAsset] {
+        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return library.assets }
+        return library.assets.filter {
+            $0.displayName.localizedCaseInsensitiveContains(trimmed) ||
+            ($0.category?.localizedCaseInsensitiveContains(trimmed) ?? false)
+        }
     }
 
     private var unauthorizedState: some View {
@@ -142,32 +177,41 @@ struct AppleAerialsLibraryView: View {
         }
     }
 
+    @ViewBuilder
     private var galleryGrid: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                if library.isScanning {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("Scanning library…")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
+        if filteredAssets.isEmpty {
+            IllustratedEmptyState(
+                symbol: "magnifyingglass",
+                title: "No aerials match your search",
+                message: "Try a different keyword, or clear the search field to see every downloaded aerial."
+            )
+        } else {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    if library.isScanning {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Scanning library…")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 4)
                     }
-                    .padding(.horizontal, 4)
-                }
 
-                LazyVGrid(columns: columns, spacing: 14) {
-                    ForEach(library.assets) { asset in
-                        AerialThumbnailCard(
-                            asset: asset,
-                            screens: screenManager.screens,
-                            onApply: { screen in apply(asset, to: screen) },
-                            onApplyToAll: { applyToAll(asset) }
-                        )
+                    LazyVGrid(columns: columns, spacing: 14) {
+                        ForEach(filteredAssets) { asset in
+                            AerialThumbnailCard(
+                                asset: asset,
+                                screens: screenManager.screens,
+                                onApply: { screen in apply(asset, to: screen) },
+                                onApplyToAll: { applyToAll(asset) }
+                            )
+                        }
                     }
                 }
+                .padding(20)
             }
-            .padding(20)
         }
     }
 

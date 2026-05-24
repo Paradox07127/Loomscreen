@@ -17,6 +17,7 @@ struct ScreenDetailDraftStateTests {
             selectedShaderSource: .builtin(.waves),
             htmlSource: nil,
             htmlConfig: .default,
+            wpeOrigin: nil,
             setAsLockScreen: false,
             playlistBookmarks: [],
             shufflePlaylist: false,
@@ -132,10 +133,19 @@ struct ScreenDetailDraftStateTests {
             blockTrackers: false,
             customCSS: "body { opacity: 0.5; }"
         )
-        let config = ScreenConfiguration(
+        var config = ScreenConfiguration(
             screenID: 43,
             wallpaper: .html(source: source, config: htmlConfig)
         )
+        let origin = WPEOrigin(
+            workshopID: "123456",
+            title: "Web Project",
+            originalType: .web,
+            sourceFolderBookmark: Data([0x12]),
+            cacheRelativePath: nil,
+            previewFileName: "preview.jpg"
+        )
+        config.wpeOrigin = origin
 
         let draft = ScreenDetailDraftState.from(
             config: config,
@@ -144,6 +154,7 @@ struct ScreenDetailDraftStateTests {
 
         #expect(draft.htmlSource == source)
         #expect(draft.htmlConfig == htmlConfig)
+        #expect(draft.wpeOrigin == origin)
         #expect(draft.selectedWallpaperType == .html)
         #expect(draft.hasPreviewSource == false)
     }

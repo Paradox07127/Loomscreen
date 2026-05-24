@@ -72,6 +72,12 @@ public struct GlobalSettings: Codable, Sendable {
     /// wallpaper. See `VideoDecoderPreference` for the semantics.
     public var videoDecoderPreference: VideoDecoderPreference = .auto
 
+    /// Pro-only runtime opt-in that surfaces the Developer Tools sidebar
+    /// entry and enables `WKWebView.isInspectable` on every HTML wallpaper.
+    /// Persisted so the choice survives relaunch; default `false` keeps the
+    /// diagnostic surface invisible to ordinary users.
+    public var developerModeEnabled: Bool = false
+
     /// 150 MB default — covers a typical 30s 1080p clip outright and a 30s
     /// low-bitrate 4K with margin, while keeping the visible memory
     /// footprint under ~200 MB per screen so users glancing at Activity
@@ -109,7 +115,8 @@ public struct GlobalSettings: Codable, Sendable {
         globalShortcuts: [GlobalShortcutAction.RawAction: GlobalShortcutBinding?] = [:],
         recentWPEImports: [WPEHistoryEntry] = [],
         videoCacheMaxBytesPerScreen: Int = GlobalSettings.defaultVideoCacheBytes,
-        videoDecoderPreference: VideoDecoderPreference = .auto
+        videoDecoderPreference: VideoDecoderPreference = .auto,
+        developerModeEnabled: Bool = false
     ) {
         self.globalPauseOnBattery = globalPauseOnBattery
         self.preservePlaybackOnLock = preservePlaybackOnLock
@@ -123,6 +130,7 @@ public struct GlobalSettings: Codable, Sendable {
         self.recentWPEImports = recentWPEImports
         self.videoCacheMaxBytesPerScreen = Self.clampedVideoCacheBytes(videoCacheMaxBytesPerScreen)
         self.videoDecoderPreference = videoDecoderPreference
+        self.developerModeEnabled = developerModeEnabled
     }
 
     public init(from decoder: Decoder) throws {
@@ -140,5 +148,6 @@ public struct GlobalSettings: Codable, Sendable {
         let storedCache = (try? c.decodeIfPresent(Int.self, forKey: .videoCacheMaxBytesPerScreen)) ?? GlobalSettings.defaultVideoCacheBytes
         videoCacheMaxBytesPerScreen = GlobalSettings.clampedVideoCacheBytes(storedCache)
         videoDecoderPreference = (try? c.decodeIfPresent(VideoDecoderPreference.self, forKey: .videoDecoderPreference)) ?? .auto
+        developerModeEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .developerModeEnabled)) ?? false
     }
 }

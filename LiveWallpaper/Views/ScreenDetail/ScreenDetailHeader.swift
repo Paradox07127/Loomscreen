@@ -76,32 +76,47 @@ struct ScreenDetailHeader: View {
                     }
 
                     if showsHeaderWallpaperActions {
-                        HStack(spacing: 8) {
-                            if draft.selectedWallpaperType == .video {
-                                Button(action: onSelectVideo) {
-                                    Image(systemName: "folder.badge.plus")
-                                }
-                                .adaptiveGlassButton(.prominent)
-                                .controlSize(.regular)
-                                .help(Text("Select Video — choose a video file for this display"))
-                                .accessibilityLabel(Text("Select video"))
-                                .accessibilityHint(Text("Opens a file picker to choose a wallpaper video"))
-                            }
-
-                            Button(role: .destructive, action: onClearWallpaper) {
-                                Image(systemName: "trash")
+                        if draft.selectedWallpaperType == .video {
+                            Button(action: onSelectVideo) {
+                                Image(systemName: "folder.badge.plus")
                             }
                             .adaptiveGlassButton(.regular)
-                            .destructiveControlTint()
                             .controlSize(.regular)
-                            .help(Text("Clear Wallpaper — remove the current wallpaper without deleting source files"))
-                            .accessibilityLabel(Text("Clear current wallpaper"))
-                            .accessibilityHint(Text("Removes the current wallpaper from this screen without deleting source files or library items"))
+                            .help(Text("Select Video — choose a video file for this display"))
+                            .accessibilityLabel(Text("Select video"))
+                            .accessibilityHint(Text("Opens a file picker to choose a wallpaper video"))
                         }
+
+                        Button(role: .destructive, action: onClearWallpaper) {
+                            Image(systemName: "trash")
+                        }
+                        .adaptiveGlassButton(.regular)
+                        .destructiveControlTint()
+                        .controlSize(.regular)
+                        .help(Text(clearHelpText))
+                        .accessibilityLabel(Text(clearAccessibilityLabel))
                     }
                 }
             }
         )
+    }
+
+    private var clearHelpText: LocalizedStringKey {
+        switch draft.selectedWallpaperType {
+        case .video:       return "Clear Video — remove the saved video for this display"
+        case .html:        return "Clear Web Page — remove the saved web page for this display"
+        case .metalShader: return "Stop Shader — deactivate the running shader for this display"
+        case .scene:       return "Clear Scene — remove the active scene for this display"
+        }
+    }
+
+    private var clearAccessibilityLabel: LocalizedStringKey {
+        switch draft.selectedWallpaperType {
+        case .video:       return "Clear video"
+        case .html:        return "Clear web page"
+        case .metalShader: return "Stop shader"
+        case .scene:       return "Clear scene"
+        }
     }
 
     @ViewBuilder

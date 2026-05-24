@@ -1,4 +1,5 @@
 import AppKit
+import LiveWallpaperCore
 import WebKit
 
 /// `WKWebView` 子类：开启 first-mouse 接收（Plash 模式），关闭 Force-Touch 链接预览，
@@ -552,6 +553,16 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     /// same toggles skip the user-script teardown / re-install.
     private var lastAppliedConfig: HTMLConfig?
     private var wallpaperEnginePropertyBootstrapScript: String?
+    /// Cached schema for the active project's `project.json`. Re-read on
+    /// folder swap inside `updateWallpaperEnginePropertyBridge(for:)`, so
+    /// the hot apply path can re-serialize WPE property payloads without
+    /// touching disk on every slider drag.
+    private var wallpaperEnginePropertySchema: WallpaperEngineProjectPropertySchema?
+    /// Folder the cached schema was parsed from, used to detect stale
+    /// caches when the source switches.
+    private var wallpaperEnginePropertySchemaFolder: URL?
+    /// Current project-key bucket for WPE web user property overrides.
+    private var wallpaperEngineProjectKey: String?
     /// Replays into `loadSource(_:)` for retry / re-entry (sleep wake, error banner).
     private var lastSource: HTMLSource?
     /// Counts consecutive navigation failures since the last successful load.
@@ -563,6 +574,18 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     private var refreshTimerTask: Task<Void, Never>?
     private var isCleaningUp = false
     private var mediaPlaybackSuspended = false
+    /// Observer token for `Notification.Name.developerModeDidChange`.
+    /// Held so live HTML wallpapers can flip `WKWebView.isInspectable` in
+    /// place without rebuilding the session. Removed in `cleanup()` and
+    /// `deinit` so the closure can't outlive the view.
+    /// `nonisolated(unsafe)` mirrors the `AppDelegate.showOnboardingObserver`
+    /// pattern so the deinit can release it from any thread. Compile-gated
+    /// out of Lite — Lite forces `isInspectable = false` and never reads
+    /// the persisted toggle, so an imported settings bundle cannot smuggle
+    /// the Web Inspector into the Lite runtime.
+    #if !LITE_BUILD
+    nonisolated(unsafe) private var developerModeObserver: NSObjectProtocol?
+    #endif
     /// Tracks the directory the current source is allowed to read from when
     /// it is local (`.file` / `.folder`). Remote (`.url`) and `.inline`
     /// sources leave this nil so the navigation policy can deny `file://`
@@ -597,10 +620,21 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
 
         configureWebView()
         addSubview(webView)
+        #if !LITE_BUILD
+        startObservingDeveloperMode()
+        #endif
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        #if !LITE_BUILD
+        if let token = developerModeObserver {
+            NotificationCenter.default.removeObserver(token)
+        }
+        #endif
     }
 
     // MARK: - Configuration
@@ -614,10 +648,57 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         webView.allowsBackForwardNavigationGestures = false
         webView.allowsLinkPreview = false
 
+        applyDeveloperMode(currentDeveloperModeEnabled())
+
         installBaselineUserScripts(for: nil)
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.autoresizingMask = [.width, .height]
+    }
+
+    #if !LITE_BUILD
+    /// Subscribes to `.developerModeDidChange` so a Settings toggle is
+    /// reflected in this wallpaper's WKWebView without rebuilding the
+    /// session. WebKit supports flipping `isInspectable` on a live view,
+    /// so the user sees the change immediately (Web Inspector becomes
+    /// available or vanishes from the right-click menu).
+    private func startObservingDeveloperMode() {
+        developerModeObserver = NotificationCenter.default.addObserver(
+            forName: .developerModeDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, !self.isCleaningUp else { return }
+                self.applyDeveloperMode(self.currentDeveloperModeEnabled())
+            }
+        }
+    }
+    #endif
+
+    /// Reads the persisted Developer Mode flag in Pro; always returns
+    /// `false` in Lite so an imported settings bundle can never smuggle
+    /// the Web Inspector into the lightweight runtime.
+    private func currentDeveloperModeEnabled() -> Bool {
+        #if !LITE_BUILD
+        return SettingsManager.shared.loadGlobalSettings().developerModeEnabled
+        #else
+        return false
+        #endif
+    }
+
+    /// Public entry point so callers (notification handler, future
+    /// programmatic toggles) can flip Web Inspector availability on the
+    /// active web view without going through a full HTML rebuild. Lite
+    /// pins the value to `false` regardless of the requested state.
+    func applyDeveloperMode(_ enabled: Bool) {
+        if #available(macOS 13.3, *) {
+            #if !LITE_BUILD
+            webView.isInspectable = enabled
+            #else
+            webView.isInspectable = false
+            #endif
+        }
     }
 
     /// 注入静态基线脚本 + 反映当前配置的状态脚本。
@@ -881,6 +962,22 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             """)
         }
 
+        let previousProjectOverrides = previous?.projectWallpaperEngineProperties(
+            forProjectKey: wallpaperEngineProjectKey
+        ) ?? [:]
+        let currentProjectOverrides = current.projectWallpaperEngineProperties(
+            forProjectKey: wallpaperEngineProjectKey
+        )
+        if previousProjectOverrides != currentProjectOverrides,
+           let schema = wallpaperEnginePropertySchema,
+           let script = WallpaperEngineWebPropertyBridge.applyScript(
+               schema: schema,
+               previousOverrides: previousProjectOverrides,
+               overrides: currentProjectOverrides
+           ) {
+            statements.append(script)
+        }
+
         if previous?.physicalPixelLayout != current.physicalPixelLayout {
             statements.append(HTMLWallpaperRuntimeScript.physicalPixelState(
                 enabled: current.physicalPixelLayout,
@@ -923,6 +1020,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     /// Internal entry point distinguishing user-driven loads (which reset the retry budget) from `scheduleRetry` continuations (which keep the counter so backoff progresses).
     private func loadSource(_ source: HTMLSource, resetFailureCount: Bool) {
         lastSource = source
+        wallpaperEngineProjectKey = WallpaperEngineProjectIdentity.key(source: source)
         if resetFailureCount {
             resetNavigationFailureState()
         }
@@ -974,9 +1072,26 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     }
 
     private func updateWallpaperEnginePropertyBridge(for folderURL: URL?) {
-        let nextScript = folderURL.flatMap {
-            WallpaperEngineWebPropertyBridge.bootstrapScript(forFolder: $0)
+        // Re-parse the manifest only when the active folder actually
+        // changes; subsequent override edits reuse the cached schema and
+        // hit zero disk I/O on the runtime apply path.
+        if folderURL != wallpaperEnginePropertySchemaFolder {
+            wallpaperEnginePropertySchemaFolder = folderURL
+            wallpaperEnginePropertySchema = folderURL.flatMap {
+                WallpaperEngineWebPropertyBridge.parseSchema(forFolder: $0)
+            }
         }
+
+        let overrides = lastAppliedConfig?.projectWallpaperEngineProperties(
+            forProjectKey: wallpaperEngineProjectKey
+        ) ?? [:]
+        let nextScript: String? = {
+            guard let schema = wallpaperEnginePropertySchema else { return nil }
+            return WallpaperEngineWebPropertyBridge.bootstrapScript(
+                schema: schema,
+                overrides: overrides
+            )
+        }()
         guard wallpaperEnginePropertyBootstrapScript != nextScript else { return }
         wallpaperEnginePropertyBootstrapScript = nextScript
         installBaselineUserScripts(for: lastAppliedConfig)
@@ -1275,6 +1390,12 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         refreshTimerTask?.cancel()
         refreshTimerTask = nil
         onError = nil
+        #if !LITE_BUILD
+        if let token = developerModeObserver {
+            NotificationCenter.default.removeObserver(token)
+            developerModeObserver = nil
+        }
+        #endif
         webView.stopLoading()
         webView.navigationDelegate = nil
         webView.uiDelegate = nil

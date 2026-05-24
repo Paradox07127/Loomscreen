@@ -119,17 +119,7 @@ Temporary Items
 *.log
 .audit/
 
-docs/*
-!docs/legal/
-!docs/legal/**
-!docs/qa/
-!docs/qa/**
-!docs/engineering/
-!docs/engineering/**
-!docs/superpowers/
-docs/superpowers/*
-!docs/superpowers/plans/
-!docs/superpowers/plans/**
+docs/
 .claude/
 
 # WPE shader toolchain build artifacts — intermediates only; the
