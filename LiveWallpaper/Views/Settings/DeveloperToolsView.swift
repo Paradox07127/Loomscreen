@@ -1,13 +1,13 @@
 #if !LITE_BUILD
-#if DEBUG
 import SwiftUI
 import AppKit
 
-/// DEBUG-only Phase A.3 corpus playback test menu. Streams a
+/// Pro-only diagnostic surface gated at runtime by the Developer Mode
+/// toggle in Settings → General → Advanced. The sidebar entry is hidden
+/// by default and only appears once the user opts in, so end users never
+/// see this view unless they go looking for it. Streams a
 /// `WPECorpusPlaybackHarness` run, surfaces per-scene outcomes in a table,
 /// and lets the maintainer export the resulting JSON report for triage.
-/// Compiled out of Release so end users never see (and the bundle never
-/// carries) this UI.
 struct DeveloperToolsView: View {
     @State private var isRunning = false
     @State private var progressLabel: String = ""
@@ -54,7 +54,7 @@ struct DeveloperToolsView: View {
             Text(verbatim: "[\(report.renderer)] \(summaryLabel(report.summary, total: report.total))")
                 .foregroundStyle(.secondary)
         } else {
-            Text("Phase A.3 — Corpus playback test")
+            Text("Visible while Developer Mode is on. Disable it in Settings → General → Advanced.", comment: "Developer Tools header subtitle explaining the runtime gate.")
                 .foregroundStyle(.secondary)
         }
     }
@@ -149,7 +149,7 @@ struct DeveloperToolsView: View {
             Text(verbatim: "Automatic = WPESceneBackendRouter picks per scene (BC textures → Metal, RGBA + video → WebGL).  Metal / WebGL2 pin every scene to that backend.  Mirror of `defaults write Taijia.LiveWallpaper \(WPERuntimeSelection.defaultsKey)`.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Text(verbatim: "Takes effect on the next scene-wallpaper load — already-running scenes keep the renderer they started with. DEBUG-only; Release builds default to Metal.")
+            Text(verbatim: "Takes effect on the next scene-wallpaper load — already-running scenes keep the renderer they started with. Default is Automatic; user pins override the router.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }
@@ -395,5 +395,4 @@ struct DeveloperToolsView: View {
         return lines.isEmpty ? entry.title : lines.joined(separator: "\n")
     }
 }
-#endif
 #endif

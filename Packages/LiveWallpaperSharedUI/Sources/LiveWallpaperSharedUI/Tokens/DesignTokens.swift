@@ -60,11 +60,25 @@ public enum DesignTokens {
         public static let horizontalPadding: CGFloat = Spacing.xl
         public static let verticalPadding: CGFloat = 14
         public static let contentSpacing: CGFloat = 14
-        public static let iconSize: CGFloat = 44
-        public static let iconSymbolSize: CGFloat = 18
+        public static let iconSize: CGFloat = 40
+        public static let iconSymbolSize: CGFloat = 20
         public static let titleSize: CGFloat = 18
         public static let textSpacing: CGFloat = 2
         public static let metadataSpacing: CGFloat = 8
+    }
+
+    /// Detail-page secondary control row (library filter bar). Anchored under
+    /// the DetailHeaderBar with the same horizontal alignment so the search
+    /// capsule lines up with the header brand icon. Vertical padding stays
+    /// tighter than the header so the two rows read as one composite hero.
+    public enum LibraryFilterBar {
+        public static let horizontalPadding: CGFloat = Spacing.xl
+        public static let verticalPadding: CGFloat = 10
+        public static let contentSpacing: CGFloat = 10
+        public static let searchMinWidth: CGFloat = 220
+        public static let searchIdealWidth: CGFloat = 280
+        public static let searchMaxWidth: CGFloat = 360
+        public static let controlHeight: CGFloat = 28
     }
 
     /// Floor dimensions every sidebar-routed library page uses. Without this,

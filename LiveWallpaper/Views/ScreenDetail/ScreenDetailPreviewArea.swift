@@ -7,7 +7,6 @@ struct ScreenDetailPreviewArea: View {
     @Binding var draft: ScreenDetailDraftState
     let featureCatalog: FeatureCatalog
     let previewController: InspectorPreviewController
-    let wpeOrigin: WPEOrigin?
     let isLoading: Bool
     let isDraggingOver: Bool
     let reduceMotion: Bool
@@ -67,8 +66,6 @@ struct ScreenDetailPreviewArea: View {
             ScreenDetailLoadingView()
         } else if draft.hasPreviewSource || previewController.hasPreviewContent {
             VStack(spacing: 16) {
-                wpeOriginBadge
-
                 if featureCatalog.isEnabled(.inspectorPreview) {
                     VideoPreviewSection(
                         previewController: previewController,
@@ -101,8 +98,6 @@ struct ScreenDetailPreviewArea: View {
 
     private var htmlContent: some View {
         VStack(spacing: 16) {
-            wpeOriginBadge
-
             if featureCatalog.isEnabled(.inspectorPreview), draft.htmlSource != nil {
                 HTMLPreviewSection(source: draft.htmlSource, config: draft.htmlConfig)
             }
@@ -113,17 +108,6 @@ struct ScreenDetailPreviewArea: View {
             )
         }
         .padding(24)
-    }
-
-    @ViewBuilder
-    private var wpeOriginBadge: some View {
-        #if !LITE_BUILD
-        if let origin = wpeOrigin, featureCatalog.isEnabled(.wpeImport) {
-            WPEOriginBadge(origin: origin) {
-                draft.selectedWallpaperType = .scene
-            }
-        }
-        #endif
     }
 
     private var videoCommandBar: some View {

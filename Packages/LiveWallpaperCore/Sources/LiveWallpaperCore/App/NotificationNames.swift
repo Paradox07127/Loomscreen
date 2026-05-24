@@ -16,6 +16,13 @@ extension Notification.Name {
     /// Request the settings UI to navigate to the app preferences page.
     public static let openGeneralSettings = Notification.Name("OpenGeneralSettings")
 
+    /// Request the AppDelegate to (re-)open the onboarding flow. Posted by
+    /// the General Settings "Welcome Tour" tile. Decoupled via notification
+    /// because `@NSApplicationDelegateAdaptor` wraps the user delegate in
+    /// `SwiftUI.AppDelegate`, breaking `NSApplication.shared.delegate as?
+    /// AppDelegate` from inside a SwiftUI-hosted window.
+    public static let showOnboarding = Notification.Name("ShowOnboarding")
+
     /// A screen's persisted wallpaper configuration changed (saved or removed).
     /// `userInfo["screenID"]: CGDirectDisplayID` identifies which screen.
     /// Inspectors / detail views should reload their @State from the manager
@@ -66,4 +73,10 @@ extension Notification.Name {
     /// listens and re-applies the resolution / bitrate ceiling to any active
     /// `AVPlayerItem` on the next reconcile.
     public static let videoDecoderPreferenceDidChange = Notification.Name("VideoDecoderPreferenceDidChange")
+
+    /// User toggled `GlobalSettings.developerModeEnabled`. Live `HTMLWebView`
+    /// instances react by flipping `isInspectable` in place (no session
+    /// rebuild); `ContentView` refreshes the Developer Tools sidebar entry
+    /// visibility and falls back the selection if the entry disappears.
+    public static let developerModeDidChange = Notification.Name("DeveloperModeDidChange")
 }

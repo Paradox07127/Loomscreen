@@ -42,10 +42,14 @@ struct WeatherStatusBadge: View {
                 }
 
                 if let error = weatherService.lastError {
-                    Text(verbatim: error)
+                    Text(verbatim: BugReporter.sanitize(error))
                         .font(.caption2)
                         .foregroundStyle(.red)
                         .lineLimit(1)
+                        .help(Text(
+                            "Weather fetch error (paths and tokens scrubbed)",
+                            comment: "Tooltip on the weather badge's sanitized error caption. Hovering surfaces this hint that PII has been redacted."
+                        ))
                 }
             }
             .accessibilityElement(children: .combine)
@@ -62,12 +66,21 @@ struct WeatherStatusBadge: View {
 
             if needsLocationSettingsLink {
                 Button(action: openLocationSettings) {
-                    Text("Open Settings")
+                    Text(
+                        "Open Settings",
+                        comment: "Weather badge button label that jumps to System Settings → Location Services."
+                    )
                         .font(.caption.weight(.semibold))
                 }
                 .buttonStyle(GlassCapsuleButtonStyle(fontSize: 10, horizontalPadding: 7, verticalPadding: 3))
-                .help(Text("Open System Settings → Privacy & Security → Location Services"))
-                .accessibilityLabel(Text("Open Location Services settings"))
+                .help(Text(
+                    "Open System Settings → Privacy & Security → Location Services",
+                    comment: "Tooltip for the Open Settings button on the weather badge."
+                ))
+                .accessibilityLabel(Text(
+                    "Open Location Services settings",
+                    comment: "A11y label for the weather badge Open Settings button."
+                ))
             }
 
             Button(action: refresh) {
@@ -75,8 +88,14 @@ struct WeatherStatusBadge: View {
                     .font(.caption.weight(.semibold))
             }
             .buttonStyle(.plain)
-            .help(Text("Refresh weather now"))
-            .accessibilityLabel(Text("Refresh weather"))
+            .help(Text(
+                "Refresh weather now",
+                comment: "Tooltip on the weather badge refresh icon."
+            ))
+            .accessibilityLabel(Text(
+                "Refresh weather",
+                comment: "A11y label for the weather badge refresh icon."
+            ))
         }
         .padding(.vertical, 4)
         .dynamicTypeSize(...DynamicTypeSize.accessibility3)
@@ -93,8 +112,9 @@ struct WeatherStatusBadge: View {
         case .available: return "cloud.sun.fill"
         case .fetching: return "arrow.triangle.2.circlepath"
         case .denied: return "location.slash"
+        case .notDetermined: return "location.circle"
         case .error: return "exclamationmark.triangle"
-        default: return "cloud.fill"
+        case .authorized: return "cloud.fill"
         }
     }
 
@@ -103,8 +123,9 @@ struct WeatherStatusBadge: View {
         case .available: return .cyan
         case .fetching: return .orange
         case .denied: return .red
+        case .notDetermined: return .orange
         case .error: return .red
-        default: return .secondary
+        case .authorized: return .secondary
         }
     }
 

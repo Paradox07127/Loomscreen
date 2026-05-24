@@ -42,6 +42,33 @@ struct WallpaperEngineWebPropertyBridgeTests {
         #expect(WallpaperEngineWebPropertyBridge.bootstrapScript(forFolder: folder) == nil)
     }
 
+    @Test("Hot apply only sends Wallpaper Engine properties whose effective value changed")
+    func hotApplyOnlySendsChangedProperties() throws {
+        let schema = try WallpaperEngineProjectPropertySchema.parse(data: Data("""
+        {
+          "file": "index.html",
+          "type": "Web",
+          "general": {
+            "properties": {
+              "dialogx": { "type": "slider", "text": "Dialog X", "value": 33, "min": 0, "max": 100, "step": 0.1 },
+              "dialogy": { "type": "slider", "text": "Dialog Y", "value": 53, "min": 0, "max": 100, "step": 0.1 },
+              "modelresolution": { "type": "combo", "text": "Model Resolution", "value": "8k" }
+            }
+          }
+        }
+        """.utf8))
+
+        let script = try #require(WallpaperEngineWebPropertyBridge.applyScript(
+            schema: schema,
+            previousOverrides: ["dialogx": .number(33)],
+            overrides: ["dialogx": .number(34)]
+        ))
+
+        #expect(script.contains("\"dialogx\":{\"value\":34}"))
+        #expect(!script.contains("dialogy"))
+        #expect(!script.contains("modelresolution"))
+    }
+
     private func makeProjectFolder(manifest: String) throws -> URL {
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("WPEWebPropertyBridgeTests-\(UUID().uuidString)", isDirectory: true)

@@ -23,6 +23,10 @@ struct GeneralSettingsView: View {
     /// force software / hardware decode, so the cases map to resolution /
     /// bitrate hints instead. See `VideoDecoderPreference` for semantics.
     @State private var videoDecoderPreference: VideoDecoderPreference
+    /// Pro-only runtime opt-in for the Developer Tools sidebar entry and
+    /// `WKWebView.isInspectable` on HTML wallpapers. Hidden in Lite via
+    /// `#if !LITE_BUILD` + capability gate so the row never renders.
+    @State private var developerModeEnabled: Bool
 
     @State private var pendingDestructive: PendingDestructive?
     @State private var pendingBugReport: BugReport?
@@ -53,6 +57,7 @@ struct GeneralSettingsView: View {
         _showInDock = State(initialValue: settings.showInDock)
         _videoCacheBudgetMB = State(initialValue: Double(settings.videoCacheMaxBytesPerScreen) / Double(1024 * 1024))
         _videoDecoderPreference = State(initialValue: settings.videoDecoderPreference)
+        _developerModeEnabled = State(initialValue: settings.developerModeEnabled)
     }
 
     var body: some View {
@@ -205,6 +210,8 @@ struct GeneralSettingsView: View {
         pauseOnFullScreen = settings.pauseOnFullScreen
         showInDock = settings.showInDock
         videoDecoderPreference = settings.videoDecoderPreference
+        developerModeEnabled = settings.developerModeEnabled
+        postSettingsNotificationAsync(.developerModeDidChange)
 
         let feedback = importFeedbackMessage(for: summary)
         DispatchQueue.main.async {
@@ -341,6 +348,8 @@ struct GeneralSettingsView: View {
 
             batteryThresholdSection
 
+            advancedSection
+
             Section {
                 resetDefaultsRow
             } header: {
@@ -351,6 +360,40 @@ struct GeneralSettingsView: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    /// Pro-only opt-in surface for diagnostic features. Compiled out of Lite
+    /// (`#if !LITE_BUILD`) and only rendered when the runtime capability is
+    /// also present so accidental enabling in a misconfigured SKU is
+    /// impossible.
+    @ViewBuilder
+    private var advancedSection: some View {
+        #if !LITE_BUILD
+        if featureCatalog.isEnabled(.developerTools) {
+            Section {
+                SettingRow(
+                    icon: "wrench.and.screwdriver",
+                    iconColor: .orange,
+                    title: "Developer Mode",
+                    subtitle: "Show Developer Tools in the sidebar and enable right-click Inspect Element on HTML wallpapers.",
+                    info: "When on, HTML wallpapers open with WebKit's Web Inspector accessible — right-click in a webview wallpaper to inspect. Recommended only when debugging your own content."
+                ) {
+                    Toggle("", isOn: $developerModeEnabled)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .onChange(of: developerModeEnabled) { _, _ in updateGlobalSettings() }
+                        .accessibilityLabel(Text("Developer Mode"))
+                        .accessibilityHint(Text("Reveals diagnostic tools and HTML web inspector. Off by default."))
+                }
+            } header: {
+                Text("Advanced", comment: "Section header for Developer Mode toggle in General settings.")
+            } footer: {
+                Text("Off by default. Turning this on exposes WebKit's Web Inspector for HTML wallpapers and adds a Developer Tools entry to the sidebar.", comment: "Footer for the Developer Mode toggle explaining what the switch surfaces.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        #endif
     }
 
     // MARK: - General Sections
@@ -637,9 +680,12 @@ struct GeneralSettingsView: View {
                     systemImage: "sparkles",
                     accent: .purple,
                     action: {
-                        if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
-                            appDelegate.showOnboarding()
-                        }
+                        // `NSApplication.shared.delegate` is `SwiftUI.AppDelegate`
+                        // (an internal wrapper around `@NSApplicationDelegateAdaptor`),
+                        // so casting to our own `AppDelegate` fails. Route the
+                        // request via NotificationCenter instead — AppDelegate
+                        // observes `.showOnboarding` and triggers the window.
+                        NotificationCenter.default.post(name: .showOnboarding, object: nil)
                     }
                 )
             }
@@ -840,6 +886,7 @@ struct GeneralSettingsView: View {
         var settings = SettingsManager.shared.loadGlobalSettings()
         let dockChanged = settings.showInDock != showInDock
         let decoderChanged = settings.videoDecoderPreference != videoDecoderPreference
+        let developerModeChanged = settings.developerModeEnabled != developerModeEnabled
         settings.globalPauseOnBattery = globalPauseOnBattery
         settings.preservePlaybackOnLock = preservePlaybackOnLock
         settings.startOnLogin = startOnLogin
@@ -848,6 +895,7 @@ struct GeneralSettingsView: View {
         settings.showInDock = showInDock
         settings.videoCacheMaxBytesPerScreen = Int(videoCacheBudgetMB) * 1024 * 1024
         settings.videoDecoderPreference = videoDecoderPreference
+        settings.developerModeEnabled = developerModeEnabled
         SettingsManager.shared.saveGlobalSettings(settings)
         screenManager.handleGlobalSettingsChanged()
         if dockChanged {
@@ -855,6 +903,9 @@ struct GeneralSettingsView: View {
         }
         if decoderChanged {
             postSettingsNotificationAsync(.videoDecoderPreferenceDidChange)
+        }
+        if developerModeChanged {
+            postSettingsNotificationAsync(.developerModeDidChange)
         }
     }
 
@@ -877,10 +928,12 @@ struct GeneralSettingsView: View {
         pauseOnFullScreen = true
         showInDock = false
         videoDecoderPreference = .auto
+        developerModeEnabled = false
 
         postSettingsNotificationAsync(.dockVisibilityDidChange)
         postSettingsNotificationAsync(.globalShortcutsDidChange)
         postSettingsNotificationAsync(.weatherLocationPreferenceDidChange)
+        postSettingsNotificationAsync(.developerModeDidChange)
         screenManager.handleGlobalSettingsChanged()
         screenManager.resetAllWallpaperSessions()
         screenManager.refreshScreens(preserveRuntimeSessions: false)

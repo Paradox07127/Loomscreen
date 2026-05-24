@@ -64,17 +64,10 @@ struct ScreenDetailView: View {
             screenManager.switchToHTMLWallpaper(for: screen)
         case .metalShader:
             guard featureCatalog.isEnabled(.metalShader) else { return }
-            screenManager.setShaderWallpaper(source: draft.selectedShaderSource, for: screen)
+            screenManager.switchToShaderWallpaper(for: screen)
         case .scene:
             break
         }
-    }
-
-    /// Resolved Wallpaper Engine origin metadata for the active wallpaper, or
-    /// nil when the user picked content directly. Recomputed on every body
-    /// evaluation so save/import flows propagate without local @State.
-    private var wpeOrigin: WPEOrigin? {
-        screenManager.getConfiguration(for: screen)?.wpeOrigin
     }
 
     /// Single source of truth for the three overlapping booleans the rest of
@@ -201,7 +194,6 @@ struct ScreenDetailView: View {
                     draft: $draft,
                     featureCatalog: featureCatalog,
                     previewController: previewController,
-                    wpeOrigin: wpeOrigin,
                     isLoading: isLoading,
                     isDraggingOver: isDraggingOver,
                     reduceMotion: reduceMotion,
@@ -572,9 +564,13 @@ struct ScreenDetailView: View {
         }
     }
 
+    /// Per-type clear: only drops the saved state for the tab the user is on
+    /// (Video / HTML / Shader / Scene) and stops the matching runtime. Other
+    /// tabs' saved picks are preserved. Falls back to whatever other type is
+    /// still saved before resorting to a full screen clear.
     private func performClearWallpaper() {
         cleanupPreviewPlayer()
-        screenManager.clearWallpaperForScreen(screen)
+        screenManager.clearWallpaperOfType(draft.selectedWallpaperType, for: screen)
     }
 
     private func requestApplyToAll() {

@@ -17,6 +17,7 @@ struct ScreenDetailDraftState: Sendable, Equatable {
     var selectedShaderSource: ShaderSource
     var htmlSource: HTMLSource?
     var htmlConfig: HTMLConfig
+    var wpeOrigin: WPEOrigin?
     var setAsLockScreen: Bool
     var playlistBookmarks: [Data]
     var shufflePlaylist: Bool
@@ -40,6 +41,7 @@ struct ScreenDetailDraftState: Sendable, Equatable {
         selectedShaderSource: .builtin(.waves),
         htmlSource: nil,
         htmlConfig: .default,
+        wpeOrigin: nil,
         setAsLockScreen: false,
         playlistBookmarks: [],
         shufflePlaylist: false,
@@ -79,6 +81,7 @@ struct ScreenDetailDraftState: Sendable, Equatable {
             selectedShaderSource: config.activeWallpaper.shaderSource ?? Self.default.selectedShaderSource,
             htmlSource: config.htmlSource,
             htmlConfig: config.htmlConfig ?? .default,
+            wpeOrigin: config.wpeOrigin,
             setAsLockScreen: config.setAsLockScreen,
             playlistBookmarks: config.playlistBookmarks ?? [],
             shufflePlaylist: config.shufflePlaylist,

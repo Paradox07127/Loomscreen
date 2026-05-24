@@ -17,6 +17,9 @@ struct ScreenDetailInspectorPanel: View {
     let onWeatherReactiveChange: (Bool) -> Void
     let onWallpaperModeChange: (WallpaperMode) -> Void
     let onResetDisplaySettings: () -> Void
+    #if !LITE_BUILD
+    @State private var wpeProjectCustomSettingsSchema: WallpaperEngineProjectPropertySchema?
+    #endif
 
     var body: some View {
         ScrollView {
@@ -50,6 +53,18 @@ struct ScreenDetailInspectorPanel: View {
                             config: $draft.htmlConfig
                         )
 
+                        #if !LITE_BUILD
+                        if let wpeProjectCustomSettingsSchema,
+                           wpeProjectCustomSettingsSchema.hasMeaningfulSettings {
+                            WPEProjectCustomSettingsCard(
+                                screen: screen,
+                                schema: wpeProjectCustomSettingsSchema,
+                                projectKey: wpeProjectCustomSettingsProjectKey,
+                                config: $draft.htmlConfig
+                            )
+                        }
+                        #endif
+
                         HTMLTransformInspector(
                             screen: screen,
                             config: $draft.htmlConfig
@@ -76,7 +91,57 @@ struct ScreenDetailInspectorPanel: View {
         .background(Color(NSColor.windowBackgroundColor))
         .clipped()
         .accessibilityLabel(Text("Wallpaper Properties"))
+        #if !LITE_BUILD
+        .task(id: wpeProjectCustomSettingsLoadKey) {
+            await loadWPEProjectCustomSettingsSchema()
+        }
+        #endif
     }
+
+    #if !LITE_BUILD
+    /// Stable identifier driving WPE project schema reloads. The inspector
+    /// panel is always mounted while HTML properties are visible, unlike the
+    /// card itself, so the async read cannot deadlock behind an initially empty
+    /// card body.
+    private var wpeProjectCustomSettingsLoadKey: String {
+        guard let projectKey = wpeProjectCustomSettingsProjectKey else {
+            return "hidden"
+        }
+        return "\(screen.id):\(projectKey)"
+    }
+
+    private var wpeProjectCustomSettingsProjectKey: String? {
+        guard draft.selectedWallpaperType == .html,
+              case .folder = draft.htmlSource else {
+            return nil
+        }
+        if let originalType = draft.wpeOrigin?.originalType,
+           originalType != .web {
+            return nil
+        }
+        return WallpaperEngineProjectIdentity.key(source: draft.htmlSource, origin: draft.wpeOrigin)
+    }
+
+    @MainActor
+    private func loadWPEProjectCustomSettingsSchema() async {
+        guard draft.selectedWallpaperType == .html else {
+            wpeProjectCustomSettingsSchema = nil
+            return
+        }
+
+        let outcome = await WPEProjectCustomSettingsSchemaLoader.load(
+            source: draft.htmlSource,
+            wpeOrigin: draft.wpeOrigin
+        )
+        guard !Task.isCancelled else { return }
+        if outcome.schema != nil || outcome.isExpectedAbsence {
+            Logger.info("WPECustomSettings: \(outcome.log)", category: .screenManager)
+        } else {
+            Logger.warning("WPECustomSettings: \(outcome.log)", category: .screenManager)
+        }
+        wpeProjectCustomSettingsSchema = outcome.schema
+    }
+    #endif
 
     @ViewBuilder
     private var videoSettingsContent: some View {
