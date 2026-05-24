@@ -1,6 +1,7 @@
 #if !LITE_BUILD
 import CoreGraphics
 import Foundation
+import LiveWallpaperProWPE
 import Metal
 import MetalKit
 
@@ -156,17 +157,21 @@ final class WPEMetalRenderExecutor {
         )
 
         for system in alive {
-            let texture = texturesByMaterial[ObjectIdentifier(system)]
-                ?? texturesByMaterial.values.first
+            // A system whose texture failed to load was already filtered
+            // out at scene-load time (see loadParticleSystems). Skip here
+            // defensively so a stale Metal texture-slot binding from a
+            // prior system can never leak into the current draw.
+            guard let texture = texturesByMaterial[ObjectIdentifier(system)] else {
+                continue
+            }
             let pipelineState = try particlePipelineState(
-                colorPixelFormat: output.pixelFormat
+                colorPixelFormat: output.pixelFormat,
+                blendMode: system.blendMode
             )
             encoder.setRenderPipelineState(pipelineState)
             encoder.setVertexBuffer(system.instanceBuffer, offset: 0, index: 1)
             encoder.setVertexBytes(&projection, length: MemoryLayout<WPEParticleProjection>.stride, index: 2)
-            if let texture {
-                encoder.setFragmentTexture(texture, index: 0)
-            }
+            encoder.setFragmentTexture(texture, index: 0)
             encoder.drawPrimitives(
                 type: .triangleStrip,
                 vertexStart: 0,
@@ -259,10 +264,19 @@ final class WPEMetalRenderExecutor {
         return state
     }
 
-    private var particlePipelineCache: [UInt: MTLRenderPipelineState] = [:]
+    private struct ParticlePipelineKey: Hashable {
+        let pixelFormat: UInt
+        let blendMode: WPEParticleBlendMode
+    }
 
-    private func particlePipelineState(colorPixelFormat: MTLPixelFormat) throws -> MTLRenderPipelineState {
-        if let cached = particlePipelineCache[colorPixelFormat.rawValue] {
+    private var particlePipelineCache: [ParticlePipelineKey: MTLRenderPipelineState] = [:]
+
+    private func particlePipelineState(
+        colorPixelFormat: MTLPixelFormat,
+        blendMode: WPEParticleBlendMode
+    ) throws -> MTLRenderPipelineState {
+        let key = ParticlePipelineKey(pixelFormat: colorPixelFormat.rawValue, blendMode: blendMode)
+        if let cached = particlePipelineCache[key] {
             return cached
         }
         guard let library = device.makeDefaultLibrary(),
@@ -280,12 +294,28 @@ final class WPEMetalRenderExecutor {
         attachment.isBlendingEnabled = true
         attachment.rgbBlendOperation = .add
         attachment.alphaBlendOperation = .add
-        attachment.sourceRGBBlendFactor = .one
-        attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
-        attachment.sourceAlphaBlendFactor = .one
-        attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        // Fragment shader outputs straight (non-premultiplied) alpha. WPE
+        // material `blending` strings map to the three classic factor
+        // combos — anything else falls back to translucent at parse time.
+        switch blendMode {
+        case .normal:
+            attachment.sourceRGBBlendFactor = .one
+            attachment.destinationRGBBlendFactor = .zero
+            attachment.sourceAlphaBlendFactor = .one
+            attachment.destinationAlphaBlendFactor = .zero
+        case .translucent:
+            attachment.sourceRGBBlendFactor = .sourceAlpha
+            attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
+            attachment.sourceAlphaBlendFactor = .sourceAlpha
+            attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        case .additive:
+            attachment.sourceRGBBlendFactor = .sourceAlpha
+            attachment.destinationRGBBlendFactor = .one
+            attachment.sourceAlphaBlendFactor = .sourceAlpha
+            attachment.destinationAlphaBlendFactor = .one
+        }
         let state = try device.makeRenderPipelineState(descriptor: descriptor)
-        particlePipelineCache[colorPixelFormat.rawValue] = state
+        particlePipelineCache[key] = state
         return state
     }
 

@@ -1,6 +1,24 @@
 import CoreGraphics
 import Foundation
 
+/// WPE material blending kind. Maps directly onto Metal blend factors
+/// (see `WPEMetalRenderExecutor.particlePipelineState`). Unknown strings
+/// fall back to `.translucent` — the most common particle case and the
+/// least likely to over-saturate the frame buffer.
+public enum WPEParticleBlendMode: String, Sendable, CaseIterable, Equatable {
+    case normal
+    case translucent
+    case additive
+
+    public init(materialString: String?) {
+        guard let raw = materialString?.lowercased() else {
+            self = .translucent
+            return
+        }
+        self = WPEParticleBlendMode(rawValue: raw) ?? .translucent
+    }
+}
+
 /// Lean particle-system descriptor parsed from a WPE `particles/*.json`
 /// file. We model just enough of the emitter/initializer/operator DSL to
 /// drive a CPU emitter that produces visually-present results — full
@@ -20,6 +38,7 @@ public struct WPEParticleDefinition: Equatable, Sendable {
     public let originOffset: SIMD3<Double>
     public let dispersalMin: Double
     public let dispersalMax: Double
+    public let directionMask: SIMD3<Double>
     public let velocityMin: SIMD3<Double>
     public let velocityMax: SIMD3<Double>
     public let colorMin: SIMD3<Double>
@@ -42,7 +61,8 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         velocityMax: SIMD3<Double>,
         colorMin: SIMD3<Double>,
         colorMax: SIMD3<Double>,
-        fadeInSeconds: Double
+        fadeInSeconds: Double,
+        directionMask: SIMD3<Double> = SIMD3<Double>(1, 1, 1)
     ) {
         self.materialRelativePath = materialRelativePath
         self.maxCount = maxCount
@@ -55,6 +75,7 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         self.originOffset = originOffset
         self.dispersalMin = dispersalMin
         self.dispersalMax = dispersalMax
+        self.directionMask = directionMask
         self.velocityMin = velocityMin
         self.velocityMax = velocityMax
         self.colorMin = colorMin
@@ -106,12 +127,16 @@ public enum WPEParticleDefinitionParser {
         var origin: SIMD3<Double> = SIMD3(0, 0, 0)
         var dispersalMin: Double = 0
         var dispersalMax: Double = 0
+        var directionMask: SIMD3<Double> = def.directionMask
 
         if let emitters = json["emitter"] as? [[String: Any]], let first = emitters.first {
             rate = WPEValueParser.double(first["rate"]) ?? 0
             origin = WPEValueParser.vector3(first["origin"]) ?? SIMD3(0, 0, 0)
             dispersalMin = WPEValueParser.double(first["distancemin"]) ?? 0
             dispersalMax = WPEValueParser.double(first["distancemax"]) ?? 0
+            if let mask = WPEValueParser.vector3(first["directions"]) {
+                directionMask = SIMD3<Double>(abs(mask.x), abs(mask.y), abs(mask.z))
+            }
         }
 
         var lifetimeMin: Double = def.lifetimeMin
@@ -187,7 +212,8 @@ public enum WPEParticleDefinitionParser {
             velocityMax: velocityMax,
             colorMin: colorMin,
             colorMax: colorMax,
-            fadeInSeconds: max(0, fadeInSeconds)
+            fadeInSeconds: max(0, fadeInSeconds),
+            directionMask: directionMask
         )
     }
 }

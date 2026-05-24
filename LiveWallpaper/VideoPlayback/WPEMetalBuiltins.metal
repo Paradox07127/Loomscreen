@@ -306,7 +306,11 @@ fragment half4 wpe_particle_instanced_fragment(
     float4 sampled = float4(texture0.sample(linearSampler, in.uv));
     float3 rgb = sampled.rgb * in.color.rgb;
     float alpha = sampled.a * in.color.a;
-    return half4(float4(rgb * alpha, alpha));
+    // Straight (non-premultiplied) alpha. The Metal pipeline state's
+    // blend factors handle the translucent/additive/normal split set
+    // up by `particlePipelineState` — keeping the shader factor-agnostic
+    // means one less branch and one less combo to test.
+    return half4(float4(rgb, alpha));
 }
 
 // Phase 2D-N: text overlay quad. Vertex stage takes per-overlay center

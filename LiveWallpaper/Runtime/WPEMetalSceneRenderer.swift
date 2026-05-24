@@ -554,7 +554,47 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         }
     }
 
+    /// Material descriptor extracted from `passes[0]`. Only the fields the
+    /// particle path needs — full material parsing lives in the generic
+    /// pipeline builder.
+    private struct ParticleMaterialDescriptor {
+        let blendMode: WPEParticleBlendMode
+        let firstTexturePath: String?
+    }
+
+    private func parseParticleMaterial(at relativePath: String) -> ParticleMaterialDescriptor? {
+        guard let materialURL = try? entryResolver.resolveExistingFileURL(relativePath: relativePath),
+              let materialData = try? Data(contentsOf: materialURL),
+              let materialJSON = try? JSONSerialization.jsonObject(with: materialData) as? [String: Any],
+              let passes = materialJSON["passes"] as? [[String: Any]],
+              let firstPass = passes.first else {
+            return nil
+        }
+        let blendString = firstPass["blending"] as? String
+        let textures = firstPass["textures"] as? [Any]
+        let firstTexturePath = textures?.first as? String
+        return ParticleMaterialDescriptor(
+            blendMode: WPEParticleBlendMode(materialString: blendString),
+            firstTexturePath: firstTexturePath
+        )
+    }
+
+    private func makeParticleSceneTransform(for object: WPESceneParticleObject) -> WPEParticleSceneTransform {
+        WPEParticleSceneTransform(
+            sceneSize: SIMD2<Float>(Float(sceneRenderSize.width), Float(sceneRenderSize.height)),
+            objectOrigin: SIMD3<Float>(Float(object.origin.x), Float(object.origin.y), Float(object.origin.z)),
+            objectScale: SIMD3<Float>(Float(object.scale.x), Float(object.scale.y), Float(object.scale.z)),
+            objectAngleZ: Float(object.angles.z)
+        )
+    }
+
     /// Spawn one `WPEParticleSystem` per parsed particle object.
+    ///
+    /// A particle system is only registered if its sprite texture loads
+    /// successfully. Missing textures would otherwise leave Metal's
+    /// fragment-texture(0) slot stale across systems and produce the
+    /// "black background + red grid" overlay seen in workshop 3725117707
+    /// before the fix.
     private func loadParticleSystems(from document: WPESceneDocument) async {
         particleSystems.removeAll(keepingCapacity: true)
         particleTextures.removeAll(keepingCapacity: true)
@@ -564,34 +604,40 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
                   let definition = WPEParticleDefinitionParser.parse(data: data) else {
                 continue
             }
+            let material = definition.materialRelativePath
+                .flatMap(parseParticleMaterial(at:))
+            let blendMode = material?.blendMode ?? .translucent
+            let sceneTransform = makeParticleSceneTransform(for: object)
             guard let system = WPEParticleSystem(
                 definition: definition,
-                device: executor.textureSourceDevice
+                device: executor.textureSourceDevice,
+                blendMode: blendMode,
+                sceneTransform: sceneTransform
+            ) else { continue }
+            guard let texturePath = material?.firstTexturePath else {
+                debugStage("particle", "skip \(object.name) — material missing texture binding")
+                continue
+            }
+            guard let texturePayload = try? await makeTextureResource(
+                relativePath: texturePath,
+                label: "particle texture \(texturePath)"
             ) else {
+                debugStage("particle", "skip \(object.name) — texture load failed: \(texturePath)")
+                continue
+            }
+            let texture: MTLTexture?
+            switch texturePayload {
+            case .staticTexture(let t):
+                texture = t
+            case .dynamicSource(let source):
+                texture = source.texture(at: 0)
+            }
+            guard let resolved = texture else {
+                debugStage("particle", "skip \(object.name) — dynamic source yielded no texture")
                 continue
             }
             particleSystems.append(system)
-            if let materialPath = definition.materialRelativePath,
-               let materialURL = try? entryResolver.resolveExistingFileURL(relativePath: materialPath),
-               let materialData = try? Data(contentsOf: materialURL),
-               let materialJSON = try? JSONSerialization.jsonObject(with: materialData) as? [String: Any],
-               let passes = materialJSON["passes"] as? [[String: Any]],
-               let firstPass = passes.first,
-               let textures = firstPass["textures"] as? [Any],
-               let firstTexturePath = textures.first as? String,
-               let texturePayload = try? await makeTextureResource(
-                    relativePath: firstTexturePath,
-                    label: "particle texture \(firstTexturePath)"
-               ) {
-                switch texturePayload {
-                case .staticTexture(let texture):
-                    particleTextures[ObjectIdentifier(system)] = texture
-                case .dynamicSource(let source):
-                    if let texture = source.texture(at: 0) {
-                        particleTextures[ObjectIdentifier(system)] = texture
-                    }
-                }
-            }
+            particleTextures[ObjectIdentifier(system)] = resolved
         }
     }
 

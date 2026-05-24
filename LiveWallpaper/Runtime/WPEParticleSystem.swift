@@ -1,38 +1,97 @@
 #if !LITE_BUILD
 import Foundation
+import LiveWallpaperProWPE
 import Metal
 import simd
 
 /// Per-instance attributes the GPU vertex stage reads from. Layout MUST
 /// match `WPEParticleInstance` in `WPEMetalBuiltins.metal` exactly.
 struct WPEParticleInstance {
-    var positionAndSize: SIMD4<Float> // x, y in pixel space ; z (unused, reserved); w = size
+    var positionAndSize: SIMD4<Float> // x, y in centered scene pixels ; z (unused, reserved); w = size
     var color: SIMD4<Float>           // rgb 0…1, a = current alpha
+}
+
+/// One-shot world-space placement applied to a `WPEParticleSystem` at
+/// load time. Mirrors `CParticle::setup()` in linux-wallpaperengine:
+/// the WPE authoring frame is top-left + Y-down pixels; the renderer
+/// works in a centered + Y-up frame. We bake that conversion together
+/// with the scene-object transform (origin / scale / angles.z) so the
+/// hot tick loop stays in one coordinate space.
+struct WPEParticleSceneTransform {
+    var sceneSize: SIMD2<Float>
+    var objectOrigin: SIMD3<Float>
+    var objectScale: SIMD3<Float>
+    var objectAngleZ: Float
+
+    static let identity = WPEParticleSceneTransform(
+        sceneSize: SIMD2<Float>(1, 1),
+        objectOrigin: SIMD3<Float>(0, 0, 0),
+        objectScale: SIMD3<Float>(1, 1, 1),
+        objectAngleZ: 0
+    )
+
+    func worldOrigin(localOffset: SIMD3<Float>) -> SIMD3<Float> {
+        let scaled = SIMD3<Float>(
+            localOffset.x * objectScale.x,
+            localOffset.y * objectScale.y,
+            localOffset.z * objectScale.z
+        )
+        let cosA = cos(objectAngleZ)
+        let sinA = sin(objectAngleZ)
+        let rotated = SIMD3<Float>(
+            scaled.x * cosA - scaled.y * sinA,
+            scaled.x * sinA + scaled.y * cosA,
+            scaled.z
+        )
+        // WPE author space (top-left origin, Y-down) → centered (Y-up).
+        let worldX = (objectOrigin.x + rotated.x) - sceneSize.x * 0.5
+        let worldY = sceneSize.y * 0.5 - (objectOrigin.y + rotated.y)
+        return SIMD3<Float>(worldX, worldY, objectOrigin.z + rotated.z)
+    }
+
+    func worldVelocity(_ local: SIMD3<Float>) -> SIMD3<Float> {
+        // WPE only Y-flips *position* origin (CParticle::setup) — velocity
+        // is consumed verbatim, so a negative vy in JSON translates to
+        // "position.y decreases" in our Y-up render frame, which the
+        // author intended as "falls down on screen". Mirroring velocity
+        // here would flip the wind direction for every scene.
+        let scaled = SIMD3<Float>(
+            local.x * objectScale.x,
+            local.y * objectScale.y,
+            local.z * objectScale.z
+        )
+        let cosA = cos(objectAngleZ)
+        let sinA = sin(objectAngleZ)
+        return SIMD3<Float>(
+            scaled.x * cosA - scaled.y * sinA,
+            scaled.x * sinA + scaled.y * cosA,
+            scaled.z
+        )
+    }
+
+    func worldSizeMultiplier() -> Float {
+        // Particles are billboarded; size scales with the average of X/Y
+        // axes (Z is depth, irrelevant for the screen-space quad).
+        return max(0.0001, (abs(objectScale.x) + abs(objectScale.y)) * 0.5)
+    }
 }
 
 /// CPU-side emitter + GPU buffer. One instance per scene particle object.
 ///
 /// Lifecycle:
-///   - `prepare()` runs once on scene load: spawns the persistent
-///     instance buffer sized to `definition.maxCount` (clamped to a sane
-///     ceiling so a runaway descriptor doesn't allocate gigabytes).
+///   - `init` clamps capacity, allocates the persistent GPU instance
+///     buffer, and bakes the scene transform once. Subsequent ticks
+///     spawn directly into world-space coordinates so the vertex shader
+///     only needs the centered ortho projection.
 ///   - `tick(now:)` advances every alive particle by the elapsed delta
 ///     since the last tick, recycles dead ones, and emits new ones at
-///     the configured rate. The pure-Swift loop is bounded by maxCount;
-///     no per-frame allocations.
+///     the configured rate.
 ///   - `aliveInstances` returns the slice the renderer should bind.
-///
-/// Coordinate system: spawn positions are in WPE's pixel-space (e.g.
-/// origin "0 650 0" means 650 px above scene center). The dispatcher's
-/// vertex shader projects them into NDC using the scene's orthogonal
-/// projection.
 final class WPEParticleSystem {
     let definition: WPEParticleDefinition
-    /// Capped allocation size — never larger than maxCount, never larger
-    /// than `WPEParticleSystem.absoluteCap` (so a malformed JSON saying
-    /// `maxcount=100000` doesn't OOM us).
     let capacity: Int
-    /// GPU instance buffer, persistent for the system's lifetime.
+    let blendMode: WPEParticleBlendMode
+    let sceneTransform: WPEParticleSceneTransform
     let instanceBuffer: MTLBuffer
 
     private var aliveCount: Int = 0
@@ -55,8 +114,15 @@ final class WPEParticleSystem {
         var age: Float       // Float.greatestFiniteMagnitude when slot is free
     }
 
-    init?(definition: WPEParticleDefinition, device: MTLDevice) {
+    init?(
+        definition: WPEParticleDefinition,
+        device: MTLDevice,
+        blendMode: WPEParticleBlendMode = .translucent,
+        sceneTransform: WPEParticleSceneTransform = .identity
+    ) {
         self.definition = definition
+        self.blendMode = blendMode
+        self.sceneTransform = sceneTransform
         let cap = max(1, min(definition.maxCount, Self.absoluteCap))
         self.capacity = cap
         self.particles = .init(repeating: Particle(
@@ -78,7 +144,6 @@ final class WPEParticleSystem {
         self.rng = SystemRandomNumberGenerator()
     }
 
-    /// Fast random doubles bounded by [low, high].
     private func uniform(_ low: Double, _ high: Double) -> Double {
         guard high > low else { return low }
         let r = Double.random(in: 0...1, using: &rng)
@@ -161,22 +226,26 @@ final class WPEParticleSystem {
         let theta = Double.random(in: 0..<2 * .pi, using: &rng)
         let phi = Double.random(in: 0..<(.pi), using: &rng)
         let radius = uniform(definition.dispersalMin, definition.dispersalMax)
+        let mask = definition.directionMask
         let dispersal = SIMD3<Float>(
-            Float(radius * sin(phi) * cos(theta)),
-            Float(radius * sin(phi) * sin(theta)),
-            Float(radius * cos(phi))
+            Float(radius * sin(phi) * cos(theta) * mask.x),
+            Float(radius * sin(phi) * sin(theta) * mask.y),
+            Float(radius * cos(phi) * mask.z)
         )
-        let origin = SIMD3<Float>(
+        let localOrigin = SIMD3<Float>(
             Float(definition.originOffset.x),
             Float(definition.originOffset.y),
             Float(definition.originOffset.z)
-        )
-        let velocity = uniformVector(definition.velocityMin, definition.velocityMax)
-        let size = Float(uniform(definition.sizeMin, definition.sizeMax))
+        ) + dispersal
+        let localVelocity = uniformVector(definition.velocityMin, definition.velocityMax)
+        let position = sceneTransform.worldOrigin(localOffset: localOrigin)
+        let velocity = sceneTransform.worldVelocity(localVelocity)
+        let sizeScale = sceneTransform.worldSizeMultiplier()
+        let size = Float(uniform(definition.sizeMin, definition.sizeMax)) * sizeScale
         let rawColor = uniformVector(definition.colorMin, definition.colorMax)
         let lifetime = Float(uniform(definition.lifetimeMin, definition.lifetimeMax))
         particles[slot] = Particle(
-            position: origin + dispersal,
+            position: position,
             velocity: velocity,
             size: size,
             color: SIMD3<Float>(
