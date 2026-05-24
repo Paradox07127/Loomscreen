@@ -89,8 +89,11 @@ struct SystemSnapshot: Sendable {
     private static func sysctlString(_ name: String) -> String? {
         var size: size_t = 0
         guard sysctlbyname(name, nil, &size, nil, 0) == 0, size > 0 else { return nil }
-        var buffer = [CChar](repeating: 0, count: size)
+        var buffer = [UInt8](repeating: 0, count: size)
         guard sysctlbyname(name, &buffer, &size, nil, 0) == 0 else { return nil }
-        return String(cString: buffer)
+        // Sysctl strings are null-terminated; trim trailing zeros before
+        // decoding so the resulting `String` doesn't carry an embedded NUL.
+        let useful = buffer.prefix(while: { $0 != 0 })
+        return String(decoding: useful, as: UTF8.self)
     }
 }

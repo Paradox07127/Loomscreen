@@ -274,7 +274,7 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
     /// Both cases collapse to the same fix: when an Ogg-family URL is
     /// requested, prefer a same-name sibling in a reliably-supported
     /// container if one exists. Returns `nil` when no substitution applies.
-    private static let oggFallbackExtensions: [String] = ["mp3", "m4a", "aac", "wav", "flac"]
+    nonisolated private static let oggFallbackExtensions: [String] = ["mp3", "m4a", "aac", "wav", "flac"]
 
     nonisolated static func oggFallbackURL(for primary: URL) -> URL? {
         let ext = primary.pathExtension.lowercased()

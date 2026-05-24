@@ -568,7 +568,7 @@ private struct WPEProjectSettingRow<Content: View>: View {
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
-                if let subtitle {
+                if subtitle != nil {
                     subtitleText
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
