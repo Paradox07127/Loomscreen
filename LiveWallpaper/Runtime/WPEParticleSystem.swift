@@ -123,6 +123,10 @@ final class WPEParticleSystem {
         var alphaBase: Float
         var lifetime: Float
         var age: Float       // Float.greatestFiniteMagnitude when slot is free
+        /// Per-particle turbulence inputs sampled once at spawn; the
+        /// operator pumps a deterministic noise field every frame.
+        var turbulenceSpeed: Float
+        var turbulencePhase: Float
     }
 
     init?(
@@ -145,7 +149,9 @@ final class WPEParticleSystem {
             angularVelocityZ: 0,
             alphaBase: 1,
             lifetime: 0,
-            age: .greatestFiniteMagnitude
+            age: .greatestFiniteMagnitude,
+            turbulenceSpeed: 0,
+            turbulencePhase: 0
         ), count: cap)
         guard let buffer = device.makeBuffer(
             length: cap * MemoryLayout<WPEParticleInstance>.stride,
@@ -233,6 +239,11 @@ final class WPEParticleSystem {
         let dragScalar: Float = max(0, 1 - Float(definition.drag) * dt)
         let angularDragScalar: Float = max(0, 1 - Float(definition.angularDrag) * dt)
         let angularForce = Float(definition.angularForceZ)
+        let turbulenceScale = Float(definition.turbulenceScale)
+        let turbulenceTimescale = Float(definition.turbulenceTimescale)
+        let turbulenceOffset = Float(definition.turbulenceOffset)
+        let turbulenceEnabled = definition.turbulenceSpeedMax > 0
+        let elapsedFloat = Float(elapsed)
 
         for index in 0..<capacity {
             guard particles[index].age != .greatestFiniteMagnitude else { continue }
@@ -244,7 +255,21 @@ final class WPEParticleSystem {
             // Linear motion with gravity + drag.
             particles[index].velocity += gravity * dt
             if dragScalar < 1 { particles[index].velocity *= dragScalar }
-            particles[index].position += particles[index].velocity * dt
+            var step = particles[index].velocity
+            if turbulenceEnabled && particles[index].turbulenceSpeed > 0 {
+                let pos = particles[index].position
+                let t = elapsedFloat * turbulenceTimescale
+                    + turbulenceOffset
+                    + particles[index].turbulencePhase
+                let noise = turbulenceNoise(
+                    x: pos.x * turbulenceScale,
+                    y: pos.y * turbulenceScale,
+                    t: t
+                )
+                step.x += noise.x * particles[index].turbulenceSpeed
+                step.y += noise.y * particles[index].turbulenceSpeed
+            }
+            particles[index].position += step * dt
             // Angular motion with force + drag.
             particles[index].angularVelocityZ += angularForce * dt
             if angularDragScalar < 1 { particles[index].angularVelocityZ *= angularDragScalar }
@@ -315,6 +340,8 @@ final class WPEParticleSystem {
         let alpha = Float(uniform(definition.alphaMin, definition.alphaMax))
         let rotationVec = uniformVector(definition.rotationMin, definition.rotationMax)
         let angularVec = uniformVector(definition.angularVelocityMin, definition.angularVelocityMax)
+        let turbulenceSpeed = Float(uniform(definition.turbulenceSpeedMin, definition.turbulenceSpeedMax))
+        let turbulencePhase = Float(uniform(definition.turbulencePhaseMin, definition.turbulencePhaseMax))
         particles[slot] = Particle(
             position: position,
             velocity: velocity,
@@ -328,8 +355,21 @@ final class WPEParticleSystem {
             angularVelocityZ: angularVec.z,
             alphaBase: min(max(alpha, 0), 1),
             lifetime: max(0.0001, lifetime),
-            age: 0
+            age: 0,
+            turbulenceSpeed: turbulenceSpeed,
+            turbulencePhase: turbulencePhase
         )
+    }
+
+    /// Cheap deterministic 2D noise field built from sine products —
+    /// sufficient for "leaves drift on the breeze" feel without pulling
+    /// in a full Perlin/simplex implementation. Each output component
+    /// is bounded to roughly [-0.5, 0.5] so multiplying by `speed`
+    /// caps the per-frame velocity contribution cleanly.
+    private func turbulenceNoise(x: Float, y: Float, t: Float) -> SIMD2<Float> {
+        let nx = sin(x * 0.10 + t * 0.5) + cos(y * 0.13 + t * 0.7)
+        let ny = sin(x * 0.17 + t * 0.3) + cos(y * 0.09 + t * 0.4)
+        return SIMD2<Float>(nx * 0.25, ny * 0.25)
     }
 }
 #endif

@@ -283,6 +283,79 @@ struct WPEParticleSystemTests {
         #expect(late < early)
     }
 
+    @Test("Parser captures turbulence parameters")
+    func parserCapturesTurbulence() throws {
+        let json = #"""
+        {
+            "maxcount": 10,
+            "emitter": [{"rate": 5}],
+            "initializer": [
+                {"name": "turbulentvelocityrandom",
+                 "speedmin": 35, "speedmax": 100,
+                 "scale": 0.5, "offset": 3,
+                 "timescale": 0.02,
+                 "phasemin": 0, "phasemax": 6.28}
+            ],
+            "operator": []
+        }
+        """#
+        let def = try #require(WPEParticleDefinitionParser.parse(data: Data(json.utf8)))
+        #expect(def.turbulenceSpeedMin == 35)
+        #expect(def.turbulenceSpeedMax == 100)
+        #expect(def.turbulenceScale == 0.5)
+        #expect(def.turbulenceOffset == 3)
+        #expect(def.turbulenceTimescale == 0.02)
+        #expect(def.turbulencePhaseMax > 6.2)
+    }
+
+    @Test("Turbulence produces non-zero position delta")
+    func turbulenceProducesPositionDelta() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let calmDef = WPEParticleDefinition(
+            materialRelativePath: nil, maxCount: 4,
+            rate: 1000, startDelay: 0,
+            lifetimeMin: 10, lifetimeMax: 10,
+            sizeMin: 1, sizeMax: 1,
+            originOffset: SIMD3(0, 0, 0),
+            dispersalMin: 0, dispersalMax: 0,
+            velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
+            colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
+            fadeInSeconds: 0
+        )
+        let stormyDef = WPEParticleDefinition(
+            materialRelativePath: nil, maxCount: 4,
+            rate: 1000, startDelay: 0,
+            lifetimeMin: 10, lifetimeMax: 10,
+            sizeMin: 1, sizeMax: 1,
+            originOffset: SIMD3(0, 0, 0),
+            dispersalMin: 0, dispersalMax: 0,
+            velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
+            colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
+            fadeInSeconds: 0,
+            turbulenceSpeedMin: 50, turbulenceSpeedMax: 50,
+            turbulenceScale: 0.1, turbulenceTimescale: 1,
+            turbulencePhaseMin: 1, turbulencePhaseMax: 1
+        )
+        let calmSystem = try #require(WPEParticleSystem(definition: calmDef, device: device))
+        let stormySystem = try #require(WPEParticleSystem(definition: stormyDef, device: device))
+        for step in 1...10 {
+            calmSystem.tick(now: Double(step) * 0.05)
+            stormySystem.tick(now: Double(step) * 0.05)
+        }
+        let calm = calmSystem.instanceBuffer.contents()
+            .bindMemory(to: WPEParticleInstance.self, capacity: 4)[0]
+            .positionAndSize
+        let stormy = stormySystem.instanceBuffer.contents()
+            .bindMemory(to: WPEParticleInstance.self, capacity: 4)[0]
+            .positionAndSize
+        // Both systems share the same spawn placement (scene transform
+        // is identity by default). Turbulence should push the stormy
+        // particle clear of the calm baseline.
+        let dx = stormy.x - calm.x
+        let dy = stormy.y - calm.y
+        #expect(sqrt(dx * dx + dy * dy) > 0.5)
+    }
+
     @Test("Pre-warm advances simulation without prior tick")
     func prewarmAdvancesPopulation() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())

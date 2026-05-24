@@ -62,6 +62,16 @@ public struct WPEParticleDefinition: Equatable, Sendable {
     /// `operator: angularmovement` — applied on rotationZ.
     public let angularForceZ: Double
     public let angularDrag: Double
+    /// `turbulentvelocityrandom` initializer parameters (per-particle
+    /// random sample baked at spawn time, then the operator applies a
+    /// noise field every frame).
+    public let turbulenceSpeedMin: Double
+    public let turbulenceSpeedMax: Double
+    public let turbulenceScale: Double
+    public let turbulenceTimescale: Double
+    public let turbulenceOffset: Double
+    public let turbulencePhaseMin: Double
+    public let turbulencePhaseMax: Double
 
     public init(
         materialRelativePath: String?,
@@ -91,7 +101,14 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         gravity: SIMD3<Double> = SIMD3<Double>(0, 0, 0),
         drag: Double = 0,
         angularForceZ: Double = 0,
-        angularDrag: Double = 0
+        angularDrag: Double = 0,
+        turbulenceSpeedMin: Double = 0,
+        turbulenceSpeedMax: Double = 0,
+        turbulenceScale: Double = 0.005,
+        turbulenceTimescale: Double = 0.01,
+        turbulenceOffset: Double = 0,
+        turbulencePhaseMin: Double = 0,
+        turbulencePhaseMax: Double = 0
     ) {
         self.materialRelativePath = materialRelativePath
         self.maxCount = maxCount
@@ -121,6 +138,13 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         self.drag = drag
         self.angularForceZ = angularForceZ
         self.angularDrag = angularDrag
+        self.turbulenceSpeedMin = max(0, min(turbulenceSpeedMin, turbulenceSpeedMax))
+        self.turbulenceSpeedMax = max(turbulenceSpeedMin, turbulenceSpeedMax)
+        self.turbulenceScale = max(0, turbulenceScale)
+        self.turbulenceTimescale = turbulenceTimescale
+        self.turbulenceOffset = turbulenceOffset
+        self.turbulencePhaseMin = min(turbulencePhaseMin, turbulencePhaseMax)
+        self.turbulencePhaseMax = max(turbulencePhaseMin, turbulencePhaseMax)
     }
 
     public static let empty = WPEParticleDefinition(
@@ -193,6 +217,13 @@ public enum WPEParticleDefinitionParser {
         var rotationMax: SIMD3<Double> = def.rotationMax
         var angularVelocityMin: SIMD3<Double> = def.angularVelocityMin
         var angularVelocityMax: SIMD3<Double> = def.angularVelocityMax
+        var turbulenceSpeedMin: Double = def.turbulenceSpeedMin
+        var turbulenceSpeedMax: Double = def.turbulenceSpeedMax
+        var turbulenceScale: Double = def.turbulenceScale
+        var turbulenceTimescale: Double = def.turbulenceTimescale
+        var turbulenceOffset: Double = def.turbulenceOffset
+        var turbulencePhaseMin: Double = def.turbulencePhaseMin
+        var turbulencePhaseMax: Double = def.turbulencePhaseMax
 
         if let initializers = json["initializer"] as? [[String: Any]] {
             for entry in initializers {
@@ -243,6 +274,14 @@ public enum WPEParticleDefinitionParser {
                 case "angularvelocityrandom":
                     angularVelocityMin = WPEValueParser.vector3(entry["min"]) ?? angularVelocityMin
                     angularVelocityMax = WPEValueParser.vector3(entry["max"]) ?? angularVelocityMax
+                case "turbulentvelocityrandom":
+                    turbulenceSpeedMin = WPEValueParser.double(entry["speedmin"]) ?? turbulenceSpeedMin
+                    turbulenceSpeedMax = WPEValueParser.double(entry["speedmax"]) ?? turbulenceSpeedMax
+                    turbulenceScale = WPEValueParser.double(entry["scale"]) ?? turbulenceScale
+                    turbulenceTimescale = WPEValueParser.double(entry["timescale"]) ?? turbulenceTimescale
+                    turbulenceOffset = WPEValueParser.double(entry["offset"]) ?? turbulenceOffset
+                    turbulencePhaseMin = WPEValueParser.double(entry["phasemin"]) ?? turbulencePhaseMin
+                    turbulencePhaseMax = WPEValueParser.double(entry["phasemax"]) ?? turbulencePhaseMax
                 default:
                     break
                 }
@@ -304,7 +343,14 @@ public enum WPEParticleDefinitionParser {
             gravity: gravity,
             drag: max(0, drag),
             angularForceZ: angularForceZ,
-            angularDrag: max(0, angularDrag)
+            angularDrag: max(0, angularDrag),
+            turbulenceSpeedMin: turbulenceSpeedMin,
+            turbulenceSpeedMax: turbulenceSpeedMax,
+            turbulenceScale: turbulenceScale,
+            turbulenceTimescale: turbulenceTimescale,
+            turbulenceOffset: turbulenceOffset,
+            turbulencePhaseMin: turbulencePhaseMin,
+            turbulencePhaseMax: turbulencePhaseMax
         )
     }
 }
