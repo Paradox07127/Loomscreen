@@ -59,6 +59,7 @@ struct ScreenDetailInspectorPanel: View {
                             WPEProjectCustomSettingsCard(
                                 screen: screen,
                                 schema: wpeProjectCustomSettingsSchema,
+                                projectKey: wpeProjectCustomSettingsProjectKey,
                                 config: $draft.htmlConfig
                             )
                         }
@@ -103,15 +104,22 @@ struct ScreenDetailInspectorPanel: View {
     /// card itself, so the async read cannot deadlock behind an initially empty
     /// card body.
     private var wpeProjectCustomSettingsLoadKey: String {
-        guard draft.selectedWallpaperType == .html,
-              case .folder(let bookmarkData, let indexFileName) = draft.htmlSource else {
+        guard let projectKey = wpeProjectCustomSettingsProjectKey else {
             return "hidden"
+        }
+        return "\(screen.id):\(projectKey)"
+    }
+
+    private var wpeProjectCustomSettingsProjectKey: String? {
+        guard draft.selectedWallpaperType == .html,
+              case .folder = draft.htmlSource else {
+            return nil
         }
         if let originalType = draft.wpeOrigin?.originalType,
            originalType != .web {
-            return "hidden"
+            return nil
         }
-        return "\(screen.id):\(draft.wpeOrigin?.workshopID ?? "folder"):\(indexFileName):\(bookmarkData.base64EncodedString())"
+        return WallpaperEngineProjectIdentity.key(source: draft.htmlSource, origin: draft.wpeOrigin)
     }
 
     @MainActor

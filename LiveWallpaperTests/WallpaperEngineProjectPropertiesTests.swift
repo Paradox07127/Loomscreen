@@ -90,6 +90,58 @@ struct WallpaperEngineProjectPropertiesTests {
         #expect(decoded.physicalPixelLayout)
     }
 
+    @Test("HTMLConfig stores Wallpaper Engine overrides by project key")
+    func htmlConfigStoresProjectPropertyOverridesByProjectKey() throws {
+        var config = HTMLConfig(
+            wallpaperEngineProjectProperties: [
+                "bgmvolume": .number(20)
+            ]
+        )
+
+        #expect(config.projectWallpaperEngineProperties(forProjectKey: "project-a")["bgmvolume"] == .number(20))
+
+        config.setWallpaperEngineProjectProperties(
+            [
+                "bgmvolume": .number(33),
+                "modelresolution": .string("4k")
+            ],
+            forProjectKey: "project-a"
+        )
+        config.setWallpaperEngineProjectProperties(
+            [
+                "bgmvolume": .number(12)
+            ],
+            forProjectKey: "project-b"
+        )
+
+        #expect(config.wallpaperEngineProjectProperties.isEmpty)
+        #expect(config.projectWallpaperEngineProperties(forProjectKey: "project-a")["bgmvolume"] == .number(33))
+        #expect(config.projectWallpaperEngineProperties(forProjectKey: "project-a")["modelresolution"] == .string("4k"))
+        #expect(config.projectWallpaperEngineProperties(forProjectKey: "project-b")["bgmvolume"] == .number(12))
+
+        let data = try JSONEncoder().encode(config)
+        let decoded = try JSONDecoder().decode(HTMLConfig.self, from: data)
+
+        #expect(decoded.wallpaperEngineProjectProperties.isEmpty)
+        #expect(decoded.projectWallpaperEngineProperties(forProjectKey: "project-a")["bgmvolume"] == .number(33))
+        #expect(decoded.projectWallpaperEngineProperties(forProjectKey: "project-b")["bgmvolume"] == .number(12))
+    }
+
+    @Test("Wallpaper Engine project identity keys are stable per HTML folder source")
+    func projectIdentityKeysAreStablePerHTMLFolderSource() throws {
+        let sourceA = HTMLSource.folder(bookmarkData: Data([0x01, 0x02, 0x03]), indexFileName: "index.html")
+        let sourceARepeat = HTMLSource.folder(bookmarkData: Data([0x01, 0x02, 0x03]), indexFileName: "index.html")
+        let sourceB = HTMLSource.folder(bookmarkData: Data([0x04, 0x05, 0x06]), indexFileName: "index.html")
+
+        let keyA = try #require(WallpaperEngineProjectIdentity.key(source: sourceA))
+        let keyARepeat = try #require(WallpaperEngineProjectIdentity.key(source: sourceARepeat))
+        let keyB = try #require(WallpaperEngineProjectIdentity.key(source: sourceB))
+
+        #expect(keyA == keyARepeat)
+        #expect(keyA != keyB)
+        #expect(WallpaperEngineProjectIdentity.key(source: .url(URL(string: "https://example.com")!)) == nil)
+    }
+
     @Test("Web property bridge uses user overrides over project defaults")
     func bridgeUsesOverridesOverDefaults() throws {
         let folder = try makeProjectFolder(manifest: sampleManifest)
