@@ -20,8 +20,7 @@ struct HTMLPreviewSection: View {
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             cardBody
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-                .shadow(color: Color.black.opacity(0.15), radius: 10, x: 0, y: 4)
+                .screenPreviewChrome()
 
             VStack {
                 HStack {

@@ -127,8 +127,8 @@ struct AerialThumbnailCard: View {
     private var formatBadgeRow: some View {
         if let badges = formatInfo?.badges, !badges.isEmpty {
             HStack(spacing: 4) {
-                ForEach(badges, id: \.self) { label in
-                    Text(verbatim: label)
+                ForEach(badges, id: \.self) { badge in
+                    Text(verbatim: badge.displayLabel)
                         .font(.system(size: 9, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 5)
@@ -137,7 +137,7 @@ struct AerialThumbnailCard: View {
                 }
             }
             .accessibilityElement(children: .combine)
-            .accessibilityLabel(Text(verbatim: badges.joined(separator: ", ")))
+            .accessibilityLabel(Text(verbatim: badges.map(\.displayLabel).joined(separator: ", ")))
         }
     }
 

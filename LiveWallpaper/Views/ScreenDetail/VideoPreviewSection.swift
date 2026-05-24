@@ -1,4 +1,5 @@
 import LiveWallpaperCore
+import LiveWallpaperSharedUI
 import AVKit
 import SwiftUI
 
@@ -45,8 +46,7 @@ struct VideoPreviewSection: View {
         ZStack(alignment: .bottom) {
             CustomVideoPlayer(player: player, fitMode: selectedFitMode)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-                .shadow(color: Color.black.opacity(0.15), radius: 10, x: 0, y: 4)
+                .screenPreviewChrome()
 
             playbackControls
         }
@@ -110,7 +110,6 @@ struct VideoPreviewSection: View {
                 .resizable()
                 .scaledToFill()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: 16))
                 .overlay(Color.black.opacity(0.18))
 
             Button(action: startPreview) {
@@ -121,11 +120,12 @@ struct VideoPreviewSection: View {
             .accessibilityLabel(Text("Play preview"))
             .accessibilityHint(Text("Starts a temporary video preview for this settings panel"))
         }
+        .screenPreviewChrome(shadow: false)
     }
 
     @ViewBuilder
     private var unloadedPreview: some View {
-        let errorMessage = previewController.lastError
+        let errorMessage = previewController.lastError.map(PIISanitizer.scrub)
         VStack(spacing: 14) {
             Image(systemName: errorMessage == nil ? (previewController.isLoading ? "hourglass" : "photo") : "exclamationmark.triangle")
                 .font(.system(size: 36))
@@ -144,7 +144,6 @@ struct VideoPreviewSection: View {
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(NSColor.windowBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separatorColor), lineWidth: 1))
+        .screenPreviewChrome(stroke: true, shadow: false)
     }
 }

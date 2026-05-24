@@ -117,7 +117,7 @@ final class VideoWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackCon
             wallpaperType: .video,
             activity: activity,
             supportsPlaybackControl: true,
-            subtitle: runtimeError?.userMessage
+            subtitle: runtimeError.map { PIISanitizer.scrub($0.userMessage) }
         )
     }
 
@@ -254,7 +254,7 @@ final class AmbientWallpaperSession: WallpaperRuntimeSession, HTMLWallpaperConfi
             wallpaperType: wallpaperType,
             activity: activity,
             supportsPlaybackControl: false,
-            subtitle: runtimeError?.userMessage
+            subtitle: runtimeError.map { PIISanitizer.scrub($0.userMessage) }
         )
     }
 

@@ -394,7 +394,7 @@ final class WallpaperVideoPlayer {
         guard formatInfo.isHDR, let videoView else { return }
         let details = formatInfo.badges.isEmpty
             ? "transfer function detected"
-            : formatInfo.badges.joined(separator: " ")
+            : formatInfo.badges.map(\.displayLabel).joined(separator: " ")
         Logger.info("Video is HDR (\(details)) — enabling EDR output", category: .videoPlayer)
         videoView.applyHDRPreference(true)
         window?.setExtendedDynamicRangeEnabled(true)
