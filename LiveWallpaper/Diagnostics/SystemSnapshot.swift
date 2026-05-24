@@ -91,8 +91,6 @@ struct SystemSnapshot: Sendable {
         guard sysctlbyname(name, nil, &size, nil, 0) == 0, size > 0 else { return nil }
         var buffer = [UInt8](repeating: 0, count: size)
         guard sysctlbyname(name, &buffer, &size, nil, 0) == 0 else { return nil }
-        // Sysctl strings are null-terminated; trim trailing zeros before
-        // decoding so the resulting `String` doesn't carry an embedded NUL.
         let useful = buffer.prefix(while: { $0 != 0 })
         return String(decoding: useful, as: UTF8.self)
     }
