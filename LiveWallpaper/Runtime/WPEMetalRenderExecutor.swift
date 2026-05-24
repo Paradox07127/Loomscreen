@@ -18,9 +18,9 @@ final class WPEMetalRenderExecutor {
     private let targetPool: WPEMetalRenderTargetPool
     private let depthCache: WPEMetalDepthStateCache
     private let pipelineCache: WPEMetalPipelineCache
-    /// Phase 2D-A: invoked when the dispatcher sees a non-built-in shader.
-    /// Default is the stub which fails loudly with `.backendUnavailable`;
-    /// production builds inject a real translator once the toolchain ships.
+    /// Invoked when the dispatcher sees a non-built-in shader. Defaults to
+    /// the shipping Swift transpiler; tests inject an alternate compiler at
+    /// this seam.
     let shaderCompiler: WPEShaderCompiling
     /// Phase 2D-H: memoize the per-shader compile across frames so we
     /// don't re-translate every draw call.
@@ -53,9 +53,8 @@ final class WPEMetalRenderExecutor {
     }
 
     private static func preferredCompiler(device: MTLDevice) -> any WPEShaderCompiling {
-        // Phase 12 dual-backend strategy: the Swift transpiler is the only
-        // Metal-side translator we ship. SPIRV-Cross/glslang has been
-        // retired; shaders the Swift transpiler can't handle bubble up as
+        // The Swift transpiler is the only Metal-side translator we ship.
+        // Shaders it can't handle bubble up as
         // `WPEMetalRenderExecutorError.shaderTranslatorUnavailable`, which
         // `SceneWallpaperSession` then redirects to the WebGL renderer
         // through the scene-level fallback.

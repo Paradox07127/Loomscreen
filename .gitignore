@@ -122,9 +122,4 @@ Temporary Items
 docs/
 .claude/
 
-# WPE shader toolchain build artifacts — intermediates only; the
-# WPEShaderToolchain.xcframework binary is tracked via git LFS.
-ThirdParty/_build/
-ThirdParty/_install/
-ThirdParty/sources/
 .vm-bridge/

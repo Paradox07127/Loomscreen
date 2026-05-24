@@ -2,15 +2,15 @@
 import CryptoKit
 import Foundation
 
-/// Pure-Swift frontend for the WPE shader dialect. Runs before any C++
-/// translator: parses `// [COMBO]` / `// [BIND]` annotations, resolves
+/// Pure-Swift frontend for the WPE shader dialect. Runs before the Swift
+/// transpiler: parses `// [COMBO]` / `// [BIND]` annotations, resolves
 /// `#include "header.h"` against the scene's `shaders/` directory, applies
 /// WPE→canonical-GLSL macro fixups, and bakes combo `#define`s into the
-/// preamble so the downstream toolchain only has to deal with vanilla GLSL.
+/// preamble so translation only has to deal with vanilla GLSL.
 ///
 /// Every transformation here is portable and easy to test, which is exactly
-/// what we want — by the time the C++ backend is invoked, all WPE-specific
-/// quirks have been resolved.
+/// what we want — by the time translation runs, all WPE-specific quirks
+/// have been resolved.
 struct WPEShaderPreprocessor {
 
     /// Files looked up via `#include`. Keyed by relative include path,

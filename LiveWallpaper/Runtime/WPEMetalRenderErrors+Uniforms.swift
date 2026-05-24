@@ -9,9 +9,10 @@ enum WPEMetalRenderExecutorError: Error, Equatable, LocalizedError, Sendable {
     case libraryUnavailable
     case pipelineUnavailable(String)
     case unsupportedShader(String)
-    /// Custom shader needs the WPE→MSL translator but the backend isn't
-    /// vendored yet. Carries the underlying compiler reason so the diagnostic
-    /// surfaced to the UI is precise instead of "unsupported".
+    /// Custom shader could not be translated or compiled by the Metal
+    /// path. Carries the underlying compiler reason so the diagnostic
+    /// surfaced to the UI is precise instead of just "unsupported"; the
+    /// scene then falls back to the WebGL runtime.
     case shaderTranslatorUnavailable(name: String, reason: String)
     /// Metal refused to build a render pipeline state, most commonly because
     /// the vertex stage's struct doesn't line up with the fragment's
@@ -53,8 +54,8 @@ enum WPEMetalRenderExecutorError: Error, Equatable, LocalizedError, Sendable {
         case .shaderTranslatorUnavailable(let name, let reason):
             return String(
                 localized: "error.render.executor.shader_translator_unavailable",
-                defaultValue: "WPE shader '\(name)' needs the GLSL→MSL translator: \(reason)",
-                comment: "Error shown when a custom WPE shader needs translation but the backend is not yet integrated."
+                defaultValue: "WPE shader '\(name)' is unsupported by the Metal renderer: \(reason)",
+                comment: "Error shown when a custom WPE shader cannot be translated or compiled by the Metal renderer."
             )
         case .pipelineStateBuildFailed(let name, let detail):
             return String(

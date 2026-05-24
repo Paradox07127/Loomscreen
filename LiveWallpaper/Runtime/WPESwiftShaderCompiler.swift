@@ -64,8 +64,12 @@ struct WPESwiftShaderCompiler: WPEShaderCompiling {
                 translatedMSL: translation.mslSource,
                 errorText: "Metal rejected MSL: \(error.localizedDescription)"
             )
+            // Don't inline the generated MSL into the thrown reason: it
+            // can flow into user-facing diagnostics, and the full source
+            // has already been written to `WPESceneDebugArtifacts` above
+            // for offline inspection.
             throw WPEShaderCompilerError.mslLibraryFailed(
-                "Metal rejected translated MSL for '\(request.shaderName)': \(error.localizedDescription). MSL was: \(translation.mslSource.prefix(800))"
+                "Metal rejected translated MSL for '\(request.shaderName)': \(error.localizedDescription)"
             )
         }
 

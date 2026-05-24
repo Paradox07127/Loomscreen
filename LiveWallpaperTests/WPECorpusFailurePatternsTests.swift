@@ -9,11 +9,12 @@ import Testing
 /// CURRENT behaviour — that the transpiler throws or emits MSL that
 /// Metal rejects.
 ///
-/// When the SPIRV-Cross toolchain integration lands (Phase 2b — see
-/// PR #73 + PR #74), these tests should be UPDATED, not deleted: flip
-/// the `#expect(throws:)` to `#expect` of a successful compile so they
-/// turn into positive regression coverage that proves the new path
-/// actually handles the documented gap.
+/// The SPIRV-Cross / glslang toolchain that was once staged to close
+/// these gaps has been retired (Phase 12). Scenes hitting these
+/// patterns now fall back to the WebGL runtime instead. When the Swift
+/// transpiler grows native support for any of these cases, flip the
+/// matching `#expect(throws:)` to `#expect` of a successful compile so
+/// the test becomes positive regression coverage.
 ///
 /// This file deliberately uses synthetic minimal shaders rather than
 /// embedding real workshop sources because (a) the corpus is

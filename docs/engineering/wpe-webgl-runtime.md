@@ -139,8 +139,8 @@ See [.claude/plan/wpe-webgl-migration.md](../../.claude/plan/wpe-webgl-migration
 for the 12-phase plan and `wpe-webgl-migration-progress.md` for the
 phase-by-phase execution journal.
 
-| Phase | Status (as of Phase 0+1+2 landing) |
-|------:|------------------------------------|
+| Phase | Status |
+|------:|--------|
 | 0 — Recovery tag + feature flag | Flag landed; tag deferred to Phase 12 prerequisite |
 | 1 — Renderer shell + bridge contract | Landed |
 | 2 — JS runtime scaffold | Landed (Vite + TS source + placeholder bundle) |
@@ -153,7 +153,7 @@ phase-by-phase execution journal.
 | 9 — Corpus harness adaptation + golden tests | Pending |
 | 10 — Performance + memory pass | Pending |
 | 11 — Cutover | Pending |
-| 12 — Metal/SPIRV deletion | Pending |
+| 12 — SPIRV-Cross / glslang deletion | Done — the staged C++ XCFramework, `ThirdParty/` sources, and the dual-backend dispatcher seam are all removed. Metal continues to ship through the Swift transpiler until WebGL cutover lands in Phase 11. |
 
 ## Dev workflow
 

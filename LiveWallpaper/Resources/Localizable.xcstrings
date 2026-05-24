@@ -8857,30 +8857,30 @@
       }
     },
     "error.render.executor.shader_translator_unavailable" : {
-      "comment" : "Error shown when a custom WPE shader needs translation but the backend is not yet integrated.",
+      "comment" : "Error shown when a custom WPE shader cannot be translated or compiled by the Metal renderer.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "WPE shader '%1$@' needs the GLSL→MSL translator: %2$@"
+            "value" : "WPE shader '%1$@' is unsupported by the Metal renderer: %2$@"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "WPE シェーダー「%1$@」には GLSL→MSL トランスレーターが必要です: %2$@"
+            "value" : "WPE シェーダー「%1$@」は Metal レンダラーでサポートされていません: %2$@"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "WPE 着色器“%1$@”需要 GLSL→MSL 转译器：%2$@"
+            "value" : "Metal 渲染器不支持 WPE 着色器“%1$@”：%2$@"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "WPE 著色器「%1$@」需要 GLSL→MSL 轉譯器：%2$@"
+            "value" : "Metal 算繪器不支援 WPE 著色器「%1$@」：%2$@"
           }
         }
       }

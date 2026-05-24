@@ -27,9 +27,12 @@ import Foundation
 ///   - `discard` / `gl_FragData[*]` MRT
 ///   - sampler arrays, texture arrays, cube maps, 3D textures
 ///
-/// This is the focused 80% solution. The C++ glslang+SPIRV-Cross stack
-/// stays staged at the same `WPEShaderCompiling` boundary for the
-/// remaining 20%; the dispatcher only knows about the protocol.
+/// This is the only Metal-side translator we ship. The earlier C++
+/// glslang+SPIRV-Cross stack has been retired (Phase 12); shaders this
+/// transpiler can't handle throw `.translationFailed`, which the
+/// `WPEShaderCompiling` dispatcher surfaces as
+/// `metalRendererUnsupported` so `SceneWallpaperSession` can fall back
+/// to the WebGL runtime instead.
 struct WPEShaderTranspiler {
 
     /// Each uniform occupies one or more float4 slots. Packing rule
