@@ -260,7 +260,9 @@ struct WPEParticleInstance {
 
 struct WPEParticleVertexOut {
     float4 position [[position]];
-    float2 uv;
+    float2 uvCurrent;
+    float2 uvNext;
+    float frameBlend;
     float4 color;
 };
 
@@ -310,21 +312,35 @@ vertex WPEParticleVertexOut wpe_particle_vertex(
     float2 cornerNDC = rotatedCorner * (instance.positionAndSize.w * 2.0)
         / float2(halfWidth * 2.0, halfHeight * 2.0);
 
-    // Sprite-sheet sub-rect: map the [0,1] unit UV into the cell for
-    // the current frame index. `grid.x/y = (cols, rows)`; with both 1
-    // we degenerate to the full atlas (single-frame sprites).
+    // Sprite-sheet: walk two adjacent cells and let the fragment shader
+    // cross-fade between them by `frameBlend`. The WPE shader contract
+    // (per ComputeSpriteFrame) is `floor(t*N)` = current frame and
+    // `frac(t*N)` = blend toward next frame. Without this lerp the
+    // 30-frame animation at ~90 fps reads as flicker.
     float cols = max(sprite.grid.x, 1.0);
     float rows = max(sprite.grid.y, 1.0);
+    float frameCount = max(sprite.grid.z, 1.0);
     float2 frameUVScale = float2(1.0 / cols, 1.0 / rows);
-    uint frameIdx = uint(instance.rotationAndLife.z);
-    uint colsI = uint(cols);
-    uint col = frameIdx % max(colsI, 1u);
-    uint row = frameIdx / max(colsI, 1u);
-    float2 uvOrigin = float2(float(col), float(row)) * frameUVScale;
+    float frameContinuous = instance.rotationAndLife.z;
+    float frameLo = floor(frameContinuous);
+    float blend = frameContinuous - frameLo;
+    float frameHi = (frameLo + 1.0 >= frameCount) ? 0.0 : (frameLo + 1.0);
+
+    uint colsI = max(uint(cols), 1u);
+    uint frameLoI = uint(frameLo);
+    uint colLo = frameLoI % colsI;
+    uint rowLo = frameLoI / colsI;
+    uint frameHiI = uint(frameHi);
+    uint colHi = frameHiI % colsI;
+    uint rowHi = frameHiI / colsI;
+    float2 uvOriginLo = float2(float(colLo), float(rowLo)) * frameUVScale;
+    float2 uvOriginHi = float2(float(colHi), float(rowHi)) * frameUVScale;
 
     WPEParticleVertexOut out;
     out.position = float4(centerNDC + cornerNDC, 0.0, 1.0);
-    out.uv = uvOrigin + unitUV * frameUVScale;
+    out.uvCurrent = uvOriginLo + unitUV * frameUVScale;
+    out.uvNext = uvOriginHi + unitUV * frameUVScale;
+    out.frameBlend = blend;
     out.color = instance.color;
     return out;
 }
@@ -335,19 +351,22 @@ fragment half4 wpe_particle_instanced_fragment(
     constant WPEParticleSpriteParams& sprite [[buffer(0)]]
 ) {
     constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
-    float4 sampled = float4(texture0.sample(linearSampler, in.uv));
+    half4 sLo = texture0.sample(linearSampler, in.uvCurrent);
+    half4 sHi = texture0.sample(linearSampler, in.uvNext);
+    half blend = half(in.frameBlend);
+    half4 sampled = mix(sLo, sHi, blend);
     // Single-channel alpha-mask atlases (WPE fog particles, format=r8)
     // pack the sprite shape into the R channel only — the texture has
     // no RGB content of its own. The particle's per-instance tint
     // becomes the colour, the texture sample becomes the opacity.
     bool isMask = sprite.grid.w > 0.5;
-    float3 rgb = isMask ? in.color.rgb : (sampled.rgb * in.color.rgb);
-    float alpha = (isMask ? sampled.r : sampled.a) * in.color.a;
+    half3 tint = half3(in.color.rgb);
+    half3 rgb = isMask ? tint : (sampled.rgb * tint);
+    half alpha = (isMask ? sampled.r : sampled.a) * half(in.color.a);
     // Straight (non-premultiplied) alpha. The Metal pipeline state's
     // blend factors handle the translucent/additive/normal split set
-    // up by `particlePipelineState` — keeping the shader factor-agnostic
-    // means one less branch and one less combo to test.
-    return half4(float4(rgb, alpha));
+    // up by `particlePipelineState`.
+    return half4(rgb, alpha);
 }
 
 // Phase 2D-N: text overlay quad. Vertex stage takes per-overlay center

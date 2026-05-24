@@ -194,7 +194,7 @@ struct WPEParticleSystemTests {
         #expect(abs(pointer[0].rotationAndLife.x - 0.675) < 0.1)
     }
 
-    @Test("Gravity pulls particles down on screen (author writes +Y in Y-down WPE space)")
+    @Test("Gravity pulls particles down on screen (author writes -Y in Y-up WPE space)")
     func gravityIntegrates() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let def = WPEParticleDefinition(
@@ -207,10 +207,9 @@ struct WPEParticleSystemTests {
             velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
             colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
             fadeInSeconds: 0.01,
-            // WPE author space is Y-down: +Y in JSON is the gravity that
-            // pulls particles *down on screen*. The runtime Y-flips it
-            // once at init so the Y-up simulator decreases position.y.
-            gravity: SIMD3(0, 10, 0)
+            // Author Y-up: negative gravity Y means "pulls particles
+            // down on screen". The simulator integrates it verbatim.
+            gravity: SIMD3(0, -10, 0)
         )
         let system = try #require(WPEParticleSystem(definition: def, device: device))
         system.tick(now: 0)
@@ -220,8 +219,6 @@ struct WPEParticleSystemTests {
         system.tick(now: 0.15)
         let laterY = system.instanceBuffer.contents()
             .bindMemory(to: WPEParticleInstance.self, capacity: 1)[0].positionAndSize.y
-        // Y-up render frame: gravity that "pulls down on screen" makes
-        // position.y decrease over time.
         #expect(laterY < initialY)
     }
 
