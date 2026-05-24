@@ -28,6 +28,11 @@ public struct SceneDescriptor: Codable, Equatable, Sendable {
     /// `[String]` on disk for forward-compatibility — unknown future flags
     /// round-trip without the decoder rejecting the blob.
     public let preflightFeatureFlags: [WPESceneFeatureFlag]
+    /// User-tunable values for `project.json -> general -> properties`.
+    /// Keyed by the property name (e.g. `schemecolor`). Empty for a freshly
+    /// imported scene; populated as the user adjusts the right-hand
+    /// inspector. Persisted so settings survive relaunch.
+    public let propertyOverrides: [String: WallpaperEngineProjectPropertyValue]
 
     public init(
         workshopID: String,
@@ -36,7 +41,8 @@ public struct SceneDescriptor: Codable, Equatable, Sendable {
         capabilityTier: SceneCapabilityTier,
         dependencyWorkshopIDs: [String] = [],
         preflightTier: WPEScenePreflightTier? = nil,
-        preflightFeatureFlags: [WPESceneFeatureFlag] = []
+        preflightFeatureFlags: [WPESceneFeatureFlag] = [],
+        propertyOverrides: [String: WallpaperEngineProjectPropertyValue] = [:]
     ) {
         self.workshopID = workshopID
         self.cacheRelativePath = cacheRelativePath
@@ -45,6 +51,45 @@ public struct SceneDescriptor: Codable, Equatable, Sendable {
         self.dependencyWorkshopIDs = dependencyWorkshopIDs
         self.preflightTier = preflightTier
         self.preflightFeatureFlags = preflightFeatureFlags
+        self.propertyOverrides = propertyOverrides
+    }
+
+    /// Returns a copy of the descriptor with the named property override
+    /// set to the supplied value (or cleared when `value == nil`).
+    public func updating(
+        property key: String,
+        to value: WallpaperEngineProjectPropertyValue?
+    ) -> SceneDescriptor {
+        var next = propertyOverrides
+        if let value {
+            next[key] = value
+        } else {
+            next.removeValue(forKey: key)
+        }
+        return SceneDescriptor(
+            workshopID: workshopID,
+            cacheRelativePath: cacheRelativePath,
+            entryFile: entryFile,
+            capabilityTier: capabilityTier,
+            dependencyWorkshopIDs: dependencyWorkshopIDs,
+            preflightTier: preflightTier,
+            preflightFeatureFlags: preflightFeatureFlags,
+            propertyOverrides: next
+        )
+    }
+
+    /// Returns a copy with every override cleared.
+    public func clearingPropertyOverrides() -> SceneDescriptor {
+        SceneDescriptor(
+            workshopID: workshopID,
+            cacheRelativePath: cacheRelativePath,
+            entryFile: entryFile,
+            capabilityTier: capabilityTier,
+            dependencyWorkshopIDs: dependencyWorkshopIDs,
+            preflightTier: preflightTier,
+            preflightFeatureFlags: preflightFeatureFlags,
+            propertyOverrides: [:]
+        )
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -55,6 +100,7 @@ public struct SceneDescriptor: Codable, Equatable, Sendable {
         case dependencyWorkshopIDs
         case preflightTier
         case preflightFeatureFlags
+        case propertyOverrides
     }
 
     public init(from decoder: Decoder) throws {
@@ -67,6 +113,10 @@ public struct SceneDescriptor: Codable, Equatable, Sendable {
         preflightTier = try? c.decodeIfPresent(WPEScenePreflightTier.self, forKey: .preflightTier)
         let rawFlags = (try? c.decodeIfPresent([String].self, forKey: .preflightFeatureFlags)) ?? []
         preflightFeatureFlags = rawFlags.compactMap(WPESceneFeatureFlag.init(rawValue:))
+        propertyOverrides = (try? c.decodeIfPresent(
+            [String: WallpaperEngineProjectPropertyValue].self,
+            forKey: .propertyOverrides
+        )) ?? [:]
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -78,6 +128,9 @@ public struct SceneDescriptor: Codable, Equatable, Sendable {
         try c.encode(dependencyWorkshopIDs, forKey: .dependencyWorkshopIDs)
         try c.encodeIfPresent(preflightTier, forKey: .preflightTier)
         try c.encode(preflightFeatureFlags.map(\.rawValue), forKey: .preflightFeatureFlags)
+        if !propertyOverrides.isEmpty {
+            try c.encode(propertyOverrides, forKey: .propertyOverrides)
+        }
     }
 }
 

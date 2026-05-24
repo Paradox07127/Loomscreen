@@ -29,6 +29,11 @@ struct ScreenDetailDraftState: Sendable, Equatable {
     var particleDensity: Double
     var selectedFrameRateLimit: FrameRateLimit
     var hasPreviewSource: Bool
+    /// Mirror of `WallpaperContent.scene(descriptor)` so the right-hand
+    /// inspector can bind property overrides without round-tripping
+    /// through the persistence store on every keystroke. Nil for non-
+    /// scene wallpaper types.
+    var sceneDescriptor: SceneDescriptor?
 
     static let `default` = ScreenDetailDraftState(
         playbackSpeed: 1.0,
@@ -52,7 +57,8 @@ struct ScreenDetailDraftState: Sendable, Equatable {
         videoColorSpace: .auto,
         particleDensity: 1.0,
         selectedFrameRateLimit: .fps60,
-        hasPreviewSource: false
+        hasPreviewSource: false,
+        sceneDescriptor: nil
     )
 
     /// Maps a `ScreenConfiguration` onto a draft snapshot. When `config`
@@ -92,7 +98,8 @@ struct ScreenDetailDraftState: Sendable, Equatable {
             videoColorSpace: config.videoColorSpace,
             particleDensity: config.effectConfig.particleDensity,
             selectedFrameRateLimit: config.frameRateLimit,
-            hasPreviewSource: config.wallpaperType == .video && config.hasConfiguredVideoSource
+            hasPreviewSource: config.wallpaperType == .video && config.hasConfiguredVideoSource,
+            sceneDescriptor: config.activeWallpaper.sceneDescriptor
         )
     }
 }

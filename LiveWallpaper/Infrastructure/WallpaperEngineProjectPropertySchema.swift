@@ -19,16 +19,26 @@ struct WallpaperEngineProjectPropertySchema: Equatable, Sendable {
 
     static func read(
         from folder: URL,
-        preferredLanguages: [String] = Locale.preferredLanguages
+        preferredLanguages: [String] = Locale.preferredLanguages,
+        includeSchemeColor: Bool = false
     ) throws -> WallpaperEngineProjectPropertySchema {
         let manifestURL = folder.appendingPathComponent("project.json")
         let data = try Data(contentsOf: manifestURL)
-        return try parse(data: data, preferredLanguages: preferredLanguages)
+        return try parse(
+            data: data,
+            preferredLanguages: preferredLanguages,
+            includeSchemeColor: includeSchemeColor
+        )
     }
 
+    /// HTML web projects already render their own `schemecolor` via CSS,
+    /// so the HTML inspector hides it (default `false`). WPE Metal/WebGL
+    /// scenes need it surfaced — that's the only colour control most
+    /// authors expose — so the Scene inspector calls this with `true`.
     static func parse(
         data: Data,
-        preferredLanguages: [String] = Locale.preferredLanguages
+        preferredLanguages: [String] = Locale.preferredLanguages,
+        includeSchemeColor: Bool = false
     ) throws -> WallpaperEngineProjectPropertySchema {
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let general = root["general"] as? [String: Any],
@@ -42,8 +52,8 @@ struct WallpaperEngineProjectPropertySchema: Equatable, Sendable {
         )
 
         let properties = rawProperties.compactMap { key, raw -> Property? in
-            guard key != "schemecolor",
-                  let dict = raw as? [String: Any] else { return nil }
+            if !includeSchemeColor && key == "schemecolor" { return nil }
+            guard let dict = raw as? [String: Any] else { return nil }
             return Property(key: key, dict: dict, localization: localization)
         }
         .sorted { lhs, rhs in

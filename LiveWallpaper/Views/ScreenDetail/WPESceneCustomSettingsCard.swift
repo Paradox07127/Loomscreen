@@ -4,44 +4,51 @@ import LiveWallpaperSharedUI
 import SwiftUI
 
 /// Pro-only inspector card that mirrors Wallpaper Engine's right-hand
-/// property panel for an imported web project. Hidden in Lite via the
-/// `#if !LITE_BUILD` wrapper (the SPM source-file layout would otherwise
-/// pull this view into the lightweight runtime, even though the Lite
-/// capability catalog has no `wpeImport`).
-struct WPEProjectCustomSettingsCard: View {
+/// property panel for an imported `.scene` workshop project.
+///
+/// Companion to `WPEProjectCustomSettingsCard` (the HTML-web flavour).
+/// The two diverge on three points:
+///   - storage: scene overrides live on `SceneDescriptor.propertyOverrides`
+///     rather than `HTMLConfig.wallpaperEngineProjectPropertiesByProject`
+///     because there's no parent HTMLConfig in the `.scene(...)`
+///     wallpaper case;
+///   - the apply path goes through `ScreenManager.updateSceneDescriptor`
+///     instead of `updateHTMLConfig`;
+///   - `schemecolor` is *included* in the schema (the scene renderer
+///     consumes it via Phase B uniform injection; the HTML inspector
+///     hides it because CSS already paints it).
+///
+/// All widget rendering (bool/slider/combo/color/textinput/group/text)
+/// matches the HTML card pixel-for-pixel so the two inspectors feel
+/// like one feature wearing two coats.
+struct WPESceneCustomSettingsCard: View {
     var screen: Screen
     var schema: WallpaperEngineProjectPropertySchema
-    var projectKey: String?
-    @Binding var config: HTMLConfig
+    @Binding var descriptor: SceneDescriptor
 
     @Environment(ScreenManager.self) private var screenManager
-    @AppStorage("Inspector.WPEProjectCustomSettingsExpanded") private var isExpanded = true
+    @AppStorage("Inspector.WPESceneCustomSettingsExpanded") private var isExpanded = true
 
     var body: some View {
-        projectSettingsCard(schema)
-    }
-
-    private func projectSettingsCard(_ schema: WallpaperEngineProjectPropertySchema) -> some View {
         GroupBox {
             CollapsibleSection(
                 title: "Project Custom Settings",
                 systemImage: "slider.horizontal.3",
                 isExpanded: $isExpanded,
-                trailingAccessory: { resetAccessory(for: schema) }
+                trailingAccessory: { resetAccessory }
             ) {
-                VStack(spacing: 8) {
-                    gateNotices(for: schema)
-                    propertyList(for: schema)
-                }
+                propertyList
             }
         }
         .groupBoxStyle(ContainerGroupBoxStyle())
     }
 
+    // MARK: - Reset
+
     @ViewBuilder
-    private func resetAccessory(for schema: WallpaperEngineProjectPropertySchema) -> some View {
-        if hasOverrides(for: schema) {
-            Button(action: { resetOverrides(for: schema) }) {
+    private var resetAccessory: some View {
+        if hasOverrides {
+            Button(action: resetOverrides) {
                 Image(systemName: "arrow.counterclockwise")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.red)
@@ -52,56 +59,29 @@ struct WPEProjectCustomSettingsCard: View {
         }
     }
 
-    @ViewBuilder
-    private func gateNotices(for schema: WallpaperEngineProjectPropertySchema) -> some View {
-        if !config.allowJavaScript {
-            WPEProjectNotice(
-                icon: "curlybraces",
-                text: "JavaScript is off, so project settings cannot reach this wallpaper."
-            )
-            Divider()
-        } else if needsMouseInput(schema), !config.allowMouseInteraction {
-            HStack(spacing: 8) {
-                WPEProjectNotice(
-                    icon: "cursorarrow.click",
-                    text: "Page Input is off; mouse-related project options may not react."
-                )
-
-                Button("Enable") {
-                    var next = config
-                    next.allowMouseInteraction = true
-                    apply(next)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .fixedSize()
-            }
-            Divider()
-        }
-
-        if config.muteAudio, needsAudio(schema) {
-            WPEProjectNotice(
-                icon: "speaker.slash",
-                text: "Master Audio is muted; project volume options still update the wallpaper."
-            )
-            Divider()
-        }
+    private var hasOverrides: Bool {
+        let keys = Set(schema.properties.map(\.key))
+        return descriptor.propertyOverrides.keys.contains { keys.contains($0) }
     }
 
-    private func propertyList(for schema: WallpaperEngineProjectPropertySchema) -> some View {
-        let values = schema.effectiveValues(overrides: projectOverrides)
+    private func resetOverrides() {
+        apply(descriptor.clearingPropertyOverrides())
+    }
+
+    // MARK: - Property list
+
+    private var propertyList: some View {
+        let values = schema.effectiveValues(overrides: descriptor.propertyOverrides)
         let visibleProperties = schema.visibleProperties(values: values)
 
         return VStack(spacing: 8) {
             ForEach(visibleProperties) { property in
                 propertyView(for: property, values: values)
-
                 if property.id != visibleProperties.last?.id {
                     Divider()
                 }
             }
         }
-        .disabled(!config.allowJavaScript)
     }
 
     @ViewBuilder
@@ -140,19 +120,11 @@ struct WPEProjectCustomSettingsCard: View {
             let optionsCoverCurrent = property.options.contains { $0.value == currentValue }
             WPEProjectSettingRow(icon: "list.bullet.rectangle", iconColor: .purple, title: property.displayText) {
                 if property.options.isEmpty {
-                    // Author shipped a combo with no `options[]`. There is
-                    // nothing the user can switch between — mark as
-                    // unavailable instead of rendering an empty Picker.
                     Text(verbatim: currentValue.stringValue)
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.secondary)
                 } else {
                     Picker("", selection: valueBinding(for: property)) {
-                        // If the persisted value lies outside the option
-                        // set, surface it as a synthetic "Custom (…)" tag
-                        // so the Picker still has a matching selection and
-                        // the user can see why their override looks
-                        // foreign.
                         if !optionsCoverCurrent {
                             Text(verbatim: "·  \(currentValue.stringValue)")
                                 .tag(currentValue)
@@ -181,13 +153,6 @@ struct WPEProjectCustomSettingsCard: View {
                     .controlSize(.small)
             }
         case .file, .directory:
-            // WPE web projects expect to load arbitrary local paths
-            // through `applyUserProperties`, but our `WKWebView` only has
-            // read access scoped to the project folder via
-            // `FolderURLSchemeHandler`. Picking an outside path would
-            // silently fail at the WebKit boundary, so the row is shown
-            // as informational only — no picker — until we ship a
-            // proper sandbox bridge.
             WPEProjectSettingRow(
                 icon: property.type == .file ? "doc.badge.plus" : "folder.badge.plus",
                 iconColor: .secondary,
@@ -207,6 +172,8 @@ struct WPEProjectCustomSettingsCard: View {
         }
     }
 
+    // MARK: - Bindings
+
     private func value(
         for property: WallpaperEngineProjectPropertySchema.Property,
         values: [String: WallpaperEngineProjectPropertyValue]
@@ -218,16 +185,11 @@ struct WPEProjectCustomSettingsCard: View {
         for property: WallpaperEngineProjectPropertySchema.Property
     ) -> WallpaperEngineProjectPropertyValue {
         switch property.type {
-        case .bool:
-            return .bool(false)
-        case .slider:
-            return .number(property.minimum ?? 0)
-        case .combo:
-            return property.options.first?.value ?? .string("")
-        case .color:
-            return .string("1 1 1")
-        case .textinput, .file, .directory, .text, .group, .unsupported:
-            return .string("")
+        case .bool: return .bool(false)
+        case .slider: return .number(property.minimum ?? 0)
+        case .combo: return property.options.first?.value ?? .string("")
+        case .color: return .string("1 1 1")
+        case .textinput, .file, .directory, .text, .group, .unsupported: return .string("")
         }
     }
 
@@ -236,11 +198,11 @@ struct WPEProjectCustomSettingsCard: View {
     ) -> Binding<WallpaperEngineProjectPropertyValue> {
         Binding(
             get: {
-                projectOverrides[property.key]
+                descriptor.propertyOverrides[property.key]
                     ?? property.defaultValue
                     ?? fallbackValue(for: property)
             },
-            set: { setProjectValue($0, for: property) }
+            set: { setValue($0, for: property) }
         )
     }
 
@@ -249,7 +211,7 @@ struct WPEProjectCustomSettingsCard: View {
     ) -> Binding<Bool> {
         Binding(
             get: { valueBinding(for: property).wrappedValue.boolValue ?? false },
-            set: { setProjectValue(.bool($0), for: property) }
+            set: { setValue(.bool($0), for: property) }
         )
     }
 
@@ -259,11 +221,10 @@ struct WPEProjectCustomSettingsCard: View {
         Binding(
             get: {
                 let raw = valueBinding(for: property).wrappedValue.numberValue
-                    ?? property.minimum
-                    ?? 0
+                    ?? property.minimum ?? 0
                 return clamp(raw, to: sliderRange(for: property))
             },
-            set: { setProjectValue(.number(normalizedSliderValue($0, for: property)), for: property) }
+            set: { setValue(.number(normalizedSliderValue($0, for: property)), for: property) }
         )
     }
 
@@ -272,7 +233,7 @@ struct WPEProjectCustomSettingsCard: View {
     ) -> Binding<String> {
         Binding(
             get: { valueBinding(for: property).wrappedValue.stringValue },
-            set: { setProjectValue(.string($0), for: property) }
+            set: { setValue(.string($0), for: property) }
         )
     }
 
@@ -281,37 +242,27 @@ struct WPEProjectCustomSettingsCard: View {
     ) -> Binding<CGColor> {
         Binding(
             get: { cgColor(from: valueBinding(for: property).wrappedValue.stringValue) },
-            set: { setProjectValue(.string(colorString(from: $0)), for: property) }
+            set: { setValue(.string(colorString(from: $0)), for: property) }
         )
     }
 
-    private func setProjectValue(
+    private func setValue(
         _ value: WallpaperEngineProjectPropertyValue,
         for property: WallpaperEngineProjectPropertySchema.Property
     ) {
-        var next = config
-        var overrides = next.projectWallpaperEngineProperties(forProjectKey: projectKey)
-        if Self.matchesDefault(value: value, for: property) {
-            overrides.removeValue(forKey: property.key)
-        } else {
-            overrides[property.key] = value
-        }
-        next.setWallpaperEngineProjectProperties(overrides, forProjectKey: projectKey)
+        let matchesDefault = Self.matchesDefault(value: value, for: property)
+        let next = descriptor.updating(property: property.key, to: matchesDefault ? nil : value)
         apply(next)
     }
 
-    /// Type-aware comparison that decides whether a freshly-edited value
-    /// should be persisted as an override or treated as "back to default".
-    /// Plain `==` on the enum is too strict for two cases:
-    ///
-    /// 1. **Slider values** — SwiftUI slider math reproduces the default
-    ///    `20` as `20.000000000000004` after one round-trip, which would
-    ///    permanently mark the slider as overridden.
-    /// 2. **Color values** — the ColorPicker may yield `"0.500000 0.500000
-    ///    0.500000"` for a default authored as `"0.5 0.5 0.5"`.
-    ///
-    /// Compare numerically per component within an epsilon so the Reset
-    /// affordance and the persisted override set both stay honest.
+    private func apply(_ next: SceneDescriptor) {
+        guard descriptor != next else { return }
+        descriptor = next
+        screenManager.updateSceneDescriptor(next, for: screen)
+    }
+
+    // MARK: - Equality (color/number tolerance)
+
     private static func matchesDefault(
         value: WallpaperEngineProjectPropertyValue,
         for property: WallpaperEngineProjectPropertySchema.Property
@@ -322,21 +273,12 @@ struct WPEProjectCustomSettingsCard: View {
         switch (defaultValue, value) {
         case (.bool(let lhs), .bool(let rhs)):
             return lhs == rhs
-
         case (.number(let lhs), .number(let rhs)):
             return abs(lhs - rhs) <= tolerance
-
         case (.string(let lhs), .string(let rhs)):
             if property.type == .color {
                 let lhsComponents = colorComponents(from: lhs)
                 let rhsComponents = colorComponents(from: rhs)
-                // Compare the first three (RGB) components only. WPE
-                // authors mix `"r g b"`, `"#rrggbb"`, and `"#rrggbbaa"`
-                // freely, while SwiftUI's `ColorPicker` (with
-                // `supportsOpacity: false`) always rounds-trips three
-                // components — without trimming we would mark a default
-                // `#808080ff` as "different" from the picker's
-                // `"0.5 0.5 0.5"`.
                 guard lhsComponents.count >= 3, rhsComponents.count >= 3 else {
                     return lhs == rhs
                 }
@@ -344,69 +286,33 @@ struct WPEProjectCustomSettingsCard: View {
                     .allSatisfy { abs($0 - $1) <= tolerance }
             }
             return lhs == rhs
-
         default:
             return defaultValue == value
         }
     }
 
-    /// Parses the shared `"r g b"` / hex / `#rrggbb` color literal into
-    /// 3-4 normalized components so both equality and `cgColor(from:)` go
-    /// through the same source of truth.
     private static func colorComponents(from raw: String) -> [Double] {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let hex = decodeHexColor(trimmed) {
-            return hex
-        }
+        if let hex = decodeHexColor(trimmed) { return hex }
         let parts = trimmed.split(whereSeparator: { $0 == " " || $0 == "," })
         let parsed = parts.compactMap { Double($0) }
         guard parsed.count >= 3 else { return [] }
         return parsed.prefix(4).map { min(max($0, 0), 1) }
     }
 
-    /// Recognises WPE's other common color encoding (`"#rrggbb"`,
-    /// `"#rrggbbaa"`, or bare `"rrggbb"`) so authors who used either
-    /// notation interoperate with the SwiftUI ColorPicker round-trip.
     private static func decodeHexColor(_ raw: String) -> [Double]? {
         var hex = raw.lowercased()
         if hex.hasPrefix("#") { hex.removeFirst() }
-        let allowedLengths: Set<Int> = [6, 8]
-        guard allowedLengths.contains(hex.count),
+        guard [6, 8].contains(hex.count),
               hex.allSatisfy({ "0123456789abcdef".contains($0) }) else {
             return nil
         }
-        let pairs = stride(from: 0, to: hex.count, by: 2).map { offset -> Double in
+        return stride(from: 0, to: hex.count, by: 2).map { offset -> Double in
             let start = hex.index(hex.startIndex, offsetBy: offset)
             let end = hex.index(start, offsetBy: 2)
             let byte = UInt8(hex[start..<end], radix: 16) ?? 0
             return Double(byte) / 255.0
         }
-        return pairs
-    }
-
-    private func apply(_ next: HTMLConfig) {
-        guard config != next else { return }
-        config = next
-        screenManager.updateHTMLConfig(next, for: screen)
-    }
-
-    private func resetOverrides(for schema: WallpaperEngineProjectPropertySchema) {
-        let keys = Set(schema.properties.map(\.key))
-        var next = config
-        let overrides = next.projectWallpaperEngineProperties(forProjectKey: projectKey).filter {
-            !keys.contains($0.key)
-        }
-        next.setWallpaperEngineProjectProperties(overrides, forProjectKey: projectKey)
-        apply(next)
-    }
-
-    private func hasOverrides(for schema: WallpaperEngineProjectPropertySchema) -> Bool {
-        let keys = Set(schema.properties.map(\.key))
-        return projectOverrides.keys.contains { keys.contains($0) }
-    }
-
-    private var projectOverrides: [String: WallpaperEngineProjectPropertyValue] {
-        config.projectWallpaperEngineProperties(forProjectKey: projectKey)
     }
 
     private func sliderRange(
@@ -414,8 +320,7 @@ struct WPEProjectCustomSettingsCard: View {
     ) -> ClosedRange<Double> {
         let lower = property.minimum ?? 0
         let upper = property.maximum ?? max(100, lower + 1)
-        if upper > lower { return lower...upper }
-        return lower...(lower + 1)
+        return upper > lower ? lower...upper : lower...(lower + 1)
     }
 
     private func sliderStep(
@@ -470,7 +375,6 @@ struct WPEProjectCustomSettingsCard: View {
         } else {
             converted = color
         }
-
         let components = converted.components ?? [1, 1, 1]
         let red: Double
         let green: Double
@@ -488,40 +392,11 @@ struct WPEProjectCustomSettingsCard: View {
     }
 
     private func trimmedColor(_ value: Double) -> String {
-        let clamped = clamp01(value)
-        return String(format: "%.6g", clamped)
+        String(format: "%.6g", clamp01(value))
     }
 
     private func clamp01(_ value: Double) -> Double {
         min(max(value, 0), 1)
     }
-
-    private func needsMouseInput(_ schema: WallpaperEngineProjectPropertySchema) -> Bool {
-        schema.properties.contains { property in
-            let text = "\(property.key) \(property.displayText)".lowercased()
-            return text.contains("mouse")
-                || text.contains("click")
-                || text.contains("cursor")
-                || text.contains("headpat")
-                || text.contains("tracking")
-                || text.contains("hitbox")
-        }
-    }
-
-    private func needsAudio(_ schema: WallpaperEngineProjectPropertySchema) -> Bool {
-        schema.properties.contains { property in
-            let text = "\(property.key) \(property.displayText)".lowercased()
-            return text.contains("audio")
-                || text.contains("music")
-                || text.contains("bgm")
-                || text.contains("sound")
-                || text.contains("voice")
-                || text.contains("volume")
-        }
-    }
 }
-
 #endif
-// Shared widgets `WPEProjectSettingRow`, `WPEProjectTextBlock`,
-// `WPEProjectNotice` were extracted to `WPEProjectSettingWidgets.swift`
-// so the scene-side `WPESceneCustomSettingsCard` can render the same UI.

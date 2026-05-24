@@ -1426,6 +1426,23 @@ final class ScreenManager {
         htmlCoordinator.updateConfig(config, for: screen)
     }
 
+    /// Replace the active scene's `SceneDescriptor` (currently used by the
+    /// Pro inspector to push user-edited `project.json` properties down).
+    /// Restarts the wallpaper session so the renderer picks up the new
+    /// overrides — there's no in-place apply seam on the WPE runtimes yet,
+    /// the way HTML has `applyHTMLConfig`.
+    func updateSceneDescriptor(_ descriptor: SceneDescriptor, for screen: Screen) {
+        guard var configuration = configurationStore.get(for: screen.id) else { return }
+        guard case .scene(let current) = configuration.activeWallpaper,
+              current.workshopID == descriptor.workshopID else {
+            return
+        }
+        guard current != descriptor else { return }
+        configuration.activeWallpaper = .scene(descriptor)
+        saveConfiguration(configuration)
+        restoreWallpaperSession(for: screen, configuration: configuration, preservingState: false)
+    }
+
     // MARK: - Metal Shader Wallpaper
 
     /// Matches `setSceneWallpaper` — the body only touches Core schema +

@@ -19,6 +19,7 @@ struct ScreenDetailInspectorPanel: View {
     let onResetDisplaySettings: () -> Void
     #if !LITE_BUILD
     @State private var wpeProjectCustomSettingsSchema: WallpaperEngineProjectPropertySchema?
+    @State private var wpeSceneCustomSettingsSchema: WallpaperEngineProjectPropertySchema?
     #endif
 
     var body: some View {
@@ -81,6 +82,19 @@ struct ScreenDetailInspectorPanel: View {
                        featureCatalog.capabilities.selectableWallpaperModes.count > 1 {
                         videoSettingsContent
                     }
+
+                    #if !LITE_BUILD
+                    if draft.selectedWallpaperType == .scene,
+                       let schema = wpeSceneCustomSettingsSchema,
+                       schema.hasMeaningfulSettings,
+                       let _ = draft.sceneDescriptor {
+                        WPESceneCustomSettingsCard(
+                            screen: screen,
+                            schema: schema,
+                            descriptor: sceneDescriptorBinding
+                        )
+                    }
+                    #endif
                 }
                 .padding(.horizontal, DesignTokens.Inspector.horizontalPadding(for: inspectorPanelWidth))
                 .padding(.vertical, 14)
@@ -95,8 +109,68 @@ struct ScreenDetailInspectorPanel: View {
         .task(id: wpeProjectCustomSettingsLoadKey) {
             await loadWPEProjectCustomSettingsSchema()
         }
+        .task(id: wpeSceneCustomSettingsLoadKey) {
+            await loadWPESceneCustomSettingsSchema()
+        }
         #endif
     }
+
+    #if !LITE_BUILD
+    private var sceneDescriptorBinding: Binding<SceneDescriptor> {
+        Binding(
+            get: {
+                draft.sceneDescriptor ?? SceneDescriptor(
+                    workshopID: "",
+                    cacheRelativePath: "",
+                    entryFile: "scene.json",
+                    capabilityTier: .unsupported
+                )
+            },
+            set: { newValue in
+                draft.sceneDescriptor = newValue
+            }
+        )
+    }
+
+    private var wpeSceneCustomSettingsLoadKey: String {
+        guard draft.selectedWallpaperType == .scene,
+              let descriptor = draft.sceneDescriptor else {
+            return "hidden"
+        }
+        return "\(screen.id):scene:\(descriptor.workshopID)"
+    }
+
+    @MainActor
+    private func loadWPESceneCustomSettingsSchema() async {
+        guard draft.selectedWallpaperType == .scene,
+              let descriptor = draft.sceneDescriptor,
+              WPEPathSafety.isSafeCacheRelativePath(descriptor.cacheRelativePath) else {
+            wpeSceneCustomSettingsSchema = nil
+            return
+        }
+
+        let cacheRelativePath = descriptor.cacheRelativePath
+
+        let schema: WallpaperEngineProjectPropertySchema? = await Task.detached(priority: .userInitiated) {
+            guard let supportRoot = try? FileManager.default.url(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: false
+            ) else { return nil }
+            let folderURL = supportRoot
+                .appendingPathComponent("LiveWallpaper", isDirectory: true)
+                .appendingPathComponent(cacheRelativePath, isDirectory: true)
+            return try? WallpaperEngineProjectPropertySchema.read(
+                from: folderURL,
+                includeSchemeColor: true
+            )
+        }.value
+
+        guard !Task.isCancelled else { return }
+        wpeSceneCustomSettingsSchema = schema
+    }
+    #endif
 
     #if !LITE_BUILD
     /// Stable identifier driving WPE project schema reloads. The inspector
