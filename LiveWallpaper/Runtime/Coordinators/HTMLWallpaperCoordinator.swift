@@ -92,14 +92,32 @@ final class HTMLWallpaperCoordinator {
         forceReload: Bool = false,
         for screen: Screen
     ) {
+        let existingConfiguration = configurationStore.get(for: screen.id)
+        let previousContent = existingConfiguration?.activeWallpaper
+        let previousHTMLSource: HTMLSource?
+        let previousHTMLConfig: HTMLConfig?
+        if case .html(let source, let config) = previousContent {
+            previousHTMLSource = source
+            previousHTMLConfig = config
+        } else {
+            previousHTMLSource = nil
+            previousHTMLConfig = nil
+        }
+
         var persistedConfig = config
         if !persistedConfig.physicalPixelLayout,
            HTMLWallpaperCompatibilityPolicy.looksLikeWallpaperEngineFolder(source) {
             persistedConfig.physicalPixelLayout = true
             Logger.info("HTML wallpaper: auto-enabling physical-pixel layout for Wallpaper Engine folder on screen \(screen.id)", category: .screenManager)
         }
+        persistedConfig = Self.bindingLegacyProjectProperties(
+            in: persistedConfig,
+            previousSource: previousHTMLSource,
+            previousConfig: previousHTMLConfig,
+            nextSource: source
+        )
 
-        var configuration = configurationStore.get(for: screen.id) ?? ScreenConfiguration(
+        var configuration = existingConfiguration ?? ScreenConfiguration(
             screenID: screen.id,
             wallpaper: .html(source: source, config: persistedConfig)
         )
@@ -112,7 +130,6 @@ final class HTMLWallpaperCoordinator {
             return
         }
 
-        let previousContent = configurationStore.get(for: screen.id)?.activeWallpaper
         configuration.setHTMLWallpaper(source: source, config: persistedConfig)
         originReconciler.reconcile(
             &configuration,
@@ -160,5 +177,34 @@ final class HTMLWallpaperCoordinator {
         previous.useEphemeralStorage != current.useEphemeralStorage
             || previous.allowJavaScript != current.allowJavaScript
             || previous.blockTrackers != current.blockTrackers
+    }
+
+    private static func bindingLegacyProjectProperties(
+        in config: HTMLConfig,
+        previousSource: HTMLSource?,
+        previousConfig: HTMLConfig?,
+        nextSource: HTMLSource
+    ) -> HTMLConfig {
+        let legacyOverrides = config.wallpaperEngineProjectProperties
+        guard !legacyOverrides.isEmpty else { return config }
+
+        var result = config
+        let sourceForLegacy: HTMLSource
+        if let previousSource,
+           previousSource != nextSource,
+           previousConfig?.wallpaperEngineProjectProperties == legacyOverrides {
+            sourceForLegacy = previousSource
+        } else {
+            sourceForLegacy = nextSource
+        }
+
+        guard let projectKey = WallpaperEngineProjectIdentity.key(source: sourceForLegacy) else {
+            return result
+        }
+        if result.wallpaperEngineProjectPropertiesByProject[projectKey] == nil {
+            result.wallpaperEngineProjectPropertiesByProject[projectKey] = legacyOverrides
+        }
+        result.wallpaperEngineProjectProperties = [:]
+        return result
     }
 }

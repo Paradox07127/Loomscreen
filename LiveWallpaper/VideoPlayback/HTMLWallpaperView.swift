@@ -561,6 +561,8 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     /// Folder the cached schema was parsed from, used to detect stale
     /// caches when the source switches.
     private var wallpaperEnginePropertySchemaFolder: URL?
+    /// Current project-key bucket for WPE web user property overrides.
+    private var wallpaperEngineProjectKey: String?
     /// Replays into `loadSource(_:)` for retry / re-entry (sleep wake, error banner).
     private var lastSource: HTMLSource?
     /// Counts consecutive navigation failures since the last successful load.
@@ -960,12 +962,18 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             """)
         }
 
-        if previous?.wallpaperEngineProjectProperties != current.wallpaperEngineProjectProperties,
+        let previousProjectOverrides = previous?.projectWallpaperEngineProperties(
+            forProjectKey: wallpaperEngineProjectKey
+        ) ?? [:]
+        let currentProjectOverrides = current.projectWallpaperEngineProperties(
+            forProjectKey: wallpaperEngineProjectKey
+        )
+        if previousProjectOverrides != currentProjectOverrides,
            let schema = wallpaperEnginePropertySchema,
            let script = WallpaperEngineWebPropertyBridge.applyScript(
                schema: schema,
-               previousOverrides: previous?.wallpaperEngineProjectProperties ?? [:],
-               overrides: current.wallpaperEngineProjectProperties
+               previousOverrides: previousProjectOverrides,
+               overrides: currentProjectOverrides
            ) {
             statements.append(script)
         }
@@ -1012,6 +1020,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     /// Internal entry point distinguishing user-driven loads (which reset the retry budget) from `scheduleRetry` continuations (which keep the counter so backoff progresses).
     private func loadSource(_ source: HTMLSource, resetFailureCount: Bool) {
         lastSource = source
+        wallpaperEngineProjectKey = WallpaperEngineProjectIdentity.key(source: source)
         if resetFailureCount {
             resetNavigationFailureState()
         }
@@ -1073,7 +1082,9 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             }
         }
 
-        let overrides = lastAppliedConfig?.wallpaperEngineProjectProperties ?? [:]
+        let overrides = lastAppliedConfig?.projectWallpaperEngineProperties(
+            forProjectKey: wallpaperEngineProjectKey
+        ) ?? [:]
         let nextScript: String? = {
             guard let schema = wallpaperEnginePropertySchema else { return nil }
             return WallpaperEngineWebPropertyBridge.bootstrapScript(

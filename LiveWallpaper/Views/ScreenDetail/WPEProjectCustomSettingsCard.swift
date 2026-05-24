@@ -11,6 +11,7 @@ import SwiftUI
 struct WPEProjectCustomSettingsCard: View {
     var screen: Screen
     var schema: WallpaperEngineProjectPropertySchema
+    var projectKey: String?
     @Binding var config: HTMLConfig
 
     @Environment(ScreenManager.self) private var screenManager
@@ -88,7 +89,7 @@ struct WPEProjectCustomSettingsCard: View {
     }
 
     private func propertyList(for schema: WallpaperEngineProjectPropertySchema) -> some View {
-        let values = schema.effectiveValues(overrides: config.wallpaperEngineProjectProperties)
+        let values = schema.effectiveValues(overrides: projectOverrides)
         let visibleProperties = schema.visibleProperties(values: values)
 
         return VStack(spacing: 8) {
@@ -235,7 +236,7 @@ struct WPEProjectCustomSettingsCard: View {
     ) -> Binding<WallpaperEngineProjectPropertyValue> {
         Binding(
             get: {
-                config.wallpaperEngineProjectProperties[property.key]
+                projectOverrides[property.key]
                     ?? property.defaultValue
                     ?? fallbackValue(for: property)
             },
@@ -289,11 +290,13 @@ struct WPEProjectCustomSettingsCard: View {
         for property: WallpaperEngineProjectPropertySchema.Property
     ) {
         var next = config
+        var overrides = next.projectWallpaperEngineProperties(forProjectKey: projectKey)
         if Self.matchesDefault(value: value, for: property) {
-            next.wallpaperEngineProjectProperties.removeValue(forKey: property.key)
+            overrides.removeValue(forKey: property.key)
         } else {
-            next.wallpaperEngineProjectProperties[property.key] = value
+            overrides[property.key] = value
         }
+        next.setWallpaperEngineProjectProperties(overrides, forProjectKey: projectKey)
         apply(next)
     }
 
@@ -390,15 +393,20 @@ struct WPEProjectCustomSettingsCard: View {
     private func resetOverrides(for schema: WallpaperEngineProjectPropertySchema) {
         let keys = Set(schema.properties.map(\.key))
         var next = config
-        next.wallpaperEngineProjectProperties = next.wallpaperEngineProjectProperties.filter {
+        let overrides = next.projectWallpaperEngineProperties(forProjectKey: projectKey).filter {
             !keys.contains($0.key)
         }
+        next.setWallpaperEngineProjectProperties(overrides, forProjectKey: projectKey)
         apply(next)
     }
 
     private func hasOverrides(for schema: WallpaperEngineProjectPropertySchema) -> Bool {
         let keys = Set(schema.properties.map(\.key))
-        return config.wallpaperEngineProjectProperties.keys.contains { keys.contains($0) }
+        return projectOverrides.keys.contains { keys.contains($0) }
+    }
+
+    private var projectOverrides: [String: WallpaperEngineProjectPropertyValue] {
+        config.projectWallpaperEngineProperties(forProjectKey: projectKey)
     }
 
     private func sliderRange(

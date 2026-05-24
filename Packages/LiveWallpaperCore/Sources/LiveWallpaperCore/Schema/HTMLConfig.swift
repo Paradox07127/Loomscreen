@@ -71,6 +71,12 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
     /// wallpaper's own `applyUserProperties` callback.
     public var wallpaperEngineProjectProperties: [String: WallpaperEngineProjectPropertyValue] = [:]
 
+    /// Project-keyed Wallpaper Engine web user property overrides. New writes
+    /// go here so two HTML projects with the same author property names do not
+    /// share values accidentally. The flat field above remains for decoding
+    /// older configurations and no-key runtimes.
+    public var wallpaperEngineProjectPropertiesByProject: [String: [String: WallpaperEngineProjectPropertyValue]] = [:]
+
     public static let `default` = HTMLConfig()
 
     /// Bounds for `audioVolume`. Defined on the type so UI sliders and
@@ -112,6 +118,7 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
         case useEphemeralStorage
         case maxRetries
         case wallpaperEngineProjectProperties
+        case wallpaperEngineProjectPropertiesByProject
     }
 
     public init(
@@ -129,7 +136,8 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
         physicalPixelLayout: Bool = false,
         useEphemeralStorage: Bool = false,
         maxRetries: Int = 3,
-        wallpaperEngineProjectProperties: [String: WallpaperEngineProjectPropertyValue] = [:]
+        wallpaperEngineProjectProperties: [String: WallpaperEngineProjectPropertyValue] = [:],
+        wallpaperEngineProjectPropertiesByProject: [String: [String: WallpaperEngineProjectPropertyValue]] = [:]
     ) {
         self.allowJavaScript = allowJavaScript
         self.allowMouseInteraction = allowMouseInteraction
@@ -146,6 +154,7 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
         self.useEphemeralStorage = useEphemeralStorage
         self.maxRetries = maxRetries
         self.wallpaperEngineProjectProperties = wallpaperEngineProjectProperties
+        self.wallpaperEngineProjectPropertiesByProject = wallpaperEngineProjectPropertiesByProject
     }
 
     public init(from decoder: Decoder) throws {
@@ -187,6 +196,59 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
             )
             wallpaperEngineProjectProperties = [:]
         }
+        do {
+            wallpaperEngineProjectPropertiesByProject = try c.decodeIfPresent(
+                [String: [String: WallpaperEngineProjectPropertyValue]].self,
+                forKey: .wallpaperEngineProjectPropertiesByProject
+            ) ?? [:]
+        } catch {
+            Logger.warning(
+                "HTMLConfig: dropping unreadable wallpaperEngineProjectPropertiesByProject (\(error.localizedDescription))",
+                category: .settings
+            )
+            wallpaperEngineProjectPropertiesByProject = [:]
+        }
+    }
+
+    /// Returns the overrides for a concrete WPE web project. When no bucket
+    /// exists yet, the legacy flat dictionary is treated as a compatibility
+    /// fallback so existing saved configs keep working until the next edit or
+    /// source switch migrates them.
+    public func projectWallpaperEngineProperties(
+        forProjectKey projectKey: String?
+    ) -> [String: WallpaperEngineProjectPropertyValue] {
+        guard let projectKey = Self.normalizedProjectKey(projectKey) else {
+            return wallpaperEngineProjectProperties
+        }
+        return wallpaperEngineProjectPropertiesByProject[projectKey]
+            ?? wallpaperEngineProjectProperties
+    }
+
+    /// Stores overrides for a concrete WPE web project and clears the legacy
+    /// flat dictionary so future projects cannot inherit these values by name.
+    public mutating func setWallpaperEngineProjectProperties(
+        _ values: [String: WallpaperEngineProjectPropertyValue],
+        forProjectKey projectKey: String?
+    ) {
+        guard let projectKey = Self.normalizedProjectKey(projectKey) else {
+            wallpaperEngineProjectProperties = values
+            return
+        }
+
+        if values.isEmpty {
+            wallpaperEngineProjectPropertiesByProject.removeValue(forKey: projectKey)
+        } else {
+            wallpaperEngineProjectPropertiesByProject[projectKey] = values
+        }
+        wallpaperEngineProjectProperties = [:]
+    }
+
+    private static func normalizedProjectKey(_ projectKey: String?) -> String? {
+        guard let projectKey = projectKey?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !projectKey.isEmpty else {
+            return nil
+        }
+        return projectKey
     }
 
     public static func clampedAudioVolume(_ value: Double) -> Double {
