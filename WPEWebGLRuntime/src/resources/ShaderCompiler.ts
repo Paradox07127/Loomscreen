@@ -150,11 +150,19 @@ export class ShaderCompiler {
   // variable name onto wpe_FragColor so the header declaration matches.
   private static rewriteBody(source: string, isFragment: boolean): string {
     const intVars = collectIntegerVariables(source);
-    return source
+    const fragmentInputs = isFragment
+      ? collectFragmentInputVariables(source)
+      : new Map<string, string>();
+
+    const lines = source
       .split("\n")
       .map((line) => ShaderCompiler.rewriteLine(line, isFragment, intVars))
-      .filter((line): line is string => line !== null)
-      .join("\n");
+      .filter((line): line is string => line !== null);
+
+    if (isFragment && fragmentInputs.size > 0) {
+      return rewriteFragmentInputAssignments(lines, fragmentInputs).join("\n");
+    }
+    return lines.join("\n");
   }
 
   private static rewriteLine(line: string, isFragment: boolean, intVars: Set<string>): string | null {
@@ -230,19 +238,36 @@ function compileShader(
 // overloading built-in functions (so we can't ship a `max(int, float)`
 // shim). WPE workshop shaders are written for desktop GLSL / HLSL where
 // `max(0, baseSize)`, `M_PI * 2`, `1 - mDist`, `fragLV %= 2`,
-// `out_var = 0;` are all accepted. We apply four surgical rewrites:
+// `out_var = 0;` are all accepted. We apply seven surgical rewrites:
 //
-//   1. `%=` (float modulo-assign idiom) → `var = mod(var, float(rhs))`
+//   1. `%=` (float modulo-assign idiom) → `var = mod(var, float(rhs))`.
 //   2. `<int> [+\-*/] <id|(>` and `<id|)|0-9]> [+\-*/] <int>` → cast int
-//      side to float. The extended digit lookbehind catches chained
-//      expressions like `pointer * 2 - 1` (after Pass 2a casts `2`,
-//      the trailing `- 1` still sees a digit on the left).
-//   3. `<float_var>(.swizzle)? = <int>;` → `.0` suffix. `intVars` tells
-//      us which identifiers were declared `int`/`uint`/`ivec*`/`uvec*`
-//      so we skip integer-typed destinations.
-//   4. Inside calls to whitelisted float-only built-ins (`max`, `min`,
+//      LITERAL side to float. The extended digit lookbehind catches
+//      chained expressions like `pointer * 2 - 1` (after Pass 2a casts
+//      `2`, the trailing `- 1` still sees a digit on the left).
+//   3. Float-context comparisons (`time == 0`, `bootPhase < 1`) → cast
+//      the bare int literal. We deliberately allow this inside `if(...)`
+//      heads because the `castIntsInArithmetic` skip-list was protecting
+//      `int < int` arithmetic, not float-vs-int boolean tests. Still
+//      skipped: known-int operands (`i == 4` stays int-typed).
+//   4. Known int VARIABLES in float arithmetic (`i / sampleDrop`,
+//      `vec.x * count`) → `float(intVar)`. Triggered only when the
+//      adjacent operand is visibly float-like (float literal, float
+//      built-in result, or an identifier NOT in `intVars`). False
+//      negatives preserve the original error; false positives are the
+//      real risk and are kept narrow on purpose.
+//   5. Inside calls to whitelisted float-only built-ins (`max`, `min`,
 //      `clamp`, `mix`, `mod`, etc.), cast bare int literal args to
 //      float so `max(0, x)` resolves to `max(float, float)`.
+//   6. `(const)? (float|vec*|mat*) X = <expr>;` whose RHS still mentions
+//      an int literal or int variable → wrap the RHS with `float(...)` /
+//      `vecN(...)` / `matN(...)`. Safety net: even if passes 2-4 missed
+//      a coercion inside the expression, the constructor coerces the
+//      whole thing on assignment. Already-explicit constructors
+//      (`float x = float(a);`) are left alone.
+//   7. `<float_var>(.swizzle)? = <int>;` → `.0` suffix. `intVars` tells
+//      us which identifiers were declared `int`/`uint`/`ivec*`/`uvec*`
+//      so we skip integer-typed destinations.
 //
 // Skipped at the line level: `#` directives, `//` comments, `for(...)`
 // headers, integer-typed declarations (`int n = 4;`).
@@ -260,10 +285,11 @@ function applyGLSLEsCompat(line: string, intVars: Set<string>): string {
   );
 
   out = castIntsInArithmetic(out);
-
-  out = castFloatVarAssignments(out, intVars);
-
+  out = castIntLiteralsInFloatComparisons(out, intVars);
+  out = castIntVarsInFloatExpressions(out, intVars);
   out = castIntArgsInFloatCalls(out);
+  out = castFloatDeclarationInitializers(out, intVars);
+  out = castFloatVarAssignments(out, intVars);
 
   return out;
 }
@@ -455,10 +481,45 @@ function collectIntegerVariables(source: string): Set<string> {
     const body = match[1] ?? "";
     for (const declarator of splitDeclarators(body)) {
       const name = /^\s*([A-Za-z_]\w*)/.exec(declarator)?.[1];
-      if (name) intVars.add(name);
+      addIntegerVariableName(intVars, name);
     }
   }
+  collectIntegerFunctionParameters(source, intVars);
   return intVars;
+}
+
+// `(int a, int b)` is captured by `collectIntegerVariables` as a single
+// declarator chain `a, int b)` — splitDeclarators yields `a` and
+// `int b)`, so only the FIRST parameter name reaches `intVars`. The
+// second extraction picks up `int` (the type keyword itself); without
+// the keyword-filter in `addIntegerVariableName` we would then treat
+// `int < int` as `float(int) < int`. Walk function signatures explicitly
+// so every integer parameter is registered.
+function collectIntegerFunctionParameters(source: string, intVars: Set<string>): void {
+  const functionRe = /\b([A-Za-z_]\w*)\s+([A-Za-z_]\w*)\s*\(/g;
+  let match: RegExpExecArray | null;
+  while ((match = functionRe.exec(source)) !== null) {
+    const returnType = match[1] ?? "";
+    if (/^(?:if|for|while|switch|return)$/.test(returnType)) continue;
+
+    const openIdx = match.index + match[0].length - 1;
+    const closeIdx = matchClose(source, openIdx, "(", ")");
+    const after = source.substring(closeIdx + 1).trimStart()[0] ?? "";
+    if (after !== "{" && after !== ";") continue;
+
+    const params = source.substring(openIdx + 1, closeIdx);
+    for (const param of splitDeclarators(params)) {
+      const name = /^(?:(?:const|in|out|inout|highp|mediump|lowp)\s+)*(?:int|uint|ivec[234]|uvec[234])\s+([A-Za-z_]\w*)\b/.exec(param.trim())?.[1];
+      addIntegerVariableName(intVars, name);
+    }
+    functionRe.lastIndex = closeIdx + 1;
+  }
+}
+
+function addIntegerVariableName(intVars: Set<string>, name: string | undefined): void {
+  if (!name) return;
+  if (/^(?:void|bool|int|uint|float|[biu]?vec[234]|mat[234])$/.test(name)) return;
+  intVars.add(name);
 }
 
 function splitDeclarators(body: string): string[] {
@@ -493,6 +554,459 @@ function matchClose(s: string, start: number, open: string, close: string): numb
     }
   }
   return s.length - 1;
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Pass 3 in `applyGLSLEsCompat`: float comparison int-literal coercion.
+// Sits outside `castIntsInArithmetic` because that pass skips `if(...)`
+// heads to protect `if (i < count)` integer comparisons. Here we re-enter
+// those contexts under stricter operand checks.
+function castIntLiteralsInFloatComparisons(line: string, intVars: Set<string>): string {
+  return rewriteOutsideArraySubscripts(line, (segment) => {
+    let out = segment.replace(
+      /(\b[A-Za-z_]\w*(?:\.[xyzwrgbastpq]+)?|(?:\d+\.\d*|\.\d+|\d+[eE][+-]?\d+)[fF]?)(\s*(?:==|!=|<=|>=|<|>)\s*)(-?\d+)(?![\w.])/g,
+      (match, left: string, op: string, num: string) => {
+        if (!isFloatLikeOperandText(left, intVars)) return match;
+        return `${left}${op}${num}.0`;
+      }
+    );
+    out = out.replace(
+      /(^|[^\w.])(-?\d+)(\s*(?:==|!=|<=|>=|<|>)\s*)(\b[A-Za-z_]\w*(?:\.[xyzwrgbastpq]+)?|(?:\d+\.\d*|\.\d+|\d+[eE][+-]?\d+)[fF]?)/g,
+      (match, prefix: string, num: string, op: string, right: string) => {
+        if (!isFloatLikeOperandText(right, intVars)) return match;
+        return `${prefix}${num}.0${op}${right}`;
+      }
+    );
+    return out;
+  });
+}
+
+// Pass 4: known int VARIABLES adjacent to float-like operands → wrap
+// with `float(...)`. Heuristic, not a type-checker: we only look one
+// operator left and one right, and only fire when that neighbor reads
+// as float (literal, float built-in result, or identifier not in
+// `intVars`). False negatives keep the original GLSL error; false
+// positives would corrupt working integer math, so the cast is gated
+// behind the operand check and skipped when the int var is already
+// wrapped (`float(i)`) or used as a swizzle base (`foo.x`).
+function castIntVarsInFloatExpressions(line: string, intVars: Set<string>): string {
+  if (intVars.size === 0) return line;
+  const names = [...intVars]
+    .filter((name) => /^[A-Za-z_]\w*$/.test(name))
+    .sort((a, b) => b.length - a.length);
+  if (names.length === 0) return line;
+
+  const intVarRe = new RegExp(`\\b(${names.map(escapeRegExp).join("|")})\\b`, "g");
+  return rewriteOutsideArraySubscripts(line, (segment) => {
+    let out = "";
+    let last = 0;
+    let match: RegExpExecArray | null;
+    while ((match = intVarRe.exec(segment)) !== null) {
+      const name = match[1] ?? "";
+      const start = match.index;
+      const end = start + name.length;
+      out += segment.substring(last, start);
+      if (
+        segment[start - 1] === "." ||
+        segment[end] === "." ||
+        isWrappedByFloatCall(segment, start) ||
+        !shouldCastIntVarOperand(segment, start, end, intVars)
+      ) {
+        out += name;
+      } else {
+        out += `float(${name})`;
+      }
+      last = end;
+    }
+    out += segment.substring(last);
+    return out;
+  });
+}
+
+// Pass 6: `(const)? (float|vec*|mat*) X = <expr>;` whose RHS still
+// references int literals or int vars → wrap with `glslType(...)`. This
+// is the safety net for cases where passes 2-4 missed an inner operand.
+// Multi-declarator (`float a = 0, b = 1;`) is intentionally a false
+// negative — splitting per-declarator would need a type-aware split and
+// the simpler workshop pattern is one decl per line.
+function castFloatDeclarationInitializers(line: string, intVars: Set<string>): string {
+  return line.replace(
+    /^(\s*(?:const\s+)?(float|vec[234]|mat[234])\s+[A-Za-z_]\w*(?:\s*\[[^\]]+\])?\s*=\s*)([^;]+)(\s*;.*)$/,
+    (match, prefix: string, glslType: string, expr: string, tail: string) => {
+      const trimmed = expr.trim();
+      if (!trimmed || hasTopLevelComma(trimmed) || isWholeExplicitFloatConstructor(trimmed)) {
+        return match;
+      }
+      if (!containsIntCoercionSource(trimmed, intVars)) return match;
+      const leading = expr.match(/^\s*/)?.[0] ?? "";
+      const trailing = expr.match(/\s*$/)?.[0] ?? "";
+      return `${prefix}${leading}${glslType}(${trimmed})${trailing}${tail}`;
+    }
+  );
+}
+
+// Fragment `in`/`varying` variables are immutable in GLSL ES — workshop
+// shaders authored against desktop GLSL routinely write to them
+// (`v_TexCoord = v_TexCoord * 0.5;`). We rewrite the first assignment
+// into a local copy and re-target all subsequent reads.
+//
+// Limitation: the local copy is inserted immediately before the first
+// assignment. If that assignment lives inside a nested scope (`if/for`
+// block), references outside that scope still point at `<name>_local`,
+// which won't exist. We accept this as a known false-positive class —
+// it matches the workshop pattern of writing to varyings at the top of
+// `main()`, and tightening it would require true brace-aware scope
+// tracking.
+function rewriteFragmentInputAssignments(
+  lines: string[],
+  fragmentInputs: Map<string, string>
+): string[] {
+  const assignedInputs = collectAssignedFragmentInputs(lines, fragmentInputs);
+  if (assignedInputs.size === 0) return lines;
+
+  const out: string[] = [];
+  const activeLocals = new Set<string>();
+  for (const line of lines) {
+    const trimmed = line.trimStart();
+    if (
+      trimmed.startsWith("#") ||
+      trimmed.startsWith("//") ||
+      isFragmentInputDeclaration(line, assignedInputs)
+    ) {
+      out.push(line);
+      continue;
+    }
+
+    const newlyAssigned = [...assignedInputs].filter(
+      ([name]) => !activeLocals.has(name) && lineAssignsToInput(line, name)
+    );
+    for (const [name, glslType] of newlyAssigned) {
+      activeLocals.add(name);
+      const indent = line.match(/^\s*/)?.[0] ?? "";
+      out.push(`${indent}${glslType} ${name}_local = ${name};`);
+    }
+
+    let rewritten = line;
+    for (const name of activeLocals) {
+      rewritten = replaceIdentifierInCode(rewritten, name, `${name}_local`);
+    }
+    out.push(rewritten);
+  }
+  return out;
+}
+
+function collectFragmentInputVariables(source: string): Map<string, string> {
+  const inputs = new Map<string, string>();
+  const declRe =
+    /^\s*(?:(?:flat|smooth|noperspective|centroid|sample)\s+)*(?:in|varying)\s+(?:(?:highp|mediump|lowp)\s+)?([A-Za-z_]\w*)\s+([A-Za-z_]\w*)\s*(?:\[[^\]]+\])?\s*;/gm;
+  let match: RegExpExecArray | null;
+  while ((match = declRe.exec(source)) !== null) {
+    const glslType = match[1] ?? "";
+    const name = match[2] ?? "";
+    if (glslType && name) inputs.set(name, glslType);
+  }
+  return inputs;
+}
+
+function collectAssignedFragmentInputs(
+  lines: string[],
+  fragmentInputs: Map<string, string>
+): Map<string, string> {
+  const assigned = new Map<string, string>();
+  for (const [name, glslType] of fragmentInputs) {
+    if (lines.some((line) => lineAssignsToInput(line, name))) {
+      assigned.set(name, glslType);
+    }
+  }
+  return assigned;
+}
+
+function lineAssignsToInput(line: string, name: string): boolean {
+  const code = splitLineComment(line).code;
+  const re = new RegExp(
+    `(^|[^\\w.])${escapeRegExp(name)}(?:\\s*\\.[xyzwrgbastpq]+)?\\s*(?:[+\\-*/%]?=)(?!=)`
+  );
+  return re.test(code);
+}
+
+function isFragmentInputDeclaration(line: string, inputs: Map<string, string>): boolean {
+  for (const [name, glslType] of inputs) {
+    const re = new RegExp(
+      `^\\s*(?:(?:flat|smooth|noperspective|centroid|sample)\\s+)*(?:in|varying)\\s+(?:(?:highp|mediump|lowp)\\s+)?${escapeRegExp(glslType)}\\s+${escapeRegExp(name)}\\s*(?:\\[[^\\]]+\\])?\\s*;`
+    );
+    if (re.test(line)) return true;
+  }
+  return false;
+}
+
+function replaceIdentifierInCode(line: string, name: string, replacement: string): string {
+  const { code, comment } = splitLineComment(line);
+  return code.replace(new RegExp(`\\b${escapeRegExp(name)}\\b`, "g"), replacement) + comment;
+}
+
+// Shared by passes 3 and 4: rewrite only the parts of `line` that are
+// OUTSIDE `[...]` subscripts, so integer-typed indices stay int. Caller
+// supplies a per-segment rewriter; bracket contents are forwarded
+// verbatim.
+function rewriteOutsideArraySubscripts(
+  line: string,
+  rewrite: (segment: string) => string
+): string {
+  let out = "";
+  let buffer = "";
+  const flush = () => {
+    if (!buffer) return;
+    out += rewrite(buffer);
+    buffer = "";
+  };
+  let i = 0;
+  while (i < line.length) {
+    const ch: string = line[i] ?? "";
+    if (ch === "[") {
+      flush();
+      const close = matchClose(line, i, "[", "]");
+      out += line.substring(i, close + 1);
+      i = close + 1;
+      continue;
+    }
+    buffer += ch;
+    i++;
+  }
+  flush();
+  return out;
+}
+
+function shouldCastIntVarOperand(
+  text: string,
+  start: number,
+  end: number,
+  intVars: Set<string>
+): boolean {
+  const nextOp = readOperatorAfter(text, end);
+  if (nextOp && isFloatLikeOperandText(readOperandAfter(text, nextOp.end), intVars)) {
+    return true;
+  }
+  const prevOp = readOperatorBefore(text, start);
+  if (prevOp && isFloatLikeOperandText(readOperandBefore(text, prevOp.start), intVars)) {
+    return true;
+  }
+  return false;
+}
+
+function readOperatorAfter(text: string, index: number): { start: number; end: number } | null {
+  const i = skipWhitespaceForward(text, index);
+  const two = text.substring(i, i + 2);
+  if (["++", "--", "+=", "-=", "*=", "/=", "%="].includes(two)) return null;
+  if (["==", "!=", "<=", ">="].includes(two)) return { start: i, end: i + 2 };
+  if ("+-*/<>".includes(text[i] ?? "")) return { start: i, end: i + 1 };
+  return null;
+}
+
+function readOperatorBefore(text: string, index: number): { start: number; end: number } | null {
+  const i = skipWhitespaceBackward(text, index - 1);
+  const two = text.substring(i - 1, i + 1);
+  if (["++", "--", "+=", "-=", "*=", "/=", "%="].includes(two)) return null;
+  if (["==", "!=", "<=", ">="].includes(two)) return { start: i - 1, end: i + 1 };
+  if ("+-*/<>".includes(text[i] ?? "")) return { start: i, end: i + 1 };
+  return null;
+}
+
+function readOperandAfter(text: string, index: number): string {
+  const start = skipWhitespaceForward(text, index);
+  let depth = 0;
+  let i = start;
+  while (i < text.length) {
+    const ch = text[i] ?? "";
+    if (
+      depth === 0 &&
+      (ch === ";" || ch === "," || ch === ")" || ch === "{" || ch === "}" || isExpressionOperator(text, i))
+    ) {
+      break;
+    }
+    if (ch === "(" || ch === "[") depth += 1;
+    else if (ch === ")" || ch === "]") depth -= 1;
+    i++;
+  }
+  return stripLeadingStatementKeywords(text.substring(start, i).trim());
+}
+
+function readOperandBefore(text: string, index: number): string {
+  const end = skipWhitespaceBackward(text, index - 1) + 1;
+  let depth = 0;
+  let i = end - 1;
+  while (i >= 0) {
+    const ch = text[i] ?? "";
+    if (
+      depth === 0 &&
+      (ch === ";" || ch === "," || ch === "(" || ch === "{" || ch === "}" || isExpressionOperator(text, i))
+    ) {
+      break;
+    }
+    if (ch === ")" || ch === "]") depth += 1;
+    else if (ch === "(" || ch === "[") depth -= 1;
+    i--;
+  }
+  return stripLeadingStatementKeywords(text.substring(i + 1, end).trim());
+}
+
+// `return a < b` — when we walk backward from `<`, no `;` precedes
+// `return`, so the operand window grows all the way to the line start
+// and `expressionContainsFloatCue` then sees `return` as a non-int
+// identifier and counts it as a float cue. Strip leading GLSL
+// statement-introducing keywords so the operand collapses back to the
+// actual expression token (`a`).
+function stripLeadingStatementKeywords(operand: string): string {
+  return operand.replace(
+    /^(?:return|if|else|while|for|do|switch|case|default|break|continue|discard)\b\s*/,
+    ""
+  );
+}
+
+function isFloatLikeOperandText(operand: string, intVars: Set<string>): boolean {
+  const text = stripOuterParens(operand.trim());
+  if (!text) return false;
+  if (/^[+-]?(?:\d+\.\d*|\.\d+|\d+[eE][+-]?\d+)[fF]?$/.test(text)) return true;
+
+  const call = /^([A-Za-z_]\w*)\s*\(/.exec(text);
+  if (call) {
+    const name = call[1] ?? "";
+    return FLOAT_BUILT_INS.has(name) || /^(float|vec[234]|mat[234])$/.test(name);
+  }
+
+  const ident = /^([A-Za-z_]\w*)(?:\.[xyzwrgbastpq]+)?$/.exec(text);
+  if (ident) return !intVars.has(ident[1] ?? "");
+
+  return expressionContainsFloatCue(text, intVars);
+}
+
+function containsIntCoercionSource(expr: string, intVars: Set<string>): boolean {
+  const text = stripBracketContents(expr);
+  if (hasBareIntLiteral(text)) return true;
+  for (const intVar of intVars) {
+    if (new RegExp(`\\b${escapeRegExp(intVar)}\\b`).test(text)) return true;
+  }
+  return false;
+}
+
+function expressionContainsFloatCue(expr: string, intVars: Set<string>): boolean {
+  const text = stripBracketContents(expr);
+  if (/(^|[^\w.])(?:\d+\.\d*|\.\d+|\d+[eE][+-]?\d+)[fF]?(?![\w.])/.test(text)) return true;
+  const identRe = /\b([A-Za-z_]\w*)\b/g;
+  let match: RegExpExecArray | null;
+  while ((match = identRe.exec(text)) !== null) {
+    const name = match[1] ?? "";
+    if (intVars.has(name) || isGLSLNonValueKeyword(name)) continue;
+    return true;
+  }
+  return false;
+}
+
+// Identifiers that aren't variables: GLSL primitive types, control-flow
+// keywords, storage qualifiers. Treating them as "float cues" makes
+// `castIntVarsInFloatExpressions` spuriously wrap int neighbors. Type
+// keywords also live in `addIntegerVariableName`'s filter; the two
+// lists overlap on purpose so each pass stays self-contained.
+function isGLSLNonValueKeyword(name: string): boolean {
+  return /^(?:void|bool|int|uint|float|[biu]?vec[234]|mat[234]|return|if|else|while|for|do|switch|case|default|break|continue|discard|const|in|out|inout|uniform|varying|attribute|highp|mediump|lowp|precision|layout|flat|smooth|noperspective|centroid|sample|true|false)$/.test(name);
+}
+
+function hasBareIntLiteral(text: string): boolean {
+  let i = 0;
+  while (i < text.length) {
+    const rest = text.substring(i);
+    const float = /^(?:\d+\.\d*|\.\d+|\d+[eE][+-]?\d+)[fF]?/.exec(rest);
+    if (float) {
+      i += float[0].length;
+      continue;
+    }
+    const hexOrUint = /^(?:0[xX][0-9a-fA-F]+|\d+[uU])/.exec(rest);
+    if (hexOrUint) {
+      i += hexOrUint[0].length;
+      continue;
+    }
+    const intLit = /^-?\d+/.exec(rest);
+    if (intLit) {
+      const prev = text[i - 1] ?? "";
+      const next = text[i + intLit[0].length] ?? "";
+      if (!/[\w.]/.test(prev) && !/[\w.]/.test(next)) return true;
+      i += intLit[0].length;
+      continue;
+    }
+    i++;
+  }
+  return false;
+}
+
+function isWholeExplicitFloatConstructor(expr: string): boolean {
+  const call = /^(float|vec[234]|mat[234])\s*\(/.exec(expr);
+  if (!call) return false;
+  const open = expr.indexOf("(");
+  return matchClose(expr, open, "(", ")") === expr.length - 1;
+}
+
+function isWrappedByFloatCall(text: string, start: number): boolean {
+  const open = skipWhitespaceBackward(text, start - 1);
+  if (text[open] !== "(") return false;
+  const wordEnd = skipWhitespaceBackward(text, open - 1) + 1;
+  let wordStart = wordEnd - 1;
+  while (wordStart >= 0 && /\w/.test(text[wordStart] ?? "")) wordStart--;
+  return text.substring(wordStart + 1, wordEnd) === "float";
+}
+
+function hasTopLevelComma(text: string): boolean {
+  let depth = 0;
+  for (const ch of text) {
+    if (ch === "(" || ch === "[" || ch === "{") depth += 1;
+    else if (ch === ")" || ch === "]" || ch === "}") depth -= 1;
+    else if (ch === "," && depth === 0) return true;
+  }
+  return false;
+}
+
+function stripOuterParens(text: string): string {
+  if (!text.startsWith("(")) return text;
+  const close = matchClose(text, 0, "(", ")");
+  return close === text.length - 1 ? text.substring(1, close).trim() : text;
+}
+
+function stripBracketContents(text: string): string {
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] === "[") {
+      const close = matchClose(text, i, "[", "]");
+      out += " ";
+      i = close + 1;
+      continue;
+    }
+    out += text[i] ?? "";
+    i++;
+  }
+  return out;
+}
+
+function splitLineComment(line: string): { code: string; comment: string } {
+  const idx = line.indexOf("//");
+  return idx === -1 ? { code: line, comment: "" } : { code: line.substring(0, idx), comment: line.substring(idx) };
+}
+
+function skipWhitespaceForward(text: string, index: number): number {
+  let i = index;
+  while (i < text.length && /\s/.test(text[i] ?? "")) i++;
+  return i;
+}
+
+function skipWhitespaceBackward(text: string, index: number): number {
+  let i = index;
+  while (i >= 0 && /\s/.test(text[i] ?? "")) i--;
+  return i;
+}
+
+function isExpressionOperator(text: string, index: number): boolean {
+  return /[+\-*/<>!=]/.test(text[index] ?? "");
 }
 
 function hashString(s: string): string {
