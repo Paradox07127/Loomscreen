@@ -240,7 +240,13 @@ final class WPEParticleSystem {
         let cyclesPerLifetime: Float
         if let sheet = spriteSheet, sheet.frameCount > 1 {
             frameCount = Float(sheet.frameCount)
-            cyclesPerLifetime = max(0.0001, Float(definition.sequenceMultiplier))
+            // `sequenceMultiplier × 2` empirically lands between Almamu's
+            // wall-clock rate (visibly fast/flickery at default settings)
+            // and a pure lifetime-relative single-multiplier reading
+            // (too slow on leaves2). For leaves7 (sequenceMultiplier 3,
+            // lifetime ~9s, 30 frames): 6 cycles ≈ 20 fps — the natural
+            // "leaves slowly rotating as they fall" pace.
+            cyclesPerLifetime = max(0.0001, Float(definition.sequenceMultiplier) * 2)
         } else {
             frameCount = 1
             cyclesPerLifetime = 0
