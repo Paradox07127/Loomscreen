@@ -54,7 +54,7 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
             wallpaperType: .scene,
             activity: activity,
             supportsPlaybackControl: false,
-            subtitle: loadError?.errorDescription
+            subtitle: loadError?.errorDescription.map(PIISanitizer.scrub)
         )
     }
 

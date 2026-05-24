@@ -25,7 +25,9 @@ public struct SystemMonitorView: View {
     private var cpuPercent: Double {
         ramScopeRaw == "app" ? monitor.cpuUsage : monitor.systemCpuUsage
     }
-    private var ramTitle: String { "RAM" }
+    private var ramTitle: String {
+        String(localized: "RAM", defaultValue: "RAM", comment: "Dashboard memory gauge title. Industry-standard abbreviation; kept verbatim across locales.")
+    }
 
     private var ramDetailText: Text {
         if ramScopeRaw == "app" {

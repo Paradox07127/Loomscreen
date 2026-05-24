@@ -13,6 +13,8 @@ struct RuntimeErrorBanner: View {
     let onRePick: () -> Void
 
     var body: some View {
+        let sanitizedTitle = PIISanitizer.scrub(error.title)
+
         HStack(alignment: .center, spacing: 12) {
             Image(systemName: severityIcon)
                 .foregroundStyle(severityTint)
@@ -20,11 +22,11 @@ struct RuntimeErrorBanner: View {
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(verbatim: error.title)
+                Text(verbatim: sanitizedTitle)
                     .font(.callout.weight(.medium))
                     .lineLimit(2)
                 if let subtitle = error.subtitlePath, !subtitle.isEmpty {
-                    Text(verbatim: subtitle)
+                    Text(verbatim: PIISanitizer.scrub(subtitle))
                         .font(.system(.caption, design: .monospaced))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -32,8 +34,8 @@ struct RuntimeErrorBanner: View {
                 }
             }
             .accessibilityElement(children: .combine)
-            .accessibilityLabel(Text(error.title))
-            .accessibilityValue(Text(verbatim: error.accessibilityDetail))
+            .accessibilityLabel(Text(verbatim: sanitizedTitle))
+            .accessibilityValue(Text(verbatim: PIISanitizer.scrub(error.accessibilityDetail)))
 
             Spacer(minLength: 8)
 
