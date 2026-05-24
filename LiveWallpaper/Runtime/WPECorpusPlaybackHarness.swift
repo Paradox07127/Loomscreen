@@ -63,6 +63,14 @@ struct WPECorpusPlaybackReport: Codable, Sendable {
         let elapsedSeconds: Double
         let failureMessage: String?
         let resolution: ResolutionSummary
+        /// Concrete backend the scene actually ran against (`metal` /
+        /// `webgl`). Nil only for entries from before the dual-backend
+        /// router landed (Phase 11) so old archives still decode.
+        let renderer: String?
+        /// `user` if the user pinned a backend, `automatic` if the router
+        /// chose. Nil for pre-router archives. Decoded leniently so old
+        /// reports remain readable.
+        let routedBy: WPESceneBackendRouter.RoutedBy?
 
         var id: String { workshopID }
 
@@ -116,6 +124,7 @@ final class WPECorpusPlaybackHarness {
     private struct HeadlessSession {
         let renderer: WPESceneRenderer
         let window: NSWindow
+        let routing: WPESceneBackendRouter.Routing
     }
 
     private struct TimeoutError: Error, LocalizedError, Sendable {
@@ -289,6 +298,8 @@ final class WPECorpusPlaybackHarness {
             )
             let headless = try makeHeadlessSession(
                 descriptor: descriptor,
+                document: document,
+                cacheURL: cacheURL,
                 dependencyMounts: dependencyMounts,
                 engineAssetsRoot: engineAssetsRoot
             )
@@ -307,7 +318,8 @@ final class WPECorpusPlaybackHarness {
                     result: .pass,
                     startedAt: startedAt,
                     failureMessage: nil,
-                    resolution: Self.resolutionSummary(from: headless.renderer.resolutionDiagnostics)
+                    resolution: Self.resolutionSummary(from: headless.renderer.resolutionDiagnostics),
+                    routing: headless.routing
                 )
             } catch let error as TimeoutError {
                 return makeEntry(
@@ -318,7 +330,8 @@ final class WPECorpusPlaybackHarness {
                     result: .timeout,
                     startedAt: startedAt,
                     failureMessage: error.errorDescription,
-                    resolution: Self.resolutionSummary(from: headless.renderer.resolutionDiagnostics)
+                    resolution: Self.resolutionSummary(from: headless.renderer.resolutionDiagnostics),
+                    routing: headless.routing
                 )
             } catch {
                 let diagnosticMessage = headless.renderer.loadDiagnostics?.errorDescription
@@ -330,7 +343,8 @@ final class WPECorpusPlaybackHarness {
                     result: .fail,
                     startedAt: startedAt,
                     failureMessage: diagnosticMessage ?? Self.describe(error),
-                    resolution: Self.resolutionSummary(from: headless.renderer.resolutionDiagnostics)
+                    resolution: Self.resolutionSummary(from: headless.renderer.resolutionDiagnostics),
+                    routing: headless.routing
                 )
             }
         } catch HarnessError.metalUnavailable {
@@ -365,14 +379,23 @@ final class WPECorpusPlaybackHarness {
 
     private func makeHeadlessSession(
         descriptor: SceneDescriptor,
+        document: WPESceneDocument,
+        cacheURL probedCacheURL: URL,
         dependencyMounts: [WPEAssetMount],
         engineAssetsRoot: URL?
     ) throws -> HeadlessSession {
         let frame = CGRect(origin: .zero, size: configuration.rendererFrame)
         let cacheURL = applicationSupportCacheURL(for: descriptor)
+        let routing = WPESceneBackendRouter.resolve(
+            userSelection: WPERuntimeSelection.current,
+            document: document,
+            cacheURL: probedCacheURL,
+            dependencyMounts: dependencyMounts,
+            engineAssetsRootURL: engineAssetsRoot
+        )
 
         let renderer: WPESceneRenderer
-        switch WPERuntimeSelection.current {
+        switch routing.backend {
         case .webGL:
             do {
                 renderer = try WPEWebGLSceneRenderer(
@@ -403,7 +426,7 @@ final class WPECorpusPlaybackHarness {
         window.contentView = renderer.nsView
         window.alphaValue = 0
         window.orderBack(nil)
-        return HeadlessSession(renderer: renderer, window: window)
+        return HeadlessSession(renderer: renderer, window: window, routing: routing)
     }
 
     /// Re-derive the cache URL from the descriptor's `cacheRelativePath`, matching the contract `AmbientWallpaperSessionBuilder` enforces.
@@ -488,7 +511,8 @@ final class WPECorpusPlaybackHarness {
         result: WPECorpusPlaybackReport.Entry.Outcome,
         startedAt: Date,
         failureMessage: String?,
-        resolution: WPECorpusPlaybackReport.Entry.ResolutionSummary
+        resolution: WPECorpusPlaybackReport.Entry.ResolutionSummary,
+        routing: WPESceneBackendRouter.Routing?
     ) -> WPECorpusPlaybackReport.Entry {
         WPECorpusPlaybackReport.Entry(
             workshopID: workshopID,
@@ -498,7 +522,9 @@ final class WPECorpusPlaybackHarness {
             result: result,
             elapsedSeconds: Date().timeIntervalSince(startedAt),
             failureMessage: failureMessage,
-            resolution: resolution
+            resolution: resolution,
+            renderer: routing?.backend.rawValue,
+            routedBy: routing?.routedBy
         )
     }
 
@@ -518,7 +544,9 @@ final class WPECorpusPlaybackHarness {
             result: result,
             elapsedSeconds: Date().timeIntervalSince(startedAt),
             failureMessage: failureMessage,
-            resolution: .empty
+            resolution: .empty,
+            renderer: nil,
+            routedBy: nil
         )
     }
 

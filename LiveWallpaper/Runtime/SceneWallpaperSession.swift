@@ -6,6 +6,12 @@ import AppKit
 /// the rest of the runtime stack does not need a scene-specific code path.
 @MainActor
 final class SceneWallpaperSession: WallpaperRuntimeSession {
+    /// Builds a replacement renderer when the primary fails with
+    /// `SceneRenderingError.metalRendererUnsupported`. Returning `nil`
+    /// signals there is no fallback (e.g. WebGL bundle missing) and the
+    /// session should surface the original error.
+    typealias FallbackRendererFactory = @MainActor () -> WPESceneRenderer?
+
     let wallpaperType: WallpaperType = .scene
 
     private var window: NSWindow?
@@ -14,6 +20,8 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
     private var isVisible = true
     private var didStartLoad = false
     private var loadTask: Task<Void, Never>?
+    private let fallbackFactory: FallbackRendererFactory?
+    private var didUseFallback = false
     private(set) var isThrottled = false
     private(set) var loadError: SceneRenderingError?
     /// Latest per-layer progress message reported by the renderer.
@@ -21,9 +29,14 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
     /// "Decoding 7/12 textures…" instead of an opaque spinner.
     private(set) var loadProgress: String?
 
-    init(window: NSWindow, renderer: WPESceneRenderer) {
+    init(
+        window: NSWindow,
+        renderer: WPESceneRenderer,
+        fallbackFactory: FallbackRendererFactory? = nil
+    ) {
         self.window = window
         self.renderer = renderer
+        self.fallbackFactory = fallbackFactory
     }
 
     var summary: WallpaperSessionSummary {
@@ -96,26 +109,7 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
         didStartLoad = true
         installProgressHandler(on: renderer)
         loadTask = Task { @MainActor [weak self] in
-            do {
-                try await renderer.load()
-                guard !Task.isCancelled else { return }
-                self?.loadError = nil
-                self?.loadProgress = nil
-            } catch is CancellationError {
-                return
-            } catch let error as SceneRenderingError {
-                guard !Task.isCancelled else { return }
-                Logger.warning("Scene wallpaper load failed: \(error.errorDescription ?? "(no description)")", category: .screenManager)
-                self?.loadError = error
-            } catch {
-                guard !Task.isCancelled else { return }
-                Logger.warning("Scene wallpaper load failed: \(error.localizedDescription)", category: .screenManager)
-                if let diagnostic = renderer.loadDiagnostics {
-                    self?.loadError = .resourceFailed(diagnostic)
-                } else {
-                    self?.loadError = .parseFailed(error.localizedDescription)
-                }
-            }
+            await self?.runLoadWithFallback(initial: renderer)
             self?.loadTask = nil
         }
     }
@@ -154,6 +148,81 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
         renderer.onProgress = { [weak self] progress in
             self?.loadProgress = progress
         }
+    }
+
+    /// Runs `load()` on `initial`. If it fails with
+    /// `SceneRenderingError.metalRendererUnsupported`, asks the fallback
+    /// factory for a WebGL renderer, swaps it into the window, and retries
+    /// once. Any other failure (or a failed fallback) updates `loadError`
+    /// and returns.
+    private func runLoadWithFallback(initial: WPESceneRenderer) async {
+        var active = initial
+        while true {
+            do {
+                try await active.load()
+                guard !Task.isCancelled else { return }
+                loadError = nil
+                loadProgress = nil
+                return
+            } catch is CancellationError {
+                return
+            } catch let SceneRenderingError.metalRendererUnsupported(reason) {
+                guard !Task.isCancelled else { return }
+                if let next = await swapInFallback(reason: reason) {
+                    active = next
+                    continue
+                }
+                Logger.warning(
+                    "Metal scene load failed (\(reason)); no WebGL fallback available",
+                    category: .screenManager
+                )
+                loadError = .metalRendererUnsupported(reason: reason)
+                return
+            } catch let error as SceneRenderingError {
+                guard !Task.isCancelled else { return }
+                Logger.warning(
+                    "Scene wallpaper load failed: \(error.errorDescription ?? "(no description)")",
+                    category: .screenManager
+                )
+                loadError = error
+                return
+            } catch {
+                guard !Task.isCancelled else { return }
+                Logger.warning(
+                    "Scene wallpaper load failed: \(error.localizedDescription)",
+                    category: .screenManager
+                )
+                if let diagnostic = active.loadDiagnostics {
+                    loadError = .resourceFailed(diagnostic)
+                } else {
+                    loadError = .parseFailed(error.localizedDescription)
+                }
+                return
+            }
+        }
+    }
+
+    private func swapInFallback(reason: String) async -> WPESceneRenderer? {
+        guard !didUseFallback, let factory = fallbackFactory else { return nil }
+        didUseFallback = true
+        Logger.warning(
+            "Metal scene load failed (\(reason)); retrying with WebGL fallback",
+            category: .screenManager
+        )
+        renderer?.cleanup()
+        renderer = nil
+        guard let next = factory() else { return nil }
+        renderer = next
+        if let window {
+            window.contentView = next.nsView
+            next.nsView.frame = window.contentView?.bounds ?? next.nsView.frame
+        }
+        installProgressHandler(on: next)
+        next.applyPerformanceProfile(isVisible ? currentProfile : .suspended)
+        if isThrottled {
+            next.setThrottled(true)
+        }
+        return next
     }
 }
 #endif

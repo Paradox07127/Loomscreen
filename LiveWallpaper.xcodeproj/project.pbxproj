@@ -20,7 +20,6 @@
 		0CA00000000000000000B012 /* LiveWallpaperVideoWeb in Frameworks */ = {isa = PBXBuildFile; productRef = 0CA00000000000000000B021 /* LiveWallpaperVideoWeb */; };
 		0CA00000000000000000B013 /* LiveWallpaperSharedUI in Frameworks */ = {isa = PBXBuildFile; productRef = 0CA00000000000000000B022 /* LiveWallpaperSharedUI */; };
 		0CA00000000000000000B014 /* LiveWallpaperProFeatures in Frameworks */ = {isa = PBXBuildFile; productRef = 0CA00000000000000000B023 /* LiveWallpaperProFeatures */; };
-		0CABCDEF2D8000020000C48B /* WPEShaderToolchain.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 0CABCDEF2D8000010000C48B /* WPEShaderToolchain.xcframework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -46,7 +45,6 @@
 		0C322C0A2D6950490033C48B /* LiveWallpaperUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LiveWallpaperUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		0C9A00012D7350000033C48B /* AppIntents.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppIntents.framework; path = System/Library/Frameworks/AppIntents.framework; sourceTree = SDKROOT; };
 		0CA00000000000000000B000 /* LiveWallpaperLite.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LiveWallpaperLite.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		0CABCDEF2D8000010000C48B /* WPEShaderToolchain.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = WPEShaderToolchain.xcframework; path = ThirdParty/WPEShaderToolchain.xcframework; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -92,7 +90,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				0C9A00022D7350000033C48B /* AppIntents.framework in Frameworks */,
-				0CABCDEF2D8000020000C48B /* WPEShaderToolchain.xcframework in Frameworks */,
 				0CA00000000000000000A003 /* LiveWallpaperCore in Frameworks */,
 				0CA00000000000000000A103 /* LiveWallpaperVideoWeb in Frameworks */,
 				0CA00000000000000000A203 /* LiveWallpaperSharedUI in Frameworks */,
@@ -158,7 +155,6 @@
 			isa = PBXGroup;
 			children = (
 				0C9A00012D7350000033C48B /* AppIntents.framework */,
-				0CABCDEF2D8000010000C48B /* WPEShaderToolchain.xcframework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";

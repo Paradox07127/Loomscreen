@@ -257,6 +257,8 @@ final class WPEWebGLSceneRenderer: NSObject, WPESceneRenderer, WKNavigationDeleg
                 return .other(layer: "scene", message: detail)
             case .resourceFailed(let diagnostic):
                 return diagnostic
+            case .metalRendererUnsupported(let reason):
+                return .other(layer: "scene", message: reason)
             }
         case let resolveError as SceneResourceResolver.ResolveError:
             switch resolveError {

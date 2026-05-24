@@ -48,7 +48,15 @@ final class WPEMetalPipelineCache {
         descriptor.depthAttachmentPixelFormat = depthPixelFormat
         Self.applyBlendMode(normalizedBlend, to: colorAttachment)
 
-        let state = try device.makeRenderPipelineState(descriptor: descriptor)
+        let state: MTLRenderPipelineState
+        do {
+            state = try device.makeRenderPipelineState(descriptor: descriptor)
+        } catch {
+            throw WPEMetalRenderExecutorError.pipelineStateBuildFailed(
+                name: fragmentName,
+                detail: error.localizedDescription
+            )
+        }
         pipelineStates[key] = state
         return state
     }

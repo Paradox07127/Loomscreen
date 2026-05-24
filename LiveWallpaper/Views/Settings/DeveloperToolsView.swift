@@ -125,27 +125,31 @@ struct DeveloperToolsView: View {
         }
     }
 
-    @State private var useWebGLRuntime: Bool = UserDefaults.standard.bool(forKey: WPERuntimeSelection.defaultsKey)
+    @State private var runtimeSelection: WPERuntimeSelection = WPERuntimeSelection.current
 
     @ViewBuilder
     private var wpeRuntimeToggle: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Toggle(isOn: Binding(
-                get: { useWebGLRuntime },
+        VStack(alignment: .leading, spacing: 6) {
+            Picker(selection: Binding(
+                get: { runtimeSelection },
                 set: { newValue in
-                    guard useWebGLRuntime != newValue else { return }
-                    useWebGLRuntime = newValue
-                    UserDefaults.standard.set(newValue, forKey: WPERuntimeSelection.defaultsKey)
+                    guard runtimeSelection != newValue else { return }
+                    runtimeSelection = newValue
+                    UserDefaults.standard.set(newValue.rawValue, forKey: WPERuntimeSelection.defaultsKey)
                 }
             )) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Use WebGL2 scene runtime")
-                    Text(verbatim: "Mirror of `defaults write Taijia.LiveWallpaper \(WPERuntimeSelection.defaultsKey)`.  Off → Metal + SPIRV-Cross (current default).  On → WKWebView + GLSL ES 3.00.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                Text(verbatim: "Automatic").tag(WPERuntimeSelection.automatic)
+                Text(verbatim: "Metal").tag(WPERuntimeSelection.metal)
+                Text(verbatim: "WebGL2").tag(WPERuntimeSelection.webGL)
+            } label: {
+                Text(verbatim: "Scene runtime")
             }
-            Text("Takes effect on the next scene-wallpaper load — already-running scenes keep the renderer they started with. DEBUG-only; Release builds are pinned to Metal until Phase 11 cutover.")
+            .pickerStyle(.segmented)
+
+            Text(verbatim: "Automatic = WPESceneBackendRouter picks per scene (BC textures → Metal, RGBA + video → WebGL).  Metal / WebGL2 pin every scene to that backend.  Mirror of `defaults write Taijia.LiveWallpaper \(WPERuntimeSelection.defaultsKey)`.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(verbatim: "Takes effect on the next scene-wallpaper load — already-running scenes keep the renderer they started with. DEBUG-only; Release builds default to Metal.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }
@@ -186,6 +190,13 @@ struct DeveloperToolsView: View {
                     .foregroundStyle(.secondary)
             }
             .width(min: 90, ideal: 130)
+
+            TableColumn("Backend") { entry in
+                Text(verbatim: backendLabel(for: entry))
+                    .monospaced()
+                    .foregroundStyle(.secondary)
+            }
+            .width(min: 80, ideal: 100)
 
             TableColumn("Elapsed") { entry in
                 Text(verbatim: String(format: "%.2fs", entry.elapsedSeconds))
@@ -356,6 +367,17 @@ struct DeveloperToolsView: View {
         case .fail: return .red
         case .timeout: return .orange
         case .skipped: return .secondary
+        }
+    }
+
+    private func backendLabel(for entry: WPECorpusPlaybackReport.Entry) -> String {
+        guard let renderer = entry.renderer else { return "—" }
+        guard let routedBy = entry.routedBy else { return renderer }
+        switch routedBy {
+        case .user:
+            return renderer
+        case .automatic:
+            return "\(renderer) (auto)"
         }
     }
 
