@@ -11,6 +11,7 @@ import {
   type RuntimeStatePayload,
   sendDiagnostic,
   sendError,
+  sendFrame,
   sendLoadFailed,
   sendReady,
   sendSceneLoaded
@@ -23,7 +24,14 @@ interface RuntimeState {
   timerHandle: number | null;
   isRunning: boolean;
   startedAt: number;
+  frameIndex: number;
+  lastFrameReportAt: number;
 }
+
+// Heartbeat cadence for the `frame` host event. The Swift inspector only
+// needs the first frame to flip `hasPresentedFrame`; subsequent reports keep
+// the corpus harness FPS estimate fresh without flooding the WK bridge.
+const FRAME_REPORT_INTERVAL_MS = 1000;
 
 function bootstrap(): void {
   const canvasEl = document.getElementById("wpe-canvas") as HTMLCanvasElement | null;
@@ -57,7 +65,9 @@ function bootstrap(): void {
     rafHandle: null,
     timerHandle: null,
     isRunning: false,
-    startedAt: performance.now()
+    startedAt: performance.now(),
+    frameIndex: 0,
+    lastFrameReportAt: 0
   };
 
   const api: HostBridgeApi = {
@@ -122,6 +132,8 @@ function bootstrap(): void {
 
       runtime.isRunning = true;
       runtime.startedAt = performance.now();
+      runtime.frameIndex = 0;
+      runtime.lastFrameReportAt = 0;
       sendDiagnostic("scene", `Scene ${envelope.sceneID} loaded with ${envelope.renderGraph?.layers.length ?? 0} layers.`);
       schedule();
       sendSceneLoaded(envelope.sceneID);
@@ -182,6 +194,19 @@ function bootstrap(): void {
     } else {
       gl.clearColor(0, 0, 0, 1);
       gl.clear(gl.COLOR_BUFFER_BIT);
+    }
+
+    runtime.frameIndex += 1;
+    const now = performance.now();
+    // First frame must report so the Swift inspector flips
+    // `hasPresentedFrame` and exits the loading spinner. Subsequent reports
+    // are throttled to ~1Hz to keep the WK message bridge quiet.
+    if (
+      runtime.frameIndex === 1 ||
+      now - runtime.lastFrameReportAt >= FRAME_REPORT_INTERVAL_MS
+    ) {
+      sendFrame(runtime.frameIndex, now - runtime.startedAt);
+      runtime.lastFrameReportAt = now;
     }
 
     schedule();
