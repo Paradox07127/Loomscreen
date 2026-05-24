@@ -2,26 +2,41 @@
 import Foundation
 import Metal
 
-/// Legacy BC1/2/3/7 → RGBA8 transcode entry point for callers that still
-/// require a CPU-side `CGImage`. Phase 2A does not extend this path:
-/// Apple Silicon Metal renderers sample supported BC textures natively via
-/// `WPEMetalTextureFormatMapper`, while SpriteKit/CGImage decode remains
-/// fail-closed for compressed formats.
+/// BC1/2/3/7 → RGBA8 transcode using Apple's GPU. macOS 14+ Apple Silicon
+/// devices ship native BC sampler support, so the cheapest path is:
 ///
-/// Until then `transcode(...)` returns `.metalUnavailable(format:)` so
-/// the resolver maps the error to a precise `texUnsupportedFormat` UI
-/// reason. The 431960 sample set includes BC-family textures, so those
-/// layers stay degraded until the Phase 2.2 transcoder lands.
+/// 1. Upload the BC blocks into a sampler-only `MTLTexture`.
+/// 2. Render a fullscreen quad that samples that texture into an
+///    `rgba8Unorm` render target.
+/// 3. Read the decoded pixels back from the render target.
 ///
-/// Modeled as an `enum` (no instance, no stored Metal state) so the
-/// type is trivially `Sendable` under Swift 6 strict concurrency without
-/// resorting to `@unchecked Sendable` on `MTLDevice` / `MTLCommandQueue`.
+/// **Why not `MTLBlitCommandEncoder.copy`?** Blit is a bit-for-bit copy.
+/// Copying a BC texture into an `rgba8Unorm` destination doesn't
+/// decompress — it reinterprets BC block bytes as RGBA pixels, producing
+/// the classic green-tinted noise pattern. The decompression has to go
+/// through a sampling shader.
+///
+/// The WebGL path needs this because WebKit ships without
+/// `WEBGL_compressed_texture_s3tc` by default, so every BC-compressed
+/// `.tex` would otherwise fall back to the magenta placeholder.
 enum WPETexMetalTranscoder {
 
-    /// Reports whether the legacy CGImage path can transcode the given format.
+    private static let device: MTLDevice? = MTLCreateSystemDefaultDevice()
+
+    /// Lazily initialised render pipeline that samples a BC texture and
+    /// writes an unmodified RGBA8 pixel. Cached on first use; reused for
+    /// every transcode. `nonisolated(unsafe)` because Metal pipeline
+    /// objects are thread-safe and this enum has no concurrent writers
+    /// beyond the lazy first-init guarded by `pipelineLock`.
+    nonisolated(unsafe) private static var pipelineState: MTLRenderPipelineState?
+    nonisolated(unsafe) private static var commandQueue: MTLCommandQueue?
+    nonisolated(unsafe) private static var samplerState: MTLSamplerState?
+    private static let pipelineLock = NSLock()
+
+    /// Reports whether the GPU transcoder can handle the given format.
     static func isAvailable(for format: WPETexFormat) -> Bool {
-        _ = format
-        return false
+        guard let device, device.supportsBCTextureCompression else { return false }
+        return mtlPixelFormat(for: format) != nil
     }
 
     static func transcode(
@@ -31,8 +46,219 @@ enum WPETexMetalTranscoder {
         height: Int,
         mipmap: Int
     ) throws -> DecodedRGBAImage {
-        _ = (bytes, width, height, mipmap)
-        throw WPETexDecodeError.metalUnavailable(format: format)
+        guard let device else {
+            throw WPETexDecodeError.metalUnavailable(format: format)
+        }
+        guard device.supportsBCTextureCompression else {
+            throw WPETexDecodeError.metalUnavailable(format: format)
+        }
+        guard let pixelFormat = mtlPixelFormat(for: format) else {
+            throw WPETexDecodeError.unsupportedFormat(code: format.rawValue)
+        }
+
+        let blockBytes = blockByteSize(for: format)
+        let blocksWide = max(1, (width + 3) / 4)
+        let bytesPerRow = blocksWide * blockBytes
+
+        let srcDescriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: pixelFormat,
+            width: width,
+            height: height,
+            mipmapped: false
+        )
+        srcDescriptor.usage = [.shaderRead]
+        srcDescriptor.storageMode = .shared
+        guard let srcTexture = device.makeTexture(descriptor: srcDescriptor) else {
+            throw WPETexDecodeError.metalUnavailable(format: format)
+        }
+        bytes.withUnsafeBytes { rawBufferPointer in
+            guard let base = rawBufferPointer.baseAddress else { return }
+            srcTexture.replace(
+                region: MTLRegionMake2D(0, 0, width, height),
+                mipmapLevel: 0,
+                withBytes: base,
+                bytesPerRow: bytesPerRow
+            )
+        }
+
+        let dstDescriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .rgba8Unorm,
+            width: width,
+            height: height,
+            mipmapped: false
+        )
+        dstDescriptor.usage = [.renderTarget, .shaderRead]
+        dstDescriptor.storageMode = .shared
+        guard let dstTexture = device.makeTexture(descriptor: dstDescriptor) else {
+            throw WPETexDecodeError.metalUnavailable(format: format)
+        }
+
+        let resources = try ensureResources(device: device, mipmap: mipmap)
+
+        guard let buffer = resources.queue.makeCommandBuffer() else {
+            throw WPETexDecodeError.decodeFailed(mipmap: mipmap, detail: "Metal command buffer unavailable")
+        }
+
+        let renderDescriptor = MTLRenderPassDescriptor()
+        renderDescriptor.colorAttachments[0].texture = dstTexture
+        renderDescriptor.colorAttachments[0].loadAction = .dontCare
+        renderDescriptor.colorAttachments[0].storeAction = .store
+
+        guard let encoder = buffer.makeRenderCommandEncoder(descriptor: renderDescriptor) else {
+            throw WPETexDecodeError.decodeFailed(mipmap: mipmap, detail: "Metal render command encoder unavailable")
+        }
+        encoder.setRenderPipelineState(resources.pipeline)
+        encoder.setFragmentTexture(srcTexture, index: 0)
+        encoder.setFragmentSamplerState(resources.sampler, index: 0)
+        encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+        encoder.endEncoding()
+
+        buffer.commit()
+        buffer.waitUntilCompleted()
+        if let error = buffer.error {
+            throw WPETexDecodeError.decodeFailed(mipmap: mipmap, detail: "Metal BC decode failed: \(error.localizedDescription)")
+        }
+
+        let pixelByteCount = width * height * 4
+        var pixels = Data(count: pixelByteCount)
+        pixels.withUnsafeMutableBytes { rawBufferPointer in
+            guard let base = rawBufferPointer.baseAddress else { return }
+            dstTexture.getBytes(
+                base,
+                bytesPerRow: width * 4,
+                from: MTLRegionMake2D(0, 0, width, height),
+                mipmapLevel: 0
+            )
+        }
+        return DecodedRGBAImage(width: width, height: height, pixels: pixels)
+    }
+
+    private struct DecodeResources {
+        let queue: MTLCommandQueue
+        let pipeline: MTLRenderPipelineState
+        let sampler: MTLSamplerState
+    }
+
+    private static func ensureResources(device: MTLDevice, mipmap: Int) throws -> DecodeResources {
+        pipelineLock.lock()
+        defer { pipelineLock.unlock() }
+
+        if let queue = commandQueue,
+           let pipeline = pipelineState,
+           let sampler = samplerState {
+            return DecodeResources(queue: queue, pipeline: pipeline, sampler: sampler)
+        }
+
+        let library: MTLLibrary
+        do {
+            library = try device.makeLibrary(source: Self.shaderSource, options: nil)
+        } catch {
+            throw WPETexDecodeError.decodeFailed(
+                mipmap: mipmap,
+                detail: "Metal BC decoder shader compile failed: \(error.localizedDescription)"
+            )
+        }
+        guard let vertex = library.makeFunction(name: "wpe_tex_decode_vertex"),
+              let fragment = library.makeFunction(name: "wpe_tex_decode_fragment") else {
+            throw WPETexDecodeError.decodeFailed(
+                mipmap: mipmap,
+                detail: "Metal BC decoder shader entry points missing"
+            )
+        }
+
+        let descriptor = MTLRenderPipelineDescriptor()
+        descriptor.vertexFunction = vertex
+        descriptor.fragmentFunction = fragment
+        descriptor.colorAttachments[0].pixelFormat = .rgba8Unorm
+
+        let pipeline: MTLRenderPipelineState
+        do {
+            pipeline = try device.makeRenderPipelineState(descriptor: descriptor)
+        } catch {
+            throw WPETexDecodeError.decodeFailed(
+                mipmap: mipmap,
+                detail: "Metal BC decoder pipeline build failed: \(error.localizedDescription)"
+            )
+        }
+
+        let samplerDescriptor = MTLSamplerDescriptor()
+        samplerDescriptor.minFilter = .nearest
+        samplerDescriptor.magFilter = .nearest
+        samplerDescriptor.sAddressMode = .clampToEdge
+        samplerDescriptor.tAddressMode = .clampToEdge
+        guard let sampler = device.makeSamplerState(descriptor: samplerDescriptor) else {
+            throw WPETexDecodeError.decodeFailed(
+                mipmap: mipmap,
+                detail: "Metal BC decoder sampler unavailable"
+            )
+        }
+
+        guard let queue = device.makeCommandQueue() else {
+            throw WPETexDecodeError.metalUnavailable(format: .rgba8888)
+        }
+
+        pipelineState = pipeline
+        samplerState = sampler
+        commandQueue = queue
+        return DecodeResources(queue: queue, pipeline: pipeline, sampler: sampler)
+    }
+
+    /// Fullscreen-quad pass: vertex emits clip-space corners + UV, fragment
+    /// samples the BC source and writes RGBA8. UV flips Y so the readback
+    /// matches the BC texel order (BC row 0 = top of the image).
+    private static let shaderSource = """
+    #include <metal_stdlib>
+    using namespace metal;
+
+    struct WPETexDecodeVertex {
+        float4 position [[position]];
+        float2 uv;
+    };
+
+    vertex WPETexDecodeVertex wpe_tex_decode_vertex(uint vertexID [[vertex_id]]) {
+        float2 positions[4] = {
+            float2(-1.0, -1.0),
+            float2( 1.0, -1.0),
+            float2(-1.0,  1.0),
+            float2( 1.0,  1.0)
+        };
+        float2 uvs[4] = {
+            float2(0.0, 1.0),
+            float2(1.0, 1.0),
+            float2(0.0, 0.0),
+            float2(1.0, 0.0)
+        };
+        WPETexDecodeVertex out;
+        out.position = float4(positions[vertexID], 0.0, 1.0);
+        out.uv = uvs[vertexID];
+        return out;
+    }
+
+    fragment float4 wpe_tex_decode_fragment(
+        WPETexDecodeVertex in [[stage_in]],
+        texture2d<float> source [[texture(0)]],
+        sampler samp [[sampler(0)]]
+    ) {
+        return source.sample(samp, in.uv);
+    }
+    """
+
+    private static func mtlPixelFormat(for format: WPETexFormat) -> MTLPixelFormat? {
+        switch format {
+        case .dxt1: return .bc1_rgba
+        case .dxt3: return .bc2_rgba
+        case .dxt5: return .bc3_rgba
+        case .bc7:  return .bc7_rgbaUnorm
+        default:    return nil
+        }
+    }
+
+    private static func blockByteSize(for format: WPETexFormat) -> Int {
+        switch format {
+        case .dxt1: return 8
+        case .dxt3, .dxt5, .bc7: return 16
+        default: return 16
+        }
     }
 }
 #endif

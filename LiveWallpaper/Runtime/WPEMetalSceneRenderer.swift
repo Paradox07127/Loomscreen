@@ -152,7 +152,46 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         } catch {
             loadDiagnostics = diagnostic(for: error)
             logSceneFailureDiagnostics(error: error)
+            if let reason = Self.metalFallbackReason(for: error) {
+                throw SceneRenderingError.metalRendererUnsupported(reason: reason)
+            }
             throw error
+        }
+    }
+
+    /// Classifies a `performLoad()` failure as Metal-specific (where the
+    /// WebGL renderer might succeed) versus generic (where both backends
+    /// would hit the same problem). Returning a non-nil reason promotes the
+    /// error to `SceneRenderingError.metalRendererUnsupported`, which the
+    /// session uses as the fallback trigger.
+    private static func metalFallbackReason(for error: Error) -> String? {
+        switch error {
+        case let context as WPEMetalTextureLoadContextError:
+            return metalFallbackReason(for: context.underlying)
+        case let executorError as WPEMetalRenderExecutorError:
+            switch executorError {
+            case .shaderTranslatorUnavailable(let name, let reason):
+                return "shader '\(name)': \(reason)"
+            case .unsupportedShader(let name):
+                return "shader '\(name)' unsupported by Metal renderer"
+            case .unsupportedTarget:
+                return "unsupported Metal render target"
+            case .pipelineStateBuildFailed(let name, let detail):
+                return "Metal pipeline '\(name)' rejected (likely stage_in mismatch): \(detail)"
+            case .missingTexture(let reference):
+                switch reference {
+                case .previous:
+                    return "previous-frame effect not implemented on Metal"
+                case .fbo(let name):
+                    return "named FBO '\(name)' unresolved on Metal pass — likely cross-pass alias miss"
+                case .image, .asset:
+                    return nil
+                }
+            case .commandQueueUnavailable, .libraryUnavailable, .pipelineUnavailable, .commandBufferFailed, .noRenderablePasses:
+                return nil
+            }
+        default:
+            return nil
         }
     }
 
@@ -859,6 +898,11 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
                 return .materialUnresolved(
                     layer: layerName,
                     reason: "Shader \"\(name)\" needs the WPE GLSL translator: \(reason)"
+                )
+            case .pipelineStateBuildFailed(let name, let detail):
+                return .materialUnresolved(
+                    layer: layerName,
+                    reason: "Metal pipeline for \"\(name)\" failed to build: \(detail)"
                 )
             case .unsupportedTarget:
                 return .materialUnresolved(layer: layerName, reason: "This wallpaper uses an unsupported rendering target.")

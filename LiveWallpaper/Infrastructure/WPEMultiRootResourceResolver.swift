@@ -40,6 +40,29 @@ struct WPEMultiRootResourceResolver: Sendable {
         self.tracer = tracer
     }
 
+    /// Drop the most recently recorded resolution event. WebGL cascade
+    /// uses this to retract intermediate probe failures so the user-
+    /// visible diagnostics only show the final outcome.
+    func popLastTraceEvent() {
+        tracer?.popLastEvent()
+    }
+
+    /// Append a single resolution event under an alternate key (e.g. the
+    /// original bare request path) when the multi-candidate cascade
+    /// wants to surface a canonical miss rather than the last probed
+    /// candidate's path.
+    func recordTraceEvent(
+        relativePath: String,
+        attempt: WPEResolutionAttempt,
+        finalOutcome: WPEResolutionOutcome
+    ) {
+        tracer?.record(WPEResolutionEvent(
+            ref: relativePath,
+            attempts: [attempt],
+            finalOutcome: finalOutcome
+        ))
+    }
+
     func resolveImage(relativePath: String) throws -> CGImage {
         if let dependency = dependencyReference(relativePath) {
             return try resolveDependency(relativePath: relativePath, dependency: dependency) { resolver, path in

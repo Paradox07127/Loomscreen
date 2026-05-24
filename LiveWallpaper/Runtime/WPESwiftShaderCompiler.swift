@@ -3,16 +3,12 @@ import Foundation
 import Metal
 
 /// `WPEShaderCompiling` implementation that uses `WPEShaderTranspiler` to
-/// emit MSL and `MTLDevice.makeLibrary(source:)` to compile it. Replaces
-/// `WPEStubShaderCompiler` as the default the renderer ships with — this
-/// is the actual unblocker for the scene corpus that depends on custom
-/// effect shaders.
-///
-/// Falls back to throwing `.translationFailed` for shaders the transpiler
-/// can't handle (multi-pass effects, vertex shaders that aren't the
-/// fullscreen quad, anything that uses `gl_FragCoord` without a
-/// converted equivalent). The dispatcher catches the throw and surfaces
-/// the precise reason so the UI can show "needs deeper translator".
+/// emit MSL and `MTLDevice.makeLibrary(source:)` to compile it. This is the
+/// sole shipping Metal-side translator after Phase-12 retired the
+/// SPIRV-Cross/glslang XCFramework; shaders it can't handle throw
+/// `.translationFailed`, which `WPEMetalSceneRenderer` then surfaces as
+/// `SceneRenderingError.metalRendererUnsupported` so `SceneWallpaperSession`
+/// can redirect the scene to the WebGL renderer.
 struct WPESwiftShaderCompiler: WPEShaderCompiling {
     let device: MTLDevice
 

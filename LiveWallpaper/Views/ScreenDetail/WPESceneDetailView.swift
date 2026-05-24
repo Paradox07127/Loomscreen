@@ -395,6 +395,12 @@ struct WPESceneDetailView: View {
             return .sceneParseFailed(detail)
         case .resourceFailed(let diagnostic):
             return Self.fallbackReason(for: diagnostic)
+        case .metalRendererUnsupported(let reason):
+            // The session swaps in WebGL on this error before surfacing it
+            // to the UI; the only path here is "WebGL fallback unavailable
+            // or itself failed". Treat like a generic scene parse failure
+            // so the inspector still shows a meaningful diagnostic.
+            return .sceneParseFailed(reason)
         }
     }
 

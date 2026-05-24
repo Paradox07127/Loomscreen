@@ -52,11 +52,13 @@ final class WPEMetalRenderExecutor {
     }
 
     private static func preferredCompiler(device: MTLDevice) -> any WPEShaderCompiling {
-        let swiftTranspiler = WPESwiftShaderCompiler(device: device)
-        if WPESPIRVShaderCompiler.isToolchainAvailable() {
-            return WPESPIRVShaderCompiler(device: device, fallback: swiftTranspiler)
-        }
-        return swiftTranspiler
+        // Phase 12 dual-backend strategy: the Swift transpiler is the only
+        // Metal-side translator we ship. SPIRV-Cross/glslang has been
+        // retired; shaders the Swift transpiler can't handle bubble up as
+        // `WPEMetalRenderExecutorError.shaderTranslatorUnavailable`, which
+        // `SceneWallpaperSession` then redirects to the WebGL renderer
+        // through the scene-level fallback.
+        WPESwiftShaderCompiler(device: device)
     }
 
     /// Phase 2E: lets `WPEMetalSceneRenderer` hand the executor's MTLDevice
@@ -684,7 +686,15 @@ final class WPEMetalRenderExecutor {
         colorAttachment.pixelFormat = colorPixelFormat
         descriptor.depthAttachmentPixelFormat = depthPixelFormat
         Self.applyBlendMode(blendMode.lowercased(), to: colorAttachment)
-        let state = try device.makeRenderPipelineState(descriptor: descriptor)
+        let state: MTLRenderPipelineState
+        do {
+            state = try device.makeRenderPipelineState(descriptor: descriptor)
+        } catch {
+            throw WPEMetalRenderExecutorError.pipelineStateBuildFailed(
+                name: result.fragmentFunctionName,
+                detail: error.localizedDescription
+            )
+        }
         translatedPipelineCache[key] = state
         return state
     }

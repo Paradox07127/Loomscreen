@@ -50,8 +50,8 @@ struct DeveloperToolsView: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
-        } else if let summary = lastReport?.summary {
-            Text(verbatim: summaryLabel(summary, total: lastReport?.total ?? entries.count))
+        } else if let report = lastReport {
+            Text(verbatim: "[\(report.renderer)] \(summaryLabel(report.summary, total: report.total))")
                 .foregroundStyle(.secondary)
         } else {
             Text("Visible while Developer Mode is on. Disable it in Settings → General → Advanced.", comment: "Developer Tools header subtitle explaining the runtime gate.")
@@ -105,7 +105,9 @@ struct DeveloperToolsView: View {
 
     private var configurationSection: some View {
         GroupBox(label: Text("Configuration").font(.headline)) {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 12) {
+                wpeRuntimeToggle
+                Divider()
                 HStack {
                     Text("Per-scene timeout")
                     Slider(value: $perSceneTimeout, in: 3...30, step: 1)
@@ -115,11 +117,41 @@ struct DeveloperToolsView: View {
                         .monospacedDigit()
                         .frame(width: 36, alignment: .trailing)
                 }
-                Text("Iterates every imported scene workshop project, runs `WPEMetalSceneRenderer.load()` headlessly with the configured timeout, and aggregates pass/fail/timeout outcomes plus resolution diagnostics. The test window is held at alpha 0 behind the desktop — nothing flashes on screen.")
+                Text("Iterates every imported scene workshop project, runs `WPESceneRenderer.load()` headlessly with the configured timeout, and aggregates pass/fail/timeout outcomes plus resolution diagnostics. Uses the active renderer (Metal or WebGL2 — controlled by the toggle above). The test window is held at alpha 0 behind the desktop — nothing flashes on screen.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             .padding(.vertical, 4)
+        }
+    }
+
+    @State private var runtimeSelection: WPERuntimeSelection = WPERuntimeSelection.current
+
+    @ViewBuilder
+    private var wpeRuntimeToggle: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Picker(selection: Binding(
+                get: { runtimeSelection },
+                set: { newValue in
+                    guard runtimeSelection != newValue else { return }
+                    runtimeSelection = newValue
+                    UserDefaults.standard.set(newValue.rawValue, forKey: WPERuntimeSelection.defaultsKey)
+                }
+            )) {
+                Text(verbatim: "Automatic").tag(WPERuntimeSelection.automatic)
+                Text(verbatim: "Metal").tag(WPERuntimeSelection.metal)
+                Text(verbatim: "WebGL2").tag(WPERuntimeSelection.webGL)
+            } label: {
+                Text(verbatim: "Scene runtime")
+            }
+            .pickerStyle(.segmented)
+
+            Text(verbatim: "Automatic = WPESceneBackendRouter picks per scene (BC textures → Metal, RGBA + video → WebGL).  Metal / WebGL2 pin every scene to that backend.  Mirror of `defaults write Taijia.LiveWallpaper \(WPERuntimeSelection.defaultsKey)`.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(verbatim: "Takes effect on the next scene-wallpaper load — already-running scenes keep the renderer they started with. Default is Automatic; user pins override the router.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
         }
     }
 
@@ -158,6 +190,13 @@ struct DeveloperToolsView: View {
                     .foregroundStyle(.secondary)
             }
             .width(min: 90, ideal: 130)
+
+            TableColumn("Backend") { entry in
+                Text(verbatim: backendLabel(for: entry))
+                    .monospaced()
+                    .foregroundStyle(.secondary)
+            }
+            .width(min: 80, ideal: 100)
 
             TableColumn("Elapsed") { entry in
                 Text(verbatim: String(format: "%.2fs", entry.elapsedSeconds))
@@ -328,6 +367,17 @@ struct DeveloperToolsView: View {
         case .fail: return .red
         case .timeout: return .orange
         case .skipped: return .secondary
+        }
+    }
+
+    private func backendLabel(for entry: WPECorpusPlaybackReport.Entry) -> String {
+        guard let renderer = entry.renderer else { return "—" }
+        guard let routedBy = entry.routedBy else { return renderer }
+        switch routedBy {
+        case .user:
+            return renderer
+        case .automatic:
+            return "\(renderer) (auto)"
         }
     }
 

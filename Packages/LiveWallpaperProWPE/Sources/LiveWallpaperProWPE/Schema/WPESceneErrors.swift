@@ -30,6 +30,12 @@ public enum SceneRenderingError: Error, LocalizedError, Equatable, Sendable {
     case cacheRootMissing
     case parseFailed(String)
     case resourceFailed(SceneLoadDiagnostic)
+    /// Raised by the Metal renderer when the failure is specifically a
+    /// Metal-pipeline gap (shader translator missing, unsupported render
+    /// target, previous-frame effect). The session uses this as the
+    /// fallback signal: under the dual-backend strategy it tears down the
+    /// Metal renderer and retries the load on the WebGL renderer instead.
+    case metalRendererUnsupported(reason: String)
 
     public var errorDescription: String? {
         switch self {
@@ -39,6 +45,8 @@ public enum SceneRenderingError: Error, LocalizedError, Equatable, Sendable {
             return String(localized: "error.scene.rendering.parse_failed", defaultValue: "Failed to parse scene.json: \(detail)", comment: "Error shown when a Wallpaper Engine scene.json file cannot be parsed.")
         case .resourceFailed(let diagnostic):
             return diagnostic.errorDescription
+        case .metalRendererUnsupported(let reason):
+            return String(localized: "error.scene.rendering.metal_unsupported", defaultValue: "Metal renderer cannot stage this scene: \(reason)", comment: "Error shown when the Metal scene renderer cannot stage a scene because of a Metal-specific gap (shader translator, unsupported target, etc.).")
         }
     }
 }

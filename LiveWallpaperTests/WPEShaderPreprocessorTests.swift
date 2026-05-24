@@ -169,18 +169,4 @@ struct WPEShaderPreprocessorTests {
         #expect(request.textureBindings[0] == "materialOverride")
     }
 
-    @Test("Stub compiler always reports backend unavailable")
-    func stubCompilerReportsUnavailable() {
-        let stub = WPEStubShaderCompiler()
-        #expect(throws: WPEShaderCompilerError.self) {
-            _ = try stub.compile(WPEShaderCompileRequest(
-                shaderName: "any",
-                processedVertexSource: "",
-                processedFragmentSource: "",
-                sourceHash: "",
-                comboValues: [:],
-                textureBindings: [:]
-            ))
-        }
-    }
 }

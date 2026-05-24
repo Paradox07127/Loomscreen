@@ -27091,6 +27091,35 @@
         }
       }
     },
+    "error.render.executor.pipeline_state_build_failed": {
+      "comment": "Error shown when Metal refuses to build a render pipeline state (typically a stage_in mismatch between the vertex output and the fragment input).",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Metal pipeline build failed for '%1$@': %2$@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "'%1$@' の Metal パイプライン構築に失敗しました: %2$@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Metal 管线为 \"%1$@\" 构建失败：%2$@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Metal 管線為「%1$@」建構失敗：%2$@"
+          }
+        }
+      }
+    },
     "error.render.executor.shader_translator_unavailable": {
       "comment": "Error shown when a custom WPE shader needs translation but the backend is not yet integrated.",
       "localizations": {
@@ -27860,6 +27889,36 @@
           "stringUnit": {
             "state": "translated",
             "value": "解析 scene.json 失敗：%@"
+          }
+        }
+      }
+    },
+    "error.scene.rendering.metal_unsupported": {
+      "comment": "Error shown when the Metal scene renderer cannot stage a scene because of a Metal-specific gap (shader translator, unsupported target, etc.).",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Metal renderer cannot stage this scene: %@"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Metal レンダラーはこのシーンを描画できません: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Metal 渲染器无法呈现此场景：%@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Metal 渲染器無法呈現此場景：%@"
           }
         }
       }
