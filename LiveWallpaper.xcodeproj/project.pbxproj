@@ -688,7 +688,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = LiveWallpaperInfo.plist;
+				INFOPLIST_FILE = LoomscreenInfo.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -698,8 +698,8 @@
 					"$(inherited)",
 					"-lc++",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = Taijia.LiveWallpaperLite;
-				PRODUCT_NAME = LiveWallpaperLite;
+				PRODUCT_BUNDLE_IDENTIFIER = com.loomscreen;
+				PRODUCT_NAME = Loomscreen;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) LITE_BUILD";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 6.0;
@@ -729,7 +729,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = LiveWallpaperInfo.plist;
+				INFOPLIST_FILE = LoomscreenInfo.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -739,8 +739,8 @@
 					"$(inherited)",
 					"-lc++",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = Taijia.LiveWallpaperLite;
-				PRODUCT_NAME = LiveWallpaperLite;
+				PRODUCT_BUNDLE_IDENTIFIER = com.loomscreen;
+				PRODUCT_NAME = Loomscreen;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) LITE_BUILD";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 6.0;

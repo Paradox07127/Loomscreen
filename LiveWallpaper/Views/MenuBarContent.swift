@@ -6,7 +6,7 @@ import os
 /// MenuBarExtra window content.
 struct MenuBarContent: View {
     private static let signposter = OSSignposter(
-        subsystem: "com.taijia.LiveWallpaper",
+        subsystem: Bundle.main.bundleIdentifier ?? "com.taijia.LiveWallpaper",
         category: "MenuBar"
     )
 

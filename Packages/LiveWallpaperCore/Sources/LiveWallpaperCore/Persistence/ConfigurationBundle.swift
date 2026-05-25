@@ -16,17 +16,35 @@ public struct ConfigurationBundle: Codable, Sendable {
     public static let currentSchemaVersion = 1
     public static let fileExtension = "lwconfig"
 
-    /// Custom UTType registered via `UTExportedTypeDeclarations` in
-    /// `LiveWallpaperInfo.plist`. Conforms to `public.json` so file panels
-    /// also accept hand-edited `.json` exports, and gives Finder a stable
-    /// icon + "Open With…" association for `.lwconfig` files.
-    ///
-    /// Falls back to `.json` only if the Info.plist registration somehow
-    /// failed to load — exists purely so unit tests can run without the
-    /// full app bundle context.
+    /// Custom UTType registered via `UTExportedTypeDeclarations` in the host
+    /// app's Info.plist. Each SKU registers its own identifier — Pro uses
+    /// `com.taijia.livewallpaper.config` (`.lwconfig`), Loomscreen Lite uses
+    /// `com.loomscreen.config` (`.loomscreen`). We probe bundle-derived first
+    /// so any future SKU rename works without touching this code, then fall
+    /// back to the historical identifier that matches the current bundle's
+    /// SKU prefix, then `.json` for unit tests running outside a hosted
+    /// bundle context. The order matters when both SKUs are installed side
+    /// by side: a Pro test runner whose own `.config` UTI does not resolve
+    /// must never accidentally fall through to Lite's UTI, or vice versa.
     public static let contentType: UTType = {
-        if let registered = UTType("com.taijia.livewallpaper.config") {
-            return registered
+        var candidates: [String] = []
+        if let bundleID = Bundle.main.bundleIdentifier {
+            candidates.append(bundleID + ".config")
+            if bundleID.lowercased().contains("loomscreen") {
+                candidates.append("com.loomscreen.config")
+                candidates.append("com.taijia.livewallpaper.config")
+            } else {
+                candidates.append("com.taijia.livewallpaper.config")
+                candidates.append("com.loomscreen.config")
+            }
+        } else {
+            candidates.append("com.taijia.livewallpaper.config")
+            candidates.append("com.loomscreen.config")
+        }
+        for identifier in candidates {
+            if let registered = UTType(identifier) {
+                return registered
+            }
         }
         return .json
     }()
