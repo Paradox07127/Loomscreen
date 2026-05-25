@@ -13,9 +13,9 @@ import Testing
 /// 24/30/60 FPS sources played back 2-8× faster than authored. These tests
 /// lock in the AVPlayer-based contract: frames come out on the wall clock,
 /// the suspend/resume hooks reach the underlying player, `invalidate()`
-/// clears state and the temp file, and the produced texture lives in the
-/// raw `.bgra8Unorm` pixel format the rest of the Metal pipeline expects
-/// (no `_srgb` double-encode).
+/// clears state and the temp file, and the produced texture is a
+/// BGRA8 variant (sRGB-preferred to match the Metal pipeline's output
+/// attachment, with `.bgra8Unorm` as the fallback).
 @MainActor
 @Suite("WPEVideoTextureSource pacing", .serialized)
 struct WPEVideoTextureSourcePacingTests {
@@ -53,7 +53,9 @@ struct WPEVideoTextureSourcePacingTests {
 
         let texture = try await pollForTexture(from: source, timeout: 2.0)
         try #require(texture != nil, "AVPlayer-backed source must produce a frame within 2s")
-        #expect(texture?.pixelFormat == .bgra8Unorm, "Frames must stay in raw RGBA8 space — no sRGB double-encode")
+        let format = try #require(texture?.pixelFormat)
+        #expect(format == .bgra8Unorm_srgb || format == .bgra8Unorm,
+                "Frames are BGRA8; the sRGB variant is preferred to match the pipeline's output attachment")
     }
 
     @Test("Playhead advances on the wall clock — not faster (the old AVAssetReader bug)")

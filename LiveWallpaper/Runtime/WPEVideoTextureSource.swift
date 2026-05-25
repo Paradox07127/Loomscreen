@@ -19,11 +19,10 @@ import QuartzCore
 /// clock that drives the on-screen Metal pipeline, so the output is
 /// in-sync with WPE's reference renderer.
 ///
-/// Pixel format is raw `.bgra8Unorm` — the Metal scene pipeline runs in
-/// raw RGBA8 author space (matches Almamu's reference linux-wallpaperengine
-/// and the WPE Windows shader math). Sampling these as `_srgb` would
-/// compound with the output attachment's sRGB encode on the way out and
-/// produce the "over-exposed" appearance seen on video-backed scenes.
+/// Pixel format prefers `.bgra8Unorm_srgb` to match the rest of the
+/// Metal scene pipeline's sRGB output attachment (see
+/// `WPEMetalRenderExecutor.outputPixelFormat`), with `.bgra8Unorm` as the
+/// fallback if the GPU rejects the sRGB variant for this buffer.
 ///
 /// Lifecycle: the player stays paused after `init` so the renderer's
 /// `applyPerformanceProfile(currentProfile)` (called once textures finish
@@ -192,17 +191,30 @@ final class WPEVideoTextureSource {
         let width = CVPixelBufferGetWidth(pixelBuffer)
         let height = CVPixelBufferGetHeight(pixelBuffer)
         var cvTexture: CVMetalTexture?
-        let status = CVMetalTextureCacheCreateTextureFromImage(
+        var status = CVMetalTextureCacheCreateTextureFromImage(
             kCFAllocatorDefault,
             textureCache,
             pixelBuffer,
             nil,
-            .bgra8Unorm,
+            .bgra8Unorm_srgb,
             width,
             height,
             0,
             &cvTexture
         )
+        if status != kCVReturnSuccess {
+            status = CVMetalTextureCacheCreateTextureFromImage(
+                kCFAllocatorDefault,
+                textureCache,
+                pixelBuffer,
+                nil,
+                .bgra8Unorm,
+                width,
+                height,
+                0,
+                &cvTexture
+            )
+        }
         guard status == kCVReturnSuccess,
               let cvTexture,
               let texture = CVMetalTextureGetTexture(cvTexture) else {

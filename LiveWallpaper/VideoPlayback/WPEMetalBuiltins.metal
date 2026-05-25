@@ -207,7 +207,7 @@ struct WPEShakeUniforms {
 // the default no-combo case is what most scenes ship.
 
 struct WPEGenericImageUniforms {
-    float4 color;        // g_Color, forwarded verbatim by the executor (raw RGBA8 pipeline)
+    float4 color;        // g_Color (sRGB→linear converted by executor)
     float4 alphaMaskUV;  // x=alpha multiplier, y=brightness, z=hasMask, w=padding
 };
 
