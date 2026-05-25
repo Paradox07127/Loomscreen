@@ -313,8 +313,14 @@ export class RenderGraphExecutor {
         gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE, gl.ONE, gl.ONE);
         break;
       case "translucent":
+        // `translucent` in WPE is a non-premultiplied alpha blend (same
+        // factors as `normal`). Treating it as premultiplied silently
+        // doubles any pass that writes `vec4(scene.rgb, 0)` over the
+        // existing scene — see the audio-visualizer over-exposure
+        // investigation on workshop 2846660316. Keep `premultiplied`
+        // below for shaders that genuinely emit pre-multiplied output.
         gl.blendEquation(gl.FUNC_ADD);
-        gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+        gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
         break;
       case "negative":
         gl.blendEquation(gl.FUNC_ADD);

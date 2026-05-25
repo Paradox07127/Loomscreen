@@ -110,16 +110,7 @@ final class WPEMetalPipelineCache {
             attachment.sourceAlphaBlendFactor = .zero
             attachment.destinationAlphaBlendFactor = .one
 
-        case "translucent":
-            attachment.isBlendingEnabled = true
-            attachment.rgbBlendOperation = .add
-            attachment.alphaBlendOperation = .add
-            attachment.sourceRGBBlendFactor = .one
-            attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
-            attachment.sourceAlphaBlendFactor = .one
-            attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
-
-        case "normalmapped", "normal":
+        case "translucent", "normalmapped", "normal":
             fallthrough
 
         default:

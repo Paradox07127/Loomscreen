@@ -845,11 +845,16 @@ private struct BlendFixture: Sendable {
     let expected: Pixel
 }
 
+// `translucent` is a WPE alias for the standard non-premultiplied alpha
+// blend (same factors as `normal`). Pre-fix it was wired as premultiplied
+// (`src.rgb*1 + dst.rgb*(1-src.a)`), which doubled any pass that wrote
+// `vec4(scene.rgb, 0)` into the scene — see the audio-visualizer
+// over-exposure investigation on workshop 2846660316.
 private let blendFixtures: [BlendFixture] = [
     BlendFixture(mode: "normal", expected: Pixel(r: 188, g: 0, b: 188, a: 255)),
     BlendFixture(mode: "additive", expected: Pixel(r: 188, g: 0, b: 255, a: 255)),
     BlendFixture(mode: "multiply", expected: Pixel(r: 0, g: 0, b: 0, a: 255)),
-    BlendFixture(mode: "translucent", expected: Pixel(r: 255, g: 0, b: 188, a: 255)),
+    BlendFixture(mode: "translucent", expected: Pixel(r: 188, g: 0, b: 188, a: 255)),
     BlendFixture(mode: "normalmapped", expected: Pixel(r: 188, g: 0, b: 188, a: 255)),
     BlendFixture(mode: "disabled", expected: Pixel(r: 255, g: 0, b: 0, a: 128))
 ]
