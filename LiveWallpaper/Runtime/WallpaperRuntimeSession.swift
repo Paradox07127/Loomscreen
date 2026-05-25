@@ -55,6 +55,26 @@ protocol WallpaperPerformanceConfigurable: AnyObject {
     func applyPerformanceProfile(_ profile: WallpaperPerformanceProfile)
 }
 
+/// Implemented by scene-style renderers (Metal / WebGL) that own a
+/// display-link-equivalent and can re-target their render tempo at
+/// runtime. The plain-video path stays on the existing
+/// `WallpaperVideoPlayer.setFrameRateLimit` code path because its limit
+/// is interpreted as a compositing FPS via `AVVideoComposition`.
+@MainActor
+protocol WallpaperFrameRateConfigurable: AnyObject {
+    func setFrameRateLimit(_ limit: FrameRateLimit)
+}
+
+/// Implemented by sessions whose audio is owned by something other than
+/// `WallpaperVideoPlayer` (today: `WPESoundRuntime` for `.scene`). The
+/// inspector's mute/volume controls route through here so they aren't
+/// dead UI for non-video wallpapers.
+@MainActor
+protocol WallpaperAudioConfigurable: AnyObject {
+    func setAudioMuted(_ muted: Bool)
+    func setAudioVolume(_ volume: Double)
+}
+
 @MainActor
 protocol WallpaperResourceCleanable: AnyObject {
     func cleanup()

@@ -99,6 +99,7 @@ final class PlaybackCoordinator {
         configuration.muted = muted
         save(configuration)
         syncVideoAudioLeadership()
+        applySceneAudioState(configuration: configuration, screen: screen)
     }
 
     func updateVideoVolume(_ volume: Double, for screen: Screen) {
@@ -109,6 +110,21 @@ final class PlaybackCoordinator {
         configuration.videoVolume = clampedVolume
         save(configuration)
         syncVideoAudioLeadership()
+        applySceneAudioState(configuration: configuration, screen: screen)
+    }
+
+    /// Routes the configuration's mute/volume into the scene's
+    /// `WPESoundRuntime` via `WallpaperAudioConfigurable`. No-op when the
+    /// screen runs a `.video` or `.html` session, or when the active
+    /// scene has no sound objects (audioController is nil). Pro-only —
+    /// Lite drops the WPE scene runtime entirely.
+    private func applySceneAudioState(configuration: ScreenConfiguration, screen: Screen) {
+        #if !LITE_BUILD
+        guard let session = screen.runtimeSession as? SceneWallpaperSession,
+              let audio = session.audioController else { return }
+        audio.setAudioMuted(configuration.muted)
+        audio.setAudioVolume(configuration.videoVolume)
+        #endif
     }
 
     func updateVideoColorSpace(_ colorSpace: VideoColorSpace, for screen: Screen) {
@@ -166,6 +182,24 @@ final class PlaybackCoordinator {
     }
 
     func applyFrameRateLimit(_ frameRateLimit: FrameRateLimit, to screen: Screen) {
+        // Scene (and any future ambient renderer that owns its own
+        // display link) responds via WallpaperFrameRateConfigurable.
+        // Before this branch existed the UI's "Frame Rate" picker was a
+        // dead control for `.scene` — it persisted to disk but never
+        // touched `mtkView.preferredFramesPerSecond`. Pro-only; Lite
+        // doesn't carry SceneWallpaperSession.
+        #if !LITE_BUILD
+        if let session = screen.runtimeSession as? SceneWallpaperSession,
+           let frameRateController = session.frameRateController {
+            Logger.info(
+                "Applying scene frame rate limit \(frameRateLimit.rawValue) to screen \(screen.id)",
+                category: .videoPlayer
+            )
+            frameRateController.setFrameRateLimit(frameRateLimit)
+            return
+        }
+        #endif
+
         guard let player = screen.videoPlayer, player.videoFrameRate > 0 else { return }
 
         let screenRefreshRate = refreshRateLookup(screen.id)

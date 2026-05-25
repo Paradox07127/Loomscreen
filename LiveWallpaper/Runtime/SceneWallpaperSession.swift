@@ -66,6 +66,21 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
     /// reaching through `wallpaperWindow.contentView`.
     var sceneRenderer: WPESceneRenderer? { renderer }
 
+    /// Returns the renderer when it owns its own frame-rate clock and
+    /// can re-target it from the inspector's frame-rate picker.
+    /// Currently the Metal renderer; the WebGL fallback uses
+    /// `requestAnimationFrame` inside the WKWebView and doesn't conform.
+    var frameRateController: (any WallpaperFrameRateConfigurable)? {
+        renderer as? any WallpaperFrameRateConfigurable
+    }
+
+    /// Returns the renderer when it has a scene-owned audio engine
+    /// (`WPESoundRuntime`) responsive to inspector mute/volume changes.
+    /// Nil for renderers without sound objects.
+    var audioController: (any WallpaperAudioConfigurable)? {
+        renderer as? any WallpaperAudioConfigurable
+    }
+
     func updateFrame(to frame: CGRect) {
         window?.setFrame(frame, display: true)
         renderer?.nsView.frame = CGRect(origin: .zero, size: frame.size)

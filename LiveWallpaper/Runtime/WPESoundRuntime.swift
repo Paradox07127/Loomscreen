@@ -26,6 +26,12 @@ final class WPESoundRuntime: @unchecked Sendable {
     private let engine = AVAudioEngine()
     private var players: [AVAudioPlayerNode] = []
     private var buffers: [AVAudioPCMBuffer] = []
+    /// Per-player scene-declared `sound.volume` from scene.json. Kept so
+    /// `applyAudioState` can rebuild each node's final volume as
+    /// `sceneVolume × masterVolume` instead of overwriting the scene value.
+    private var sceneVolumes: [Float] = []
+    private var masterVolume: Float = 1.0
+    private var isMuted: Bool = false
     private let resolver: WPEMultiRootResourceResolver
     /// Lock-protected so the audio render thread (tap) and the Metal
     /// render thread (spectrum read) don't race.
@@ -67,10 +73,12 @@ final class WPESoundRuntime: @unchecked Sendable {
                 let player = AVAudioPlayerNode()
                 engine.attach(player)
                 engine.connect(player, to: mainMixer, format: file.processingFormat)
-                player.volume = Float(sound.volume)
+                let sceneVolume = Float(sound.volume)
+                player.volume = effectiveVolume(sceneVolume: sceneVolume)
                 player.scheduleBuffer(buffer, at: nil, options: [.loops], completionHandler: nil)
                 players.append(player)
                 buffers.append(buffer)
+                sceneVolumes.append(sceneVolume)
                 attached += 1
                 break
             }
@@ -102,6 +110,37 @@ final class WPESoundRuntime: @unchecked Sendable {
         engine.stop()
         players.removeAll(keepingCapacity: false)
         buffers.removeAll(keepingCapacity: false)
+        sceneVolumes.removeAll(keepingCapacity: false)
+    }
+
+    /// Master mute applied on top of the scene-declared per-sound volume.
+    /// `applyAudioState` rebuilds each player's `.volume` so subsequent
+    /// `setMasterVolume(_:)` calls keep the scene mix intact.
+    func setMuted(_ muted: Bool) {
+        guard isMuted != muted else { return }
+        isMuted = muted
+        applyAudioState()
+    }
+
+    /// `[0, 1]` master gain multiplied into every scene-declared
+    /// `sound.volume`. Out-of-range values are clamped.
+    func setMasterVolume(_ volume: Double) {
+        let clamped = Float(min(max(volume, 0), 1))
+        guard abs(masterVolume - clamped) > 0.001 else { return }
+        masterVolume = clamped
+        applyAudioState()
+    }
+
+    private func applyAudioState() {
+        for (index, player) in players.enumerated() {
+            let sceneVolume = index < sceneVolumes.count ? sceneVolumes[index] : 1.0
+            player.volume = effectiveVolume(sceneVolume: sceneVolume)
+        }
+    }
+
+    private func effectiveVolume(sceneVolume: Float) -> Float {
+        guard !isMuted else { return 0 }
+        return max(0, min(1, sceneVolume * masterVolume))
     }
 
     /// Snapshot of the latest 64-bin spectrum. Safe to call from any

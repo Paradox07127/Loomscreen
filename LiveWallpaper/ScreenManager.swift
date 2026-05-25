@@ -1388,6 +1388,17 @@ final class ScreenManager {
             observeRuntimeErrors(for: sceneSession)
             screen.installRuntimeSession(sceneSession)
             sceneSession.setThrottled(throttledSceneScreenID() == screen.id)
+            // Push the persisted playback inspector state into the freshly
+            // installed scene session so the user's saved Frame Rate /
+            // Mute / Volume take effect from the first frame instead of
+            // only after the inspector slider moves. (For mute/volume
+            // this is also why those controls used to be dead UI for
+            // `.scene` — there was nothing to push them through.)
+            sceneSession.frameRateController?.setFrameRateLimit(configuration.frameRateLimit)
+            if let audio = sceneSession.audioController {
+                audio.setAudioMuted(configuration.muted)
+                audio.setAudioVolume(configuration.videoVolume)
+            }
             let globalSettings = SettingsManager.shared.loadGlobalSettings()
             applyPerformancePolicy(
                 to: screen,

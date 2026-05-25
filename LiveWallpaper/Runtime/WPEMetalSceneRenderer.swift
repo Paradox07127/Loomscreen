@@ -13,10 +13,21 @@ private struct WPEMetalTextureLoadContextError: Error {
 }
 
 @MainActor
-final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
-    /// Default frame rate target when not throttled. `MTKView` clamps this
-    /// to the display's refresh rate so 60 means "render every vsync".
-    static let defaultPreferredFPS = 60
+final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRateConfigurable, WallpaperAudioConfigurable, MTKViewDelegate {
+    /// Default frame rate target when not throttled and no user override
+    /// has been applied. 30 FPS matches Wallpaper Engine's stock default
+    /// (Almamu's reference open-source impl ships `maximumFPS = 30`; the
+    /// official Windows app's "Balanced" preset also defaults to 30) —
+    /// most published WPE shaders are tuned around a 30 FPS clock, so
+    /// running at 60 made their `g_Time`-driven motion look ≈2× too fast.
+    /// `MTKView` clamps this to the display's refresh rate.
+    static let defaultPreferredFPS = 30
+    /// Native vsync cap used when the user picks `.unlimited` — MTKView's
+    /// throttle clamps to the display refresh anyway, but we surface 60
+    /// here so a `setPreferredFramesPerSecond(0)` doesn't get interpreted
+    /// as "as fast as possible" (which on some macOS versions free-runs
+    /// well past vsync).
+    static let unlimitedPreferredFPS = 60
     /// Frame rate target when an external coordinator wants the renderer
     /// out of the way (e.g. console window in focus, multi-display
     /// exclusive rendering takeover). 1fps keeps the timer alive so we can
@@ -81,6 +92,15 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
     private var didLoad = false
     private var isThrottled = false
     private var currentProfile: WallpaperPerformanceProfile = .quality
+    /// User-selected frame rate ceiling, applied to `mtkView.preferredFramesPerSecond`
+    /// whenever the renderer is not throttled / suspended. Defaults to the
+    /// WPE-compatible 30 FPS until `setFrameRateLimit(_:)` overrides it.
+    private var userPreferredFPS: Int = WPEMetalSceneRenderer.defaultPreferredFPS
+    /// Inspector mute state cached here so callers that arrive before
+    /// `startSoundRuntime` can still record intent; `startSoundRuntime`
+    /// reads these to seed `WPESoundRuntime` at the right level.
+    private var pendingAudioMuted: Bool = false
+    private var pendingAudioVolume: Double = 1.0
 
     private(set) var hasPresentedFrame = false
     private(set) var loadDiagnostics: SceneLoadDiagnostic?
@@ -527,6 +547,12 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             return
         }
         let runtime = WPESoundRuntime(resolver: resourceResolver)
+        // Seed the runtime with whatever pending inspector state arrived
+        // before load completed — otherwise muting a scene before it
+        // finishes loading would silently revert to the scene-declared
+        // sound.volume the moment audio starts.
+        runtime.setMuted(pendingAudioMuted)
+        runtime.setMasterVolume(pendingAudioVolume)
         let attachedCount = runtime.start(sounds: document.soundObjects)
         if attachedCount == 0 {
         }
@@ -725,7 +751,43 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
         guard currentProfile != .suspended else { return }
         mtkView.preferredFramesPerSecond = throttled
             ? Self.throttledPreferredFPS
-            : Self.defaultPreferredFPS
+            : userPreferredFPS
+    }
+
+    /// Applies the user-selected frame rate ceiling. `.unlimited` falls
+    /// back to vsync (`unlimitedPreferredFPS`) so MTKView doesn't free-run.
+    /// Throttled / suspended states are not overridden here — the ceiling
+    /// takes effect on the next non-throttled transition.
+    func setFrameRateLimit(_ limit: FrameRateLimit) {
+        let resolved: Int
+        switch limit {
+        case .unlimited:
+            resolved = Self.unlimitedPreferredFPS
+        default:
+            resolved = max(1, limit.rawValue)
+        }
+        guard resolved != userPreferredFPS else { return }
+        userPreferredFPS = resolved
+        guard currentProfile != .suspended, !isThrottled else { return }
+        mtkView.preferredFramesPerSecond = resolved
+    }
+
+    /// Forwards the inspector's mute toggle into the scene's audio
+    /// runtime. Cached so calls that arrive before `startSoundRuntime`
+    /// (which only fires from `performLoad`) still take effect once the
+    /// runtime exists.
+    func setAudioMuted(_ muted: Bool) {
+        pendingAudioMuted = muted
+        soundRuntime?.setMuted(muted)
+    }
+
+    /// Forwards the inspector's audio slider into the scene's audio
+    /// runtime as a master gain multiplied into each scene-declared
+    /// `sound.volume`. Cached so pre-load calls survive across the
+    /// `startSoundRuntime` boundary.
+    func setAudioVolume(_ volume: Double) {
+        pendingAudioVolume = volume
+        soundRuntime?.setMasterVolume(volume)
     }
 
     /// True when something on stage actually changes between frames — a
@@ -749,7 +811,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, MTKViewDelegate {
             mtkView.enableSetNeedsDisplay = !needsContinuousFrames
             mtkView.preferredFramesPerSecond = isThrottled
                 ? Self.throttledPreferredFPS
-                : Self.defaultPreferredFPS
+                : userPreferredFPS
         case .suspended:
             mtkView.isPaused = true
             mtkView.enableSetNeedsDisplay = true

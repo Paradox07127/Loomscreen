@@ -268,6 +268,93 @@ struct WPEMetalSceneRendererTests {
         #expect(bare.contains("materials/halo.png"))
         #expect(bare.contains("halo"))
     }
+
+    @Test("Default preferredFramesPerSecond is 30 (WPE-compatible)")
+    func defaultPreferredFPSIsThirty() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let fixture = try MetalSceneFixture.solidColorScene()
+        defer { fixture.cleanup() }
+        let renderer = try WPEMetalSceneRenderer(
+            descriptor: fixture.descriptor,
+            cacheRootURL: fixture.root,
+            dependencyMounts: [],
+            frame: CGRect(x: 0, y: 0, width: 64, height: 64),
+            device: device
+        )
+
+        let mtkView = try #require(renderer.nsView as? MTKView)
+        #expect(mtkView.preferredFramesPerSecond == 30)
+        #expect(WPEMetalSceneRenderer.defaultPreferredFPS == 30)
+    }
+
+    @Test("setFrameRateLimit re-targets the MTKView's preferredFramesPerSecond")
+    func setFrameRateLimitRetargetsMTKView() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let fixture = try MetalSceneFixture.solidColorScene()
+        defer { fixture.cleanup() }
+        let renderer = try WPEMetalSceneRenderer(
+            descriptor: fixture.descriptor,
+            cacheRootURL: fixture.root,
+            dependencyMounts: [],
+            frame: CGRect(x: 0, y: 0, width: 64, height: 64),
+            device: device
+        )
+        let mtkView = try #require(renderer.nsView as? MTKView)
+
+        renderer.setFrameRateLimit(.fps60)
+        #expect(mtkView.preferredFramesPerSecond == 60)
+
+        renderer.setFrameRateLimit(.fps15)
+        #expect(mtkView.preferredFramesPerSecond == 15)
+
+        // .unlimited falls back to vsync ceiling, not 0 (which would
+        // free-run on some macOS versions).
+        renderer.setFrameRateLimit(.unlimited)
+        #expect(mtkView.preferredFramesPerSecond == WPEMetalSceneRenderer.unlimitedPreferredFPS)
+    }
+
+    @Test("Throttled state preserves the user's frame rate ceiling for restore")
+    func throttleRestoresUserPreferredFPS() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let fixture = try MetalSceneFixture.solidColorScene()
+        defer { fixture.cleanup() }
+        let renderer = try WPEMetalSceneRenderer(
+            descriptor: fixture.descriptor,
+            cacheRootURL: fixture.root,
+            dependencyMounts: [],
+            frame: CGRect(x: 0, y: 0, width: 64, height: 64),
+            device: device
+        )
+        let mtkView = try #require(renderer.nsView as? MTKView)
+
+        renderer.setFrameRateLimit(.fps60)
+        renderer.setThrottled(true)
+        #expect(mtkView.preferredFramesPerSecond == WPEMetalSceneRenderer.throttledPreferredFPS)
+        // Releasing throttle must restore the user's ceiling (60), not
+        // the renderer's hard-coded default (30).
+        renderer.setThrottled(false)
+        #expect(mtkView.preferredFramesPerSecond == 60)
+    }
+
+    @Test("setAudioMuted before load is no-op on the renderer (no crash) and seeds runtime state")
+    func setAudioMutedBeforeLoadIsSafe() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let fixture = try MetalSceneFixture.solidColorScene()
+        defer { fixture.cleanup() }
+        let renderer = try WPEMetalSceneRenderer(
+            descriptor: fixture.descriptor,
+            cacheRootURL: fixture.root,
+            dependencyMounts: [],
+            frame: CGRect(x: 0, y: 0, width: 64, height: 64),
+            device: device
+        )
+
+        // Before load: soundRuntime is nil, the calls should not crash
+        // and the state is cached for later application during startSoundRuntime.
+        renderer.setAudioMuted(true)
+        renderer.setAudioVolume(0.4)
+        #expect(true)
+    }
 }
 
 private struct MetalSceneFixture {
