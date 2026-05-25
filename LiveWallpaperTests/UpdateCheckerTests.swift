@@ -45,7 +45,7 @@ struct SemanticVersionTests {
     }
 }
 
-@Suite("UpdateChecker state-machine flows")
+@Suite("UpdateChecker state-machine flows", .serialized)
 @MainActor
 struct UpdateCheckerTests {
     private var defaultsSuite: UserDefaults {
@@ -199,7 +199,148 @@ struct UpdateCheckerTests {
             Issue.record("Expected .failed, got \(String(describing: checker.status))")
             return
         }
-        #expect(reason == "test failure")
+        // Generic user-facing string — the audit flagged surfacing the
+        // raw error.localizedDescription as both noisy and a potential
+        // implementation-detail leak.
+        #expect(reason == "Unable to check for updates right now.")
+    }
+
+    @Test("Persists lastCheckedAt BEFORE the network call so failures cannot defeat the throttle")
+    func failedFetchStillUpdatesThrottle() async {
+        resetDefaults()
+        struct TestError: Error { }
+        let transport = StubTransport(error: TestError())
+        let attemptInstant = Date(timeIntervalSince1970: 1_000_000)
+        let checker = UpdateChecker(
+            transport: transport,
+            now: { attemptInstant },
+            currentVersionString: "1.0.0"
+        )
+
+        await checker.checkNow(force: false)
+
+        #expect(checker.lastCheckedAt == attemptInstant)
+        #expect(defaultsSuite.object(forKey: "loomscreen.update.lastCheckedAt") as? Date == attemptInstant)
+        guard case .failed = checker.status else {
+            Issue.record("Expected .failed after transport error.")
+            return
+        }
+    }
+
+    @Test("Treats backwards-running wall clock as stale (proceeds with the check)")
+    func clockSkewTreatedAsStale() async {
+        resetDefaults()
+        // Last check is in the future relative to now — i.e. clock moved
+        // backwards. The throttle math should not suppress the check.
+        let futureLastCheck = Date(timeIntervalSince1970: 2_000_000)
+        defaultsSuite.set(futureLastCheck, forKey: "loomscreen.update.lastCheckedAt")
+        let transport = StubTransport(releases: [
+            release(tag: "loomscreen-v1.1.0", asset: "Loomscreen-1.1.0.dmg")
+        ])
+        let checker = UpdateChecker(
+            transport: transport,
+            now: { Date(timeIntervalSince1970: 1_000_000) },
+            currentVersionString: "1.0.0"
+        )
+
+        await checker.checkNow(force: false)
+
+        #expect(transport.fetchCount == 1)
+        guard case .available = checker.status else {
+            Issue.record("Expected .available; clock skew should not suppress checks.")
+            return
+        }
+    }
+
+    @Test("Falls back to the canonical releases page when html_url is hostile")
+    func hostileHtmlUrlFallsBackToCanonical() async {
+        resetDefaults()
+        let hostile = GitHubRelease(
+            tagName: "loomscreen-v1.1.0",
+            body: nil,
+            draft: false,
+            prerelease: false,
+            publishedAt: nil,
+            htmlURL: URL(string: "https://evil.example.com/releases/tag/loomscreen-v1.1.0"),
+            assets: []
+        )
+        let transport = StubTransport(releases: [hostile])
+        let checker = UpdateChecker(
+            transport: transport,
+            now: { Date(timeIntervalSince1970: 1_000_000) },
+            currentVersionString: "1.0.0"
+        )
+
+        await checker.checkNow(force: false)
+
+        guard case .available(let release) = checker.status else {
+            Issue.record("Expected .available, got \(String(describing: checker.status))")
+            return
+        }
+        #expect(release.releasePageURL == UpdateChecker.releasesPage)
+    }
+
+    @Test("Rejects non-GitHub or non-.dmg download URLs")
+    func rejectsHostileDownloadURL() async {
+        resetDefaults()
+        let hostile = GitHubRelease(
+            tagName: "loomscreen-v1.1.0",
+            body: nil,
+            draft: false,
+            prerelease: false,
+            publishedAt: nil,
+            htmlURL: URL(string: "https://github.com/Paradox07127/LiveWallpaper/releases/tag/loomscreen-v1.1.0"),
+            assets: [
+                .init(name: "Loomscreen-1.1.0.dmg",
+                      browserDownloadURL: URL(string: "https://evil.example.com/Loomscreen-1.1.0.dmg")),
+                .init(name: "Loomscreen-1.1.0.zip",
+                      browserDownloadURL: URL(string: "https://github.com/Paradox07127/LiveWallpaper/releases/download/loomscreen-v1.1.0/Loomscreen-1.1.0.zip"))
+            ]
+        )
+        let transport = StubTransport(releases: [hostile])
+        let checker = UpdateChecker(
+            transport: transport,
+            now: { Date(timeIntervalSince1970: 1_000_000) },
+            currentVersionString: "1.0.0"
+        )
+
+        await checker.checkNow(force: false)
+
+        guard case .available(let release) = checker.status else {
+            Issue.record("Expected .available, got \(String(describing: checker.status))")
+            return
+        }
+        #expect(release.downloadURL == nil,
+                "Hostile .dmg URL and benign .zip URL must both be rejected.")
+    }
+
+    @Test("Truncates oversized release notes body")
+    func truncatesOversizedBody() async {
+        resetDefaults()
+        let large = String(repeating: "x", count: 10_000)
+        let bigBody = GitHubRelease(
+            tagName: "loomscreen-v1.1.0",
+            body: large,
+            draft: false,
+            prerelease: false,
+            publishedAt: nil,
+            htmlURL: URL(string: "https://github.com/Paradox07127/LiveWallpaper/releases/tag/loomscreen-v1.1.0"),
+            assets: []
+        )
+        let transport = StubTransport(releases: [bigBody])
+        let checker = UpdateChecker(
+            transport: transport,
+            now: { Date(timeIntervalSince1970: 1_000_000) },
+            currentVersionString: "1.0.0"
+        )
+
+        await checker.checkNow(force: false)
+
+        guard case .available(let release) = checker.status else {
+            Issue.record("Expected .available, got \(String(describing: checker.status))")
+            return
+        }
+        #expect(release.body.count == UpdateChecker.maximumReleaseBodyCharacters)
     }
 
     @Test("Skips network call when inside the 12-hour throttle window")
