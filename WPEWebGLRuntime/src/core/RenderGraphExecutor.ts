@@ -242,6 +242,10 @@ export class RenderGraphExecutor {
     gl.bindVertexArray(null);
   }
 
+  dumpFBOCenterPixels(): void {
+    this.fboPool.dumpCenterPixels();
+  }
+
   dispose(): void {
     const gl = this.gl;
     if (this.vao) gl.deleteVertexArray(this.vao);

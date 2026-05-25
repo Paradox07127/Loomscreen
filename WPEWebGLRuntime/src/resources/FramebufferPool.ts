@@ -111,6 +111,42 @@ export class FramebufferPool {
     this.swappedCurrentTargets.clear();
   }
 
+  // Black-screen forensics: read the center pixel of every live FBO in
+  // the pool so we can identify which pass in the chain first produces
+  // black output. Fires once per session from the first-frame
+  // diagnostic block in `main.ts`.
+  dumpCenterPixels(): void {
+    const gl = this.gl;
+    if (this.fbos.size === 0) {
+      sendDiagnostic("fbo-pixel", "pool is empty");
+      return;
+    }
+    const restoreKey = this.currentTargetKey;
+    for (const [key, fbo] of this.fbos.entries()) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo.framebuffer);
+      const px = new Uint8Array(4);
+      const cx = Math.floor(fbo.width / 2);
+      const cy = Math.floor(fbo.height / 2);
+      try {
+        gl.readPixels(cx, cy, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+        sendDiagnostic(
+          "fbo-pixel",
+          `${key} ${fbo.width}x${fbo.height} fmt=${fbo.format} center rgba=(${px[0]},${px[1]},${px[2]},${px[3]})`
+        );
+      } catch (e) {
+        sendDiagnostic(
+          "fbo-pixel",
+          `${key} ${fbo.width}x${fbo.height} read failed: ${e instanceof Error ? e.message : String(e)}`
+        );
+      }
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    // Restore-key is best-effort; the next tick will rebind whatever it
+    // needs via `resolveTarget`. We just leave the default framebuffer
+    // bound, which is the safe baseline.
+    void restoreKey;
+  }
+
   private readTextureForKey(key: string, fbo: PoolFBO): WebGLTexture {
     if (this.currentTargetKey !== key) {
       return fbo.texture;

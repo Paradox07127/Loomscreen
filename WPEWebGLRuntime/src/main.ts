@@ -236,6 +236,16 @@ function bootstrap(): void {
       } catch (e) {
         sendDiagnostic("canvas-pixel", `readPixels failed: ${e instanceof Error ? e.message : String(e)}`);
       }
+      // Per-FBO center pixels — the canvas-pixel above only tells us
+      // the final composite. To isolate WHICH pass produced black we
+      // dump every live pool FBO's center pixel. The first non-black
+      // intermediate identifies where the chain is still healthy;
+      // everything after is the suspect.
+      try {
+        executor?.dumpFBOCenterPixels();
+      } catch (e) {
+        sendDiagnostic("fbo-pixel", `dumpFBOCenterPixels failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
     }
 
     schedule();
