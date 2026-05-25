@@ -138,6 +138,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             scheduleSettingsWindowPrewarm()
         }
+
+        #if LITE_BUILD
+        // Loomscreen Lite ships ad-hoc signed via GitHub Releases, so we
+        // hand-roll a single-shot launch-time update check (no background
+        // timer, throttled to 12 h in UpdateChecker itself). Skip it on
+        // first-run onboarding so a brand-new user doesn't get a network
+        // prompt before they see their first wallpaper.
+        if !startupPlan.showOnboarding && !runtimeOptions.isTesting {
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(5))
+                await UpdateChecker.shared.checkNow(force: false)
+            }
+        }
+        #endif
     }
 
     deinit {

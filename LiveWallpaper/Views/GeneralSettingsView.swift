@@ -638,6 +638,9 @@ struct GeneralSettingsView: View {
         ScrollView {
             VStack(spacing: 28) {
                 aboutHero
+                #if LITE_BUILD
+                UpdateBannerView()
+                #endif
                 aboutTagline
                 aboutActionGrid
                 aboutFooter
