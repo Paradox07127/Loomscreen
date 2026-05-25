@@ -122,6 +122,12 @@ public enum WPETexDecodeError: Error, Equatable, Sendable, LocalizedError {
 
 /// `TEXI` block payload. Width / height are in pixels; `mipmapCount`
 /// counts the mip chain stored in the following `TEXB` block.
+///
+/// `imageWidth/imageHeight/unknownInt0` are TEXI fields the decoder reads
+/// but doesn't act on; they are surfaced here for dump fidelity so future
+/// runtime/transpiler work can cross-reference padded atlas dimensions
+/// against the texture-coordinate space (the modal `.tex` records the
+/// padded atlas size, not the logical image size, in `width/height`).
 public struct WPETexInfo: Sendable, Equatable {
     public let containerVersion: Int
     public let infoVersion: Int
@@ -131,8 +137,23 @@ public struct WPETexInfo: Sendable, Equatable {
     public let format: WPETexFormat?
     public let mipmapCount: Int
     public let flags: UInt32
+    public let imageWidth: Int
+    public let imageHeight: Int
+    public let unknownInt0: Int32
 
-    public init(containerVersion: Int, infoVersion: Int, width: Int, height: Int, textureFormatCode: Int, format: WPETexFormat?, mipmapCount: Int, flags: UInt32) {
+    public init(
+        containerVersion: Int,
+        infoVersion: Int,
+        width: Int,
+        height: Int,
+        textureFormatCode: Int,
+        format: WPETexFormat?,
+        mipmapCount: Int,
+        flags: UInt32,
+        imageWidth: Int = 0,
+        imageHeight: Int = 0,
+        unknownInt0: Int32 = 0
+    ) {
         self.containerVersion = containerVersion
         self.infoVersion = infoVersion
         self.width = width
@@ -141,6 +162,9 @@ public struct WPETexInfo: Sendable, Equatable {
         self.format = format
         self.mipmapCount = mipmapCount
         self.flags = flags
+        self.imageWidth = imageWidth
+        self.imageHeight = imageHeight
+        self.unknownInt0 = unknownInt0
     }
 
     public var dimensionsLooksValid: Bool {
@@ -149,7 +173,28 @@ public struct WPETexInfo: Sendable, Equatable {
     }
 }
 
-/// One mipmap entry pulled out of `TEXB`.
+/// TEXB v4 carries four extra fields per mipmap that the runtime doesn't
+/// consume (yet) but should still surface in raw-tex dumps so corpus
+/// regressions don't silently lose ground. `condition` is the only
+/// non-trivial one — it's a NUL-terminated ASCII run used as a
+/// conditional-mip predicate in the official engine.
+public struct WPETexMipmapV4Fields: Sendable, Equatable {
+    public let param1: Int32
+    public let param2: Int32
+    public let condition: String
+    public let param3: Int32
+
+    public init(param1: Int32, param2: Int32, condition: String, param3: Int32) {
+        self.param1 = param1
+        self.param2 = param2
+        self.condition = condition
+        self.param3 = param3
+    }
+}
+
+/// One mipmap entry pulled out of `TEXB`. `v4Fields` is populated only
+/// when the parent `WPETexBitmapBlock.version == 4`; older containers
+/// leave it nil.
 public struct WPETexMipmap: Sendable, Equatable {
     public let index: Int
     public let width: Int
@@ -158,8 +203,18 @@ public struct WPETexMipmap: Sendable, Equatable {
     public let decompressedByteCount: Int?
     public let payload: Data
     public let isCompressed: Bool
+    public let v4Fields: WPETexMipmapV4Fields?
 
-    public init(index: Int, width: Int, height: Int, storedByteCount: Int, decompressedByteCount: Int?, payload: Data, isCompressed: Bool) {
+    public init(
+        index: Int,
+        width: Int,
+        height: Int,
+        storedByteCount: Int,
+        decompressedByteCount: Int?,
+        payload: Data,
+        isCompressed: Bool,
+        v4Fields: WPETexMipmapV4Fields? = nil
+    ) {
         self.index = index
         self.width = width
         self.height = height
@@ -167,6 +222,20 @@ public struct WPETexMipmap: Sendable, Equatable {
         self.decompressedByteCount = decompressedByteCount
         self.payload = payload
         self.isCompressed = isCompressed
+        self.v4Fields = v4Fields
+    }
+}
+
+/// Raw parser output used by the P3 metadata dump path. Carries the
+/// parsed TEXI + TEXB blocks so debug consumers can render the imageW/H
+/// + TEXB v4 fields that the runtime mipmap normalization discards.
+public struct WPETexRawMetadata: Sendable, Equatable {
+    public let info: WPETexInfo
+    public let bitmap: WPETexBitmapBlock
+
+    public init(info: WPETexInfo, bitmap: WPETexBitmapBlock) {
+        self.info = info
+        self.bitmap = bitmap
     }
 }
 

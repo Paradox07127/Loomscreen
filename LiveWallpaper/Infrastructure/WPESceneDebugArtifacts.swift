@@ -334,6 +334,39 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
         write(contents, to: folderURL.appendingPathComponent(safeFileName(name)))
     }
 
+    /// P3 dump for raw `.tex` metadata: TEXI image-dimension + unkInt0 and
+    /// TEXB v4 conditional-mip fields the decoder records but the runtime
+    /// doesn't act on. Lets corpus regressions cross-reference padded
+    /// atlas sizes / v4 conditions against the published engine without
+    /// re-reading the .tex container by hand.
+    ///
+    /// Writes one `tex-meta-<name>.txt` per call into the active session
+    /// folder when debug artifacts are enabled; no-op otherwise.
+    func dumpRawTexMetadata(name: String, info: WPETexInfo, bitmap: WPETexBitmapBlock) {
+        guard isEnabled else { return }
+        var lines: [String] = []
+        lines.append("container=\(info.containerVersion) infoVersion=\(info.infoVersion)")
+        lines.append("size=\(info.width)x\(info.height) imageSize=\(info.imageWidth)x\(info.imageHeight) unkInt0=\(info.unknownInt0)")
+        let formatLabel = info.format?.debugLabel ?? "unknown(\(info.textureFormatCode))"
+        lines.append("format=\(formatLabel) flags=0x\(String(info.flags, radix: 16))")
+        let sourceFormat = bitmap.sourceImageFormatCode?.description ?? "nil"
+        lines.append("bitmapVersion=\(bitmap.version) sourceImageFormatCode=\(sourceFormat) isVideo=\(bitmap.isVideoPayload) usesEncoded=\(bitmap.usesEncodedImagePayload)")
+        lines.append("frames=\(bitmap.frames.count)")
+        for (frameIndex, mipmaps) in bitmap.frames.enumerated() {
+            for mipmap in mipmaps {
+                var line = "  frame=\(frameIndex) mip=\(mipmap.index) size=\(mipmap.width)x\(mipmap.height) stored=\(mipmap.storedByteCount) compressed=\(mipmap.isCompressed)"
+                if let decompressed = mipmap.decompressedByteCount {
+                    line += " decompressed=\(decompressed)"
+                }
+                if let v4 = mipmap.v4Fields {
+                    line += " v4{p1=\(v4.param1) p2=\(v4.param2) cond=\"\(v4.condition)\" p3=\(v4.param3)}"
+                }
+                lines.append(line)
+            }
+        }
+        recordNote(name: "tex-meta-\(name).txt", contents: lines.joined(separator: "\n"))
+    }
+
     var activeSessionFolder: URL? {
         sessionLock.lock()
         defer { sessionLock.unlock() }

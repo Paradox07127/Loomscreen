@@ -42,6 +42,21 @@ struct SceneResourceResolver: Sendable {
     /// strict-concurrency mode).
     private var fileManager: FileManager { .default }
 
+    /// P3 hook: when scene-debug artifacts are active, parse the `.tex`
+    /// header once more (very cheap — TEXI + TEXB headers only) and
+    /// write the raw TEXI image dims + TEXB v4 fields into the session
+    /// folder. No-op when artifacts are off, so production scene loads
+    /// don't pay the cost.
+    private func dumpRawTexMetadataIfActive(payload: Data, target: URL) {
+        guard WPESceneDebugArtifacts.shared.activeSessionFolder != nil else { return }
+        guard case .success(let metadata) = decoder.extractRawMetadata(data: payload) else { return }
+        WPESceneDebugArtifacts.shared.dumpRawTexMetadata(
+            name: target.lastPathComponent,
+            info: metadata.info,
+            bitmap: metadata.bitmap
+        )
+    }
+
     /// Returns a CGImage decoded from the cache.
     func resolveImage(relativePath: String) throws -> CGImage {
         guard !relativePath.isEmpty else { throw ResolveError.fileMissing }
@@ -54,12 +69,18 @@ struct SceneResourceResolver: Sendable {
 
         let lowered = target.pathExtension.lowercased()
         if lowered == "tex" {
+            // mmap: large `.tex` containers in the corpus run 200+ MB and
+            // the decoder copies out only the slices it needs; letting
+            // the OS page-in saves the RSS spike of fully reading the
+            // file. PNG/JPEG continue through CGImageSourceCreateWithURL
+            // below — ImageIO already handles its own paging.
             let payload: Data
             do {
-                payload = try Data(contentsOf: target)
+                payload = try Data(contentsOf: target, options: [.mappedIfSafe])
             } catch {
                 throw ResolveError.fileMissing
             }
+            dumpRawTexMetadataIfActive(payload: payload, target: target)
             switch decoder.decode(data: payload) {
             case .success(let image):
                 return image
@@ -90,10 +111,11 @@ struct SceneResourceResolver: Sendable {
 
         let payload: Data
         do {
-            payload = try Data(contentsOf: target)
+            payload = try Data(contentsOf: target, options: [.mappedIfSafe])
         } catch {
             throw ResolveError.fileMissing
         }
+        dumpRawTexMetadataIfActive(payload: payload, target: target)
         switch decoder.extractTexturePayload(data: payload) {
         case .success(let texture):
             return texture
@@ -124,6 +146,7 @@ struct SceneResourceResolver: Sendable {
         } catch {
             throw ResolveError.fileMissing
         }
+        dumpRawTexMetadataIfActive(payload: payload, target: target)
         switch decoder.extractStreamingPayload(data: payload) {
         case .success(let streaming):
             return streaming

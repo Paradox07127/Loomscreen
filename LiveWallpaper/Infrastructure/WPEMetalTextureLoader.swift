@@ -53,7 +53,15 @@ struct WPEMetalTextureLoader {
         try WPETexLazyAnimatedTextureSource(payload: payload, device: device, label: label)
     }
 
-    /// Phase 2E: pre-uploads every animation frame to GPU as a separate `MTLTexture` and hands the pre-baked array to `WPETexAnimatedTextureSource`.
+    /// Phase 2E + P0: pre-uploads every animation frame to GPU as a
+    /// separate `MTLTexture` sized to the TEXS sub-rect, and hands the
+    /// pre-baked frames to `WPETexAnimatedTextureSource`.
+    ///
+    /// Pre-P0 this method passed `frame.mipmaps` straight through, which
+    /// meant every TEXS frame got a Metal texture sized to the **whole
+    /// atlas** and the sub-rect was silently dropped. Sprite sheets in
+    /// the corpus (27/29 animated samples in the 431960 audit) rendered
+    /// the entire atlas as one frame because of it.
     @MainActor
     func makeAnimatedTextureSource(
         from payload: WPETexTexturePayload,
@@ -62,26 +70,98 @@ struct WPEMetalTextureLoader {
         guard let animation = payload.animationTrack else {
             throw WPEMetalTextureLoaderError.malformedPayload("missing animation track")
         }
-
-        var frameTextures: [MTLTexture] = []
-        frameTextures.reserveCapacity(animation.frames.count)
-        for (frameIndex, frame) in animation.frames.enumerated() {
-            let framePayload = WPETexTexturePayload(
-                info: payload.info,
-                mipmaps: frame.mipmaps,
-                hasAnimationFrames: false
+        guard let format = payload.info.format else {
+            throw WPEMetalTextureLoaderError.malformedPayload(
+                "unknown texture format \(payload.info.textureFormatCode)"
             )
-            frameTextures.append(try await makeTexture(
-                from: framePayload,
-                label: "\(label) frame \(frameIndex)"
+        }
+        let mapping = try WPEMetalTextureFormatMapper.mapping(for: format, capabilities: capabilities)
+
+        var frames: [WPETexAnimatedFrame] = []
+        frames.reserveCapacity(animation.frames.count)
+        let device = self.device
+        for (frameIndex, frame) in animation.frames.enumerated() {
+            guard let atlasMip = frame.mipmaps.first else {
+                throw WPEMetalTextureLoaderError.malformedPayload(
+                    "animation frame \(frameIndex) is missing its source atlas mipmap"
+                )
+            }
+            let frameLabel = "\(label) frame \(frameIndex)"
+            let subRect = frame.subRect
+            // CPU crop + GPU upload both run on the dedicated upload
+            // queue (per-frame allocate already lives there). Keeping
+            // crop inside the same `perform` block avoids pulling large
+            // memcpys onto MainActor — sprite sheets can run 60+ frames
+            // and a 4k atlas crop per frame is multi-MB of memmove.
+            let texture = try await uploadQueue.perform {
+                let cropped: WPETexSubRectCropper.CroppedTextureBytes
+                do {
+                    cropped = try WPETexSubRectCropper.crop(
+                        atlasBytes: atlasMip.bytes,
+                        atlasWidth: atlasMip.width,
+                        atlasHeight: atlasMip.height,
+                        subRect: subRect,
+                        mapping: mapping
+                    )
+                } catch {
+                    throw WPEMetalTextureLoaderError.malformedPayload(
+                        "animation frame \(frameIndex) sub-rect crop failed: \(error)"
+                    )
+                }
+                return try Self.uploadCroppedFrame(
+                    cropped: cropped,
+                    mapping: mapping,
+                    label: frameLabel,
+                    device: device
+                )
+            }
+            frames.append(WPETexAnimatedFrame(
+                texture: texture,
+                sourceSubRect: frame.subRect,
+                duration: frame.duration
             ))
         }
 
         return WPETexAnimatedTextureSource(
-            frames: frameTextures,
+            frames: frames,
             frameRate: animation.frameRate,
             loop: animation.loop
         )
+    }
+
+    /// Allocates a Metal texture sized to the cropped frame and uploads
+    /// the bytes. Reused by raw `.tex` (P0) and encoded PNG/JPEG + TEXS
+    /// (P1) paths so both produce pixel-identical frame textures.
+    static func uploadCroppedFrame(
+        cropped: WPETexSubRectCropper.CroppedTextureBytes,
+        mapping: WPEMetalTextureFormatMapping,
+        label: String,
+        device: MTLDevice
+    ) throws -> MTLTexture {
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: mapping.pixelFormat,
+            width: max(cropped.width, 1),
+            height: max(cropped.height, 1),
+            mipmapped: false
+        )
+        descriptor.usage = [.shaderRead]
+        descriptor.storageMode = .shared
+
+        guard let texture = device.makeTexture(descriptor: descriptor) else {
+            throw WPEMetalTextureLoaderError.textureAllocationFailed
+        }
+        texture.label = label
+
+        cropped.bytes.withUnsafeBytes { raw in
+            guard let base = raw.baseAddress else { return }
+            texture.replace(
+                region: MTLRegionMake2D(0, 0, cropped.width, cropped.height),
+                mipmapLevel: 0,
+                withBytes: base,
+                bytesPerRow: cropped.bytesPerRow
+            )
+        }
+        return texture
     }
 
     func makeTexture(from image: DecodedRGBAImage, label: String) async throws -> MTLTexture {

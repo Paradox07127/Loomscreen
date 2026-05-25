@@ -57,6 +57,22 @@ struct WPETexDecoder: Sendable {
         }
     }
 
+    /// P3 raw-metadata probe: parses the container only, without
+    /// normalizing mipmaps or constructing animation tracks. Used by the
+    /// scene-debug dump path so it can render TEXI imageW/H / unkInt0
+    /// and TEXB v4 fields that the playback IR drops on its way to the
+    /// renderer. Read-only — does not bind GPU resources or decompress.
+    func extractRawMetadata(data: Data) -> Result<WPETexRawMetadata, WPETexDecodeError> {
+        do {
+            let parsed = try parse(data: data)
+            return .success(WPETexRawMetadata(info: parsed.info, bitmap: parsed.bitmap))
+        } catch let error as WPETexDecodeError {
+            return .failure(error)
+        } catch {
+            return .failure(.decodeFailed(mipmap: 0, detail: error.localizedDescription))
+        }
+    }
+
     /// Metal path.
     func extractTexturePayload(data: Data) -> Result<WPETexTexturePayload, WPETexDecodeError> {
         do {
@@ -467,8 +483,7 @@ struct WPETexDecoder: Sendable {
         let textureHeight = Int(try reader.readInt32(blockName: "TEXI.textureHeight"))
         let imageWidth = Int(try reader.readInt32(blockName: "TEXI.imageWidth"))
         let imageHeight = Int(try reader.readInt32(blockName: "TEXI.imageHeight"))
-        _ = imageWidth; _ = imageHeight
-        _ = try reader.readInt32(blockName: "TEXI.unkInt0")
+        let unknownInt0 = try reader.readInt32(blockName: "TEXI.unkInt0")
 
         let format = WPETexFormat(rawValue: formatCode)
         let info = WPETexInfo(
@@ -479,7 +494,15 @@ struct WPETexDecoder: Sendable {
             textureFormatCode: formatCode,
             format: format,
             mipmapCount: 0,
-            flags: flags
+            flags: flags,
+            // P3 dump fidelity: pass the raw TEXI integers through
+            // unclamped so the metadata dump shows the on-disk values.
+            // `width/height` above still clamp via `max(_, 1)` to keep
+            // the runtime allocation invariant — that is the runtime
+            // texture size, not the source image dimensions.
+            imageWidth: imageWidth,
+            imageHeight: imageHeight,
+            unknownInt0: unknownInt0
         )
         guard info.dimensionsLooksValid else {
             throw WPETexDecodeError.invalidDimensions(width: textureWidth, height: textureHeight)
@@ -550,11 +573,18 @@ struct WPETexDecoder: Sendable {
         index: Int,
         reader: inout WPETexByteReader
     ) throws -> WPETexMipmap {
+        var v4Fields: WPETexMipmapV4Fields?
         if version == 4 {
-            _ = try reader.readInt32(blockName: "TEXB.v4Param1")
-            _ = try reader.readInt32(blockName: "TEXB.v4Param2")
-            try reader.skipNullTerminatedString(blockName: "TEXB.v4Condition")
-            _ = try reader.readInt32(blockName: "TEXB.v4Param3")
+            let param1 = try reader.readInt32(blockName: "TEXB.v4Param1")
+            let param2 = try reader.readInt32(blockName: "TEXB.v4Param2")
+            let condition = try reader.readNullTerminatedString(blockName: "TEXB.v4Condition")
+            let param3 = try reader.readInt32(blockName: "TEXB.v4Param3")
+            v4Fields = WPETexMipmapV4Fields(
+                param1: param1,
+                param2: param2,
+                condition: condition,
+                param3: param3
+            )
         }
 
         let mipWidth = Int(try reader.readInt32(blockName: "TEXB.mipWidth"))
@@ -577,7 +607,8 @@ struct WPETexDecoder: Sendable {
             storedByteCount: storedSize,
             decompressedByteCount: decompressedByteCount,
             payload: payload,
-            isCompressed: compressedFlag != 0
+            isCompressed: compressedFlag != 0,
+            v4Fields: v4Fields
         )
     }
 
@@ -667,24 +698,26 @@ struct WPETexDecoder: Sendable {
         return image
     }
 
-    /// Converts a TEXB-encoded image payload (PNG/JPEG bytes wrapped inside a WPE `.tex` file) into a synthetic `WPETexTexturePayload` shaped like raw RGBA8888 so the existing Metal upload path can consume it without branching on encoded-vs-raw at every call site.
+    /// Converts a TEXB-encoded image payload (PNG/JPEG bytes wrapped
+    /// inside a WPE `.tex` file) into a synthetic `WPETexTexturePayload`
+    /// shaped like raw RGBA8888 so the existing Metal upload path can
+    /// consume it without branching on encoded-vs-raw at every call site.
+    ///
+    /// P1: animated encoded payloads (PNG/JPEG atlas + TEXS schedule, 3
+    /// samples in the 431960 corpus) used to throw `.unsupportedAnimation`
+    /// here, blocking playback entirely. The new branch decodes the atlas
+    /// once via ImageIO and feeds every TEXS frame into the same
+    /// `WPETexAnimationTrack` pipeline raw `.tex` uses — the eager loader
+    /// then crops each frame via `WPETexSubRectCropper` just like P0.
     private func bridgeEncodedImagePayload(_ parsed: ParsedTex) throws -> WPETexTexturePayload {
-        guard !parsed.hasAnimationFrames else {
-            throw WPETexDecodeError.unsupportedAnimation
+        if parsed.hasAnimationFrames {
+            return try bridgeEncodedAnimatedImagePayload(parsed)
         }
-        guard let mip = parsed.bitmap.largestMipmap else {
-            throw WPETexDecodeError.missingBitmapBlock
-        }
-        let payloadBytes = try inflateIfNeeded(
-            payload: mip.payload,
-            expectedByteCount: nil,
-            decompressedByteCount: mip.decompressedByteCount,
-            isCompressed: mip.isCompressed,
-            mipmap: mip.index
-        )
-        let image = try makeEncodedCGImage(from: payloadBytes, mipmap: mip.index)
-        let rgba = try rasterizeRGBA8(from: image, mipmap: mip.index)
+        return try bridgeSingleEncodedImagePayload(parsed)
+    }
 
+    private func bridgeSingleEncodedImagePayload(_ parsed: ParsedTex) throws -> WPETexTexturePayload {
+        let rgba = try rasterizeFirstEncodedFrame(parsed)
         let bridgedInfo = WPETexInfo(
             containerVersion: parsed.info.containerVersion,
             infoVersion: parsed.info.infoVersion,
@@ -693,7 +726,10 @@ struct WPETexDecoder: Sendable {
             textureFormatCode: WPETexFormat.rgba8888.rawValue,
             format: .rgba8888,
             mipmapCount: 1,
-            flags: parsed.info.flags
+            flags: parsed.info.flags,
+            imageWidth: parsed.info.imageWidth,
+            imageHeight: parsed.info.imageHeight,
+            unknownInt0: parsed.info.unknownInt0
         )
         let bridgedMipmap = WPETexTextureMipmap(
             index: 0,
@@ -706,6 +742,133 @@ struct WPETexDecoder: Sendable {
             mipmaps: [bridgedMipmap],
             hasAnimationFrames: false
         )
+    }
+
+    private func bridgeEncodedAnimatedImagePayload(_ parsed: ParsedTex) throws -> WPETexTexturePayload {
+        let texsFrames = parsed.frameInfo?.frames ?? []
+        let defaultDuration = 1.0 / WPETexAnimationTrack.defaultFrameRate
+
+        // Each encoded TEXB image is rasterized once and shared across
+        // every TEXS frame that references it via `imageID` (mirrors raw
+        // `.tex`'s `mipmapsByImageID` cache in `makeAnimationTrack`).
+        // Without this dedup an N-image animation would re-decode the
+        // same atlas every frame.
+        var rasterizedByImageID: [Int: WPETexTextureMipmap] = [:]
+        func atlas(for imageID: Int) throws -> WPETexTextureMipmap {
+            let sourceIndex = parsed.bitmap.frames.indices.contains(imageID)
+                ? imageID
+                : min(max(imageID, 0), max(parsed.bitmap.frames.count - 1, 0))
+            if let cached = rasterizedByImageID[sourceIndex] {
+                return cached
+            }
+            let rgba = try rasterizeEncodedFrame(parsed, sourceIndex: sourceIndex)
+            let mip = WPETexTextureMipmap(
+                index: 0,
+                width: rgba.width,
+                height: rgba.height,
+                bytes: rgba.pixels
+            )
+            rasterizedByImageID[sourceIndex] = mip
+            return mip
+        }
+
+        // Without a TEXS schedule but with multiple encoded TEXB images,
+        // synthesise a default-cadence frame per source image — same
+        // shape `makeAnimationTrack` uses for raw `.tex`. Single-image
+        // case still degrades cleanly to a static payload.
+        struct Descriptor {
+            let fallbackIndex: Int
+            let frameInfo: WPETexFrameInfo?
+        }
+        let descriptors: [Descriptor]
+        if texsFrames.isEmpty {
+            guard parsed.bitmap.frames.count > 1 else {
+                return try bridgeSingleEncodedImagePayload(parsed)
+            }
+            descriptors = parsed.bitmap.frames.indices.map {
+                Descriptor(fallbackIndex: $0, frameInfo: nil)
+            }
+        } else {
+            descriptors = texsFrames.enumerated().map {
+                Descriptor(fallbackIndex: $0.offset, frameInfo: $0.element)
+            }
+        }
+
+        let frames: [WPETexAnimationFrame] = try descriptors.map { descriptor in
+            let requestedID = descriptor.frameInfo?.imageID ?? descriptor.fallbackIndex
+            let mip = try atlas(for: requestedID)
+            let duration = (descriptor.frameInfo?.frameTime ?? 0) > 0
+                ? descriptor.frameInfo!.frameTime
+                : defaultDuration
+            let subRect = descriptor.frameInfo?.subRect(
+                textureWidth: mip.width,
+                textureHeight: mip.height
+            )
+            return WPETexAnimationFrame(
+                imageID: requestedID,
+                duration: duration,
+                mipmaps: [mip],
+                subRect: subRect
+            )
+        }
+
+        let validDurations = frames.map(\.duration).filter { $0 > 0 }
+        let averageDuration = validDurations.isEmpty
+            ? defaultDuration
+            : validDurations.reduce(0, +) / Double(validDurations.count)
+        let frameRate = averageDuration > 0
+            ? 1.0 / averageDuration
+            : WPETexAnimationTrack.defaultFrameRate
+        let track = WPETexAnimationTrack(
+            frames: frames,
+            frameRate: frameRate,
+            loop: true
+        )
+
+        // Use the largest rasterized atlas as the bridged info dims so
+        // downstream callers that ignore the animation track still see
+        // a plausible texture size (matches raw `.tex` behavior where
+        // info.width/height is the atlas size).
+        let infoSource = frames.first?.mipmaps.first
+        let bridgedInfo = WPETexInfo(
+            containerVersion: parsed.info.containerVersion,
+            infoVersion: parsed.info.infoVersion,
+            width: infoSource?.width ?? parsed.info.width,
+            height: infoSource?.height ?? parsed.info.height,
+            textureFormatCode: WPETexFormat.rgba8888.rawValue,
+            format: .rgba8888,
+            mipmapCount: 1,
+            flags: parsed.info.flags,
+            imageWidth: parsed.info.imageWidth,
+            imageHeight: parsed.info.imageHeight,
+            unknownInt0: parsed.info.unknownInt0
+        )
+        return WPETexTexturePayload(
+            info: bridgedInfo,
+            mipmaps: [],
+            hasAnimationFrames: true,
+            animationTrack: track
+        )
+    }
+
+    private func rasterizeFirstEncodedFrame(_ parsed: ParsedTex) throws -> DecodedRGBAImage {
+        try rasterizeEncodedFrame(parsed, sourceIndex: 0)
+    }
+
+    private func rasterizeEncodedFrame(_ parsed: ParsedTex, sourceIndex: Int) throws -> DecodedRGBAImage {
+        guard parsed.bitmap.frames.indices.contains(sourceIndex),
+              let mip = parsed.bitmap.frames[sourceIndex].first else {
+            throw WPETexDecodeError.missingBitmapBlock
+        }
+        let payloadBytes = try inflateIfNeeded(
+            payload: mip.payload,
+            expectedByteCount: nil,
+            decompressedByteCount: mip.decompressedByteCount,
+            isCompressed: mip.isCompressed,
+            mipmap: mip.index
+        )
+        let image = try makeEncodedCGImage(from: payloadBytes, mipmap: mip.index)
+        return try rasterizeRGBA8(from: image, mipmap: mip.index)
     }
 
     /// Renders a `CGImage` into straight-alpha, sRGB-encoded RGBA8 bytes suitable for upload as `MTLPixelFormat.rgba8Unorm_srgb`.

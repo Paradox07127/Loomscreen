@@ -70,13 +70,22 @@ struct WPETexByteReader {
     }
 
     mutating func skipNullTerminatedString(blockName: String) throws {
+        _ = try readNullTerminatedString(blockName: blockName)
+    }
+
+    /// Reads a NUL-terminated ASCII run, advancing past the terminator.
+    /// Used by `TEXB` v4 to surface the `v4Condition` string into the IR
+    /// for dump fidelity (older code path discarded it via skip-only).
+    mutating func readNullTerminatedString(blockName: String) throws -> String {
         guard cursor <= data.count else {
             throw WPETexDecodeError.truncatedBlock(block: blockName, offset: cursor)
         }
         guard let terminator = data[cursor...].firstIndex(of: 0) else {
             throw WPETexDecodeError.truncatedBlock(block: blockName, offset: cursor)
         }
+        let slice = data.subdata(in: cursor..<terminator)
         cursor = terminator + 1
+        return String(data: slice, encoding: .ascii) ?? ""
     }
 
     private func ensure(byteCount: Int, blockName: String) throws {
