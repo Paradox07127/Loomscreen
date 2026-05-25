@@ -82,7 +82,11 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         playbackSpeed: Double = 1.0,
         fitMode: VideoFitMode = .aspectFill,
         videoDisplayMode: VideoDisplayMode = .perDisplay,
-        frameRateLimit: FrameRateLimit = .fps60,
+        // `nil` defers to `FrameRateLimit.naturalDefault(for:)` so each
+        // wallpaper type gets its own type-appropriate baseline (scene
+        // → 30 to match WPE; video → 60 for native pass-through). Pass
+        // an explicit value to override.
+        frameRateLimit: FrameRateLimit? = nil,
         particleEffect: ParticleEffect = .none,
         effectConfig: VideoEffectConfig = .default,
         scheduleSlots: [ScheduleSlot]? = nil,
@@ -104,6 +108,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         self.fitMode = fitMode
         self.videoDisplayMode = videoDisplayMode
         self.frameRateLimit = frameRateLimit
+            ?? FrameRateLimit.naturalDefault(for: wallpaper.wallpaperType)
         self.particleEffect = particleEffect
         self.effectConfig = effectConfig
         self.scheduleSlots = scheduleSlots
@@ -119,6 +124,9 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         videoBookmarkData: Data,
         playbackSpeed: Double = 1.0,
         fitMode: VideoFitMode = .aspectFill,
+        // Video convenience init: explicit `.fps60` default keeps the
+        // native pass-through behaviour even when callers don't pass a
+        // value (also matches `FrameRateLimit.naturalDefault(for: .video)`).
         frameRateLimit: FrameRateLimit = .fps60,
         particleEffect: ParticleEffect = .none,
         effectConfig: VideoEffectConfig = .default,
@@ -152,7 +160,9 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         videoBookmarkData: Data,
         playbackSpeed: Double = 1.0,
         fitMode: VideoFitMode = .aspectFill,
-        frameRateLimit: FrameRateLimit = .fps60,
+        // Type-pivot convenience init: `nil` defers to the per-type
+        // natural default (resolved against `wallpaperType` parameter).
+        frameRateLimit: FrameRateLimit? = nil,
         wallpaperType: WallpaperType,
         particleEffect: ParticleEffect = .none,
         effectConfig: VideoEffectConfig = .default,
@@ -166,6 +176,8 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         setAsLockScreen: Bool = false
     ) {
         let savedVideoBookmarkData = videoBookmarkData.isEmpty ? nil : videoBookmarkData
+        let resolvedFrameRateLimit = frameRateLimit
+            ?? FrameRateLimit.naturalDefault(for: wallpaperType)
 
         switch wallpaperType {
         case .video:
@@ -174,7 +186,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
                 videoBookmarkData: videoBookmarkData,
                 playbackSpeed: playbackSpeed,
                 fitMode: fitMode,
-                frameRateLimit: frameRateLimit,
+                frameRateLimit: resolvedFrameRateLimit,
                 particleEffect: particleEffect,
                 effectConfig: effectConfig,
                 scheduleSlots: scheduleSlots,
@@ -206,7 +218,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
                 wallpaper: wallpaper,
                 playbackSpeed: playbackSpeed,
                 fitMode: fitMode,
-                frameRateLimit: frameRateLimit,
+                frameRateLimit: resolvedFrameRateLimit,
                 particleEffect: particleEffect,
                 effectConfig: effectConfig,
                 scheduleSlots: scheduleSlots,

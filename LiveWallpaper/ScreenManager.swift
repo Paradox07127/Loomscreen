@@ -1169,7 +1169,9 @@ final class ScreenManager {
         config.playbackSpeed = 1.0
         config.fitMode = .aspectFill
         config.videoDisplayMode = .perDisplay
-        config.frameRateLimit = .fps60
+        // Match the per-type natural default the constructor uses so
+        // "Reset to defaults" on a scene goes to 30 (WPE parity), not 60.
+        config.frameRateLimit = FrameRateLimit.naturalDefault(for: config.wallpaperType)
         config.particleEffect = .none
         config.effectConfig = .default
         config.scheduleSlots = nil

@@ -146,4 +146,43 @@ struct ScreenConfigurationCompatTests {
         #expect(settings.recentWPEImports.isEmpty)
         #expect(settings.pauseOnFullScreen == true)
     }
+
+    // Type-aware default: a brand-new ScreenConfiguration picks the
+    // per-type natural frame rate so the picker (which reads this
+    // value) and the runtime (which the picker drives) start out
+    // agreeing. Pre-fix the picker said "60 FPS" while WPE scenes
+    // wanted 30 — the contradiction that prompted this change.
+    @Test("New scene ScreenConfiguration defaults to fps30 (WPE parity)")
+    func newSceneConfigurationDefaultsToThirty() throws {
+        let descriptor = SceneDescriptor(
+            workshopID: "test-fps-default",
+            cacheRelativePath: "test-fps-default",
+            entryFile: "scene.json",
+            capabilityTier: .degraded
+        )
+        let config = ScreenConfiguration(screenID: 1, wallpaper: .scene(descriptor))
+        #expect(config.frameRateLimit == .fps30)
+    }
+
+    @Test("New video ScreenConfiguration keeps fps60 (native pass-through)")
+    func newVideoConfigurationDefaultsToSixty() {
+        let config = ScreenConfiguration(screenID: 1, wallpaper: .video(bookmarkData: Data([0x01])))
+        #expect(config.frameRateLimit == .fps60)
+    }
+
+    @Test("Explicit frameRateLimit overrides the type-aware default")
+    func explicitFrameRateLimitOverridesDefault() throws {
+        let descriptor = SceneDescriptor(
+            workshopID: "test-fps-override",
+            cacheRelativePath: "test-fps-override",
+            entryFile: "scene.json",
+            capabilityTier: .degraded
+        )
+        let config = ScreenConfiguration(
+            screenID: 1,
+            wallpaper: .scene(descriptor),
+            frameRateLimit: .fps60
+        )
+        #expect(config.frameRateLimit == .fps60)
+    }
 }

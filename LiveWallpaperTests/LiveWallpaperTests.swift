@@ -455,6 +455,21 @@ struct FrameRateLimitTests {
         let decoded = try JSONDecoder().decode(FrameRateLimit.self, from: data)
         #expect(decoded == .fps60)
     }
+
+    // naturalDefault: the picker and the runtime agree on the type-
+    // appropriate baseline. Scene defaults to 30 (WPE parity); video /
+    // html / metalShader keep 60 (native pass-through, no extra cost).
+    @Test("naturalDefault returns fps30 for scene wallpapers (WPE parity)")
+    func naturalDefaultForScene() {
+        #expect(FrameRateLimit.naturalDefault(for: .scene) == .fps30)
+    }
+
+    @Test("naturalDefault returns fps60 for non-scene wallpapers")
+    func naturalDefaultForOthers() {
+        #expect(FrameRateLimit.naturalDefault(for: .video) == .fps60)
+        #expect(FrameRateLimit.naturalDefault(for: .html) == .fps60)
+        #expect(FrameRateLimit.naturalDefault(for: .metalShader) == .fps60)
+    }
 }
 
 @Suite("PlainVideoFrameRateCompositionPolicy")
