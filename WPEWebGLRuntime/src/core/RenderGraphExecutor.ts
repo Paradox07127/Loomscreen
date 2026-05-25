@@ -210,7 +210,18 @@ export class RenderGraphExecutor {
 
         gl.drawArrays(gl.TRIANGLES, 0, 6);
 
-        if (targetFBO) {
+        // `previous` references resolve to `currentSceneFBO`. WPE's
+        // semantics for `previous` inside an effect pass is "the layer-
+        // composite state before this effect ran", NOT "the most recent
+        // FBO write". Shine's pipeline writes intermediate blur results
+        // to `_rt_HalfCompoBuffer*` (kind = "fbo") between layer-
+        // composite ping-pongs (kind = "layer_composite"); if we update
+        // `currentSceneFBO` on every FBO write, `shine_combine`'s
+        // `bind: [{name: "_rt_HalfCompoBuffer2"}, {name: "previous"}]`
+        // resolves slot 1 to the blur buffer instead of the original
+        // albedo and the screen goes black. Only refresh from
+        // layer_composite or canvas writes.
+        if (targetFBO && pass.target.kind === "layer_composite") {
           currentSceneFBO = targetFBO;
         }
       }
