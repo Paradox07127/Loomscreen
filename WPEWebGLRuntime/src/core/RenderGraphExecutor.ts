@@ -177,12 +177,24 @@ export class RenderGraphExecutor {
         this.uploadBuiltinUniforms(program, time, runtimeUniforms, layer.parallaxDepth);
         this.uploadConstants(program, pass.constants ?? {});
 
-        const sourceResolved = this.resolveBoundTexture(layer.objectID, pass.source, currentSceneFBO, sceneSize);
+        // Swift `WPERenderPipelineBuilder.textureBindings(for:defaults:)`
+        // already folds `effect.bind[0]` overrides on top of `pass.source`
+        // and emits the result into `pass.textures[0]` — which means
+        // `shine_combine`'s `bind: [{name:"_rt_HalfCompoBuffer2", index:0},
+        // {name:"previous", index:1}]` ends up with `textures[0]` pointing
+        // at the blur ring buffer instead of the raw effect source. If we
+        // sample `pass.source` here, we drop that override and the final
+        // composite samples the layer state for both g_Texture0 AND
+        // g_Texture1 — under the default BLENDMODE the screen turns black.
+        // Prefer the resolved binding; fall back to `pass.source` for
+        // graphs that don't ship a `textures[0]`.
+        const textures = pass.textures ?? {};
+        const slot0Ref = textures[0] ?? pass.source;
+        const sourceResolved = this.resolveBoundTexture(layer.objectID, slot0Ref, currentSceneFBO, sceneSize);
         this.bindTextureSlot(program, 0, sourceResolved.texture, "g_Texture0", { width: sourceResolved.width, height: sourceResolved.height });
         this.uploadSpriteSheetUniforms(program, sourceResolved, sceneSize, time);
         boundSamplers.add("g_Texture0");
 
-        const textures = pass.textures ?? {};
         for (const slotStr of Object.keys(textures)) {
           const slot = Number(slotStr);
           if (!Number.isInteger(slot) || slot === 0) continue;
