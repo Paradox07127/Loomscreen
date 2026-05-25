@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import Metal
 import Testing
@@ -108,6 +109,80 @@ struct WPEMetalTextureLoaderTests {
 
         #expect(texture.width == 2)
         #expect(recorder.snapshot() == [false])
+    }
+
+    // P0: eager animated payload must crop each TEXS frame to its
+    // sub-rect — pre-P0 every frame got a Metal texture sized to the
+    // whole atlas. Asserts both the per-frame dimensions and the texture
+    // count match the TEXS schedule.
+    @MainActor
+    @Test("Eager animated payload produces a per-frame sub-rect-sized MTLTexture")
+    func eagerAnimatedPayloadCropsPerFrameSubRects() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        // 4×4 RGBA atlas — index encoded in red channel.
+        var atlasBytes: [UInt8] = []
+        atlasBytes.reserveCapacity(4 * 4 * 4)
+        for row in 0..<4 {
+            for col in 0..<4 {
+                atlasBytes.append(contentsOf: [UInt8(row << 4 | col), 0, 0, 0xff])
+            }
+        }
+        let atlasMipmap = WPETexTextureMipmap(index: 0, width: 4, height: 4, bytes: Data(atlasBytes))
+
+        let track = WPETexAnimationTrack(
+            frames: [
+                WPETexAnimationFrame(
+                    imageID: 0,
+                    duration: 0.04,
+                    mipmaps: [atlasMipmap],
+                    subRect: CGRect(x: 0, y: 0, width: 2, height: 2)
+                ),
+                WPETexAnimationFrame(
+                    imageID: 0,
+                    duration: 0.04,
+                    mipmaps: [atlasMipmap],
+                    subRect: CGRect(x: 2, y: 0, width: 2, height: 2)
+                ),
+                WPETexAnimationFrame(
+                    imageID: 0,
+                    duration: 0.04,
+                    mipmaps: [atlasMipmap],
+                    subRect: CGRect(x: 0, y: 2, width: 2, height: 2)
+                )
+            ],
+            frameRate: 25,
+            loop: true
+        )
+        let payload = WPETexTexturePayload(
+            info: WPETexInfo(
+                containerVersion: 5,
+                infoVersion: 1,
+                width: 4,
+                height: 4,
+                textureFormatCode: WPETexFormat.rgba8888.rawValue,
+                format: .rgba8888,
+                mipmapCount: 1,
+                flags: 0
+            ),
+            mipmaps: [],
+            hasAnimationFrames: true,
+            animationTrack: track
+        )
+
+        let source = try await WPEMetalTextureLoader(device: device)
+            .makeAnimatedTextureSource(from: payload, label: "test-animated")
+
+        let frame0 = try #require(source.texture(at: 0.0))
+        let frame1 = try #require(source.texture(at: 0.05))
+        let frame2 = try #require(source.texture(at: 0.09))
+
+        #expect(frame0.width == 2)
+        #expect(frame0.height == 2)
+        #expect(frame1.width == 2)
+        #expect(frame2.width == 2)
+        // Each crop must produce its own MTLTexture (no atlas reuse).
+        #expect(frame0 !== frame1)
+        #expect(frame1 !== frame2)
     }
 
     @Test("Upload queue semaphore bounds concurrent upload operations")

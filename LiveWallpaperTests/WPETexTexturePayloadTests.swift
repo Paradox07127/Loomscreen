@@ -49,8 +49,16 @@ struct WPETexTexturePayloadTests {
         #expect(firstPixel[3] == 0x80, "A should preserve 0x80 unchanged")
     }
 
-    @Test("Rejects encoded TEXB animation tracks with .unsupportedAnimation")
-    func rejectsEncodedAnimationFrames() throws {
+    // P1 contract: encoded animation no longer throws.
+    // - Multi-image + no TEXS schedule: synthesises a default-cadence
+    //   frame per source image (mirrors raw `.tex`'s makeAnimationTrack
+    //   behaviour). Pre-P1 this threw `.unsupportedAnimation`.
+    // - Single-image + no TEXS: degrades to a static payload (covered
+    //   below).
+    // - Multi-image + TEXS schedule: full animation track with per-frame
+    //   sub-rects, covered by `WPETexDecoderTests.encodedPNGWithTEXSExtractsAnimationTrack`.
+    @Test("Multi-image encoded TEXB without TEXS synthesises a default-cadence animation track")
+    func encodedAnimationWithoutTEXSSynthesisesDefaultCadenceTrack() throws {
         let png = try makeSolidColorPNG(width: 2, height: 2, red: 0, green: 0, blue: 255, alpha: 255)
         let tex = makeAnimatedImage(
             width: 2,
@@ -60,12 +68,36 @@ struct WPETexTexturePayloadTests {
             sourceImageFormatCode: 0
         )
 
-        let result = WPETexDecoder().extractTexturePayload(data: tex)
-        guard case .failure(let error) = result else {
-            Issue.record("Expected .failure, got \(result)")
-            return
-        }
-        #expect(error == .unsupportedAnimation, "Encoded animation tracks should raise unsupportedAnimation, got: \(error)")
+        let extracted = try WPETexDecoder().extractTexturePayload(data: tex).get()
+        let track = try #require(extracted.animationTrack)
+
+        #expect(extracted.hasAnimationFrames == true)
+        #expect(track.frames.count == 2)
+        #expect(track.frames[0].imageID == 0)
+        #expect(track.frames[1].imageID == 1)
+        // No TEXS sub-rect → frame uses whole atlas (subRect == nil).
+        #expect(track.frames[0].subRect == nil)
+        #expect(track.frames[1].subRect == nil)
+    }
+
+    @Test("Single-image encoded TEXB without TEXS degrades to static payload")
+    func encodedSingleImageWithoutTEXSDegradesToStaticPayload() throws {
+        let png = try makeSolidColorPNG(width: 2, height: 2, red: 0, green: 0, blue: 255, alpha: 255)
+        let tex = makeAnimatedImage(
+            width: 2,
+            height: 2,
+            formatCode: WPETexFormat.rgba8888.rawValue,
+            framePayloads: [png],
+            sourceImageFormatCode: 0
+        )
+
+        let extracted = try WPETexDecoder().extractTexturePayload(data: tex).get()
+
+        #expect(extracted.animationTrack == nil)
+        #expect(extracted.hasAnimationFrames == false)
+        let mip = try #require(extracted.largestMipmap)
+        #expect(mip.width == 2)
+        #expect(mip.height == 2)
     }
 
     @Test("Extracts raw RGBA8888 mip payload without creating CGImage")

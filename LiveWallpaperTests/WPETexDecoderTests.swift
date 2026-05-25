@@ -1,6 +1,9 @@
 import Compression
+import CoreGraphics
 import Foundation
+import ImageIO
 import Testing
+import UniformTypeIdentifiers
 @testable import LiveWallpaper
 
 @Suite("WPETexDecoder — container + RGBA8888")
@@ -148,6 +151,59 @@ struct WPETexDecoderTests {
             return
         }
     }
+
+    // P1: encoded PNG/JPEG + TEXS animation no longer rejects;
+    // bridgeEncodedAnimatedImagePayload should produce a usable
+    // animation track that shares the ImageIO-rasterized atlas across
+    // every TEXS frame, with each frame carrying its own sub-rect.
+    @Test("Encoded PNG + TEXS animation extracts an animation track with per-frame sub-rects")
+    func encodedPNGWithTEXSExtractsAnimationTrack() throws {
+        let buffer = makeEncodedPNGAtlasWithTEXS()
+        let payload = try WPETexDecoder().extractTexturePayload(data: buffer).get()
+        let track = try #require(payload.animationTrack)
+
+        #expect(payload.hasAnimationFrames == true)
+        #expect(payload.info.format == .rgba8888)
+        #expect(track.frames.count == 2)
+        #expect(track.frames[0].subRect == CGRect(x: 0, y: 0, width: 2, height: 2))
+        #expect(track.frames[1].subRect == CGRect(x: 2, y: 0, width: 2, height: 2))
+        // All frames share the same atlas RGBA bytes.
+        #expect(track.frames[0].mipmaps.first?.bytes == track.frames[1].mipmaps.first?.bytes)
+    }
+
+    // P3: TEXI imageWidth/imageHeight + unknown int0 must reach
+    // WPETexInfo so future runtime / dump consumers can cross-reference
+    // padded atlas dimensions against the texture-coordinate space.
+    @Test("TEXI imageWidth/imageHeight/unkInt0 surface into WPETexInfo")
+    func texiUnknownFieldsAreRetained() throws {
+        let buffer = makeImageWithTEXIImageDimensions(
+            textureWidth: 4,
+            textureHeight: 4,
+            imageWidth: 3,
+            imageHeight: 2,
+            unknownInt0: 7
+        )
+
+        let info = try WPETexDecoder().probe(data: buffer).get()
+
+        #expect(info.width == 4)
+        #expect(info.height == 4)
+        #expect(info.imageWidth == 3)
+        #expect(info.imageHeight == 2)
+        #expect(info.unknownInt0 == 7)
+    }
+
+    // P3: TEXB v4's `v4Param1/v4Param2/v4Condition/v4Param3` block is
+    // only read when the parser keeps `effectiveBitmapVersion == 4`,
+    // which today requires `isVideoMP4 == 1`. The video-payload branch
+    // doesn't expose `WPETexMipmap.v4Fields` through any public API
+    // (extractTexturePayload returns `videoPayload` + empty mipmaps),
+    // so we can't round-trip v4Fields through `.decode` / `extractTexturePayload`
+    // alone. The data flow is exercised end-to-end by
+    // `WPESceneDebugArtifacts.dumpRawTexMetadata` which reads them off
+    // the parser's internal `WPETexBitmapBlock`; the read-not-skip
+    // contract is enforced by `readNullTerminatedString` in the byte
+    // reader (which would otherwise mis-align the next mip read).
 
     @Test("Streaming extraction preserves TEXS sub-rects and compressed image payloads")
     func streamingExtractionPreservesSubRectsAndCompressedPayloads() throws {
@@ -349,6 +405,127 @@ struct WPETexDecoderTests {
             appendFloat32(&buffer, 0)
             appendFloat32(&buffer, rect.3)
         }
+        return buffer
+    }
+
+    /// PNG atlas (2×2 RGBA bytes encoded as PNG) wrapped in a TEXV0005
+    /// container with a TEXB0003 encoded-payload + TEXS0003 schedule of
+    /// 2 frames at 25 FPS. Synthesises the corpus's "encoded animated"
+    /// shape (3 samples in 431960).
+    private func makeEncodedPNGAtlasWithTEXS() -> Data {
+        let pngBytes = twoByTwoPNGAtlas()
+        var buffer = Data()
+        appendMagic(&buffer, magic: "TEXV0005")
+        appendMagic(&buffer, magic: "TEXI0001")
+        appendInt32(&buffer, Int32(WPETexFormat.rgba8888.rawValue))
+        appendUInt32(&buffer, 2)   // flags: animation present
+        appendInt32(&buffer, 4)    // textureWidth
+        appendInt32(&buffer, 4)    // textureHeight
+        appendInt32(&buffer, 4)    // imageWidth
+        appendInt32(&buffer, 4)    // imageHeight
+        appendInt32(&buffer, 0)    // unkInt0
+
+        appendMagic(&buffer, magic: "TEXB0003")
+        appendInt32(&buffer, 1)    // imageCount
+        appendInt32(&buffer, 13)   // sourceImageFormatCode (encoded marker)
+        appendInt32(&buffer, 1)    // mipmapCount
+        appendInt32(&buffer, 4)    // mipWidth
+        appendInt32(&buffer, 4)    // mipHeight
+        appendUInt32(&buffer, 0)   // compressed flag
+        appendUInt32(&buffer, UInt32(pngBytes.count))
+        appendUInt32(&buffer, UInt32(pngBytes.count))
+        buffer.append(pngBytes)
+
+        appendMagic(&buffer, magic: "TEXS0003")
+        appendInt32(&buffer, 2)    // frame count
+        appendInt32(&buffer, 4)    // gifWidth
+        appendInt32(&buffer, 4)    // gifHeight
+        for (imageID, rect) in [
+            (0, (Float(0), Float(0), Float(2), Float(2))),
+            (0, (Float(2), Float(0), Float(2), Float(2)))
+        ] {
+            appendInt32(&buffer, Int32(imageID))
+            appendFloat32(&buffer, 0.04)
+            appendFloat32(&buffer, rect.0)
+            appendFloat32(&buffer, rect.1)
+            appendFloat32(&buffer, rect.2)
+            appendFloat32(&buffer, 0)
+            appendFloat32(&buffer, 0)
+            appendFloat32(&buffer, rect.3)
+        }
+        return buffer
+    }
+
+    /// Generates a 4×4 RGBA PNG (uniform color per quadrant) used by the
+    /// encoded-animated fixture. The fixture's TEXS schedule slices this
+    /// atlas into two 2×2 sub-rects so the test can assert that
+    /// `bridgeEncodedAnimatedImagePayload` returns 2 animation frames
+    /// pointing at the same atlas with distinct sub-rects.
+    private func twoByTwoPNGAtlas() -> Data {
+        var pixels = Data()
+        pixels.reserveCapacity(4 * 4 * 4)
+        for row in 0..<4 {
+            for col in 0..<4 {
+                let red: UInt8 = col < 2 ? 0xff : 0x00
+                let green: UInt8 = row < 2 ? 0xff : 0x00
+                pixels.append(contentsOf: [red, green, 0x00, 0xff])
+            }
+        }
+        let provider = CGDataProvider(data: pixels as CFData)!
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue)
+        let image = CGImage(
+            width: 4, height: 4,
+            bitsPerComponent: 8, bitsPerPixel: 32,
+            bytesPerRow: 16,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo,
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: false,
+            intent: .defaultIntent
+        )!
+        let mutable = NSMutableData()
+        let destination = CGImageDestinationCreateWithData(mutable, "public.png" as CFString, 1, nil)!
+        CGImageDestinationAddImage(destination, image, nil)
+        CGImageDestinationFinalize(destination)
+        return mutable as Data
+    }
+
+    /// TEXI fixture asserting that imageWidth/imageHeight/unkInt0
+    /// survive into `WPETexInfo`.
+    private func makeImageWithTEXIImageDimensions(
+        textureWidth: Int,
+        textureHeight: Int,
+        imageWidth: Int,
+        imageHeight: Int,
+        unknownInt0: Int32
+    ) -> Data {
+        let pixel: [UInt8] = [0xff, 0x80, 0x33, 0xff]
+        var raw = Data()
+        raw.reserveCapacity(textureWidth * textureHeight * 4)
+        for _ in 0..<(textureWidth * textureHeight) { raw.append(contentsOf: pixel) }
+        var buffer = Data()
+        appendMagic(&buffer, magic: "TEXV0005")
+        appendMagic(&buffer, magic: "TEXI0001")
+        appendInt32(&buffer, Int32(WPETexFormat.rgba8888.rawValue))
+        appendUInt32(&buffer, 0)
+        appendInt32(&buffer, Int32(textureWidth))
+        appendInt32(&buffer, Int32(textureHeight))
+        appendInt32(&buffer, Int32(imageWidth))
+        appendInt32(&buffer, Int32(imageHeight))
+        appendInt32(&buffer, unknownInt0)
+
+        appendMagic(&buffer, magic: "TEXB0003")
+        appendInt32(&buffer, 1)
+        appendInt32(&buffer, -1)
+        appendInt32(&buffer, 1)
+        appendInt32(&buffer, Int32(textureWidth))
+        appendInt32(&buffer, Int32(textureHeight))
+        appendUInt32(&buffer, 0)
+        appendUInt32(&buffer, UInt32(raw.count))
+        appendUInt32(&buffer, UInt32(raw.count))
+        buffer.append(raw)
         return buffer
     }
 
