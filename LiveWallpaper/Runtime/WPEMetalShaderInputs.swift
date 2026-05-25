@@ -10,15 +10,19 @@ import simd
 /// without routing through an executor reference. Everything in here is
 /// `static` and reads only from its parameters.
 enum WPEMetalShaderInputs {
-    /// WPE scene JSON authors `g_Color` in sRGB perceptual space ("0.5 0.5 0.5" → mid-gray on screen).
+    /// WPE scene JSON authors `g_Color` against raw RGBA8 — the WPE Windows
+    /// runtime samples linear, multiplies by g_Color, and writes linear,
+    /// with no sRGB linearise on either side. Same contract on Almamu.
+    /// We forward the channel values untouched so the on-screen result
+    /// matches both reference renderers.
     static func colorVector(for pass: WPEPreparedRenderPass) -> SIMD4<Float> {
         let vector = pass.uniformValues["g_Color"]?.vectorValue
             ?? pass.pass.constants["g_Color"]?.vectorValue
             ?? [1, 1, 1, 1]
         return SIMD4<Float>(
-            sRGBToLinear(Float(vector[safe: 0] ?? 1)),
-            sRGBToLinear(Float(vector[safe: 1] ?? 1)),
-            sRGBToLinear(Float(vector[safe: 2] ?? 1)),
+            Float(vector[safe: 0] ?? 1),
+            Float(vector[safe: 1] ?? 1),
+            Float(vector[safe: 2] ?? 1),
             Float(vector[safe: 3] ?? 1)
         )
     }
@@ -173,15 +177,6 @@ enum WPEMetalShaderInputs {
             Float(min(max(offset.x, -0.05), 0.05)),
             Float(min(max(offset.y, -0.05), 0.05))
         )
-    }
-
-    /// Standard sRGB EOTF used by Metal's `_srgb` pixel formats.
-    private static func sRGBToLinear(_ value: Float) -> Float {
-        let clamped = min(max(value, 0), 1)
-        if clamped <= 0.04045 {
-            return clamped / 12.92
-        }
-        return Float(pow(Double((clamped + 0.055) / 1.055), 2.4))
     }
 
     private static func scalarFloat(_ value: WPESceneShaderConstantValue?) -> Float? {

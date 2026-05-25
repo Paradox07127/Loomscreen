@@ -35,7 +35,7 @@ struct WPEMetalTextureLoaderTests {
 
         #expect(texture.width == 2)
         #expect(texture.height == 2)
-        #expect(texture.pixelFormat == .rgba8Unorm_srgb)
+        #expect(texture.pixelFormat == .rgba8Unorm)
     }
 
     @Test("Rejects BC payload when current device cannot sample BC")
