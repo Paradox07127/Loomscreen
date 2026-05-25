@@ -21,12 +21,17 @@ import QuartzCore
 ///
 /// Pixel format is raw `.bgra8Unorm` — the Metal scene pipeline runs in
 /// raw RGBA8 author space (matches Almamu's reference linux-wallpaperengine
-/// and the WPE Windows shader math). Sampling these textures as `_srgb`
-/// would compound with the output attachment's sRGB encode on the way out
-/// and produce the "over-exposed" appearance seen on video-backed scenes.
+/// and the WPE Windows shader math). Sampling these as `_srgb` would
+/// compound with the output attachment's sRGB encode on the way out and
+/// produce the "over-exposed" appearance seen on video-backed scenes.
+///
+/// Lifecycle: the player stays paused after `init` so the renderer's
+/// `applyPerformanceProfile(currentProfile)` (called once textures finish
+/// loading) decides whether to start it. Starting in `init` would let the
+/// video drift ahead of the rest of the scene's first-frame setup and
+/// would also ignore a pre-load `.suspended` profile.
 @MainActor
 final class WPEVideoTextureSource {
-    private let device: MTLDevice
     private let textureCache: CVMetalTextureCache
     private let player: AVQueuePlayer
     private let videoOutput: AVPlayerItemVideoOutput
@@ -40,10 +45,11 @@ final class WPEVideoTextureSource {
     /// `invalidate()` so we don't leak temp `.mp4`s across scene swaps.
     private let cleanupURL: URL?
     /// `AVPlayerLooper` mints a fresh `AVPlayerItem` per loop iteration;
-    /// we need to attach `videoOutput` to each one. Weak-set so completed
-    /// items can be reclaimed without manual bookkeeping.
-    private let observedItems = NSHashTable<AVPlayerItem>.weakObjects()
+    /// `videoOutput` can only be attached to one item at a time, so we
+    /// remove it from the previous item before adding it to the new one.
+    private weak var attachedOutputItem: AVPlayerItem?
     private var latest: PublishedFrame?
+    private var isInvalidated = false
 
     private struct PublishedFrame {
         let texture: MTLTexture
@@ -63,7 +69,6 @@ final class WPEVideoTextureSource {
     }
 
     init(device: MTLDevice, videoURL: URL) throws {
-        self.device = device
         self.cleanupURL = videoURL
 
         var cache: CVMetalTextureCache?
@@ -119,15 +124,16 @@ final class WPEVideoTextureSource {
 
         self.playerLooper = AVPlayerLooper(player: queuePlayer, templateItem: playerItem)
 
-        // Bind the output to the looper's first concrete item; subsequent
-        // rotations are caught by `attachOutputIfNeeded` on each
-        // `texture(at:)` call.
+        // Bind the output to the looper's first concrete item; later
+        // rotations land via `attachOutputIfNeeded` on each `texture(at:)`
+        // call. Playback stays paused — the renderer drives play/pause
+        // through `applyPerformanceProfile`.
         attachOutputIfNeeded(to: queuePlayer.currentItem ?? playerItem)
-        queuePlayer.play()
     }
 
     func texture(at time: TimeInterval) -> MTLTexture? {
         _ = time   // Wall-clock pacing comes from AVPlayer, not the scene clock.
+        guard !isInvalidated else { return nil }
         attachOutputIfNeeded(to: player.currentItem)
 
         let host = CACurrentMediaTime()
@@ -145,6 +151,7 @@ final class WPEVideoTextureSource {
     }
 
     func applyPerformanceProfile(_ profile: WallpaperPerformanceProfile) {
+        guard !isInvalidated else { return }
         switch profile {
         case .quality:
             player.play()
@@ -154,7 +161,14 @@ final class WPEVideoTextureSource {
     }
 
     func invalidate() {
+        guard !isInvalidated else { return }
+        isInvalidated = true
+        playerLooper.disableLooping()
         player.pause()
+        if let item = attachedOutputItem {
+            item.remove(videoOutput)
+            attachedOutputItem = nil
+        }
         player.removeAllItems()
         latest = nil
         CVMetalTextureCacheFlush(textureCache, 0)
@@ -166,9 +180,12 @@ final class WPEVideoTextureSource {
     // MARK: - Internals
 
     private func attachOutputIfNeeded(to item: AVPlayerItem?) {
-        guard let item, !observedItems.contains(item) else { return }
+        guard let item, item !== attachedOutputItem else { return }
+        if let previous = attachedOutputItem {
+            previous.remove(videoOutput)
+        }
         item.add(videoOutput)
-        observedItems.add(item)
+        attachedOutputItem = item
     }
 
     private func publish(pixelBuffer: CVPixelBuffer) {
@@ -206,6 +223,21 @@ final class WPEVideoTextureSource {
         label: "app.livewallpaper.wpe.video.in-memory-loader",
         qos: .userInitiated
     )
+
+    // MARK: - Testing seam
+
+    #if DEBUG
+    /// Underlying player's current item time, in seconds. Exposed for
+    /// pacing tests that need to assert "after 250 ms wall-clock the player
+    /// has advanced ~250 ms, not 5 seconds" — i.e. that we're not back on
+    /// the old `AVAssetReader` unpaced loop.
+    var currentItemPlaybackSeconds: TimeInterval {
+        let time = player.currentTime()
+        guard time.isValid, !time.isIndefinite else { return 0 }
+        let seconds = time.seconds
+        return seconds.isFinite ? seconds : 0
+    }
+    #endif
 }
 
 extension WPEVideoTextureSource: WPEDynamicTextureSource {}

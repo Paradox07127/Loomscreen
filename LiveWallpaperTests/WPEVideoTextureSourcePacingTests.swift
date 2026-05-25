@@ -20,6 +20,24 @@ import Testing
 @Suite("WPEVideoTextureSource pacing", .serialized)
 struct WPEVideoTextureSourcePacingTests {
 
+    @Test("Stays paused until applyPerformanceProfile(.quality) — no auto-start in init")
+    func staysPausedUntilProfileApplied() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let videoURL = try await SyntheticVideoFixture.writeMP4(
+            durationSeconds: 1.0,
+            frameRate: 24
+        )
+        defer { try? FileManager.default.removeItem(at: videoURL) }
+
+        let source = try WPEVideoTextureSource(device: device, videoURL: videoURL)
+        defer { source.invalidate() }
+
+        // Give AVPlayer time to load the asset. If init had called play()
+        // the playhead would have advanced past 0 by now.
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(source.currentItemPlaybackSeconds == 0, "Source must not auto-start in init — renderer drives play/pause via applyPerformanceProfile")
+    }
+
     @Test("AVPlayer-backed source publishes a frame within a bounded wall-clock window")
     func publishesFrameWithinBoundedDelay() async throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
@@ -31,14 +49,51 @@ struct WPEVideoTextureSourcePacingTests {
 
         let source = try WPEVideoTextureSource(device: device, videoURL: videoURL)
         defer { source.invalidate() }
+        source.applyPerformanceProfile(.quality)
 
         let texture = try await pollForTexture(from: source, timeout: 2.0)
         try #require(texture != nil, "AVPlayer-backed source must produce a frame within 2s")
         #expect(texture?.pixelFormat == .bgra8Unorm, "Frames must stay in raw RGBA8 space — no sRGB double-encode")
     }
 
-    @Test("Suspending leaves the source idle; resuming brings frames back")
-    func suspendThenResume() async throws {
+    @Test("Playhead advances on the wall clock — not faster (the old AVAssetReader bug)")
+    func playheadAdvancesAtRealTime() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        // 4s clip so the playhead has a long, monotonic window to land in.
+        let videoURL = try await SyntheticVideoFixture.writeMP4(
+            durationSeconds: 4.0,
+            frameRate: 24
+        )
+        defer { try? FileManager.default.removeItem(at: videoURL) }
+
+        let source = try WPEVideoTextureSource(device: device, videoURL: videoURL)
+        defer { source.invalidate() }
+        source.applyPerformanceProfile(.quality)
+
+        // Wait for the first frame to confirm the player is actually
+        // playing, then measure how far the playhead advances over a
+        // controlled wall-clock window.
+        try #require(try await pollForTexture(from: source, timeout: 2.0) != nil)
+        let startSeconds = source.currentItemPlaybackSeconds
+
+        let measurementWindow: TimeInterval = 0.6
+        try await Task.sleep(for: .milliseconds(Int(measurementWindow * 1_000)))
+
+        let endSeconds = source.currentItemPlaybackSeconds
+        let advanced = endSeconds - startSeconds
+
+        // The unpaced `while true { copyNextSampleBuffer() }` regression
+        // would let the playhead race past the wall-clock delta by 2-8×.
+        // Cap at 2× the measurement window with a generous floor to allow
+        // AVPlayer's startup jitter (first-frame buffering pause).
+        #expect(advanced <= measurementWindow * 2.0,
+                "Playhead advanced \(advanced)s over \(measurementWindow)s wall-clock — AVPlayer pacing regression?")
+        #expect(advanced >= 0.05,
+                "Playhead did not advance at all (\(advanced)s) — player is stuck/paused")
+    }
+
+    @Test("Suspending freezes the playhead; resuming starts it again")
+    func suspendFreezesPlayhead() async throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let videoURL = try await SyntheticVideoFixture.writeMP4(
             durationSeconds: 2.0,
@@ -48,19 +103,23 @@ struct WPEVideoTextureSourcePacingTests {
 
         let source = try WPEVideoTextureSource(device: device, videoURL: videoURL)
         defer { source.invalidate() }
-
-        // Warm-up: first frame proves the player is running.
-        _ = try await pollForTexture(from: source, timeout: 2.0)
-
-        // Suspending must not throw or invalidate the cached frame.
-        source.applyPerformanceProfile(.suspended)
-        let cachedAfterSuspend = source.texture(at: 0)
-        #expect(cachedAfterSuspend != nil, "Suspend keeps the last published frame in cache")
-
-        // Resuming must accept .quality again without re-init.
         source.applyPerformanceProfile(.quality)
-        let texture = try await pollForTexture(from: source, timeout: 2.0)
-        #expect(texture != nil, "Resuming the source must yield fresh frames")
+
+        _ = try await pollForTexture(from: source, timeout: 2.0)
+        source.applyPerformanceProfile(.suspended)
+        let pausedAt = source.currentItemPlaybackSeconds
+
+        try await Task.sleep(for: .milliseconds(300))
+        let stillPausedAt = source.currentItemPlaybackSeconds
+        #expect(abs(stillPausedAt - pausedAt) < 0.05,
+                "Suspend must freeze the playhead (was \(pausedAt)s, now \(stillPausedAt)s)")
+        #expect(source.texture(at: 0) != nil, "Cached frame must survive suspend")
+
+        source.applyPerformanceProfile(.quality)
+        try await Task.sleep(for: .milliseconds(300))
+        let resumedAt = source.currentItemPlaybackSeconds
+        #expect(resumedAt > pausedAt,
+                "Resume must advance the playhead past the suspend point (paused at \(pausedAt)s, now at \(resumedAt)s)")
     }
 
     @Test("invalidate() drops the cached frame and removes the staged temp file")
@@ -72,6 +131,7 @@ struct WPEVideoTextureSourcePacingTests {
         )
 
         let source = try WPEVideoTextureSource(device: device, videoURL: videoURL)
+        source.applyPerformanceProfile(.quality)
         _ = try await pollForTexture(from: source, timeout: 2.0)
         #expect(FileManager.default.fileExists(atPath: videoURL.path))
 
@@ -79,6 +139,23 @@ struct WPEVideoTextureSourcePacingTests {
 
         #expect(source.texture(at: 0) == nil, "invalidate() must clear the cached frame")
         #expect(FileManager.default.fileExists(atPath: videoURL.path) == false, "invalidate() must remove the staged temp file")
+    }
+
+    @Test("invalidate() is idempotent — second call is a no-op")
+    func invalidateIsIdempotent() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let videoURL = try await SyntheticVideoFixture.writeMP4(
+            durationSeconds: 1.0,
+            frameRate: 24
+        )
+        defer { try? FileManager.default.removeItem(at: videoURL) }
+
+        let source = try WPEVideoTextureSource(device: device, videoURL: videoURL)
+        source.invalidate()
+        // Second call must not crash, throw, or otherwise undo invariants.
+        source.invalidate()
+        source.applyPerformanceProfile(.quality)   // Also a no-op after invalidate.
+        #expect(source.texture(at: 0) == nil)
     }
 
     // MARK: - Helpers

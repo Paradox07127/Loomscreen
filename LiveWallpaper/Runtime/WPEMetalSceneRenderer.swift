@@ -1101,12 +1101,17 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
             videoPayload.bytes,
             cacheDirectory: Self.videoCacheDirectory()
         )
-        let source = try WPEVideoTextureSource(
-            device: executor.textureSourceDevice,
-            videoURL: url
-        )
-        _ = label
-        return source
+        do {
+            let source = try WPEVideoTextureSource(
+                device: executor.textureSourceDevice,
+                videoURL: url
+            )
+            _ = label
+            return source
+        } catch {
+            try? FileManager.default.removeItem(at: url)
+            throw error
+        }
     }
 
     private static func videoCacheDirectory() -> URL {
