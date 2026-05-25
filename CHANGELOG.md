@@ -34,5 +34,5 @@ First public release. Will track:
 - Loomscreen-specific app icon
 - MIT-licensed source
 
-[Unreleased]: https://github.com/OWNER/REPO/compare/loomscreen-v1.0.0...HEAD
-[1.0.0]: https://github.com/OWNER/REPO/releases/tag/loomscreen-v1.0.0
+[Unreleased]: https://github.com/Paradox07127/LiveWallpaper/compare/loomscreen-v1.0.0...HEAD
+[1.0.0]: https://github.com/Paradox07127/LiveWallpaper/releases/tag/loomscreen-v1.0.0

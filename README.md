@@ -15,7 +15,7 @@ This repository is the source of two macOS SKUs that ship from a single codebase
 
 ### Download
 
-> **Stable releases:** https://github.com/OWNER/REPO/releases  *(placeholder — replace with the canonical URL once the open-source ship date is set).*
+> **Stable releases:** https://github.com/Paradox07127/LiveWallpaper/releases  *(placeholder — replace with the canonical URL once the open-source ship date is set).*
 
 1. Download the latest `Loomscreen-x.y.z.dmg` from GitHub Releases.
 2. Open the DMG and drag **Loomscreen.app** into `/Applications`.
