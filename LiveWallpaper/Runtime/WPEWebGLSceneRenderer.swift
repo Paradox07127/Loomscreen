@@ -279,6 +279,29 @@ final class WPEWebGLSceneRenderer: NSObject, WPESceneRenderer, WKNavigationDeleg
                 projection: projection
             )
         )
+
+        // Black-screen forensics: when load succeeds but the canvas
+        // shows (0,0,0,255) — i.e. all FBOs have content per the
+        // per-FBO pixel dump but the final pass writes black — the only
+        // remaining unknown is what the shader source ACTUALLY contains
+        // after Swift's prelude injection + include expansion. Dump
+        // every pass's processed fragment source under the active
+        // scene-debug session so we can read the real GL input. Cheap;
+        // disk write happens once per scene load.
+        if let renderGraph = envelope.renderGraph {
+            for layer in renderGraph.layers {
+                for (passIdx, pass) in layer.passes.enumerated() {
+                    let header = "// pass=\(pass.id) shader=\(pass.shaderName) idx=\(passIdx)\n// combos=\(pass.combos)\n// constants=\(pass.constants.keys.sorted())\n"
+                    let combined = header + "\n// --- VERTEX ---\n" + pass.vertexSource + "\n// --- FRAGMENT ---\n" + pass.fragmentSource
+                    WPESceneDebugArtifacts.shared.dumpRawPassSource(
+                        passID: pass.id,
+                        shader: pass.shaderName,
+                        source: combined
+                    )
+                }
+            }
+        }
+
         bridge.loadScene(envelope)
 
         try await waitForSceneLoaded()

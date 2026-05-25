@@ -296,6 +296,33 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
         }
     }
 
+    /// Dump a pass's processed vertex+fragment source as it goes out
+    /// over the WebGL bridge. Used for black-screen forensics when the
+    /// pipeline loads successfully but produces wrong pixels — gives us
+    /// the exact GLSL string GL receives, including the Swift prelude
+    /// + include expansion + combo defines.
+    func dumpRawPassSource(passID: String, shader: String, source: String) {
+        guard isEnabled else { return }
+        sessionLock.lock()
+        let folderURL = session?.folderURL
+        sessionLock.unlock()
+        guard let folderURL else { return }
+        let passesFolder = folderURL.appendingPathComponent("pass-source", isDirectory: true)
+        let baseName = safeFileName("\(passID)-\(shader)")
+        let url = passesFolder.appendingPathComponent("\(baseName).glsl")
+        writeQueue.async {
+            do {
+                try FileManager.default.createDirectory(at: passesFolder, withIntermediateDirectories: true)
+                try source.write(to: url, atomically: true, encoding: .utf8)
+            } catch {
+                Logger.warning(
+                    "Scene debug pass-source dump failed: \(error)",
+                    category: .wpeRender
+                )
+            }
+        }
+    }
+
     /// Drop a simple text payload (named-FBO miss list, texture diagnostics,
     /// etc.) into the current session folder.
     func recordNote(name: String, contents: String) {
