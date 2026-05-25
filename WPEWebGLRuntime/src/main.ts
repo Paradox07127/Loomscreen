@@ -219,6 +219,23 @@ function bootstrap(): void {
         `drawing=${gl.drawingBufferWidth}x${gl.drawingBufferHeight} ` +
         `client=${canvas.clientWidth}x${canvas.clientHeight}`
       );
+      // Read the center pixel of the default framebuffer. This is the
+      // GROUND-TRUTH for what the GPU actually output — distinguishes
+      // "shader produced black pixels" from "everything works but
+      // something composites the canvas away".
+      try {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        const px = new Uint8Array(4);
+        const cx = Math.floor(gl.drawingBufferWidth / 2);
+        const cy = Math.floor(gl.drawingBufferHeight / 2);
+        gl.readPixels(cx, cy, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+        sendDiagnostic(
+          "canvas-pixel",
+          `first-tick center=(${cx},${cy}) rgba=(${px[0]},${px[1]},${px[2]},${px[3]})`
+        );
+      } catch (e) {
+        sendDiagnostic("canvas-pixel", `readPixels failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
     }
 
     schedule();
