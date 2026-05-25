@@ -221,6 +221,117 @@ struct WPERenderPipelineBuilderTests {
         #expect(shader.isBuiltin)
     }
 
+    @Test("Prefers scene-provided source for WPE effect aliases")
+    func prefersSceneProvidedSourceForWPEEffectAliases() throws {
+        let fixture = try makeFixture(files: [
+            "shaders/effects/shake.vert": """
+            attribute vec3 a_Position;
+            void main() { gl_Position = vec4(a_Position, 1.0); }
+            """,
+            "shaders/effects/shake.frag": """
+            uniform sampler2D g_Texture0;
+            void main() {
+                vec4 sampled = texSample2D(g_Texture0, vec2(0.5));
+                gl_FragColor = sampled + vec4(0.123, 0.0, 0.0, 0.0);
+            }
+            """
+        ])
+        defer { fixture.cleanup() }
+
+        let graph = WPERenderGraph(layers: [
+            WPERenderLayer(
+                objectID: "1",
+                objectName: "Layer",
+                imagePath: "materials/base.png",
+                materialPath: nil,
+                compositeA: "a",
+                compositeB: "b",
+                localFBOs: [],
+                passes: [
+                    WPERenderPass(
+                        id: "1.0",
+                        phase: .effect(file: "effects/shake/effect.json"),
+                        shader: "effects/shake",
+                        source: .image("materials/base.png"),
+                        target: .scene,
+                        textures: [:],
+                        binds: [:],
+                        constants: [:],
+                        combos: [:],
+                        blending: "normal",
+                        cullMode: "nocull",
+                        depthTest: "disabled",
+                        depthWrite: "disabled"
+                    )
+                ]
+            )
+        ])
+
+        let pipeline = try WPERenderPipelineBuilder(cacheRootURL: fixture.root).build(graph: graph)
+        let shader = try #require(pipeline.layers.first?.passes.first?.shader)
+
+        #expect(shader.isBuiltin == false)
+        #expect(shader.fragmentSource.contains("0.123"))
+    }
+
+    @Test("Expands WPE imageblending mode 31 as additive blending")
+    func expandsWPEImageBlendingMode31AsAdditiveBlending() throws {
+        let fixture = try makeFixture(files: [
+            "shaders/effects/lightblend.vert": """
+            attribute vec3 a_Position;
+            void main() { gl_Position = vec4(a_Position, 1.0); }
+            """,
+            "shaders/effects/lightblend.frag": """
+            // [COMBO] {"material":"ui_editor_properties_blend_mode","combo":"BLENDMODE","type":"imageblending","default":31}
+            #include "common_blending.h"
+            uniform sampler2D g_Texture0;
+            void main() {
+                vec4 albedo = texSample2D(g_Texture0, vec2(0.5));
+                gl_FragColor = vec4(ApplyBlending(BLENDMODE, albedo.rgb, vec3(0.25), 1.0), albedo.a);
+            }
+            """
+        ])
+        defer { fixture.cleanup() }
+
+        let graph = WPERenderGraph(layers: [
+            WPERenderLayer(
+                objectID: "1",
+                objectName: "Layer",
+                imagePath: "materials/base.png",
+                materialPath: nil,
+                compositeA: "a",
+                compositeB: "b",
+                localFBOs: [],
+                passes: [
+                    WPERenderPass(
+                        id: "1.0",
+                        phase: .effect(file: "effects/lightblend/effect.json"),
+                        shader: "effects/lightblend",
+                        source: .image("materials/base.png"),
+                        target: .scene,
+                        textures: [:],
+                        binds: [:],
+                        constants: [:],
+                        combos: [:],
+                        blending: "normal",
+                        cullMode: "nocull",
+                        depthTest: "disabled",
+                        depthWrite: "disabled"
+                    )
+                ]
+            )
+        ])
+
+        let pipeline = try WPERenderPipelineBuilder(cacheRootURL: fixture.root).build(graph: graph)
+        let pass = try #require(pipeline.layers.first?.passes.first)
+        let shader = try #require(pass.shader)
+
+        #expect(pass.comboValues["BLENDMODE"] == 31)
+        #expect(shader.fragmentSource.contains("#define BLENDMODE 31"))
+        #expect(shader.fragmentSource.contains("blendMode == 31"))
+        #expect(shader.fragmentSource.contains("#include") == false)
+    }
+
     @Test("Builds built-in solid color shader")
     func buildsBuiltinSolidColorShader() throws {
         let fixture = try makeFixture(files: [:])
@@ -360,6 +471,63 @@ struct WPERenderPipelineBuilderTests {
         #expect(pass.textureBindings[1] == .asset("util/noise"))
         #expect(pass.textureBindings[2] == .asset("masks/flow"))
         #expect(pass.uniformValues["u_Strength"]?.numberValue == 0.75)
+    }
+
+    @Test("Sampler defaults honor shader require conditions")
+    func samplerDefaultsHonorShaderRequireConditions() throws {
+        let fixture = try makeFixture(files: [
+            "shaders/effects/conditional.vert": """
+            attribute vec3 a_Position;
+            void main() { gl_Position = vec4(a_Position, 1.0); }
+            """,
+            "shaders/effects/conditional.frag": """
+            // [COMBO] {"combo":"RENDERING","default":0}
+            uniform sampler2D g_Texture1; // {"default":"gradient/gradient_iridescent","require":{"RENDERING":1}}
+            void main() { gl_FragColor = vec4(1.0); }
+            """
+        ])
+        defer { fixture.cleanup() }
+
+        func buildPass(combos: [String: Int]) throws -> WPEPreparedRenderPass {
+            let graph = WPERenderGraph(layers: [
+                WPERenderLayer(
+                    objectID: "1",
+                    objectName: "Layer",
+                    imagePath: "materials/base.png",
+                    materialPath: nil,
+                    compositeA: "a",
+                    compositeB: "b",
+                    localFBOs: [],
+                    passes: [
+                        WPERenderPass(
+                            id: "1.0",
+                            phase: .effect(file: "effects/conditional/effect.json"),
+                            shader: "effects/conditional",
+                            source: .image("materials/base.png"),
+                            target: .scene,
+                            textures: [:],
+                            binds: [:],
+                            constants: [:],
+                            combos: combos,
+                            blending: "normal",
+                            cullMode: "nocull",
+                            depthTest: "disabled",
+                            depthWrite: "disabled"
+                        )
+                    ]
+                )
+            ])
+            let pipeline = try WPERenderPipelineBuilder(cacheRootURL: fixture.root).build(graph: graph)
+            return try #require(pipeline.layers.first?.passes.first)
+        }
+
+        let inactivePass = try buildPass(combos: [:])
+        #expect(inactivePass.comboValues["RENDERING"] == 0)
+        #expect(inactivePass.textureBindings[1] == nil)
+
+        let activePass = try buildPass(combos: ["RENDERING": 1])
+        #expect(activePass.comboValues["RENDERING"] == 1)
+        #expect(activePass.textureBindings[1] == WPETextureReference.asset("gradient/gradient_iridescent"))
     }
 
     @Test("Comments require directives and emits WPE compatibility prelude")

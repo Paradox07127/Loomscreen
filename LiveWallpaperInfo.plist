@@ -28,6 +28,8 @@
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>MetalCaptureEnabled</key>
+	<true/>
 	<key>NSAccentColorName</key>
 	<string>AccentColor</string>
 	<key>NSDesktopFolderUsageDescription</key>

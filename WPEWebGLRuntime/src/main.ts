@@ -32,6 +32,7 @@ interface RuntimeState {
 // needs the first frame to flip `hasPresentedFrame`; subsequent reports keep
 // the corpus harness FPS estimate fresh without flooding the WK bridge.
 const FRAME_REPORT_INTERVAL_MS = 1000;
+const FRAME_PROBE_INDICES = new Set([1, 120, 300]);
 
 function bootstrap(): void {
   const canvasEl = document.getElementById("wpe-canvas") as HTMLCanvasElement | null;
@@ -69,6 +70,7 @@ function bootstrap(): void {
     frameIndex: 0,
     lastFrameReportAt: 0
   };
+  let firstCanvasProbeHash: string | null = null;
 
   const api: HostBridgeApi = {
     loadScene(rawEnvelope) {
@@ -189,14 +191,19 @@ function bootstrap(): void {
     const pointer = runtime.state?.pointer ?? undefined;
     const audioSpectrum = runtime.state?.audioSpectrum ?? undefined;
 
+    const nextFrameIndex = runtime.frameIndex + 1;
     if (executor) {
-      executor.drawFrame(t, { pointer, audioSpectrum });
+      executor.drawFrame(
+        t,
+        { pointer, audioSpectrum },
+        { frameIndex: nextFrameIndex, enabled: FRAME_PROBE_INDICES.has(nextFrameIndex) }
+      );
     } else {
       gl.clearColor(0, 0, 0, 1);
       gl.clear(gl.COLOR_BUFFER_BIT);
     }
 
-    runtime.frameIndex += 1;
+    runtime.frameIndex = nextFrameIndex;
     const now = performance.now();
     // First frame must report so the Swift inspector flips
     // `hasPresentedFrame` and exits the loading spinner. Subsequent reports
@@ -247,12 +254,61 @@ function bootstrap(): void {
         sendDiagnostic("fbo-pixel", `dumpFBOCenterPixels failed: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
+    if (FRAME_PROBE_INDICES.has(runtime.frameIndex)) {
+      try {
+        const probe = readCanvasProbe(gl);
+        if (firstCanvasProbeHash === null) {
+          firstCanvasProbeHash = probe.hash;
+        }
+        sendDiagnostic(
+          "canvas-probe",
+          `frame=${runtime.frameIndex} t=${t.toFixed(3)} hash=${probe.hash} ` +
+          `changedFromFirst=${probe.hash !== firstCanvasProbeHash} samples=${probe.samples}`
+        );
+      } catch (e) {
+        sendDiagnostic("canvas-probe", `read failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
 
     schedule();
   }
 
   sendReady();
   void loseContext;
+}
+
+function readCanvasProbe(gl: WebGL2RenderingContext): { hash: string; samples: string } {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  const width = Math.max(1, gl.drawingBufferWidth);
+  const height = Math.max(1, gl.drawingBufferHeight);
+  const points: Array<[number, number]> = [
+    [0.25, 0.25],
+    [0.50, 0.25],
+    [0.75, 0.25],
+    [0.25, 0.50],
+    [0.50, 0.50],
+    [0.75, 0.50],
+    [0.25, 0.75],
+    [0.50, 0.75],
+    [0.75, 0.75]
+  ];
+  const px = new Uint8Array(4);
+  let hash = 2166136261;
+  const sampleText: string[] = [];
+  for (const [fx, fy] of points) {
+    const x = Math.min(width - 1, Math.max(0, Math.floor(width * fx)));
+    const y = Math.min(height - 1, Math.max(0, Math.floor(height * fy)));
+    gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    sampleText.push(`${x},${y}:${px[0]},${px[1]},${px[2]},${px[3]}`);
+    for (const channel of px) {
+      hash ^= channel;
+      hash = Math.imul(hash, 16777619) >>> 0;
+    }
+  }
+  return {
+    hash: hash.toString(16).padStart(8, "0"),
+    samples: sampleText.join("|")
+  };
 }
 
 if (document.readyState === "loading") {

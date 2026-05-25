@@ -231,11 +231,10 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
         }
     }
 
-    /// Classifies a `performLoad()` failure as Metal-specific (where the
-    /// WebGL renderer might succeed) versus generic (where both backends
-    /// would hit the same problem). Returning a non-nil reason promotes the
-    /// error to `SceneRenderingError.metalRendererUnsupported`, which the
-    /// session uses as the fallback trigger.
+    /// Classifies a `performLoad()` failure as Metal-specific versus generic
+    /// (where both backends would hit the same problem). Returning a non-nil
+    /// reason promotes the error to `SceneRenderingError.metalRendererUnsupported`;
+    /// only automatic sessions use that as a WebGL fallback trigger.
     private static func metalFallbackReason(for error: Error) -> String? {
         switch error {
         case let context as WPEMetalTextureLoadContextError:
@@ -378,6 +377,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
         onProgress?("Loading textures")
         try await loadTextures(for: pipeline)
         debugStage("textures.load.done", "loaded=\(loadedTextures.count) dynamic=\(dynamicTextureSources.count)")
+        dumpLoadedTexturesIfRequested()
         try Task.checkCancellation()
 
         debugStage("particles.load", "begin")
@@ -403,9 +403,14 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
 
         debugStage("render.firstFrame", "begin")
         onProgress?("Rendering scene")
+
+        let capture = beginGPUCaptureIfRequested()
         outputTexture = try renderCurrentFrame()
+        capture?.stop()
+
         if let outputTexture {
             cachedSnapshot = snapshotter.snapshot(from: outputTexture)
+            dumpOutputTextureIfRequested(outputTexture)
         }
         hasPresentedFrame = true
         didLoad = true
@@ -414,6 +419,321 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
         debugStage("render.firstFrame.done", "size=\(outputTexture?.width ?? 0)x\(outputTexture?.height ?? 0) snapshot=\(cachedSnapshot == nil ? "none" : "saved")")
         _ = id
     }
+
+    /// Iterate every entry in `loadedTextures` and dump each to a PNG so we
+    /// can verify whether the source-image upload actually carried bytes to
+    /// the GPU. Same gate as the GPU trace + outputTexture dump.
+    private func dumpLoadedTexturesIfRequested() {
+        #if DEBUG
+        let wantedID = UserDefaults.standard.string(forKey: "WPEMetalCaptureScene")
+        guard let wantedID, !wantedID.isEmpty, wantedID == descriptor.workshopID else {
+            return
+        }
+        for (path, texture) in loadedTextures {
+            let safeName = path
+                .replacingOccurrences(of: "/", with: "_")
+                .replacingOccurrences(of: "\\", with: "_")
+            dumpTextureToPNG(texture, basename: "tex-\(safeName)")
+        }
+        #endif
+    }
+
+    #if DEBUG
+    private func dumpTextureToPNG(_ texture: MTLTexture, basename: String) {
+        guard texture.pixelFormat == .rgba8Unorm || texture.pixelFormat == .rgba8Unorm_srgb else {
+            Logger.warning(
+                "[WPEMetalCaptureScene] texture dump: unsupported pixel format \(texture.pixelFormat.rawValue) for \(basename)",
+                category: .wpeRender
+            )
+            return
+        }
+        let bytesPerPixel = 4
+        let bytesPerRow = texture.width * bytesPerPixel
+        var bytes = [UInt8](repeating: 0, count: bytesPerRow * texture.height)
+        texture.getBytes(
+            &bytes,
+            bytesPerRow: bytesPerRow,
+            from: MTLRegionMake2D(0, 0, texture.width, texture.height),
+            mipmapLevel: 0
+        )
+
+        guard let provider = CGDataProvider(data: Data(bytes) as CFData) else {
+            Logger.warning("[WPEMetalCaptureScene] texture dump: CGDataProvider failed for \(basename)", category: .wpeRender)
+            return
+        }
+        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+        guard let cgImage = CGImage(
+            width: texture.width,
+            height: texture.height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: bytesPerRow,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo,
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: false,
+            intent: .defaultIntent
+        ) else {
+            Logger.warning("[WPEMetalCaptureScene] texture dump: CGImage failed for \(basename)", category: .wpeRender)
+            return
+        }
+
+        let nsImage = NSImage(cgImage: cgImage, size: CGSize(width: texture.width, height: texture.height))
+        do {
+            let support = try FileManager.default.url(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: true
+            )
+            let dir = support
+                .appendingPathComponent("LiveWallpaper", isDirectory: true)
+                .appendingPathComponent("gpu-traces", isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let url = dir.appendingPathComponent(
+                "wpe-\(descriptor.workshopID)-\(basename)-\(texture.width)x\(texture.height).png"
+            )
+            guard let tiff = nsImage.tiffRepresentation,
+                  let bitmap = NSBitmapImageRep(data: tiff),
+                  let png = bitmap.representation(using: .png, properties: [:]) else {
+                Logger.warning("[WPEMetalCaptureScene] texture dump: PNG encode failed for \(basename)", category: .wpeRender)
+                return
+            }
+            try png.write(to: url)
+            Logger.notice("[WPEMetalCaptureScene] texture dump → \(url.path)", category: .wpeRender)
+        } catch {
+            Logger.warning(
+                "[WPEMetalCaptureScene] texture dump failed for \(basename): \(error.localizedDescription)",
+                category: .wpeRender
+            )
+        }
+    }
+    #endif
+
+    /// Writes the raw post-render `outputTexture` (the scene render output
+    /// *before* present blit) to disk as a PNG via a GPU blit into a
+    /// `.storageModeShared` `MTLBuffer` — the robust readback path for
+    /// large textures where `texture.getBytes(...)` can silently return
+    /// stale bytes on some driver/storage combos. Gated on the same
+    /// `WPEMetalCaptureScene` UserDefault as the GPU trace capture.
+    private func dumpOutputTextureIfRequested(_ texture: MTLTexture) {
+        #if DEBUG
+        let wantedID = UserDefaults.standard.string(forKey: "WPEMetalCaptureScene")
+        guard let wantedID, !wantedID.isEmpty, wantedID == descriptor.workshopID else {
+            return
+        }
+        let device = texture.device
+        guard texture.pixelFormat == .rgba8Unorm || texture.pixelFormat == .rgba8Unorm_srgb else {
+            Logger.warning(
+                "[WPEMetalCaptureScene] outputTexture dump: unsupported pixel format \(texture.pixelFormat.rawValue)",
+                category: .wpeRender
+            )
+            return
+        }
+        let bytesPerPixel = 4
+        let bytesPerRow = texture.width * bytesPerPixel
+        let totalBytes = bytesPerRow * texture.height
+        guard let buffer = device.makeBuffer(length: totalBytes, options: .storageModeShared) else {
+            Logger.warning("[WPEMetalCaptureScene] outputTexture dump: makeBuffer failed", category: .wpeRender)
+            return
+        }
+        guard let queue = device.makeCommandQueue(),
+              let cb = queue.makeCommandBuffer(),
+              let blit = cb.makeBlitCommandEncoder() else {
+            Logger.warning("[WPEMetalCaptureScene] outputTexture dump: cannot create blit encoder", category: .wpeRender)
+            return
+        }
+        blit.copy(
+            from: texture,
+            sourceSlice: 0,
+            sourceLevel: 0,
+            sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+            sourceSize: MTLSize(width: texture.width, height: texture.height, depth: 1),
+            to: buffer,
+            destinationOffset: 0,
+            destinationBytesPerRow: bytesPerRow,
+            destinationBytesPerImage: totalBytes
+        )
+        blit.endEncoding()
+        cb.commit()
+        cb.waitUntilCompleted()
+        guard cb.status == .completed else {
+            Logger.warning(
+                "[WPEMetalCaptureScene] outputTexture dump: blit failed (status=\(cb.status.rawValue))",
+                category: .wpeRender
+            )
+            return
+        }
+
+        let provider = CGDataProvider(dataInfo: nil, data: buffer.contents(), size: totalBytes) { _, _, _ in }
+        guard let provider else {
+            Logger.warning("[WPEMetalCaptureScene] outputTexture dump: CGDataProvider failed", category: .wpeRender)
+            return
+        }
+        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+        guard let cg = CGImage(
+            width: texture.width,
+            height: texture.height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: bytesPerRow,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo,
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: false,
+            intent: .defaultIntent
+        ) else {
+            Logger.warning("[WPEMetalCaptureScene] outputTexture dump: CGImage failed", category: .wpeRender)
+            return
+        }
+        let nsImage = NSImage(cgImage: cg, size: CGSize(width: texture.width, height: texture.height))
+        let fm = FileManager.default
+        do {
+            let support = try fm.url(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: true
+            )
+            let dir = support
+                .appendingPathComponent("LiveWallpaper", isDirectory: true)
+                .appendingPathComponent("gpu-traces", isDirectory: true)
+            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+            let url = dir.appendingPathComponent(
+                "wpe-\(descriptor.workshopID)-output-\(texture.width)x\(texture.height).png"
+            )
+            guard let tiff = nsImage.tiffRepresentation,
+                  let bitmap = NSBitmapImageRep(data: tiff),
+                  let png = bitmap.representation(using: .png, properties: [:]) else {
+                Logger.warning("[WPEMetalCaptureScene] outputTexture dump: PNG encode failed", category: .wpeRender)
+                return
+            }
+            try png.write(to: url)
+            // Also probe the buffer contents directly so we have a numeric
+            // sanity check independent of CG / PNG encoding: how many of the
+            // first 64 KB of bytes are non-zero.
+            let probe = buffer.contents().assumingMemoryBound(to: UInt8.self)
+            let probeLength = min(64 * 1024, totalBytes)
+            var nonZero = 0
+            for i in 0..<probeLength where probe[i] != 0 { nonZero += 1 }
+            Logger.notice(
+                "[WPEMetalCaptureScene] outputTexture dump → \(url.path) (first \(probeLength) bytes: \(nonZero) non-zero)",
+                category: .wpeRender
+            )
+        } catch {
+            Logger.warning(
+                "[WPEMetalCaptureScene] outputTexture dump failed: \(error.localizedDescription)",
+                category: .wpeRender
+            )
+        }
+        #endif
+    }
+
+    /// DEBUG-only `MTLCaptureManager` wrap around `renderCurrentFrame()`. When
+    /// `UserDefaults.standard.string(forKey: "WPEMetalCaptureScene")` matches
+    /// the active scene's workshopID, the render's `MTLCommandBuffer` is
+    /// captured to a `.gputrace` file under `/tmp` so a maintainer can open
+    /// it in Xcode and inspect every render-pass attachment, bound texture,
+    /// uniform buffer, and translated MSL source for that scene.
+    ///
+    /// Triggered via:
+    ///   defaults write Taijia.LiveWallpaper WPEMetalCaptureScene 3669681034
+    /// (then reload the wallpaper). Clear with:
+    ///   defaults delete Taijia.LiveWallpaper WPEMetalCaptureScene
+    private func beginGPUCaptureIfRequested() -> GPUCaptureHandle? {
+        #if DEBUG
+        let wantedID = UserDefaults.standard.string(forKey: "WPEMetalCaptureScene")
+        guard let wantedID, !wantedID.isEmpty, wantedID == descriptor.workshopID else {
+            return nil
+        }
+        let manager = MTLCaptureManager.shared()
+        guard manager.supportsDestination(.gpuTraceDocument) else {
+            Logger.warning(
+                "[WPEMetalCaptureScene] device does not support gpuTraceDocument capture; ensure MetalCaptureEnabled is YES in Info.plist and Xcode is attached.",
+                category: .wpeRender
+            )
+            return nil
+        }
+        let descriptorObj = MTLCaptureDescriptor()
+        descriptorObj.captureObject = executor.textureSourceDevice
+        descriptorObj.destination = .gpuTraceDocument
+        let traceURL: URL
+        do {
+            traceURL = try Self.makeCaptureURL(workshopID: descriptor.workshopID)
+        } catch {
+            Logger.warning(
+                "[WPEMetalCaptureScene] could not create capture directory: \(error.localizedDescription)",
+                category: .wpeRender
+            )
+            return nil
+        }
+        descriptorObj.outputURL = traceURL
+        do {
+            try manager.startCapture(with: descriptorObj)
+            Logger.notice(
+                "[WPEMetalCaptureScene] capture started for \(descriptor.workshopID) → \(traceURL.path)",
+                category: .wpeRender
+            )
+            WPESceneDebugArtifacts.shared.appendLog(
+                "[capture.start] gputrace → \(traceURL.path)",
+                level: .notice
+            )
+            return GPUCaptureHandle(manager: manager, outputURL: traceURL)
+        } catch {
+            Logger.warning(
+                "[WPEMetalCaptureScene] capture start failed: \(error.localizedDescription)",
+                category: .wpeRender
+            )
+            return nil
+        }
+        #else
+        return nil
+        #endif
+    }
+
+    #if DEBUG
+    private static func makeCaptureURL(workshopID: String) throws -> URL {
+        let fm = FileManager.default
+        let support = try fm.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let dir = support
+            .appendingPathComponent("LiveWallpaper", isDirectory: true)
+            .appendingPathComponent("gpu-traces", isDirectory: true)
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let suffix = UUID().uuidString.prefix(8)
+        return dir.appendingPathComponent("wpe-\(workshopID)-\(suffix).gputrace")
+    }
+
+    private struct GPUCaptureHandle {
+        let manager: MTLCaptureManager
+        let outputURL: URL
+
+        func stop() {
+            guard manager.isCapturing else { return }
+            manager.stopCapture()
+            Logger.notice(
+                "[WPEMetalCaptureScene] capture written → \(outputURL.path)",
+                category: .wpeRender
+            )
+            WPESceneDebugArtifacts.shared.appendLog(
+                "[capture.stop] gputrace ready at \(outputURL.path)",
+                level: .notice
+            )
+        }
+    }
+    #else
+    private struct GPUCaptureHandle {
+        func stop() {}
+    }
+    #endif
 
     /// One-shot debug breadcrumb shared by every load-path stage. Emits to
     /// the `wpeRender` os.Logger category AND mirrors into the per-scene

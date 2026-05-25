@@ -32,9 +32,8 @@ public enum SceneRenderingError: Error, LocalizedError, Equatable, Sendable {
     case resourceFailed(SceneLoadDiagnostic)
     /// Raised by the Metal renderer when the failure is specifically a
     /// Metal-pipeline gap (shader translator missing, unsupported render
-    /// target, previous-frame effect). The session uses this as the
-    /// fallback signal: under the dual-backend strategy it tears down the
-    /// Metal renderer and retries the load on the WebGL renderer instead.
+    /// target, previous-frame effect). Automatic routing can use this as a
+    /// fallback signal; user-pinned Metal surfaces the error directly.
     case metalRendererUnsupported(reason: String)
 
     public var errorDescription: String? {

@@ -31,8 +31,8 @@ import Foundation
 /// glslang+SPIRV-Cross stack has been retired (Phase 12); shaders this
 /// transpiler can't handle throw `.translationFailed`, which the
 /// `WPEShaderCompiling` dispatcher surfaces as
-/// `metalRendererUnsupported` so `SceneWallpaperSession` can fall back
-/// to the WebGL runtime instead.
+/// `metalRendererUnsupported`. Automatic sessions can fall back to WebGL;
+/// user-pinned Metal surfaces the Metal error.
 struct WPEShaderTranspiler {
 
     /// Each uniform occupies one or more float4 slots. Packing rule

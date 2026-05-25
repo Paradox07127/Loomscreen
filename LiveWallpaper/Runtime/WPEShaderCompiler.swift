@@ -8,8 +8,8 @@ import Metal
 /// the pure-Swift `WPEShaderTranspiler` (Phase-12 dual-backend strategy
 /// retired the SPIRV-Cross/glslang XCFramework). Shaders the transpiler
 /// can't handle throw `.translationFailed`, which surfaces as
-/// `SceneRenderingError.metalRendererUnsupported` and trips the WebGL
-/// fallback in `SceneWallpaperSession`.
+/// `SceneRenderingError.metalRendererUnsupported`; automatic sessions can
+/// use that as the WebGL fallback signal.
 protocol WPEShaderCompiling: Sendable {
     func compile(_ request: WPEShaderCompileRequest) throws -> WPEShaderCompileResult
 }

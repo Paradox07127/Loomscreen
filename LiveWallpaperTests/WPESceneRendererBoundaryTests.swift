@@ -65,6 +65,60 @@ struct WPESceneRendererBoundaryTests {
         try await waitForSessionLoad(session)
     }
 
+    @Test("User-pinned Metal does not install a WebGL fallback")
+    func userPinnedMetalDoesNotInstallWebGLFallback() throws {
+        _ = try #require(MTLCreateSystemDefaultDevice())
+        let defaults = UserDefaults.standard
+        let originalSelection = defaults.string(forKey: WPERuntimeSelection.defaultsKey)
+        defaults.set(WPERuntimeSelection.metal.rawValue, forKey: WPERuntimeSelection.defaultsKey)
+        defer {
+            if let originalSelection {
+                defaults.set(originalSelection, forKey: WPERuntimeSelection.defaultsKey)
+            } else {
+                defaults.removeObject(forKey: WPERuntimeSelection.defaultsKey)
+            }
+        }
+
+        let fixture = try SceneFixture.cacheBackedInvalidSceneJSON()
+        defer { fixture.cleanup() }
+
+        let session = try #require(AmbientWallpaperSessionBuilder().makeSceneSession(
+            descriptor: fixture.descriptor,
+            frame: CGRect(x: 0, y: 0, width: 64, height: 64),
+            applicationSupportRootURL: fixture.root
+        ))
+        defer { session.cleanup() }
+
+        #expect(!sessionHasFallbackFactory(session))
+    }
+
+    @Test("Automatic Metal routing installs a WebGL fallback")
+    func automaticMetalRoutingInstallsWebGLFallback() throws {
+        _ = try #require(MTLCreateSystemDefaultDevice())
+        let defaults = UserDefaults.standard
+        let originalSelection = defaults.string(forKey: WPERuntimeSelection.defaultsKey)
+        defaults.set(WPERuntimeSelection.automatic.rawValue, forKey: WPERuntimeSelection.defaultsKey)
+        defer {
+            if let originalSelection {
+                defaults.set(originalSelection, forKey: WPERuntimeSelection.defaultsKey)
+            } else {
+                defaults.removeObject(forKey: WPERuntimeSelection.defaultsKey)
+            }
+        }
+
+        let fixture = try SceneFixture.cacheBackedInvalidSceneJSON()
+        defer { fixture.cleanup() }
+
+        let session = try #require(AmbientWallpaperSessionBuilder().makeSceneSession(
+            descriptor: fixture.descriptor,
+            frame: CGRect(x: 0, y: 0, width: 64, height: 64),
+            applicationSupportRootURL: fixture.root
+        ))
+        defer { session.cleanup() }
+
+        #expect(sessionHasFallbackFactory(session))
+    }
+
     private func waitForSessionLoad(_ session: SceneWallpaperSession) async throws {
         for _ in 0..<50 {
             if session.sceneRenderer?.hasPresentedFrame == true {
@@ -80,6 +134,18 @@ struct WPESceneRendererBoundaryTests {
             code: 1,
             userInfo: [NSLocalizedDescriptionKey: "Timed out waiting for scene renderer load"]
         )
+    }
+
+    private func sessionHasFallbackFactory(_ session: SceneWallpaperSession) -> Bool {
+        for child in Mirror(reflecting: session).children where child.label == "fallbackFactory" {
+            return !isNilOptional(child.value)
+        }
+        return false
+    }
+
+    private func isNilOptional(_ value: Any) -> Bool {
+        let mirror = Mirror(reflecting: value)
+        return mirror.displayStyle == .optional && mirror.children.isEmpty
     }
 }
 
@@ -146,6 +212,23 @@ private struct SceneFixture {
         }
         """
         try Data(scene.utf8).write(to: cacheRoot.appendingPathComponent("scene.json"))
+        return SceneFixture(
+            root: root,
+            descriptor: SceneDescriptor(
+                workshopID: UUID().uuidString,
+                cacheRelativePath: "wpe-cache/test",
+                entryFile: "scene.json",
+                capabilityTier: .imageOnly
+            )
+        )
+    }
+
+    static func cacheBackedInvalidSceneJSON() throws -> SceneFixture {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPESceneBuilderBoundary-\(UUID().uuidString)", isDirectory: true)
+        let cacheRoot = root.appendingPathComponent("wpe-cache/test", isDirectory: true)
+        try FileManager.default.createDirectory(at: cacheRoot, withIntermediateDirectories: true)
+        try Data("{".utf8).write(to: cacheRoot.appendingPathComponent("scene.json"))
         return SceneFixture(
             root: root,
             descriptor: SceneDescriptor(

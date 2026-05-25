@@ -18,7 +18,7 @@ enum WPEMetalRenderExecutorError: Error, Equatable, LocalizedError, Sendable {
     /// the vertex stage's struct doesn't line up with the fragment's
     /// `[[stage_in]]` (the "stage_in mismatch" cluster). Carries the raw
     /// underlying error description so logs name the actual missing field
-    /// instead of just the shader name. Eligible for the WebGL fallback.
+    /// instead of just the shader name. Eligible for automatic WebGL fallback.
     case pipelineStateBuildFailed(name: String, detail: String)
     case unsupportedTarget(WPERenderTarget)
     case missingTexture(WPETextureReference)

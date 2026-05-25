@@ -13,6 +13,35 @@ final class WPEMetalRenderExecutor {
     /// scene fixture.
     static let outputPixelFormat: MTLPixelFormat = .rgba8Unorm_srgb
 
+    /// Debug bisect flag: when `defaults write Taijia.LiveWallpaper
+    /// WPEMetalBypassEffects -bool YES` is in effect (and the binary is
+    /// a DEBUG build) every image layer skips its material/effect/command
+    /// passes and blits the first pass's resolved source texture to scene.
+    /// Used to confirm Metal's upload+present chain reaches the screen
+    /// before the effect shader chain is exercised. Always false in
+    /// Release builds.
+    static var bypassEffectsForDebug: Bool {
+        #if DEBUG
+        return UserDefaults.standard.bool(forKey: "WPEMetalBypassEffects")
+        #else
+        return false
+        #endif
+    }
+
+    /// Mirrors the slot-0 precedence used by
+    /// `WPEMetalSceneRenderer.requiredTextureReferences(for:)`: prefer the
+    /// per-pass binding override, then the pass's `textures[0]`, then the
+    /// raw graph source. We use this to look up the layer's resolved
+    /// background image in the bypass path so the blit copies the asset
+    /// the renderer actually preloaded — not the unresolved model JSON
+    /// path that `WPERenderLayer.imagePath` carries.
+    static func bypassSourceReference(for layer: WPEPreparedRenderLayer) -> WPETextureReference? {
+        guard let firstPass = layer.passes.first else { return nil }
+        return firstPass.textureBindings[0]
+            ?? firstPass.pass.textures[0]
+            ?? firstPass.pass.source
+    }
+
     private let device: MTLDevice
     private let commandQueue: MTLCommandQueue
     private let targetPool: WPEMetalRenderTargetPool
@@ -56,8 +85,7 @@ final class WPEMetalRenderExecutor {
         // The Swift transpiler is the only Metal-side translator we ship.
         // Shaders it can't handle bubble up as
         // `WPEMetalRenderExecutorError.shaderTranslatorUnavailable`, which
-        // `SceneWallpaperSession` then redirects to the WebGL renderer
-        // through the scene-level fallback.
+        // automatic scene sessions may use as the WebGL fallback signal.
         WPESwiftShaderCompiler(device: device)
     }
 
@@ -88,11 +116,30 @@ final class WPEMetalRenderExecutor {
         targetPool.prepare(pipeline: preparedPipeline)
         var frameState = WPEMetalFrameState(output: output, sceneSize: size)
         var didEncode = false
+        let bypassEffects = Self.bypassEffectsForDebug
 
         for layer in preparedPipeline.layers {
             if layer.passes.isEmpty {
                 try encodeCopy(
                     reference: .image(layer.graphLayer.imagePath),
+                    target: .scene,
+                    layer: layer.graphLayer,
+                    runtimeUniforms: runtimeUniforms,
+                    textures: textures,
+                    commandBuffer: commandBuffer,
+                    frameState: &frameState
+                )
+                didEncode = true
+                continue
+            }
+            if bypassEffects, let firstSource = Self.bypassSourceReference(for: layer) {
+                // Debug bisect: skip every material/effect/command pass and
+                // blit the first pass's resolved source (the background
+                // image) straight to scene. Lets us prove the upload +
+                // present chain works at the layer's native resolution
+                // before the effect shaders join the mix.
+                try encodeCopy(
+                    reference: firstSource,
                     target: .scene,
                     layer: layer.graphLayer,
                     runtimeUniforms: runtimeUniforms,
@@ -337,7 +384,21 @@ final class WPEMetalRenderExecutor {
 
     @MainActor
     func present(texture source: MTLTexture, in view: MTKView) throws -> Bool {
-        guard let drawable = view.currentDrawable else { return false }
+        guard let drawable = view.currentDrawable else {
+            #if DEBUG
+            Logger.warning(
+                "[present] view.currentDrawable=nil — source=\(source.width)x\(source.height) view.bounds=\(view.bounds) drawableSize=\(view.drawableSize)",
+                category: .wpeRender
+            )
+            #endif
+            return false
+        }
+        #if DEBUG
+        Logger.debug(
+            "[present] source=\(source.width)x\(source.height) fmt=\(source.pixelFormat.rawValue) → drawable=\(drawable.texture.width)x\(drawable.texture.height) fmt=\(drawable.texture.pixelFormat.rawValue) view.bounds=\(view.bounds) view.frame=\(view.frame) drawableSize=\(view.drawableSize)",
+            category: .wpeRender
+        )
+        #endif
         guard let commandBuffer = commandQueue.makeCommandBuffer() else {
             throw WPEMetalRenderExecutorError.commandBufferFailed
         }
@@ -363,6 +424,21 @@ final class WPEMetalRenderExecutor {
         encoder.endEncoding()
 
         commandBuffer.present(drawable)
+        #if DEBUG
+        commandBuffer.addCompletedHandler { [weak source] cb in
+            if cb.status == .error {
+                Logger.warning(
+                    "[present] commandBuffer ERROR after present: \(cb.error?.localizedDescription ?? "unknown")",
+                    category: .wpeRender
+                )
+            } else if let source {
+                Logger.debug(
+                    "[present] commandBuffer completed status=\(cb.status.rawValue) source.label=\(source.label ?? "nil")",
+                    category: .wpeRender
+                )
+            }
+        }
+        #endif
         commandBuffer.commit()
         return true
     }
@@ -411,7 +487,18 @@ final class WPEMetalRenderExecutor {
         descriptor.colorAttachments[0].texture = destination.texture
         descriptor.colorAttachments[0].loadAction = frameState.hasInitialized(destination.texture) ? .load : .clear
         descriptor.colorAttachments[0].storeAction = .store
+        #if DEBUG
+        // DIAGNOSTIC: magenta clear so we can distinguish "passes wrote 0/black"
+        // from "passes never wrote and clear leaked through". Gated by the
+        // WPEMetalCaptureScene UserDefault so production renders stay black.
+        if UserDefaults.standard.string(forKey: "WPEMetalCaptureScene") != nil {
+            descriptor.colorAttachments[0].clearColor = MTLClearColor(red: 1, green: 0, blue: 1, alpha: 1)
+        } else {
+            descriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+        }
+        #else
         descriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+        #endif
 
         if needsDepth {
             let depth = try depthCache.attachmentTexture(for: destination, frameState: &frameState)

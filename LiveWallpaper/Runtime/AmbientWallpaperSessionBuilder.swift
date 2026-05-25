@@ -189,12 +189,11 @@ final class AmbientWallpaperSessionBuilder {
         window.contentView = renderer.nsView
         window.orderBack(nil)
 
-        // Scenes that started on Metal get a WebGL fallback closure so the
-        // session can retry on `metalRendererUnsupported`. Scenes that
-        // already started on WebGL have no fallback (WebGL is the
-        // backstop in this dual-backend strategy).
+        // Automatic Metal routing gets one WebGL fallback so "auto" can
+        // prioritize successful playback. User-pinned Metal/WebGL stays on
+        // the selected backend and surfaces that backend's errors directly.
         let fallbackFactory: SceneWallpaperSession.FallbackRendererFactory?
-        if routing.backend == .metal {
+        if routing.backend == .metal && routing.routedBy == .automatic {
             fallbackFactory = { @MainActor in
                 Self.buildWebGLFallback(
                     descriptor: descriptor,

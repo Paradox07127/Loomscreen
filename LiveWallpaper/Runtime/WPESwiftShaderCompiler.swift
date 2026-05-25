@@ -7,8 +7,7 @@ import Metal
 /// sole shipping Metal-side translator after Phase-12 retired the
 /// SPIRV-Cross/glslang XCFramework; shaders it can't handle throw
 /// `.translationFailed`, which `WPEMetalSceneRenderer` then surfaces as
-/// `SceneRenderingError.metalRendererUnsupported` so `SceneWallpaperSession`
-/// can redirect the scene to the WebGL renderer.
+/// `SceneRenderingError.metalRendererUnsupported`.
 struct WPESwiftShaderCompiler: WPEShaderCompiling {
     let device: MTLDevice
 
@@ -17,6 +16,19 @@ struct WPESwiftShaderCompiler: WPEShaderCompiling {
     }
 
     func compile(_ request: WPEShaderCompileRequest) throws -> WPEShaderCompileResult {
+        if let reason = Self.unsupportedVertexVaryingReason(for: request) {
+            WPESceneDebugArtifacts.shared.recordShaderFailure(
+                shaderName: request.shaderName,
+                originalVertex: nil,
+                processedVertex: request.processedVertexSource,
+                originalFragment: nil,
+                processedFragment: request.processedFragmentSource,
+                translatedMSL: nil,
+                errorText: "translation rejected: \(reason)"
+            )
+            throw WPEShaderCompilerError.translationFailed(reason)
+        }
+
         let translation: WPEShaderTranslationResult
         do {
             translation = try WPEShaderTranspiler.translateFragment(
@@ -82,6 +94,15 @@ struct WPESwiftShaderCompiler: WPEShaderCompiling {
             uniformLayout: translation.uniformLayout,
             samplerNames: translation.samplers
         )
+    }
+
+    private static func unsupportedVertexVaryingReason(for request: WPEShaderCompileRequest) -> String? {
+        let perspectiveVarying = "v_TexCoordFx"
+        guard request.processedVertexSource.contains(perspectiveVarying),
+              request.processedFragmentSource.contains(perspectiveVarying) else {
+            return nil
+        }
+        return "perspective vertex varying '\(perspectiveVarying)' requires custom vertex shader translation"
     }
 }
 #endif

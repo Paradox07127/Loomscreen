@@ -79,6 +79,17 @@ private struct WPEShaderSourceLoader: Sendable {
     }
 
     func load(shaderName: String, pass: WPERenderPass) throws -> WPEShaderLoadResult {
+        if shouldPreferSceneSource(shaderName: shaderName) {
+            do {
+                return try sourceProgram(shaderName: shaderName, pass: pass)
+            } catch WPERenderPipelineError.shaderMissing {
+                // Some corpus effects are satisfied only by our Metal-side
+                // built-ins. Preserve the old copy degradation when the
+                // workshop does not ship shader source, but do not mask
+                // invalid source/include errors.
+            }
+        }
+
         if let builtin = builtinProgram(shaderName: shaderName, combos: pass.combos) {
             return WPEShaderLoadResult(
                 program: builtin,
@@ -88,6 +99,14 @@ private struct WPEShaderSourceLoader: Sendable {
             )
         }
 
+        return try sourceProgram(shaderName: shaderName, pass: pass)
+    }
+
+    private func shouldPreferSceneSource(shaderName: String) -> Bool {
+        WPEBuiltinShaderName.normalized(shaderName).hasPrefix("effect_")
+    }
+
+    private func sourceProgram(shaderName: String, pass: WPERenderPass) throws -> WPEShaderLoadResult {
         let vertexPath = "shaders/\(shaderName).vert"
         let fragmentPath = "shaders/\(shaderName).frag"
         let vertexSource = try readShaderSource(path: vertexPath, shaderName: shaderName, stage: "vertex")
@@ -599,6 +618,7 @@ private struct WPEShaderSourceLoader: Sendable {
         var defaultTextures: [Int: WPETextureReference] = [:]
         var uniformDefaults: [String: WPESceneShaderConstantValue] = [:]
         var materialUniformNames: [String: String] = [:]
+        var samplerUniforms: [WPEShaderUniformAnnotation] = []
 
         for source in sources {
             for line in source.components(separatedBy: .newlines) {
@@ -616,12 +636,7 @@ private struct WPEShaderSourceLoader: Sendable {
                     continue
                 }
                 if uniform.type == "sampler2D" || uniform.type == "sampler2DComparison" {
-                    applySamplerAnnotation(
-                        uniform,
-                        pass: pass,
-                        defaultTextures: &defaultTextures,
-                        comboValues: &comboValues
-                    )
+                    samplerUniforms.append(uniform)
                 } else if let value = parseShaderConstant(uniform.metadata["default"], type: uniform.type) {
                     uniformDefaults[uniform.name] = value
                     if let material = uniform.metadata["material"] as? String, !material.isEmpty {
@@ -635,6 +650,15 @@ private struct WPEShaderSourceLoader: Sendable {
             comboValues[key] = value
         }
 
+        for uniform in samplerUniforms where requireConditionsSatisfied(uniform.metadata["require"], comboValues: comboValues) {
+            applySamplerAnnotation(
+                uniform,
+                pass: pass,
+                defaultTextures: &defaultTextures,
+                comboValues: &comboValues
+            )
+        }
+
         var uniformValues = uniformDefaults
         for (key, value) in pass.constants {
             let uniformName = materialUniformNames[key] ?? key
@@ -646,6 +670,21 @@ private struct WPEShaderSourceLoader: Sendable {
             comboValues: comboValues,
             uniformValues: uniformValues
         )
+    }
+
+    private func requireConditionsSatisfied(_ raw: Any?, comboValues: [String: Int]) -> Bool {
+        guard let requirements = raw as? [String: Any], !requirements.isEmpty else {
+            return true
+        }
+        for (key, rawValue) in requirements {
+            guard let required = parseInt(rawValue) else {
+                return false
+            }
+            if (comboValues[key] ?? 0) != required {
+                return false
+            }
+        }
+        return true
     }
 
     private func applySamplerAnnotation(
@@ -977,6 +1016,7 @@ private struct WPEShaderSourceLoader: Sendable {
             #define BlendScreen 5
             #define BlendLinearDodge 6
             #define BlendAdd 6
+            #define BlendWPELinearDodge 31
             #define BlendSubtract 7
             #define BlendDifference 8
 
@@ -990,6 +1030,7 @@ private struct WPEShaderSourceLoader: Sendable {
                 else if (blendMode == 4) { result = A * B; }                                          // Multiply
                 else if (blendMode == 5) { result = vec3(1.0) - (vec3(1.0) - A) * (vec3(1.0) - B); } // Screen
                 else if (blendMode == 6) { result = A + B; }                                          // LinearDodge / Add
+                else if (blendMode == 31) { result = A + B; }                                         // WPE imageblending LinearDodge / Add
                 else if (blendMode == 7) { result = max(vec3(0.0), A - B); }                         // Subtract
                 else if (blendMode == 8) { result = vec3(1.0) - abs(vec3(1.0) - B - A); }            // Difference
                 return mix(A, result, opacity);

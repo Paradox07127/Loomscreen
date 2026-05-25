@@ -144,6 +144,40 @@ struct WPEShaderTranspilerTests {
         #expect(result.library.makeFunction(name: "wpe_translated_fragment") != nil)
     }
 
+    @Test("Rejects perspective vertex varyings instead of synthesizing z=0")
+    func rejectsPerspectiveVertexVaryings() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let compiler = WPESwiftShaderCompiler(device: device)
+        let request = WPEShaderCompileRequest(
+            shaderName: "effects/lightshafts",
+            processedVertexSource: """
+            #version 410 core
+            in vec3 a_Position;
+            in vec2 a_TexCoord;
+            out vec3 v_TexCoordFx;
+            void main() {
+                v_TexCoordFx = vec3(a_TexCoord, 1.0);
+                gl_Position = vec4(a_Position, 1.0);
+            }
+            """,
+            processedFragmentSource: """
+            #version 410 core
+            in vec3 v_TexCoordFx;
+            void main() {
+                vec2 fxCoord = v_TexCoordFx.xy / v_TexCoordFx.z;
+                gl_FragColor = vec4(fxCoord, 0.0, 1.0);
+            }
+            """,
+            sourceHash: "perspective-varying-test",
+            comboValues: [:],
+            textureBindings: [:]
+        )
+
+        #expect(throws: WPEShaderCompilerError.self) {
+            _ = try compiler.compile(request)
+        }
+    }
+
     @Test("Translates audio-spectrum shader with uniform float array to MSL")
     func translatesAudioSpectrumArray() throws {
         let source = """

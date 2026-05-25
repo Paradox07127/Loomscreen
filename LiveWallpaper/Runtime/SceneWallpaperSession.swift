@@ -6,10 +6,9 @@ import AppKit
 /// the rest of the runtime stack does not need a scene-specific code path.
 @MainActor
 final class SceneWallpaperSession: WallpaperRuntimeSession {
-    /// Builds a replacement renderer when the primary fails with
-    /// `SceneRenderingError.metalRendererUnsupported`. Returning `nil`
-    /// signals there is no fallback (e.g. WebGL bundle missing) and the
-    /// session should surface the original error.
+    /// Builds a replacement renderer when this session is allowed to recover
+    /// from `SceneRenderingError.metalRendererUnsupported`. Returning `nil`
+    /// surfaces the original error.
     typealias FallbackRendererFactory = @MainActor () -> WPESceneRenderer?
 
     let wallpaperType: WallpaperType = .scene
@@ -165,11 +164,9 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
         }
     }
 
-    /// Runs `load()` on `initial`. If it fails with
-    /// `SceneRenderingError.metalRendererUnsupported`, asks the fallback
-    /// factory for a WebGL renderer, swaps it into the window, and retries
-    /// once. Any other failure (or a failed fallback) updates `loadError`
-    /// and returns.
+    /// Runs `load()` on `initial`. When a fallback factory is present,
+    /// `SceneRenderingError.metalRendererUnsupported` swaps in that renderer
+    /// and retries once. Any other failure updates `loadError` and returns.
     private func runLoadWithFallback(initial: WPESceneRenderer) async {
         var active = initial
         while true {

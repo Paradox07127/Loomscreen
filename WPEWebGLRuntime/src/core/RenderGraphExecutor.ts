@@ -17,6 +17,12 @@ import { TextureManager } from "../resources/TextureManager";
 // a stale or unrelated texture (Phase 3 audit Medium).
 const PLACEHOLDER_UNIT = 14;
 const AUDIO_UNIT = 15;
+const FULLSCREEN_IDENTITY_MATRIX = new Float32Array([
+  1, 0, 0, 0,
+  0, 1, 0, 0,
+  0, 0, 1, 0,
+  0, 0, 0, 1
+]);
 // Frame cadence for sprite-sheet textures sampled by genericimage4-style
 // passes. Aligned with Swift's `WPETexAnimationTrack.defaultFrameRate`
 // so the WebGL and Metal backends agree. The fragment shader cross-fades
@@ -42,6 +48,11 @@ interface BoundTexture {
   texture: WebGLTexture | null;
   width: number;
   height: number;
+}
+
+export interface FrameProbeOptions {
+  frameIndex: number;
+  enabled: boolean;
 }
 
 export class RenderGraphExecutor {
@@ -137,7 +148,11 @@ export class RenderGraphExecutor {
     return this.assetUrlPrefix + segments.join("/");
   }
 
-  drawFrame(time: number, runtimeUniforms: { pointer?: { x: number; y: number; click: number; hover: number }; audioSpectrum?: number[] }): void {
+  drawFrame(
+    time: number,
+    runtimeUniforms: { pointer?: { x: number; y: number; click: number; hover: number }; audioSpectrum?: number[] },
+    probe?: FrameProbeOptions
+  ): void {
     const gl = this.gl;
     const graph = this.graph;
     if (!graph || !this.vao) return;
@@ -221,6 +236,9 @@ export class RenderGraphExecutor {
         }
 
         gl.drawArrays(gl.TRIANGLES, 0, 6);
+        if (probe?.enabled) {
+          this.emitPassProbe(probe.frameIndex, pass, targetFBO);
+        }
 
         // `previous` references resolve to `currentSceneFBO`. WPE's
         // semantics for `previous` inside an effect pass is "the layer-
@@ -244,6 +262,61 @@ export class RenderGraphExecutor {
 
   dumpFBOCenterPixels(): void {
     this.fboPool.dumpCenterPixels();
+  }
+
+  private emitPassProbe(frameIndex: number, pass: RenderPassPayload, targetFBO: PoolFBO | null): void {
+    const target = targetFBO
+      ? `${pass.target.kind}:${pass.target.name ?? "(unnamed)"}`
+      : "scene";
+    try {
+      const width = targetFBO?.width ?? this.gl.drawingBufferWidth;
+      const height = targetFBO?.height ?? this.gl.drawingBufferHeight;
+      const probe = this.readFramebufferProbe(width, height);
+      sendDiagnostic(
+        "pass-probe",
+        `frame=${frameIndex} pass=${pass.id} shader=${pass.shaderName} ` +
+        `target=${target} ${width}x${height} hash=${probe.hash} samples=${probe.samples}`
+      );
+    } catch (e) {
+      sendDiagnostic(
+        "pass-probe",
+        `frame=${frameIndex} pass=${pass.id} shader=${pass.shaderName} read failed: ${e instanceof Error ? e.message : String(e)}`
+      );
+    }
+  }
+
+  private readFramebufferProbe(width: number, height: number): { hash: string; samples: string } {
+    const gl = this.gl;
+    const w = Math.max(1, width);
+    const h = Math.max(1, height);
+    const points: Array<[number, number]> = [
+      [0.25, 0.25],
+      [0.50, 0.25],
+      [0.75, 0.25],
+      [0.25, 0.50],
+      [0.50, 0.50],
+      [0.75, 0.50],
+      [0.25, 0.75],
+      [0.50, 0.75],
+      [0.75, 0.75]
+    ];
+    const px = new Uint8Array(4);
+    let hash = 2166136261;
+    const sampleText: string[] = [];
+    for (const [fx, fy] of points) {
+      const x = Math.min(w - 1, Math.max(0, Math.floor(w * fx)));
+      const y = Math.min(h - 1, Math.max(0, Math.floor(h * fy)));
+      gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      sampleText.push(`${x},${y}:${px[0]},${px[1]},${px[2]},${px[3]}`);
+      for (const channel of px) {
+        hash ^= channel;
+        hash = Math.imul(hash, 16777619) >>> 0;
+      }
+    }
+    return {
+      hash: hash.toString(16).padStart(8, "0"),
+      samples: sampleText.join("|")
+    };
   }
 
   dispose(): void {
@@ -383,6 +456,13 @@ export class RenderGraphExecutor {
     layerParallax: number
   ): void {
     const gl = this.gl;
+    const mvpLoc = gl.getUniformLocation(program, "g_ModelViewProjectionMatrix");
+    if (mvpLoc !== null) {
+      // RenderGraphExecutor draws screen-space quads; WPE effect vertex
+      // shaders still expect the standard MVP uniform to exist.
+      gl.uniformMatrix4fv(mvpLoc, false, FULLSCREEN_IDENTITY_MATRIX);
+    }
+
     const timeLoc = gl.getUniformLocation(program, "g_Time");
     if (timeLoc) gl.uniform1f(timeLoc, time);
 
@@ -570,7 +650,11 @@ private uploadConstants(program: WebGLProgram, constants: Record<string, Constan
     if (resLoc) {
       const w = Math.max(1, resolution.width);
       const h = Math.max(1, resolution.height);
-      gl.uniform4f(resLoc, w, h, 1 / w, 1 / h);
+      // WPE shaders use .xy for the bound texture size and .zw as the
+      // source texture size in pixel units. Effects such as shake and
+      // foliage sway divide .z/.x to remap mask UVs, so uploading inverse
+      // texel sizes here collapses those masks to a near-constant sample.
+      gl.uniform4f(resLoc, w, h, w, h);
     }
   }
 
