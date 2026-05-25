@@ -44,7 +44,7 @@
 		0C322C002D6950490033C48B /* LiveWallpaperTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LiveWallpaperTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		0C322C0A2D6950490033C48B /* LiveWallpaperUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LiveWallpaperUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		0C9A00012D7350000033C48B /* AppIntents.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppIntents.framework; path = System/Library/Frameworks/AppIntents.framework; sourceTree = SDKROOT; };
-		0CA00000000000000000B000 /* LiveWallpaperLite.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LiveWallpaperLite.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		0CA00000000000000000B000 /* Loomscreen.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Loomscreen.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -144,7 +144,7 @@
 			isa = PBXGroup;
 			children = (
 				0C322BEF2D6950480033C48B /* LiveWallpaper.app */,
-				0CA00000000000000000B000 /* LiveWallpaperLite.app */,
+				0CA00000000000000000B000 /* Loomscreen.app */,
 				0C322C002D6950490033C48B /* LiveWallpaperTests.xctest */,
 				0C322C0A2D6950490033C48B /* LiveWallpaperUITests.xctest */,
 			);
@@ -258,7 +258,7 @@
 				0CA00000000000000000B023 /* LiveWallpaperProFeatures */,
 			);
 			productName = LiveWallpaperLite;
-			productReference = 0CA00000000000000000B000 /* LiveWallpaperLite.app */;
+			productReference = 0CA00000000000000000B000 /* Loomscreen.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */

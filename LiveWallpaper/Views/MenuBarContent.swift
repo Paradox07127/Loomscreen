@@ -66,7 +66,7 @@ struct MenuBarContent: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
-                Text("LiveWallpaper")
+                Text(verbatim: BundleIdentity.productDisplayName)
                     .font(.title2.weight(.semibold))
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading)

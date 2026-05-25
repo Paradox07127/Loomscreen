@@ -670,7 +670,7 @@ struct GeneralSettingsView: View {
             .accessibilityHidden(true)
 
             VStack(spacing: 4) {
-                Text("LiveWallpaper")
+                Text(verbatim: BundleIdentity.productDisplayName)
                     .font(.system(size: 24, weight: .semibold))
                     .textSelection(.enabled)
 
