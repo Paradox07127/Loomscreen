@@ -113,10 +113,10 @@ final class WPEVideoTextureSource {
         queuePlayer.volume = 0
         self.player = queuePlayer
 
-        let attributes: [String: any Sendable] = [
+        let attributes: [String: Any] = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
             kCVPixelBufferMetalCompatibilityKey as String: true,
-            kCVPixelBufferIOSurfacePropertiesKey as String: [String: any Sendable]()
+            kCVPixelBufferIOSurfacePropertiesKey as String: [:]
         ]
         let output = AVPlayerItemVideoOutput(pixelBufferAttributes: attributes)
         output.suppressesPlayerRendering = true

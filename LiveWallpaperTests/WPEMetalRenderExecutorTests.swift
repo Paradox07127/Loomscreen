@@ -499,8 +499,8 @@ private func copyPass() -> WPERenderPass {
 }
 
 private extension WPEMetalRenderExecutorTests {
-    @Test("Offscreen output is raw RGBA8 — no _srgb suffix, matches WPE / Almamu shader contract")
-    func outputTextureIsRawRGBA8() throws {
+    @Test("Offscreen output is sRGB-tagged for SpriteKit gamma parity")
+    func outputTextureIsSRGB() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let executor = try WPEMetalRenderExecutor(device: device)
         let pass = solidPass()
@@ -519,12 +519,12 @@ private extension WPEMetalRenderExecutorTests {
 
         let output = try executor.render(pipeline: pipeline, size: CGSize(width: 4, height: 4), textures: [:])
 
-        #expect(output.pixelFormat == .rgba8Unorm)
-        #expect(WPEMetalRenderExecutor.outputPixelFormat == .rgba8Unorm)
+        #expect(output.pixelFormat == .rgba8Unorm_srgb)
+        #expect(WPEMetalRenderExecutor.outputPixelFormat == .rgba8Unorm_srgb)
     }
 
-    @Test("solidcolor mid-tone uniform writes a literal mid-grey byte (no gamma alteration)")
-    func solidcolorMidToneRoundTrip() throws {
+    @Test("solidcolor mid-tone uniform round-trips through sRGB target without gamma double-encoding")
+    func solidcolorMidToneSRGBRoundTrip() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let executor = try WPEMetalRenderExecutor(device: device)
         let pass = WPERenderPass(
@@ -619,41 +619,6 @@ private extension WPEMetalRenderExecutorTests {
         )
 
         #expect(try readPixel(output0, x: 2, y: 2) == readPixel(output1, x: 2, y: 2))
-    }
-
-    @Test("colorVector forwards g_Color verbatim — no sRGB linearise (matches WPE / Almamu)")
-    func colorVectorPreservesAuthoredChannels() {
-        let pass = WPERenderPass(
-            id: "g.0",
-            phase: .material,
-            shader: "solidcolor",
-            source: .previous,
-            target: .scene,
-            textures: [:],
-            binds: [:],
-            constants: [:],
-            combos: [:],
-            blending: "normal",
-            cullMode: "nocull",
-            depthTest: "disabled",
-            depthWrite: "disabled"
-        )
-        let prepared = WPEPreparedRenderPass(
-            pass: pass,
-            shader: WPEShaderProgram(name: "solidcolor", vertexSource: "", fragmentSource: "", isBuiltin: true),
-            textureBindings: [:],
-            comboValues: [:],
-            uniformValues: ["g_Color": .vector([0.5, 0.25, 0.75, 0.9])]
-        )
-
-        let result = WPEMetalShaderInputs.colorVector(for: prepared)
-
-        // sRGB→linear of 0.5 ≈ 0.214, of 0.25 ≈ 0.05, of 0.75 ≈ 0.522 — were
-        // the old transform still in place these assertions would all fail.
-        #expect(abs(result.x - 0.5) < 0.001)
-        #expect(abs(result.y - 0.25) < 0.001)
-        #expect(abs(result.z - 0.75) < 0.001)
-        #expect(abs(result.w - 0.9) < 0.001)
     }
 
     @Test("Generic image parallax offset is bounded by pointer delta and layer depth")
@@ -880,17 +845,12 @@ private struct BlendFixture: Sendable {
     let expected: Pixel
 }
 
-// Baselines reflect the raw-RGBA8 pipeline contract: src.rgb*src.a + dst.rgb*(1-src.a)
-// for "normal" with src=(1,0,0,0.5), dst=(0,0,1,1) yields (0.5, 0, 0.5, 1) → bytes
-// (128, 0, 128, 255). Pre-fix the offscreen target was `.rgba8Unorm_srgb`, so the
-// linear 0.5 result was re-encoded to sRGB 0.737 ≈ byte 188; the value shift below
-// is exactly that 188 → 128 delta on every channel that carries a 0.5 result.
 private let blendFixtures: [BlendFixture] = [
-    BlendFixture(mode: "normal", expected: Pixel(r: 128, g: 0, b: 128, a: 255)),
-    BlendFixture(mode: "additive", expected: Pixel(r: 128, g: 0, b: 255, a: 255)),
+    BlendFixture(mode: "normal", expected: Pixel(r: 188, g: 0, b: 188, a: 255)),
+    BlendFixture(mode: "additive", expected: Pixel(r: 188, g: 0, b: 255, a: 255)),
     BlendFixture(mode: "multiply", expected: Pixel(r: 0, g: 0, b: 0, a: 255)),
-    BlendFixture(mode: "translucent", expected: Pixel(r: 255, g: 0, b: 128, a: 255)),
-    BlendFixture(mode: "normalmapped", expected: Pixel(r: 128, g: 0, b: 128, a: 255)),
+    BlendFixture(mode: "translucent", expected: Pixel(r: 255, g: 0, b: 188, a: 255)),
+    BlendFixture(mode: "normalmapped", expected: Pixel(r: 188, g: 0, b: 188, a: 255)),
     BlendFixture(mode: "disabled", expected: Pixel(r: 255, g: 0, b: 0, a: 128))
 ]
 
@@ -1172,11 +1132,8 @@ private extension WPEMetalRenderExecutorTests {
         )
         let pixel = try readPixel(output, x: 2, y: 2)
 
-        // g_Color = (0, 1, 0, 0.5); solidlayer writes color * alpha = 0.5 → byte 128
-        // in raw RGBA8. (Pre-fix the linear 0.5 was re-encoded into the sRGB target
-        // as byte 188 — see `blendFixtures` comment.)
         #expect(pixel.r <= 5)
-        #expect(abs(Int(pixel.g) - 128) <= 4)
+        #expect(abs(Int(pixel.g) - 188) <= 4)
         #expect(pixel.b <= 5)
         #expect(abs(Int(pixel.a) - 128) <= 4)
     }
@@ -1311,11 +1268,7 @@ private extension WPEMetalRenderExecutorTests {
         )
         let pixel = try readPixel(output, x: 0, y: 0)
 
-        // Raw RGBA8 pipeline: red input (1,0,0) sampled linearly → Rec709
-        // luminance ≈ 0.2126 → byte ~54. (Pre-fix the sRGB sample path lifted
-        // the red to 1.0 linear and then the sRGB output encoded the linear
-        // 0.213 result back to ~127, hiding the fact that nothing changed.)
-        expectPixel(pixel, approximately: Pixel(r: 54, g: 54, b: 54, a: 255), tolerance: 5)
+        expectPixel(pixel, approximately: Pixel(r: 127, g: 127, b: 127, a: 255))
     }
 
     @Test("Blur built-in applies centered 9 tap kernel")
@@ -1364,11 +1317,7 @@ private extension WPEMetalRenderExecutorTests {
         )
         let pixel = try readPixel(output, x: 4, y: 0)
 
-        // Raw RGBA8: only the center tap carries red; 9-tap kernel weights average
-        // toward the center sample (1.0 linear) and drop the linear value into the
-        // ~46/255 region. Pre-fix the sRGB encode lifted the same linear average to
-        // byte 118.
-        expectPixel(pixel, approximately: Pixel(r: 46, g: 0, b: 0, a: 255), tolerance: 6)
+        expectPixel(pixel, approximately: Pixel(r: 118, g: 0, b: 0, a: 255))
     }
 
     @Test("Vignette built-in darkens outside outer radius")

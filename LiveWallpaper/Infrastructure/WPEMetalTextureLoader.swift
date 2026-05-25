@@ -149,9 +149,7 @@ struct WPEMetalTextureLoader {
                 let texture = try loader.newTexture(
                     cgImage: cgImage,
                     options: [
-                        // Linear upload — see WPEMetalTextureFormatMapper.mapping; the
-                        // WPE shader math is authored against raw RGBA8.
-                        MTKTextureLoader.Option.SRGB: false,
+                        MTKTextureLoader.Option.SRGB: true,
                         MTKTextureLoader.Option.textureUsage: MTLTextureUsage.shaderRead.rawValue
                     ]
                 )

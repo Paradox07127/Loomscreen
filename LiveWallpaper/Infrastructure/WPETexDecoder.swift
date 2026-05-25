@@ -874,12 +874,7 @@ struct WPETexDecoder: Sendable {
         return try rasterizeRGBA8(from: image, mipmap: mip.index)
     }
 
-    /// Renders a `CGImage` into straight-alpha RGBA8 bytes. The CGContext
-    /// rasterises through the sRGB color space (matches how PNG/JPEG sources
-    /// were authored), but the bytes are uploaded into a raw `.rgba8Unorm`
-    /// Metal texture and sampled linearly — same contract as the WPE Windows
-    /// reference renderer, where shaders treat the encoded byte values as
-    /// linear input.
+    /// Renders a `CGImage` into straight-alpha, sRGB-encoded RGBA8 bytes suitable for upload as `MTLPixelFormat.rgba8Unorm_srgb`.
     private func rasterizeRGBA8(from image: CGImage, mipmap: Int) throws -> DecodedRGBAImage {
         let width = image.width
         let height = image.height

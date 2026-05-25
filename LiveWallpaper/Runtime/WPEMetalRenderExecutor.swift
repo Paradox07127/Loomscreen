@@ -6,18 +6,12 @@ import Metal
 import MetalKit
 
 final class WPEMetalRenderExecutor {
-    /// Single pixel format shared by every offscreen target, the on-screen
-    /// swapchain, and the render-target pool's fallback (see
-    /// `WPEMetalRenderTargetPool.pixelFormat(forFBOFormat:)`) so pipelines
-    /// built against an offscreen pass can be reused by `present()` without
-    /// re-creation.
-    ///
-    /// Stays in raw RGBA8 — WPE / Almamu shaders are authored against
-    /// non-sRGB sampling and a non-sRGB output attachment. Switching to
-    /// `_srgb` introduces a sample-time linearise + write-time sRGB encode
-    /// that doesn't exist on either reference renderer and produces the
-    /// "over-exposed" appearance on video-backed and image-backed scenes.
-    static let outputPixelFormat: MTLPixelFormat = .rgba8Unorm
+    /// Phase 2A H3: every offscreen target and the on-screen swapchain share
+    /// a single sRGB pixel format so render pipelines built for the offscreen
+    /// pass can be reused by `present()` without re-creation, and so the
+    /// rendered gamma matches the SpriteKit/CGImage fallback on the same
+    /// scene fixture.
+    static let outputPixelFormat: MTLPixelFormat = .rgba8Unorm_srgb
 
     private let device: MTLDevice
     private let commandQueue: MTLCommandQueue
