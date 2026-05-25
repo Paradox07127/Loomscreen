@@ -116,7 +116,11 @@ export class ShaderCompiler {
   // legacy syntax (gl_FragColor, texture2D, attribute/varying). We strip
   // any existing #version, then emit a clean header + body.
   static preprocess(source: string, isFragment: boolean, combos: Record<string, number>): string {
-    let body = source.replace(/^[ \t]*#version[^\n]*\n?/m, "");
+    // Engine assets ship with Windows CRLF endings; downstream regex
+    // passes anchor on `$` and assume `.*` does not need to swallow a
+    // trailing `\r`. Normalize at the entry so every pass sees clean
+    // `\n`-terminated lines.
+    let body = source.replace(/\r\n?/g, "\n").replace(/^[ \t]*#version[^\n]*\n?/m, "");
 
     const headerParts: string[] = ["#version 300 es"];
     const sortedCombos = Object.keys(combos).sort();
@@ -154,15 +158,16 @@ export class ShaderCompiler {
       ? collectFragmentInputVariables(source)
       : new Map<string, string>();
 
-    const lines = source
+    let lines = source
       .split("\n")
       .map((line) => ShaderCompiler.rewriteLine(line, isFragment, intVars))
       .filter((line): line is string => line !== null);
 
     if (isFragment && fragmentInputs.size > 0) {
-      return rewriteFragmentInputAssignments(lines, fragmentInputs).join("\n");
+      lines = rewriteFragmentInputAssignments(lines, fragmentInputs);
     }
-    return lines.join("\n");
+
+    return hoistGlobalDeclarations(lines).join("\n");
   }
 
   private static rewriteLine(line: string, isFragment: boolean, intVars: Set<string>): string | null {
@@ -714,6 +719,31 @@ function rewriteFragmentInputAssignments(
     out.push(rewritten);
   }
   return out;
+}
+
+// WPE workshop shaders routinely use `#include "common_*.h"` at the top
+// of the source, which after Swift-side expansion places helper
+// functions above the `uniform sampler2D g_Texture0;` / `varying ...`
+// declarations that those helpers reference. Desktop GLSL is permissive
+// about declaration order for globals, but GLSL ES 3.00 is not —
+// WebGL2 reports `'g_Texture0' : undeclared identifier` at every helper
+// call site. Move single-line global declarations to the top of the
+// body so helpers below see them. Function bodies and multi-line
+// declarations are left alone (anchored regex requires `;` end).
+function hoistGlobalDeclarations(lines: string[]): string[] {
+  const declRe =
+    /^\s*(?:layout\s*\([^)]*\)\s*)?(?:uniform|in|out|attribute|varying)\s+(?:(?:highp|mediump|lowp)\s+)?[A-Za-z_]\w*\s+[A-Za-z_]\w*(?:\s*\[[^\]]+\])?\s*;\s*(?:\/\/.*)?$/;
+  const decls: string[] = [];
+  const rest: string[] = [];
+  for (const line of lines) {
+    if (declRe.test(line)) {
+      decls.push(line);
+    } else {
+      rest.push(line);
+    }
+  }
+  if (decls.length === 0) return lines;
+  return [...decls, ...rest];
 }
 
 function collectFragmentInputVariables(source: string): Map<string, string> {

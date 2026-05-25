@@ -120,6 +120,35 @@ void main() {
     expect(output).not.toContain("return a < float(b);");
   });
 
+  // Regression guard: shine_gaussian.frag `#include "common_blur.h"`
+  // places helper functions above the `uniform sampler2D g_Texture0;`
+  // declaration. Desktop GLSL forgives this; GLSL ES 3.00 reports
+  // every helper's `g_Texture0` ref as undeclared. Hoist global
+  // declarations to the top of the body.
+  it("hoists global uniform/varying declarations above helper functions", () => {
+    const output = preprocessFragment(`
+vec4 blur(vec2 uv) {
+  return texture(g_Texture0, uv) + texture(g_Texture0, uv + v_Offset);
+}
+
+uniform sampler2D g_Texture0;
+varying vec2 v_Offset;
+
+void main() {
+  gl_FragColor = blur(vec2(0.5));
+}
+`);
+
+    const uniformIdx = output.indexOf("uniform sampler2D g_Texture0;");
+    const varyingIdx = output.indexOf("in vec2 v_Offset;");
+    const blurIdx = output.indexOf("vec4 blur(vec2 uv)");
+    expect(uniformIdx).toBeGreaterThan(-1);
+    expect(varyingIdx).toBeGreaterThan(-1);
+    expect(blurIdx).toBeGreaterThan(-1);
+    expect(uniformIdx).toBeLessThan(blurIdx);
+    expect(varyingIdx).toBeLessThan(blurIdx);
+  });
+
   it("preserves int loop counter in the for-statement header", () => {
     const output = preprocessFragment(`
 void main() {
