@@ -119,8 +119,21 @@ final class WPEWebGLSceneRenderer: NSObject, WPESceneRenderer, WKNavigationDeleg
             Logger.info("WPE-WebGL [\(diagnostic.kind)]: \(diagnostic.message)", category: .screenManager)
         }
         bridge.onFrame = { [weak self] info in
-            self?.frameCount = info.frameIndex
-            self?.hasPresentedFrame = true
+            guard let self else { return }
+            let wasFirstFrame = !self.hasPresentedFrame
+            self.frameCount = info.frameIndex
+            self.hasPresentedFrame = true
+            if wasFirstFrame {
+                Logger.info(
+                    "WPE-WebGL [frame.first]: scene presented frame 1 at \(Int(info.elapsedMs))ms",
+                    category: .screenManager
+                )
+            } else if info.frameIndex.isMultiple(of: 300) {
+                Logger.info(
+                    "WPE-WebGL [frame.tick]: \(info.frameIndex) (elapsed \(Int(info.elapsedMs))ms)",
+                    category: .screenManager
+                )
+            }
         }
     }
 

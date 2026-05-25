@@ -208,6 +208,18 @@ function bootstrap(): void {
       sendFrame(runtime.frameIndex, now - runtime.startedAt);
       runtime.lastFrameReportAt = now;
     }
+    if (runtime.frameIndex === 1) {
+      // Black-screen forensics: surface canvas + drawing-buffer
+      // dimensions on the first tick so we can tell a zero-sized canvas
+      // ("loaded but invisible") apart from a real output bug ("loaded
+      // and ticking but pixels wrong"). Logs once per session.
+      sendDiagnostic(
+        "canvas",
+        `first-tick canvas=${canvas.width}x${canvas.height} ` +
+        `drawing=${gl.drawingBufferWidth}x${gl.drawingBufferHeight} ` +
+        `client=${canvas.clientWidth}x${canvas.clientHeight}`
+      );
+    }
 
     schedule();
   }
