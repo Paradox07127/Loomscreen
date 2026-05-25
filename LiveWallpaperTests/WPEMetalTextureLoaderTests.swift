@@ -111,15 +111,16 @@ struct WPEMetalTextureLoaderTests {
         #expect(recorder.snapshot() == [false])
     }
 
-    // P0: eager animated payload must crop each TEXS frame to its
-    // sub-rect — pre-P0 every frame got a Metal texture sized to the
-    // whole atlas. Asserts both the per-frame dimensions and the texture
-    // count match the TEXS schedule.
+    // Eager animated payload returns the source atlas per TEXS frame
+    // and dedups MTLTexture uploads by imageID. Sub-rect data is kept
+    // on `WPETexAnimatedFrame.sourceSubRect` for future shader-aware
+    // consumers — the particle renderer relies on the atlas-sized
+    // texture to recover sprite-sheet `cols/rows` from .tex-json frame
+    // dimensions; per-frame cropping breaks that math (1×1 grid).
     @MainActor
-    @Test("Eager animated payload produces a per-frame sub-rect-sized MTLTexture")
-    func eagerAnimatedPayloadCropsPerFrameSubRects() async throws {
+    @Test("Eager animated payload shares one MTLTexture per imageID across frames")
+    func eagerAnimatedPayloadSharesOneTexturePerImageID() async throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
-        // 4×4 RGBA atlas — index encoded in red channel.
         var atlasBytes: [UInt8] = []
         atlasBytes.reserveCapacity(4 * 4 * 4)
         for row in 0..<4 {
@@ -128,6 +129,12 @@ struct WPEMetalTextureLoaderTests {
             }
         }
         let atlasMipmap = WPETexTextureMipmap(index: 0, width: 4, height: 4, bytes: Data(atlasBytes))
+        let secondAtlas = WPETexTextureMipmap(
+            index: 0,
+            width: 4,
+            height: 4,
+            bytes: Data(repeating: 0x55, count: 4 * 4 * 4)
+        )
 
         let track = WPETexAnimationTrack(
             frames: [
@@ -144,9 +151,9 @@ struct WPEMetalTextureLoaderTests {
                     subRect: CGRect(x: 2, y: 0, width: 2, height: 2)
                 ),
                 WPETexAnimationFrame(
-                    imageID: 0,
+                    imageID: 1,
                     duration: 0.04,
-                    mipmaps: [atlasMipmap],
+                    mipmaps: [secondAtlas],
                     subRect: CGRect(x: 0, y: 2, width: 2, height: 2)
                 )
             ],
@@ -176,13 +183,14 @@ struct WPEMetalTextureLoaderTests {
         let frame1 = try #require(source.texture(at: 0.05))
         let frame2 = try #require(source.texture(at: 0.09))
 
-        #expect(frame0.width == 2)
-        #expect(frame0.height == 2)
-        #expect(frame1.width == 2)
-        #expect(frame2.width == 2)
-        // Each crop must produce its own MTLTexture (no atlas reuse).
-        #expect(frame0 !== frame1)
-        #expect(frame1 !== frame2)
+        // All textures stay the atlas size — no per-frame cropping.
+        #expect(frame0.width == 4)
+        #expect(frame0.height == 4)
+        #expect(frame1.width == 4)
+        #expect(frame2.width == 4)
+        // imageID=0 frames share the same MTLTexture; imageID=1 gets its own.
+        #expect(frame0 === frame1)
+        #expect(frame0 !== frame2)
     }
 
     @Test("Upload queue semaphore bounds concurrent upload operations")

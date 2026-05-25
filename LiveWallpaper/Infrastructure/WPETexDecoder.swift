@@ -705,10 +705,13 @@ struct WPETexDecoder: Sendable {
     ///
     /// P1: animated encoded payloads (PNG/JPEG atlas + TEXS schedule, 3
     /// samples in the 431960 corpus) used to throw `.unsupportedAnimation`
-    /// here, blocking playback entirely. The new branch decodes the atlas
-    /// once via ImageIO and feeds every TEXS frame into the same
-    /// `WPETexAnimationTrack` pipeline raw `.tex` uses — the eager loader
-    /// then crops each frame via `WPETexSubRectCropper` just like P0.
+    /// here, blocking playback entirely. The new branch decodes each
+    /// source atlas once via ImageIO (deduped by imageID, mirroring raw
+    /// `.tex`'s `mipmapsByImageID` cache) and feeds every TEXS frame
+    /// into the same `WPETexAnimationTrack` pipeline. The eager loader
+    /// then shares one MTLTexture per imageID across frames, matching
+    /// the particle renderer's expectation that `source.texture(at:)`
+    /// returns an atlas-sized surface for its own sprite-sheet UV math.
     private func bridgeEncodedImagePayload(_ parsed: ParsedTex) throws -> WPETexTexturePayload {
         if parsed.hasAnimationFrames {
             return try bridgeEncodedAnimatedImagePayload(parsed)
