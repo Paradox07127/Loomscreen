@@ -334,6 +334,24 @@ function castIntsInArithmetic(line: string): string {
       /(\b[A-Za-z_]\w*(?:\.[xyzwrgbastpq]+)?\s*[*/]\s*\d+\.0)(\s*[+\-]\s*)(\d+)(?![\w.])/g,
       (_m, left: string, op: string, num: string) => `${left}${op}${num}.0`
     );
+    // Mixed numeric literals: `(30 / 8.0)`, `0.1 * (30 - 5.0)`, etc.
+    // The two passes above only fire when one operand is an identifier
+    // or paren/bracket — they miss bare int adjacent to bare float.
+    // `castFloatDeclarationInitializers` later wraps the outer
+    // expression with `float(...)`, but GLSL types from inside-out so
+    // the inner `int / float` still errors before the outer cast can
+    // promote. Promote the int literal directly when the neighbor is
+    // a float literal.
+    s = s.replace(
+      /(^|[^\w.])(\d+)(\s*[+\-*/]\s*)((?:\d+\.\d*|\.\d+|\d+[eE][+-]?\d+)[fF]?)/g,
+      (_m, pre: string, num: string, op: string, floatLit: string) =>
+        `${pre}${num}.0${op}${floatLit}`
+    );
+    s = s.replace(
+      /((?:\d+\.\d*|\.\d+|\d+[eE][+-]?\d+)[fF]?)(\s*[+\-*/]\s*)(\d+)(?![\w.])/g,
+      (_m, floatLit: string, op: string, num: string) =>
+        `${floatLit}${op}${num}.0`
+    );
     out += s;
     buffer = "";
   };

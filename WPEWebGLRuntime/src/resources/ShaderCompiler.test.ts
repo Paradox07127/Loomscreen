@@ -70,6 +70,38 @@ void main() {
     expect(output).toContain("  vec2 uv = v_TexCoord_local;");
   });
 
+  // Regression guard: shine_cast.frag `sampleIntensity` was still
+  // black-screening saber after the first round of coercion because
+  // `0.1 * (30 / 8.0)` puts a bare int next to a bare float literal —
+  // neither operand is an identifier so Pass 2's existing two regex
+  // patterns missed it. Pass 6 wrapped the outer expression in
+  // `float(...)` but GLSL types from inside-out, so the inner
+  // `int / float` error still fired before the outer cast could
+  // promote. Pass 2 now promotes adjacent int/float literal pairs
+  // directly.
+  it("coerces shine_cast sampleIntensity mixed-literal arithmetic", () => {
+    const output = preprocessFragment(`
+void main() {
+  const float sampleIntensity = 0.1 * (30 / 8.0);
+}
+`);
+
+    expect(output).toContain("0.1 * (30.0 / 8.0)");
+    expect(output).not.toContain("(30 / 8.0)");
+  });
+
+  // Symmetric case: float literal on the left, int literal on the right.
+  it("coerces mixed-literal arithmetic when the float literal is on the left", () => {
+    const output = preprocessFragment(`
+void main() {
+  float x = 8.0 / 30;
+}
+`);
+
+    expect(output).toContain("8.0 / 30.0");
+    expect(output).not.toContain("8.0 / 30;");
+  });
+
   // Regression guard: before `collectIntegerFunctionParameters` was
   // added, the function-arg `b` was missed by `intVars` and Pass 4
   // rewrote `a < b` into `float(a) < b` (invalid GLSL ES).
