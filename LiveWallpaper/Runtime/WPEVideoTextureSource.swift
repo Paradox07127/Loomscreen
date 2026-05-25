@@ -4,60 +4,53 @@ import CoreMedia
 import CoreVideo
 import Foundation
 import Metal
+import QuartzCore
 
-/// Phase 2E MP4-in-`.tex` video source. WPE Workshop ships some "video
-/// wallpapers" as a `.tex` whose bitmap payload is an MP4 byte run; before
-/// 2E those payloads were rejected as `.unsupportedAnimation`.
+/// MP4-in-`.tex` video source. WPE Workshop ships some "video wallpapers"
+/// as a `.tex` whose bitmap payload is an MP4 byte run; this type plays
+/// that MP4 back on the wall clock and hands the renderer the current
+/// frame as a Metal texture.
 ///
-/// The source stages the MP4 bytes into a temp file (Apple's `AVURLAsset`
-/// requires a URL on macOS) and runs a dedicated `AVAssetReader` worker on
-/// a utility-QoS queue. Each decoded `CMSampleBuffer` becomes an
-/// `MTLTexture` via `CVMetalTextureCache` so no CPU copy lands on the main
-/// thread.
+/// Pacing comes from `AVPlayer` + `AVPlayerItemVideoOutput` rather than a
+/// `while true { copyNextSampleBuffer() }` over `AVAssetReader`. The old
+/// path was an offline-decode API used as a playback engine, so it ran as
+/// fast as the CPU/GPU could decode — 24 FPS clips perceived as 8× speed,
+/// 60 FPS clips as 3×. `AVPlayer` schedules frames against the same host
+/// clock that drives the on-screen Metal pipeline, so the output is
+/// in-sync with WPE's reference renderer.
 ///
-/// Threading model: state behind `NSLock`. The renderer is `@MainActor` and
-/// only ever calls `texture(at:)`, `applyPerformanceProfile(_:)`, and
-/// `invalidate()` from main; the reader queue advances frames in the
-/// background and publishes the latest decoded `MTLTexture` under the same
-/// lock.
-final class WPEVideoTextureSource: @unchecked Sendable {
+/// Pixel format is raw `.bgra8Unorm` — the Metal scene pipeline runs in
+/// raw RGBA8 author space (matches Almamu's reference linux-wallpaperengine
+/// and the WPE Windows shader math). Sampling these textures as `_srgb`
+/// would compound with the output attachment's sRGB encode on the way out
+/// and produce the "over-exposed" appearance seen on video-backed scenes.
+@MainActor
+final class WPEVideoTextureSource {
+    private let device: MTLDevice
+    private let textureCache: CVMetalTextureCache
+    private let player: AVQueuePlayer
+    private let videoOutput: AVPlayerItemVideoOutput
+    /// Retained for the lifetime of the source — `AVPlayerLooper` releases
+    /// the looped item rotation if it deallocates.
+    private let playerLooper: AVPlayerLooper
+    /// `AVAssetResourceLoader.setDelegate(_:queue:)` keeps only a weak
+    /// reference; we hold the loader so the in-memory bytes survive.
+    private let inMemoryAssetLoader: InMemoryVideoAssetLoader?
+    /// The on-disk staging file written by `persistVideoData`. Removed in
+    /// `invalidate()` so we don't leak temp `.mp4`s across scene swaps.
+    private let cleanupURL: URL?
+    /// `AVPlayerLooper` mints a fresh `AVPlayerItem` per loop iteration;
+    /// we need to attach `videoOutput` to each one. Weak-set so completed
+    /// items can be reclaimed without manual bookkeeping.
+    private let observedItems = NSHashTable<AVPlayerItem>.weakObjects()
+    private var latest: PublishedFrame?
+
     private struct PublishedFrame {
         let texture: MTLTexture
         let cvTexture: CVMetalTexture
-        let presentationTime: TimeInterval
     }
 
-    private final class State {
-        var reader: AVAssetReader?
-        var output: AVAssetReaderTrackOutput?
-        var latestFrame: PublishedFrame?
-        var requestedTime: TimeInterval = 0
-        var isRunning = false
-        var isSuspended = false
-    }
-
-    private let device: MTLDevice
-    private let videoURL: URL
-    private let asset: AVURLAsset
-    private let queue = DispatchQueue(label: "LiveWallpaper.WPEVideoTextureSource.reader", qos: .userInitiated)
-    private let lock = NSLock()
-    private let state = State()
-    private var textureCache: CVMetalTextureCache?
-
-    init(device: MTLDevice, videoURL: URL) throws {
-        self.device = device
-        self.videoURL = videoURL
-        self.asset = AVURLAsset(url: videoURL)
-
-        var cache: CVMetalTextureCache?
-        let status = CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, device, nil, &cache)
-        guard status == kCVReturnSuccess, let cache else {
-            throw WPEMetalTextureLoaderError.textureAllocationFailed
-        }
-        self.textureCache = cache
-    }
-
-    static func persistVideoData(_ data: Data, cacheDirectory: URL) async throws -> URL {
+    nonisolated static func persistVideoData(_ data: Data, cacheDirectory: URL) async throws -> URL {
         try await Task.detached(priority: .utility) {
             try FileManager.default.createDirectory(
                 at: cacheDirectory,
@@ -69,244 +62,151 @@ final class WPEVideoTextureSource: @unchecked Sendable {
         }.value
     }
 
-    @MainActor
-    func texture(at time: TimeInterval) -> MTLTexture? {
-        let shouldStart: Bool
-        let latest: MTLTexture?
+    init(device: MTLDevice, videoURL: URL) throws {
+        self.device = device
+        self.cleanupURL = videoURL
 
-        lock.lock()
-        state.requestedTime = max(time, 0)
-        shouldStart = !state.isRunning && !state.isSuspended
-        latest = state.latestFrame?.texture
-        if shouldStart {
-            state.isRunning = true
+        var cache: CVMetalTextureCache?
+        let status = CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, device, nil, &cache)
+        guard status == kCVReturnSuccess, let cache else {
+            throw WPEMetalTextureLoaderError.textureAllocationFailed
         }
-        lock.unlock()
+        self.textureCache = cache
 
-        if shouldStart {
-            queue.async { [weak self] in
-                self?.readerLoop()
-            }
+        let assetOptions: [String: Any] = [
+            AVURLAssetReferenceRestrictionsKey: AVAssetReferenceRestrictions.forbidAll.rawValue,
+            AVURLAssetAllowsCellularAccessKey: false,
+            AVURLAssetAllowsExpensiveNetworkAccessKey: false,
+            AVURLAssetAllowsConstrainedNetworkAccessKey: false
+        ]
+        let activeURL: URL
+        let loader: InMemoryVideoAssetLoader?
+        do {
+            let result = try InMemoryVideoAssetLoader.load(from: videoURL)
+            loader = result.loader
+            activeURL = result.customURL
+        } catch {
+            loader = nil
+            activeURL = videoURL
+        }
+        self.inMemoryAssetLoader = loader
+
+        let asset = AVURLAsset(url: activeURL, options: assetOptions)
+        if let loader {
+            asset.resourceLoader.setDelegate(loader, queue: Self.resourceLoaderQueue)
         }
 
-        return latest
+        let playerItem = AVPlayerItem(asset: asset)
+        playerItem.preferredForwardBufferDuration = Self.bufferHintSeconds
+        playerItem.canUseNetworkResourcesForLiveStreamingWhilePaused = false
+
+        let queuePlayer = AVQueuePlayer()
+        queuePlayer.actionAtItemEnd = .none
+        queuePlayer.automaticallyWaitsToMinimizeStalling = false
+        queuePlayer.preventsDisplaySleepDuringVideoPlayback = false
+        queuePlayer.isMuted = true
+        queuePlayer.volume = 0
+        self.player = queuePlayer
+
+        let attributes: [String: Any] = [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+            kCVPixelBufferMetalCompatibilityKey as String: true,
+            kCVPixelBufferIOSurfacePropertiesKey as String: [:]
+        ]
+        let output = AVPlayerItemVideoOutput(pixelBufferAttributes: attributes)
+        output.suppressesPlayerRendering = true
+        self.videoOutput = output
+
+        self.playerLooper = AVPlayerLooper(player: queuePlayer, templateItem: playerItem)
+
+        // Bind the output to the looper's first concrete item; subsequent
+        // rotations are caught by `attachOutputIfNeeded` on each
+        // `texture(at:)` call.
+        attachOutputIfNeeded(to: queuePlayer.currentItem ?? playerItem)
+        queuePlayer.play()
     }
 
-    @MainActor
+    func texture(at time: TimeInterval) -> MTLTexture? {
+        _ = time   // Wall-clock pacing comes from AVPlayer, not the scene clock.
+        attachOutputIfNeeded(to: player.currentItem)
+
+        let host = CACurrentMediaTime()
+        let itemTime = videoOutput.itemTime(forHostTime: host)
+        guard itemTime.isValid else { return latest?.texture }
+
+        if videoOutput.hasNewPixelBuffer(forItemTime: itemTime),
+           let pixelBuffer = videoOutput.copyPixelBuffer(
+               forItemTime: itemTime,
+               itemTimeForDisplay: nil
+           ) {
+            publish(pixelBuffer: pixelBuffer)
+        }
+        return latest?.texture
+    }
+
     func applyPerformanceProfile(_ profile: WallpaperPerformanceProfile) {
         switch profile {
         case .quality:
-            lock.withLockGuard { state.isSuspended = false }
+            player.play()
         case .suspended:
-            lock.withLockGuard { state.isSuspended = true }
-            queue.async { [weak self] in
-                self?.stopReaderAndFlush()
-            }
+            player.pause()
         }
     }
 
-    @MainActor
     func invalidate() {
-        lock.withLockGuard { state.isSuspended = true }
-        queue.sync {
-            stopReaderAndFlush()
-        }
-        try? FileManager.default.removeItem(at: videoURL)
-    }
-
-    private func readerLoop() {
-        defer {
-            lock.withLockGuard { state.isRunning = false }
-        }
-
-        while true {
-            if lock.withLockGuard({ state.isSuspended }) {
-                stopReaderAndFlush()
-                return
-            }
-
-            do {
-                try configureReaderIfNeeded()
-            } catch {
-                stopReaderAndFlush()
-                return
-            }
-
-            guard let output = lock.withLockGuard({ state.output }) else {
-                stopReaderAndFlush()
-                return
-            }
-
-            guard let sample = output.copyNextSampleBuffer() else {
-                restartReaderForLoop()
-                continue
-            }
-
-            autoreleasepool {
-                publish(sampleBuffer: sample)
-            }
+        player.pause()
+        player.removeAllItems()
+        latest = nil
+        CVMetalTextureCacheFlush(textureCache, 0)
+        if let cleanupURL {
+            try? FileManager.default.removeItem(at: cleanupURL)
         }
     }
 
-    private func configureReaderIfNeeded() throws {
-        if lock.withLockGuard({ state.reader != nil }) {
-            return
-        }
+    // MARK: - Internals
 
-        let (track, _) = try Self.loadVideoTrackAndDuration(asset: asset)
-
-        let reader = try AVAssetReader(asset: asset)
-        let output = AVAssetReaderTrackOutput(
-            track: track,
-            outputSettings: [
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-                kCVPixelBufferMetalCompatibilityKey as String: true
-            ]
-        )
-        output.alwaysCopiesSampleData = false
-
-        guard reader.canAdd(output) else {
-            throw WPEMetalTextureLoaderError.malformedPayload("AVAssetReader cannot add video output")
-        }
-        reader.add(output)
-
-        let requestedTime = lock.withLockGuard { state.requestedTime }
-        if requestedTime > 0 {
-            let start = CMTime(seconds: requestedTime, preferredTimescale: 600)
-            reader.timeRange = CMTimeRange(start: start, duration: .positiveInfinity)
-        }
-
-        guard reader.startReading() else {
-            throw reader.error ?? WPEMetalTextureLoaderError.malformedPayload("AVAssetReader failed to start")
-        }
-
-        lock.lock()
-        state.reader = reader
-        state.output = output
-        lock.unlock()
+    private func attachOutputIfNeeded(to item: AVPlayerItem?) {
+        guard let item, !observedItems.contains(item) else { return }
+        item.add(videoOutput)
+        observedItems.add(item)
     }
 
-    /// Bridges the async `AVAsset` API to our sync background reader loop.
-    /// The deprecated `tracks(withMediaType:)` + `asset.duration` accessors
-    /// would block silently on first access; the modern `loadTracks` /
-    /// `load(.duration)` are explicit. We block the reader queue here because
-    /// the rest of the loop already pulls samples synchronously — promoting
-    /// the loop to async is a wider refactor scheduled for a later phase.
-    ///
-    /// Caller runs on the `.userInitiated` `queue`; the detached task must
-    /// match that priority or the semaphore wait below causes a priority
-    /// inversion (high-QoS thread blocked on a default-QoS thread). The
-    /// runtime emits a thread-performance warning for that pattern.
-    nonisolated private static func loadVideoTrackAndDuration(asset: AVURLAsset) throws -> (AVAssetTrack, Double) {
-        let semaphore = DispatchSemaphore(value: 0)
-        nonisolated(unsafe) var result: Result<(AVAssetTrack, Double), Error> =
-            .failure(WPEMetalTextureLoaderError.malformedPayload("Asset load did not complete"))
-
-        Task.detached(priority: .userInitiated) {
-            do {
-                let tracks = try await asset.loadTracks(withMediaType: .video)
-                guard let track = tracks.first else {
-                    throw WPEMetalTextureLoaderError.malformedPayload("MP4 TEX has no video track")
-                }
-                let duration = try await asset.load(.duration)
-                let seconds = duration.seconds.isFinite ? duration.seconds : 0
-                result = .success((track, seconds))
-            } catch {
-                result = .failure(error)
-            }
-            semaphore.signal()
-        }
-
-        semaphore.wait()
-        return try result.get()
-    }
-
-    private func publish(sampleBuffer: CMSampleBuffer) {
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer),
-              let textureCache else {
-            return
-        }
-
+    private func publish(pixelBuffer: CVPixelBuffer) {
         let width = CVPixelBufferGetWidth(pixelBuffer)
         let height = CVPixelBufferGetHeight(pixelBuffer)
         var cvTexture: CVMetalTexture?
-        var status = CVMetalTextureCacheCreateTextureFromImage(
+        let status = CVMetalTextureCacheCreateTextureFromImage(
             kCFAllocatorDefault,
             textureCache,
             pixelBuffer,
             nil,
-            .bgra8Unorm_srgb,
+            .bgra8Unorm,
             width,
             height,
             0,
             &cvTexture
         )
-
-        if status != kCVReturnSuccess {
-            status = CVMetalTextureCacheCreateTextureFromImage(
-                kCFAllocatorDefault,
-                textureCache,
-                pixelBuffer,
-                nil,
-                .bgra8Unorm,
-                width,
-                height,
-                0,
-                &cvTexture
-            )
-        }
-
         guard status == kCVReturnSuccess,
               let cvTexture,
               let texture = CVMetalTextureGetTexture(cvTexture) else {
             return
         }
-
-        let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds
-        let frame = PublishedFrame(
-            texture: texture,
-            cvTexture: cvTexture,
-            presentationTime: pts.isFinite ? pts : 0
-        )
-
-        lock.withLockGuard {
-            state.latestFrame = frame
-        }
+        latest = PublishedFrame(texture: texture, cvTexture: cvTexture)
     }
 
-    private func restartReaderForLoop() {
-        lock.lock()
-        state.reader?.cancelReading()
-        state.reader = nil
-        state.output = nil
-        state.requestedTime = 0
-        lock.unlock()
-    }
+    /// 2s forward buffer — bytes are already in RAM via the in-memory
+    /// resource loader, so longer buffers gain nothing while costing peak
+    /// decoder state.
+    private static let bufferHintSeconds: TimeInterval = 2
 
-    private func stopReaderAndFlush() {
-        let cache = textureCache
-
-        lock.lock()
-        state.reader?.cancelReading()
-        state.reader = nil
-        state.output = nil
-        state.latestFrame = nil
-        lock.unlock()
-
-        if let cache {
-            CVMetalTextureCacheFlush(cache, 0)
-        }
-    }
+    /// Dedicated queue for the in-memory resource-loader delegate, mirroring
+    /// `WallpaperVideoPlayer`'s pattern so byte-range fulfilment never lands
+    /// on main.
+    private static let resourceLoaderQueue = DispatchQueue(
+        label: "app.livewallpaper.wpe.video.in-memory-loader",
+        qos: .userInitiated
+    )
 }
 
 extension WPEVideoTextureSource: WPEDynamicTextureSource {}
-
-private extension NSLock {
-    /// Helper avoids shadowing the protocol method `withLock` SwiftSyntax may already have on newer SDKs.
-    func withLockGuard<T>(_ body: () throws -> T) rethrows -> T {
-        lock()
-        defer { unlock() }
-        return try body()
-    }
-}
 #endif
