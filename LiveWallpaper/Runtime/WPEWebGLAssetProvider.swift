@@ -86,8 +86,15 @@ actor WPEWebGLAssetProvider: WPEAssetProvider {
     }
 
     private func resolveImageCascade(relativePath: String) throws -> CascadeResolution {
+        // `NSString.pathExtension` treats EVERYTHING after the last `.` as an
+        // extension, so paths like `…uhdpaper.com-600@5@f` end up with
+        // `pathExtension = "com-600@5@f"`. Trusting that short-circuits the
+        // cascade loop below — and with it the `unsupportedAnimation` →
+        // video-bytes fallback — leaving TEXV/MP4 main wallpapers (saber,
+        // many workshop scenes) as "Load failed". Only short-circuit when
+        // the extension is one we actually recognize as a texture suffix.
         let ext = (relativePath as NSString).pathExtension.lowercased()
-        if !ext.isEmpty {
+        if !ext.isEmpty && Self.textureSearchSuffixes.contains(ext) {
             return .image(try resolver.resolveImage(relativePath: relativePath))
         }
 
