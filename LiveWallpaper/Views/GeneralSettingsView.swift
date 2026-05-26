@@ -900,29 +900,6 @@ struct GeneralSettingsView: View {
         pendingBugReport = BugReporter.makeReport(activeWallpaperKinds: kinds)
     }
 
-    private func settingsActionButton(
-        title: LocalizedStringKey,
-        accessibilityLabel: LocalizedStringKey,
-        accessibilityHint: LocalizedStringKey,
-        systemImage: String,
-        tint: Color = .accentColor,
-        isDestructive: Bool = false,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            SettingsActionTileLabel(
-                title: title,
-                systemImage: systemImage,
-                tint: tint,
-                isDestructive: isDestructive
-            )
-        }
-        .buttonStyle(.plain)
-        .frame(maxWidth: .infinity)
-        .accessibilityLabel(Text(accessibilityLabel))
-        .accessibilityHint(Text(accessibilityHint))
-    }
-
     private var versionString: String {
         let info = Bundle.main.infoDictionary
         let version = info?["CFBundleShortVersionString"] as? String ?? "–"
@@ -997,38 +974,6 @@ struct GeneralSettingsView: View {
         screenManager.refreshScreens(preserveRuntimeSessions: false)
     }
 
-}
-
-private struct SettingsActionTileLabel: View {
-    let title: LocalizedStringKey
-    let systemImage: String
-    var tint: Color = .accentColor
-    var isDestructive: Bool = false
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: systemImage)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(tint)
-                .frame(width: 16)
-
-            Text(title)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(isDestructive ? Color.red : Color.primary)
-                .lineLimit(1)
-        }
-        .frame(maxWidth: .infinity, minHeight: 28)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(
-            RoundedRectangle(cornerRadius: DesignTokens.Corner.sm, style: .continuous)
-                .fill(Color(NSColor.controlBackgroundColor).opacity(0.7))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: DesignTokens.Corner.sm, style: .continuous)
-                .strokeBorder(tint.opacity(isDestructive ? 0.35 : 0.12), lineWidth: 0.5)
-        )
-    }
 }
 
 struct BatteryLevelIndicator: View {
