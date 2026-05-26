@@ -800,14 +800,11 @@ struct GeneralSettingsView: View {
     /// selectable. Placeholders need to be replaced before shipping.
     private var aboutFooter: some View {
         VStack(spacing: 4) {
-            // TODO: Replace `<your name>` with the real author byline.
-            Text("Made by <your name>")
+            Text("Made by Paradox07127")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            // TODO: Replace with the real copyright year + holder + license.
-            // Suggest MIT or GPLv3 for GitHub open source.
-            Text(verbatim: "© 2026 <copyright holder> · Released under <license>")
+            Text(verbatim: "© 2026 Loomscreen contributors · MIT License")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
@@ -1007,8 +1004,4 @@ struct BatteryLevelIndicator: View {
                 .frame(width: 4, height: 16)
         }
     }
-}
-
-#Preview {
-    GeneralSettingsView()
 }
