@@ -7,7 +7,7 @@ body:
     attributes:
       value: |
         Thanks for taking the time to file a bug! Before submitting:
-        - Search [existing issues](https://github.com/Paradox07127/LiveWallpaper/issues?q=is%3Aissue) — your bug may already be tracked.
+        - Search [existing issues](https://github.com/Paradox07127/Loomscreen/issues?q=is%3Aissue) — your bug may already be tracked.
         - If you opened this template from the in-app **Report a Bug…** sheet, the diagnostic snapshot is already pasted below. Please add **What happened?** and **Steps to reproduce** before posting.
 
   - type: checkboxes

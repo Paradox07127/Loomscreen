@@ -51,5 +51,5 @@ codebase, distributed via GitHub Releases.
   `CFBundleName` to "LiveWallpaper" for every locale, which used to
   override Loomscreen's hard-coded display name at runtime.
 
-[Unreleased]: https://github.com/Paradox07127/LiveWallpaper/compare/loomscreen-v0.1.0...HEAD
-[0.1.0]: https://github.com/Paradox07127/LiveWallpaper/releases/tag/loomscreen-v0.1.0
+[Unreleased]: https://github.com/Paradox07127/Loomscreen/compare/loomscreen-v0.1.0...HEAD
+[0.1.0]: https://github.com/Paradox07127/Loomscreen/releases/tag/loomscreen-v0.1.0

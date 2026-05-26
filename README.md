@@ -3,11 +3,11 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![macOS 14+](https://img.shields.io/badge/macOS-14.0%2B-blue.svg)](#requirements)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-required-purple.svg)](#requirements)
-[![Release](https://img.shields.io/github/v/release/Paradox07127/LiveWallpaper?include_prereleases&sort=semver&filter=loomscreen-*)](https://github.com/Paradox07127/LiveWallpaper/releases)
+[![Release](https://img.shields.io/github/v/release/Paradox07127/Loomscreen?include_prereleases&sort=semver&filter=loomscreen-*)](https://github.com/Paradox07127/Loomscreen/releases)
 
 > English | [简体中文](README.zh-Hans.md)
 
-> 🚧 **Active development.** Loomscreen is being iterated continuously. Feedback, bug reports, and PRs are very welcome — open an [issue](https://github.com/Paradox07127/LiveWallpaper/issues) or start a [discussion](https://github.com/Paradox07127/LiveWallpaper/discussions).
+> 🚧 **Active development.** Loomscreen is being iterated continuously. Feedback, bug reports, and PRs are very welcome — open an [issue](https://github.com/Paradox07127/Loomscreen/issues) or start a [discussion](https://github.com/Paradox07127/Loomscreen/discussions).
 
 A macOS menu bar app that plays animated wallpapers — videos and web pages — across every connected display.
 
@@ -22,7 +22,7 @@ This repository ships two SKUs from a single codebase:
 
 ## Quick start
 
-1. Download `Loomscreen-x.y.z.dmg` from [Releases](https://github.com/Paradox07127/LiveWallpaper/releases).
+1. Download `Loomscreen-x.y.z.dmg` from [Releases](https://github.com/Paradox07127/Loomscreen/releases).
 2. Open the DMG, drag **Loomscreen.app** into `/Applications`.
 3. Run **once** in Terminal — Loomscreen is ad-hoc signed (no paid Apple Developer ID yet), so macOS Gatekeeper quarantines the binary on first launch:
    ```bash
@@ -65,7 +65,7 @@ LiveWallpaper does **not** sign in to Steam, connect to Steam Workshop, download
 ## Building from source
 
 ```bash
-git clone https://github.com/Paradox07127/LiveWallpaper.git
+git clone https://github.com/Paradox07127/Loomscreen.git
 cd LiveWallpaper
 open LiveWallpaper.xcodeproj
 ```
@@ -77,7 +77,7 @@ Don't build both schemes in parallel — they share the same `XCBuildData/build.
 ## Contributing · Security · License
 
 - **PRs and issues welcome.** Run `xcodebuild test` on the `LiveWallpaper` scheme + `xcodebuild build` on `LiveWallpaperLite` before opening a PR; both must succeed. The test suite enforces runtime invariants — if a PR needs to diverge from them, flag it in the description.
-- **Security issues:** use GitHub's [private vulnerability reporting](https://github.com/Paradox07127/LiveWallpaper/security/advisories/new) instead of public issues.
+- **Security issues:** use GitHub's [private vulnerability reporting](https://github.com/Paradox07127/Loomscreen/security/advisories/new) instead of public issues.
 - **License:** MIT — see [LICENSE](LICENSE). The full LiveWallpaper codebase (including Pro-only modules gated by `#if !LITE_BUILD`) is covered.
 
 ## Trademarks

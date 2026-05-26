@@ -54,18 +54,18 @@ final class UpdateChecker {
     }
 
     static let releasesAPI = URL(
-        string: "https://api.github.com/repos/Paradox07127/LiveWallpaper/releases?per_page=10"
+        string: "https://api.github.com/repos/Paradox07127/Loomscreen/releases?per_page=10"
     )!
     static let releasesPage = URL(
-        string: "https://github.com/Paradox07127/LiveWallpaper/releases"
+        string: "https://github.com/Paradox07127/Loomscreen/releases"
     )!
 
     static let tagPrefix = "loomscreen-v"
     static let throttleInterval: TimeInterval = 60 * 60 * 12
     static let maximumReleaseBodyCharacters = 4_000
     static let trustedGitHubHost = "github.com"
-    static let trustedReleasesPathPrefix = "/Paradox07127/LiveWallpaper/releases/"
-    static let trustedDownloadPathPrefix = "/Paradox07127/LiveWallpaper/releases/download/"
+    static let trustedReleasesPathPrefix = "/Paradox07127/Loomscreen/releases/"
+    static let trustedDownloadPathPrefix = "/Paradox07127/Loomscreen/releases/download/"
 
     private static let lastCheckedKey = "loomscreen.update.lastCheckedAt"
     private static let skippedVersionKey = "loomscreen.update.skippedVersion"

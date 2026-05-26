@@ -103,8 +103,8 @@ jobs:
             xattr -dr com.apple.quarantine /Applications/Loomscreen.app
             ```
 
-            See [CHANGELOG.md](https://github.com/Paradox07127/LiveWallpaper/blob/main/CHANGELOG.md)
-            for the full release notes, and the [README](https://github.com/Paradox07127/LiveWallpaper#loomscreen-lite-edition)
+            See [CHANGELOG.md](https://github.com/Paradox07127/Loomscreen/blob/main/CHANGELOG.md)
+            for the full release notes, and the [README](https://github.com/Paradox07127/Loomscreen#loomscreen-lite-edition)
             for installation and troubleshooting.
           files: |
             build/release/Loomscreen-${{ steps.version.outputs.version }}.dmg

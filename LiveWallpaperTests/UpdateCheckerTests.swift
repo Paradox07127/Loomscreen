@@ -289,12 +289,12 @@ struct UpdateCheckerTests {
             draft: false,
             prerelease: false,
             publishedAt: nil,
-            htmlURL: URL(string: "https://github.com/Paradox07127/LiveWallpaper/releases/tag/loomscreen-v1.1.0"),
+            htmlURL: URL(string: "https://github.com/Paradox07127/Loomscreen/releases/tag/loomscreen-v1.1.0"),
             assets: [
                 .init(name: "Loomscreen-1.1.0.dmg",
                       browserDownloadURL: URL(string: "https://evil.example.com/Loomscreen-1.1.0.dmg")),
                 .init(name: "Loomscreen-1.1.0.zip",
-                      browserDownloadURL: URL(string: "https://github.com/Paradox07127/LiveWallpaper/releases/download/loomscreen-v1.1.0/Loomscreen-1.1.0.zip"))
+                      browserDownloadURL: URL(string: "https://github.com/Paradox07127/Loomscreen/releases/download/loomscreen-v1.1.0/Loomscreen-1.1.0.zip"))
             ]
         )
         let transport = StubTransport(releases: [hostile])
@@ -324,7 +324,7 @@ struct UpdateCheckerTests {
             draft: false,
             prerelease: false,
             publishedAt: nil,
-            htmlURL: URL(string: "https://github.com/Paradox07127/LiveWallpaper/releases/tag/loomscreen-v1.1.0"),
+            htmlURL: URL(string: "https://github.com/Paradox07127/Loomscreen/releases/tag/loomscreen-v1.1.0"),
             assets: []
         )
         let transport = StubTransport(releases: [bigBody])
@@ -417,11 +417,11 @@ struct UpdateCheckerTests {
             "draft": false,
             "prerelease": false,
             "published_at": "2026-06-01T12:00:00Z",
-            "html_url": "https://github.com/Paradox07127/LiveWallpaper/releases/tag/loomscreen-v1.0.1",
+            "html_url": "https://github.com/Paradox07127/Loomscreen/releases/tag/loomscreen-v1.0.1",
             "assets": [
               {
                 "name": "Loomscreen-1.0.1.dmg",
-                "browser_download_url": "https://github.com/Paradox07127/LiveWallpaper/releases/download/loomscreen-v1.0.1/Loomscreen-1.0.1.dmg"
+                "browser_download_url": "https://github.com/Paradox07127/Loomscreen/releases/download/loomscreen-v1.0.1/Loomscreen-1.0.1.dmg"
               }
             ]
           }
@@ -454,11 +454,11 @@ struct UpdateCheckerTests {
             draft: draft,
             prerelease: prerelease,
             publishedAt: Date(timeIntervalSince1970: 1_700_000_000),
-            htmlURL: URL(string: "https://github.com/Paradox07127/LiveWallpaper/releases/tag/\(tag)"),
+            htmlURL: URL(string: "https://github.com/Paradox07127/Loomscreen/releases/tag/\(tag)"),
             assets: asset.map { name in
                 [GitHubRelease.Asset(
                     name: name,
-                    browserDownloadURL: URL(string: "https://github.com/Paradox07127/LiveWallpaper/releases/download/\(tag)/\(name)")
+                    browserDownloadURL: URL(string: "https://github.com/Paradox07127/Loomscreen/releases/download/\(tag)/\(name)")
                 )]
             } ?? []
         )

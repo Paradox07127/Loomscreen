@@ -3,11 +3,11 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![macOS 14+](https://img.shields.io/badge/macOS-14.0%2B-blue.svg)](#运行环境)
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-required-purple.svg)](#运行环境)
-[![Release](https://img.shields.io/github/v/release/Paradox07127/LiveWallpaper?include_prereleases&sort=semver&filter=loomscreen-*)](https://github.com/Paradox07127/LiveWallpaper/releases)
+[![Release](https://img.shields.io/github/v/release/Paradox07127/Loomscreen?include_prereleases&sort=semver&filter=loomscreen-*)](https://github.com/Paradox07127/Loomscreen/releases)
 
 > [English](README.md) | 简体中文
 
-> 🚧 **持续开发中。** Loomscreen 正在不断迭代完善,欢迎提建议、反馈 bug、贡献 PR —— 来开 [issue](https://github.com/Paradox07127/LiveWallpaper/issues) 或者 [discussion](https://github.com/Paradox07127/LiveWallpaper/discussions)。
+> 🚧 **持续开发中。** Loomscreen 正在不断迭代完善,欢迎提建议、反馈 bug、贡献 PR —— 来开 [issue](https://github.com/Paradox07127/Loomscreen/issues) 或者 [discussion](https://github.com/Paradox07127/Loomscreen/discussions)。
 
 一款 macOS 菜单栏应用,把视频和网页变成跨多显示器的动态壁纸。
 
@@ -22,7 +22,7 @@
 
 ## 快速开始
 
-1. 从 [Releases](https://github.com/Paradox07127/LiveWallpaper/releases) 下载 `Loomscreen-x.y.z.dmg`。
+1. 从 [Releases](https://github.com/Paradox07127/Loomscreen/releases) 下载 `Loomscreen-x.y.z.dmg`。
 2. 打开 DMG,把 **Loomscreen.app** 拖到 `/Applications`。
 3. 在终端**执行一次** —— Loomscreen 采用 ad-hoc 签名(暂无 Apple Developer ID),所以 macOS Gatekeeper 会在第一次启动时拦截:
    ```bash
@@ -65,7 +65,7 @@ LiveWallpaper **不会**登录 Steam、不连接 Steam Workshop、不下载 Work
 ## 从源码构建
 
 ```bash
-git clone https://github.com/Paradox07127/LiveWallpaper.git
+git clone https://github.com/Paradox07127/Loomscreen.git
 cd LiveWallpaper
 open LiveWallpaper.xcodeproj
 ```
@@ -77,7 +77,7 @@ open LiveWallpaper.xcodeproj
 ## 参与贡献 · 安全 · 许可
 
 - **欢迎 PR 和 issue。** 在开 PR 之前请本地跑通 `LiveWallpaper` scheme 的 `xcodebuild test` 和 `LiveWallpaperLite` scheme 的 `xcodebuild build`,两者都必须成功。测试套件强制了若干运行时约定 —— 如果 PR 需要偏离,请在描述里明确说明。
-- **安全漏洞:** 请使用 GitHub 的 [私有漏洞报告通道](https://github.com/Paradox07127/LiveWallpaper/security/advisories/new),不要开公开 issue。
+- **安全漏洞:** 请使用 GitHub 的 [私有漏洞报告通道](https://github.com/Paradox07127/Loomscreen/security/advisories/new),不要开公开 issue。
 - **许可:** MIT —— 见 [LICENSE](LICENSE)。整个 LiveWallpaper 代码库(包括 `#if !LITE_BUILD` 守卫的 Pro 独有模块)同样适用该许可。
 
 ## 商标声明

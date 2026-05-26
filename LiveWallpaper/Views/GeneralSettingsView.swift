@@ -716,13 +716,13 @@ struct GeneralSettingsView: View {
                     title: "View on GitHub",
                     systemImage: "chevron.left.forwardslash.chevron.right",
                     accent: .blue,
-                    url: URL(string: "https://github.com/Paradox07127/LiveWallpaper")
+                    url: URL(string: "https://github.com/Paradox07127/Loomscreen")
                 )
                 aboutTile(
                     title: "Discussions",
                     systemImage: "bubble.left.and.bubble.right",
                     accent: .indigo,
-                    url: URL(string: "https://github.com/Paradox07127/LiveWallpaper/discussions")
+                    url: URL(string: "https://github.com/Paradox07127/Loomscreen/discussions")
                 )
             }
             GridRow {

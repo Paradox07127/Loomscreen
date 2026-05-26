@@ -229,7 +229,7 @@ time, in Terminal:
 After that, double-click Loomscreen.app like any other app. Updates are
 checked once per launch (throttled to 12 h) via the GitHub Releases API.
 
-Source: https://github.com/Paradox07127/LiveWallpaper
+Source: https://github.com/Paradox07127/Loomscreen
 License: MIT
 EOF
 

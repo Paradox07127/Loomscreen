@@ -20,11 +20,11 @@ struct BugReport: Identifiable, Sendable {
 /// Builds the data the bug-report sheet needs without doing any UI work.
 /// Kept side-effect-free so it can be unit-tested and called from any actor.
 enum BugReporter {
-    /// `Paradox07127/LiveWallpaper` — the public open-source repo. Hardcoded
+    /// `Paradox07127/Loomscreen` — the public open-source repo. Hardcoded
     /// rather than read from a build setting because the issue URL must
     /// survive even if `Bundle` lookups fail.
     private static let issueTemplateURL = URL(
-        string: "https://github.com/Paradox07127/LiveWallpaper/issues/new?template=bug_report.yml"
+        string: "https://github.com/Paradox07127/Loomscreen/issues/new?template=bug_report.yml"
     )!
 
     /// How many recent warning/error lines we lift from the runtime log into
