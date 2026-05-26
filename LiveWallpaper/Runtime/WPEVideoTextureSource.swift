@@ -11,24 +11,18 @@ import QuartzCore
 /// that MP4 back on the wall clock and hands the renderer the current
 /// frame as a Metal texture.
 ///
-/// Pacing comes from `AVPlayer` + `AVPlayerItemVideoOutput` rather than a
-/// `while true { copyNextSampleBuffer() }` over `AVAssetReader`. The old
-/// path was an offline-decode API used as a playback engine, so it ran as
-/// fast as the CPU/GPU could decode — 24 FPS clips perceived as 8× speed,
-/// 60 FPS clips as 3×. `AVPlayer` schedules frames against the same host
-/// clock that drives the on-screen Metal pipeline, so the output is
-/// in-sync with WPE's reference renderer.
+/// Pacing uses `AVPlayer` + `AVPlayerItemVideoOutput` so frames schedule
+/// against the same host clock as the Metal pipeline (an `AVAssetReader`
+/// loop decodes as fast as possible and de-syncs).
 ///
-/// Pixel format prefers `.bgra8Unorm_srgb` to match the rest of the
-/// Metal scene pipeline's sRGB output attachment (see
-/// `WPEMetalRenderExecutor.outputPixelFormat`), with `.bgra8Unorm` as the
-/// fallback if the GPU rejects the sRGB variant for this buffer.
+/// Pixel format prefers `.bgra8Unorm_srgb` to match
+/// `WPEMetalRenderExecutor.outputPixelFormat`, with `.bgra8Unorm` as the
+/// fallback when the GPU rejects the sRGB variant.
 ///
-/// Lifecycle: the player stays paused after `init` so the renderer's
-/// `applyPerformanceProfile(currentProfile)` (called once textures finish
-/// loading) decides whether to start it. Starting in `init` would let the
-/// video drift ahead of the rest of the scene's first-frame setup and
-/// would also ignore a pre-load `.suspended` profile.
+/// Lifecycle: the player stays paused after `init`; the renderer's
+/// `applyPerformanceProfile(currentProfile)` (called once textures
+/// finish loading) decides whether to start it, which also respects a
+/// pre-load `.suspended` profile.
 @MainActor
 final class WPEVideoTextureSource {
     private let textureCache: CVMetalTextureCache

@@ -1020,8 +1020,7 @@ final class WPEMetalRenderExecutor {
             return result
         } catch let error as WPEShaderCompilerError {
             switch error {
-            case .backendUnavailable(let reason),
-                 .glslPreprocessFailed(let reason),
+            case .glslPreprocessFailed(let reason),
                  .translationFailed(let reason),
                  .mslLibraryFailed(let reason):
                 // The compiler already dumped processed sources; tack on the

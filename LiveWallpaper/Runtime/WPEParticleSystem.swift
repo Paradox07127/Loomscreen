@@ -15,27 +15,16 @@ struct WPEParticleInstance {
 /// One-shot world-space placement applied to a `WPEParticleSystem` at
 /// load time.
 ///
-/// **Mixed coordinate convention** (empirically derived from
-/// workshop 3725117707 + smoke/vapor presets):
+/// **Mixed coordinate convention** (do not unify naively):
 ///
-///   - **Scene-object `origin`** is in WPE editor's artist-friendly
-///     Y-up bottom-left frame (so `(0,0)` is the bottom-left corner
-///     of the scene, +Y rises). We just center it (`-W/2, -H/2`).
-///   - **Everything inside the emitter** (emitter `origin`, emitter
-///     `directions.y`, per-particle `velocity.y`, `gravity.y`, plus
-///     `angles.x/z` on the scene-object's rotation) follows the
-///     graphics-traditional Y-down top-left convention that lines up
-///     with D3D/Win32 coordinates. We Y-flip those once at spawn so
-///     the simulator runs in a single Y-up frame, and we negate
+///   - **Scene-object `origin`** is in WPE's artist-friendly Y-up
+///     bottom-left frame; we center it (`-W/2, -H/2`).
+///   - **Everything inside the emitter** (emitter `origin`,
+///     `directions.y`, per-particle `velocity.y`, `gravity.y`, and
+///     `angles.x/z` on the scene-object's rotation) is Y-down
+///     top-left (D3D/Win32 convention). We Y-flip those once at spawn
+///     so the simulator runs in a single Y-up frame, and we negate
 ///     `angles.x/z` on the rotation matrix to match.
-///
-/// The data: scene-object `fog y=440` visually appears in the LOWER
-/// 18% of the scene (Y-up reading); but `leaves2` emitter origin
-/// `(350, 750)` rotated by `angles.z = 2.77 rad` produces leaves that
-/// drift the *correct* way (top → bottom) only if the emitter
-/// internals are read Y-down with Almamu's rotation sign convention.
-/// Almamu Y-flips *both* layers; we Y-flip only the inner one. This
-/// produces the visual behaviour the workshop authors clearly tuned for.
 struct WPEParticleSceneTransform {
     /// Scene-object origin in the centered render frame.
     var renderOrigin: SIMD3<Float>

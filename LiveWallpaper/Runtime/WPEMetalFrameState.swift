@@ -66,10 +66,6 @@ struct WPEMetalFrameState {
     func hasInitialized(_ texture: MTLTexture) -> Bool {
         initializedTextures.contains(ObjectIdentifier(texture))
     }
-
-    func hasWritten(_ targetID: WPEMetalTargetID) -> Bool {
-        writtenTargets.contains(targetID)
-    }
 }
 
 struct WPEMetalPipelineKey: Hashable {

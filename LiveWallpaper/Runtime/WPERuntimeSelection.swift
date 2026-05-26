@@ -9,14 +9,14 @@ enum WPERuntimeSelection: String, Sendable, CaseIterable {
     case metal
     case webGL = "webgl"
 
-    /// Phase-11 string-valued default. Three valid values: `auto`, `metal`,
-    /// `webgl`. Replaces the legacy boolean `WPEUseWebGLRuntime` key; the
-    /// boolean is migrated lazily inside `current` if the new key is absent.
+    /// String-valued default. Three valid values: `auto`, `metal`, `webgl`.
+    /// Migrates lazily from the legacy boolean key inside `current` when the
+    /// new key is absent.
     static let defaultsKey = "WPERuntimeSelection"
 
-    /// Original Phase-0 boolean toggle (`true` → WebGL, `false` → Metal).
-    /// Read once when the new key is missing so existing DEBUG configurations
-    /// don't silently flip after upgrade.
+    /// Legacy boolean toggle (`true` → WebGL, `false` → Metal). Read once
+    /// when the new key is missing so existing configurations don't silently
+    /// flip after upgrade.
     static let legacyDefaultsKey = "WPEUseWebGLRuntime"
 
     /// User's chosen mode. May be `.automatic`; callers that need a

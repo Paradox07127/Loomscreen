@@ -204,33 +204,6 @@ struct WPEShaderPreprocessor {
         return s
     }
 
-    /// Replace occurrences of `prefix` only when preceded by a non-identifier character (so `mymul(` doesn't get rewritten by `mul(`).
-    private static func replaceWordPrefix(_ prefix: String, in source: String, with replacement: String) -> String {
-        guard !prefix.isEmpty else { return source }
-        var result = ""
-        result.reserveCapacity(source.count)
-        var index = source.startIndex
-        while index < source.endIndex {
-            if source[index...].hasPrefix(prefix) {
-                let priorOK: Bool
-                if index == source.startIndex {
-                    priorOK = true
-                } else {
-                    let prior = source[source.index(before: index)]
-                    priorOK = !prior.isLetter && !prior.isNumber && prior != "_"
-                }
-                if priorOK {
-                    result += replacement
-                    index = source.index(index, offsetBy: prefix.count)
-                    continue
-                }
-            }
-            result.append(source[index])
-            index = source.index(after: index)
-        }
-        return result
-    }
-
     // MARK: - Combos
 
     private func mergeComboDefaults(

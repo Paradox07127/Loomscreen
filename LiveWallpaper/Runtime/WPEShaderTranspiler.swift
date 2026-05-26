@@ -3,13 +3,12 @@ import Foundation
 
 /// Pure-Swift WPE-flavor GLSL → Metal Shading Language transpiler.
 ///
-/// Scope: the canonical single-pass WPE effect shader. Every input goes
-/// through `WPEShaderPreprocessor` first (combos baked into `#define`s,
-/// includes inlined, `texSample2D` mapped to `texture()`); the transpiler
-/// then walks the source, lifts `uniform` / `varying` declarations into
-/// structured Metal inputs, and rewrites the body with type/intrinsic
-/// substitutions. Output signature is fixed so the dispatcher's custom
-/// path knows the binding convention without runtime reflection:
+/// Scope: the canonical single-pass WPE effect shader. Inputs come from
+/// `WPEShaderPreprocessor` (combos baked into `#define`s, includes
+/// inlined, `texSample2D` mapped to `texture()`). The transpiler lifts
+/// `uniform` / `varying` declarations into structured Metal inputs and
+/// rewrites the body with type/intrinsic substitutions. Output signature
+/// is fixed so the dispatcher binds without runtime reflection:
 ///
 ///   fragment float4 wpe_translated_fragment(
 ///       WPEStageIn in [[stage_in]],
@@ -27,12 +26,8 @@ import Foundation
 ///   - `discard` / `gl_FragData[*]` MRT
 ///   - sampler arrays, texture arrays, cube maps, 3D textures
 ///
-/// This is the only Metal-side translator we ship. The earlier C++
-/// glslang+SPIRV-Cross stack has been retired (Phase 12); shaders this
-/// transpiler can't handle throw `.translationFailed`, which the
-/// `WPEShaderCompiling` dispatcher surfaces as
-/// `metalRendererUnsupported`. Automatic sessions can fall back to WebGL;
-/// user-pinned Metal surfaces the Metal error.
+/// Unsupported shaders surface as `metalRendererUnsupported`; automatic
+/// sessions fall back to WebGL, user-pinned Metal surfaces the error.
 struct WPEShaderTranspiler {
 
     /// Each uniform occupies one or more float4 slots. Packing rule

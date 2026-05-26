@@ -3,11 +3,9 @@ import Foundation
 import Metal
 
 /// `WPEShaderCompiling` implementation that uses `WPEShaderTranspiler` to
-/// emit MSL and `MTLDevice.makeLibrary(source:)` to compile it. This is the
-/// sole shipping Metal-side translator after Phase-12 retired the
-/// SPIRV-Cross/glslang XCFramework; shaders it can't handle throw
-/// `.translationFailed`, which `WPEMetalSceneRenderer` then surfaces as
-/// `SceneRenderingError.metalRendererUnsupported`.
+/// emit MSL and `MTLDevice.makeLibrary(source:)` to compile it. Shaders it
+/// can't handle throw `.translationFailed`, which `WPEMetalSceneRenderer`
+/// surfaces as `SceneRenderingError.metalRendererUnsupported`.
 struct WPESwiftShaderCompiler: WPEShaderCompiling {
     let device: MTLDevice
 

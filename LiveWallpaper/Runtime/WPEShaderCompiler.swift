@@ -5,11 +5,10 @@ import Metal
 /// Boundary type for the WPE → MSL shader pipeline.
 ///
 /// `WPESwiftShaderCompiler` is the only shipping implementation; it wraps
-/// the pure-Swift `WPEShaderTranspiler` (Phase-12 dual-backend strategy
-/// retired the SPIRV-Cross/glslang XCFramework). Shaders the transpiler
-/// can't handle throw `.translationFailed`, which surfaces as
-/// `SceneRenderingError.metalRendererUnsupported`; automatic sessions can
-/// use that as the WebGL fallback signal.
+/// the pure-Swift `WPEShaderTranspiler`. Shaders the transpiler can't
+/// handle throw `.translationFailed`, which surfaces as
+/// `SceneRenderingError.metalRendererUnsupported`; automatic sessions use
+/// that as the WebGL fallback signal.
 protocol WPEShaderCompiling: Sendable {
     func compile(_ request: WPEShaderCompileRequest) throws -> WPEShaderCompileResult
 }
@@ -53,10 +52,6 @@ struct WPEShaderCompileResult: @unchecked Sendable {
 }
 
 enum WPEShaderCompilerError: Error, Sendable, Equatable {
-    /// Retained for backwards compatibility on archived diagnostics; the
-    /// Phase-12 shipping path never raises this — `WPESwiftShaderCompiler`
-    /// throws `.translationFailed` instead when it can't handle a shader.
-    case backendUnavailable(String)
     case glslPreprocessFailed(String)
     case translationFailed(String)
     case mslLibraryFailed(String)

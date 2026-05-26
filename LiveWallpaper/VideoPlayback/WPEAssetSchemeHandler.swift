@@ -4,11 +4,7 @@ import Foundation
 import UniformTypeIdentifiers
 
 /// Serves per-scene assets over `wpe-asset://scene/<nonce>/<relative-path>`.
-///
-/// Phase 1 lays the URL contract + nonce gating; Phase 4 will plug in a
-/// `WPEAssetProvider` backed by `WPETexDecoder` + `WPEMultiRootResourceResolver`.
-/// Until then every request fails with 404 so the JS side can exercise its
-/// error paths against a wired-but-empty handler.
+/// Nonce-gated; requests without an active provider fail with 404.
 protocol WPEAssetProvider: AnyObject, Sendable {
     /// Returns the bytes + MIME for `relativePath` inside the active scene's
     /// asset roots. `nil` => 404. Errors raised here are surfaced as 5xx.
