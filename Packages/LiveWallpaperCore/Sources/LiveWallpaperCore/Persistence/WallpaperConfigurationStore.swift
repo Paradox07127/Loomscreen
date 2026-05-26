@@ -61,32 +61,6 @@ public final class WallpaperConfigurationStore {
         return configs
     }
 
-    public func pruneInvalidVideoConfigurations(using validator: (CGDirectDisplayID) -> Bool) -> [CGDirectDisplayID] {
-        let candidateVideoIDs = persistence
-            .loadConfigurations()
-            .filter { $0.wallpaperType == .video }
-            .map(\.screenID)
-
-        let invalidVideoIDs = Set(candidateVideoIDs.filter { !validator($0) })
-
-        guard !invalidVideoIDs.isEmpty else {
-            _ = loadAll()
-            return []
-        }
-
-        let postValidationConfigs = persistence.loadConfigurations()
-
-        let pruned = Self.removingInvalidVideoConfigurations(
-            from: postValidationConfigs,
-            invalidScreenIDs: invalidVideoIDs
-        )
-
-        cache = Dictionary(uniqueKeysWithValues: pruned.map { ($0.screenID, $0) })
-        persistence.replaceAllConfigurations(pruned)
-
-        return Array(invalidVideoIDs)
-    }
-
     public func pruneInvalidResourceConfigurations(using validator: (CGDirectDisplayID) -> Bool) -> [CGDirectDisplayID] {
         let candidateIDs = persistence
             .loadConfigurations()
@@ -110,15 +84,6 @@ public final class WallpaperConfigurationStore {
         persistence.replaceAllConfigurations(pruned)
 
         return Array(invalidIDs)
-    }
-
-    public nonisolated static func removingInvalidVideoConfigurations(
-        from configs: [ScreenConfiguration],
-        invalidScreenIDs: Set<CGDirectDisplayID>
-    ) -> [ScreenConfiguration] {
-        configs.filter { config in
-            !(config.wallpaperType == .video && invalidScreenIDs.contains(config.screenID))
-        }
     }
 
     public nonisolated static func removingInvalidResourceConfigurations(

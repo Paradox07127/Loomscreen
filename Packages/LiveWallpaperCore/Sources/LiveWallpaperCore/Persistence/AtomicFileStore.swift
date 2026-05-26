@@ -2,24 +2,14 @@ import Foundation
 
 /// Generic JSON-on-disk store with atomic write + rotating `.bak` recovery.
 ///
-/// Design goals
-/// - Survives mid-write crashes: the previous file remains intact until the
-///   new bytes are durably on disk and renamed into place (POSIX atomic).
-/// - Survives a single corrupt `.json` file: `read()` falls back to `.bak`.
-/// - Independent of `cfprefsd`: works on fresh user accounts where
-///   `UserDefaults` may silently drop writes during launch.
-/// - Sandbox-portable: lives under `Application Support/<bundle-id>/` which
-///   macOS redirects into the sandbox container automatically if we ever
-///   enable App Sandbox later.
-/// - Multi-instance safe: an advisory `flock`-style POSIX lock prevents two
-///   LiveWallpaper processes from clobbering each other's temp files.
-/// - Privacy: files contain security-scoped bookmark Data and local path
-///   metadata, so directory mode is forced to `0700` and file mode to
-///   `0600` regardless of user umask.
+/// - Crash-safe: previous file stays intact until the new bytes are durably
+///   renamed into place; `read()` falls back to `.bak` on corruption.
+/// - Independent of `cfprefsd` / `UserDefaults`; sandbox-portable under
+///   `Application Support/<bundle-id>/`.
+/// - Multi-instance safe via POSIX advisory lock.
+/// - Privacy: dir `0700`, file `0600` (bookmark Data + local paths).
 ///
-/// The store is thread-confined to its actor (typically MainActor) by the
-/// caller; the disk I/O itself is synchronous so callers can reason about
-/// when a save has hit the filesystem.
+/// Thread-confined to the caller's actor; disk I/O is synchronous.
 public struct AtomicFileStore<Value: Codable> {
     public enum StoreError: Error, CustomStringConvertible {
         case writeFailed(underlying: Error)

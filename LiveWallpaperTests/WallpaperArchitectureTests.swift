@@ -734,27 +734,8 @@ private final class FakePlaybackController: WallpaperPlaybackControllable {
     }
 }
 
-@Suite("WallpaperConfigurationStore removing invalid video configurations")
+@Suite("WallpaperConfigurationStore removing invalid resource configurations")
 struct WallpaperConfigurationStoreInvalidConfigTests {
-
-    @Test("Invalid video configurations are removed while non-video wallpapers survive")
-    func invalidVideoConfigurationsAreRemoved() {
-        let configs = [
-            ScreenConfiguration(screenID: 1, videoBookmarkData: Data([0x01]), wallpaperType: .video),
-            ScreenConfiguration(screenID: 2, videoBookmarkData: Data(), wallpaperType: .html, htmlContent: "https://example.com"),
-            ScreenConfiguration(screenID: 3, videoBookmarkData: Data(), wallpaperType: .metalShader, shaderPreset: .aurora),
-        ]
-
-        let pruned = WallpaperConfigurationStore.removingInvalidVideoConfigurations(
-            from: configs,
-            invalidScreenIDs: [1, 2, 3]
-        )
-
-        #expect(pruned.count == 2)
-        #expect(pruned.contains(where: { $0.screenID == 2 && $0.wallpaperType == .html }))
-        #expect(pruned.contains(where: { $0.screenID == 3 && $0.wallpaperType == .metalShader }))
-        #expect(!pruned.contains(where: { $0.screenID == 1 }))
-    }
 
     @Test("Invalid local HTML configurations are removed while shader wallpapers survive")
     func invalidLocalHTMLConfigurationsAreRemoved() {
