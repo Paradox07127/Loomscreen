@@ -94,11 +94,15 @@ if [[ "$PROJECT_MARKETING_VERSION" != "$VERSION" ]]; then
   exit 65
 fi
 
-echo "== Pre-flight: existing release-candidate checks =="
-REQUIRE_DEVELOPER_ID=0 scripts/release_candidate_check.sh || {
-  echo "ERROR: release_candidate_check.sh failed; fix before packaging." >&2
-  exit 1
-}
+if [[ "$DRY_RUN" == "1" ]]; then
+  echo "== Pre-flight: skipping release-candidate checks (--dry-run) =="
+else
+  echo "== Pre-flight: existing release-candidate checks =="
+  REQUIRE_DEVELOPER_ID=0 scripts/release_candidate_check.sh || {
+    echo "ERROR: release_candidate_check.sh failed; fix before packaging." >&2
+    exit 1
+  }
+fi
 
 # ---------- archive ----------
 
