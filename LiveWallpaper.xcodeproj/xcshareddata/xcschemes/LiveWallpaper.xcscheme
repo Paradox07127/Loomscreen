@@ -54,16 +54,6 @@
                ReferencedContainer = "container:LiveWallpaper.xcodeproj">
             </BuildableReference>
          </TestableReference>
-         <TestableReference
-            skipped = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "0C322C092D6950490033C48B"
-               BuildableName = "LiveWallpaperUITests.xctest"
-               BlueprintName = "LiveWallpaperUITests"
-               ReferencedContainer = "container:LiveWallpaper.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction
