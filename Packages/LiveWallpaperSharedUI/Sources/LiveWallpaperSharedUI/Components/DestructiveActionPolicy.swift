@@ -68,13 +68,13 @@ public enum DestructiveAction: Identifiable, Equatable {
         case .removeScheduleSlot:        return "Remove this schedule slot?"
         case .disableSchedule:           return "Disable schedule?"
         case .clearUnusedWallpapers:     return "Clear unused wallpapers?"
-        case .forgetWorkshopLibrary:     return "Forget Workshop library?"
-        case .forgetEngineAssets:        return "Forget Wallpaper Engine install folder?"
+        case .forgetWorkshopLibrary:     return "Forget scene library?"
+        case .forgetEngineAssets:        return "Forget external scene-format install folder?"
         case .removeHistoryEntry:        return "Remove from history?"
         case .clearAllShortcuts:         return "Reset all keyboard shortcuts?"
         case .resetShortcut:             return "Reset this shortcut?"
         case .resetAllSettings:          return "Reset all settings?"
-        case .clearAllWPECache:          return "Clear all cached Wallpaper Engine projects?"
+        case .clearAllWPECache:          return "Clear all cached scene projects?"
         case .removeWPECacheEntry:       return "Remove this cache entry?"
         case .applyConfigurationToAllDisplays: return "Apply this wallpaper to every other display?"
         case .clearCurrentWallpaper:     return "Clear current wallpaper?"
@@ -106,7 +106,7 @@ public enum DestructiveAction: Identifiable, Equatable {
         case .forgetWorkshopLibrary(let path):
             return "The library at '\(path)' will be unlinked. Local scene caches are kept; you can re-link the folder later."
         case .forgetEngineAssets(let path):
-            return "The Wallpaper Engine install folder at '\(path)' will be unlinked. Scenes that depend on shared engine framework files will fail to render until you grant access again."
+            return "The external scene-format install folder at '\(path)' will be unlinked. Scenes that depend on shared engine framework files will fail to render until you grant access again."
         case .removeHistoryEntry(let name):
             return "'\(name)' will be removed from your recent items. The underlying file or scene is not deleted."
         case .clearAllShortcuts:
@@ -116,9 +116,9 @@ public enum DestructiveAction: Identifiable, Equatable {
         case .resetAllSettings:
             return "All preferences, screen configurations, playlists, schedules, and bookmarks return to their defaults. This cannot be undone."
         case .clearAllWPECache(let count, let byteSize):
-            return "Removes \(count) extracted project\(count == 1 ? "" : "s") · \(byteSize). Workshop folders on disk are untouched; re-applying a wallpaper will re-extract on demand."
+            return "Removes \(count) extracted project\(count == 1 ? "" : "s") · \(byteSize). Source folders on disk are untouched; re-applying a wallpaper will re-extract on demand."
         case .removeWPECacheEntry(let displayName):
-            return "'\(displayName)' will be re-extracted next time you apply it. The history entry and original Workshop folder stay untouched."
+            return "'\(displayName)' will be re-extracted next time you apply it. The history entry and original source folder stay untouched."
         case .applyConfigurationToAllDisplays(let count):
             return "This replaces the wallpaper on \(count) other display\(count == 1 ? "" : "s") with the same content and settings as this one."
         case .clearCurrentWallpaper(let displayName):

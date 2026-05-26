@@ -11,7 +11,7 @@ This repository is the source of two macOS SKUs that ship from a single codebase
 
 | Build | Distribution | Status |
 |---|---|---|
-| **LiveWallpaper** | Commercial Pro edition; distributed separately. | All features, including Metal shader wallpapers, Wallpaper Engine scene rendering / import, and the developer-tools harness. |
+| **LiveWallpaper** | Commercial Pro edition; distributed separately. | All features, including Metal shader wallpapers, third-party scene-format rendering / import, and the developer-tools harness. |
 | **Loomscreen** | **Open-source Lite edition. MIT licensed.** Distributed via GitHub Releases. | Video, HTML/Web, Aerials, particles, schedules, playlists — the four Pro-only renderers / tools listed above are compiled out. |
 
 "LiveWallpaper" is also the **internal codename** of this repository. "Loomscreen" is the **public product name** of the open-source release — same codebase, slimmer ship.
@@ -61,15 +61,15 @@ Loomscreen checks GitHub Releases on app launch (rate-limited to **once every 12
 | Inline inspector preview                            | ✅ | ✅ |
 | Global keyboard shortcuts                           | ✅ | ✅ |
 | **Metal shader procedural wallpapers**              | ✅ | — |
-| **Wallpaper Engine scene rendering**                | ✅ | — |
-| **Wallpaper Engine scene import (`scene.pkg`)**     | ✅ | — |
+| **Third-party scene-format rendering**              | ✅ | — |
+| **Third-party scene-format import (`.pkg`)**        | ✅ | — |
 | **Developer-tools harness**                         | ✅ | — |
 
 Lite is a **lightweight runtime, not a UI castration**: video / HTML / Aerials fidelity matches Pro one-for-one. The capability set is defined in [ProductCapabilities.swift](Packages/LiveWallpaperCore/Sources/LiveWallpaperCore/Capabilities/ProductCapabilities.swift).
 
 ## Features (full codebase)
 
-- **Multi-Type Wallpapers** — Video (MP4/MOV/AVI), HTML/Web (WKWebView), Metal shader (procedural GPU art), compatible Wallpaper Engine scenes (Workshop folder import; `scene.pkg` extraction when present)
+- **Multi-Type Wallpapers** — Video (MP4/MOV/AVI), HTML/Web (WKWebView), Metal shader (procedural GPU art), compatible third-party community scene packages (folder import; `.pkg` extraction when present)
 - **Multi-Display** — Independent configuration per screen
 - **Bookmarks** — Save any video / web page / shader once, re-apply to any display in one click (sidebar Library, inspector header)
 - **HTML Trust Model** — Untrusted remote URLs run with JavaScript disabled by default; one-click `Trust this site` to allow
@@ -83,7 +83,7 @@ Lite is a **lightweight runtime, not a UI castration**: video / HTML / Aerials f
 - **System Monitoring** — System-wide CPU/GPU/memory/thermal + per-app metrics, estimated render FPS
 - **Adaptive macOS UI** — native Liquid Glass on macOS 26, material-based fallbacks on macOS 14 and 15. The highest-fidelity path is the default on every supported OS; no per-user configuration.
 - **Swift 6 Strict Concurrency** — Compile-time data race safety
-- **800+ Unit Tests** — Policies, decoders, bookmarks, HTML trust, schedule, playlist, WPE import/rendering, macOS compatibility policy, in-app update checker, and release regressions
+- **800+ Unit Tests** — Policies, decoders, bookmarks, HTML trust, schedule, playlist, scene import/rendering, macOS compatibility policy, in-app update checker, and release regressions
 - **Zero Dependencies** — Pure Apple-native frameworks
 
 ## Requirements
@@ -121,6 +121,10 @@ PRs and issues welcome. Read [CLAUDE.md](CLAUDE.md) first — it documents the r
 ## Security
 
 For security issues, please use GitHub's [private vulnerability reporting](https://github.com/Paradox07127/LiveWallpaper/security/advisories/new) instead of opening a public issue.
+
+## Trademarks
+
+"Wallpaper Engine" is a trademark of Kaboom Productions. "Steam" and "Steam Workshop" are trademarks of Valve Corporation. This project is independent open-source software, not affiliated with, endorsed by, or sponsored by either company. References elsewhere in this codebase to third-party scene formats are for interoperability documentation purposes only (nominative fair use).
 
 ## License
 
