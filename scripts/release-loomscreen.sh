@@ -148,15 +148,14 @@ if [[ ! -f "$ENTITLEMENTS" ]]; then
   exit 1
 fi
 
-echo "== Ad-hoc re-signing every embedded binary (Hardened Runtime) =="
-# `--deep` is deprecated for top-level signing but reliable when followed
-# by an explicit walk; we walk Frameworks/PlugIns/XPCServices first to be
-# safe, then sign the .app outer wrapper last.
-find "$APP_PATH" -type d \( -name "*.framework" -o -name "*.bundle" -o -name "*.xpc" \) -print0 \
-  | while IFS= read -r -d '' inner; do
-      codesign --force --sign - --options runtime --timestamp=none "$inner" >/dev/null
-    done
-
+echo "== Re-signing outer .app with entitlements =="
+# xcodebuild archive already inside-out signed every embedded framework
+# / xpc / properly-formed bundle with CODE_SIGN_IDENTITY="-", so we only
+# need to re-sign the outer .app wrapper here to attach our explicit
+# entitlements file. Walking nested directories with codesign blindly
+# fails on resource-only directories that carry a .bundle suffix but
+# are not real NSBundles (e.g. wpe-webgl-runtime.bundle, which is a
+# raw JS asset folder).
 codesign --force --sign - --options runtime --timestamp=none \
   --entitlements "$ENTITLEMENTS" "$APP_PATH"
 
