@@ -90,27 +90,14 @@ public enum FrameRateLimit: Int, CaseIterable, Identifiable, Codable, Sendable {
 }
 
 extension FrameRateLimit {
-    /// The fps each wallpaper type should default to when a brand-new
-    /// `ScreenConfiguration` is created (no saved frame-rate exists yet).
+    /// Initial FPS seed for a brand-new `ScreenConfiguration`. User-set
+    /// values always win; saved configs keep their previous value.
     ///
-    /// Rationale:
-    /// - `.video` → `.fps60` keeps the existing native pass-through; any
-    ///   cap < 60 forces an `AVVideoComposition` recompose pass (see
-    ///   `enforcesCompositionCap`) which costs CPU/GPU for no UX win on
-    ///   plain video.
-    /// - `.scene` → `.fps30` matches Wallpaper Engine's stock default
-    ///   (Almamu's open-source reference ships `maximumFPS = 30`; the
-    ///   official Windows app's "Balanced" preset also defaults to 30).
-    ///   Most published WPE shaders are tuned around a 30 FPS clock —
-    ///   running at 60 makes their `g_Time`-driven motion look ~2× too
-    ///   fast (the "Neco Arc grain too fast" report that prompted this).
-    /// - `.html`, `.metalShader` → `.fps60` keeps the prior behaviour;
-    ///   these renderers don't share WPE's 30-FPS authoring convention.
-    ///
-    /// User-set values always win — this only seeds the initial default
-    /// before the inspector picker is touched. Existing saved configs
-    /// keep whatever value they previously persisted (the decoder
-    /// fallback stays `.fps60` for backward compatibility).
+    /// - `.scene` → 30: matches WPE authoring convention (Almamu reference
+    ///   + Windows "Balanced" preset). Running at 60 doubles `g_Time`-driven
+    ///   motion.
+    /// - `.video`/`.html`/`.metalShader` → 60: native pass-through avoids
+    ///   forcing an `AVVideoComposition` recompose (see `enforcesCompositionCap`).
     public static func naturalDefault(for wallpaperType: WallpaperType) -> FrameRateLimit {
         switch wallpaperType {
         case .scene:                       return .fps30

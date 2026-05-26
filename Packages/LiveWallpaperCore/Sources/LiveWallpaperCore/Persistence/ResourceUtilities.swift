@@ -4,18 +4,6 @@ import UniformTypeIdentifiers
 
 @MainActor
 public final class ResourceUtilities {
-    public struct BookmarkResolution {
-        public let url: URL
-        public let isStale: Bool
-        public let isSecurityScoped: Bool
-
-        public init(url: URL, isStale: Bool, isSecurityScoped: Bool) {
-            self.url = url
-            self.isStale = isStale
-            self.isSecurityScoped = isSecurityScoped
-        }
-    }
-
     // MARK: - Security-Scoped Bookmarks
 
     public static let bookmarkCreationOptions: URL.BookmarkCreationOptions = [
@@ -112,40 +100,6 @@ public final class ResourceUtilities {
             category: .fileAccess
         )
         return localBookmark
-    }
-
-    /// Legacy bookmark resolver. Returns staleness as data without persisting
-    /// a refresh, so 11+ historical call sites silently dropped the flag and
-    /// caused user-granted folder access to invalidate after a single Apple
-    /// grace use. New code MUST route through `SecurityScopedBookmarkResolver`
-    /// with a typed `Target` so the refreshed Data is written back to its
-    /// owning store. Existing callers are being migrated incrementally; the
-    /// deprecation warning identifies the remaining work.
-    @available(
-        *,
-        deprecated,
-        message: "Use SecurityScopedBookmarkResolver.shared.resolve(_:target:) instead — it observes bookmarkDataIsStale and refreshes the saved Data via a typed Target."
-    )
-    public nonisolated static func resolveBookmark(_ data: Data) throws -> BookmarkResolution {
-        var scopedStale = false
-        do {
-            let scopedURL = try URL(
-                resolvingBookmarkData: data,
-                options: .withSecurityScope,
-                relativeTo: nil,
-                bookmarkDataIsStale: &scopedStale
-            )
-            return BookmarkResolution(url: scopedURL, isStale: scopedStale, isSecurityScoped: true)
-        } catch {
-            var plainStale = false
-            let plainURL = try URL(
-                resolvingBookmarkData: data,
-                options: [],
-                relativeTo: nil,
-                bookmarkDataIsStale: &plainStale
-            )
-            return BookmarkResolution(url: plainURL, isStale: plainStale, isSecurityScoped: false)
-        }
     }
 
     /// Attempts one scoped bookmark write and logs the underlying NSError.

@@ -7,21 +7,15 @@ import Testing
 /// transpiler cannot handle today. Each test reproduces a minimal
 /// shader matching a real workshop scene's failure mode and asserts the
 /// CURRENT behaviour — that the transpiler throws or emits MSL that
-/// Metal rejects.
+/// Metal rejects. Scenes hitting these patterns fall back to the WebGL
+/// runtime. Flip `#expect(throws:)` to a positive compile assertion
+/// when the Swift transpiler grows native support.
 ///
-/// The SPIRV-Cross / glslang toolchain that was once staged to close
-/// these gaps has been retired (Phase 12). Scenes hitting these
-/// patterns now fall back to the WebGL runtime instead. When the Swift
-/// transpiler grows native support for any of these cases, flip the
-/// matching `#expect(throws:)` to `#expect` of a successful compile so
-/// the test becomes positive regression coverage.
-///
-/// This file deliberately uses synthetic minimal shaders rather than
-/// embedding real workshop sources because (a) the corpus is
-/// user-specific (Wallpaper Engine asset trees), and (b) the failure
-/// patterns are simple enough to reproduce in <20 lines each.
+/// Synthetic minimal shaders are used instead of real workshop sources
+/// because the corpus is user-specific and each pattern reproduces in
+/// <20 lines.
 @MainActor
-@Suite("WPE corpus failure patterns (documents Phase 2 gap)")
+@Suite("WPE corpus failure patterns")
 struct WPECorpusFailurePatternsTests {
 
     // MARK: - Helper-scope multi-texture (lens_flare_sun, dot_matrix_mobile_fix)

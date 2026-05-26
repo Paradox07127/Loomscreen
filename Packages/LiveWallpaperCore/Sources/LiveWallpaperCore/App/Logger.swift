@@ -138,10 +138,6 @@ public final class Logger {
 
     // MARK: - Domain-Specific Logging
 
-    public static func videoLoaded(url: URL, screenID: UInt32, file: String = #file, function: String = #function, line: Int = #line) {
-        log("Video loaded: \(url.lastPathComponent) for screen \(screenID)", category: .videoPlayer, level: .info, file: file, function: function, line: line)
-    }
-
     public static func screensDetected(_ count: Int, file: String = #file, function: String = #function, line: Int = #line) {
         log("Detected \(count) screens", category: .screenManager, level: .notice, file: file, function: function, line: line)
     }
