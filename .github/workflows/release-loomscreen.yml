@@ -39,6 +39,13 @@ jobs:
         with:
           xcode-version: '16.2'
 
+      - name: Install ripgrep
+        # scripts/release_candidate_check.sh greps with `rg` for terse,
+        # alternation-friendly patterns. Local dev usually has it via brew;
+        # GitHub's macos-15 runner does not ship ripgrep, so the first
+        # `rg` call in the script aborts with "command not found".
+        run: brew install ripgrep
+
       - name: Resolve version from tag or input
         id: version
         env:
