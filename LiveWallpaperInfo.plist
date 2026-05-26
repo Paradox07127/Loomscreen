@@ -40,12 +40,6 @@
 	<string>Access to Downloads is needed to play wallpaper files stored there.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Location is used to fetch local weather for weather-reactive effects.</string>
-	<key>NSPowerMonitorUsageDescription</key>
-	<string>Power status is used to pause wallpapers on battery.</string>
-	<key>NSSecurityScopedBookmarksUsageDescription</key>
-	<string>Bookmarks keep access to selected wallpaper files across launches.</string>
-	<key>NSSystemPreferencesUsageDescription</key>
-	<string>System Settings access is used to help configure related permissions.</string>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>
