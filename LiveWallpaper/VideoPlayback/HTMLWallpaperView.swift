@@ -300,35 +300,13 @@ enum HTMLWallpaperRuntimeScript {
         """
     }
 
-    /// Upgrades the WebGL backing store to physical pixels for CSS-naive
-    /// canvases. WPE Spine workshop boilerplates do
-    /// `canvas.width = window.innerWidth`, which on retina macOS leaves the
-    /// backing store at half the physical resolution — WebKit's compositor
-    /// then bilinear-upsamples, producing the characteristic Spine blur.
-    ///
-    /// Mechanism:
-    ///   1. Intercept `HTMLCanvasElement.width / height` setters. Always stash
-    ///      the requested logical value; only multiply the backing store by
-    ///      DPR when the canvas has been claimed for WebGL rendering AND the
-    ///      requested value matches CSS-pixel space (≤ the canvas's CSS
-    ///      width × 1.05). DPR-aware callers (spine-player, PIXI v8, modern
-    ///      Spine 4.2 `SceneRenderer`) set `canvas.width = clientWidth × DPR`
-    ///      directly; we recognise that and pass through untouched so we
-    ///      don't double-scale them.
-    ///   2. Intercept `HTMLCanvasElement.getContext`. On a WebGL request, mark
-    ///      the canvas, re-run the size setter so the backing store gets
-    ///      upgraded before the context is allocated, then forward.
-    ///   3. Intercept `WebGLRenderingContext.viewport / scissor`. When the
-    ///      bound framebuffer is the default and the canvas was upgraded,
-    ///      multiply the rect by the same scale factor so the rendered
-    ///      triangles fill the enlarged backing store.
-    ///   4. Track `bindFramebuffer` so user-created FBOs keep author-specified
-    ///      viewports.
-    ///
-    /// 2D canvases (overlays, sprite work buffers) never see the upgrade —
-    /// their `ctx.clearRect(0, 0, c.width, c.height)` etc. stays consistent
-    /// with the backing store. Same for canvases that only get used for
-    /// `toDataURL` / `getImageData`.
+    /// Upgrades WebGL backing store to physical pixels for CSS-naive canvases
+    /// (e.g. `canvas.width = window.innerWidth`) so retina output is not
+    /// bilinear-upsampled by the compositor. Invariants:
+    /// - DPR scale applies only to WebGL canvases sized in CSS-pixel space;
+    ///   DPR-aware callers (spine-player, PIXI v8) pass through untouched.
+    /// - `viewport` / `scissor` are scaled only when the default framebuffer
+    ///   is bound; user FBOs keep author-specified rects. 2D canvases skipped.
     static func canvasBackingStoreUpgrader() -> String {
         return """
         (function () {

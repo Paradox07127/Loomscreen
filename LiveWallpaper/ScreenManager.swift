@@ -1567,10 +1567,6 @@ final class ScreenManager {
         automationOrchestrator.updateScheduleSlots(slots, for: screen)
     }
 
-    func checkAndApplySchedule(for screen: Screen) {
-        automationOrchestrator.checkAndApplySchedule(for: screen)
-    }
-
     func updatePlaylistRotationMinutes(_ minutes: Int?, for screen: Screen) {
         automationOrchestrator.updatePlaylistRotationMinutes(minutes, for: screen)
     }

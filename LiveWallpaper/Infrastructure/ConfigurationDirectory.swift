@@ -1,42 +1,15 @@
 import Foundation
 
 /// Resolves the on-disk location for app configuration files. Centralized so
-/// the same path is used by every typed store (and by tests, which inject a
-/// temporary root via `init(root:)`).
+/// every typed store (and tests via `init(root:)`) shares the same path.
 ///
-/// Layout (matches Apple's HIG for non-document app data):
+/// Layout: `~/Library/Application Support/<bundle-id>/Configuration/{screen-configurations,global-settings,wallpaper-bookmarks}.json`
+/// Created lazily on first write — read paths return `nil` for unmigrated installs
+/// and `SettingsManager` handles the seed-from-`UserDefaults` step.
 ///
-///   ~/Library/Application Support/<bundle-id>/Configuration/
-///       screen-configurations.json
-///       global-settings.json
-///       wallpaper-bookmarks.json
-///
-/// The directory is created lazily on first write — read paths never create
-/// directories, so an unmigrated install reads `nil` and the migration code
-/// in `SettingsManager` handles the seed-from-`UserDefaults` step.
-///
-/// ## App Sandbox readiness
-///
-/// We currently ship via Developer ID + Notarization (not sandboxed). If we
-/// ever turn on `com.apple.security.app-sandbox` the resolver below still
-/// returns the *correct* path because macOS automatically rewrites
-/// `applicationSupportDirectory` to
-/// `~/Library/Containers/<bundle-id>/Data/Library/Application Support/`.
-///
-/// **Migration concern**: an existing user upgrading to a sandboxed build
-/// would no longer see their old non-container files. The first sandboxed
-/// release MUST ship with one of:
-/// 1. A `<bundle-id>.sb` container-migration manifest that maps the legacy
-///    `~/Library/Application Support/<bundle-id>/Configuration/` into the
-///    sandbox container, OR
-/// 2. An in-app "import legacy data" path that reads via Apple's temporary
-///    user-selected file extension and copies forward.
-///
-/// **Entitlement concern**: the current entitlements only grant
-/// `user-selected.read-only`. A sandboxed build that needs Export to write
-/// to user-picked locations must also grant `user-selected.read-write`. The
-/// SwiftUI `.fileExporter` modifier handles the security-scoped extension
-/// internally — but the entitlement is still required.
+/// If sandboxing is ever enabled, `applicationSupportDirectory` is auto-rewritten
+/// by macOS to the container path; a future sandboxed release would still need a
+/// legacy-data migration step + `user-selected.read-write` entitlement for Export.
 struct ConfigurationDirectory {
     enum File: String {
         case screenConfigurations = "screen-configurations.json"
