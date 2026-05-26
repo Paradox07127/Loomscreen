@@ -5,6 +5,8 @@
 [![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-required-purple.svg)](#requirements)
 [![Release](https://img.shields.io/github/v/release/Paradox07127/LiveWallpaper?include_prereleases&sort=semver&filter=loomscreen-*)](https://github.com/Paradox07127/LiveWallpaper/releases)
 
+> English | [简体中文](README.zh-Hans.md)
+
 A macOS menu bar app that plays animated wallpapers — videos and web pages — across every connected display.
 
 This repository is the source of two macOS SKUs that ship from a single codebase:
