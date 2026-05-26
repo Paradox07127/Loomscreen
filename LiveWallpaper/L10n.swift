@@ -28,7 +28,7 @@ enum L10n {
         static let importProject = String(
             localized: "panel.prompt.import_project",
             defaultValue: "Apply Project",
-            comment: "Confirmation button for choosing and applying a Wallpaper Engine project folder."
+            comment: "Confirmation button for choosing and applying a copied local project folder."
         )
 
         static let grantAccess = String(
@@ -40,7 +40,7 @@ enum L10n {
         static let grantLibraryAccess = String(
             localized: "panel.prompt.grant_library_access",
             defaultValue: "Grant Library Access",
-            comment: "Confirmation button for granting access to the Wallpaper Engine library folder."
+            comment: "Confirmation button for granting access to the local project library folder."
         )
 
         static let changeFolder = String(
@@ -63,8 +63,8 @@ enum L10n {
 
         static let workshopProjectsFolderMessage = String(
             localized: "panel.message.workshop_projects_folder",
-            defaultValue: "Select your Wallpaper Engine projects folder",
-            comment: "Message shown in the folder picker for choosing a Wallpaper Engine projects folder."
+            defaultValue: "Select the project folder copied from Windows",
+            comment: "Message shown in the folder picker for choosing a copied local project folder."
         )
 
         static let appleAerialsAccessMessage = String(

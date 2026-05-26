@@ -701,7 +701,7 @@ struct GeneralSettingsView: View {
     }
 
     private var aboutTagline: some View {
-        Text("Live wallpapers for macOS — videos, web pages, and Wallpaper Engine scenes across every connected display.")
+        Text("Live wallpapers for macOS: videos, web pages, and compatible imported scenes across every connected display.")
             .font(.callout)
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)

@@ -64,9 +64,9 @@ struct WPESceneSection: View {
                 .symbolRenderingMode(.hierarchical)
 
             VStack(spacing: 8) {
-                Text("Apply Wallpaper Engine Project")
+                Text("Apply Local Project")
                     .font(.title2.bold())
-                Text("Choose a Wallpaper Engine project folder to apply")
+                Text("Choose a copied project folder to apply")
                     .foregroundStyle(.secondary)
             }
 
@@ -78,7 +78,7 @@ struct WPESceneSection: View {
                 }
                 .adaptiveGlassButton(.prominent)
                 .controlSize(.large)
-                .accessibilityHint(Text("Opens a folder chooser to apply a Wallpaper Engine project"))
+                .accessibilityHint(Text("Opens a folder chooser to apply a copied local project"))
 
                 Button {
                     showWorkshopGallery = true
@@ -87,7 +87,7 @@ struct WPESceneSection: View {
                 }
                 .adaptiveGlassButton(.regular)
                 .controlSize(.regular)
-                .accessibilityHint(Text("Discover Workshop projects under your Steam library"))
+                .accessibilityHint(Text("Browse copied local projects"))
             }
             .padding(.top, 4)
 
@@ -103,7 +103,7 @@ struct WPESceneSection: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text("Recent Workshop Projects")
+                    Text("Recent Imported Projects")
                         .font(.headline)
                     Spacer()
                     Button {
@@ -113,7 +113,7 @@ struct WPESceneSection: View {
                     }
                     .adaptiveGlassButton(.regular)
                     .controlSize(.regular)
-                    .accessibilityHint(Text("Discover Workshop projects from your Steam Workshop folder"))
+                    .accessibilityHint(Text("Browse copied local projects"))
 
                     Button {
                         presentFolderPicker()
@@ -156,7 +156,7 @@ struct WPESceneSection: View {
                 .controlSize(.regular)
                 .help(Text("Back to library"))
                 .accessibilityLabel(Text("Back to library"))
-                .accessibilityHint(Text("Return to the recent Workshop projects grid"))
+                .accessibilityHint(Text("Return to the recent imported projects grid"))
                 Spacer()
             }
             WPEFallbackCard(

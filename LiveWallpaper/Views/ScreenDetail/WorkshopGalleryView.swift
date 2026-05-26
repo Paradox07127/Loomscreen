@@ -197,9 +197,9 @@ struct WorkshopGalleryView: View {
                             }
                             .adaptiveGlassButton(.regular)
                             .controlSize(.regular)
-                            .help(Text("Rescan — re-scan the workshop folder for new projects"))
-                            .accessibilityLabel(Text("Rescan workshop"))
-                            .accessibilityHint(Text("Re-scan the workshop folder for new projects"))
+                            .help(Text("Rescan — re-scan the local project folder for new projects"))
+                            .accessibilityLabel(Text("Rescan library"))
+                            .accessibilityHint(Text("Re-scan the local project folder for new projects"))
                             .disabled(isBusy)
                         }
 
@@ -272,11 +272,11 @@ struct WorkshopGalleryView: View {
         GuidedLibrarySurface {
             LibraryGuideCard(
                 icon: "books.vertical",
-                title: "Connect Steam Workshop",
-                message: "Choose the Wallpaper Engine folder that contains your subscribed project folders.",
+                title: "Choose Copied Project Folder",
+                message: "Choose the folder you copied from Wallpaper Engine on Windows.",
                 features: [
-                    LibraryGuideFeature(icon: "folder.badge.gearshape", text: "Pick the folder that contains numbered Workshop project folders"),
-                    LibraryGuideFeature(icon: "arrow.triangle.2.circlepath", text: "Rescan after Steam downloads or removes subscriptions"),
+                    LibraryGuideFeature(icon: "folder.badge.gearshape", text: "Pick the copied folder that contains numbered project folders"),
+                    LibraryGuideFeature(icon: "arrow.triangle.2.circlepath", text: "Rescan after copying new or changed projects"),
                     LibraryGuideFeature(icon: "checkmark.shield", text: "Read-only access; projects are prepared only when you apply or bookmark")
                 ],
                 actionTitle: "Choose Folder...",
@@ -290,7 +290,7 @@ struct WorkshopGalleryView: View {
         VStack(spacing: 14) {
             ProgressView()
                 .controlSize(.large)
-            Text("Scanning workshop folder…")
+            Text("Scanning local project folder…")
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }
@@ -305,7 +305,7 @@ struct WorkshopGalleryView: View {
             VStack(spacing: 0) {
                 LibraryFilterBar(
                     searchText: $searchText,
-                    searchPrompt: "Search Workshop",
+                    searchPrompt: "Search Projects",
                     resultCount: visibleProjects.count,
                     totalCount: projects.count,
                     isDisabled: isBusy
@@ -365,11 +365,11 @@ struct WorkshopGalleryView: View {
         GuidedLibrarySurface {
             LibraryGuideCard(
                 icon: "folder.badge.questionmark",
-                title: "No Workshop projects found",
-                message: "The selected folder did not contain Wallpaper Engine project folders. Pick the folder that contains numeric Workshop IDs, then scan again.",
+                title: "No local projects found",
+                message: "The selected folder did not contain copied project folders. Pick the folder that contains numbered project ID folders, then scan again.",
                 features: [
-                    LibraryGuideFeature(icon: "folder.badge.gearshape", text: "Choose the folder that contains numbered Workshop project folders"),
-                    LibraryGuideFeature(icon: "arrow.triangle.2.circlepath", text: "Rescan after Steam finishes downloading subscriptions"),
+                    LibraryGuideFeature(icon: "folder.badge.gearshape", text: "Choose the copied folder that contains numbered project folders"),
+                    LibraryGuideFeature(icon: "arrow.triangle.2.circlepath", text: "Rescan after copying new or changed projects"),
                     LibraryGuideFeature(icon: "checkmark.shield", text: "Video, Web, and compatible Scene projects can be applied or bookmarked")
                 ],
                 actionTitle: "Change Folder...",
@@ -478,8 +478,8 @@ struct WorkshopGalleryView: View {
         .fixedSize()
         .adaptiveGlassButton(.regular)
         .controlSize(.regular)
-        .help(Text("More Workshop actions"))
-        .accessibilityLabel(Text("More Workshop actions"))
+        .help(Text("More library actions"))
+        .accessibilityLabel(Text("More library actions"))
         .disabled(isBusy)
     }
 
@@ -542,7 +542,7 @@ struct WorkshopGalleryView: View {
     }
 
     private func confirmDisconnectLibraryRoot() {
-        let path = rootPathSummary ?? "your Workshop library folder"
+        let path = rootPathSummary ?? "your local project library folder"
         pendingDestructive = PendingDestructive(.forgetWorkshopLibrary(path: path)) {
             disconnectLibraryRoot()
         }
@@ -570,8 +570,8 @@ struct WorkshopGalleryView: View {
             state = .results
         } catch WallpaperEngineLibraryScanner.ScanError.rootInaccessible(let detail) {
             errorMessage = String(
-                localized: "Workshop folder is unreachable: \(detail). Try again — your saved access remains.",
-                comment: "Workshop library folder access error after a transient scan failure. The placeholder is the system detail. The saved bookmark is preserved so the user can retry."
+                localized: "Local project folder is unreachable: \(detail). Try again — your saved access remains.",
+                comment: "Workshop Library folder access error after a transient scan failure. The placeholder is the system detail. The saved bookmark is preserved so the user can retry."
             )
             projects = []
             state = hasLibraryRoot ? .results : .needsRoot
@@ -587,9 +587,9 @@ struct WorkshopGalleryView: View {
         let targets = effectiveTargetScreens
         guard !targets.isEmpty else {
             errorMessage = String(
-                localized: "Open a display first, then choose a Workshop wallpaper to apply.",
-                defaultValue: "Open a display first, then choose a Workshop wallpaper to apply.",
-                comment: "Workshop gallery apply error when there is no target display."
+                localized: "Open a display first, then choose a local project to apply.",
+                defaultValue: "Open a display first, then choose a local project to apply.",
+                comment: "Workshop Library apply error when there is no target display."
             )
             return
         }
@@ -676,14 +676,14 @@ struct WorkshopGalleryView: View {
         case .success(let resolved):
             rootURL = resolved.url
         case .failure:
-            return .rejected(reason: "Workshop folder access expired. Re-grant library access.")
+            return .rejected(reason: "Local project folder access expired. Re-grant library access.")
         }
 
         let didStart = rootURL.startAccessingSecurityScopedResource()
         defer { if didStart { rootURL.stopAccessingSecurityScopedResource() } }
 
         guard didStart || FileManager.default.fileExists(atPath: project.folderURL.path) else {
-            return .rejected(reason: "Workshop folder access denied. Re-grant library access.")
+            return .rejected(reason: "Local project folder access denied. Re-grant library access.")
         }
 
         let outcome = await screenManager.importWallpaperEngineProject(at: project.folderURL, for: screen)
@@ -704,14 +704,14 @@ struct WorkshopGalleryView: View {
         case .success(let resolved):
             rootURL = resolved.url
         case .failure:
-            return .rejected(reason: "Workshop folder access expired. Re-grant library access.")
+            return .rejected(reason: "Local project folder access expired. Re-grant library access.")
         }
 
         let didStart = rootURL.startAccessingSecurityScopedResource()
         defer { if didStart { rootURL.stopAccessingSecurityScopedResource() } }
 
         guard didStart || FileManager.default.fileExists(atPath: project.folderURL.path) else {
-            return .rejected(reason: "Workshop folder access denied. Re-grant library access.")
+            return .rejected(reason: "Local project folder access denied. Re-grant library access.")
         }
 
         return await screenManager.prepareWallpaperEngineProject(at: project.folderURL)

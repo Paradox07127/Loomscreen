@@ -73,8 +73,8 @@ struct WPEHistoryRow: View {
         .wpeProjectCardChrome(isHovering: isHovering, reduceMotion: reduceMotion)
         .onHover { isHovering = $0 }
         .accessibilityLabel(Text(
-            "Wallpaper Engine project: \(entry.origin.title)",
-            comment: "A11y label for a WPE history row card. The placeholder is the WPE project title."
+            "Imported project: \(entry.origin.title)",
+            comment: "A11y label for an imported project history row card. The placeholder is the project title."
         ))
         .accessibilityHint(isActive
             ? Text("Currently in use. Tap to reactivate.", comment: "A11y hint for a WPE history row that is the active wallpaper.")
@@ -136,7 +136,7 @@ struct WPEHistoryRow: View {
             }
             return ("Experimental", .yellow, Text("Scene wallpapers are rendered with the Phase 2.1 image-only engine"))
         case .unknown:
-            return ("Untested", .gray, Text("Wallpaper Engine project type is unknown"))
+            return ("Untested", .gray, Text("Project type is unknown"))
         }
     }
 }

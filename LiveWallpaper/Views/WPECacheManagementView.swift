@@ -25,7 +25,7 @@ struct WPECacheManagementView: View {
                 summaryRow
             } header: {
                 HStack {
-                    Text("Wallpaper Engine Cache")
+                    Text("Imported Project Cache")
                     Spacer()
                     if let stats {
                         Text(verbatim: "\(byteFormatter.string(fromByteCount: Int64(stats.totalBytes))) · \(stats.entries.count)")

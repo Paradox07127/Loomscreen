@@ -428,7 +428,7 @@ struct HTMLOptionsInspector: View {
             icon: "rectangle.split.2x1",
             iconColor: .indigo,
             title: "Physical-pixel layout",
-            info: "Renders WebGL content at retina resolution so character art and Spine wallpapers stop looking soft. Auto-enabled for Wallpaper Engine folders."
+            info: "Renders WebGL content at retina resolution so character art and Spine wallpapers stop looking soft. Auto-enabled for imported project folders."
         ) {
             Toggle("", isOn: configBinding(\.physicalPixelLayout))
                 .labelsHidden()

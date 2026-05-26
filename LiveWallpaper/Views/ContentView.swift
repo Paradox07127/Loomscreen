@@ -353,7 +353,7 @@ struct Sidebar: View {
                     NavigationLink(value: Navigation.workshop) {
                         Label("Workshop Library", systemImage: "cube.transparent")
                     }
-                    .accessibilityHint(Text("Browse Wallpaper Engine workshop projects"))
+                    .accessibilityHint(Text("Browse copied local projects in the Workshop Library"))
                 }
 
                 #if !LITE_BUILD

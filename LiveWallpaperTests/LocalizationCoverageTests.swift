@@ -60,6 +60,60 @@ struct LocalizationCoverageTests {
             )
         }
     }
+
+    @Test("Workshop import copy describes local copied projects, not online Workshop connection")
+    func workshopImportCopyAvoidsOnlineConnectionLanguage() throws {
+        let projectRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let relativePaths = [
+            "LiveWallpaper/L10n.swift",
+            "LiveWallpaper/Resources/Localizable.xcstrings",
+            "LiveWallpaper/Views/ContentView.swift",
+            "LiveWallpaper/Views/GeneralSettingsView.swift",
+            "LiveWallpaper/Views/WPECacheManagementView.swift",
+            "LiveWallpaper/Views/ScreenDetail/WPESceneSection.swift",
+            "LiveWallpaper/Views/ScreenDetail/WorkshopGalleryView.swift",
+            "LiveWallpaper/Views/ScreenDetail/EmptyStateGuideView.swift",
+            "LiveWallpaper/Views/ScreenDetail/WPEFallbackCard.swift",
+            "LiveWallpaper/Views/ScreenDetail/WPEHistoryRow.swift",
+            "LiveWallpaper/Views/ScreenDetail/HTMLSourceSection.swift",
+        ]
+        let source = try relativePaths.map { relativePath in
+            let url = projectRoot.appendingPathComponent(relativePath)
+            return try String(contentsOf: url, encoding: .utf8)
+        }.joined(separator: "\n")
+
+        let disallowedPhrases = [
+            "Connect Steam Workshop",
+            "Search Workshop",
+            "Scanning workshop folder",
+            "Workshop folder access expired",
+            "Workshop folder access denied",
+            "Workshop folder is unreachable",
+            "Discover Workshop projects under your Steam library",
+            "Discover Workshop projects from your Steam Workshop folder",
+            "Open a display first, then choose a Workshop wallpaper to apply.",
+            "Choose the Wallpaper Engine folder that contains your subscribed project folders.",
+            "No Workshop projects found",
+            "Recent Workshop Projects",
+            "Return to the recent Workshop projects grid",
+            "Wallpaper Engine project:",
+            "Wallpaper Engine project type is unknown",
+            "We couldn't recognize this Wallpaper Engine project type.",
+            "Opens a folder chooser to apply a Wallpaper Engine project",
+            "Select your Wallpaper Engine projects folder",
+            "Auto-enabled for Wallpaper Engine folders.",
+            "Browse Wallpaper Engine workshop projects",
+            "Wallpaper Engine scenes across every connected display.",
+            "Wallpaper Engine scene imports.",
+            "Wallpaper Engine Cache",
+        ]
+
+        let hits = disallowedPhrases.filter { source.contains($0) }
+        #expect(hits.isEmpty, "User-facing import copy still implies online Workshop/WPE coupling: \(hits)")
+        #expect(source.contains("Workshop Library"), "The product decision keeps the Workshop Library page label.")
+    }
 }
 
 private struct StringCatalog: Decodable {

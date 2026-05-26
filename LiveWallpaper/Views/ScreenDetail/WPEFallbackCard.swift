@@ -217,11 +217,11 @@ struct WPEFallbackCard: View {
         case .unsupportedType:
             switch origin.originalType {
             case .scene:
-                return String(localized: "This wallpaper needs Wallpaper Engine's own 3D rendering engine to play. We're working on broader Phase 2 support — your other wallpapers continue to play unaffected.", defaultValue: "This wallpaper needs Wallpaper Engine's own 3D rendering engine to play. We're working on broader Phase 2 support — your other wallpapers continue to play unaffected.", comment: "Wallpaper Engine fallback warning body.")
+                return String(localized: "This scene needs rendering features that are not supported on Mac yet. We're working on broader Phase 2 support — your other wallpapers continue to play unaffected.", defaultValue: "This scene needs rendering features that are not supported on Mac yet. We're working on broader Phase 2 support — your other wallpapers continue to play unaffected.", comment: "Scene fallback warning body.")
             case .application:
                 return String(localized: "For your security, LiveWallpaper does not run executable workshop projects.", defaultValue: "For your security, LiveWallpaper does not run executable workshop projects.", comment: "Wallpaper Engine fallback warning body.")
             default:
-                return String(localized: "We couldn't recognize this Wallpaper Engine project type.", defaultValue: "We couldn't recognize this Wallpaper Engine project type.", comment: "Wallpaper Engine fallback warning body.")
+                return String(localized: "We couldn't recognize this project type.", defaultValue: "We couldn't recognize this project type.", comment: "Project fallback warning body.")
             }
         case .sceneParseFailed(let detail):
             return String(localized: "The author's scene.json couldn't be parsed: \(detail)", comment: "Wallpaper Engine fallback warning body. The placeholder is parser detail.")
@@ -238,11 +238,11 @@ struct WPEFallbackCard: View {
         case .texUnsupportedFormat(let code):
             switch code {
             case 8:
-                return String(localized: "WPE format 8 (RGBA1010102) is rare and pending decoder support. Most other layers in this scene should still render.", defaultValue: "WPE format 8 (RGBA1010102) is rare and pending decoder support. Most other layers in this scene should still render.", comment: "Wallpaper Engine fallback warning body.")
+                return String(localized: "Texture format 8 (RGBA1010102) is rare and pending decoder support. Most other layers in this scene should still render.", defaultValue: "Texture format 8 (RGBA1010102) is rare and pending decoder support. Most other layers in this scene should still render.", comment: "Texture fallback warning body.")
             case -1:
                 return String(localized: "This format requires Metal-backed GPU decoding that this Mac doesn't support. Try rendering on a newer GPU.", defaultValue: "This format requires Metal-backed GPU decoding that this Mac doesn't support. Try rendering on a newer GPU.", comment: "Wallpaper Engine fallback warning body.")
             default:
-                return String(localized: "Wallpaper Engine format \(code) is not in the Phase 2.1 decoder. The renderer skips just this layer; the rest of the scene continues.", comment: "Wallpaper Engine fallback warning body. The placeholder is a texture format code.")
+                return String(localized: "Texture format \(code) is not in the Phase 2.1 decoder. The renderer skips just this layer; the rest of the scene continues.", comment: "Texture fallback warning body. The placeholder is a texture format code.")
             }
         case .texDecodeFailed(let detail):
             return String(localized: "A texture failed to decode (\(detail)). Re-downloading the wallpaper in Steam usually fixes it.", comment: "Wallpaper Engine fallback warning body. The placeholder is decode detail.")

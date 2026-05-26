@@ -11,8 +11,8 @@ This repository is the source of two macOS SKUs that ship from a single codebase
 
 | Build | Distribution | Status |
 |---|---|---|
-| **LiveWallpaper** | Commercial Pro edition; distributed separately. | All features, including Metal shader wallpapers, third-party scene-format rendering / import, and the developer-tools harness. |
-| **Loomscreen** | **Open-source Lite edition. MIT licensed.** Distributed via GitHub Releases. | Video, HTML/Web, Aerials, particles, schedules, playlists — the four Pro-only renderers / tools listed above are compiled out. |
+| **LiveWallpaper** | Commercial Pro edition; distributed separately. | All features, including Metal shader wallpapers, local copied project-folder import, compatible Scene rendering, and the developer-tools harness. |
+| **Loomscreen** | **Open-source Lite edition. MIT licensed.** Distributed via GitHub Releases. | Video, HTML/Web, Aerials, particles, schedules, playlists — Pro-only renderers, local project import, and developer tools are compiled out. |
 
 "LiveWallpaper" is also the **internal codename** of this repository. "Loomscreen" is the **public product name** of the open-source release — same codebase, slimmer ship.
 
@@ -61,15 +61,32 @@ Loomscreen checks GitHub Releases on app launch (rate-limited to **once every 12
 | Inline inspector preview                            | ✅ | ✅ |
 | Global keyboard shortcuts                           | ✅ | ✅ |
 | **Metal shader procedural wallpapers**              | ✅ | — |
-| **Third-party scene-format rendering**              | ✅ | — |
-| **Third-party scene-format import (`.pkg`)**        | ✅ | — |
+| **Local copied project-folder import**              | ✅ | — |
+| **Compatible Scene project rendering**              | ✅ | — |
 | **Developer-tools harness**                         | ✅ | — |
 
-Lite is a **lightweight runtime, not a UI castration**: video / HTML / Aerials fidelity matches Pro one-for-one. The capability set is defined in [ProductCapabilities.swift](Packages/LiveWallpaperCore/Sources/LiveWallpaperCore/Capabilities/ProductCapabilities.swift).
+Lite is a **lightweight runtime, not a UI castration**: video / HTML / Aerials fidelity matches Pro one-for-one. It does not include the Pro-only local project importer or compatible Scene renderer. The capability set is defined in [ProductCapabilities.swift](Packages/LiveWallpaperCore/Sources/LiveWallpaperCore/Capabilities/ProductCapabilities.swift).
+
+## LiveWallpaper Pro local project import
+
+LiveWallpaper Pro can scan and import local project folders copied from a Windows Wallpaper Engine library. The supported workflow is:
+
+1. On Windows, use Steam / Wallpaper Engine to download the wallpapers you are allowed to use.
+2. Copy the local folder that contains numbered project folders to your Mac. This is commonly a parent folder such as `431960/`, or a subset of individual project ID folders.
+3. In LiveWallpaper Pro, choose that copied folder. The app scans local `project.json` files, reads previews and metadata, and prepares supported projects for playback.
+
+This is a local-file workflow. LiveWallpaper does not sign in to Steam, connect to Steam Workshop, download Workshop items, bundle Wallpaper Engine content, or bypass creator permissions. Users are responsible for ensuring they have the rights to copy and use the project files they import.
+
+Import support is intentionally conservative:
+
+- Video and Web projects are mapped to LiveWallpaper's native video / WKWebView runtimes.
+- Compatible Scene projects are rendered by the Pro Scene renderer; coverage is still expanding and some scenes may render partially or be marked unsupported.
+- Projects that require Windows executables or `.dll` plugins are skipped on macOS.
+- Missing dependency projects must already exist in the copied local folder or the Pro cache.
 
 ## Features (full codebase)
 
-- **Multi-Type Wallpapers** — Video (MP4/MOV/AVI), HTML/Web (WKWebView), Metal shader (procedural GPU art), compatible third-party community scene packages (folder import; `.pkg` extraction when present)
+- **Multi-Type Wallpapers** — Video (MP4/MOV/AVI), HTML/Web (WKWebView), Metal shader (procedural GPU art), and Pro-only local project folders copied from Windows (`.pkg` extraction or folder mirroring when needed)
 - **Multi-Display** — Independent configuration per screen
 - **Bookmarks** — Save any video / web page / shader once, re-apply to any display in one click (sidebar Library, inspector header)
 - **HTML Trust Model** — Untrusted remote URLs run with JavaScript disabled by default; one-click `Trust this site` to allow
@@ -123,7 +140,7 @@ For security issues, please use GitHub's [private vulnerability reporting](https
 
 ## Trademarks
 
-"Wallpaper Engine" is a trademark of Kaboom Productions. "Steam" and "Steam Workshop" are trademarks of Valve Corporation. This project is independent open-source software, not affiliated with, endorsed by, or sponsored by either company. References elsewhere in this codebase to third-party scene formats are for interoperability documentation purposes only (nominative fair use).
+"Wallpaper Engine", "Steam", and "Steam Workshop" are trademarks of their respective owners. This project is independent software, not affiliated with, endorsed by, or sponsored by Wallpaper Engine, Steam, Valve, or their related companies. References to these names are for interoperability documentation and accurate user instructions only.
 
 ## License
 

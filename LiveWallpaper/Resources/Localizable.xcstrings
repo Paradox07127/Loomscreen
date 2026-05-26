@@ -2408,30 +2408,30 @@
         }
       }
     },
-    "Apply Wallpaper Engine Project" : {
+    "Apply Local Project" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Apply Wallpaper Engine Project"
+            "value" : "Apply Local Project"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Wallpaper Engine プロジェクトを適用"
+            "value" : "ローカルプロジェクトを適用"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "应用 Wallpaper Engine 项目"
+            "value" : "应用本地项目"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "套用 Wallpaper Engine 專案"
+            "value" : "套用本機專案"
           }
         }
       }
@@ -3498,30 +3498,30 @@
         }
       }
     },
-    "Browse Wallpaper Engine workshop projects" : {
+    "Browse copied local projects in the Workshop Library" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Browse Wallpaper Engine workshop projects"
+            "value" : "Browse copied local projects in the Workshop Library"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Wallpaper Engine ワークショッププロジェクトを表示"
+            "value" : "Workshop Library でコピー済みのローカルプロジェクトを表示"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "浏览 Wallpaper Engine 创意工坊项目"
+            "value" : "在 Workshop Library 中浏览已拷贝的本地项目"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "瀏覽 Wallpaper Engine 創意工坊專案"
+            "value" : "在 Workshop Library 中瀏覽已拷貝的本機專案"
           }
         }
       }
@@ -4304,30 +4304,30 @@
         }
       }
     },
-    "Choose a Wallpaper Engine project folder to apply" : {
+    "Choose a copied project folder to apply" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Choose a Wallpaper Engine project folder to apply"
+            "value" : "Choose a copied project folder to apply"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "適用する Wallpaper Engine プロジェクトフォルダを選択"
+            "value" : "適用するコピー済みプロジェクトフォルダを選択"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "选择要应用的 Wallpaper Engine 项目文件夹"
+            "value" : "选择要应用的已拷贝项目文件夹"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "選擇要套用的 Wallpaper Engine 專案資料夾"
+            "value" : "選擇要套用的已拷貝專案資料夾"
           }
         }
       }
@@ -4618,58 +4618,58 @@
         }
       }
     },
-    "Choose the folder that contains numbered Workshop project folders" : {
+    "Choose the copied folder that contains numbered project folders" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Choose the folder that contains numbered Workshop project folders"
+            "value" : "Choose the copied folder that contains numbered project folders"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "番号付きのワークショッププロジェクトフォルダを含むフォルダを選択"
+            "value" : "番号付きプロジェクトフォルダを含むコピー済みフォルダを選択"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "选择包含创意工坊编号项目文件夹的文件夹"
+            "value" : "选择包含编号项目文件夹的已拷贝文件夹"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "選擇包含編號創意工坊專案資料夾的資料夾"
+            "value" : "選擇包含編號專案資料夾的已拷貝資料夾"
           }
         }
       }
     },
-    "Choose the Wallpaper Engine folder that contains your subscribed project folders." : {
+    "Choose the folder you copied from Wallpaper Engine on Windows." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Choose the Wallpaper Engine folder that contains your subscribed project folders."
+            "value" : "Choose the folder you copied from Wallpaper Engine on Windows."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "サブスクライブ済みプロジェクトフォルダを含む Wallpaper Engine フォルダを選択してください。"
+            "value" : "Windows の Wallpaper Engine からコピーしたフォルダを選択してください。"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "选择包含您订阅的项目文件夹的 Wallpaper Engine 文件夹。"
+            "value" : "选择从 Windows 上的 Wallpaper Engine 拷贝过来的文件夹。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "選擇包含您已訂閱專案資料夾的 Wallpaper Engine 資料夾。"
+            "value" : "選擇從 Windows 上的 Wallpaper Engine 拷貝過來的資料夾。"
           }
         }
       }
@@ -5741,30 +5741,30 @@
         }
       }
     },
-    "Connect Steam Workshop" : {
+    "Choose Copied Project Folder" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Connect Steam Workshop"
+            "value" : "Choose Copied Project Folder"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Steam ワークショップに接続"
+            "value" : "コピー済みプロジェクトフォルダを選択"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "连接 Steam 创意工坊"
+            "value" : "选择已拷贝的项目文件夹"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "連接 Steam 創意工坊"
+            "value" : "選擇已拷貝的專案資料夾"
           }
         }
       }
@@ -7304,58 +7304,30 @@
         }
       }
     },
-    "Discover Workshop projects from your Steam Workshop folder" : {
+    "Browse copied local projects" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Discover Workshop projects from your Steam Workshop folder"
+            "value" : "Browse copied local projects"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Steam ワークショップフォルダからワークショッププロジェクトを検出"
+            "value" : "コピー済みのローカルプロジェクトを表示"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "从你的 Steam 创意工坊文件夹发现项目"
+            "value" : "浏览已拷贝的本地项目"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "從您的 Steam 創意工坊資料夾尋找專案"
-          }
-        }
-      }
-    },
-    "Discover Workshop projects under your Steam library" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Discover Workshop projects under your Steam library"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Steam ライブラリ内のワークショッププロジェクトを検出"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "发现 Steam 库中的创意工坊项目"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "尋找 Steam 資料庫中的創意工坊專案"
+            "value" : "瀏覽已拷貝的本機專案"
           }
         }
       }
@@ -13296,31 +13268,31 @@
         }
       }
     },
-    "Live wallpapers for macOS — videos, web pages, and Wallpaper Engine scenes across every connected display." : {
+    "Live wallpapers for macOS: videos, web pages, and compatible imported scenes across every connected display." : {
       "comment" : "Tagline on the About page describing what the app does.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Live wallpapers for macOS — videos, web pages, and Wallpaper Engine scenes across every connected display."
+            "value" : "Live wallpapers for macOS: videos, web pages, and compatible imported scenes across every connected display."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "macOS のためのライブ壁紙 — 動画、ウェブページ、Wallpaper Engine シーンを接続中のすべてのディスプレイに。"
+            "value" : "macOS のためのライブ壁紙: 動画、ウェブページ、対応するインポート済みシーンを接続中のすべてのディスプレイに。"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "macOS 上的动态壁纸——视频、网页、Wallpaper Engine 场景，覆盖每一台外接显示器。"
+            "value" : "macOS 上的动态壁纸：视频、网页和兼容的已导入场景，覆盖每一台连接的显示器。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "macOS 上的動態桌布——影片、網頁、Wallpaper Engine 場景，覆蓋每一台外接顯示器。"
+            "value" : "macOS 上的動態桌布：影片、網頁與相容的已匯入場景，覆蓋每一台已連接顯示器。"
           }
         }
       }
@@ -14421,31 +14393,31 @@
         }
       }
     },
-    "More Workshop actions" : {
+    "More library actions" : {
       "comment" : "Accessibility label / tooltip for the Workshop header overflow ('…') menu.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "More Workshop actions"
+            "value" : "More library actions"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Workshop のその他の操作"
+            "value" : "ライブラリのその他の操作"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "更多创意工坊操作"
+            "value" : "更多库操作"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "更多創意工坊操作"
+            "value" : "更多資料庫操作"
           }
         }
       }
@@ -15700,30 +15672,30 @@
         }
       }
     },
-    "No Workshop projects found" : {
+    "No local projects found" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "No Workshop projects found"
+            "value" : "No local projects found"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "ワークショッププロジェクトが見つかりません"
+            "value" : "ローカルプロジェクトが見つかりません"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "未找到 Steam 创意工坊项目"
+            "value" : "未找到本地项目"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "找不到創意工坊專案"
+            "value" : "找不到本機專案"
           }
         }
       }
@@ -16189,31 +16161,31 @@
         }
       }
     },
-    "Open a display first, then choose a Workshop wallpaper to apply." : {
+    "Open a display first, then choose a local project to apply." : {
       "comment" : "Workshop gallery apply error when there is no target display.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Open a display first, then choose a Workshop wallpaper to apply."
+            "value" : "Open a display first, then choose a local project to apply."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "先にディスプレイを開いてから、適用するワークショップ壁紙を選択してください。"
+            "value" : "先にディスプレイを開いてから、適用するローカルプロジェクトを選択してください。"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请先打开一个显示器，再选择要应用的创意工坊壁纸。"
+            "value" : "请先打开一个显示器，再选择要应用的本地项目。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "請先開啟顯示器，再選擇要套用的創意工坊桌布。"
+            "value" : "請先開啟顯示器，再選擇要套用的本機專案。"
           }
         }
       }
@@ -16617,30 +16589,30 @@
         }
       }
     },
-    "Opens a folder chooser to apply a Wallpaper Engine project" : {
+    "Opens a folder chooser to apply a copied local project" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Opens a folder chooser to apply a Wallpaper Engine project"
+            "value" : "Opens a folder chooser to apply a copied local project"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "フォルダ選択を開いて Wallpaper Engine プロジェクトを適用します"
+            "value" : "フォルダ選択を開いてコピー済みローカルプロジェクトを適用します"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "打开文件夹选择器以应用 Wallpaper Engine 项目"
+            "value" : "打开文件夹选择器以应用已拷贝的本地项目"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "開啟資料夾選擇器以套用 Wallpaper Engine 專案"
+            "value" : "開啟資料夾選擇器以套用已拷貝的本機專案"
           }
         }
       }
@@ -16880,30 +16852,30 @@
       }
     },
     "panel.message.workshop_projects_folder" : {
-      "comment" : "Message shown in the folder picker for choosing a Wallpaper Engine projects folder.",
+      "comment" : "Message shown in the folder picker for choosing a copied local project folder.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Select your Wallpaper Engine projects folder"
+            "value" : "Select the project folder copied from Windows"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Wallpaper Engine のプロジェクトフォルダを選択"
+            "value" : "Windows からコピーしたプロジェクトフォルダを選択"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "选择你的 Wallpaper Engine 项目文件夹"
+            "value" : "选择从 Windows 拷贝的项目文件夹"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "選取你的 Wallpaper Engine 專案資料夾"
+            "value" : "選擇從 Windows 拷貝的專案資料夾"
           }
         }
       }
@@ -16996,7 +16968,7 @@
       }
     },
     "panel.prompt.grant_library_access" : {
-      "comment" : "Confirmation button for granting access to the Wallpaper Engine library folder.",
+      "comment" : "Confirmation button for granting access to the local project library folder.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -17025,7 +16997,7 @@
       }
     },
     "panel.prompt.import_project" : {
-      "comment" : "Confirmation button for choosing and applying a Wallpaper Engine project folder.",
+      "comment" : "Confirmation button for choosing and applying a copied local project folder.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -17978,30 +17950,30 @@
         }
       }
     },
-    "Pick the folder that contains numbered Workshop project folders" : {
+    "Pick the copied folder that contains numbered project folders" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Pick the folder that contains numbered Workshop project folders"
+            "value" : "Pick the copied folder that contains numbered project folders"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "番号付きのワークショッププロジェクトフォルダを含むフォルダを選択"
+            "value" : "番号付きプロジェクトフォルダを含むコピー済みフォルダを選択"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "选择包含创意工坊编号项目文件夹的文件夹。"
+            "value" : "选择包含编号项目文件夹的已拷贝文件夹"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "選擇包含已編號創意工坊專案資料夾的資料夾"
+            "value" : "選擇包含編號專案資料夾的已拷貝資料夾"
           }
         }
       }
@@ -19103,30 +19075,30 @@
         }
       }
     },
-    "Re-scan the workshop folder for new projects" : {
+    "Re-scan the local project folder for new projects" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Re-scan the workshop folder for new projects"
+            "value" : "Re-scan the local project folder for new projects"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "ワークショップフォルダを再スキャンして新しいプロジェクトを探す"
+            "value" : "ローカルプロジェクトフォルダを再スキャンして新しいプロジェクトを探す"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "重新扫描创意工坊文件夹以查找新项目"
+            "value" : "重新扫描本地项目文件夹以查找新项目"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "重新掃描創意工坊資料夾以尋找新專案"
+            "value" : "重新掃描本機專案資料夾以尋找新專案"
           }
         }
       }
@@ -19272,30 +19244,30 @@
         }
       }
     },
-    "Recent Workshop Projects" : {
+    "Recent Imported Projects" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Recent Workshop Projects"
+            "value" : "Recent Imported Projects"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "最近のワークショッププロジェクト"
+            "value" : "最近のインポート済みプロジェクト"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "最近的创意工坊项目"
+            "value" : "最近导入的项目"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "最近的創意工坊專案"
+            "value" : "最近匯入的專案"
           }
         }
       }
@@ -20446,30 +20418,30 @@
         }
       }
     },
-    "Renders WebGL content at retina resolution so character art and Spine wallpapers stop looking soft. Auto-enabled for Wallpaper Engine folders." : {
+    "Renders WebGL content at retina resolution so character art and Spine wallpapers stop looking soft. Auto-enabled for imported project folders." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Renders WebGL content at retina resolution so character art and Spine wallpapers stop looking soft. Auto-enabled for Wallpaper Engine folders."
+            "value" : "Renders WebGL content at retina resolution so character art and Spine wallpapers stop looking soft. Auto-enabled for imported project folders."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "WebGL コンテンツを Retina 解像度でレンダリングし、キャラクターアートや Spine ウォールペーパーがぼやけて見えるのを防ぎます。Wallpaper Engine フォルダでは自動で有効になります。"
+            "value" : "WebGL コンテンツを Retina 解像度でレンダリングし、キャラクターアートや Spine ウォールペーパーがぼやけて見えるのを防ぎます。インポート済みプロジェクトフォルダでは自動で有効になります。"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "以 Retina 分辨率渲染 WebGL 内容，避免角色立绘和 Spine 壁纸看起来发软。Wallpaper Engine 文件夹会自动启用。"
+            "value" : "以 Retina 分辨率渲染 WebGL 内容，避免角色立绘和 Spine 壁纸看起来发软。已导入项目文件夹会自动启用。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "以 Retina 解析度算繪 WebGL 內容，避免角色立繪與 Spine 桌布看起來偏軟。Wallpaper Engine 資料夾會自動啟用。"
+            "value" : "以 Retina 解析度算繪 WebGL 內容，避免角色立繪與 Spine 桌布看起來偏軟。已匯入專案資料夾會自動啟用。"
           }
         }
       }
@@ -20531,114 +20503,86 @@
         }
       }
     },
-    "Rescan — re-scan the workshop folder for new projects" : {
+    "Rescan — re-scan the local project folder for new projects" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Rescan — re-scan the workshop folder for new projects"
+            "value" : "Rescan — re-scan the local project folder for new projects"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "再スキャン — ワークショップフォルダを再スキャンして新しいプロジェクトを探す"
+            "value" : "再スキャン — ローカルプロジェクトフォルダを再スキャンして新しいプロジェクトを探す"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "重新扫描——扫描创意工坊文件夹以发现新项目"
+            "value" : "重新扫描——扫描本地项目文件夹以发现新项目"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "重新掃描 — 重新掃描創意工坊資料夾以尋找新專案"
+            "value" : "重新掃描 — 重新掃描本機專案資料夾以尋找新專案"
           }
         }
       }
     },
-    "Rescan after Steam downloads or removes subscriptions" : {
+    "Rescan after copying new or changed projects" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Rescan after Steam downloads or removes subscriptions"
+            "value" : "Rescan after copying new or changed projects"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Steam がサブスクリプションをダウンロードまたは削除した後に再スキャン"
+            "value" : "新しいプロジェクトや変更済みプロジェクトをコピーした後に再スキャン"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 Steam 下载或移除订阅后重新扫描"
+            "value" : "拷贝新增或变更的项目后重新扫描"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 Steam 下載或移除訂閱後重新掃描"
+            "value" : "拷貝新增或變更的專案後重新掃描"
           }
         }
       }
     },
-    "Rescan after Steam finishes downloading subscriptions" : {
+    "Rescan library" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Rescan after Steam finishes downloading subscriptions"
+            "value" : "Rescan library"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Steam がサブスクリプションのダウンロードを完了した後に再スキャン"
+            "value" : "ライブラリを再スキャン"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 Steam 完成下载订阅后重新扫描"
+            "value" : "重新扫描库"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在 Steam 完成下載訂閱後重新掃描"
-          }
-        }
-      }
-    },
-    "Rescan workshop" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Rescan workshop"
-          }
-        },
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ワークショップを再スキャン"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重新扫描创意工坊"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重新掃描創意工坊"
+            "value" : "重新掃描資料庫"
           }
         }
       }
@@ -21515,30 +21459,30 @@
         }
       }
     },
-    "Return to the recent Workshop projects grid" : {
+    "Return to the recent imported projects grid" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Return to the recent Workshop projects grid"
+            "value" : "Return to the recent imported projects grid"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "最近のワークショッププロジェクトのグリッドに戻る"
+            "value" : "最近のインポート済みプロジェクトのグリッドに戻る"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "返回最近的创意工坊项目网格"
+            "value" : "返回最近导入项目网格"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "返回最近創意工坊專案格狀檢視"
+            "value" : "返回最近匯入專案格狀檢視"
           }
         }
       }
@@ -22178,30 +22122,30 @@
         }
       }
     },
-    "Scanning workshop folder…" : {
+    "Scanning local project folder…" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Scanning workshop folder…"
+            "value" : "Scanning local project folder…"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "ワークショップフォルダをスキャン中…"
+            "value" : "ローカルプロジェクトフォルダをスキャン中…"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在扫描创意工坊文件夹…"
+            "value" : "正在扫描本地项目文件夹…"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在掃描創意工坊資料夾…"
+            "value" : "正在掃描本機專案資料夾…"
           }
         }
       }
@@ -22815,30 +22759,30 @@
         }
       }
     },
-    "Search Workshop" : {
+    "Search Projects" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Search Workshop"
+            "value" : "Search Projects"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "ワークショップを検索"
+            "value" : "プロジェクトを検索"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "搜索创意工坊"
+            "value" : "搜索项目"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "搜尋創意工坊"
+            "value" : "搜尋專案"
           }
         }
       }
@@ -25481,30 +25425,30 @@
         }
       }
     },
-    "The selected folder did not contain Wallpaper Engine project folders. Pick the folder that contains numeric Workshop IDs, then scan again." : {
+    "The selected folder did not contain copied project folders. Pick the folder that contains numbered project ID folders, then scan again." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The selected folder did not contain Wallpaper Engine project folders. Pick the folder that contains numeric Workshop IDs, then scan again."
+            "value" : "The selected folder did not contain copied project folders. Pick the folder that contains numbered project ID folders, then scan again."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "選択したフォルダに Wallpaper Engine プロジェクトフォルダが含まれていません。数字のワークショップ ID が入ったフォルダを選択してから、もう一度スキャンしてください。"
+            "value" : "選択したフォルダにコピー済みプロジェクトフォルダが含まれていません。番号付きのプロジェクト ID フォルダを含むフォルダを選択してから、もう一度スキャンしてください。"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "所选文件夹不包含 Wallpaper Engine 项目文件夹。请选择包含以数字创意工坊 ID 命名的文件夹，然后重新扫描。"
+            "value" : "所选文件夹不包含已拷贝的项目文件夹。请选择包含编号项目 ID 文件夹的文件夹，然后重新扫描。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "所選資料夾不包含 Wallpaper Engine 專案資料夾。請選擇包含數字創意工坊 ID 的資料夾，然後重新掃描。"
+            "value" : "所選資料夾不包含已拷貝的專案資料夾。請選擇包含編號專案 ID 資料夾的資料夾，然後重新掃描。"
           }
         }
       }
@@ -25833,31 +25777,31 @@
         }
       }
     },
-    "This wallpaper needs Wallpaper Engine's own 3D rendering engine to play. We're working on broader Phase 2 support — your other wallpapers continue to play unaffected." : {
-      "comment" : "Wallpaper Engine fallback warning body.",
+    "This scene needs rendering features that are not supported on Mac yet. We're working on broader Phase 2 support — your other wallpapers continue to play unaffected." : {
+      "comment" : "Scene fallback warning body.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "This wallpaper needs Wallpaper Engine's own 3D rendering engine to play. We're working on broader Phase 2 support — your other wallpapers continue to play unaffected."
+            "value" : "This scene needs rendering features that are not supported on Mac yet. We're working on broader Phase 2 support — your other wallpapers continue to play unaffected."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "この壁紙の再生には Wallpaper Engine 独自の 3D レンダリングエンジンが必要です。Phase 2 の対応範囲を拡大中です。他の壁紙は影響を受けずに再生されます。"
+            "value" : "このシーンの再生には、Mac ではまだ対応していないレンダリング機能が必要です。Phase 2 の対応範囲を拡大中です。他の壁紙は影響を受けずに再生されます。"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "此壁纸需要 Wallpaper Engine 自带的 3D 渲染引擎才能播放。我们正在扩展 Phase 2 支持，其他壁纸会继续正常播放。"
+            "value" : "此场景需要 Mac 暂不支持的渲染功能。我们正在扩展 Phase 2 支持，其他壁纸会继续正常播放。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "此桌布需要 Wallpaper Engine 自己的 3D 渲染引擎才能播放。我們正在擴充 Phase 2 支援；你的其他桌布會照常播放，不受影響。"
+            "value" : "此場景需要 Mac 尚未支援的算繪功能。我們正在擴充 Phase 2 支援；其他桌布會照常播放，不受影響。"
           }
         }
       }
@@ -28032,146 +27976,146 @@
         }
       }
     },
-    "Wallpaper Engine Cache" : {
+    "Imported Project Cache" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Wallpaper Engine Cache"
+            "value" : "Imported Project Cache"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Wallpaper Engine キャッシュ"
+            "value" : "インポート済みプロジェクトキャッシュ"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Wallpaper Engine 缓存"
+            "value" : "已导入项目缓存"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Wallpaper Engine 快取"
+            "value" : "已匯入專案快取"
           }
         }
       }
     },
-    "Wallpaper Engine format %lld is not in the Phase 2.1 decoder. The renderer skips just this layer; the rest of the scene continues." : {
-      "comment" : "Wallpaper Engine fallback warning body. The placeholder is a texture format code.",
+    "Texture format %lld is not in the Phase 2.1 decoder. The renderer skips just this layer; the rest of the scene continues." : {
+      "comment" : "Texture fallback warning body. The placeholder is a texture format code.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Wallpaper Engine format %lld is not in the Phase 2.1 decoder. The renderer skips just this layer; the rest of the scene continues."
+            "value" : "Texture format %lld is not in the Phase 2.1 decoder. The renderer skips just this layer; the rest of the scene continues."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Wallpaper Engine 形式 %lld は Phase 2.1 デコーダーに含まれていません。レンダラーはこのレイヤーだけをスキップし、シーンの残りは続行されます。"
+            "value" : "テクスチャ形式 %lld は Phase 2.1 デコーダーに含まれていません。レンダラーはこのレイヤーだけをスキップし、シーンの残りは続行されます。"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Wallpaper Engine 格式 %lld 尚未包含在 Phase 2.1 解码器中。渲染器只会跳过该图层，其余场景会继续。"
+            "value" : "纹理格式 %lld 尚未包含在 Phase 2.1 解码器中。渲染器只会跳过该图层，其余场景会继续。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Wallpaper Engine 格式 %lld 尚未納入 Phase 2.1 解碼器。渲染器只會略過此圖層；場景的其餘部分會繼續。"
+            "value" : "紋理格式 %lld 尚未納入 Phase 2.1 解碼器。算繪器只會略過此圖層；場景的其餘部分會繼續。"
           }
         }
       }
     },
-    "Wallpaper Engine project type is unknown" : {
+    "Project type is unknown" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Wallpaper Engine project type is unknown"
+            "value" : "Project type is unknown"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Wallpaper Engine プロジェクトタイプが不明です"
+            "value" : "プロジェクトタイプが不明です"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Wallpaper Engine 项目类型未知"
+            "value" : "项目类型未知"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Wallpaper Engine 專案類型未知"
+            "value" : "專案類型未知"
           }
         }
       }
     },
-    "Wallpaper Engine project: %@" : {
-      "comment" : "A11y label for a WPE history row card. The placeholder is the WPE project title.",
+    "Imported project: %@" : {
+      "comment" : "A11y label for an imported project history row card. The placeholder is the project title.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Wallpaper Engine project: %@"
+            "value" : "Imported project: %@"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Wallpaper Engine プロジェクト：%@"
+            "value" : "インポート済みプロジェクト：%@"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Wallpaper Engine 项目：%@"
+            "value" : "已导入项目：%@"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Wallpaper Engine 專案：%@"
+            "value" : "已匯入專案：%@"
           }
         }
       }
     },
-    "Wallpaper Engine scene imports." : {
+    "Compatible imported scenes." : {
       "comment" : "Text displayed in a guide card for the Scene wallpaper type.",
       "isCommentAutoGenerated" : true,
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Wallpaper Engine scene imports."
+            "value" : "Compatible imported scenes."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Wallpaper Engine シーンのインポート。"
+            "value" : "対応するインポート済みシーン。"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "导入 Wallpaper Engine 场景。"
+            "value" : "兼容的已导入场景。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Wallpaper Engine 場景匯入。"
+            "value" : "相容的已匯入場景。"
           }
         }
       }
@@ -28463,31 +28407,31 @@
         }
       }
     },
-    "We couldn't recognize this Wallpaper Engine project type." : {
-      "comment" : "Wallpaper Engine fallback warning body.",
+    "We couldn't recognize this project type." : {
+      "comment" : "Project fallback warning body.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "We couldn't recognize this Wallpaper Engine project type."
+            "value" : "We couldn't recognize this project type."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "この Wallpaper Engine プロジェクトタイプを認識できませんでした。"
+            "value" : "このプロジェクトタイプを認識できませんでした。"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "无法识别此 Wallpaper Engine 项目类型。"
+            "value" : "无法识别此项目类型。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "無法辨識此 Wallpaper Engine 專案類型。"
+            "value" : "無法辨識此專案類型。"
           }
         }
       }
@@ -29216,31 +29160,31 @@
         }
       }
     },
-    "Workshop folder is unreachable: %@. Try again — your saved access remains." : {
-      "comment" : "Workshop library folder access error after a transient scan failure. The placeholder is the system detail. The saved bookmark is preserved so the user can retry.",
+    "Local project folder is unreachable: %@. Try again — your saved access remains." : {
+      "comment" : "Workshop Library folder access error after a transient scan failure. The placeholder is the system detail. The saved bookmark is preserved so the user can retry.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Workshop folder is unreachable: %@. Try again — your saved access remains."
+            "value" : "Local project folder is unreachable: %@. Try again — your saved access remains."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "ワークショップフォルダにアクセスできません：%@。もう一度試してください。保存済みのアクセス権は保持されます。"
+            "value" : "ローカルプロジェクトフォルダにアクセスできません：%@。もう一度試してください。保存済みのアクセス権は保持されます。"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "无法访问创意工坊文件夹：%@。请重试——您保存的访问权限仍然有效。"
+            "value" : "无法访问本地项目文件夹：%@。请重试——您保存的访问权限仍然有效。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "無法存取創意工坊資料夾：%@。請再試一次；你已儲存的存取權仍會保留。"
+            "value" : "無法存取本機專案資料夾：%@。請再試一次；已儲存的存取權仍會保留。"
           }
         }
       }
@@ -29361,31 +29305,31 @@
         }
       }
     },
-    "WPE format 8 (RGBA1010102) is rare and pending decoder support. Most other layers in this scene should still render." : {
-      "comment" : "Wallpaper Engine fallback warning body.",
+    "Texture format 8 (RGBA1010102) is rare and pending decoder support. Most other layers in this scene should still render." : {
+      "comment" : "Texture fallback warning body.",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "WPE format 8 (RGBA1010102) is rare and pending decoder support. Most other layers in this scene should still render."
+            "value" : "Texture format 8 (RGBA1010102) is rare and pending decoder support. Most other layers in this scene should still render."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "WPE 形式 8（RGBA1010102）はまれで、デコーダー対応待ちです。このシーンの他のほとんどのレイヤーは引き続きレンダリングされるはずです。"
+            "value" : "テクスチャ形式 8（RGBA1010102）はまれで、デコーダー対応待ちです。このシーンの他のほとんどのレイヤーは引き続きレンダリングされるはずです。"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "WPE 格式 8（RGBA1010102）较少见，解码支持仍在排期中。此场景中的大多数其他图层应仍可渲染。"
+            "value" : "纹理格式 8（RGBA1010102）较少见，解码支持仍在排期中。此场景中的大多数其他图层应仍可渲染。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "WPE 格式 8（RGBA1010102）較少見，解碼支援仍待加入。此場景中的大多數其他圖層應仍可渲染。"
+            "value" : "紋理格式 8（RGBA1010102）較少見，解碼支援仍待加入。此場景中的大多數其他圖層應仍可算繪。"
           }
         }
       }

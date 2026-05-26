@@ -67,7 +67,7 @@ struct EmptyStateGuideView: View {
                             icon: "cube.transparent",
                             iconTint: .purple,
                             title: "Scene",
-                            subtitle: "Wallpaper Engine scene imports.",
+                            subtitle: "Compatible imported scenes.",
                             accessibilityLabel: "Scene wallpaper type",
                             actionTitle: "Use Scene",
                             actionSystemImage: "arrow.right",
