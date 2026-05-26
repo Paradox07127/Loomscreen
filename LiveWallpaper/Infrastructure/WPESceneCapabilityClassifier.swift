@@ -8,19 +8,15 @@ import Foundation
 ///
 /// - `.unsupported` — no image objects at all, or every declared layer is
 ///   unresolvable through any mount. The import service refuses to mount
-///   such projects so the user sees the failure at import time instead of
-///   after they try to apply the wallpaper.
+///   such projects so the user sees the failure at import time.
 /// - `.imageOnly` — every declared layer resolves AND no blocking parser
 ///   diagnostics. The renderer will likely produce a clean frame.
 /// - `.degraded` — at least one declared layer resolves, but some are
 ///   missing or the parser flagged a non-`.tex` blocking diagnostic. The
-///   renderer still mounts and degrades gracefully for the missing layers.
+///   renderer still mounts and degrades gracefully.
 ///
-/// The name is historical — this classifier predates `WPEScenePreflight`
-/// (which mints feature-flag-based capability tiers). It now coexists as
-/// the *resource-availability* gate; preflight stays as the *structural*
-/// gate (Windows plugin, runtime-system requirements). Both signals are
-/// persisted on `SceneDescriptor`.
+/// Coexists with `WPEScenePreflight` (the structural gate covering Windows
+/// plugins / runtime-system requirements). Both signals persist on `SceneDescriptor`.
 struct WPESceneCapabilityClassifier: Sendable {
     func capabilityTier(
         for document: WPESceneDocument,

@@ -69,10 +69,6 @@ struct WPETexByteReader {
         cursor += count
     }
 
-    mutating func skipNullTerminatedString(blockName: String) throws {
-        _ = try readNullTerminatedString(blockName: blockName)
-    }
-
     /// Reads a NUL-terminated ASCII run, advancing past the terminator.
     /// Used by `TEXB` v4 to surface the `v4Condition` string into the IR
     /// for dump fidelity (older code path discarded it via skip-only).

@@ -314,12 +314,6 @@ struct WPEOrthogonalProjectionPayload: Codable, Sendable {
 
 // MARK: - Bridge messages
 
-enum WPEWebGLOutgoingEvent: String, Codable, Sendable {
-    case loadScene = "load_scene"
-    case runtimeState = "runtime_state"
-    case unload
-}
-
 enum WPEWebGLIncomingEvent: String, Codable, Sendable {
     case ready
     case sceneLoaded = "scene_loaded"

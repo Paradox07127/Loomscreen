@@ -4,34 +4,15 @@ import Foundation
 import LiveWallpaperCore
 
 /// Per-scene debug session that mirrors every shader compile + pipeline build
-/// failure to disk so a maintainer can `cd` into the folder and reproduce the
-/// crash with the exact preprocessed source the compiler saw.
+/// failure to disk under `~/Library/.../Application Support/LiveWallpaper/scene-debug/<timestamp-id>/`,
+/// so a maintainer can reproduce the crash with the exact preprocessed source
+/// the compiler saw (original/processed GLSL, translated MSL, error text,
+/// scene-info, scene.log mirror, optional first-frame.png).
 ///
-/// Layout under `~/Library/.../Application Support/LiveWallpaper/scene-debug/`:
+/// Always on in DEBUG; in Release gated by the `WPESceneDebugArtifactsEnabled`
+/// UserDefaults flag (Developer Mode → Developer Tools).
 ///
-/// ```
-/// 20260524-143052-3340707146/
-///   scene-info.txt
-///   scene.log                     # mirror of all wpeRender logs in this load
-///   first-frame.png               # snapshotter output if any frame presented
-///   shaders/
-///     001-effectcomposebackground/
-///       01-vertex-original.glsl
-///       02-vertex-processed.glsl
-///       03-fragment-original.glsl
-///       04-fragment-processed.glsl
-///       05-msl-translated.msl    (Metal only)
-///       06-error.txt
-///   pipelines/
-///     001-wpe_translated_fragment-normal.err
-/// ```
-///
-/// Always on in DEBUG builds; in Release builds gated by the
-/// `WPESceneDebugArtifactsEnabled` UserDefaults flag (toggled from
-/// Developer Mode → Developer Tools).
-///
-/// `@unchecked Sendable` because the only shared state (`session`) is guarded
-/// by `sessionLock`; all I/O lives behind `writeQueue`.
+/// `@unchecked Sendable`: `session` is guarded by `sessionLock`; I/O via `writeQueue`.
 final class WPESceneDebugArtifacts: @unchecked Sendable {
 
     static let shared = WPESceneDebugArtifacts()

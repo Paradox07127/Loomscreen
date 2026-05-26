@@ -3,24 +3,16 @@ import os
 
 /// Lightweight launch-time update checker for the Loomscreen Lite SKU.
 ///
-/// **Cadence policy.** Runs *once* per app launch, throttled to a minimum
-/// 12-hour interval since the last check (persisted in `UserDefaults`).
-/// There is no background timer: if the user opens Loomscreen ten times in a
-/// row, only the first lookup actually hits GitHub. Manual `Check for
-/// Updates` from the About panel bypasses the throttle.
+/// **Cadence**: once per launch, ≥12h since last check (persisted in
+/// `UserDefaults`); no background timer. Manual "Check for Updates" from the
+/// About panel bypasses the throttle.
 ///
-/// **Network shape.** Single unauthenticated GET to
-/// `https://api.github.com/repos/<owner>/<repo>/releases?per_page=10`,
-/// `Accept: application/vnd.github+json`. GitHub's unauth quota is 60
-/// requests/hour/IP; our worst case (one user, one launch / 12 h) is far
-/// below that. We do not poll, do not transmit telemetry, do not include
-/// any client identifier beyond a plain `User-Agent`.
+/// **Network**: single unauthenticated GET to GitHub's
+/// `/repos/<owner>/<repo>/releases?per_page=10` with `Accept: application/vnd.github+json`.
+/// No polling, no telemetry, no client identifier beyond `User-Agent`.
 ///
-/// **Pro is opt-out at the call site.** The class compiles in both SKUs so
-/// the Pro test runner can cover it, but only the Loomscreen Lite app
-/// invokes `checkNow(force:)` from its `applicationDidFinishLaunching`
-/// hook (`#if LITE_BUILD`). Pro's update story is reserved for a future
-/// Sparkle / Developer ID switch and uses different entitlements.
+/// Compiles in both SKUs (Pro test runner covers it), but only Lite calls
+/// `checkNow(force:)` from `applicationDidFinishLaunching` (`#if LITE_BUILD`).
 @MainActor
 @Observable
 final class UpdateChecker {

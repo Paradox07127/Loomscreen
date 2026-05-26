@@ -53,26 +53,15 @@ struct WPEMetalTextureLoader {
         try WPETexLazyAnimatedTextureSource(payload: payload, device: device, label: label)
     }
 
-    /// Phase 2E + P0 (regressed-and-restored): builds a per-TEXS-frame
-    /// schedule against the source atlases.
+    /// Builds a per-TEXS-frame schedule against the source atlases.
     ///
-    /// Each WPE `.tex` animation frame carries `(imageID, subRect)`. The
-    /// modal consumer of the eager animated path is the particle
-    /// renderer (`loadParticleSystems` calls `source.texture(at: 0)` and
-    /// pipes the texture into `parseParticleSpriteSheet`, which divides
-    /// the atlas pixel dimensions by the `.tex-json` sprite frame
-    /// dimensions to recover `cols/rows`). That math depends on the
-    /// **whole atlas** size, not the per-frame sub-rect.
-    ///
-    /// Earlier in this branch the loader uploaded one MTLTexture per
-    /// TEXS frame, sized to its sub-rect — that visually decimated
-    /// particles (every particle saw a 1×1 sprite grid since the cropped
-    /// texture was already one sprite). The behaviour the corpus
-    /// actually relies on is: one MTLTexture per unique imageID, every
-    /// TEXS frame referencing the right atlas. Sub-rect metadata is
-    /// retained on `WPETexAnimatedFrame.sourceSubRect` for future
-    /// shader-aware consumers (sprite-sheet background passes), but the
-    /// texture itself is the source atlas.
+    /// **Invariant**: one MTLTexture per unique `imageID` (the whole atlas),
+    /// not per-frame sub-rect. The particle renderer's sprite-grid math
+    /// (`parseParticleSpriteSheet`) divides atlas pixel dims by `.tex-json`
+    /// sprite frame dims to recover `cols/rows` — so frames must reference
+    /// the full atlas. Sub-rect metadata is retained on
+    /// `WPETexAnimatedFrame.sourceSubRect` for shader-aware consumers
+    /// (sprite-sheet background passes).
     @MainActor
     func makeAnimatedTextureSource(
         from payload: WPETexTexturePayload,

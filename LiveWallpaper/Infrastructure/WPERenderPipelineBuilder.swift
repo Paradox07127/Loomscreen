@@ -1039,8 +1039,7 @@ private struct WPEShaderSourceLoader: Sendable {
             float ApplyBlendingAlpha(int blendMode, float a, float b, float opacity) {
                 // Most blend modes leave alpha unmodified; the source alpha
                 // gates how much of the blended colour shows through. The
-                // `blendMode` argument is accepted but currently ignored — a
-                // mode-specific alpha policy is Phase 5 work.
+                // `blendMode` argument is accepted but currently ignored.
                 return mix(a, max(a, b), opacity);
             }
 
