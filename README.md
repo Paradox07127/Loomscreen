@@ -99,20 +99,13 @@ Lite is a **lightweight runtime, not a UI castration**: video / HTML / Aerials f
 ## Documentation
 
 - [CLAUDE.md](CLAUDE.md) — Conventions and runtime contracts contributors must follow.
-- [DESIGN.md](DESIGN.md) — One-page architecture reference: layers, flows, persistence keys, performance contracts.
 - [CHANGELOG.md](CHANGELOG.md) — Loomscreen release notes (Lite). Pro release notes are tracked separately.
 
-## Release readiness (Pro signing path)
+## Release tooling
 
-- [docs/qa/release-qa-matrix.md](docs/qa/release-qa-matrix.md) — Manual release-candidate QA matrix.
-- [docs/qa/release-blockers.md](docs/qa/release-blockers.md) — P0/P1 blocker triage.
-- [docs/qa/privacy-data-map.md](docs/qa/privacy-data-map.md) — Privacy and data-flow review source.
-- [docs/qa/packaging-notarization-checklist.md](docs/qa/packaging-notarization-checklist.md) — Developer ID signing and notarization gate.
-- [docs/qa/performance-stability-protocol.md](docs/qa/performance-stability-protocol.md) — Performance and soak-test protocol.
-- [docs/qa/rc-signoff-template.md](docs/qa/rc-signoff-template.md) — Final release candidate sign-off template.
-- [docs/legal/privacy-policy-draft.md](docs/legal/privacy-policy-draft.md) — Draft privacy policy for product / legal review.
-- [docs/legal/terms-of-use-draft.md](docs/legal/terms-of-use-draft.md) — Draft terms for product / legal review.
-- [scripts/release_candidate_check.sh](scripts/release_candidate_check.sh) — Automated local release-candidate checks; set `REQUIRE_DEVELOPER_ID=1` on the signing machine.
+- [scripts/release-loomscreen.sh](scripts/release-loomscreen.sh) — Build, ad-hoc sign, and package a Loomscreen DMG. `--version X.Y.Z` (required), `--dry-run` skips DMG generation.
+- [scripts/release_candidate_check.sh](scripts/release_candidate_check.sh) — Automated local release-candidate checks (Hardened Runtime, Privacy Manifest, i18n, static audit). `REQUIRE_DEVELOPER_ID=1` on a signing machine fails fast if the Developer ID Application certificate is missing.
+- [.github/workflows/release-loomscreen.yml](.github/workflows/release-loomscreen.yml) — Push a `loomscreen-v*.*.*` tag to trigger an automated archive → sign → DMG → publish run.
 
 ## License
 

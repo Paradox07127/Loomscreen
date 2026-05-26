@@ -234,10 +234,9 @@ instead of `.repeating` so users on Sequoia and later keep the smoother
 `repeat(.continuous)` behavior — `.repeating` alone maps to a periodic
 cadence on macOS 15+.
 
-Runtime verification on real macOS 14 / 15 uses the local VirtualBuddy VM
-matrix. See [`docs/qa/vm-test-environment.md`](docs/qa/vm-test-environment.md)
-for the connection, shared-folder bridge, build-push, crash-log and
-debugging workflow; do not re-derive any of those paths in feature code.
+Runtime verification on real macOS 14 / 15 should be done on a local VM
+(VirtualBuddy works well) or a spare physical Mac. There is no committed
+test-environment doc — set up the VM, snapshot, and you're good.
 
 ### 10. Playlist schema — `combinedPlaylist` + `playlistPrimaryIndex`
 
