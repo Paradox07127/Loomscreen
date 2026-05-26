@@ -47,9 +47,6 @@ struct MenuBarContent: View {
             .frame(width: MenuBarMetrics.popoverWidth)
         }
         .modifier(MenuBarOuterShell())
-        .onAppear {
-            Logger.debug("MenuBar popover appeared", category: .startup)
-        }
     }
 
     /// Subtle horizontal rule used between sections inside the single glass
@@ -87,7 +84,6 @@ struct MenuBarContent: View {
                     get: { isWallpaperEnabled },
                     set: { enabled in
                         guard enabled != isWallpaperEnabled else { return }
-                        Logger.debug("MenuBar action: master switch \(enabled ? "on" : "off")", category: .startup)
                         screenManager.setWallpapersEnabled(enabled)
                     }
                 ))
@@ -132,12 +128,10 @@ struct MenuBarContent: View {
                         videoVolume: videoVolumeBinding(for: screen),
                         openAction: { invokeOpenScreenSettings(screen.id) },
                         previousAction: {
-                            Logger.debug("MenuBar action: previous wallpaper tapped", category: .startup)
                             screenManager.regressPlaylist(for: screen)
                         },
                         playbackAction: { togglePlayback(for: screen) },
                         nextAction: {
-                            Logger.debug("MenuBar action: next wallpaper tapped", category: .startup)
                             screenManager.advancePlaylist(for: screen)
                         }
                     )
@@ -394,13 +388,11 @@ struct MenuBarContent: View {
     }
 
     private func togglePlayback(for screen: Screen) {
-        Logger.debug("MenuBar action: row playback tapped", category: .startup)
         guard let playback = screen.playbackController else { return }
         PlaybackToggle.toggle(playback)
     }
 
     private func invokeManageWindow() {
-        Logger.debug("MenuBar action: manage tapped", category: .startup)
         dismiss()
         if let screen = screenManager.screens.first {
             openSettingsForScreen(screen.id)
@@ -410,29 +402,24 @@ struct MenuBarContent: View {
     }
 
     private func invokeOpenScreenSettings(_ id: CGDirectDisplayID) {
-        Logger.debug("MenuBar action: display settings tapped", category: .startup)
         dismiss()
         openSettingsForScreen(id)
     }
 
     private func invokeOpenSettings() {
-        Logger.debug("MenuBar action: settings tapped", category: .startup)
         dismiss()
         openSettings()
     }
 
     private func invokeQuit() {
-        Logger.debug("MenuBar action: quit tapped", category: .startup)
         NSApp.terminate(nil)
     }
 
     private func invokeReload() {
-        Logger.debug("MenuBar action: reload tapped", category: .startup)
         screenManager.reloadAllScreens()
     }
 
     private func invokeAddWallpaper() {
-        Logger.debug("MenuBar action: add wallpaper tapped", category: .startup)
         dismiss()
         openSettingsAndAddWallpaper()
     }
@@ -494,19 +481,10 @@ enum PlaybackToggle {
     }
 }
 
-/// Outer Liquid Glass shell that wraps the entire popover.
-///
-/// On **macOS 26+** the popover's system NSVisualEffectView would block the
-/// desktop wallpaper, defeating the inner Liquid Glass refraction. We strip
-/// that chrome (`MenuBarWindowChromeClearer`) and replace it with a single
-/// large `.glassEffect` so the popover itself becomes one crystalline
-/// capsule, with internal sections separated by lightweight dividers.
-///
-/// On **macOS 14/15** the popover's NSVisualEffectView *is* the surface —
-/// stripping it would leave the popover transparent without a replacement
-/// (Liquid Glass doesn't exist there). Layering an `adaptiveGlassSurface`
-/// on top would double up `.regularMaterial` for no visual win. So we leave
-/// the system chrome alone and skip the outer shell entirely.
+/// Outer Liquid Glass shell wrapping the popover.
+/// macOS 26+: strip system NSVisualEffectView (would block wallpaper refraction)
+/// and replace with one `.glassEffect` capsule. macOS 14/15: keep system chrome
+/// (Liquid Glass unavailable; doubling `.regularMaterial` adds nothing).
 private struct MenuBarOuterShell: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
@@ -819,26 +797,11 @@ private struct MenuBarPressFeedbackStyle: ButtonStyle {
     }
 }
 
-/// Bridges into AppKit at view-appear time to strip the menubar popover's
-/// chrome so the desktop wallpaper bleeds through the outer Liquid Glass
-/// shell. Two layers have to be cleared, not one:
-///
-/// 1. **NSWindow itself** — `isOpaque = false`, `backgroundColor = .clear`.
-///    The window stops painting its own backdrop.
-/// 2. **NSVisualEffectView descendants** — `MenuBarExtra(.window)` plants a
-///    dark-vibrancy `NSVisualEffectView` as the popover's default backdrop.
-///    It is a sibling/child of the SwiftUI host view, NOT the window's
-///    `backgroundColor`, so step 1 alone leaves a uniform dark layer
-///    behind everything. Hiding it lets the Liquid Glass shell sit
-///    directly over the desktop wallpaper.
-///
-/// Gated to macOS 26+ by the call site (`MenuBarOuterShell`). On macOS
-/// 14/15 we keep the system chrome — there is no Liquid Glass to take its
-/// place, and stripping vibrancy without a replacement leaves an empty
-/// transparent popover.
-///
-/// Idempotent: AppKit re-uses the same NSWindow across popover open/close
-/// cycles, and these setters are no-ops once already cleared.
+/// Strips the menubar popover chrome (macOS 26+ only) so desktop wallpaper
+/// bleeds through Liquid Glass: clears `NSWindow.isOpaque/backgroundColor`
+/// AND hides the dark-vibrancy `NSVisualEffectView` that `MenuBarExtra(.window)`
+/// plants as a sibling of the SwiftUI host (the window backdrop alone is not
+/// enough). Idempotent across popover open/close cycles.
 private struct MenuBarWindowChromeClearer: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let view = NSView(frame: .zero)
