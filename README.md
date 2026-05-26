@@ -1,21 +1,28 @@
 # LiveWallpaper · Loomscreen
 
-A macOS menu bar application that plays video, HTML, Metal shader, and compatible Wallpaper Engine scene content as animated desktop wallpapers across multiple displays.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![macOS 14+](https://img.shields.io/badge/macOS-14.0%2B-blue.svg)](#requirements)
+[![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-required-purple.svg)](#requirements)
+[![Release](https://img.shields.io/github/v/release/Paradox07127/LiveWallpaper?include_prereleases&sort=semver&filter=loomscreen-*)](https://github.com/Paradox07127/LiveWallpaper/releases)
+
+A macOS menu bar app that plays animated wallpapers — videos and web pages — across every connected display.
 
 This repository is the source of two macOS SKUs that ship from a single codebase:
 
 | Build | Distribution | Status |
 |---|---|---|
-| **LiveWallpaper** | Commercial Pro edition; distributed separately. | All features below. |
-| **Loomscreen** | **Open-source Lite edition. MIT licensed.** Distributed via GitHub Releases. | Lightweight runtime; Pro-only renderers compiled out. |
+| **LiveWallpaper** | Commercial Pro edition; distributed separately. | All features, including Metal shader wallpapers, Wallpaper Engine scene rendering / import, and the developer-tools harness. |
+| **Loomscreen** | **Open-source Lite edition. MIT licensed.** Distributed via GitHub Releases. | Video, HTML/Web, Aerials, particles, schedules, playlists — the four Pro-only renderers / tools listed above are compiled out. |
 
 "LiveWallpaper" is also the **internal codename** of this repository. "Loomscreen" is the **public product name** of the open-source release — same codebase, slimmer ship.
+
+> ⚠️ Loomscreen is on the **0.x** semver line. Features and configuration shape may change between `0.y` and `0.(y+1)`. The schema gets locked when the surface reaches `1.0.0`.
 
 ## Loomscreen (Lite edition)
 
 ### Download
 
-> **Stable releases:** https://github.com/Paradox07127/LiveWallpaper/releases  *(placeholder — replace with the canonical URL once the open-source ship date is set).*
+> **Releases:** https://github.com/Paradox07127/LiveWallpaper/releases
 
 1. Download the latest `Loomscreen-x.y.z.dmg` from GitHub Releases.
 2. Open the DMG and drag **Loomscreen.app** into `/Applications`.
@@ -76,7 +83,7 @@ Lite is a **lightweight runtime, not a UI castration**: video / HTML / Aerials f
 - **System Monitoring** — System-wide CPU/GPU/memory/thermal + per-app metrics, estimated render FPS
 - **Adaptive macOS UI** — native Liquid Glass on macOS 26, material-based fallbacks on macOS 14 and 15. The highest-fidelity path is the default on every supported OS; no per-user configuration.
 - **Swift 6 Strict Concurrency** — Compile-time data race safety
-- **669 Unit Tests** — Policies, decoders, bookmarks, HTML trust, schedule, playlist, WPE import/rendering, macOS compatibility policy, and release regressions
+- **800+ Unit Tests** — Policies, decoders, bookmarks, HTML trust, schedule, playlist, WPE import/rendering, macOS compatibility policy, in-app update checker, and release regressions
 - **Zero Dependencies** — Pure Apple-native frameworks
 
 ## Requirements
@@ -107,8 +114,14 @@ Lite is a **lightweight runtime, not a UI castration**: video / HTML / Aerials f
 - [scripts/release_candidate_check.sh](scripts/release_candidate_check.sh) — Automated local release-candidate checks (Hardened Runtime, Privacy Manifest, i18n, static audit). `REQUIRE_DEVELOPER_ID=1` on a signing machine fails fast if the Developer ID Application certificate is missing.
 - [.github/workflows/release-loomscreen.yml](.github/workflows/release-loomscreen.yml) — Push a `loomscreen-v*.*.*` tag to trigger an automated archive → sign → DMG → publish run.
 
+## Contributing
+
+PRs and issues welcome. Read [CLAUDE.md](CLAUDE.md) first — it documents the runtime invariants, conventions, and build gates enforced by the test suite. Run `xcodebuild test` on the `LiveWallpaper` scheme and `xcodebuild build` on `LiveWallpaperLite` locally before opening a PR.
+
+## Security
+
+For security issues, please use GitHub's [private vulnerability reporting](https://github.com/Paradox07127/LiveWallpaper/security/advisories/new) instead of opening a public issue.
+
 ## License
 
 Released under the **MIT License** — see [LICENSE](LICENSE). The full LiveWallpaper codebase (including Pro-only modules gated by `#if !LITE_BUILD`) is covered by the same license.
-
-Contributions welcome via GitHub issues and pull requests. Please read [CLAUDE.md](CLAUDE.md) first — it documents the runtime invariants and code-style conventions enforced by the existing test suite.

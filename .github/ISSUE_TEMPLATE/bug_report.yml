@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a problem with LiveWallpaper
+description: Report a problem with Loomscreen (or LiveWallpaper Pro)
 title: "[Bug] "
 labels: ["bug", "triage"]
 body:
@@ -17,7 +17,7 @@ body:
       options:
         - label: I searched existing issues and did not find a duplicate.
           required: true
-        - label: I am running the latest release of LiveWallpaper (or a development build I am willing to identify below).
+        - label: I am running the latest release of Loomscreen (or a development build I am willing to identify below).
           required: true
 
   - type: textarea
@@ -45,8 +45,8 @@ body:
     id: app-version
     attributes:
       label: App version
-      description: From the diagnostic snapshot or About menu (e.g. `1.0 (Build 42)`).
-      placeholder: "1.0 (Build 42)"
+      description: From the diagnostic snapshot or About menu (e.g. `0.1.0 (1)`).
+      placeholder: "0.1.0 (1)"
     validations:
       required: true
 
