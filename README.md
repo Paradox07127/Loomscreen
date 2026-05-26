@@ -105,7 +105,6 @@ Lite is a **lightweight runtime, not a UI castration**: video / HTML / Aerials f
 
 ## Documentation
 
-- [CLAUDE.md](CLAUDE.md) — Conventions and runtime contracts contributors must follow.
 - [CHANGELOG.md](CHANGELOG.md) — Loomscreen release notes (Lite). Pro release notes are tracked separately.
 
 ## Release tooling
@@ -116,7 +115,7 @@ Lite is a **lightweight runtime, not a UI castration**: video / HTML / Aerials f
 
 ## Contributing
 
-PRs and issues welcome. Read [CLAUDE.md](CLAUDE.md) first — it documents the runtime invariants, conventions, and build gates enforced by the test suite. Run `xcodebuild test` on the `LiveWallpaper` scheme and `xcodebuild build` on `LiveWallpaperLite` locally before opening a PR.
+PRs and issues welcome. Run `xcodebuild test` on the `LiveWallpaper` scheme and `xcodebuild build` on `LiveWallpaperLite` locally before opening a PR — both must succeed. The test suite enforces runtime invariants (persistence, observation guards, notification timing, the adaptive Liquid Glass wrapper, playlist schema, bookmark semantics) — if a PR needs to diverge from them, please flag it in the description.
 
 ## Security
 
