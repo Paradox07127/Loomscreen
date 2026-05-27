@@ -82,7 +82,7 @@ final class PlaybackCoordinator {
     // MARK: - Configuration setters
 
     func updatePlaybackSpeed(_ speed: Double, for screen: Screen) {
-        guard var configuration = configurationStore.get(for: screen.id),
+        guard var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               speed != configuration.playbackSpeed else { return }
 
         let previous = configuration.playbackSpeed
@@ -93,7 +93,7 @@ final class PlaybackCoordinator {
     }
 
     func updateMuted(_ muted: Bool, for screen: Screen) {
-        guard var configuration = configurationStore.get(for: screen.id),
+        guard var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               muted != configuration.muted else { return }
 
         configuration.muted = muted
@@ -103,7 +103,7 @@ final class PlaybackCoordinator {
     }
 
     func updateVideoVolume(_ volume: Double, for screen: Screen) {
-        guard var configuration = configurationStore.get(for: screen.id) else { return }
+        guard var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
         let clampedVolume = Self.clampedVideoVolume(volume)
         guard abs(configuration.videoVolume - clampedVolume) > 0.001 else { return }
 
@@ -128,7 +128,7 @@ final class PlaybackCoordinator {
     }
 
     func updateVideoColorSpace(_ colorSpace: VideoColorSpace, for screen: Screen) {
-        guard var configuration = configurationStore.get(for: screen.id),
+        guard var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               configuration.videoColorSpace != colorSpace else { return }
         configuration.videoColorSpace = colorSpace
         save(configuration)
@@ -146,7 +146,7 @@ final class PlaybackCoordinator {
     }
 
     func updateVideoDisplayMode(_ mode: VideoDisplayMode, for screen: Screen) {
-        guard var configuration = configurationStore.get(for: screen.id),
+        guard var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               configuration.videoDisplayMode != mode else { return }
 
         configuration.videoDisplayMode = mode
@@ -155,7 +155,7 @@ final class PlaybackCoordinator {
     }
 
     func updateFitMode(_ fitMode: VideoFitMode, for screen: Screen) {
-        guard var configuration = configurationStore.get(for: screen.id),
+        guard var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               fitMode != configuration.fitMode else { return }
 
         let previous = configuration.fitMode
@@ -166,7 +166,7 @@ final class PlaybackCoordinator {
     }
 
     func updateFrameRateLimit(_ frameRateLimit: FrameRateLimit, for screen: Screen) {
-        guard var configuration = configurationStore.get(for: screen.id) else {
+        guard var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else {
             Logger.warning("Cannot update frame rate limit: No configuration found for screen \(screen.id)", category: .videoPlayer)
             return
         }
@@ -345,7 +345,7 @@ final class PlaybackCoordinator {
     func setVideo(url: URL, bookmarkData: Data, for screen: Screen) {
         Logger.info("Setting video for screen \(screen.id): \(url.lastPathComponent)", category: .screenManager)
 
-        let existing = configurationStore.get(for: screen.id)
+        let existing = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint)
         let isSameURL = Self.bookmarkResolves(to: url, bookmark: existing?.videoBookmarkData)
 
         let previousContent = existing?.activeWallpaper
@@ -550,7 +550,7 @@ final class PlaybackCoordinator {
     func setupVideoPlayback(url: URL, screen: Screen) {
         releaseRuntimeSession(screen)
 
-        let configuration = configurationStore.get(for: screen.id)
+        let configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint)
         let player = WallpaperVideoPlayer(
             url: url,
             frame: screen.frame,
@@ -620,7 +620,7 @@ final class PlaybackCoordinator {
         let screens = screensProvider()
         let entries = screens.compactMap { screen -> VideoAudioLeadershipPolicy.Entry? in
             guard let player = screen.videoPlayer,
-                  let configuration = configurationStore.get(for: screen.id),
+                  let configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
                   configuration.wallpaperType == .video else { return nil }
             return VideoAudioLeadershipPolicy.Entry(
                 screenID: screen.id,
@@ -632,7 +632,7 @@ final class PlaybackCoordinator {
 
         for screen in screens {
             guard let player = screen.videoPlayer,
-                  let configuration = configurationStore.get(for: screen.id),
+                  let configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
                   configuration.wallpaperType == .video else { continue }
             player.setVolume(configuration.videoVolume)
             player.setMuted(effectiveMutedStates[screen.id] ?? configuration.muted)
@@ -643,7 +643,7 @@ final class PlaybackCoordinator {
         let screens = screensProvider()
         let candidates = screens.compactMap { screen -> (screen: Screen, player: WallpaperVideoPlayer, urlKey: String)? in
             guard let player = screen.videoPlayer,
-                  let configuration = configurationStore.get(for: screen.id),
+                  let configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
                   configuration.wallpaperType == .video,
                   configuration.videoDisplayMode == .spanAllDisplays,
                   let urlKey = Self.videoAudioURLKey(for: player.videoURL) else {

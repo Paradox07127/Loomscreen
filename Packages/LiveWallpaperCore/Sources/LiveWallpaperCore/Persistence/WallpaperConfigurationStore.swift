@@ -37,6 +37,42 @@ public final class WallpaperConfigurationStore {
         return configuration
     }
 
+    /// Resolve by `CGDirectDisplayID` first; on miss, fall back to
+    /// `displayFingerprint` and migrate the matched config to the current ID.
+    public func get(
+        for screenID: CGDirectDisplayID,
+        fingerprint: String?
+    ) -> ScreenConfiguration? {
+        if let direct = get(for: screenID) {
+            if let fingerprint, !fingerprint.isUnknownDisplayFingerprint,
+               direct.displayFingerprint != fingerprint {
+                var stamped = direct
+                stamped.displayFingerprint = fingerprint
+                save(stamped)
+                return stamped
+            }
+            return direct
+        }
+
+        guard let fingerprint, !fingerprint.isUnknownDisplayFingerprint else {
+            return nil
+        }
+
+        let all = persistence.loadConfigurations()
+        guard var match = all.first(where: { $0.displayFingerprint == fingerprint }) else {
+            return nil
+        }
+        let oldScreenID = match.screenID
+        match.screenID = screenID
+        match.displayFingerprint = fingerprint
+        save(match)
+        if oldScreenID != screenID {
+            persistence.cleanSettingsForScreen(oldScreenID)
+            cache.removeValue(forKey: oldScreenID)
+        }
+        return match
+    }
+
     public func save(_ config: ScreenConfiguration) {
         cache[config.screenID] = config
         persistence.saveConfiguration(config)

@@ -5,10 +5,6 @@ public class VideoWallpaperWindow: NSWindow {
     private static let desktopWindowLevel = Int(CGWindowLevelForKey(.desktopWindow))
     private static let desktopIconWindowLevel = Int(CGWindowLevelForKey(.desktopIconWindow))
     private static let passiveWallpaperWindowLevel = desktopWindowLevel - 1
-    // Plash 模式：交互态把 window 抬到桌面图标层之上。
-    // 这样 macOS Sonoma 的 "Click wallpaper to reveal desktop" 手势再也拿不到点击 —
-    // 该手势是派发给系统桌面壁纸 window 的，我们盖在它和图标层之上后事件被消费在自己的 window 里。
-    // 代价：交互态会遮住桌面图标（与 Plash 一致）。
     private static let interactiveWallpaperWindowLevel = desktopIconWindowLevel + 1
     private var allowsWallpaperMouseInteraction = false
 
@@ -41,6 +37,8 @@ public class VideoWallpaperWindow: NSWindow {
 
         isReleasedWhenClosed = false
         isExcludedFromWindowsMenu = true
+
+        canBecomeVisibleWithoutLogin = true
         disableSnapshotRestoration()
 
         setAccessibilityRole(.window)
@@ -49,7 +47,6 @@ public class VideoWallpaperWindow: NSWindow {
     }
 
     // MARK: - Window Behavior
-    // 交互态需要成为 key window，否则 WKWebView 收不到键盘 / 焦点事件。
     public override var canBecomeKey: Bool { allowsWallpaperMouseInteraction }
     public override var canBecomeMain: Bool { allowsWallpaperMouseInteraction }
 

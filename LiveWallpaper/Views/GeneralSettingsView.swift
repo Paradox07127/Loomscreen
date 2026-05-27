@@ -1,4 +1,5 @@
 import LiveWallpaperCore
+import ServiceManagement
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
@@ -34,6 +35,8 @@ struct GeneralSettingsView: View {
 
     @State private var pendingDestructive: PendingDestructive?
     @State private var pendingBugReport: BugReport?
+
+    @State private var loginItemAlert: LoginItemFailure?
 
     /// Pending import bundle: shown in a confirmation alert before applying
     /// so users can back out after seeing what's inside.
@@ -117,6 +120,34 @@ struct GeneralSettingsView: View {
         }
         .errorAlert("Import Failed", message: $importErrorMessage)
         .errorAlert("Export Failed", message: $exportErrorMessage)
+        .alert(
+            "Login Item",
+            isPresented: Binding(
+                get: { loginItemAlert != nil },
+                set: { if !$0 { loginItemAlert = nil } }
+            )
+        ) {
+            if case .requiresApproval = loginItemAlert {
+                Button("Open System Settings") {
+                    SMAppService.openSystemSettingsLoginItems()
+                    loginItemAlert = nil
+                }
+                Button("OK", role: .cancel) { loginItemAlert = nil }
+            } else {
+                Button("OK", role: .cancel) { loginItemAlert = nil }
+            }
+        } message: {
+            Text(verbatim: loginItemAlert?.userFacingMessage ?? "")
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .loginItemRegistrationDidFail)) { note in
+            if let reason = note.userInfo?["reason"] as? LoginItemFailure {
+                loginItemAlert = reason
+                // 失败时把 toggle 复位，避免 UI 显示已开但实际没生效。
+                if startOnLogin {
+                    startOnLogin = false
+                }
+            }
+        }
         .fileExporter(
             isPresented: $isPresentingExporter,
             document: exportDocument,

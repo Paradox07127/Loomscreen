@@ -48,7 +48,7 @@ final class WallpaperEffectsCoordinator {
     // MARK: - Public API (called from ScreenManager facade)
 
     func updateEffectConfig(_ effectConfig: VideoEffectConfig, for screen: Screen) {
-        guard var config = configurationStore.get(for: screen.id),
+        guard var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               config.effectConfig != effectConfig else { return }
         config.effectConfig = effectConfig
         saveConfiguration(config)
@@ -56,7 +56,7 @@ final class WallpaperEffectsCoordinator {
     }
 
     func updateParticleEffect(_ effect: ParticleEffect, for screen: Screen) {
-        guard var config = configurationStore.get(for: screen.id),
+        guard var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               config.particleEffect != effect else { return }
         config.particleEffect = effect
         saveConfiguration(config)
@@ -64,7 +64,7 @@ final class WallpaperEffectsCoordinator {
     }
 
     func updateParticleDensity(_ density: Double, for screen: Screen) {
-        guard var config = configurationStore.get(for: screen.id) else { return }
+        guard var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
         let clamped = min(max(density, 0.2), 3.0)
         guard abs(clamped - config.effectConfig.particleDensity) > 0.001 else { return }
         config.effectConfig.particleDensity = clamped
@@ -73,7 +73,7 @@ final class WallpaperEffectsCoordinator {
     }
 
     func setWeatherReactive(_ enabled: Bool, for screen: Screen) {
-        guard var config = configurationStore.get(for: screen.id),
+        guard var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               config.effectConfig.weatherReactive != enabled else { return }
         config.effectConfig.weatherReactive = enabled
         saveConfiguration(config)
@@ -88,7 +88,7 @@ final class WallpaperEffectsCoordinator {
     }
 
     func applyWeatherEffects(for screen: Screen) {
-        guard let config = configurationStore.get(for: screen.id),
+        guard let config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               config.effectConfig.weatherReactive else { return }
 
         applyParticleEffect(
@@ -167,7 +167,7 @@ final class WallpaperEffectsCoordinator {
                 guard let self,
                       self.weatherTrackingGeneration == generation else { return }
                 for screen in self.screensProvider() {
-                    guard let config = self.configurationStore.get(for: screen.id),
+                    guard let config = self.configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
                           config.effectConfig.weatherReactive else { continue }
                     self.applyWeatherEffects(for: screen)
                 }

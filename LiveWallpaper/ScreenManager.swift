@@ -113,6 +113,7 @@ final class ScreenManager {
     @ObservationIgnored private let fullScreenDetector: any FullScreenDetecting
     @ObservationIgnored private let playableVideoLoader: any PlayableVideoLoading
     @ObservationIgnored private let restoresSavedWallpapersOnScreenRefresh: Bool
+    @ObservationIgnored private var lastScreenSignatures: [CGDirectDisplayID: ScreenConfigurationSignature] = [:]
     @ObservationIgnored private var transientRuntimeErrors: [CGDirectDisplayID: WallpaperRuntimeError] = [:]
     @ObservationIgnored private let exclusiveRenderingCoordinator = ExclusiveRenderingCoordinator()
     @ObservationIgnored private var exclusiveRenderingObservation: NSObjectProtocol?
@@ -346,9 +347,92 @@ final class ScreenManager {
                 self?.handleSystemWake()
             }
             .store(in: &cleanupTasks)
+
+        // Display sleep（仅显示器睡眠，整机仍在跑）。区别于上面的 willSleep/didWake
+        // （整机睡眠）和下面的 screenIsLocked（用户锁屏，显示器仍亮）。
+        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.screensDidSleepNotification)
+            .sink { [weak self] _ in
+                self?.handleDisplaySleep()
+            }
+            .store(in: &cleanupTasks)
+
+        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.screensDidWakeNotification)
+            .sink { [weak self] _ in
+                self?.handleDisplayWake()
+            }
+            .store(in: &cleanupTasks)
+
+        DistributedNotificationCenter.default().publisher(for: Notification.Name("com.apple.screenIsLocked"))
+            .sink { [weak self] _ in
+                self?.handleScreenLocked()
+            }
+            .store(in: &cleanupTasks)
+
+        DistributedNotificationCenter.default().publisher(for: Notification.Name("com.apple.screenIsUnlocked"))
+            .sink { [weak self] _ in
+                self?.handleScreenUnlocked()
+            }
+            .store(in: &cleanupTasks)
     }
-    
+
+    private func handleScreenLocked() {
+        Logger.info("Screen locked — suspending wallpaper sessions", category: .lifecycle)
+        suspendAllForUserAbsence()
+    }
+
+    private func handleDisplaySleep() {
+        Logger.info("Display asleep — suspending wallpaper sessions", category: .lifecycle)
+        suspendAllForUserAbsence()
+    }
+
+    /// Lock screen 和 display sleep 都属于「用户不在看屏幕」语义，复用 PowerPolicy
+    /// 的 lockScreen 集合：渲染都停下，等下一次恢复信号（unlock / wake）再放回。
+    private func suspendAllForUserAbsence() {
+        for screen in screens {
+            if let playback = screen.playbackController, playback.isPlaying {
+                playback.pause()
+                powerPolicy.markPausedByLockScreen(screen.id)
+            }
+            if let session = screen.runtimeSession, screen.playbackController == nil {
+                session.applyPerformanceProfile(.suspended)
+                powerPolicy.markPausedByLockScreen(screen.id)
+            }
+        }
+        markWallpaperSessionStateChanged()
+    }
+
+    private func handleDisplayWake() {
+        Logger.info("Display awake — restoring wallpaper sessions", category: .lifecycle)
+        resumeAllAfterUserAbsence()
+    }
+
+    private func handleScreenUnlocked() {
+        Logger.info("Screen unlocked — restoring wallpaper sessions", category: .lifecycle)
+        resumeAllAfterUserAbsence()
+    }
+
+    private func resumeAllAfterUserAbsence() {
+        for screen in screens where powerPolicy.wasPausedByLockScreen(screen.id) {
+            powerPolicy.markResumedFromLockScreen(screen.id)
+            if let playback = screen.playbackController {
+                playback.play()
+            } else if let session = screen.runtimeSession {
+                session.applyPerformanceProfile(.quality)
+            }
+        }
+        // Re-apply power + full-screen policies — state may have changed during absence.
+        handlePowerStateChange(powerMonitor.currentPowerSource)
+        markWallpaperSessionStateChanged()
+    }
+
     private func handleScreenParameterChange() {
+        let current = ScreenConfigurationSignature.currentLayout()
+        if current == lastScreenSignatures && !screens.isEmpty {
+            Logger.debug("Screen parameters unchanged — skipping refresh", category: .screenManager)
+            return
+        }
+        lastScreenSignatures = current
+
         refreshRateCache.removeAll()
         refreshScreens(preserveRuntimeSessions: true)
 
@@ -560,7 +644,7 @@ final class ScreenManager {
     /// while the user still has a usable picks from another tab; only when
     /// no fallback exists does this collapse to a full `clearWallpaperForScreen`.
     func clearWallpaperOfType(_ type: WallpaperType, for screen: Screen) {
-        guard var config = configurationStore.get(for: screen.id) else { return }
+        guard var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
 
         let wasActive = (config.activeWallpaper.wallpaperType == type)
 
@@ -634,14 +718,14 @@ final class ScreenManager {
 
     private func loadConfigurationForScreen(_ screen: Screen) {
         if screen.videoPlayer != nil {
-            if let cachedConfig = configurationStore.get(for: screen.id) {
+            if let cachedConfig = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) {
                 primeBookmarkDisplayNames(from: cachedConfig)
                 applyConfiguration(cachedConfig, to: screen, preservingState: true)
             }
             return
         }
 
-        guard let config = configurationStore.get(for: screen.id) else { return }
+        guard let config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
         primeBookmarkDisplayNames(from: config)
         restoreWallpaperSession(for: screen, configuration: config, preservingState: false)
     }
@@ -761,7 +845,7 @@ final class ScreenManager {
     }
 
     func wallpaperDisplayName(for screen: Screen) -> String? {
-        guard let configuration = configurationStore.get(for: screen.id),
+        guard let configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               let definition = WallpaperSessionDefinition(configuration: configuration) else { return nil }
 
         return definition.displayName(using: { bookmarkDisplayName(for: $0) })
@@ -772,7 +856,7 @@ final class ScreenManager {
     }
 
     func currentVideoDisplayName(for screen: Screen) -> String? {
-        guard let config = configurationStore.get(for: screen.id) else { return nil }
+        guard let config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return nil }
         let cursor = config.playlistCursorIndex ?? 0
         let combined = [config.savedVideoBookmarkData].compactMap { $0 } + (config.playlistBookmarks ?? [])
         guard cursor < combined.count else {
@@ -1006,7 +1090,7 @@ final class ScreenManager {
         guard globalSettings.preservePlaybackOnLock else { return }
 
         for screen in screens {
-            guard let config = configurationStore.get(for: screen.id),
+            guard let config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
                   config.wallpaperType == .video,
                   config.setAsLockScreen else { continue }
             extractLockScreenFrame(for: screen)
@@ -1017,7 +1101,7 @@ final class ScreenManager {
     func reloadWallpaperForScreen(_ screen: Screen) {
         Logger.info("Manually reloading wallpaper for screen \(screen.id)", category: .screenManager)
 
-        guard let configuration = configurationStore.get(for: screen.id) else {
+        guard let configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else {
             releaseRuntimeSession(screen)
             return
         }
@@ -1083,7 +1167,7 @@ final class ScreenManager {
     }
 
     func updateVideoDisplayMode(_ mode: VideoDisplayMode, for screen: Screen) {
-        guard var sourceConfiguration = configurationStore.get(for: screen.id),
+        guard var sourceConfiguration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               sourceConfiguration.wallpaperType == .video,
               sourceConfiguration.hasConfiguredVideoSource else { return }
 
@@ -1093,7 +1177,7 @@ final class ScreenManager {
             var changed = false
 
             for target in screens {
-                guard var targetConfiguration = configurationStore.get(for: target.id),
+                guard var targetConfiguration = configurationStore.get(for: target.id, fingerprint: target.displayFingerprint),
                       targetConfiguration.wallpaperType == .video,
                       targetConfiguration.videoDisplayMode == .spanAllDisplays else { continue }
 
@@ -1154,7 +1238,7 @@ final class ScreenManager {
     }
     
     func getConfiguration(for screen: Screen) -> ScreenConfiguration? {
-        configurationStore.get(for: screen.id)
+        configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint)
     }
 
     /// Restores per-display playback / effect / audio / layout settings to
@@ -1164,7 +1248,7 @@ final class ScreenManager {
     /// with `activeWallpaper` and `savedHTMLConfig` is reset to defaults
     /// since it represents settings, not source content.
     func resetDisplaySettings(for screen: Screen) {
-        guard var config = configurationStore.get(for: screen.id) else { return }
+        guard var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
 
         config.playbackSpeed = 1.0
         config.fitMode = .aspectFill
@@ -1196,7 +1280,7 @@ final class ScreenManager {
     /// Copies the active wallpaper + per-screen settings from `source` onto every other registered screen, restoring each runtime session so the new content shows immediately.
     func applyConfigurationToAllDisplays(from source: Screen) {
         guard screens.count > 1,
-              let template = configurationStore.get(for: source.id) else { return }
+              let template = configurationStore.get(for: source.id, fingerprint: source.displayFingerprint) else { return }
 
         for target in screens where target.id != source.id {
             var copy = template
@@ -1235,7 +1319,7 @@ final class ScreenManager {
         configurations.forEach { primeBookmarkDisplayNames(from: $0) }
 
         for screen in screens {
-            guard let configuration = configurationStore.get(for: screen.id) else {
+            guard let configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else {
                 releaseRuntimeSession(screen)
                 continue
             }
@@ -1250,7 +1334,7 @@ final class ScreenManager {
     // MARK: - Desktop Picture from Frame
 
     func updateSetAsDesktopPicture(_ enabled: Bool, for screen: Screen) {
-        guard var config = configurationStore.get(for: screen.id),
+        guard var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               config.setAsLockScreen != enabled else { return }
         config.setAsLockScreen = enabled
         saveConfiguration(config)
@@ -1299,7 +1383,7 @@ final class ScreenManager {
     // MARK: - Wallpaper Type Switching
 
     func switchToVideoWallpaper(for screen: Screen) {
-        guard var config = configurationStore.get(for: screen.id) else { return }
+        guard var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
         let previousWallpaper = config.activeWallpaper
         guard config.activateSavedVideoWallpaper() else { return }
 
@@ -1316,7 +1400,7 @@ final class ScreenManager {
 
     /// Restore previously-applied HTML source after the user toggles the type picker back to HTML.
     func switchToHTMLWallpaper(for screen: Screen) {
-        guard var config = configurationStore.get(for: screen.id) else { return }
+        guard var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
         let previousWallpaper = config.activeWallpaper
         guard config.activateSavedHTMLWallpaper() else { return }
 
@@ -1331,7 +1415,7 @@ final class ScreenManager {
     }
 
     func setSceneWallpaper(descriptor: SceneDescriptor, origin: WPEOrigin?, for screen: Screen) {
-        var configuration = configurationStore.get(for: screen.id) ?? ScreenConfiguration(
+        var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) ?? ScreenConfiguration(
             screenID: screen.id,
             wallpaper: .scene(descriptor)
         )
@@ -1464,7 +1548,7 @@ final class ScreenManager {
     /// overrides — there's no in-place apply seam on the WPE runtimes yet,
     /// the way HTML has `applyHTMLConfig`.
     func updateSceneDescriptor(_ descriptor: SceneDescriptor, for screen: Screen) {
-        guard var configuration = configurationStore.get(for: screen.id) else { return }
+        guard var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
         guard case .scene(let current) = configuration.activeWallpaper,
               current.workshopID == descriptor.workshopID else {
             return
@@ -1483,8 +1567,8 @@ final class ScreenManager {
     /// where the `.metalShader` case is gated with `#if !LITE_BUILD`, so this
     /// stays ungated for Lite-side bookmark restore / decode compatibility.
     func setShaderWallpaper(source: ShaderSource, for screen: Screen) {
-        let previousContent = configurationStore.get(for: screen.id)?.activeWallpaper
-        var config = configurationStore.get(for: screen.id) ?? ScreenConfiguration(
+        let previousContent = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint)?.activeWallpaper
+        var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) ?? ScreenConfiguration(
             screenID: screen.id, wallpaper: .metalShader(source)
         )
         config.setShaderWallpaper(source)
@@ -1506,7 +1590,7 @@ final class ScreenManager {
     /// a preset card. Matches the "saved restore" pattern the other tabs
     /// use: silent when there's nothing to restore.
     func switchToShaderWallpaper(for screen: Screen) {
-        guard let config = configurationStore.get(for: screen.id) else { return }
+        guard let config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
         if case .metalShader = config.activeWallpaper { return }
         // Intentional no-op when active wallpaper is video / html / scene.
     }

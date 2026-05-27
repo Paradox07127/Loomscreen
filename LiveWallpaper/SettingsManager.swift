@@ -215,23 +215,67 @@ final class SettingsManager {
     }
 
     private func applyStartOnLoginSetting(_ startOnLogin: Bool) {
-        do {
-            let service = SMAppService.mainApp
+        let service = SMAppService.mainApp
+        let statusBefore = service.status
+        Logger.debug(
+            "applyStartOnLoginSetting target=\(startOnLogin) statusBefore=\(describe(statusBefore)) bundlePath=\(Bundle.main.bundlePath)",
+            category: .settings
+        )
 
+        do {
             if startOnLogin {
-                if service.status == .notRegistered {
+                if statusBefore == .notRegistered || statusBefore == .notFound {
                     try service.register()
-                    Logger.info("Successfully added to login items", category: .settings)
                 }
             } else {
-                if service.status == .enabled {
+                if statusBefore == .enabled || statusBefore == .requiresApproval {
                     try service.unregister()
-                    Logger.info("Successfully removed from login items", category: .settings)
                 }
             }
         } catch {
-            Logger.error("Failed to \(startOnLogin ? "add to" : "remove from") login items: \(error.localizedDescription)", category: .settings)
+            Logger.error(
+                "SMAppService.\(startOnLogin ? "register" : "unregister") threw: \(error.localizedDescription)",
+                category: .settings
+            )
+            postLoginItemFailure(reason: .registrationFailed(error))
+            return
         }
+
+        let statusAfter = service.status
+        Logger.debug("SMAppService statusAfter=\(describe(statusAfter))", category: .settings)
+
+        switch (startOnLogin, statusAfter) {
+        case (true, .enabled), (false, .notRegistered), (false, .notFound):
+            break  // happy paths
+        case (true, .requiresApproval):
+            Logger.warning("Login item registered but requires user approval in System Settings", category: .settings)
+            postLoginItemFailure(reason: .requiresApproval)
+        case (true, .notRegistered), (true, .notFound):
+            Logger.error("Login item register() returned without error but status is \(describe(statusAfter)); app may not be in /Applications/ or signing is rejected", category: .settings)
+            postLoginItemFailure(reason: .registrationSilentlyFailed)
+        case (false, _):
+            Logger.warning("Login item disable target=false but statusAfter=\(describe(statusAfter))", category: .settings)
+        default:
+            break
+        }
+    }
+
+    private func describe(_ status: SMAppService.Status) -> String {
+        switch status {
+        case .notRegistered:    return "notRegistered"
+        case .enabled:          return "enabled"
+        case .requiresApproval: return "requiresApproval"
+        case .notFound:         return "notFound"
+        @unknown default:       return "unknown(\(status.rawValue))"
+        }
+    }
+
+    private func postLoginItemFailure(reason: LoginItemFailure) {
+        NotificationCenter.default.post(
+            name: .loginItemRegistrationDidFail,
+            object: nil,
+            userInfo: ["reason": reason]
+        )
     }
 
     // MARK: - Clean Settings

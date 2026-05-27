@@ -79,4 +79,9 @@ extension Notification.Name {
     /// rebuild); `ContentView` refreshes the Developer Tools sidebar entry
     /// visibility and falls back the selection if the entry disappears.
     public static let developerModeDidChange = Notification.Name("DeveloperModeDidChange")
+
+    /// `SMAppService.register/unregister` produced an outcome that needs
+    /// user-visible follow-up (approval pending, app not in /Applications/,
+    /// or thrown error). `userInfo["reason"]: LoginItemFailure`.
+    public static let loginItemRegistrationDidFail = Notification.Name("LoginItemRegistrationDidFail")
 }

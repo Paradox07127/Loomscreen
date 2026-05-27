@@ -1,4 +1,5 @@
 import AppKit
+import LiveWallpaperCore
 import Observation
 
 @MainActor @Observable
@@ -7,6 +8,7 @@ class Screen: Identifiable, Hashable {
     let name: String
     let frame: CGRect
     let nsScreen: NSScreen
+    let displayFingerprint: String
 
     // MARK: - Unified Runtime Session
 
@@ -145,6 +147,8 @@ class Screen: Identifiable, Hashable {
         self.name = screenName.isEmpty
             ? "Display \(Int(frame.width))x\(Int(frame.height)) at (\(Int(frame.origin.x)),\(Int(frame.origin.y)))"
             : screenName
+
+        self.displayFingerprint = nsScreen.displayFingerprint
     }
 
     deinit {

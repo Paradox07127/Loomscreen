@@ -53,14 +53,14 @@ final class WallpaperAutomationOrchestrator {
     // MARK: - Playlist
 
     func updatePlaylistBookmarks(_ bookmarks: [Data], for screen: Screen) {
-        guard var config = configurationStore.get(for: screen.id) else { return }
+        guard var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
         config.playlistBookmarks = bookmarks.isEmpty ? nil : bookmarks
         saveConfiguration(config)
     }
 
     /// Promote `bookmark` to primary without reordering the visible list — the star marker travels with the entry's existing position.
     func setPrimaryVideo(bookmark: Data, for screen: Screen) {
-        guard var config = configurationStore.get(for: screen.id),
+        guard var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               config.savedVideoBookmarkData != bookmark else { return }
 
         let combined = config.combinedPlaylist
@@ -83,7 +83,7 @@ final class WallpaperAutomationOrchestrator {
     /// Writes the reordered playlist (full visible order) while preserving the active bookmark when only the order changed.
     func replacePlaylist(ordered: [Data], primary: Data, for screen: Screen) {
         guard let primaryIndex = ordered.firstIndex(of: primary) else { return }
-        let existing = configurationStore.get(for: screen.id)
+        let existing = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint)
         var config = existing ?? ScreenConfiguration(
             screenID: screen.id,
             videoBookmarkData: primary
@@ -124,21 +124,21 @@ final class WallpaperAutomationOrchestrator {
     }
 
     func playPlaylistEntry(at index: Int, for screen: Screen) {
-        guard let config = configurationStore.get(for: screen.id) else { return }
+        guard let config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
         let combined = config.combinedPlaylist
         guard index >= 0, index < combined.count else { return }
         applyCursor(index, combined: combined, screen: screen, label: "jumping")
     }
 
     func updateShufflePlaylist(_ shuffle: Bool, for screen: Screen) {
-        guard var config = configurationStore.get(for: screen.id),
+        guard var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               config.shufflePlaylist != shuffle else { return }
         config.shufflePlaylist = shuffle
         saveConfiguration(config)
     }
 
     func advancePlaylist(for screen: Screen) {
-        guard let config = configurationStore.get(for: screen.id),
+        guard let config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               config.wallpaperMode == .playlist else { return }
 
         let combined = config.combinedPlaylist
@@ -155,7 +155,7 @@ final class WallpaperAutomationOrchestrator {
     }
 
     func regressPlaylist(for screen: Screen) {
-        guard let config = configurationStore.get(for: screen.id),
+        guard let config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               config.wallpaperMode == .playlist else { return }
 
         let combined = config.combinedPlaylist
@@ -172,13 +172,13 @@ final class WallpaperAutomationOrchestrator {
     }
 
     func replaceActiveBookmark(_ bookmarkData: Data, for screen: Screen) {
-        guard let config = configurationStore.get(for: screen.id) else { return }
+        guard let config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
         let updated = config.withUpdatedActiveBookmark(bookmarkData)
         saveConfiguration(updated)
     }
 
     func updateWallpaperMode(_ mode: WallpaperMode, for screen: Screen) {
-        guard var config = configurationStore.get(for: screen.id),
+        guard var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               config.wallpaperType == .video,
               config.hasConfiguredVideoSource,
               config.wallpaperMode != mode else { return }
@@ -197,7 +197,7 @@ final class WallpaperAutomationOrchestrator {
     }
 
     func updatePlaylistRotationMinutes(_ minutes: Int?, for screen: Screen) {
-        guard var config = configurationStore.get(for: screen.id) else { return }
+        guard var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
         config.playlistRotationMinutes = minutes
         saveConfiguration(config)
     }
@@ -250,7 +250,7 @@ final class WallpaperAutomationOrchestrator {
     // MARK: - Schedule
 
     func updateScheduleSlots(_ slots: [ScheduleSlot]?, for screen: Screen) {
-        guard var config = configurationStore.get(for: screen.id) else { return }
+        guard var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
         config.scheduleSlots = slots
         saveConfiguration(config)
 
@@ -260,7 +260,7 @@ final class WallpaperAutomationOrchestrator {
     }
 
     func checkAndApplySchedule(for screen: Screen) {
-        guard let config = configurationStore.get(for: screen.id) else { return }
+        guard let config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) else { return }
 
         let currentHour = Calendar.current.component(.hour, from: Date())
 

@@ -45,6 +45,9 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
     /// content via the standard pickers.
     public var wpeOrigin: WPEOrigin?
 
+    /// EDID-derived fingerprint, used as fallback key when `screenID` churns.
+    public var displayFingerprint: String?
+
     private enum CodingKeys: String, CodingKey {
         case screenID
         case activeWallpaper
@@ -69,6 +72,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         case videoVolume
         case videoColorSpace
         case wpeOrigin
+        case displayFingerprint
 
         case videoBookmarkData
         case wallpaperType
@@ -322,6 +326,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         savedHTMLSource = try c.decodeIfPresent(HTMLSource.self, forKey: .savedHTMLSource)
         savedHTMLConfig = try c.decodeIfPresent(HTMLConfig.self, forKey: .savedHTMLConfig)
         wpeOrigin = (try? c.decodeIfPresent(WPEOrigin.self, forKey: .wpeOrigin)) ?? nil
+        displayFingerprint = try c.decodeIfPresent(String.self, forKey: .displayFingerprint)
 
         if let decodedWallpaper = try c.decodeIfPresent(WallpaperContent.self, forKey: .activeWallpaper) {
             activeWallpaper = decodedWallpaper
@@ -430,6 +435,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         try c.encode(videoVolume, forKey: .videoVolume)
         try c.encode(videoColorSpace, forKey: .videoColorSpace)
         try c.encodeIfPresent(wpeOrigin, forKey: .wpeOrigin)
+        try c.encodeIfPresent(displayFingerprint, forKey: .displayFingerprint)
     }
 
     private static func clampedVideoVolume(_ value: Double) -> Double {

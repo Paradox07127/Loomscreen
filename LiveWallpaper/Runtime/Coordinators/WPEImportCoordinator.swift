@@ -176,7 +176,7 @@ final class WPEImportCoordinator {
             WPEHistoryEntry(origin: origin, importedAt: importedAt, lastUsedAt: lastUsedAt)
         )
 
-        var config = configurationStore.get(for: screen.id) ?? ScreenConfiguration(
+        var config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint) ?? ScreenConfiguration(
             screenID: screen.id,
             wallpaper: content
         )

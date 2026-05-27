@@ -43,7 +43,7 @@ final class HTMLWallpaperCoordinator {
         var map: [String: [CGDirectDisplayID]] = [:]
         for screen in screensProvider() {
             guard screen.runtimeSession?.wallpaperType == .html,
-                  let config = configurationStore.get(for: screen.id),
+                  let config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
                   case .html(let source, _) = config.activeWallpaper else { continue }
             map[source.diagnosticSignature, default: []].append(screen.id)
         }
@@ -56,7 +56,7 @@ final class HTMLWallpaperCoordinator {
         return screensProvider().filter { other in
             other.id != excluding
                 && other.runtimeSession?.wallpaperType == .html
-                && (configurationStore.get(for: other.id)?.activeWallpaper).flatMap { content -> String? in
+                && (configurationStore.get(for: other.id, fingerprint: other.displayFingerprint)?.activeWallpaper).flatMap { content -> String? in
                     if case .html(let s, _) = content { return s.diagnosticSignature }
                     return nil
                 } == signature
@@ -92,7 +92,7 @@ final class HTMLWallpaperCoordinator {
         forceReload: Bool = false,
         for screen: Screen
     ) {
-        let existingConfiguration = configurationStore.get(for: screen.id)
+        let existingConfiguration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint)
         let previousContent = existingConfiguration?.activeWallpaper
         let previousHTMLSource: HTMLSource?
         let previousHTMLConfig: HTMLConfig?
@@ -142,7 +142,7 @@ final class HTMLWallpaperCoordinator {
 
     /// Swaps HTML source while keeping existing HTML settings.
     func setWallpaperPreservingConfig(source: HTMLSource, for screen: Screen) {
-        let preserved = configurationStore.get(for: screen.id)?.htmlConfig ?? .default
+        let preserved = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint)?.htmlConfig ?? .default
         setWallpaper(source: source, config: preserved, for: screen)
     }
 
@@ -153,7 +153,7 @@ final class HTMLWallpaperCoordinator {
 
     /// Updates the HTML runtime config — mute, JS toggle, mouse, ephemeral storage, tracker blocker.
     func updateConfig(_ config: HTMLConfig, for screen: Screen) {
-        guard var existing = configurationStore.get(for: screen.id),
+        guard var existing = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               case .html(let source, let previousConfig) = existing.activeWallpaper else { return }
         guard previousConfig != config else { return }
         existing.activeWallpaper = .html(source: source, config: config)

@@ -11,6 +11,8 @@ public final class PowerPolicyController {
     /// Screens paused by full-screen app detection
     public private(set) var screensPausedByFullScreen: Set<CGDirectDisplayID> = []
 
+    public private(set) var screensPausedByLockScreen: Set<CGDirectDisplayID> = []
+
     public init() {}
 
     public func markPausedByPower(_ screenID: CGDirectDisplayID) {
@@ -29,14 +31,24 @@ public final class PowerPolicyController {
         screensPausedByFullScreen.remove(screenID)
     }
 
+    public func markPausedByLockScreen(_ screenID: CGDirectDisplayID) {
+        screensPausedByLockScreen.insert(screenID)
+    }
+
+    public func markResumedFromLockScreen(_ screenID: CGDirectDisplayID) {
+        screensPausedByLockScreen.remove(screenID)
+    }
+
     public func clearTracking(for screenID: CGDirectDisplayID) {
         screensPausedByPowerManagement.remove(screenID)
         screensPausedByFullScreen.remove(screenID)
+        screensPausedByLockScreen.remove(screenID)
     }
 
     public func cleanUpStaleEntries(currentScreenIDs: Set<CGDirectDisplayID>) {
         screensPausedByPowerManagement = screensPausedByPowerManagement.intersection(currentScreenIDs)
         screensPausedByFullScreen = screensPausedByFullScreen.intersection(currentScreenIDs)
+        screensPausedByLockScreen = screensPausedByLockScreen.intersection(currentScreenIDs)
     }
 
     public func wasPausedByPower(_ screenID: CGDirectDisplayID) -> Bool {
@@ -45,5 +57,9 @@ public final class PowerPolicyController {
 
     public func wasPausedByFullScreen(_ screenID: CGDirectDisplayID) -> Bool {
         screensPausedByFullScreen.contains(screenID)
+    }
+
+    public func wasPausedByLockScreen(_ screenID: CGDirectDisplayID) -> Bool {
+        screensPausedByLockScreen.contains(screenID)
     }
 }
