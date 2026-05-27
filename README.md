@@ -51,7 +51,7 @@ Lite is a **lightweight runtime, not a UI castration** — video / HTML / Aerial
 LiveWallpaper Pro can scan and import local project folders copied from a Windows Wallpaper Engine library. The supported workflow:
 
 1. On Windows, use Steam / Wallpaper Engine to download wallpapers you are allowed to use.
-2. Copy the local folder containing numbered project folders to your Mac (commonly a parent folder like `431960/`).
+2. Copy the local folder containing numbered project folders to your Mac.
 3. In Pro, choose that folder. The app scans local `project.json` files and prepares supported projects for playback.
 
 LiveWallpaper does **not** sign in to Steam, connect to Steam Workshop, download Workshop items, bundle Wallpaper Engine content, or bypass creator permissions. Users are responsible for the rights to copy and use any imported project files. Projects requiring Windows executables / `.dll` plugins are skipped on macOS.
@@ -80,6 +80,3 @@ Don't build both schemes in parallel — they share the same `XCBuildData/build.
 - **Security issues:** use GitHub's [private vulnerability reporting](https://github.com/Paradox07127/Loomscreen/security/advisories/new) instead of public issues.
 - **License:** MIT — see [LICENSE](LICENSE). The full LiveWallpaper codebase (including Pro-only modules gated by `#if !LITE_BUILD`) is covered.
 
-## Trademarks
-
-"Wallpaper Engine", "Steam", and "Steam Workshop" are trademarks of their respective owners. This project is independent software, not affiliated with, endorsed by, or sponsored by Wallpaper Engine, Steam, Valve, or their related companies. References to these names are for interoperability documentation and accurate user instructions only.

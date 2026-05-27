@@ -51,7 +51,7 @@ Lite 是**轻量运行时,而不是 UI 阉割版** —— 视频 / HTML / 航拍
 LiveWallpaper Pro 可扫描并导入从 Windows 上 Wallpaper Engine 库**拷贝过来**的本地项目目录。工作流:
 
 1. 在 Windows 上,通过 Steam / Wallpaper Engine 下载**你有权使用**的壁纸。
-2. 把包含编号项目子目录的本地文件夹拷贝到 Mac(常见为父目录 `431960/`)。
+2. 把包含编号项目子目录的本地文件夹拷贝到 Mac。
 3. 在 Pro 中选择该目录。应用扫描本地 `project.json`,为受支持的项目准备播放。
 
 LiveWallpaper **不会**登录 Steam、不连接 Steam Workshop、不下载 Workshop 项目、不内置任何 Wallpaper Engine 内容、不绕过作者权限。用户需自行确保对所导入的项目文件拥有合法使用权。需要 Windows 可执行文件或 `.dll` 插件的项目在 macOS 上跳过。
@@ -79,7 +79,3 @@ open LiveWallpaper.xcodeproj
 - **欢迎 PR 和 issue。** 在开 PR 之前请本地跑通 `LiveWallpaper` scheme 的 `xcodebuild test` 和 `LiveWallpaperLite` scheme 的 `xcodebuild build`,两者都必须成功。测试套件强制了若干运行时约定 —— 如果 PR 需要偏离,请在描述里明确说明。
 - **安全漏洞:** 请使用 GitHub 的 [私有漏洞报告通道](https://github.com/Paradox07127/Loomscreen/security/advisories/new),不要开公开 issue。
 - **许可:** MIT —— 见 [LICENSE](LICENSE)。整个 LiveWallpaper 代码库(包括 `#if !LITE_BUILD` 守卫的 Pro 独有模块)同样适用该许可。
-
-## 商标声明
-
-"Wallpaper Engine"、"Steam" 与 "Steam Workshop" 是其各自所有者的商标。本项目为独立软件,不附属于、不被 Wallpaper Engine、Steam、Valve 或其关联公司认可、不被其赞助。文档中提及上述名称仅用于互操作性说明和准确的用户操作指引。
