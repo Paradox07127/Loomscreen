@@ -238,4 +238,35 @@ struct WPECorpusFailurePatternsTests {
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
+    @Test("Inactive WPE combo branches do not leak extra main functions")
+    func inactiveComboBranchesAreRemovedBeforeTranslation() throws {
+        let source = """
+        #version 410 core
+        #define AA_VERSION 2
+        uniform sampler2D g_Texture0;
+        #if AA_VERSION == 3
+        in vec2 wrongPath;
+        void main() {
+            gl_FragColor = vec4(wrongPath, 0.0, 1.0);
+        }
+        #endif
+        #if AA_VERSION == 2
+        in vec2 v_TexCoord;
+        void main() {
+            gl_FragColor = texture(g_Texture0, v_TexCoord);
+        }
+        #endif
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "inactive_combo_branch",
+            preprocessedSource: source
+        )
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+
+        #expect(!result.mslSource.contains("wrongPath"))
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
 }
