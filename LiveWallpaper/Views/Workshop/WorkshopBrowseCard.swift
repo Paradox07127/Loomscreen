@@ -8,22 +8,40 @@ import SwiftUI
 /// suitable for `LazyVGrid`.
 struct WorkshopBrowseCard: View {
     let item: WorkshopQueryItem
+    /// Invoked when the card's primary surface (thumbnail + text) is tapped.
+    /// The action-button row is deliberately outside this gesture so its
+    /// buttons don't also fire the parent tap.
+    var onSelect: () -> Void = {}
 
-    @State private var thumbnail: NSImage?
     @State private var isHovered = false
     @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            thumbnailArea
-                .galleryTileChrome(isHovering: isHovered, cornerRadius: DesignTokens.Corner.lg, reduceMotion: reduceMotion)
-                .onHover { isHovered = $0 }
-                .onTapGesture { openURL(item.steamCommunityURL) }
-                .help(item.title)
-                .accessibilityAddTraits(.isButton)
-                .accessibilityLabel(Text("\(item.title) — Open in Steam"))
-            infoArea
+            VStack(alignment: .leading, spacing: 0) {
+                thumbnailArea
+                    .galleryTileChrome(isHovering: isHovered, cornerRadius: DesignTokens.Corner.lg, reduceMotion: reduceMotion)
+                    .onHover { isHovered = $0 }
+                textInfo
+                    .padding([.horizontal, .top], DesignTokens.Spacing.md)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture { onSelect() }
+            .help(item.title)
+            // One VoiceOver element for the primary surface; the action buttons
+            // below stay separately focusable (no nested-button violation).
+            .accessibilityElement(children: .ignore)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel(Text("\(item.title) — animated preview"))
+            .accessibilityHint(Text("Show details"))
+            .accessibilityAction(named: Text("Open in Steam")) { openURL(item.steamCommunityURL) }
+            .accessibilityAction(named: Text("Copy link")) { copy(item.steamCommunityURL.absoluteString) }
+            .accessibilityAction(named: Text("Copy ID")) { copy(String(item.id)) }
+
+            actionButtons
+                .padding([.horizontal, .bottom], DesignTokens.Spacing.md)
+                .padding(.top, DesignTokens.Spacing.sm)
         }
         .background(Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.Corner.lg, style: .continuous))
@@ -31,30 +49,15 @@ struct WorkshopBrowseCard: View {
             RoundedRectangle(cornerRadius: DesignTokens.Corner.lg, style: .continuous)
                 .strokeBorder(Color.primary.opacity(DesignTokens.Card.strokeOpacity), lineWidth: DesignTokens.Card.strokeWidth)
         }
-        .accessibilityElement(children: .contain)
-        .task(id: item.previewImageURL) { await loadThumbnail() }
     }
 
     private var thumbnailArea: some View {
         ZStack(alignment: .topTrailing) {
-            Rectangle()
-                .fill(Color.secondary.opacity(0.12))
-
-            if let thumbnail {
-                Image(nsImage: thumbnail)
-                    .resizable()
-                    .scaledToFill()
-                    .clipped()
-                    .accessibilityHidden(true)
-            } else if item.previewImageURL != nil {
-                ProgressView()
-                    .controlSize(.small)
-                    .opacity(0.6)
-            } else {
-                Image(systemName: "cube.transparent")
-                    .font(.system(size: 36, weight: .regular))
-                    .foregroundStyle(.tertiary)
-            }
+            AnimatedGIFThumbnail(
+                url: item.previewImageURL,
+                playbackMode: .hoverToPlay,
+                isHovered: $isHovered
+            )
 
             if let count = item.subscriptionCount, count > 0 {
                 Text(formatSubs(count))
@@ -69,7 +72,7 @@ struct WorkshopBrowseCard: View {
         .aspectRatio(16/9, contentMode: .fit)
     }
 
-    private var infoArea: some View {
+    private var textInfo: some View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
             Text(item.title)
                 .font(.system(size: 13, weight: .semibold))
@@ -98,31 +101,35 @@ struct WorkshopBrowseCard: View {
             }
 
             statusBadge
-
-            HStack(spacing: DesignTokens.Spacing.xs) {
-                Button {
-                    openURL(item.steamCommunityURL)
-                } label: {
-                    Label("Open in Steam", systemImage: "arrow.up.forward.app")
-                        .font(.system(size: 11, weight: .medium))
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-
-                Menu {
-                    Button("Copy link") { copy(item.steamCommunityURL.absoluteString) }
-                    Button("Copy ID") { copy(String(item.id)) }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 11, weight: .medium))
-                }
-                .menuStyle(.button)
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .fixedSize()
-            }
         }
-        .padding(DesignTokens.Spacing.md)
+    }
+
+    private var actionButtons: some View {
+        HStack(spacing: DesignTokens.Spacing.xs) {
+            Button {
+                openURL(item.steamCommunityURL)
+            } label: {
+                Label("Open in Steam", systemImage: "arrow.up.forward.app")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(item.isBanned)
+
+            Menu {
+                Button("Copy link") { copy(item.steamCommunityURL.absoluteString) }
+                Button("Copy ID") { copy(String(item.id)) }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .menuStyle(.button)
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .fixedSize()
+            .accessibilityLabel(Text("More actions"))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
@@ -180,14 +187,6 @@ struct WorkshopBrowseCard: View {
         let pasteboard = NSPasteboard.general
         pasteboard.declareTypes([.string], owner: nil)
         pasteboard.setString(value, forType: .string)
-    }
-
-    private func loadThumbnail() async {
-        guard let url = item.previewImageURL else { return }
-        let image = await WorkshopPreviewImageLoader.shared.load(url)
-        if !Task.isCancelled {
-            thumbnail = image
-        }
     }
 
     private static let relativeFormatter: RelativeDateTimeFormatter = {

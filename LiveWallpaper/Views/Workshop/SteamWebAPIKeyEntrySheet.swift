@@ -76,9 +76,10 @@ struct SteamWebAPIKeyEntrySheet: View {
         VStack(alignment: .leading, spacing: 2) {
             Text("Set your Steam Web API key")
                 .font(.headline)
-            Text("Get a free key from Valve.")
+            Text("Use your own Steam account's key. Free, but requires Mobile Steam Guard and a non-limited Steam account.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -87,9 +88,14 @@ struct SteamWebAPIKeyEntrySheet: View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
             Text("Loomscreen uses Valve's Steam Web API to fetch Workshop metadata.")
                 .font(.system(size: 12))
-            Text("[Get a key](https://steamcommunity.com/dev/apikey)  ·  [Steam Web API TOU](https://steamcommunity.com/dev/apiterms)")
+            Text(verbatim: WorkshopAPIKeyOwnershipInfo.prerequisitesLine)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("[Get a key](https://steamcommunity.com/dev/apikey)  ·  [Steam Web API TOU](https://steamcommunity.com/dev/apiterms)  ·  [About Limited Accounts](https://help.steampowered.com/en/faqs/view/71D3-35C2-AD96-AA3A)")
                 .font(.system(size: 12))
                 .tint(Color.accentColor)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(DesignTokens.Spacing.md)
         .frame(maxWidth: .infinity, alignment: .leading)

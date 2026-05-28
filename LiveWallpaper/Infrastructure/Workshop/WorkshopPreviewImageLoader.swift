@@ -22,7 +22,8 @@ final class WorkshopPreviewImageLoader {
     static let maxBytes = 8 * 1024 * 1024
 
     private var cache: [URL: NSImage] = [:]
-    private var inflight: [URL: Task<NSImage?, Never>] = [:]
+    private var assetCache: [URL: WorkshopPreviewAsset] = [:]
+    private var assetInflight: [URL: Task<WorkshopPreviewAsset?, Never>] = [:]
     private let session: URLSession
     private let delegate: RedirectGuardDelegate
 
@@ -44,22 +45,46 @@ final class WorkshopPreviewImageLoader {
     /// callers fall back to a placeholder.
     func load(_ url: URL) async -> NSImage? {
         if let cached = cache[url] { return cached }
-        if let task = inflight[url] { return await task.value }
+        // Route through `loadAsset` so the poster goes through the same byte /
+        // frame-count / decoded-pixel caps (paste-flow thumbnails included).
+        guard let asset = await loadAsset(url) else { return nil }
+        let image = Self.nsImage(from: asset.posterFrame)
+        cache[url] = image
+        return image
+    }
+
+    /// Like `load`, but returns a decoded preview asset that distinguishes a
+    /// still image from a bounded animation so callers can drive frame-stepped
+    /// (hover-to-play) playback. Shares the same allow-list / content-type /
+    /// byte-cap fetch path as `load`.
+    func loadAsset(_ url: URL) async -> WorkshopPreviewAsset? {
+        if let cached = assetCache[url] { return cached }
+        if let task = assetInflight[url] { return await task.value }
         let task = Task { @MainActor [weak self] in
-            await self?.performLoad(url)
+            await self?.performAssetLoad(url)
         }
-        inflight[url] = task
+        assetInflight[url] = task
         let result = await task.value
-        inflight.removeValue(forKey: url)
+        assetInflight.removeValue(forKey: url)
         if let result {
-            cache[url] = result
+            assetCache[url] = result
         }
         return result
     }
 
-    private func performLoad(_ url: URL) async -> NSImage? {
-        // Initial URL is filtered by `SteamWorkshopMetadataService` before
-        // we ever see it — re-run anyway as a defense in depth.
+    private static func nsImage(from image: CGImage) -> NSImage {
+        NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
+    }
+
+    private func performAssetLoad(_ url: URL) async -> WorkshopPreviewAsset? {
+        guard let data = await fetchData(url) else { return nil }
+        return WorkshopAnimatedGIF.make(from: data)
+    }
+
+    /// The shared fetch path: re-runs the CDN allow-list as defense in depth
+    /// (the URL is already filtered by `SteamWorkshopMetadataService`),
+    /// enforces an `image/*` content type, a 200 status, and the byte cap.
+    private func fetchData(_ url: URL) async -> Data? {
         if case .rejected = WorkshopCDNHostAllowList.evaluate(url.absoluteString) {
             return nil
         }
@@ -84,7 +109,7 @@ final class WorkshopPreviewImageLoader {
         guard data.count <= Self.maxBytes else {
             return nil
         }
-        return NSImage(data: data)
+        return data
     }
 }
 

@@ -28,6 +28,7 @@ struct WorkshopOnboardingSheet: View {
             VStack(alignment: .leading, spacing: 10) {
                 bullet(systemImage: "lock.shield", text: "We never see your Steam password, Steam Guard codes, or session tokens.")
                 bullet(systemImage: "network", text: "Metadata is fetched from Valve over HTTPS. No third-party download services.")
+                bullet(systemImage: "key", text: "Online browsing uses your own free Steam Web API key (requires Mobile Steam Guard + at least $5 of Steam Store history).")
                 bullet(systemImage: "checkmark.seal", text: "Pro & direct-distribution only — the Mac App Store build doesn't ship Workshop access.")
             }
             .frame(maxWidth: 420, alignment: .leading)

@@ -94,7 +94,7 @@ struct WorkshopSettingsView: View {
                             .buttonStyle(.bordered)
                             .controlSize(.small)
                             .help("Set a new Steam Web API key")
-                        Button("Forget", role: .destructive) {
+                        Button("Forget on this Mac", role: .destructive) {
                             Task {
                                 try? await workshopServices.keychain.deleteWebAPIKey()
                                 await workshopServices.refreshAPIKeyStatus()
@@ -102,7 +102,7 @@ struct WorkshopSettingsView: View {
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
-                        .help("Delete the stored Steam Web API key")
+                        .help(Text(verbatim: WorkshopAPIKeyOwnershipInfo.forgetTooltip))
                         Button("Browse online") { showingBrowse = true }
                             .buttonStyle(.borderedProminent)
                             .controlSize(.small)
@@ -117,7 +117,7 @@ struct WorkshopSettingsView: View {
             } header: {
                 Text("Browse Online")
             } footer: {
-                Text("Loomscreen calls Valve's Workshop API directly with your key over HTTPS. Stored in Keychain, no iCloud sync.")
+                Text("The key belongs to your own Steam account, not Loomscreen. Calls go directly to Valve over HTTPS; the key is stored in this Mac's Keychain (no iCloud sync). \"Forget on this Mac\" only removes the local copy — revoke the key itself at steamcommunity.com/dev/apikey.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

@@ -227,9 +227,9 @@ actor WorkshopQueryService {
         if let task = inflight[request] {
             return try await task.value
         }
-        let cacheKey = WorkshopQueryCacheKey.canonical(request)
+        let baseCacheKey = WorkshopQueryCacheKey.canonical(request)
         let task = Task { [self] in
-            try await fetchFromCacheOrNetwork(request, cacheKey: cacheKey)
+            try await fetchFromCacheOrNetwork(request, baseCacheKey: baseCacheKey)
         }
         inflight[request] = task
         do {
@@ -284,10 +284,9 @@ actor WorkshopQueryService {
         }
     }
 
-    private func fetchFromCacheOrNetwork(_ request: WorkshopQueryRequest, cacheKey: String) async throws -> WorkshopQueryPage {
-        if let cached = await cache.read(forKey: cacheKey) {
-            return cached
-        }
+    private func fetchFromCacheOrNetwork(_ request: WorkshopQueryRequest, baseCacheKey: String) async throws -> WorkshopQueryPage {
+        // Load the key first so the cache namespace is keyed by it — a key swap
+        // (or removal) then can't serve a prior account's cached results.
         let apiKey: String
         do {
             guard let storedKey = try await keychain.loadWebAPIKey() else {
@@ -299,9 +298,22 @@ actor WorkshopQueryService {
         } catch {
             throw WorkshopQueryError.missingAPIKey
         }
+
+        let cacheKey = Self.namespacedCacheKey(baseCacheKey, apiKey: apiKey)
+        if let cached = await cache.read(forKey: cacheKey) {
+            return cached
+        }
         let page = try await performQuery(request, apiKey: apiKey)
         await cache.write(page, forKey: cacheKey)
         return page
+    }
+
+    /// Prefixes the canonical request key with a short hash of the API key so
+    /// cache entries are isolated per Steam account.
+    private static func namespacedCacheKey(_ base: String, apiKey: String) -> String {
+        let namespace = SHA256.hash(data: Data(apiKey.utf8)).prefix(8)
+            .map { String(format: "%02x", $0) }.joined()
+        return "\(namespace)-\(base)"
     }
 
     private func performQuery(_ request: WorkshopQueryRequest, apiKey: String) async throws -> WorkshopQueryPage {
