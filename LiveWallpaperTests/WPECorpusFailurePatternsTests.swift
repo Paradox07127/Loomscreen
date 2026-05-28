@@ -345,4 +345,31 @@ struct WPECorpusFailurePatternsTests {
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
+    @Test("GLSL vector array constructors become Metal initializer lists")
+    func glslVectorArrayConstructorsBecomeMetalInitializerLists() throws {
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        varying vec2 v_TexCoord;
+        #define KERNEL2 vec2(0,0),vec2(1,0)
+        #define kernelSampleCount 2
+        const vec2 kernel[kernelSampleCount] = vec2[kernelSampleCount](KERNEL2);
+        void main() {
+            vec2 offset = kernel[1] * 0.5;
+            gl_FragColor = texture(g_Texture0, v_TexCoord + offset);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "glsl_array_constructor",
+            preprocessedSource: source
+        )
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+
+        #expect(result.mslSource.contains("constant float2 kernelValues[kernelSampleCount] = { KERNEL2 };"))
+        #expect(result.mslSource.contains("float2 offset = kernelValues[1] * 0.5;"))
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
 }

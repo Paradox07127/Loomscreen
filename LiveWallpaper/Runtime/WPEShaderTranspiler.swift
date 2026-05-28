@@ -636,11 +636,13 @@ struct WPEShaderTranspiler {
         s = wordReplace(s, find: "atan2", replace: "atan2")
         s = wordReplace(s, find: "lerp", replace: "mix")
 
+        s = rewriteReservedIdentifiers(s)
         s = rewriteTextureCalls(s)
         s = rewriteTextureSampleNarrowing(s)
         s = rewriteUnsignedFloatModuloAssignments(s)
         s = rewriteFloatAssignmentsFromVectorExpressions(s)
         s = rewriteTexCoordVector2Arithmetic(s)
+        s = rewriteGLSLArrayConstructors(s)
 
         s = rewriteReferenceParameters(s)
 
@@ -688,6 +690,11 @@ struct WPEShaderTranspiler {
             result.replaceSubrange(fullRange, with: "auto \(name) = \(rhs);")
         }
         return result
+    }
+
+    /// Rename GLSL identifiers that are legal in WPE shaders but reserved by Metal.
+    private static func rewriteReservedIdentifiers(_ source: String) -> String {
+        wordReplace(source, find: "kernel", replace: "kernelValues")
     }
 
     /// GLSL permits assigning a texture sample to narrower vector/scalar locals.
@@ -738,6 +745,73 @@ struct WPEShaderTranspiler {
             range: range,
             withTemplate: "v_TexCoord.xy $1 $2"
         )
+    }
+
+    /// Metal accepts aggregate array initializers, not GLSL constructor syntax
+    /// such as `float2[n](...)`.
+    private static func rewriteGLSLArrayConstructors(_ source: String) -> String {
+        let typePattern = #"(?:(?:float[234]x[234])|(?:(?:float|int|uint|bool)(?:[234])?))"#
+        let pattern = #"\b(const\s+)?("# + typePattern + #")\s+([A-Za-z_][A-Za-z0-9_]*)\s*\[\s*([A-Za-z_][A-Za-z0-9_]*|\d+)\s*\]\s*=\s*("# + typePattern + #")\s*\[\s*([A-Za-z_][A-Za-z0-9_]*|\d+)\s*\]\s*\(([^;\n]+)\)\s*;"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return source
+        }
+        var result = source
+        var renamedArrays: [(from: String, to: String)] = []
+        let matches = regex.matches(in: source, range: NSRange(source.startIndex..., in: source))
+        for match in matches.reversed() {
+            guard let fullRange = Range(match.range(at: 0), in: result),
+                  let declarationTypeRange = Range(match.range(at: 2), in: result),
+                  let nameRange = Range(match.range(at: 3), in: result),
+                  let declarationCountRange = Range(match.range(at: 4), in: result),
+                  let constructorTypeRange = Range(match.range(at: 5), in: result),
+                  let constructorCountRange = Range(match.range(at: 6), in: result),
+                  let valuesRange = Range(match.range(at: 7), in: result) else {
+                continue
+            }
+            let declarationType = String(result[declarationTypeRange])
+            let constructorType = String(result[constructorTypeRange])
+            let declarationCount = String(result[declarationCountRange])
+            let constructorCount = String(result[constructorCountRange])
+            guard declarationType == constructorType, declarationCount == constructorCount else {
+                continue
+            }
+            let qualifier: String
+            if match.range(at: 1).location != NSNotFound,
+               let qualifierRange = Range(match.range(at: 1), in: result) {
+                qualifier = String(result[qualifierRange])
+            } else {
+                qualifier = ""
+            }
+            let outputQualifier = qualifier == "const " && isTopLevel(fullRange.lowerBound, in: result) ? "constant " : qualifier
+            let name = String(result[nameRange])
+            let outputName = name == "kernel" ? "kernelValues" : name
+            if outputName != name {
+                renamedArrays.append((from: name, to: outputName))
+            }
+            let values = result[valuesRange]
+            result.replaceSubrange(
+                fullRange,
+                with: "\(outputQualifier)\(declarationType) \(outputName)[\(declarationCount)] = { \(values) };"
+            )
+        }
+        for renamedArray in renamedArrays {
+            result = wordReplace(result, find: renamedArray.from, replace: renamedArray.to)
+        }
+        return result
+    }
+
+    private static func isTopLevel(_ index: String.Index, in source: String) -> Bool {
+        var depth = 0
+        var cursor = source.startIndex
+        while cursor < index {
+            if source[cursor] == "{" {
+                depth += 1
+            } else if source[cursor] == "}" {
+                depth = max(0, depth - 1)
+            }
+            cursor = source.index(after: cursor)
+        }
+        return depth == 0
     }
 
     /// Rewrite GLSL `inout T name` / `out T name` parameter qualifiers to Metal's `thread T& name`.
