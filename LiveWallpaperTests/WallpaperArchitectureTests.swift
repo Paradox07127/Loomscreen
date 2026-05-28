@@ -296,6 +296,12 @@ struct PlaylistEntryIdentityTests {
 
 @Suite("WeatherReactivePolicy")
 struct WeatherReactivePolicyTests {
+    @Test("Weather refresh cadence is one hour")
+    @MainActor
+    func weatherRefreshCadenceIsHourly() {
+        #expect(WeatherReactiveService.refreshInterval == .seconds(3600))
+    }
+
     @Test("Monitor runs only when an active screen has weather-reactive effects")
     func monitorRequiresActiveWeatherReactiveConfiguration() {
         let activeID: CGDirectDisplayID = 10

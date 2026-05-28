@@ -5,6 +5,8 @@ import Observation
 @MainActor @Observable
 final class WeatherReactiveService {
 
+    static let refreshInterval: Duration = .seconds(3600)
+
     private(set) var currentCondition: WeatherDescription?
     private(set) var currentParticleEffect: ParticleEffect = .none
     private(set) var currentEffectAdjustments: WeatherEffectAdjustments = .neutral
@@ -54,7 +56,7 @@ final class WeatherReactiveService {
     @ObservationIgnored private let locationProvider: WeatherLocationProviding
     @ObservationIgnored nonisolated(unsafe) private var updateTask: Task<Void, Never>?
     /// Separate from `updateTask` so an explicit `refresh()` can supersede
-    /// the in-flight fetch without tearing down the 15-min poll cycle.
+    /// the in-flight fetch without tearing down the hourly poll cycle.
     @ObservationIgnored nonisolated(unsafe) private var fetchTask: Task<Void, Never>?
     /// `nonisolated(unsafe)` because Swift 6 cannot prove the deinit (which
     /// runs on whichever queue performs the final release) accesses this
@@ -98,7 +100,7 @@ final class WeatherReactiveService {
         updateTask = Task { [weak self] in
             while !Task.isCancelled {
                 do {
-                    try await Task.sleep(for: .seconds(900))
+                    try await Task.sleep(for: Self.refreshInterval)
                 } catch {
                     return
                 }
