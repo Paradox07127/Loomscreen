@@ -8,12 +8,14 @@ import SwiftUI
 /// modal frame, a title row, and a Done button.
 struct WorkshopBrowseView: View {
     let services: WorkshopServices
+    let doctor: SteamCMDDoctorService
     let onRequestKeyEntry: () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel: WorkshopBrowseViewModel
 
-    init(services: WorkshopServices, onRequestKeyEntry: @escaping () -> Void) {
+    init(services: WorkshopServices, doctor: SteamCMDDoctorService, onRequestKeyEntry: @escaping () -> Void) {
         self.services = services
+        self.doctor = doctor
         self.onRequestKeyEntry = onRequestKeyEntry
         _viewModel = State(initialValue: WorkshopBrowseViewModel(services: services))
     }
@@ -22,7 +24,7 @@ struct WorkshopBrowseView: View {
         VStack(spacing: 0) {
             topBar
             Divider()
-            WorkshopBrowsePane(viewModel: viewModel, onRequestKeyEntry: onRequestKeyEntry)
+            WorkshopBrowsePane(viewModel: viewModel, doctor: doctor, onRequestKeyEntry: onRequestKeyEntry)
                 .environment(services)
         }
         .frame(minWidth: 880, idealWidth: 960, minHeight: 600, idealHeight: 700)

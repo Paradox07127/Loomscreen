@@ -8,6 +8,7 @@ import SwiftUI
 /// footer, the rate-limit countdown banner, and the per-item detail sheet.
 struct WorkshopBrowsePane: View {
     let viewModel: WorkshopBrowseViewModel
+    let doctor: SteamCMDDoctorService
     let onRequestKeyEntry: () -> Void
 
     @Environment(WorkshopServices.self) private var services
@@ -59,7 +60,7 @@ struct WorkshopBrowsePane: View {
             if loading { WorkshopRequestCounter.increment() }
         }
         .sheet(item: $selectedItem) { item in
-            WorkshopDetailSheet(item: item)
+            WorkshopDetailSheet(item: item, doctor: doctor)
         }
     }
 

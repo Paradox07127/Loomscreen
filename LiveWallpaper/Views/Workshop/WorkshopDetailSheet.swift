@@ -5,13 +5,20 @@ import SwiftUI
 
 /// macOS-native detail sheet for a single Workshop item. `HSplitView` with an
 /// auto-playing hero preview + actions on the left and metadata + description
-/// on the right. Download stays disabled (Phase 3) with an explanatory help
-/// tooltip; "Open in Steam" and the copy actions are live.
+/// on the right. "Download" runs SteamCMD through the configured Doctor and
+/// imports into the local library; it is enabled only once the Doctor is set
+/// up. "Open in Steam" and the copy actions are always live.
 struct WorkshopDetailSheet: View {
     let item: WorkshopQueryItem
+    let doctor: SteamCMDDoctorService
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
+
+    private var downloadCoordinator: WorkshopDownloadCoordinator { .shared }
+    private var downloadPhase: WorkshopDownloadCoordinator.DownloadPhase {
+        downloadCoordinator.phase(for: item.id)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -62,17 +69,10 @@ struct WorkshopDetailSheet: View {
                 .disabled(item.isBanned)
                 .help(Text("Open this item on the Steam Community website"))
 
-                Button {
-                    // Disabled until Phase 3 wires the SteamCMD download executor.
-                } label: {
-                    Label("Download", systemImage: "arrow.down.circle")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .disabled(true)
-                .help(Text("Wire up SteamCMD in Settings to enable Workshop downloads."))
-                .accessibilityHint(Text("Disabled. Wire up SteamCMD in Settings to enable Workshop downloads."))
+                downloadControl
             }
+
+            downloadStatusNote
 
             HStack(spacing: DesignTokens.Spacing.sm) {
                 Button {
@@ -93,6 +93,73 @@ struct WorkshopDetailSheet: View {
             }
         }
         .padding(DesignTokens.Spacing.md)
+    }
+
+    @ViewBuilder
+    private var downloadControl: some View {
+        switch downloadPhase {
+        case .idle, .failed:
+            Button {
+                downloadCoordinator.download(item, using: doctor)
+            } label: {
+                Label(isRetry ? "Retry" : "Download", systemImage: "arrow.down.circle")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .disabled(!doctor.isDownloadReady || item.isBanned)
+            .help(Text(doctor.isDownloadReady
+                       ? "Download with SteamCMD and add it to your library"
+                       : "Set up SteamCMD in Settings → Workshop → SteamCMD Doctor to enable downloads."))
+
+        case .downloading, .importing:
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text(downloadPhase == .importing ? "Importing…" : "Downloading…")
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                Button {
+                    downloadCoordinator.cancel(item.id)
+                } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help(Text("Cancel download"))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: DesignTokens.Corner.sm))
+
+        case .succeeded:
+            Label("Added to Library", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+                .frame(maxWidth: .infinity)
+        }
+    }
+
+    @ViewBuilder
+    private var downloadStatusNote: some View {
+        if case .failed(let message) = downloadPhase {
+            actionNote(message, color: .red)
+        } else if !doctor.isDownloadReady, downloadPhase == .idle {
+            actionNote(
+                String(localized: "Downloads use SteamCMD (Settings → Workshop → SteamCMD Doctor), separate from the Web API key.", comment: "Hint in the Workshop detail sheet when SteamCMD isn't configured."),
+                color: .secondary
+            )
+        }
+    }
+
+    private func actionNote(_ message: String, color: Color) -> some View {
+        Text(message)
+            .font(.caption)
+            .foregroundStyle(color)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var isRetry: Bool {
+        if case .failed = downloadPhase { return true }
+        return false
     }
 
     // MARK: - Right (metadata + description)

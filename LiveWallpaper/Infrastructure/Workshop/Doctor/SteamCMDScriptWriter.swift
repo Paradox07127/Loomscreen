@@ -69,6 +69,21 @@ enum SteamCMDScriptWriter {
         """
     }
 
+    /// Real download for `itemID` under the bound Steam account. Same shape as
+    /// the ownership probe (which is itself a `workshop_download_item`), so it
+    /// inherits the validated `@NoPromptForPassword` cached-credential path.
+    /// `itemID` is a `UInt64`, so the interpolation can only be digits.
+    static func downloadItemScript(username: String, itemID: UInt64) throws -> String {
+        guard validateUsername(username) else { throw SteamCMDScriptError.invalidUsername }
+        return """
+        @ShutdownOnFailedCommand 1
+        @NoPromptForPassword 1
+        login \(username)
+        workshop_download_item 431960 \(itemID)
+        quit
+        """
+    }
+
     /// `^[A-Za-z0-9_]{1,32}$` — Steam's documented login-name charset.
     static func validateUsername(_ username: String) -> Bool {
         guard !username.isEmpty, username.count <= 32 else { return false }

@@ -158,7 +158,7 @@ struct WorkshopSettingsView: View {
             cacheSheet
         }
         .sheet(isPresented: $showingBrowse) {
-            WorkshopBrowseView(services: workshopServices) {
+            WorkshopBrowseView(services: workshopServices, doctor: doctorService) {
                 showingBrowse = false
                 showingKeyEntry = true
             }

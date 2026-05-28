@@ -10,6 +10,7 @@ struct WorkshopPaneView: View {
     let allowsTargetSelection: Bool
 
     @Environment(WorkshopServices.self) private var services
+    @Environment(SteamCMDDoctorService.self) private var doctor
     @AppStorage("loomscreen.workshop.pane.selectedTab.v1") private var selectedTab: WorkshopPaneTab = .installed
     @AppStorage("loomscreen.workshop.onboarding.shown.v1") private var onboardingShown: Bool = false
 
@@ -109,7 +110,7 @@ struct WorkshopPaneView: View {
     @ViewBuilder
     private var browseTab: some View {
         if let viewModel = browseViewModel {
-            WorkshopBrowsePane(viewModel: viewModel) { isShowingKeyEntry = true }
+            WorkshopBrowsePane(viewModel: viewModel, doctor: doctor) { isShowingKeyEntry = true }
         } else {
             // Lazily build the view-model on first Browse activation so the
             // Installed tab pays no online-browse cost.

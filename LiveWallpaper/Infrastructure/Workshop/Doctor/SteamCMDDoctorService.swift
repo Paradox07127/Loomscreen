@@ -98,6 +98,20 @@ enum SteamCMDDoctorError: Error, Equatable, Sendable, LocalizedError {
     }
 }
 
+/// Outcome of a single Workshop download. `Imported` is whatever the caller's
+/// import handler returns (kept generic so the Doctor stays unaware of the
+/// library / import types).
+enum WorkshopItemDownloadResult<Imported: Sendable>: Sendable {
+    case imported(Imported)
+    case notConfigured(reason: String)
+    case loginRequired
+    case notEntitled
+    case removedFromSteam
+    case temporarilyUnavailable
+    case timedOut
+    case failed(reason: String)
+}
+
 @MainActor
 @Observable
 final class SteamCMDDoctorService {
@@ -567,6 +581,108 @@ final class SteamCMDDoctorService {
         } catch {
             setProbe(.wallpaperEngineOwnership, status: .red(message: redacted(error.localizedDescription), command: nil))
         }
+    }
+
+    // MARK: - Workshop download
+
+    /// Generous ceiling for a real item download; large 4K wallpapers over a
+    /// slow link can take minutes. The UI exposes a Cancel that propagates as
+    /// task cancellation (the runner terminates SteamCMD's process group).
+    static let downloadTimeout: TimeInterval = 1200
+
+    /// The button gate: a download can only succeed once the binary + workdir
+    /// + username are bound and a cached Steam login is present (otherwise
+    /// SteamCMD would prompt for a password, which `@NoPromptForPassword`
+    /// refuses). Reads `probes`, so SwiftUI re-evaluates as the Doctor changes.
+    var isDownloadReady: Bool {
+        binaryBookmarkData != nil
+            && workdirBookmarkData != nil
+            && (username.map(SteamCMDScriptWriter.validateUsername) ?? false)
+            && isGreen(.cachedLogin)
+    }
+
+    /// Downloads `itemID` via SteamCMD into the bound workdir and, while the
+    /// workdir security scope is still held, hands the resolved content folder
+    /// to `onContentReady` (the import step) — the downloaded files live under
+    /// the scoped workdir, so the import must read + bookmark them before the
+    /// scope closes.
+    func downloadWorkshopItem<Imported: Sendable>(
+        _ itemID: UInt64,
+        onContentReady: @MainActor (URL) async -> Imported
+    ) async -> WorkshopItemDownloadResult<Imported> {
+        guard binaryBookmarkData != nil else {
+            return .notConfigured(reason: SteamCMDDoctorError.missingBinaryBinding.errorDescription ?? "No SteamCMD binary is selected.")
+        }
+        guard workdirBookmarkData != nil else {
+            return .notConfigured(reason: SteamCMDDoctorError.missingWorkdirBinding.errorDescription ?? "No SteamCMD working directory is selected.")
+        }
+        guard let username, SteamCMDScriptWriter.validateUsername(username) else {
+            return .notConfigured(reason: "Enter your Steam username in the SteamCMD Doctor first.")
+        }
+        guard isGreen(.cachedLogin) else { return .loginRequired }
+
+        do {
+            let binary = try resolveBinaryURL()
+            let workdir = try resolveWorkdirURL()
+            let workdirScope = workdir.startAccessingSecurityScopedResource()
+            defer { if workdirScope { workdir.stopAccessingSecurityScopedResource() } }
+
+            let script = try SteamCMDScriptWriter.downloadItemScript(username: username, itemID: itemID)
+            let result = try await runSteamCMDScript(script, binary: binary, workdir: workdir, timeout: Self.downloadTimeout)
+
+            if let folder = Self.resolveDownloadedItemFolder(stdout: result.stdout, itemID: itemID, workdir: workdir, fileManager: fileManager) {
+                return .imported(await onContentReady(folder))
+            }
+            // Mirror the ownership probe's stdout → meaning mapping. Steam's
+            // "(No Connection)" is its confusing wording for "not entitled".
+            let out = result.stdout
+            if out.contains("ERROR! Download item \(itemID) failed (No Connection).") { return .notEntitled }
+            if out.contains("ERROR! Download item \(itemID) failed (No match).") { return .removedFromSteam }
+            if result.timedOut { return .timedOut }
+            if result.killed { return .failed(reason: "Download cancelled.") }
+            if out.contains("ERROR! Download item \(itemID) failed (Failure).") { return .temporarilyUnavailable }
+            return .failed(reason: "SteamCMD didn't report a successful download. Open the Doctor and use Export diagnostics for the raw output.")
+        } catch SteamCMDScriptError.invalidUsername {
+            return .notConfigured(reason: "Steam username must match ^[A-Za-z0-9_]{1,32}$.")
+        } catch {
+            return .failed(reason: redacted(error.localizedDescription))
+        }
+    }
+
+    /// Extracts the quoted destination from SteamCMD's
+    /// `Success. Downloaded item <id> to "<path>"` line. Pure (no filesystem),
+    /// so it is unit-testable without a real download.
+    nonisolated static func capturedDownloadPath(stdout: String, itemID: UInt64) -> String? {
+        firstCapture(in: stdout, pattern: #"Success\. Downloaded item \#(itemID) to "([^"]+)""#)
+    }
+
+    /// Resolves the downloaded item folder, preferring the in-scope workdir
+    /// location (where SteamCMD writes when run with the workdir as its CWD)
+    /// and falling back to the path SteamCMD printed.
+    private static func resolveDownloadedItemFolder(
+        stdout: String,
+        itemID: UInt64,
+        workdir: URL,
+        fileManager: FileManager
+    ) -> URL? {
+        let workdirItem = workdir
+            .appendingPathComponent("steamapps", isDirectory: true)
+            .appendingPathComponent("workshop", isDirectory: true)
+            .appendingPathComponent("content", isDirectory: true)
+            .appendingPathComponent(String(wallpaperEngineAppID), isDirectory: true)
+            .appendingPathComponent(String(itemID), isDirectory: true)
+        if isExistingDirectory(workdirItem, fileManager: fileManager) { return workdirItem }
+        if let path = capturedDownloadPath(stdout: stdout, itemID: itemID) {
+            let url = URL(fileURLWithPath: path)
+            if isExistingDirectory(url, fileManager: fileManager) { return url }
+        }
+        return nil
+    }
+
+    private static func isExistingDirectory(_ url: URL, fileManager: FileManager) -> Bool {
+        var isDirectory = ObjCBool(false)
+        return fileManager.fileExists(atPath: url.path(percentEncoded: false), isDirectory: &isDirectory)
+            && isDirectory.boolValue
     }
 
     // MARK: - Helpers
