@@ -98,6 +98,10 @@ struct WorkshopDoctorView: View {
                             do { try await service.bindBinary(url) }
                             catch { await MainActor.run { setupError = error.localizedDescription } }
                         }
+                    },
+                    onAutoDetect: {
+                        setupError = nil
+                        return await service.autoDetectBinary()
                     }
                 )
                 Divider()
@@ -309,6 +313,9 @@ private struct BinaryPickerRow: View {
     let path: String?
     let status: DoctorProbeStatus
     let onPick: (URL) -> Void
+    let onAutoDetect: () async -> Bool
+
+    @State private var isDetecting = false
 
     var body: some View {
         HStack(alignment: .top, spacing: DesignTokens.Spacing.md) {
@@ -330,16 +337,38 @@ private struct BinaryPickerRow: View {
                         .italic()
                         .font(.system(size: 12))
                         .foregroundStyle(.tertiary)
-                    Text("Pick SteamCMD's executable or its `steamcmd.sh` wrapper.")
+                    Text("Auto-detect finds a Homebrew or tarball install; otherwise pick SteamCMD's executable or its `steamcmd.sh` wrapper.")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Button(path == nil ? "Select…" : "Re-select") { pickFile() }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+            HStack(spacing: DesignTokens.Spacing.xs) {
+                if isDetecting {
+                    ProgressView().controlSize(.small)
+                }
+                Button("Auto-detect") { autoDetect() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(isDetecting)
+                    .help(Text("Scan the standard SteamCMD install locations"))
+                Button(path == nil ? "Select…" : "Re-select") { pickFile() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(isDetecting)
+            }
+        }
+    }
+
+    private func autoDetect() {
+        isDetecting = true
+        Task {
+            let found = await onAutoDetect()
+            isDetecting = false
+            // Fall back to the manual picker when nothing was found, so the
+            // user lands one click from selecting it themselves.
+            if !found { pickFile() }
         }
     }
 

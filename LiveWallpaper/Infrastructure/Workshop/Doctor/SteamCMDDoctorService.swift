@@ -217,6 +217,24 @@ final class SteamCMDDoctorService {
         await runProbe(.binaryIdentity)
     }
 
+    /// "Find it for me": scans the well-known SteamCMD install locations
+    /// (Homebrew cask, Valve tarball) and binds the first that resolves to a
+    /// valid Mach-O. The app isn't sandboxed, so a discovered path can be bound
+    /// without going through the file picker. Returns `true` if one was bound.
+    @discardableResult
+    func autoDetectBinary() async -> Bool {
+        for candidate in SteamCMDBinaryResolver.autoDetectCandidates() {
+            guard case .success = SteamCMDBinaryResolver.resolveCanonicalBinary(at: candidate) else { continue }
+            do {
+                try await bindBinary(candidate)
+                return true
+            } catch {
+                continue
+            }
+        }
+        return false
+    }
+
     func bindWorkdir(_ url: URL, isSharedSteamLibrary: Bool) async throws {
         let canonicalURL = url.resolvingSymlinksInPath().standardizedFileURL
         var isDirectory = ObjCBool(false)

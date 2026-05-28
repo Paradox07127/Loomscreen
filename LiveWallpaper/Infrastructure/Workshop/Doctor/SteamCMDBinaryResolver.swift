@@ -13,10 +13,14 @@ enum SteamCMDBinaryResolver {
         guard fileExists(pickedURL) else {
             return .failure(.fileNotFound)
         }
-        if pickedURL.lastPathComponent == "steamcmd.sh" {
-            return resolveWrapper(pickedURL)
+        // A Mach-O is the executable itself. Anything else — Valve's
+        // `steamcmd.sh`, Homebrew's `steamcmd.wrapper.sh`, or a
+        // `/opt/homebrew/bin/steamcmd` symlink that resolves to one — is a
+        // shell wrapper we follow to the real binary.
+        if isMachO(pickedURL) {
+            return validateBinary(pickedURL).map { pickedURL }
         }
-        return validateBinary(pickedURL).map { pickedURL }
+        return resolveWrapper(pickedURL)
     }
 
     /// Best-effort discovery candidates. The picker remains the source of
@@ -43,22 +47,29 @@ enum SteamCMDBinaryResolver {
     }
 
     private static func resolveWrapper(_ wrapperURL: URL) -> Result<URL, SteamCMDBinaryError> {
-        let value: String
-        do {
-            value = try steamExecutableValue(in: wrapperURL)
-        } catch let error as SteamCMDBinaryError {
-            return .failure(error)
-        } catch {
-            return .failure(.wrapperParseFailed(reason: error.localizedDescription))
+        let wrapperDir = wrapperURL.deletingLastPathComponent()
+
+        // 1) An explicit `STEAMEXE=<path>` line (Valve's tarball `steamcmd.sh`).
+        if let value = try? steamExecutableValue(in: wrapperURL) {
+            let target = resolveShellPath(value, relativeTo: wrapperDir)
+                .resolvingSymlinksInPath()
+                .standardizedFileURL
+            if fileExists(target), isMachO(target), case .success = validateBinary(target) {
+                return .success(target)
+            }
         }
 
-        let targetURL = resolveShellPath(value, relativeTo: wrapperURL.deletingLastPathComponent())
-            .resolvingSymlinksInPath()
-            .standardizedFileURL
-        guard fileExists(targetURL) else {
-            return .failure(.wrapperPointsToMissing(targetURL))
+        // 2) Otherwise locate the `steamcmd` Mach-O next to the wrapper. Covers
+        //    Homebrew's `steamcmd.wrapper.sh` (binary under `MacOS/`) and
+        //    Valve's tarball layout (alongside, or under `osx32/`).
+        for relative in ["steamcmd", "MacOS/steamcmd", "osx32/steamcmd"] {
+            let candidate = wrapperDir.appendingPathComponent(relative, isDirectory: false).standardizedFileURL
+            if fileExists(candidate), isMachO(candidate), case .success = validateBinary(candidate) {
+                return .success(candidate)
+            }
         }
-        return validateBinary(targetURL).map { targetURL }
+
+        return .failure(.wrapperParseFailed(reason: "Couldn't find the SteamCMD Mach-O binary near \(wrapperURL.lastPathComponent)."))
     }
 
     private static func steamExecutableValue(in wrapperURL: URL) throws -> String {
