@@ -4,13 +4,18 @@ import LiveWallpaperSharedUI
 import SwiftUI
 
 /// "Steam Workshop" Settings tab — sibling of "General", "Shortcuts",
-/// "Cache", "Backup", "About". v1 surfaces the privacy explainer and a
-/// reset toggle for the onboarding sheet. Doctor + Web API key sections are
-/// placeholders so future Phase 2 / Phase 5 slices have a target site
-/// (`docs/2026-05-28-steam-workshop-integration-plan.md` "UI surfaces
-/// inventory" rows #7, #11).
+/// "Cache", "Backup", "About". Privacy disclosures + entry points to the
+/// v2 Doctor and the v3 Web-API-key + browse-cache flows.
 struct WorkshopSettingsView: View {
+    @Environment(SteamCMDDoctorService.self) private var doctorService
+    @Environment(WorkshopServices.self) private var workshopServices
+
     @AppStorage("loomscreen.workshop.onboarding.shown.v1") private var onboardingShown: Bool = false
+
+    @State private var showingDoctor = false
+    @State private var showingKeyEntry = false
+    @State private var showingCacheManagement = false
+    @State private var showingBrowse = false
 
     var body: some View {
         Form {
@@ -28,7 +33,7 @@ struct WorkshopSettingsView: View {
             } header: {
                 Text("Steam Workshop")
             } footer: {
-                Text("Paste-and-preview works out of the box. Downloading needs your own Steam account + the official SteamCMD — that setup ships in a later release.")
+                Text("Paste-and-preview works out of the box. Online browsing needs your own free Steam Web API key. Downloading needs the official SteamCMD + your Steam account — open the Doctor below to wire that up.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -55,29 +60,153 @@ struct WorkshopSettingsView: View {
             }
 
             Section {
-                Label("SteamCMD Doctor", systemImage: "stethoscope")
-                    .foregroundStyle(.secondary)
-                Text("Coming with the download release.")
+                HStack {
+                    Label("SteamCMD Doctor", systemImage: "stethoscope")
+                    Spacer()
+                    doctorIndicator
+                    Button("Open") { showingDoctor = true }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
+                Text("Verify your SteamCMD install + Steam sign-in before enabling Workshop downloads.")
                     .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
             } header: {
                 Text("Downloads")
             }
 
             Section {
-                Label("Steam Web API key", systemImage: "key")
-                    .foregroundStyle(.secondary)
-                Text("Coming with the browse-online release.")
+                HStack {
+                    Label("Steam Web API key", systemImage: "key")
+                    Spacer()
+                    keyStatusBadge
+                }
+
+                HStack(spacing: DesignTokens.Spacing.xs) {
+                    if workshopServices.hasWebAPIKey {
+                        Button("Replace") { showingKeyEntry = true }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        Button("Forget", role: .destructive) {
+                            Task {
+                                try? await workshopServices.keychain.deleteWebAPIKey()
+                                await workshopServices.refreshAPIKeyStatus()
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        Button("Browse online") { showingBrowse = true }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                    } else {
+                        Button("Set key") { showingKeyEntry = true }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                    }
+                }
+
+                Text("Loomscreen calls Valve's Workshop API directly with your key over HTTPS. Stored in Keychain, no iCloud sync.")
                     .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
             } header: {
                 Text("Browse Online")
+            }
+
+            Section {
+                HStack {
+                    Label("Workshop browse cache", systemImage: "internaldrive")
+                    Spacer()
+                    Button("Manage") { showingCacheManagement = true }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
+                Text("Disk cache for `QueryFiles` JSON responses (5-minute TTL, 100 MB hard cap).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Cache")
             }
         }
         .formStyle(.grouped)
         .padding(.horizontal, DesignTokens.Settings.formHorizontalMargin)
         .padding(.vertical, DesignTokens.Settings.formVerticalMargin)
         .background(DesignTokens.Colors.pageBackground)
+        .sheet(isPresented: $showingDoctor) {
+            WorkshopDoctorView()
+                .environment(doctorService)
+        }
+        .sheet(isPresented: $showingKeyEntry) {
+            SteamWebAPIKeyEntrySheet(services: workshopServices) {
+                Task { await workshopServices.refreshAPIKeyStatus() }
+            }
+        }
+        .sheet(isPresented: $showingCacheManagement) {
+            cacheSheet
+        }
+        .sheet(isPresented: $showingBrowse) {
+            WorkshopBrowseView(services: workshopServices) {
+                showingBrowse = false
+                showingKeyEntry = true
+            }
+        }
+        .task { await workshopServices.refreshAPIKeyStatus() }
+    }
+
+    @ViewBuilder
+    private var doctorIndicator: some View {
+        switch doctorService.state {
+        case .idle:
+            indicatorDot(.gray, label: "Not yet run")
+        case .probing:
+            ProgressView().controlSize(.small)
+        case .done(let allGreen, let blockingFailures):
+            if allGreen {
+                indicatorDot(.green, label: "All probes green")
+            } else if blockingFailures == 0 {
+                indicatorDot(.orange, label: "Warnings")
+            } else {
+                indicatorDot(.red, label: "\(blockingFailures) blocker\(blockingFailures == 1 ? "" : "s")")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var keyStatusBadge: some View {
+        if workshopServices.hasWebAPIKey {
+            Label("Set", systemImage: "checkmark.seal.fill")
+                .foregroundStyle(Color.green)
+                .font(.system(size: 12, weight: .semibold))
+        } else {
+            Label("Not set", systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(Color.orange)
+                .font(.system(size: 12, weight: .semibold))
+        }
+    }
+
+    private var cacheSheet: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Workshop cache")
+                    .font(.system(size: 14, weight: .semibold))
+                Spacer()
+                Button("Done") { showingCacheManagement = false }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(.horizontal, DesignTokens.Settings.formHorizontalMargin)
+            .padding(.vertical, DesignTokens.Settings.formVerticalMargin)
+            .background(.bar)
+            WorkshopCacheManagementView(cache: workshopServices.queryCache)
+        }
+        .frame(width: 520, height: 420)
+    }
+
+    private func indicatorDot(_ color: Color, label: String) -> some View {
+        HStack(spacing: 4) {
+            Circle().fill(color).frame(width: 6, height: 6)
+            Text(label)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        }
     }
 }
 #endif

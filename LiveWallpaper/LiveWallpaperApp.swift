@@ -92,6 +92,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @ObservationIgnored nonisolated(unsafe) private var dockVisibilityObserver: NSObjectProtocol?
     @ObservationIgnored nonisolated(unsafe) private var showOnboardingObserver: NSObjectProtocol?
     @ObservationIgnored private var globalShortcutManager: GlobalShortcutManager?
+    #if !LITE_BUILD && DIRECT_DISTRIBUTION
+    /// Direct-distribution Pro only: lives for the lifetime of the app so the
+    /// Doctor's probe state survives Settings-window close / re-open and the
+    /// Workshop tab can read it without re-running probes.
+    @ObservationIgnored private let workshopDoctorService = SteamCMDDoctorService()
+    /// Bundles the Keychain + QueryService + on-disk QueryCache actors for
+    /// the v3 online-browse flow. Lives for the lifetime of the app so the
+    /// in-flight coalescing + token bucket survive Settings-window cycles.
+    @ObservationIgnored private let workshopServices = WorkshopServices()
+    #endif
     /// True between the first `.terminateLater` reply and the matching
     /// `reply(toApplicationShouldTerminate:)`. Re-entrant termination
     /// attempts skip the flush so we don't enqueue duplicate writes that
@@ -284,13 +294,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         initialNavigation: Navigation?,
         initialAddWallpaperPromptKind: String?
     ) -> NSWindowController {
-        let contentView = ContentView(
+        let baseContentView = ContentView(
             initialNavigation: initialNavigation,
             initialAddWallpaperPromptKind: initialAddWallpaperPromptKind
         )
             .environment(manager)
             .environment(\.featureCatalog, manager.featureCatalog)
+
+        #if !LITE_BUILD && DIRECT_DISTRIBUTION
+        let contentView = baseContentView
+            .environment(workshopDoctorService)
+            .environment(workshopServices)
             .appLanguageScoped()
+        #else
+        let contentView = baseContentView
+            .appLanguageScoped()
+        #endif
 
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: SettingsWindowMetrics.defaultContentSize),
