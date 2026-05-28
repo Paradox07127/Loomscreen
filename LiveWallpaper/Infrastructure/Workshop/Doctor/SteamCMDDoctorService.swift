@@ -223,7 +223,18 @@ final class SteamCMDDoctorService {
     /// without going through the file picker. Returns `true` if one was bound.
     @discardableResult
     func autoDetectBinary() async -> Bool {
-        for candidate in SteamCMDBinaryResolver.autoDetectCandidates() {
+        // 1) Well-known fixed locations (Homebrew cask, MacPorts, Valve tarball).
+        if await bindFirstResolvable(SteamCMDBinaryResolver.autoDetectCandidates()) {
+            return true
+        }
+        // 2) Whatever the user's login shell PATH resolves — the only way a
+        //    Finder-launched app sees Homebrew / custom PATH entries (its own
+        //    PATH is the minimal launchd default).
+        return await bindFirstResolvable(loginShellPathCandidates())
+    }
+
+    private func bindFirstResolvable(_ candidates: [URL]) async -> Bool {
+        for candidate in candidates {
             guard case .success = SteamCMDBinaryResolver.resolveCanonicalBinary(at: candidate) else { continue }
             do {
                 try await bindBinary(candidate)
@@ -233,6 +244,28 @@ final class SteamCMDDoctorService {
             }
         }
         return false
+    }
+
+    /// Asks the user's login shell where `steamcmd` lives. This only *locates*
+    /// the binary: it runs a fixed, argument-free `command -v` (no untrusted
+    /// interpolation) and never executes SteamCMD — the reported paths still go
+    /// through the normal Mach-O validation + bookmark flow before being bound.
+    private func loginShellPathCandidates() async -> [URL] {
+        let shellPath = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let shell = URL(fileURLWithPath: shellPath)
+        guard fileManager.isExecutableFile(atPath: shell.path(percentEncoded: false)) else { return [] }
+        let result = await runner.run(
+            binary: shell,
+            args: ["-lc", "command -v steamcmd; command -v steamcmd.sh"],
+            stdin: nil,
+            timeout: 15,
+            workingDirectory: nil
+        )
+        return result.stdout
+            .split(separator: "\n")
+            .map { String($0).trimmingCharacters(in: .whitespaces) }
+            .filter { $0.hasPrefix("/") }
+            .map { URL(fileURLWithPath: $0) }
     }
 
     func bindWorkdir(_ url: URL, isSharedSteamLibrary: Bool) async throws {

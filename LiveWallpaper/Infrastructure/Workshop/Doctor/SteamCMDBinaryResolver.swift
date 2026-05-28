@@ -27,12 +27,21 @@ enum SteamCMDBinaryResolver {
     /// truth — Valve's tarball install has no canonical location.
     static func autoDetectCandidates() -> [URL] {
         let home = FileManager.default.homeDirectoryForCurrentUser
+        // Package-manager symlinks (Homebrew on Apple Silicon / Intel, MacPorts).
         var candidates: [URL] = [
             URL(fileURLWithPath: "/opt/homebrew/bin/steamcmd"),
             URL(fileURLWithPath: "/usr/local/bin/steamcmd"),
-            home.appendingPathComponent("steamcmd/steamcmd.sh", isDirectory: false),
-            home.appendingPathComponent("Applications/steamcmd/steamcmd.sh", isDirectory: false)
+            URL(fileURLWithPath: "/opt/local/bin/steamcmd")
         ]
+        // Common official-tarball extraction directories. Valve's docs use
+        // ~/steamcmd or ~/Steam; cover a few more plausible spots. Both the
+        // `steamcmd.sh` wrapper and the bootstrapped Mach-O are probed (the
+        // resolver follows either to the real binary).
+        for dir in ["steamcmd", "Steam", "Applications/steamcmd", "Downloads/steamcmd", "Desktop/steamcmd"] {
+            let base = home.appendingPathComponent(dir, isDirectory: true)
+            candidates.append(base.appendingPathComponent("steamcmd.sh", isDirectory: false))
+            candidates.append(base.appendingPathComponent("steamcmd", isDirectory: false))
+        }
         candidates.append(contentsOf: caskroomCandidates(at: URL(fileURLWithPath: "/opt/homebrew/Caskroom/steamcmd")))
         candidates.append(contentsOf: caskroomCandidates(at: URL(fileURLWithPath: "/usr/local/Caskroom/steamcmd")))
 
