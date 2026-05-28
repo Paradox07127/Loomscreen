@@ -73,6 +73,13 @@ struct GeneralSettingsView: View {
             ShortcutsSettingsView()
                 .tabItem { Label("Shortcuts", systemImage: "command") }
 
+            #if !LITE_BUILD && DIRECT_DISTRIBUTION
+            if featureCatalog.isEnabled(.workshopOnline) {
+                WorkshopSettingsView()
+                    .tabItem { Label("Workshop", systemImage: "cube.transparent") }
+            }
+            #endif
+
             #if !LITE_BUILD
             if featureCatalog.isEnabled(.wpeImport) {
                 WPECacheManagementView()

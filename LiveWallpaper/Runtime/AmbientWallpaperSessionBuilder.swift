@@ -71,7 +71,7 @@ final class AmbientWallpaperSessionBuilder {
             Logger.info("HTML wallpaper: detected Wallpaper Engine project — enabling physical-pixel layout", category: .screenManager)
         }
 
-        let htmlView = HTMLWallpaperView(frame: frame, initialEphemeral: effective.useEphemeralStorage)
+        let htmlView = HTMLWallpaperView(frame: frame, initialEphemeral: effective.requiresEphemeralStorage)
         window.contentView = htmlView
 
         let session = AmbientWallpaperSession(window: window, wallpaperType: .html, performanceTarget: htmlView)

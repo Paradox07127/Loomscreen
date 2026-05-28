@@ -47,9 +47,22 @@ struct AppStartupPlan: Equatable {
             originReconciler: PreservingOriginReconciler()
         )
         #else
+        // Direct-distribution Pro: layer `.workshopOnline` onto the Pro catalog.
+        // The conditional lives in the app target because Xcode does not
+        // propagate `SWIFT_ACTIVE_COMPILATION_CONDITIONS` from the app target
+        // down into local SwiftPM packages — the registration cannot happen
+        // inside `ProductCapabilities.pro` even though that is where it
+        // logically belongs. MAS / non-direct-distribution Pro builds simply
+        // omit the `DIRECT_DISTRIBUTION` flag and the capability stays out.
+        #if DIRECT_DISTRIBUTION
+        let proCapabilities = ProductCapabilities.pro.withWorkshopOnline()
+        #else
+        let proCapabilities = ProductCapabilities.pro
+        #endif
         screenManagerOptions = ScreenManagerStartupOptions(
             restoreSavedWallpapers: runtimeOptions.shouldRestoreSavedWallpapers,
-            startAutomation: runtimeOptions.shouldStartAutomation
+            startAutomation: runtimeOptions.shouldStartAutomation,
+            featureCatalog: FeatureCatalog(capabilities: proCapabilities)
         )
         #endif
         refreshScreensAfterManagerCreation = false

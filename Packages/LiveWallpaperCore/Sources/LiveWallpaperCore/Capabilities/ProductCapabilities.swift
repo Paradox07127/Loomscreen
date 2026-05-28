@@ -19,6 +19,13 @@ public enum ProductFeature: String, Sendable, Hashable, Codable {
     case videoEffects
     case weatherReactive
 
+    /// Steam Workshop online surfaces (paste URL → fetch metadata → optional
+    /// download via SteamCMD). Registered at module init **only** when the
+    /// build is direct-distribution AND not Lite — MAS / Lite binaries omit
+    /// the case entirely via [`ProductCapabilities.workshopOnlineSupported`]
+    /// so no runtime check can accidentally surface the UI.
+    case workshopOnline
+
     case scheduleAutomation
     case playlists
 
@@ -75,6 +82,18 @@ public struct ProductCapabilities: Sendable, Equatable {
             .lockScreenSnapshots, .appleAerials, .inspectorPreview
         ]
     )
+
+    /// Returns a copy of this catalog with `.workshopOnline` inserted into
+    /// the feature set. The consumer-side gate lives in the **main app
+    /// target**, not in this SwiftPM package, because Xcode does not
+    /// propagate `SWIFT_ACTIVE_COMPILATION_CONDITIONS` from the app target
+    /// down into local packages — a `#if DIRECT_DISTRIBUTION` here would
+    /// always be `false`. The app target is the authority on which
+    /// distribution channel it is, and adds the capability at injection
+    /// time.
+    public func withWorkshopOnline() -> ProductCapabilities {
+        ProductCapabilities(sku: sku, enabledFeatures: enabledFeatures.union([.workshopOnline]))
+    }
 
     /// Whether the runtime is permitted to ever render a wallpaper of `type`.
     public func canRender(_ type: WallpaperType) -> Bool {

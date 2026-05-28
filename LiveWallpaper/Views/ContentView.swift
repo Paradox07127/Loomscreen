@@ -23,6 +23,14 @@ struct ContentView: View {
     /// value — without this, a stale `.developerTools` selection could
     /// mount the detail view even with the toggle off.
     @State private var developerModeEnabled: Bool = ContentView.loadDeveloperModeEnabled()
+    /// Drives the modal Steam Workshop paste sheet. Gated by
+    /// `.workshopOnline` capability — only present in direct-distribution
+    /// Pro builds.
+    #if !LITE_BUILD && DIRECT_DISTRIBUTION
+    @State private var isPresentingWorkshopPasteSheet: Bool = false
+    @State private var isPresentingWorkshopOnboarding: Bool = false
+    @AppStorage("loomscreen.workshop.onboarding.shown.v1") private var workshopOnboardingShown: Bool = false
+    #endif
     private let initialAddWallpaperPromptKind: String?
 
     init(initialNavigation: Navigation? = nil, initialAddWallpaperPromptKind: String? = nil) {
@@ -51,14 +59,7 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
-            Sidebar(selection: $selectedNavigation, developerModeEnabled: developerModeEnabled)
-                .onReceive(NotificationCenter.default.publisher(for: .selectScreenInSettings)) { notification in
-                    guard let screenID = notification.userInfo?["screenID"] as? CGDirectDisplayID else { return }
-                    scheduleNavigationChange { selectedNavigation = .screen(screenID) }
-                }
-                .onReceive(NotificationCenter.default.publisher(for: .promptAddWallpaper)) { notification in
-                    handleAddWallpaperPrompt(notification: notification)
-                }
+            sidebar
         } detail: {
             DetailContent(selection: $selectedNavigation, canShowDeveloperTools: canShowDeveloperTools)
         }
@@ -68,6 +69,16 @@ struct ContentView: View {
             minWidth: SettingsWindowMetrics.minimumContentSize.width,
             minHeight: SettingsWindowMetrics.minimumContentSize.height
         )
+        #if !LITE_BUILD && DIRECT_DISTRIBUTION
+        .sheet(isPresented: $isPresentingWorkshopPasteSheet) {
+            WorkshopPasteSheet()
+        }
+        .sheet(isPresented: $isPresentingWorkshopOnboarding) {
+            WorkshopOnboardingSheet {
+                isPresentingWorkshopPasteSheet = true
+            }
+        }
+        #endif
         .onReceive(NotificationCenter.default.publisher(for: .openGeneralSettings)) { _ in
             scheduleNavigationChange { selectedNavigation = .general }
         }
@@ -84,6 +95,49 @@ struct ContentView: View {
             prewarmSidebarIfNeeded()
         }
     }
+
+    /// Sidebar wrapper that captures the listeners shared between the
+    /// `selectScreenInSettings` / `promptAddWallpaper` notifications and,
+    /// in direct-distribution Pro, the Workshop entry button.
+    @ViewBuilder
+    private var sidebar: some View {
+        #if !LITE_BUILD && DIRECT_DISTRIBUTION
+        Sidebar(
+            selection: $selectedNavigation,
+            developerModeEnabled: developerModeEnabled,
+            onPresentWorkshopPasteSheet: { presentWorkshopPasteSheet() }
+        )
+        .onReceive(NotificationCenter.default.publisher(for: .selectScreenInSettings)) { notification in
+            guard let screenID = notification.userInfo?["screenID"] as? CGDirectDisplayID else { return }
+            scheduleNavigationChange { selectedNavigation = .screen(screenID) }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .promptAddWallpaper)) { notification in
+            handleAddWallpaperPrompt(notification: notification)
+        }
+        #else
+        Sidebar(
+            selection: $selectedNavigation,
+            developerModeEnabled: developerModeEnabled
+        )
+        .onReceive(NotificationCenter.default.publisher(for: .selectScreenInSettings)) { notification in
+            guard let screenID = notification.userInfo?["screenID"] as? CGDirectDisplayID else { return }
+            scheduleNavigationChange { selectedNavigation = .screen(screenID) }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .promptAddWallpaper)) { notification in
+            handleAddWallpaperPrompt(notification: notification)
+        }
+        #endif
+    }
+
+    #if !LITE_BUILD && DIRECT_DISTRIBUTION
+    private func presentWorkshopPasteSheet() {
+        if workshopOnboardingShown {
+            isPresentingWorkshopPasteSheet = true
+        } else {
+            isPresentingWorkshopOnboarding = true
+        }
+    }
+    #endif
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
@@ -313,6 +367,13 @@ struct Sidebar: View {
     /// Owned by `ContentView` so the sidebar entry stays in lock-step
     /// with `DetailContent`'s runtime gate.
     let developerModeEnabled: Bool
+    /// Closure invoked when the user taps "Steam Workshop" in the sidebar
+    /// Library section. Only used in direct-distribution Pro builds — the
+    /// raw enum case is omitted from `ProductFeature` in MAS / Lite so the
+    /// row never renders there and the closure stays unreferenced.
+    #if !LITE_BUILD && DIRECT_DISTRIBUTION
+    var onPresentWorkshopPasteSheet: () -> Void = {}
+    #endif
     @Environment(ScreenManager.self) private var screenManager
     @Environment(\.featureCatalog) private var featureCatalog
 
@@ -355,6 +416,24 @@ struct Sidebar: View {
                     }
                     .accessibilityHint(Text("Browse copied local projects in the Workshop Library"))
                 }
+
+                #if !LITE_BUILD && DIRECT_DISTRIBUTION
+                if featureCatalog.isEnabled(.workshopOnline) {
+                    Button {
+                        onPresentWorkshopPasteSheet()
+                    } label: {
+                        HStack {
+                            Label("Steam Workshop", systemImage: "cube.transparent.fill")
+                            Spacer()
+                            ProBadge()
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text("Steam Workshop"))
+                    .accessibilityHint(Text("Paste Workshop URLs to fetch official previews and open items in Steam."))
+                }
+                #endif
 
                 #if !LITE_BUILD
                 if featureCatalog.isEnabled(.developerTools), developerModeEnabled {
@@ -425,6 +504,34 @@ private struct SidebarSectionHeader: View {
             .padding(.bottom, DesignTokens.Sidebar.sectionHeaderBottomPadding)
     }
 }
+
+#if !LITE_BUILD && DIRECT_DISTRIBUTION
+/// Compact accent pill rendered next to Pro-only sidebar entries so users
+/// understand the feature is part of the Pro distribution. Visual sibling
+/// of [`DevPill`] (`DEV`) and reuses the accent color instead of orange so
+/// the two badges remain distinguishable in the sidebar.
+private struct ProBadge: View {
+    var body: some View {
+        Text(verbatim: "PRO")
+            .font(.system(size: 9, weight: .bold))
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: true)
+            .tracking(0.4)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1.5)
+            .foregroundStyle(Color.accentColor)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.accentColor.opacity(0.15))
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(Color.accentColor.opacity(0.35), lineWidth: 0.5)
+            )
+            .accessibilityHidden(true)
+    }
+}
+#endif
 
 // MARK: - Screen Row
 struct ScreenRow: View {
