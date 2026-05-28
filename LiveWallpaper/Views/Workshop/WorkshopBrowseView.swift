@@ -1,6 +1,5 @@
 #if !LITE_BUILD && DIRECT_DISTRIBUTION
 import AppKit
-import LiveWallpaperCore
 import LiveWallpaperSharedUI
 import SwiftUI
 
@@ -127,6 +126,31 @@ struct WorkshopBrowseView: View {
             emptyState
         } else {
             grid
+                .overlay(alignment: .top) { transientErrorBanner }
+        }
+    }
+
+    @ViewBuilder
+    private var transientErrorBanner: some View {
+        if let error = viewModel.lastError, !viewModel.items.isEmpty {
+            HStack(spacing: DesignTokens.Spacing.sm) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                Text(message(for: error))
+                    .font(.callout)
+                    .lineLimit(2)
+                Spacer()
+                Button("Retry") { Task { await viewModel.reload() } }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+            .padding(.horizontal, DesignTokens.Spacing.md)
+            .padding(.vertical, DesignTokens.Spacing.sm)
+            .background(.thinMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5))
+            .padding(DesignTokens.Spacing.md)
+            .transition(.move(edge: .top).combined(with: .opacity))
+            .accessibilityLabel(Text("Browse error: \(message(for: error))"))
         }
     }
 

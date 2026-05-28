@@ -60,33 +60,40 @@ struct WorkshopSettingsView: View {
             }
 
             Section {
-                HStack {
+                LabeledContent {
+                    HStack(spacing: DesignTokens.Spacing.xs) {
+                        doctorIndicator
+                        Button("Open") { showingDoctor = true }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .help("Open the SteamCMD diagnostics sheet")
+                    }
+                } label: {
                     Label("SteamCMD Doctor", systemImage: "stethoscope")
-                    Spacer()
-                    doctorIndicator
-                    Button("Open") { showingDoctor = true }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
                 }
+            } header: {
+                Text("Downloads")
+            } footer: {
                 Text("Verify your SteamCMD install + Steam sign-in before enabling Workshop downloads.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            } header: {
-                Text("Downloads")
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Section {
-                HStack {
-                    Label("Steam Web API key", systemImage: "key")
-                    Spacer()
+                LabeledContent {
                     keyStatusBadge
+                } label: {
+                    Label("Steam Web API key", systemImage: "key")
                 }
 
                 HStack(spacing: DesignTokens.Spacing.xs) {
+                    Spacer()
                     if workshopServices.hasWebAPIKey {
                         Button("Replace") { showingKeyEntry = true }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
+                            .help("Set a new Steam Web API key")
                         Button("Forget", role: .destructive) {
                             Task {
                                 try? await workshopServices.keychain.deleteWebAPIKey()
@@ -95,36 +102,43 @@ struct WorkshopSettingsView: View {
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
+                        .help("Delete the stored Steam Web API key")
                         Button("Browse online") { showingBrowse = true }
                             .buttonStyle(.borderedProminent)
                             .controlSize(.small)
+                            .help("Open the Workshop browse sheet")
                     } else {
                         Button("Set key") { showingKeyEntry = true }
                             .buttonStyle(.borderedProminent)
                             .controlSize(.small)
+                            .help("Paste your Steam Web API key")
                     }
                 }
-
+            } header: {
+                Text("Browse Online")
+            } footer: {
                 Text("Loomscreen calls Valve's Workshop API directly with your key over HTTPS. Stored in Keychain, no iCloud sync.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            } header: {
-                Text("Browse Online")
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Section {
-                HStack {
-                    Label("Workshop browse cache", systemImage: "internaldrive")
-                    Spacer()
+                LabeledContent {
                     Button("Manage") { showingCacheManagement = true }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
+                        .help("Inspect and clear the Workshop browse cache")
+                } label: {
+                    Label("Workshop browse cache", systemImage: "internaldrive")
                 }
-                Text("Disk cache for `QueryFiles` JSON responses (5-minute TTL, 100 MB hard cap).")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             } header: {
                 Text("Cache")
+            } footer: {
+                Text("Disk cache for QueryFiles JSON responses (5-minute TTL, 100 MB hard cap).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .formStyle(.grouped)
@@ -187,7 +201,7 @@ struct WorkshopSettingsView: View {
         VStack(spacing: 0) {
             HStack {
                 Text("Workshop cache")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.headline)
                 Spacer()
                 Button("Done") { showingCacheManagement = false }
                     .keyboardShortcut(.cancelAction)
@@ -197,7 +211,7 @@ struct WorkshopSettingsView: View {
             .background(.bar)
             WorkshopCacheManagementView(cache: workshopServices.queryCache)
         }
-        .frame(width: 520, height: 420)
+        .frame(minWidth: 460, idealWidth: 520, minHeight: 360, idealHeight: 420)
     }
 
     private func indicatorDot(_ color: Color, label: String) -> some View {

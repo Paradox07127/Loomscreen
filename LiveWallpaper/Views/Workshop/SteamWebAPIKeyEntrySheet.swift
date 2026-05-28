@@ -1,6 +1,5 @@
 #if !LITE_BUILD && DIRECT_DISTRIBUTION
 import AppKit
-import LiveWallpaperCore
 import LiveWallpaperSharedUI
 import SwiftUI
 
@@ -74,25 +73,14 @@ struct SteamWebAPIKeyEntrySheet: View {
     }
 
     private var header: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Set your Steam Web API key")
-                    .font(.system(size: 15, weight: .semibold))
-                Text("Get a free key from Valve.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.secondary)
-                    .font(.system(size: 16))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Close")
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Set your Steam Web API key")
+                .font(.headline)
+            Text("Get a free key from Valve.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var disclosurePanel: some View {

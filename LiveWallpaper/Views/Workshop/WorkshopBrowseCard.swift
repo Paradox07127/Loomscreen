@@ -1,6 +1,5 @@
 #if !LITE_BUILD && DIRECT_DISTRIBUTION
 import AppKit
-import LiveWallpaperCore
 import LiveWallpaperSharedUI
 import SwiftUI
 
@@ -158,12 +157,13 @@ struct WorkshopBrowseCard: View {
     }
 
     private var subtitleText: String? {
-        var parts: [String] = []
-        if let creator = item.creatorPersonaName { parts.append("by \(creator)") }
-        if let updated = item.timeUpdated {
-            parts.append(Self.relativeFormatter.localizedString(for: updated, relativeTo: Date()))
-        }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+        // `creatorPersonaName` requires a separate `GetPlayerSummaries` call
+        // we don't make today — `WorkshopQueryService` always returns nil for
+        // it. Keep the field optional in the model so a future Phase 5 pass
+        // can populate it without a schema change, and just render the
+        // relative-time line here.
+        guard let updated = item.timeUpdated else { return nil }
+        return Self.relativeFormatter.localizedString(for: updated, relativeTo: Date())
     }
 
     private func formatSubs(_ count: Int) -> String {

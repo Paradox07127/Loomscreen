@@ -96,7 +96,11 @@ actor SteamCMDProcessRunner {
             try check(chdirResult, context: "chdir")
         }
 
-        try check(posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP)), context: "set spawn flags")
+        // POSIX_SPAWN_CLOEXEC_DEFAULT closes every FD that doesn't have an
+        // explicit `addopen` / `adddup2` action, so we never leak the app's
+        // open sockets / files into the user-selected SteamCMD binary.
+        let spawnFlags = Int16(POSIX_SPAWN_SETPGROUP) | Int16(POSIX_SPAWN_CLOEXEC_DEFAULT)
+        try check(posix_spawnattr_setflags(&attributes, spawnFlags), context: "set spawn flags")
         try check(posix_spawnattr_setpgroup(&attributes, 0), context: "set process group")
 
         var pid = pid_t(0)
@@ -178,40 +182,29 @@ actor SteamCMDProcessRunner {
             waitForExit(pid: pid)
         }
 
-        let event = await withTaskGroup(of: SteamCMDRunEvent.self) { group in
-            group.addTask {
-                .exited(await waitTask.value)
+        // Schedule a one-shot timeout that sends SIGTERM via the process
+        // group when it fires. `waitpid` returns shortly after, so the
+        // outer `await waitTask.value` becomes the single termination
+        // point. The earlier `withTaskGroup` approach deadlocked here —
+        // group exit waits for every child, but `waitpid` is a blocking
+        // syscall that does not honor task cancellation.
+        let clampedTimeout = max(0, timeout)
+        let timeoutTask = Task<Void, Never>.detached(priority: .utility) {
+            do {
+                try await Task.sleep(nanoseconds: UInt64(clampedTimeout * 1_000_000_000))
+            } catch {
+                return
             }
-            group.addTask {
-                do {
-                    let clampedTimeout = max(timeout, 0)
-                    try await Task.sleep(nanoseconds: UInt64(clampedTimeout * 1_000_000_000))
-                    return .timedOut
-                } catch {
-                    return .cancelled
-                }
-            }
-            let first = await group.next() ?? .cancelled
-            group.cancelAll()
-            return first
+            guard !Task.isCancelled else { return }
+            processGroup.terminate()
         }
 
-        var exitCode: Int32?
-        var timedOut = false
-        var killed = false
-
-        switch event {
-        case .exited(let code):
-            exitCode = code
-        case .timedOut:
-            timedOut = true
-            killed = processGroup.terminate()
-            exitCode = await waitTask.value
-        case .cancelled:
-            killed = processGroup.terminate()
-            exitCode = await waitTask.value
-        }
+        let exitCode = await waitTask.value
+        timeoutTask.cancel()
         processGroup.markExited()
+
+        let timedOut = !timeoutTask.isCancelled && processGroup.didTerminate
+        let killed = processGroup.didTerminate
 
         stdoutCapture.waitForEOF(timeout: 1)
         stderrCapture.waitForEOF(timeout: 1)
@@ -225,7 +218,7 @@ actor SteamCMDProcessRunner {
             stdout: stdout,
             stderr: stderr,
             timedOut: timedOut,
-            killed: killed || processGroup.didTerminate
+            killed: killed
         )
     }
 
@@ -259,12 +252,6 @@ private struct SteamCMDSpawnedProcess {
     let pid: pid_t
     let stdout: FileHandle
     let stderr: FileHandle
-}
-
-private enum SteamCMDRunEvent: Sendable {
-    case exited(Int32?)
-    case timedOut
-    case cancelled
 }
 
 private enum SteamCMDProcessRunnerError: Error, LocalizedError {

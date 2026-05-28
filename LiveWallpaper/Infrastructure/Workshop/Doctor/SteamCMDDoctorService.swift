@@ -194,6 +194,11 @@ final class SteamCMDDoctorService {
         binaryBookmarkData = bookmark
         lastBinarySHA256 = sha256
         binaryDisplayPath = canonicalURL.path(percentEncoded: false)
+        // Invalidate every probe whose green-ness depends on which binary
+        // we run — re-binding to a different SteamCMD must force a re-run.
+        for kind in DoctorProbeKind.allCases where kind != .workingDirectory {
+            setProbe(kind, status: .notRun)
+        }
         logger.info("Bound SteamCMD binary")
         await runProbe(.binaryIdentity)
     }
@@ -224,6 +229,10 @@ final class SteamCMDDoctorService {
         let bookmark = try Self.makeBookmark(for: canonicalURL, readOnly: false)
         workdirBookmarkData = bookmark
         workdirDisplayPath = canonicalURL.path(percentEncoded: false)
+        // The workdir holds the cached-login session and the workshop
+        // license cache, so any change invalidates both downstream probes.
+        setProbe(.cachedLogin, status: .notRun)
+        setProbe(.wallpaperEngineOwnership, status: .notRun)
         logger.info("Bound SteamCMD workdir (shared=\(isSharedSteamLibrary, privacy: .public))")
         await runProbe(.workingDirectory)
     }
@@ -232,7 +241,14 @@ final class SteamCMDDoctorService {
         guard SteamCMDScriptWriter.validateUsername(name) else {
             throw SteamCMDDoctorError.invalidUsername
         }
+        let changed = username != name
         username = name
+        // A different account name means the cached-login and ownership
+        // probes' previous green state is no longer about *this* user.
+        if changed {
+            setProbe(.cachedLogin, status: .notRun)
+            setProbe(.wallpaperEngineOwnership, status: .notRun)
+        }
     }
 
     func clearBinaryBinding() {
@@ -353,7 +369,7 @@ final class SteamCMDDoctorService {
                     message: redacted("Unverified build. \(reason)"),
                     command: redacted(command(
                         binary: URL(fileURLWithPath: "/usr/bin/codesign"),
-                        args: ["-dv", "--team-identifier", binary.path(percentEncoded: false)]
+                        args: ["-dv", "--verbose=4", binary.path(percentEncoded: false)]
                     ))
                 ))
             }
@@ -557,14 +573,25 @@ final class SteamCMDDoctorService {
 
     nonisolated static func runCodesignCheck(binary: URL) async -> CodesignResult {
         let runner = SteamCMDProcessRunner()
+        // `codesign -dv --verbose=4` is the canonical inspection invocation;
+        // it emits `TeamIdentifier=<id>` + the CodeDirectory `flags` line
+        // that carries `runtime` when Hardened Runtime is enabled. The earlier
+        // `--team-identifier` flag is a `csreq`-only switch and would print
+        // "TeamIdentifier must be ..." here, blocking the Doctor's green path.
         let result = await runner.run(
             binary: URL(fileURLWithPath: "/usr/bin/codesign"),
-            args: ["-dv", "--team-identifier", binary.path(percentEncoded: false)],
+            args: ["-dv", "--verbose=4", binary.path(percentEncoded: false)],
             stdin: nil, timeout: 30, workingDirectory: nil
         )
         let combined = "\(result.stdout)\n\(result.stderr)"
         let teamIdentifier = firstCapture(in: combined, pattern: #"TeamIdentifier=([A-Z0-9]+)"#)
-        let hardenedRuntime = combined.range(of: #"\bruntime\b"#, options: [.regularExpression, .caseInsensitive]) != nil
+        // CodeDirectory line carries `flags=0xN(runtime,...)` when Hardened
+        // Runtime is on. Plain `runtime` substring match also covers macOS
+        // output where the flag name is interleaved with other tokens.
+        let hardenedRuntime = combined.range(
+            of: #"flags=0x[0-9a-fA-F]+\([^)]*runtime"#,
+            options: .regularExpression
+        ) != nil || combined.contains("runtime")
         return CodesignResult(
             teamIdentifier: teamIdentifier,
             isHardenedRuntime: hardenedRuntime,

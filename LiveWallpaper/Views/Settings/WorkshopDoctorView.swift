@@ -1,6 +1,5 @@
 #if !LITE_BUILD && DIRECT_DISTRIBUTION
 import AppKit
-import LiveWallpaperCore
 import LiveWallpaperSharedUI
 import SwiftUI
 
@@ -11,6 +10,7 @@ struct WorkshopDoctorView: View {
     @Environment(SteamCMDDoctorService.self) private var service
     @Environment(\.dismiss) private var dismiss
     @State private var showingToast = false
+    @State private var setupError: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -92,25 +92,50 @@ struct WorkshopDoctorView: View {
                 BinaryPickerRow(
                     path: service.binaryDisplayPath,
                     status: service.probes[.binaryIdentity]?.status ?? .notRun,
-                    onPick: { url in Task { try? await service.bindBinary(url) } }
+                    onPick: { url in
+                        setupError = nil
+                        Task {
+                            do { try await service.bindBinary(url) }
+                            catch { await MainActor.run { setupError = error.localizedDescription } }
+                        }
+                    }
                 )
                 Divider()
                 WorkdirRadioRow(
                     currentPath: service.workdirDisplayPath,
                     onPickShared: {
+                        setupError = nil
                         let home = FileManager.default.homeDirectoryForCurrentUser
                         let steamURL = home.appendingPathComponent("Library/Application Support/Steam", isDirectory: true)
-                        Task { try? await service.bindWorkdir(steamURL, isSharedSteamLibrary: true) }
+                        Task {
+                            do { try await service.bindWorkdir(steamURL, isSharedSteamLibrary: true) }
+                            catch { await MainActor.run { setupError = error.localizedDescription } }
+                        }
                     },
                     onPickSeparate: { url in
-                        Task { try? await service.bindWorkdir(url, isSharedSteamLibrary: false) }
+                        setupError = nil
+                        Task {
+                            do { try await service.bindWorkdir(url, isSharedSteamLibrary: false) }
+                            catch { await MainActor.run { setupError = error.localizedDescription } }
+                        }
                     }
                 )
                 Divider()
                 UsernameRow(
                     currentUsername: service.username,
-                    onSave: { name in try? service.setUsername(name) }
+                    onSave: { name in
+                        do { try service.setUsername(name) }
+                        catch { setupError = error.localizedDescription }
+                    }
                 )
+                if let setupError {
+                    Label(setupError, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                        .font(.caption)
+                        .padding(.top, DesignTokens.Spacing.xs)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityLabel(Text("Setup error: \(setupError)"))
+                }
             }
         }
     }
@@ -149,16 +174,21 @@ struct WorkshopDoctorView: View {
                     if service.state == .probing {
                         ProgressView().controlSize(.small)
                     }
-                    Text("Re-run all probes")
+                    Text(hasEverRunProbe ? "Re-run all probes" : "Run all probes")
                 }
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.regular)
             .disabled(service.state == .probing)
+            .help("Run every diagnostic check against the bound SteamCMD install.")
         }
     }
 
     // MARK: - Header metrics
+
+    private var hasEverRunProbe: Bool {
+        service.probes.values.contains { $0.lastRun > .distantPast }
+    }
 
     private var greenCount: Int {
         service.probes.values.filter { if case .green = $0.status { return true } else { return false } }.count
@@ -334,6 +364,12 @@ private struct BinaryPickerRow: View {
         panel.treatsFilePackagesAsDirectories = false
         panel.message = "Pick the SteamCMD executable or its steamcmd.sh wrapper."
         panel.prompt = "Use Binary"
+        // Pre-position the panel at the most plausible install location so
+        // users don't have to navigate the filesystem when SteamCMD is in
+        // its canonical Homebrew / Valve-tarball spot.
+        if let candidate = SteamCMDBinaryResolver.autoDetectCandidates().first {
+            panel.directoryURL = candidate.deletingLastPathComponent()
+        }
         if panel.runModal() == .OK, let url = panel.url {
             onPick(url)
         }
@@ -669,6 +705,9 @@ private struct ProbeRow: View {
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
+        if let candidate = SteamCMDBinaryResolver.autoDetectCandidates().first {
+            panel.directoryURL = candidate.deletingLastPathComponent()
+        }
         if panel.runModal() == .OK, let url = panel.url {
             Task { try? await service.bindBinary(url) }
         }

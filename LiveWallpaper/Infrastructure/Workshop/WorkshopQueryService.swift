@@ -223,9 +223,6 @@ actor WorkshopQueryService {
         self.cache = cache
     }
 
-    /// Exposes the disk cache so Settings can read/clear it.
-    nonisolated var diskCache: WorkshopQueryCache { cache }
-
     func fetch(_ request: WorkshopQueryRequest) async throws -> WorkshopQueryPage {
         if let task = inflight[request] {
             return try await task.value
