@@ -1364,6 +1364,12 @@ struct WPEShaderTranspiler {
         out.append("inline float min(float lhs, int rhs) { return metal::min(lhs, float(rhs)); }")
         out.append("inline float max(int lhs, float rhs) { return metal::max(float(lhs), rhs); }")
         out.append("inline float max(float lhs, int rhs) { return metal::max(lhs, float(rhs)); }")
+        out.append("inline float clamp(int value, float lower, float upper) { return metal::clamp(float(value), lower, upper); }")
+        out.append("inline float clamp(float value, int lower, float upper) { return metal::clamp(value, float(lower), upper); }")
+        out.append("inline float clamp(float value, float lower, int upper) { return metal::clamp(value, lower, float(upper)); }")
+        out.append("inline float clamp(int value, int lower, float upper) { return metal::clamp(float(value), float(lower), upper); }")
+        out.append("inline float clamp(int value, float lower, int upper) { return metal::clamp(float(value), lower, float(upper)); }")
+        out.append("inline float clamp(float value, int lower, int upper) { return metal::clamp(value, float(lower), float(upper)); }")
         appendCompatibilityPrelude(to: &out, helpers: helpers)
         out.append("")
 

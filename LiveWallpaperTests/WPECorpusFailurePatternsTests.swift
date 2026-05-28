@@ -132,6 +132,30 @@ struct WPECorpusFailurePatternsTests {
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
+    @Test("GLSL-style mixed int and float clamp calls compile")
+    func mixedIntegerFloatClampCompiles() throws {
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        in vec2 v_TexCoord;
+        void main() {
+            float depth = v_TexCoord.x;
+            depth = clamp(0, 0.15, depth);
+            gl_FragColor = vec4(depth, 0.0, 0.0, 1.0);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "mixed_clamp",
+            preprocessedSource: source
+        )
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+
+        #expect(result.mslSource.contains("clamp(0, 0.15, depth)"))
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
     @Test("Float modulo assigned to uint compiles through fmod")
     func floatModuloAssignedToUnsignedIntegerCompiles() throws {
         let source = """
