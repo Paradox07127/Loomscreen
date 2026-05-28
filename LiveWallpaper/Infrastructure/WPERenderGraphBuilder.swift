@@ -75,7 +75,7 @@ struct WPERenderGraphBuilder: Sendable {
                 case .command(let command, let source, let target):
                     let virtualPass = WPEMaterialPass(
                         shader: "commands/\(command)",
-                        textures: [0: source.map { textureReference($0, ownerPath: effect.fileRelativePath) } ?? .previous],
+                        textures: [0: source ?? .previous],
                         constants: [:],
                         combos: [:],
                         blending: "normal",
@@ -207,14 +207,17 @@ struct WPERenderGraphBuilder: Sendable {
 
     private func loadEffect(path: String) throws -> WPEEffectAsset {
         let dict = try readJSONObject(path: path)
+        let fbos = ((dict["fbos"] as? [Any]) ?? []).compactMap(parseFBO)
+        let declaredFBONames = Set(fbos.map(\.name))
         guard let rawPasses = dict["passes"] as? [Any] else {
             throw WPERenderGraphError.malformedEffect(path)
         }
-        let passes = rawPasses.compactMap { parseEffectPass($0, ownerPath: path) }
+        let passes = rawPasses.compactMap {
+            parseEffectPass($0, ownerPath: path, declaredFBONames: declaredFBONames)
+        }
         guard !passes.isEmpty else {
             throw WPERenderGraphError.malformedEffect(path)
         }
-        let fbos = ((dict["fbos"] as? [Any]) ?? []).compactMap(parseFBO)
         return WPEEffectAsset(path: path, passes: passes, fbos: fbos)
     }
 
@@ -261,9 +264,17 @@ struct WPERenderGraphBuilder: Sendable {
         )
     }
 
-    private func parseEffectPass(_ raw: Any, ownerPath: String) -> WPEEffectPass? {
+    private func parseEffectPass(
+        _ raw: Any,
+        ownerPath: String,
+        declaredFBONames: Set<String>
+    ) -> WPEEffectPass? {
         guard let dict = raw as? [String: Any] else { return nil }
-        let binds = parseBinds(dict["bind"], ownerPath: ownerPath)
+        let binds = parseBinds(
+            dict["bind"],
+            ownerPath: ownerPath,
+            declaredFBONames: declaredFBONames
+        )
         let target = dict["target"] as? String
         if let material = dict["material"] as? String, !material.isEmpty {
             return WPEEffectPass(
@@ -276,7 +287,9 @@ struct WPERenderGraphBuilder: Sendable {
             return WPEEffectPass(
                 kind: .command(
                     command,
-                    source: (dict["source"] as? String).map { inheritDependencyPrefix($0, from: ownerPath) },
+                    source: (dict["source"] as? String).map {
+                        textureReference($0, ownerPath: ownerPath, declaredFBONames: declaredFBONames)
+                    },
                     target: target
                 ),
                 binds: binds,
@@ -300,7 +313,11 @@ struct WPERenderGraphBuilder: Sendable {
         )
     }
 
-    private func parseBinds(_ raw: Any?, ownerPath: String) -> [Int: WPETextureReference] {
+    private func parseBinds(
+        _ raw: Any?,
+        ownerPath: String,
+        declaredFBONames: Set<String> = []
+    ) -> [Int: WPETextureReference] {
         guard let array = raw as? [Any] else { return [:] }
         var result: [Int: WPETextureReference] = [:]
         for entry in array {
@@ -310,7 +327,7 @@ struct WPERenderGraphBuilder: Sendable {
                   !name.isEmpty else {
                 continue
             }
-            result[index] = textureReference(name, ownerPath: ownerPath)
+            result[index] = textureReference(name, ownerPath: ownerPath, declaredFBONames: declaredFBONames)
         }
         return result
     }
@@ -326,9 +343,16 @@ struct WPERenderGraphBuilder: Sendable {
         return result
     }
 
-    private func textureReference(_ name: String, ownerPath: String) -> WPETextureReference {
+    private func textureReference(
+        _ name: String,
+        ownerPath: String,
+        declaredFBONames: Set<String> = []
+    ) -> WPETextureReference {
         if name == "previous" {
             return .previous
+        }
+        if declaredFBONames.contains(name) {
+            return .fbo(name)
         }
         if name.hasPrefix("_") {
             return .fbo(name)
@@ -431,7 +455,7 @@ private struct WPEEffectPass {
 
     enum Kind {
         case material(String)
-        case command(String, source: String?, target: String?)
+        case command(String, source: WPETextureReference?, target: String?)
     }
 }
 

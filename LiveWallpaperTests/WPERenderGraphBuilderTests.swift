@@ -310,6 +310,77 @@ struct WPERenderGraphBuilderTests {
         #expect(pass.textures[2] == .fbo("_rt_FullFrameBuffer"))
     }
 
+    @Test("Effect-declared FBO refs route through .fbo even without underscore prefix")
+    func declaredEffectFBOTexturesRouteToFBO() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPERenderGraphBuilderTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        try writeJSON(["material": "materials/layer.json"], to: root.appendingPathComponent("models/layer.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "genericimage2",
+                "textures": ["layer_albedo"]
+            ]]
+        ], to: root.appendingPathComponent("materials/layer.json"))
+        try writeJSON([
+            "fbos": [[
+                "name": "blur_start_2",
+                "scale": 0.5,
+                "format": "rgba8888",
+                "unique": false
+            ]],
+            "passes": [
+                [
+                    "material": "materials/effects/write_blur.json",
+                    "target": "blur_start_2",
+                    "bind": [["index": 0, "name": "previous"]]
+                ],
+                [
+                    "material": "materials/effects/read_blur.json",
+                    "bind": [["index": 0, "name": "blur_start_2"]]
+                ]
+            ]
+        ], to: root.appendingPathComponent("effects/blur/effect.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "effects/write_blur"
+            ]]
+        ], to: root.appendingPathComponent("materials/effects/write_blur.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "effects/read_blur"
+            ]]
+        ], to: root.appendingPathComponent("materials/effects/read_blur.json"))
+
+        let scenePayload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1920, "height": 1080, "auto": true]],
+            "objects": [[
+                "id": "layer",
+                "name": "Layer",
+                "type": "image",
+                "image": "models/layer.json",
+                "effects": [[
+                    "id": 1,
+                    "file": "effects/blur/effect.json"
+                ]]
+            ]]
+        ]
+        let sceneData = try JSONSerialization.data(withJSONObject: scenePayload)
+        let document = try WPESceneDocumentParser.parse(data: sceneData)
+
+        let graph = try WPERenderGraphBuilder(cacheRootURL: root).build(document: document)
+        let layer = try #require(graph.layers.first)
+
+        #expect(layer.localFBOs == [
+            WPERenderFBO(name: "blur_start_2", scale: 0.5, format: "rgba8888", unique: false)
+        ])
+        #expect(layer.passes[1].target == .fbo(name: "blur_start_2"))
+        #expect(layer.passes[2].binds[0] == .fbo("blur_start_2"))
+    }
+
     private func writeJSON(_ object: Any, to url: URL) throws {
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(),

@@ -896,12 +896,12 @@ private extension WPEMetalRenderExecutorTests {
         #expect(pixel.a >= 250)
     }
 
-    @Test("Routes declared FBO target into a later FBO source")
+    @Test("Routes declared non-underscore FBO target into a later FBO source")
     func routesDeclaredFBOTargetIntoScene() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let executor = try WPEMetalRenderExecutor(device: device)
 
-        let fbo = WPERenderFBO(name: "_rt_CustomBuffer", scale: 1, format: "rgba8888")
+        let fbo = WPERenderFBO(name: "blur_start_2", scale: 1, format: "rgba8888")
         let writeFBO = solidPass(
             id: "layer.0",
             color: [0, 1, 0, 1],
