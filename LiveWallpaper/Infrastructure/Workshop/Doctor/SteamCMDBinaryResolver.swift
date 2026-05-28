@@ -33,11 +33,13 @@ enum SteamCMDBinaryResolver {
             URL(fileURLWithPath: "/usr/local/bin/steamcmd"),
             URL(fileURLWithPath: "/opt/local/bin/steamcmd")
         ]
-        // Common official-tarball extraction directories. Valve's docs use
-        // ~/steamcmd or ~/Steam; cover a few more plausible spots. Both the
-        // `steamcmd.sh` wrapper and the bootstrapped Mach-O are probed (the
-        // resolver follows either to the real binary).
-        for dir in ["steamcmd", "Steam", "Applications/steamcmd", "Downloads/steamcmd", "Desktop/steamcmd"] {
+        // Conventional official-tarball extraction directories (Valve's docs
+        // use ~/steamcmd or ~/Steam). Deliberately limited to non-TCC-protected
+        // spots — we never probe ~/Desktop, ~/Documents, or ~/Downloads, so
+        // auto-detect can't trip a "wants to access your … folder" prompt.
+        // Both the `steamcmd.sh` wrapper and the bootstrapped Mach-O are probed
+        // (the resolver follows either to the real binary).
+        for dir in ["steamcmd", "Steam", "Applications/steamcmd"] {
             let base = home.appendingPathComponent(dir, isDirectory: true)
             candidates.append(base.appendingPathComponent("steamcmd.sh", isDirectory: false))
             candidates.append(base.appendingPathComponent("steamcmd", isDirectory: false))
