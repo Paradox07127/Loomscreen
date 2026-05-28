@@ -446,6 +446,42 @@ struct WPECorpusFailurePatternsTests {
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
+    @Test("Chromatic aberration style vec4 UV and vector offsets compile")
+    func chromaticAberrationStyleVectorUVAndOffsetsCompile() throws {
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform float g_Time;
+        uniform float u_rOffset;
+        uniform float u_shiftSpeed;
+        uniform float u_pointerSpeed;
+        uniform vec2 g_PointerPosition;
+        varying vec4 v_TexCoord;
+        void main() {
+            vec4 scene = texture(g_Texture0, v_TexCoord);
+            vec4 timer = texture(g_Texture0, v_TexCoord);
+            float pointer = g_PointerPosition * u_pointerSpeed;
+            v_TexCoord += g_Time * u_shiftSpeed;
+            vec4 rValue = texture(g_Texture0, v_TexCoord.xy - (u_rOffset * timer + pointer));
+            vec3 finalColor = vec4(rValue.r, scene.g, timer.b, 0.1);
+            gl_FragColor = vec4(finalColor, scene.a);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "chromatic_aberration_vector_uv",
+            preprocessedSource: source
+        )
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+
+        #expect(result.mslSource.contains("g_Texture0.sample(linearSampler, v_TexCoord.xy);"))
+        #expect(result.mslSource.contains("auto pointer = g_PointerPosition * u_pointerSpeed;"))
+        #expect(result.mslSource.contains("u_rOffset * timer.xy + pointer"))
+        #expect(result.mslSource.contains("float3 finalColor = float4(rValue.r, scene.g, timer.b, 0.1).rgb;"))
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
     @Test("GLSL vector array constructors become Metal initializer lists")
     func glslVectorArrayConstructorsBecomeMetalInitializerLists() throws {
         let source = """

@@ -638,10 +638,14 @@ struct WPEShaderTranspiler {
 
         s = rewriteReservedIdentifiers(s)
         s = rewriteTextureCalls(s)
+        s = rewriteTexCoordTextureSampleUVFallback(s)
         s = rewriteTextureSampleNarrowing(s)
+        s = rewriteVector4TextureSampleLocalsInSampleCoordinates(s)
         s = rewriteUnsignedFloatModuloAssignments(s)
         s = rewriteFloatAssignmentsFromVectorExpressions(s)
+        s = rewritePointerPositionFloatAssignments(s)
         s = rewriteTextureResolutionVector2Assignments(s)
+        s = rewriteVectorConstructorNarrowing(s)
         s = rewriteTexCoordVector2Arithmetic(s)
         s = rewriteTexCoordMaskUVFallback(s)
         s = rewriteGLSLArrayConstructors(s)
@@ -673,6 +677,31 @@ struct WPEShaderTranspiler {
     /// `texture(...).r` style scalar extraction is a separate compatibility rule.
     private static func rewriteFloatAssignmentsFromVectorExpressions(_ source: String) -> String {
         let pattern = #"\bfloat\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^;\n]*(?:\.[xyzwrgba]{2,4}|float[234]\s*\()[^;\n]*);"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return source
+        }
+        var result = source
+        let matches = regex.matches(in: source, range: NSRange(source.startIndex..., in: source))
+        for match in matches.reversed() {
+            guard let fullRange = Range(match.range(at: 0), in: result),
+                  let nameRange = Range(match.range(at: 1), in: result),
+                  let rhsRange = Range(match.range(at: 2), in: result) else {
+                continue
+            }
+            let rhs = String(result[rhsRange])
+            guard !rhs.contains(".sample("), !rhs.contains("texture") else {
+                continue
+            }
+            let name = result[nameRange]
+            result.replaceSubrange(fullRange, with: "auto \(name) = \(rhs);")
+        }
+        return result
+    }
+
+    /// WPE's cursor uniform is a vec2, but several workshop shaders declare
+    /// derived pointer offsets as `float` and rely on HLSL-style inference.
+    private static func rewritePointerPositionFloatAssignments(_ source: String) -> String {
+        let pattern = #"\bfloat\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^;\n]*\bg_PointerPosition\b[^;\n]*);"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else {
             return source
         }
@@ -736,6 +765,93 @@ struct WPEShaderTranspiler {
             }
         }
         return result
+    }
+
+    /// Metal texture2d sampling requires float2 UVs. WPE often carries extra
+    /// UV data in zw and passes the full v_TexCoord vector to texture().
+    private static func rewriteTexCoordTextureSampleUVFallback(_ source: String) -> String {
+        let pattern = #"(\.sample\s*\(\s*linearSampler\s*,\s*)v_TexCoord(\s*\))"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return source
+        }
+        return regex.stringByReplacingMatches(
+            in: source,
+            range: NSRange(source.startIndex..., in: source),
+            withTemplate: "$1v_TexCoord.xy$2"
+        )
+    }
+
+    /// Texture-sample locals are float4, but WPE effects also use them as 2D
+    /// offset vectors inside later texture coordinates.
+    private static func rewriteVector4TextureSampleLocalsInSampleCoordinates(_ source: String) -> String {
+        let declarationPattern = #"\bfloat4\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*[A-Za-z_][A-Za-z0-9_]*\.sample\s*\("#
+        guard let declarationRegex = try? NSRegularExpression(pattern: declarationPattern) else {
+            return source
+        }
+        let names = declarationRegex.matches(
+            in: source,
+            range: NSRange(source.startIndex..., in: source)
+        ).compactMap { match -> String? in
+            guard let range = Range(match.range(at: 1), in: source) else {
+                return nil
+            }
+            return String(source[range])
+        }
+        guard !names.isEmpty else {
+            return source
+        }
+
+        var result = ""
+        result.reserveCapacity(source.count)
+        var index = source.startIndex
+        let needle = ".sample("
+
+        while index < source.endIndex {
+            if source[index...].hasPrefix(needle) {
+                var cursor = source.index(index, offsetBy: needle.count)
+                var depth = 1
+                var commaIndex: String.Index?
+                while cursor < source.endIndex && depth > 0 {
+                    let ch = source[cursor]
+                    if ch == "(" { depth += 1 }
+                    else if ch == ")" { depth -= 1 }
+                    else if ch == "," && depth == 1 && commaIndex == nil {
+                        commaIndex = cursor
+                    }
+                    if depth > 0 {
+                        cursor = source.index(after: cursor)
+                    }
+                }
+                if let comma = commaIndex, cursor < source.endIndex {
+                    let coordinateStart = source.index(after: comma)
+                    var coordinate = String(source[coordinateStart..<cursor])
+                    for name in names {
+                        coordinate = wordReplaceUnlessMemberAccess(coordinate, find: name, replace: "\(name).xy")
+                    }
+                    result += source[index..<coordinateStart]
+                    result += coordinate
+                    result += ")"
+                    index = source.index(after: cursor)
+                    continue
+                }
+            }
+            result.append(source[index])
+            index = source.index(after: index)
+        }
+        return result
+    }
+
+    /// Metal will not implicitly narrow a float4 constructor into float3.
+    private static func rewriteVectorConstructorNarrowing(_ source: String) -> String {
+        let pattern = #"\bfloat3\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(float4\s*\([^;\n]+\))\s*;"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return source
+        }
+        return regex.stringByReplacingMatches(
+            in: source,
+            range: NSRange(source.startIndex..., in: source),
+            withTemplate: "float3 $1 = $2.rgb;"
+        )
     }
 
     /// Rename GLSL identifiers that are legal in WPE shaders but reserved by Metal.
@@ -933,6 +1049,42 @@ struct WPEShaderTranspiler {
                 } else {
                     let n = source[afterIndex]
                     nextOK = !n.isLetter && !n.isNumber && n != "_"
+                }
+                if priorOK && nextOK {
+                    result += replace
+                    index = afterIndex
+                    continue
+                }
+            }
+            result.append(source[index])
+            index = source.index(after: index)
+        }
+        return result
+    }
+
+    /// Identifier replacement variant for expressions where an existing
+    /// swizzle/member access must be left alone.
+    private static func wordReplaceUnlessMemberAccess(_ source: String, find: String, replace: String) -> String {
+        guard !find.isEmpty else { return source }
+        var result = ""
+        result.reserveCapacity(source.count)
+        var index = source.startIndex
+        while index < source.endIndex {
+            if source[index...].hasPrefix(find) {
+                let priorOK: Bool
+                if index == source.startIndex {
+                    priorOK = true
+                } else {
+                    let p = source[source.index(before: index)]
+                    priorOK = !p.isLetter && !p.isNumber && p != "_"
+                }
+                let afterIndex = source.index(index, offsetBy: find.count)
+                let nextOK: Bool
+                if afterIndex >= source.endIndex {
+                    nextOK = true
+                } else {
+                    let n = source[afterIndex]
+                    nextOK = !n.isLetter && !n.isNumber && n != "_" && n != "."
                 }
                 if priorOK && nextOK {
                     result += replace
