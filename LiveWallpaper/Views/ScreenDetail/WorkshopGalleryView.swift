@@ -73,6 +73,9 @@ struct WorkshopGalleryView: View {
     let screen: Screen?
     private let fixedTargetScreens: [Screen]
     private let allowsTargetSelection: Bool
+    /// When `true`, the gallery suppresses its own `DetailHeaderBar` because an
+    /// outer container (e.g. `WorkshopPaneView`) already owns the page chrome.
+    private let showsHeaderOverride: Bool
 
     @Environment(\.dismiss) private var dismiss
     @Environment(ScreenManager.self) private var screenManager
@@ -99,9 +102,15 @@ struct WorkshopGalleryView: View {
 
     private let scanner = WallpaperEngineLibraryScanner()
 
-    init(screen: Screen? = nil, screens: [Screen]? = nil, allowsTargetSelection: Bool = false) {
+    init(
+        screen: Screen? = nil,
+        screens: [Screen]? = nil,
+        allowsTargetSelection: Bool = false,
+        showsHeaderOverride: Bool = false
+    ) {
         self.screen = screen
         self.allowsTargetSelection = allowsTargetSelection
+        self.showsHeaderOverride = showsHeaderOverride
         if let screens {
             fixedTargetScreens = screens
             _selectedTargetScreenID = State(initialValue: screens.first?.id)
@@ -116,7 +125,7 @@ struct WorkshopGalleryView: View {
 
     var body: some View {
         DetailPageScaffold(
-            showsHeader: hasLibraryRoot,
+            showsHeader: hasLibraryRoot && !showsHeaderOverride,
             header: { header },
             content: { content }
         )
@@ -893,7 +902,8 @@ private struct WorkshopGalleryCard: View {
         VStack(spacing: 0) {
             WPEPreviewView(
                 imageURL: project.previewURL,
-                securityScopedBookmarkData: project.libraryRootBookmarkData
+                securityScopedBookmarkData: project.libraryRootBookmarkData,
+                playbackMode: .hoverToPlay
             )
                 .overlay(alignment: .topTrailing) {
                     typeBadge

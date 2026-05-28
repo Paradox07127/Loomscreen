@@ -2,6 +2,54 @@
 import Foundation
 import Observation
 
+/// Content-type filter mapped to canonical Wallpaper Engine Workshop tags.
+enum WorkshopContentTypeFilter: String, CaseIterable, Identifiable {
+    case all
+    case scene
+    case video
+    case web
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .all: return String(localized: "All", comment: "Workshop content-type filter: no type restriction.")
+        case .scene: return String(localized: "Scene", comment: "Workshop content-type filter: scene wallpapers.")
+        case .video: return String(localized: "Video", comment: "Workshop content-type filter: video wallpapers.")
+        case .web: return String(localized: "Web", comment: "Workshop content-type filter: web/HTML wallpapers.")
+        }
+    }
+
+    var requiredTags: [String] {
+        switch self {
+        case .all: return []
+        case .scene: return ["Scene"]
+        case .video: return ["Video"]
+        case .web: return ["Web"]
+        }
+    }
+}
+
+/// Maturity filter. `.everyone` excludes Mature-tagged items (the default);
+/// `.mature` applies no exclusion.
+enum WorkshopAgeRatingFilter: String, CaseIterable, Identifiable {
+    case everyone
+    case mature
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .everyone: return String(localized: "Everyone", comment: "Workshop maturity filter: hide mature content.")
+        case .mature: return String(localized: "Mature", comment: "Workshop maturity filter: include mature content.")
+        }
+    }
+
+    var excludedTags: [String] {
+        self == .everyone ? ["Mature"] : []
+    }
+}
+
 /// Drives `WorkshopBrowseView`. Holds the request shape, accumulates pages
 /// across the cursor pagination, debounces search input, and surfaces
 /// network / API errors for inline rendering. The view-model owns no
@@ -16,6 +64,8 @@ final class WorkshopBrowseViewModel {
     /// `searchText` changes into `currentRequest` updates.
     var searchInput: String = ""
     var preferredSort: WorkshopSortMode = .topRated
+    var typeFilter: WorkshopContentTypeFilter = .all
+    var ageRating: WorkshopAgeRatingFilter = .everyone
     private(set) var currentRequest: WorkshopQueryRequest
     private(set) var items: [WorkshopQueryItem] = []
     private(set) var nextCursor: String?
@@ -23,6 +73,12 @@ final class WorkshopBrowseViewModel {
     private(set) var isLoading: Bool = false
     private(set) var isLoadingMore: Bool = false
     private(set) var lastError: WorkshopQueryError?
+    /// Set when Steam returns HTTP 429; controls stay disabled until it lapses.
+    private(set) var rateLimitUntil: Date?
+
+    var isRateLimited: Bool {
+        (rateLimitUntil ?? .distantPast) > Date()
+    }
 
     @ObservationIgnored private var debounceTask: Task<Void, Never>?
     @ObservationIgnored private var inflightFetch: Task<Void, Never>?
@@ -40,6 +96,7 @@ final class WorkshopBrowseViewModel {
     }
 
     func reload() async {
+        guard !isRateLimited else { return }
         inflightFetch?.cancel()
         debounceTask?.cancel()
         let request = makeRequest(cursor: "*")
@@ -53,13 +110,14 @@ final class WorkshopBrowseViewModel {
     }
 
     func loadMore() async {
-        guard !isLoading, !isLoadingMore, let cursor = nextCursor, !cursor.isEmpty, cursor != "*" else { return }
+        guard !isRateLimited, !isLoading, !isLoadingMore, let cursor = nextCursor, !cursor.isEmpty, cursor != "*" else { return }
         let request = makeRequest(cursor: cursor)
         isLoadingMore = true
         await runFetch(request, append: true)
     }
 
     func updateSearch(_ text: String) {
+        guard !isRateLimited else { return }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         searchInput = text
         debounceTask?.cancel()
@@ -73,8 +131,20 @@ final class WorkshopBrowseViewModel {
     }
 
     func updateSort(_ sort: WorkshopSortMode) {
-        guard sort != preferredSort else { return }
+        guard !isRateLimited, sort != preferredSort else { return }
         preferredSort = sort
+        Task { await reload() }
+    }
+
+    func updateType(_ type: WorkshopContentTypeFilter) {
+        guard !isRateLimited, type != typeFilter else { return }
+        typeFilter = type
+        Task { await reload() }
+    }
+
+    func updateAgeRating(_ rating: WorkshopAgeRatingFilter) {
+        guard !isRateLimited, rating != ageRating else { return }
+        ageRating = rating
         Task { await reload() }
     }
 
@@ -96,9 +166,13 @@ final class WorkshopBrowseViewModel {
                 self.nextCursor = page.nextCursor
                 self.totalAvailable = page.totalAvailable
                 self.lastError = nil
+                self.rateLimitUntil = nil
             } catch let error as WorkshopQueryError {
                 guard token == self.currentRequestToken else { return }
                 self.lastError = error
+                if case .rateLimited(let retryAfter) = error {
+                    self.rateLimitUntil = Date().addingTimeInterval(retryAfter ?? 60)
+                }
             } catch is CancellationError {
                 // ignore — user-triggered reload
             } catch {
@@ -122,7 +196,9 @@ final class WorkshopBrowseViewModel {
             sort: preferredSort,
             searchText: trimmed,
             cursor: cursor,
-            numPerPage: 50
+            numPerPage: 50,
+            requiredTags: typeFilter.requiredTags,
+            excludedTags: ageRating.excludedTags
         )
     }
 }

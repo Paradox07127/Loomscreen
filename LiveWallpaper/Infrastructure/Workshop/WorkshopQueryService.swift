@@ -209,7 +209,7 @@ actor WorkshopQueryService {
     private let cache: WorkshopQueryCache
     private let logger = os.Logger(subsystem: "com.loomscreen.livewallpaper", category: "WorkshopQuery")
 
-    private var inflight: [WorkshopQueryRequest: Task<WorkshopQueryPage, Error>] = [:]
+    private var inflight: [String: Task<WorkshopQueryPage, Error>] = [:]
     private var tokenBucket = tokenCapacity
     private var tokenRefilledAt = Date()
 
@@ -224,20 +224,24 @@ actor WorkshopQueryService {
     }
 
     func fetch(_ request: WorkshopQueryRequest) async throws -> WorkshopQueryPage {
-        if let task = inflight[request] {
+        // Load the key up front so both the cache and the in-flight map are
+        // namespaced by it — a key swap mid-flight can't coalesce onto, or
+        // serve, a prior account's results.
+        let apiKey = try await loadAPIKey()
+        let cacheKey = Self.namespacedCacheKey(WorkshopQueryCacheKey.canonical(request), apiKey: apiKey)
+        if let task = inflight[cacheKey] {
             return try await task.value
         }
-        let cacheKey = WorkshopQueryCacheKey.canonical(request)
         let task = Task { [self] in
-            try await fetchFromCacheOrNetwork(request, cacheKey: cacheKey)
+            try await fetchFromCacheOrNetwork(request, cacheKey: cacheKey, apiKey: apiKey)
         }
-        inflight[request] = task
+        inflight[cacheKey] = task
         do {
             let page = try await task.value
-            inflight[request] = nil
+            inflight[cacheKey] = nil
             return page
         } catch {
-            inflight[request] = nil
+            inflight[cacheKey] = nil
             throw error
         }
     }
@@ -284,24 +288,34 @@ actor WorkshopQueryService {
         }
     }
 
-    private func fetchFromCacheOrNetwork(_ request: WorkshopQueryRequest, cacheKey: String) async throws -> WorkshopQueryPage {
-        if let cached = await cache.read(forKey: cacheKey) {
-            return cached
-        }
-        let apiKey: String
+    private func loadAPIKey() async throws -> String {
         do {
             guard let storedKey = try await keychain.loadWebAPIKey() else {
                 throw WorkshopQueryError.missingAPIKey
             }
-            apiKey = storedKey
+            return storedKey
         } catch let error as WorkshopQueryError {
             throw error
         } catch {
             throw WorkshopQueryError.missingAPIKey
         }
+    }
+
+    private func fetchFromCacheOrNetwork(_ request: WorkshopQueryRequest, cacheKey: String, apiKey: String) async throws -> WorkshopQueryPage {
+        if let cached = await cache.read(forKey: cacheKey) {
+            return cached
+        }
         let page = try await performQuery(request, apiKey: apiKey)
         await cache.write(page, forKey: cacheKey)
         return page
+    }
+
+    /// Prefixes the canonical request key with a short hash of the API key so
+    /// cache entries are isolated per Steam account.
+    private static func namespacedCacheKey(_ base: String, apiKey: String) -> String {
+        let namespace = SHA256.hash(data: Data(apiKey.utf8)).prefix(8)
+            .map { String(format: "%02x", $0) }.joined()
+        return "\(namespace)-\(base)"
     }
 
     private func performQuery(_ request: WorkshopQueryRequest, apiKey: String) async throws -> WorkshopQueryPage {

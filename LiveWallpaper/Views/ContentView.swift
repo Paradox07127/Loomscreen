@@ -23,14 +23,6 @@ struct ContentView: View {
     /// value — without this, a stale `.developerTools` selection could
     /// mount the detail view even with the toggle off.
     @State private var developerModeEnabled: Bool = ContentView.loadDeveloperModeEnabled()
-    /// Drives the modal Steam Workshop paste sheet. Gated by
-    /// `.workshopOnline` capability — only present in direct-distribution
-    /// Pro builds.
-    #if !LITE_BUILD && DIRECT_DISTRIBUTION
-    @State private var isPresentingWorkshopPasteSheet: Bool = false
-    @State private var isPresentingWorkshopOnboarding: Bool = false
-    @AppStorage("loomscreen.workshop.onboarding.shown.v1") private var workshopOnboardingShown: Bool = false
-    #endif
     private let initialAddWallpaperPromptKind: String?
 
     init(initialNavigation: Navigation? = nil, initialAddWallpaperPromptKind: String? = nil) {
@@ -69,16 +61,6 @@ struct ContentView: View {
             minWidth: SettingsWindowMetrics.minimumContentSize.width,
             minHeight: SettingsWindowMetrics.minimumContentSize.height
         )
-        #if !LITE_BUILD && DIRECT_DISTRIBUTION
-        .sheet(isPresented: $isPresentingWorkshopPasteSheet) {
-            WorkshopPasteSheet()
-        }
-        .sheet(isPresented: $isPresentingWorkshopOnboarding) {
-            WorkshopOnboardingSheet {
-                isPresentingWorkshopPasteSheet = true
-            }
-        }
-        #endif
         .onReceive(NotificationCenter.default.publisher(for: .openGeneralSettings)) { _ in
             scheduleNavigationChange { selectedNavigation = .general }
         }
@@ -101,20 +83,6 @@ struct ContentView: View {
     /// in direct-distribution Pro, the Workshop entry button.
     @ViewBuilder
     private var sidebar: some View {
-        #if !LITE_BUILD && DIRECT_DISTRIBUTION
-        Sidebar(
-            selection: $selectedNavigation,
-            developerModeEnabled: developerModeEnabled,
-            onPresentWorkshopPasteSheet: { presentWorkshopPasteSheet() }
-        )
-        .onReceive(NotificationCenter.default.publisher(for: .selectScreenInSettings)) { notification in
-            guard let screenID = notification.userInfo?["screenID"] as? CGDirectDisplayID else { return }
-            scheduleNavigationChange { selectedNavigation = .screen(screenID) }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .promptAddWallpaper)) { notification in
-            handleAddWallpaperPrompt(notification: notification)
-        }
-        #else
         Sidebar(
             selection: $selectedNavigation,
             developerModeEnabled: developerModeEnabled
@@ -126,18 +94,7 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .promptAddWallpaper)) { notification in
             handleAddWallpaperPrompt(notification: notification)
         }
-        #endif
     }
-
-    #if !LITE_BUILD && DIRECT_DISTRIBUTION
-    private func presentWorkshopPasteSheet() {
-        if workshopOnboardingShown {
-            isPresentingWorkshopPasteSheet = true
-        } else {
-            isPresentingWorkshopOnboarding = true
-        }
-    }
-    #endif
 
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
@@ -367,13 +324,6 @@ struct Sidebar: View {
     /// Owned by `ContentView` so the sidebar entry stays in lock-step
     /// with `DetailContent`'s runtime gate.
     let developerModeEnabled: Bool
-    /// Closure invoked when the user taps "Steam Workshop" in the sidebar
-    /// Library section. Only used in direct-distribution Pro builds — the
-    /// raw enum case is omitted from `ProductFeature` in MAS / Lite so the
-    /// row never renders there and the closure stays unreferenced.
-    #if !LITE_BUILD && DIRECT_DISTRIBUTION
-    var onPresentWorkshopPasteSheet: () -> Void = {}
-    #endif
     @Environment(ScreenManager.self) private var screenManager
     @Environment(\.featureCatalog) private var featureCatalog
 
@@ -410,18 +360,12 @@ struct Sidebar: View {
                 NavigationLink(value: Navigation.appleAerials) {
                     Label("Apple Aerials", systemImage: "sparkles.tv")
                 }
-                if featureCatalog.isEnabled(.wpeImport) {
-                    NavigationLink(value: Navigation.workshop) {
-                        Label("Workshop Library", systemImage: "cube.transparent")
-                    }
-                    .accessibilityHint(Text("Browse copied local projects in the Workshop Library"))
-                }
-
                 #if !LITE_BUILD && DIRECT_DISTRIBUTION
+                // Direct-distribution Pro: one row landing in the tabbed pane
+                // (Installed default + Browse Online). Paste-by-URL moves to a
+                // "+" action inside the pane.
                 if featureCatalog.isEnabled(.workshopOnline) {
-                    Button {
-                        onPresentWorkshopPasteSheet()
-                    } label: {
+                    NavigationLink(value: Navigation.workshop) {
                         HStack {
                             Label("Steam Workshop", systemImage: "cube.transparent.fill")
                             Spacer()
@@ -429,9 +373,20 @@ struct Sidebar: View {
                         }
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
                     .accessibilityLabel(Text("Steam Workshop"))
-                    .accessibilityHint(Text("Paste Workshop URLs to fetch official previews and open items in Steam."))
+                    .accessibilityHint(Text("Browse installed and online Workshop wallpapers"))
+                } else if featureCatalog.isEnabled(.wpeImport) {
+                    NavigationLink(value: Navigation.workshop) {
+                        Label("Workshop Library", systemImage: "cube.transparent")
+                    }
+                    .accessibilityHint(Text("Browse copied local projects in the Workshop Library"))
+                }
+                #else
+                if featureCatalog.isEnabled(.wpeImport) {
+                    NavigationLink(value: Navigation.workshop) {
+                        Label("Workshop Library", systemImage: "cube.transparent")
+                    }
+                    .accessibilityHint(Text("Browse copied local projects in the Workshop Library"))
                 }
                 #endif
 
@@ -634,6 +589,7 @@ struct DetailContent: View {
     /// can't bring the diagnostic surface back without the toggle.
     let canShowDeveloperTools: Bool
     @Environment(ScreenManager.self) private var screenManager
+    @Environment(\.featureCatalog) private var featureCatalog
 
     var body: some View {
         Group {
@@ -658,7 +614,13 @@ struct DetailContent: View {
                 BookmarksLibraryView()
 
             case .workshop:
-                #if !LITE_BUILD
+                #if !LITE_BUILD && DIRECT_DISTRIBUTION
+                if featureCatalog.isEnabled(.workshopOnline) {
+                    WorkshopPaneView(allowsTargetSelection: true)
+                } else {
+                    WorkshopGalleryView(allowsTargetSelection: true)
+                }
+                #elseif !LITE_BUILD
                 WorkshopGalleryView(allowsTargetSelection: true)
                 #else
                 EmptyView()

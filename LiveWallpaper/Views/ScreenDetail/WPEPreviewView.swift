@@ -3,23 +3,44 @@ import SwiftUI
 import AppKit
 import ImageIO
 
-/// Square (1:1) preview tile for a Wallpaper Engine project.
-///
-/// Renders into a CALayer with `contentsGravity = .resizeAspectFill` so
-/// previews of any source aspect (square — WPE editor's 512×512 default,
-/// 16:9 wallpapers, 9:16 vertical, etc.) fill the slot without dead bars.
-/// GIF animation is preserved by stepping `CGImageSource` frames manually
-/// (NSImageView's built-in `.animates` cannot pair with `.aspectFill`).
+/// Whether the preview auto-plays or only plays while hovered. `.autoPlay` is
+/// the back-compatible default; grid / list call sites pass `.hoverToPlay`.
+enum WPEPreviewPlaybackMode {
+    case autoPlay
+    case hoverToPlay
+}
+
+/// Square (1:1) aspect-fill preview tile for a Wallpaper Engine project.
+/// CALayer-backed with manual `CGImageSource` frame stepping — NSImageView
+/// can't pair its built-in `.animates` with aspect-fill scaling.
 struct WPEPreviewView: View {
     let imageURL: URL?
     let securityScopedBookmarkData: Data?
+    let playbackMode: WPEPreviewPlaybackMode
 
     @State private var loadAttempt: Int = 0
     @State private var loadFailed: Bool = false
+    @State private var isHovering: Bool = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    init(imageURL: URL?, securityScopedBookmarkData: Data? = nil) {
+    init(
+        imageURL: URL?,
+        securityScopedBookmarkData: Data? = nil,
+        playbackMode: WPEPreviewPlaybackMode = .autoPlay
+    ) {
         self.imageURL = imageURL
         self.securityScopedBookmarkData = securityScopedBookmarkData
+        self.playbackMode = playbackMode
+    }
+
+    /// In `.autoPlay` the animation always runs; in `.hoverToPlay` it runs only
+    /// while hovered. Reduce Motion forces the poster frame in every mode.
+    private var shouldAnimate: Bool {
+        guard !reduceMotion else { return false }
+        switch playbackMode {
+        case .autoPlay: return true
+        case .hoverToPlay: return isHovering
+        }
     }
 
     var body: some View {
@@ -34,6 +55,7 @@ struct WPEPreviewView: View {
                     imageURL: imageURL,
                     securityScopedBookmarkData: securityScopedBookmarkData,
                     loadAttempt: loadAttempt,
+                    shouldAnimate: shouldAnimate,
                     onLoadResult: { success in
                         loadFailed = !success
                     }
@@ -43,6 +65,9 @@ struct WPEPreviewView: View {
         }
         .aspectRatio(1, contentMode: .fit)
         .clipped()
+        .onHover { hovering in
+            if playbackMode == .hoverToPlay { isHovering = hovering }
+        }
         .overlay(alignment: .bottomTrailing) {
             if loadFailed {
                 retryBadge
@@ -119,6 +144,7 @@ private struct AspectFillImage: NSViewRepresentable {
     let imageURL: URL?
     let securityScopedBookmarkData: Data?
     let loadAttempt: Int
+    let shouldAnimate: Bool
     let onLoadResult: (Bool) -> Void
 
     func makeNSView(context: Context) -> AspectFillAnimatedImageView {
@@ -130,6 +156,10 @@ private struct AspectFillImage: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: AspectFillAnimatedImageView, context: Context) {
+        // Apply the desired playback state every pass so a hover toggle alone
+        // (with an unchanged URL) starts / freezes the animation.
+        nsView.setAnimating(shouldAnimate)
+
         guard let url = imageURL else {
             context.coordinator.cancelInflight()
             context.coordinator.reset()
@@ -225,6 +255,10 @@ private final class AspectFillAnimatedImageView: NSView {
     private var currentFrameIndex: Int = 0
     private var frameDelays: [TimeInterval] = []
     private var animationTimer: Timer?
+    /// Whether playback is currently desired. Toggled by `setAnimating` so a
+    /// hover-driven host can freeze the loop on the poster frame without
+    /// reloading the image. Defaults to `true` for auto-play callers.
+    private var wantsAnimation = true
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -277,9 +311,33 @@ private final class AspectFillAnimatedImageView: NSView {
 
         if count > 1 {
             frameDelays = Self.readFrameDelays(from: source, frameCount: count)
-            scheduleNextFrame()
+            if wantsAnimation { scheduleNextFrame() }
         }
         return true
+    }
+
+    /// Starts or freezes playback without reloading the image. Freezing
+    /// restores the poster (frame 0) so a hovered-out tile reads as static.
+    func setAnimating(_ animate: Bool) {
+        guard wantsAnimation != animate else {
+            // Already in the requested state — but recover if a multi-frame
+            // image was installed while frozen and now wants to animate.
+            if animate, frameCount > 1, animationTimer == nil { scheduleNextFrame() }
+            return
+        }
+        wantsAnimation = animate
+        if animate {
+            if frameCount > 1, animationTimer == nil { scheduleNextFrame() }
+        } else {
+            animationTimer?.invalidate()
+            animationTimer = nil
+            if frameCount > 1, currentFrameIndex != 0,
+               let source = imageSource,
+               let poster = CGImageSourceCreateImageAtIndex(source, 0, nil) {
+                currentFrameIndex = 0
+                layer?.contents = poster
+            }
+        }
     }
 
     func clearImage() {
@@ -293,7 +351,7 @@ private final class AspectFillAnimatedImageView: NSView {
     }
 
     private func scheduleNextFrame() {
-        guard frameCount > 1, imageSource != nil else { return }
+        guard wantsAnimation, frameCount > 1, imageSource != nil else { return }
         let delay = frameDelays.indices.contains(currentFrameIndex)
             ? frameDelays[currentFrameIndex]
             : 0.1

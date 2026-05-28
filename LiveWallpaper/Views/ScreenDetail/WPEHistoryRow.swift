@@ -19,7 +19,8 @@ struct WPEHistoryRow: View {
             VStack(spacing: 0) {
                 WPEPreviewView(
                     imageURL: previewURL,
-                    securityScopedBookmarkData: entry.origin.sourceFolderBookmark
+                    securityScopedBookmarkData: entry.origin.sourceFolderBookmark,
+                    playbackMode: .hoverToPlay
                 )
                     .overlay(alignment: .topTrailing) {
                         if let badge = compatibilityBadge {

@@ -2,29 +2,22 @@
 import AppKit
 import Foundation
 
-/// Fetches Workshop preview images under the same allow-list invariants the
-/// metadata service applies to the canonical URL. The shipping
-/// `SwiftUI.AsyncImage` cannot satisfy the plan's CDN policy because it
-/// follows 3xx redirects without re-running the host allow-list, has no
-/// `image/*` content-type check, has no byte cap, and reuses the system
-/// cookie store.
-///
-/// Cache lives in-memory for the app's lifetime; URLs are immutable Steam
-/// CDN assets so a small cap is enough. Disk caching is intentionally out of
-/// scope for v1.
+/// Fetches Workshop preview images under the metadata service's CDN allow-list
+/// invariants. Unlike `SwiftUI.AsyncImage`, it re-runs the host allow-list on
+/// every redirect, requires an `image/*` content type, caps the transfer at
+/// 8 MiB, and uses an ephemeral cookieless session. The in-memory cache lives
+/// for the app's lifetime (Steam CDN assets are immutable).
 @MainActor
 final class WorkshopPreviewImageLoader {
 
     static let shared = WorkshopPreviewImageLoader()
 
-    /// Plan-specified cap (Phase 1 / Phase 5 "Cap downloaded preview byte
-    /// size at 8 MiB; cancel and discard if exceeded").
-    static let maxBytes = 8 * 1024 * 1024
+    nonisolated static let maxBytes = 8 * 1024 * 1024
 
     private var cache: [URL: NSImage] = [:]
-    private var inflight: [URL: Task<NSImage?, Never>] = [:]
+    private var assetCache: [URL: WorkshopPreviewAsset] = [:]
+    private var assetInflight: [URL: Task<WorkshopPreviewAsset?, Never>] = [:]
     private let session: URLSession
-    private let delegate: RedirectGuardDelegate
 
     init() {
         let config = URLSessionConfiguration.ephemeral
@@ -34,9 +27,8 @@ final class WorkshopPreviewImageLoader {
         config.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         config.timeoutIntervalForRequest = 10
         config.timeoutIntervalForResource = 30
-        let delegate = RedirectGuardDelegate()
-        self.delegate = delegate
-        self.session = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
+        // `URLSession` retains its delegate, so no stored reference is needed.
+        self.session = URLSession(configuration: config, delegate: RedirectGuardDelegate(), delegateQueue: nil)
     }
 
     /// Returns the cached image, or kicks off (and awaits) a fetch.
@@ -44,47 +36,84 @@ final class WorkshopPreviewImageLoader {
     /// callers fall back to a placeholder.
     func load(_ url: URL) async -> NSImage? {
         if let cached = cache[url] { return cached }
-        if let task = inflight[url] { return await task.value }
+        // Route through `loadAsset` so the poster goes through the same byte /
+        // frame-count / decoded-pixel caps (paste-flow thumbnails included).
+        guard let asset = await loadAsset(url) else { return nil }
+        let image = Self.nsImage(from: asset.posterFrame)
+        cache[url] = image
+        return image
+    }
+
+    /// Like `load`, but returns a decoded preview asset that distinguishes a
+    /// still image from a bounded animation so callers can drive frame-stepped
+    /// (hover-to-play) playback. Shares the same allow-list / content-type /
+    /// byte-cap fetch path as `load`.
+    func loadAsset(_ url: URL) async -> WorkshopPreviewAsset? {
+        if let cached = assetCache[url] { return cached }
+        if let task = assetInflight[url] { return await task.value }
         let task = Task { @MainActor [weak self] in
-            await self?.performLoad(url)
+            await self?.performAssetLoad(url)
         }
-        inflight[url] = task
+        assetInflight[url] = task
         let result = await task.value
-        inflight.removeValue(forKey: url)
+        assetInflight.removeValue(forKey: url)
         if let result {
-            cache[url] = result
+            assetCache[url] = result
         }
         return result
     }
 
-    private func performLoad(_ url: URL) async -> NSImage? {
-        // Initial URL is filtered by `SteamWorkshopMetadataService` before
-        // we ever see it — re-run anyway as a defense in depth.
-        if case .rejected = WorkshopCDNHostAllowList.evaluate(url.absoluteString) {
+    private static func nsImage(from image: CGImage) -> NSImage {
+        NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
+    }
+
+    private func performAssetLoad(_ url: URL) async -> WorkshopPreviewAsset? {
+        let session = session
+        guard let data = await Self.fetchData(url, session: session) else { return nil }
+        // Decode off the main actor — the CGImageSource work is CPU-bound.
+        return await Task.detached(priority: .userInitiated) {
+            WorkshopAnimatedGIF.make(from: data)
+        }.value
+    }
+
+    /// Streams the body so an oversized response is aborted mid-flight rather
+    /// than buffered whole. Re-runs the allow-list (defense in depth), follows
+    /// it to the canonical URL, and requires a 200 + `image/*` content type.
+    private nonisolated static func fetchData(_ url: URL, session: URLSession) async -> Data? {
+        guard case .allowed(let canonicalURL) = WorkshopCDNHostAllowList.evaluate(url.absoluteString) else {
             return nil
         }
-        var request = URLRequest(url: url)
+        var request = URLRequest(url: canonicalURL)
         request.setValue("image/*", forHTTPHeaderField: "Accept")
         request.timeoutInterval = 30
 
-        let data: Data
+        let bytes: URLSession.AsyncBytes
         let response: URLResponse
         do {
-            (data, response) = try await session.data(for: request)
+            (bytes, response) = try await session.bytes(for: request)
         } catch {
             return nil
         }
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200,
+              let mime = http.value(forHTTPHeaderField: "Content-Type")?.lowercased(),
+              mime.hasPrefix("image/"),
+              http.expectedContentLength <= Int64(maxBytes) else {
             return nil
         }
-        if let mime = http.value(forHTTPHeaderField: "Content-Type")?.lowercased(),
-           !mime.hasPrefix("image/") {
+
+        var data = Data()
+        if http.expectedContentLength > 0 {
+            data.reserveCapacity(Int(http.expectedContentLength))
+        }
+        do {
+            for try await byte in bytes {
+                data.append(byte)
+                if data.count > maxBytes { return nil }
+            }
+        } catch {
             return nil
         }
-        guard data.count <= Self.maxBytes else {
-            return nil
-        }
-        return NSImage(data: data)
+        return data
     }
 }
 
