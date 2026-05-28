@@ -19,6 +19,20 @@
 	<array>
 		<string>com.apple.audioanalyticsd</string>
 	</array>
+	<!--
+	    Read-only access to the package-manager prefixes so the sandboxed app
+	    (and the SteamCMD child it spawns) can locate + load a Homebrew/MacPorts
+	    SteamCMD install and its sibling dylibs, which live outside the sandbox
+	    container. Read-only and scoped to tooling directories; downloads/cache
+	    still go to user-granted or container-local locations. Direct-distribution
+	    only (these exceptions are not accepted on the Mac App Store).
+	-->
+	<key>com.apple.security.temporary-exception.files.absolute-path.read-only</key>
+	<array>
+		<string>/opt/homebrew/</string>
+		<string>/usr/local/</string>
+		<string>/opt/local/</string>
+	</array>
 	<key>com.apple.security.files.bookmarks.app-scope</key>
 	<true/>
 	<key>com.apple.security.files.user-selected.read-write</key>

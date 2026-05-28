@@ -479,6 +479,15 @@ final class SteamCMDDoctorService {
                 return
             }
 
+            // If the identity probe already launched SteamCMD, Gatekeeper isn't
+            // blocking it. Skip the heavier `+login anonymous` re-launch, which
+            // can fail for sandbox-specific reasons (its network/session writes)
+            // even though the binary launches fine.
+            if isGreen(.binaryIdentity) {
+                setProbe(.gatekeeperQuarantine, status: .green(detail: "SteamCMD launches without Gatekeeper interference."))
+                return
+            }
+
             let didStart = binary.startAccessingSecurityScopedResource()
             defer { if didStart { binary.stopAccessingSecurityScopedResource() } }
             let result = await runner.run(
@@ -908,7 +917,12 @@ final class SteamCMDDoctorService {
     }
 
     private func signInCommand(binary: URL, username: String) -> String {
-        command(binary: binary, args: ["+login", username])
+        // Sandboxed: SteamCMD caches its session under $HOME/Library/Application
+        // Support/Steam, and the app's $HOME is its sandbox container (not the
+        // real home). Pin the Terminal sign-in to that same container HOME so
+        // the cached login the user creates is the one the app reads back.
+        let containerHome = NSHomeDirectory()
+        return "HOME=\(Self.shellEscaped(containerHome)) " + command(binary: binary, args: ["+login", username])
     }
 
     private func xattrCommand(for binary: URL) -> String {
