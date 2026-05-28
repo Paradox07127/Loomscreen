@@ -644,6 +644,7 @@ struct WPEShaderTranspiler {
         s = rewriteTexCoordTextureSampleUVFallback(s)
         s = rewriteTextureSampleNarrowing(s)
         s = rewriteVector4TextureSampleLocalsInSampleCoordinates(s)
+        s = rewriteSwizzledMixAssignments(s)
         s = rewriteUnsignedFloatModuloAssignments(s)
         s = rewriteFloatAssignmentsFromVectorExpressions(s)
         s = rewritePointerPositionFloatAssignments(s)
@@ -720,6 +721,9 @@ struct WPEShaderTranspiler {
     }
 
     private static func programScopeInitializerNeedsExpansion(_ rhs: String) -> Bool {
+        if rhs.range(of: #"\b[ug]_[A-Za-z0-9_]*\b"#, options: .regularExpression) != nil {
+            return true
+        }
         let functionNames = [
             "abs", "acos", "asin", "atan", "ceil", "clamp", "cos", "cross", "distance",
             "dot", "exp", "floor", "fract", "length", "log", "max", "min", "mix",
@@ -932,6 +936,7 @@ struct WPEShaderTranspiler {
     private static func rewriteReservedIdentifiers(_ source: String) -> String {
         var result = wordReplace(source, find: "kernel", replace: "kernelValues")
         result = wordReplace(result, find: "or", replace: "orValue")
+        result = wordReplace(result, find: "fragment", replace: "fragmentValue")
         return result
     }
 
@@ -968,6 +973,20 @@ struct WPEShaderTranspiler {
             result.replaceSubrange(fullRange, with: "\(type) \(name) = \(rhs)\(swizzle);")
         }
         return result
+    }
+
+    /// GLSL permits `color.rgb = mix(color, replacementRgb, mask)`, relying on
+    /// assignment narrowing. Metal requires the mixed vector widths to match.
+    private static func rewriteSwizzledMixAssignments(_ source: String) -> String {
+        let pattern = #"\b([A-Za-z_][A-Za-z0-9_]*)\.(rgb|xyz|rg|xy)\s*=\s*mix\s*\(\s*\1\s*,"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return source
+        }
+        return regex.stringByReplacingMatches(
+            in: source,
+            range: NSRange(source.startIndex..., in: source),
+            withTemplate: "$1.$2 = mix($1.$2,"
+        )
     }
 
     /// WPE workshop shaders often declare v_TexCoord as vec3 while using it as

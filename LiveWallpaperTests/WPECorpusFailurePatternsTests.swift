@@ -421,6 +421,83 @@ struct WPECorpusFailurePatternsTests {
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
+    @Test("Metal reserved helper parameter identifiers from WPE shaders are renamed")
+    func reservedHelperParameterIdentifiersCompile() throws {
+        let source = """
+        #version 410 core
+        varying vec2 v_TexCoord;
+        vec3 illuminate(vec2 fragment) {
+            return vec3(fragment.x, fragment.y, 0.0);
+        }
+        void main() {
+            vec2 fragment = v_TexCoord - vec2(0.5);
+            gl_FragColor = vec4(illuminate(fragment), 1.0);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "reserved_fragment_helper_parameter",
+            preprocessedSource: source
+        )
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+
+        #expect(result.mslSource.contains("float3 illuminate(float2 fragmentValue)"))
+        #expect(result.mslSource.contains("float2 fragmentValue = v_TexCoord.xy - float2(0.5);"))
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("GLSL mix assigned to rgb swizzle narrows the base color argument")
+    func mixAssignedToRGBSwizzleNarrowsBaseColorArgument() throws {
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform sampler2D g_Texture1;
+        varying vec2 v_TexCoord;
+        void main() {
+            vec4 albedo = texture(g_Texture0, v_TexCoord);
+            float mask = texture(g_Texture1, v_TexCoord).r;
+            vec3 newAlbedo = albedo.rgb * 0.5;
+            albedo.rgb = mix(albedo, newAlbedo, mask);
+            gl_FragColor = albedo;
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "hue_shift_rgb_mix_narrowing",
+            preprocessedSource: source
+        )
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+
+        #expect(result.mslSource.contains("albedo.rgb = mix(albedo.rgb, newAlbedo, mask);"))
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("Program-scope constants referencing uniforms expand inside fragment scope")
+    func programScopeConstantsReferencingUniformsExpandInsideFragmentScope() throws {
+        let source = """
+        #version 410 core
+        uniform float u_Feather;
+        const float FEATHER = u_Feather * 0.5;
+        void main() {
+            float mask = smoothstep(0.0 - FEATHER, 0.0 + FEATHER, 0.1);
+            gl_FragColor = vec4(vec3(mask), 1.0);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "uniform_backed_program_scope_const",
+            preprocessedSource: source
+        )
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+
+        #expect(result.mslSource.contains("#define FEATHER (u_Feather * 0.5)"))
+        #expect(!result.mslSource.contains("constant float FEATHER = u_Feather"))
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
     @Test("Texture resolution vec4 uniforms narrow to xy in vec2 compound assignments")
     func textureResolutionNarrowsInVector2CompoundAssignments() throws {
         let source = """
