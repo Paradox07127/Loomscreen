@@ -592,7 +592,7 @@ struct WPEShaderTranspiler {
         guard let openBrace = source.range(of: "{") else { return "" }
         guard let closeBrace = source.range(of: "}", options: .backwards) else { return "" }
         var inner = String(source[openBrace.upperBound..<closeBrace.lowerBound])
-        inner = applySubstitutions(inner)
+        inner = applySubstitutions(inner, rewriteProgramScopeConsts: false)
 
         let usesGLOut = inner.contains("gl_FragColor")
         let usesWPEOut = inner.contains("wpe_fragColor")
@@ -619,7 +619,7 @@ struct WPEShaderTranspiler {
     // MARK: - Type / intrinsic substitutions
 
     /// Apply token-level substitutions for the GLSL→MSL gap.
-    private static func applySubstitutions(_ source: String) -> String {
+    private static func applySubstitutions(_ source: String, rewriteProgramScopeConsts: Bool = true) -> String {
         var s = source
 
         for (glsl, msl) in [
@@ -636,6 +636,9 @@ struct WPEShaderTranspiler {
         s = wordReplace(s, find: "atan2", replace: "atan2")
         s = wordReplace(s, find: "lerp", replace: "mix")
 
+        if rewriteProgramScopeConsts {
+            s = rewriteProgramScopeConstDeclarations(s)
+        }
         s = rewriteReservedIdentifiers(s)
         s = rewriteTextureCalls(s)
         s = rewriteTexCoordTextureSampleUVFallback(s)
@@ -655,6 +658,77 @@ struct WPEShaderTranspiler {
         s = stripInParameterQualifier(s)
 
         return s
+    }
+
+    /// Metal requires program-scope variables to live in the constant address
+    /// space, while computed initializers must avoid global constructors.
+    private static func rewriteProgramScopeConstDeclarations(_ source: String) -> String {
+        var result = ""
+        result.reserveCapacity(source.count)
+        var depth = 0
+        var lineStart = source.startIndex
+
+        while lineStart < source.endIndex {
+            let lineEnd = source[lineStart...].firstIndex(of: "\n") ?? source.endIndex
+            var line = String(source[lineStart..<lineEnd])
+            if depth == 0 {
+                line = rewriteProgramScopeConstLine(line)
+            }
+            result += line
+            if lineEnd < source.endIndex {
+                result.append("\n")
+            }
+
+            for ch in line {
+                if ch == "{" {
+                    depth += 1
+                } else if ch == "}" {
+                    depth = max(0, depth - 1)
+                }
+            }
+
+            guard lineEnd < source.endIndex else { break }
+            lineStart = source.index(after: lineEnd)
+        }
+
+        return result
+    }
+
+    private static func rewriteProgramScopeConstLine(_ line: String) -> String {
+        let typePattern = #"(?:float|half|int|uint|bool)(?:[234](?:x[234])?)?"#
+        let declarationPattern = #"^(\s*)const\s+(\#(typePattern))\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+);\s*$"#
+        if let regex = try? NSRegularExpression(pattern: declarationPattern),
+           let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+           let indentRange = Range(match.range(at: 1), in: line),
+           let nameRange = Range(match.range(at: 3), in: line),
+           let rhsRange = Range(match.range(at: 4), in: line) {
+            let rhs = String(line[rhsRange])
+            if programScopeInitializerNeedsExpansion(rhs) {
+                return "\(line[indentRange])#define \(line[nameRange]) (\(rhs))"
+            }
+        }
+
+        let pattern = #"^(\s*)const\s+(\#(typePattern))\b"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return line
+        }
+        return regex.stringByReplacingMatches(
+            in: line,
+            range: NSRange(line.startIndex..., in: line),
+            withTemplate: "$1constant $2"
+        )
+    }
+
+    private static func programScopeInitializerNeedsExpansion(_ rhs: String) -> Bool {
+        let functionNames = [
+            "abs", "acos", "asin", "atan", "ceil", "clamp", "cos", "cross", "distance",
+            "dot", "exp", "floor", "fract", "length", "log", "max", "min", "mix",
+            "normalize", "pow", "reflect", "refract", "round", "sign", "sin", "smoothstep",
+            "sqrt", "step", "tan"
+        ]
+        let joined = functionNames.joined(separator: "|")
+        let pattern = #"(?<![A-Za-z0-9_])(\#(joined))\s*\("#
+        return rhs.range(of: pattern, options: .regularExpression) != nil
     }
 
     /// Rewrite WPE shaders that use GLSL-style float modulo for an unsigned bucket index.

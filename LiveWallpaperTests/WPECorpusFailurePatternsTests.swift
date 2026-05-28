@@ -482,6 +482,53 @@ struct WPECorpusFailurePatternsTests {
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
+    @Test("Program-scope vector constants compile in Metal constant address space")
+    func programScopeVectorConstantsCompileInConstantAddressSpace() throws {
+        let source = """
+        #version 410 core
+        const vec3 LUMINANCE_FACTOR = vec3(0.2126, 0.7152, 0.0722);
+        const vec3 NORMALIZED_LUMINANCE_FACTOR = normalize(LUMINANCE_FACTOR);
+        void main() {
+            vec3 color = vec3(1.0, 0.5, 0.25);
+            float luma = dot(normalize(color), NORMALIZED_LUMINANCE_FACTOR);
+            gl_FragColor = vec4(vec3(luma), 1.0);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "tone_mapping_program_scope_constants",
+            preprocessedSource: source
+        )
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+
+        #expect(result.mslSource.contains("constant float3 LUMINANCE_FACTOR = float3(0.2126, 0.7152, 0.0722);"))
+        #expect(result.mslSource.contains("#define NORMALIZED_LUMINANCE_FACTOR (normalize(LUMINANCE_FACTOR))"))
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("Main-local const scalars remain automatic variables")
+    func mainLocalConstScalarsRemainAutomaticVariables() throws {
+        let source = """
+        #version 410 core
+        void main() {
+            const float sampleIntensity = 0.1 * (30.0 / 8.0);
+            gl_FragColor = vec4(vec3(sampleIntensity), 1.0);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "shine_cast_local_const",
+            preprocessedSource: source
+        )
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+
+        #expect(result.mslSource.contains("const float sampleIntensity = 0.1 * (30.0 / 8.0);"))
+        #expect(!result.mslSource.contains("constant float sampleIntensity"))
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
     @Test("GLSL vector array constructors become Metal initializer lists")
     func glslVectorArrayConstructorsBecomeMetalInitializerLists() throws {
         let source = """
