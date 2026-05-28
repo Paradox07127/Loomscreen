@@ -241,6 +241,42 @@ final class SteamCMDDoctorService {
         return false
     }
 
+    /// One-shot "just works" setup, run when the Doctor opens: auto-detect the
+    /// SteamCMD binary and pick a sensible working directory when the user
+    /// hasn't set them yet. Never overrides an existing binding.
+    func autoConfigureIfNeeded() async {
+        if binaryBookmarkData == nil {
+            await autoDetectBinary()
+        }
+        await autoConfigureWorkdirIfNeeded()
+    }
+
+    /// Picks the working directory without asking: reuse the shared Steam
+    /// library when the GUI client is already set up (no separate SteamCMD
+    /// sign-in), otherwise an app-managed folder under Application Support.
+    /// The "Change location" disclosure still lets advanced users override.
+    private func autoConfigureWorkdirIfNeeded() async {
+        guard workdirBookmarkData == nil else { return }
+        let sharedSteam = fileManager.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Steam", isDirectory: true)
+        let sharedConfig = sharedSteam
+            .appendingPathComponent("config", isDirectory: true)
+            .appendingPathComponent("config.vdf", isDirectory: false)
+        if fileManager.fileExists(atPath: sharedConfig.path(percentEncoded: false)) {
+            try? await bindWorkdir(sharedSteam, isSharedSteamLibrary: true)
+            if workdirBookmarkData != nil { return }
+        }
+        try? await bindWorkdir(appManagedWorkdir, isSharedSteamLibrary: false)
+    }
+
+    /// Default SteamCMD working directory under Application Support, used when
+    /// no shared Steam library is present.
+    var appManagedWorkdir: URL {
+        let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support", isDirectory: true)
+        return base.appendingPathComponent("Loomscreen/SteamCMD", isDirectory: true)
+    }
+
     func bindWorkdir(_ url: URL, isSharedSteamLibrary: Bool) async throws {
         let canonicalURL = url.resolvingSymlinksInPath().standardizedFileURL
         var isDirectory = ObjCBool(false)

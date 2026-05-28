@@ -34,6 +34,9 @@ struct WorkshopDoctorView: View {
                 .padding(.bottom, DesignTokens.Spacing.xl)
                 .allowsHitTesting(false)
         }
+        // Auto-detect SteamCMD + default the working directory on open, so a
+        // first-time user usually lands on an already-configured Doctor.
+        .task { await service.autoConfigureIfNeeded() }
     }
 
     // MARK: - Sections
@@ -410,32 +413,64 @@ private struct WorkdirRadioRow: View {
     let onPickShared: () -> Void
     let onPickSeparate: (URL) -> Void
 
+    @State private var showingAdvanced = false
+
     private var selectionIsShared: Bool {
         guard let currentPath else { return false }
         return currentPath.contains("Library/Application Support/Steam")
     }
 
+    private var summaryText: String {
+        guard currentPath != nil else { return "Setting up…" }
+        return selectionIsShared ? "Shared Steam library" : "App-managed folder"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
-            Label("Working directory", systemImage: "folder")
-                .font(.system(size: 12, weight: .semibold))
+            // Default is auto-picked (shared if the Steam GUI is set up, else an
+            // app-managed folder); the two choices live under "Change location".
+            HStack(spacing: DesignTokens.Spacing.sm) {
+                Label("Working directory", systemImage: "folder")
+                    .font(.system(size: 12, weight: .semibold))
+                Spacer(minLength: 0)
+                Text(summaryText)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
 
-            workdirOption(
-                title: "Use shared Steam library",
-                detail: "Reuses your existing Steam install's downloads + cached sign-in. Anything anyone using this Mac has downloaded for Wallpaper Engine becomes available without re-checking ownership.",
-                isSelected: currentPath != nil && selectionIsShared,
-                action: onPickShared
-            )
+            if let currentPath, !selectionIsShared {
+                Text(currentPath)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+            }
 
-            workdirOption(
-                title: "Use a separate folder",
-                detail: currentPath != nil && !selectionIsShared
-                    ? currentPath ?? ""
-                    : "Pick a folder. SteamCMD manages its own sign-in and download cache inside that folder.",
-                isSelected: currentPath != nil && !selectionIsShared,
-                action: pickSeparateDirectory,
-                isPath: currentPath != nil && !selectionIsShared
-            )
+            DisclosureGroup(isExpanded: $showingAdvanced) {
+                VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
+                    workdirOption(
+                        title: "Use shared Steam library",
+                        detail: "Reuses your existing Steam install's downloads + cached sign-in. Anything anyone using this Mac has downloaded for Wallpaper Engine becomes available without re-checking ownership.",
+                        isSelected: currentPath != nil && selectionIsShared,
+                        action: onPickShared
+                    )
+                    workdirOption(
+                        title: "Use a separate folder",
+                        detail: currentPath != nil && !selectionIsShared
+                            ? currentPath ?? ""
+                            : "Pick a folder. SteamCMD manages its own sign-in and download cache inside that folder.",
+                        isSelected: currentPath != nil && !selectionIsShared,
+                        action: pickSeparateDirectory,
+                        isPath: currentPath != nil && !selectionIsShared
+                    )
+                }
+                .padding(.top, DesignTokens.Spacing.xs)
+            } label: {
+                Text("Change location")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
