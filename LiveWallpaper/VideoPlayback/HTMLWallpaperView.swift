@@ -418,20 +418,36 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     // MARK: - Public API
 
     func apply(_ config: HTMLConfig) {
-        pendingEphemeral = config.useEphemeralStorage
+        pendingEphemeral = config.requiresEphemeralStorage
         if let previous = lastAppliedConfig, previous == config {
             return
         }
 
         let previous = lastAppliedConfig
+
+        // Origin downgrade (workshopImport → userLocal) cannot be hot-swapped
+        // because `WKWebsiteDataStore` is locked at WKWebView init. The
+        // session coordinator is supposed to tear down and rebuild the view
+        // when origin changes — surface the breach loudly so the bad path
+        // doesn't ship silently. `assertionFailure` in debug; a structured
+        // warning in release.
+        if let previous, previous.originKind != config.originKind {
+            let message = "HTMLWallpaperView.apply called across an originKind change (\(previous.originKind.rawValue) → \(config.originKind.rawValue)); the session must be torn down instead of hot-swapped."
+            assertionFailure(message)
+            Logger.error(message, category: .screenManager)
+        }
+
         webView.configuration.defaultWebpagePreferences.allowsContentJavaScript = config.allowJavaScript
         allowMouseInteraction = config.allowMouseInteraction
 
         if currentDataStoreIsEphemeral != pendingEphemeral {
             let requested = pendingEphemeral ? "ephemeral" : "persistent"
             let active = currentDataStoreIsEphemeral ? "ephemeral" : "persistent"
+            let reason = config.originKind == .workshopImport
+                ? "Workshop content requires ephemeral storage"
+                : "user toggled the ephemeral storage preference"
             Logger.warning(
-                "HTML wallpaper requested \(requested) storage but the live WKWebView still uses the \(active) data store; the change applies on next session rebuild.",
+                "HTML wallpaper requested \(requested) storage (\(reason)) but the live WKWebView still uses the \(active) data store; the change applies on next session rebuild.",
                 category: .screenManager
             )
         }
@@ -441,7 +457,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         let needsScriptRebuild = (previous?.customCSS != config.customCSS)
             || (previous?.allowMouseInteraction != config.allowMouseInteraction)
             || (previous?.allowJavaScript != config.allowJavaScript)
-            || (previous?.useEphemeralStorage != config.useEphemeralStorage)
+            || (previous?.requiresEphemeralStorage != config.requiresEphemeralStorage)
             || (previous?.physicalPixelLayout != config.physicalPixelLayout)
             || (previous?.cspEnforcementEnabled != config.cspEnforcementEnabled)
             || (previous?.aggressiveSuspend != config.aggressiveSuspend)
@@ -479,10 +495,16 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     }
 
     func applyHTMLConfig(_ config: HTMLConfig) -> Bool {
-        if currentDataStoreIsEphemeral != config.useEphemeralStorage {
+        if currentDataStoreIsEphemeral != config.requiresEphemeralStorage {
             return false
         }
-        if let previous = lastAppliedConfig, previous.useEphemeralStorage != config.useEphemeralStorage {
+        if let previous = lastAppliedConfig,
+           previous.requiresEphemeralStorage != config.requiresEphemeralStorage {
+            return false
+        }
+        // Workshop content cannot transition into a session that wasn't
+        // built ephemeral; the data store is locked at init. Force a rebuild.
+        if let previous = lastAppliedConfig, previous.originKind != config.originKind {
             return false
         }
         apply(config)

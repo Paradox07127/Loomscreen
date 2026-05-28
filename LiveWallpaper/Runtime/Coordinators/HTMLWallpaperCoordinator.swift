@@ -174,7 +174,8 @@ final class HTMLWallpaperCoordinator {
     }
 
     private static func requiresSessionRebuild(previous: HTMLConfig, current: HTMLConfig) -> Bool {
-        previous.useEphemeralStorage != current.useEphemeralStorage
+        previous.requiresEphemeralStorage != current.requiresEphemeralStorage
+            || previous.originKind != current.originKind
             || previous.allowJavaScript != current.allowJavaScript
             || previous.blockTrackers != current.blockTrackers
     }

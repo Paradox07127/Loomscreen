@@ -38,6 +38,14 @@ public struct WPEOrigin: Codable, Equatable, Sendable {
     /// a permanent "won't run" badge instead of a generic error.
     public var requiresWindowsPlugin: Bool
 
+    /// Provenance of the imported folder. Used by the HTML wallpaper pipeline
+    /// to force `WKWebsiteDataStore.nonPersistent()` for Steam Workshop
+    /// content even when the user did not explicitly tick the ephemeral
+    /// storage toggle. Optional so older persisted records decode unchanged
+    /// (decoder defaults to `.userLocal`, which preserves the legacy
+    /// "respect the user toggle" semantics for previously imported items).
+    public var originKind: HTMLOriginKind
+
     public init(
         workshopID: String,
         title: String,
@@ -49,7 +57,8 @@ public struct WPEOrigin: Codable, Equatable, Sendable {
         resourceLocation: WPEResourceLocation? = nil,
         dependencyWorkshopIDs: [String] = [],
         missingDependencyIDs: [String] = [],
-        requiresWindowsPlugin: Bool = false
+        requiresWindowsPlugin: Bool = false,
+        originKind: HTMLOriginKind = .userLocal
     ) {
         self.workshopID = workshopID
         self.title = title
@@ -65,6 +74,7 @@ public struct WPEOrigin: Codable, Equatable, Sendable {
         self.dependencyWorkshopIDs = dependencyWorkshopIDs
         self.missingDependencyIDs = missingDependencyIDs
         self.requiresWindowsPlugin = requiresWindowsPlugin
+        self.originKind = originKind
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -79,6 +89,7 @@ public struct WPEOrigin: Codable, Equatable, Sendable {
         case dependencyWorkshopIDs
         case missingDependencyIDs
         case requiresWindowsPlugin
+        case originKind
     }
 
     public init(from decoder: Decoder) throws {
@@ -95,6 +106,7 @@ public struct WPEOrigin: Codable, Equatable, Sendable {
         dependencyWorkshopIDs = (try? container.decodeIfPresent([String].self, forKey: .dependencyWorkshopIDs)) ?? []
         missingDependencyIDs = (try? container.decodeIfPresent([String].self, forKey: .missingDependencyIDs)) ?? []
         requiresWindowsPlugin = (try? container.decodeIfPresent(Bool.self, forKey: .requiresWindowsPlugin)) ?? false
+        originKind = (try? container.decodeIfPresent(HTMLOriginKind.self, forKey: .originKind)) ?? .userLocal
     }
 
     public var localizedDisplayTypeName: String {

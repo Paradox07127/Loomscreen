@@ -151,15 +151,20 @@ final class WallpaperEngineImportService {
             return .rejected(reason: "Cannot create web folder bookmark")
         }
 
+        let originKind = WallpaperEngineImportService.originKind(forSourceFolder: folderURL)
         let origin = makeOrigin(
             project: project,
             sourceBookmark: sourceBookmark,
             cacheRelativePath: nil,
-            resourceLocation: .sourceFolder
+            resourceLocation: .sourceFolder,
+            originKind: originKind
         )
         let content = WallpaperContent.html(
             source: .folder(bookmarkData: folderBookmark, indexFileName: project.entryFile),
-            config: HTMLConfig(physicalPixelLayout: true)
+            config: HTMLConfig(
+                physicalPixelLayout: true,
+                originKind: originKind
+            )
         )
         return .ready(content, origin: origin)
     }
@@ -184,17 +189,52 @@ final class WallpaperEngineImportService {
             return .rejected(reason: "Cannot create cached web folder bookmark")
         }
 
+        let originKind = WallpaperEngineImportService.originKind(forSourceFolder: pkgURL.deletingLastPathComponent())
         let origin = makeOrigin(
             project: project,
             sourceBookmark: sourceBookmark,
             cacheRelativePath: cacheRelativePath(for: project),
-            resourceLocation: .cache
+            resourceLocation: .cache,
+            originKind: originKind
         )
         let content = WallpaperContent.html(
             source: .folder(bookmarkData: folderBookmark, indexFileName: project.entryFile),
-            config: HTMLConfig(physicalPixelLayout: true)
+            config: HTMLConfig(
+                physicalPixelLayout: true,
+                originKind: originKind
+            )
         )
         return .ready(content, origin: origin)
+    }
+
+    /// Marks an HTML wallpaper's `HTMLConfig` as Workshop-sourced when the
+    /// source folder lives under a SteamCMD-managed
+    /// `steamapps/workshop/content/431960/<id>/` tree.
+    ///
+    /// Path-based detection is deliberately conservative: it relies on the
+    /// canonical SteamCMD layout and Wallpaper Engine app ID (`431960`).
+    /// Any folder whose canonical path does NOT match the suffix
+    /// `/steamapps/workshop/content/431960/<numeric>/` (with the optional
+    /// trailing slash) is treated as `userLocal` — including projects copied
+    /// out to a user-managed library directory.
+    static func originKind(forSourceFolder folderURL: URL) -> HTMLOriginKind {
+        let canonical = folderURL.standardizedFileURL.resolvingSymlinksInPath().path
+        let components = canonical.split(separator: "/", omittingEmptySubsequences: true)
+        guard let id = components.last,
+              UInt64(id) != nil,
+              components.count >= 5 else {
+            return .userLocal
+        }
+        let tail = components.suffix(5)
+        let tailArray = Array(tail)
+        // Layout: steamapps / workshop / content / 431960 / <pubfileid>
+        guard tailArray[0] == "steamapps",
+              tailArray[1] == "workshop",
+              tailArray[2] == "content",
+              tailArray[3] == "431960" else {
+            return .userLocal
+        }
+        return .workshopImport
     }
 
     private func importScene(
@@ -362,7 +402,8 @@ final class WallpaperEngineImportService {
         sourceBookmark: Data,
         cacheRelativePath: String?,
         resourceLocation: WPEResourceLocation,
-        missingDependencyIDs: [String] = []
+        missingDependencyIDs: [String] = [],
+        originKind: HTMLOriginKind = .userLocal
     ) -> WPEOrigin {
         WPEOrigin(
             workshopID: project.workshopID,
@@ -375,7 +416,8 @@ final class WallpaperEngineImportService {
             resourceLocation: resourceLocation,
             dependencyWorkshopIDs: project.dependencyWorkshopIDs,
             missingDependencyIDs: missingDependencyIDs,
-            requiresWindowsPlugin: project.requiresWindowsPlugin
+            requiresWindowsPlugin: project.requiresWindowsPlugin,
+            originKind: originKind
         )
     }
 
@@ -503,7 +545,10 @@ struct WPECachedContentResolver {
             guard let bookmark = makeBookmark(cacheURL) else { return nil }
             return .html(
                 source: .folder(bookmarkData: bookmark, indexFileName: entryFile),
-                config: HTMLConfig(physicalPixelLayout: true)
+                config: HTMLConfig(
+                    physicalPixelLayout: true,
+                    originKind: origin.originKind
+                )
             )
         case .scene:
             var tier: SceneCapabilityTier = .unsupported

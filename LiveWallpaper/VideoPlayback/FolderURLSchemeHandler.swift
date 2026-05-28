@@ -23,6 +23,61 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
     nonisolated static let host = "wallpaper"
     nonisolated static let responseChunkSize = 64 * 1024
 
+    /// CSP applied to every response served from this handler. v2 baseline
+    /// from `docs/2026-05-28-steam-workshop-integration-plan.md` (Phase 4).
+    ///
+    /// Hard wins kept regardless of audit outcome:
+    /// - `frame-src 'none'` blocks clickjacking and nested document attacks.
+    /// - `object-src 'none'` denies plugins / `<embed>` / Flash.
+    /// - `form-action 'none'` denies `<form>` exfiltration submits.
+    /// - `base-uri 'none'` denies `<base href>` redirect attacks.
+    ///
+    /// Compatibility allowances (validated by the Phase 0 step 10 audit):
+    /// - `unsafe-inline` / `unsafe-eval` are required by the legitimate WPE
+    ///   web project corpus (inline `<script>` and dynamic property eval).
+    /// - `connect-src https:` allows outbound HTTPS so weather / clock / news
+    ///   widgets keep working. Residual risk (exfiltration) is documented in
+    ///   the threat model — the HTML wallpaper path registers no Swift
+    ///   bridge, so JS has no access to local files, Keychain, or app state.
+    nonisolated static let contentSecurityPolicy: String = [
+        "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: livewallpaper:;",
+        "connect-src 'self' https: livewallpaper: data: blob:;",
+        "img-src 'self' https: data: blob: livewallpaper:;",
+        "media-src 'self' https: data: blob: livewallpaper:;",
+        "font-src 'self' https: data: livewallpaper:;",
+        "frame-src 'none';",
+        "object-src 'none';",
+        "base-uri 'none';",
+        "form-action 'none';"
+    ].joined(separator: " ")
+
+    /// Per-handler CSP override. Tests inject one of the candidate policies
+    /// in `Report-Only` mode (via `CSPCompatibilityAuditTests`) so the
+    /// wallpaper runs unimpeded while the browser still emits
+    /// `securitypolicyviolation` events for the test corpus. `nil` (the
+    /// default) keeps the production enforced policy from
+    /// `contentSecurityPolicy`.
+    var cspOverride: ContentSecurityPolicyOverride?
+
+    /// Pair of directives + disposition (enforced vs. Report-Only). Held in
+    /// its own type so callers don't accidentally swap one field but forget
+    /// the other.
+    struct ContentSecurityPolicyOverride: Sendable, Equatable {
+        enum Disposition: Sendable, Equatable {
+            case enforced
+            case reportOnly
+        }
+        let directives: String
+        let disposition: Disposition
+
+        var headerName: String {
+            switch disposition {
+            case .enforced:   return "Content-Security-Policy"
+            case .reportOnly: return "Content-Security-Policy-Report-Only"
+            }
+        }
+    }
+
     private var activeFolderURL: URL?
     private var sessionNonce: String?
     private var activeTasks: [ObjectIdentifier: ActiveTask] = [:]
@@ -104,10 +159,19 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
         let rangeHeader = urlSchemeTask.request.value(forHTTPHeaderField: "Range")
         let delivery = SchemeTaskDelivery(urlSchemeTask)
         let taskID = ObjectIdentifier(urlSchemeTask as AnyObject)
+        // Snapshot the CSP for this request on the main thread so the detached
+        // worker can attach it without crossing actor boundaries to read the
+        // mutable `cspOverride` property.
+        let cspHeader: (name: String, value: String) = {
+            if let override = cspOverride {
+                return (override.headerName, override.directives)
+            }
+            return ("Content-Security-Policy", Self.contentSecurityPolicy)
+        }()
 
         activeTasks[taskID]?.cancel()
 
-        let worker = Task.detached(priority: .userInitiated) { [weak self, fileURL, mime, rangeHeader, url, delivery, taskID] in
+        let worker = Task.detached(priority: .userInitiated) { [weak self, fileURL, mime, rangeHeader, url, delivery, taskID, cspHeader] in
             do {
                 let fileSize = try Self.fileSize(for: fileURL)
                 let range = Self.byteRange(from: rangeHeader, totalLength: fileSize)
@@ -118,8 +182,17 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
                     "Content-Type": mime,
                     "Content-Length": "\(contentLength)",
                     "Accept-Ranges": "bytes",
-                    "Access-Control-Allow-Origin": "*"
+                    cspHeader.name: cspHeader.value
                 ]
+                // Range-served audio / video subresources need ACAO so the
+                // page can `<audio>`/`<video>` them across nested iframes;
+                // the previous unconditional `*` also opened every text /
+                // JSON response to cross-origin reads, which we don't want.
+                // CSP `default-src 'self'` already gates same-origin
+                // fetches without needing ACAO on those responses.
+                if Self.requiresMediaCORSExposure(for: mime) {
+                    headers["Access-Control-Allow-Origin"] = "*"
+                }
                 if let range {
                     headers["Content-Range"] = "bytes \(range.start)-\(range.end)/\(fileSize)"
                 }
@@ -411,6 +484,17 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
         case "skel":      return "application/octet-stream"
         default:          return "application/octet-stream"
         }
+    }
+
+    /// Whether the response needs `Access-Control-Allow-Origin: *` to be
+    /// useful. Range-served media (audio/video) historically needed it on the
+    /// `wpe-asset://` scheme so cross-origin `<audio>` / `<video>` could
+    /// play; we mirror that here to avoid regressing existing local WE
+    /// projects. Plain HTML / JS / JSON / CSS / images stay same-origin —
+    /// the page's own document is on `livewallpaper://wallpaper`, so the
+    /// `'self'` directive in CSP covers their needs without ACAO.
+    nonisolated static func requiresMediaCORSExposure(for mime: String) -> Bool {
+        mime.hasPrefix("audio/") || mime.hasPrefix("video/")
     }
 
     nonisolated static func makeError(_ code: URLError.Code, _ message: String? = nil) -> NSError {

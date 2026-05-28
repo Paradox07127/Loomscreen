@@ -1,5 +1,18 @@
 import Foundation
 
+/// Where the HTML content came from. Drives sandboxing decisions that should
+/// not be left to the user — Workshop content is forced into an ephemeral data
+/// store regardless of `useEphemeralStorage` so two Workshop wallpapers
+/// sharing the `livewallpaper://wallpaper` origin cannot read each other's
+/// `localStorage` / `IndexedDB` / cookies.
+public enum HTMLOriginKind: String, Codable, Sendable, CaseIterable {
+    /// User picked a folder from their own filesystem, or wrote inline HTML.
+    /// The `useEphemeralStorage` toggle is the source of truth.
+    case userLocal
+    /// Downloaded via SteamCMD from Steam Workshop. Always runs ephemeral.
+    case workshopImport
+}
+
 /// Per-screen behavior toggles for an HTML wallpaper.
 public struct HTMLConfig: Codable, Equatable, Sendable {
     /// When `false`, `WKWebView` runs with JS disabled. Useful for static
@@ -57,7 +70,26 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
     /// useful for kiosk-style wallpapers and untrusted URL sources. Toggling
     /// this only takes effect on the next session rebuild because WebKit
     /// cannot swap its data store after init.
+    ///
+    /// `originKind == .workshopImport` overrides this to `true` regardless of
+    /// the stored value; the toggle is honored only for `userLocal` content.
     public var useEphemeralStorage: Bool = false
+
+    /// Origin of the HTML payload. Untrusted (`.workshopImport`) origins are
+    /// forced through `nonPersistent()` data stores so two Workshop wallpapers
+    /// sharing the `livewallpaper://wallpaper` host cannot read each other's
+    /// `localStorage` / `IndexedDB` / cookies. See [HTMLWallpaperView.apply].
+    public var originKind: HTMLOriginKind = .userLocal
+
+    /// Whether the runtime must force `WKWebsiteDataStore.nonPersistent()` for
+    /// this configuration. `true` when the user opted in via
+    /// `useEphemeralStorage`, or when the content came from Steam Workshop.
+    public var requiresEphemeralStorage: Bool {
+        switch originKind {
+        case .workshopImport: return true
+        case .userLocal:      return useEphemeralStorage
+        }
+    }
 
     /// Maximum auto-retry attempts after navigation failures. Exponential
     /// backoff: 1s, 2s, 4s ... up to `maxRetries`. After the budget is
@@ -135,6 +167,7 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
         case transformRotationDegrees
         case physicalPixelLayout
         case useEphemeralStorage
+        case originKind
         case maxRetries
         case cspEnforcementEnabled
         case aggressiveSuspend
@@ -156,6 +189,7 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
         transformRotationDegrees: Double = 0,
         physicalPixelLayout: Bool = false,
         useEphemeralStorage: Bool = false,
+        originKind: HTMLOriginKind = .userLocal,
         maxRetries: Int = 3,
         cspEnforcementEnabled: Bool = false,
         aggressiveSuspend: Bool = false,
@@ -175,6 +209,7 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
         self.transformRotationDegrees = Self.clampedTransformRotation(transformRotationDegrees)
         self.physicalPixelLayout = physicalPixelLayout
         self.useEphemeralStorage = useEphemeralStorage
+        self.originKind = originKind
         self.maxRetries = maxRetries
         self.cspEnforcementEnabled = cspEnforcementEnabled
         self.aggressiveSuspend = aggressiveSuspend
@@ -203,6 +238,7 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
         transformRotationDegrees = Self.clampedTransformRotation(decodedRotation)
         physicalPixelLayout = try c.decodeIfPresent(Bool.self, forKey: .physicalPixelLayout) ?? false
         useEphemeralStorage = try c.decodeIfPresent(Bool.self, forKey: .useEphemeralStorage) ?? false
+        originKind = try c.decodeIfPresent(HTMLOriginKind.self, forKey: .originKind) ?? .userLocal
         let decodedRetries = try c.decodeIfPresent(Int.self, forKey: .maxRetries) ?? 3
         maxRetries = min(max(0, decodedRetries), 10)
         cspEnforcementEnabled = try c.decodeIfPresent(Bool.self, forKey: .cspEnforcementEnabled) ?? false

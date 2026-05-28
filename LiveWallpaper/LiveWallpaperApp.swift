@@ -47,9 +47,22 @@ struct AppStartupPlan: Equatable {
             originReconciler: PreservingOriginReconciler()
         )
         #else
+        // Direct-distribution Pro: layer `.workshopOnline` onto the Pro catalog.
+        // The conditional lives in the app target because Xcode does not
+        // propagate `SWIFT_ACTIVE_COMPILATION_CONDITIONS` from the app target
+        // down into local SwiftPM packages — the registration cannot happen
+        // inside `ProductCapabilities.pro` even though that is where it
+        // logically belongs. MAS / non-direct-distribution Pro builds simply
+        // omit the `DIRECT_DISTRIBUTION` flag and the capability stays out.
+        #if DIRECT_DISTRIBUTION
+        let proCapabilities = ProductCapabilities.pro.withWorkshopOnline()
+        #else
+        let proCapabilities = ProductCapabilities.pro
+        #endif
         screenManagerOptions = ScreenManagerStartupOptions(
             restoreSavedWallpapers: runtimeOptions.shouldRestoreSavedWallpapers,
-            startAutomation: runtimeOptions.shouldStartAutomation
+            startAutomation: runtimeOptions.shouldStartAutomation,
+            featureCatalog: FeatureCatalog(capabilities: proCapabilities)
         )
         #endif
         refreshScreensAfterManagerCreation = false
@@ -79,6 +92,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @ObservationIgnored nonisolated(unsafe) private var dockVisibilityObserver: NSObjectProtocol?
     @ObservationIgnored nonisolated(unsafe) private var showOnboardingObserver: NSObjectProtocol?
     @ObservationIgnored private var globalShortcutManager: GlobalShortcutManager?
+    #if !LITE_BUILD && DIRECT_DISTRIBUTION
+    /// Direct-distribution Pro only: lives for the lifetime of the app so the
+    /// Doctor's probe state survives Settings-window close / re-open and the
+    /// Workshop tab can read it without re-running probes.
+    @ObservationIgnored private let workshopDoctorService = SteamCMDDoctorService()
+    /// Bundles the Keychain + QueryService + on-disk QueryCache actors for
+    /// the v3 online-browse flow. Lives for the lifetime of the app so the
+    /// in-flight coalescing + token bucket survive Settings-window cycles.
+    @ObservationIgnored private let workshopServices = WorkshopServices()
+    #endif
     /// True between the first `.terminateLater` reply and the matching
     /// `reply(toApplicationShouldTerminate:)`. Re-entrant termination
     /// attempts skip the flush so we don't enqueue duplicate writes that
@@ -271,13 +294,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         initialNavigation: Navigation?,
         initialAddWallpaperPromptKind: String?
     ) -> NSWindowController {
-        let contentView = ContentView(
+        let baseContentView = ContentView(
             initialNavigation: initialNavigation,
             initialAddWallpaperPromptKind: initialAddWallpaperPromptKind
         )
             .environment(manager)
             .environment(\.featureCatalog, manager.featureCatalog)
+
+        #if !LITE_BUILD && DIRECT_DISTRIBUTION
+        let contentView = baseContentView
+            .environment(workshopDoctorService)
+            .environment(workshopServices)
             .appLanguageScoped()
+        #else
+        let contentView = baseContentView
+            .appLanguageScoped()
+        #endif
 
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: SettingsWindowMetrics.defaultContentSize),

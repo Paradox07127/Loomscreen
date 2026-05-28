@@ -1,0 +1,226 @@
+#if !LITE_BUILD && DIRECT_DISTRIBUTION
+import LiveWallpaperCore
+import LiveWallpaperSharedUI
+import SwiftUI
+
+/// "Steam Workshop" Settings tab — sibling of "General", "Shortcuts",
+/// "Cache", "Backup", "About". Privacy disclosures + entry points to the
+/// v2 Doctor and the v3 Web-API-key + browse-cache flows.
+struct WorkshopSettingsView: View {
+    @Environment(SteamCMDDoctorService.self) private var doctorService
+    @Environment(WorkshopServices.self) private var workshopServices
+
+    @AppStorage("loomscreen.workshop.onboarding.shown.v1") private var onboardingShown: Bool = false
+
+    @State private var showingDoctor = false
+    @State private var showingKeyEntry = false
+    @State private var showingCacheManagement = false
+    @State private var showingBrowse = false
+
+    var body: some View {
+        Form {
+            Section {
+                LabeledContent("Status") {
+                    Label("Ready", systemImage: "checkmark.seal.fill")
+                        .foregroundStyle(Color.green)
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                LabeledContent("Build") {
+                    Text("Pro · Direct distribution")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Steam Workshop")
+            } footer: {
+                Text("Paste-and-preview works out of the box. Online browsing needs your own free Steam Web API key. Downloading needs the official SteamCMD + your Steam account — open the Doctor below to wire that up.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section("Privacy") {
+                Label("Loomscreen never reads or stores your Steam password, Steam Guard codes, or session tokens.", systemImage: "lock.shield")
+                    .labelStyle(.titleAndIcon)
+                    .font(.system(size: 12))
+                Label("Workshop metadata is fetched directly from Valve over HTTPS. We never proxy through a Loomscreen server.", systemImage: "network")
+                    .labelStyle(.titleAndIcon)
+                    .font(.system(size: 12))
+                Label("Workshop wallpapers run inside an isolated, ephemeral WKWebView with a strict Content-Security-Policy.", systemImage: "shield.lefthalf.filled")
+                    .labelStyle(.titleAndIcon)
+                    .font(.system(size: 12))
+            }
+
+            Section("Onboarding") {
+                Toggle("Show the welcome sheet next time", isOn: Binding(
+                    get: { !onboardingShown },
+                    set: { onboardingShown = !$0 }
+                ))
+                .toggleStyle(.switch)
+            }
+
+            Section {
+                LabeledContent {
+                    HStack(spacing: DesignTokens.Spacing.xs) {
+                        doctorIndicator
+                        Button("Open") { showingDoctor = true }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .help("Open the SteamCMD diagnostics sheet")
+                    }
+                } label: {
+                    Label("SteamCMD Doctor", systemImage: "stethoscope")
+                }
+            } header: {
+                Text("Downloads")
+            } footer: {
+                Text("Verify your SteamCMD install + Steam sign-in before enabling Workshop downloads.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section {
+                LabeledContent {
+                    keyStatusBadge
+                } label: {
+                    Label("Steam Web API key", systemImage: "key")
+                }
+
+                HStack(spacing: DesignTokens.Spacing.xs) {
+                    Spacer()
+                    if workshopServices.hasWebAPIKey {
+                        Button("Replace") { showingKeyEntry = true }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .help("Set a new Steam Web API key")
+                        Button("Forget", role: .destructive) {
+                            Task {
+                                try? await workshopServices.keychain.deleteWebAPIKey()
+                                await workshopServices.refreshAPIKeyStatus()
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .help("Delete the stored Steam Web API key")
+                        Button("Browse online") { showingBrowse = true }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                            .help("Open the Workshop browse sheet")
+                    } else {
+                        Button("Set key") { showingKeyEntry = true }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                            .help("Paste your Steam Web API key")
+                    }
+                }
+            } header: {
+                Text("Browse Online")
+            } footer: {
+                Text("Loomscreen calls Valve's Workshop API directly with your key over HTTPS. Stored in Keychain, no iCloud sync.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section {
+                LabeledContent {
+                    Button("Manage") { showingCacheManagement = true }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .help("Inspect and clear the Workshop browse cache")
+                } label: {
+                    Label("Workshop browse cache", systemImage: "internaldrive")
+                }
+            } header: {
+                Text("Cache")
+            } footer: {
+                Text("Disk cache for QueryFiles JSON responses (5-minute TTL, 100 MB hard cap).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .formStyle(.grouped)
+        .padding(.horizontal, DesignTokens.Settings.formHorizontalMargin)
+        .padding(.vertical, DesignTokens.Settings.formVerticalMargin)
+        .background(DesignTokens.Colors.pageBackground)
+        .sheet(isPresented: $showingDoctor) {
+            WorkshopDoctorView()
+                .environment(doctorService)
+        }
+        .sheet(isPresented: $showingKeyEntry) {
+            SteamWebAPIKeyEntrySheet(services: workshopServices) {
+                Task { await workshopServices.refreshAPIKeyStatus() }
+            }
+        }
+        .sheet(isPresented: $showingCacheManagement) {
+            cacheSheet
+        }
+        .sheet(isPresented: $showingBrowse) {
+            WorkshopBrowseView(services: workshopServices) {
+                showingBrowse = false
+                showingKeyEntry = true
+            }
+        }
+        .task { await workshopServices.refreshAPIKeyStatus() }
+    }
+
+    @ViewBuilder
+    private var doctorIndicator: some View {
+        switch doctorService.state {
+        case .idle:
+            indicatorDot(.gray, label: "Not yet run")
+        case .probing:
+            ProgressView().controlSize(.small)
+        case .done(let allGreen, let blockingFailures):
+            if allGreen {
+                indicatorDot(.green, label: "All probes green")
+            } else if blockingFailures == 0 {
+                indicatorDot(.orange, label: "Warnings")
+            } else {
+                indicatorDot(.red, label: "\(blockingFailures) blocker\(blockingFailures == 1 ? "" : "s")")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var keyStatusBadge: some View {
+        if workshopServices.hasWebAPIKey {
+            Label("Set", systemImage: "checkmark.seal.fill")
+                .foregroundStyle(Color.green)
+                .font(.system(size: 12, weight: .semibold))
+        } else {
+            Label("Not set", systemImage: "exclamationmark.triangle.fill")
+                .foregroundStyle(Color.orange)
+                .font(.system(size: 12, weight: .semibold))
+        }
+    }
+
+    private var cacheSheet: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Workshop cache")
+                    .font(.headline)
+                Spacer()
+                Button("Done") { showingCacheManagement = false }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(.horizontal, DesignTokens.Settings.formHorizontalMargin)
+            .padding(.vertical, DesignTokens.Settings.formVerticalMargin)
+            .background(.bar)
+            WorkshopCacheManagementView(cache: workshopServices.queryCache)
+        }
+        .frame(minWidth: 460, idealWidth: 520, minHeight: 360, idealHeight: 420)
+    }
+
+    private func indicatorDot(_ color: Color, label: String) -> some View {
+        HStack(spacing: 4) {
+            Circle().fill(color).frame(width: 6, height: 6)
+            Text(label)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+#endif
