@@ -48,11 +48,14 @@ final class WPEMetalRenderTargetPool {
     }
 
     private let device: MTLDevice
+    private let maximumTextureDimension2D: Int
     private var slots: [WPEMetalRenderTargetKey: Slot] = [:]
     private var declaredFBOs: [String: WPERenderFBO] = [:]
 
-    init(device: MTLDevice) {
+    init(device: MTLDevice, maximumTextureDimension2D: Int? = nil) {
         self.device = device
+        self.maximumTextureDimension2D = maximumTextureDimension2D
+            ?? WPEMetalTextureLimits.maximum2DTextureDimension(for: device)
     }
 
     func prepare(pipeline: WPEPreparedRenderPipeline) {
@@ -123,10 +126,14 @@ final class WPEMetalRenderTargetPool {
     }
 
     private func makeAllocation(key: WPEMetalRenderTargetKey, label: String) throws -> Allocation {
+        let width = max(Int((Double(key.sceneWidth) * key.scale).rounded()), 1)
+        let height = max(Int((Double(key.sceneHeight) * key.scale).rounded()), 1)
+        try validateTextureDimensions(targetName: key.name, width: width, height: height)
+
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: key.pixelFormat,
-            width: max(Int((Double(key.sceneWidth) * key.scale).rounded()), 1),
-            height: max(Int((Double(key.sceneHeight) * key.scale).rounded()), 1),
+            width: width,
+            height: height,
             mipmapped: false
         )
         descriptor.usage = [.renderTarget, .shaderRead]
@@ -150,6 +157,18 @@ final class WPEMetalRenderTargetPool {
         }
         texture.label = "WPE \(key.name) \(label) texture"
         return Allocation(texture: texture, heap: nil)
+    }
+
+    private func validateTextureDimensions(targetName: String, width: Int, height: Int) throws {
+        guard width <= maximumTextureDimension2D,
+              height <= maximumTextureDimension2D else {
+            throw WPEMetalRenderExecutorError.renderTargetDimensionsExceedDeviceLimit(
+                targetName: targetName,
+                width: width,
+                height: height,
+                limit: maximumTextureDimension2D
+            )
+        }
     }
 
     private static func align(_ size: Int, to alignment: Int) -> Int {

@@ -31,6 +31,14 @@ struct WPEEndToEndCorpusTests {
             return
         }
         print("[corpus] sourcing scenes from \(envRoot)")
+        let workshopFilter = ProcessInfo.processInfo.environment["WPE_CORPUS_WORKSHOP_ID"]
+            .map { value in
+                Set(value.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
+            }
+            .flatMap { $0.isEmpty ? nil : $0 }
+        if let workshopFilter {
+            print("[corpus] filtering workshop IDs: \(workshopFilter.sorted().joined(separator: ","))")
+        }
         guard let device = MTLCreateSystemDefaultDevice() else {
             print("[corpus] no Metal device — skipping")
             return
@@ -47,6 +55,9 @@ struct WPEEndToEndCorpusTests {
 
         for folder in folders.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
             let workshopID = folder.lastPathComponent
+            if let workshopFilter, !workshopFilter.contains(workshopID) {
+                continue
+            }
             guard let project = try? WallpaperEngineProject.read(from: folder),
                   project.type == .scene else {
                 skippedNonScene += 1
@@ -55,6 +66,7 @@ struct WPEEndToEndCorpusTests {
             let stage = FileManager.default.temporaryDirectory.appendingPathComponent("wpe-e2e-\(workshopID)-\(UUID().uuidString)")
             defer { try? FileManager.default.removeItem(at: stage) }
             do {
+                print("[corpus] [\(workshopID)] extract begin")
                 try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: true)
                 let pkgURL = folder.appendingPathComponent("scene.pkg")
                 if FileManager.default.fileExists(atPath: pkgURL.path) {
@@ -71,6 +83,7 @@ struct WPEEndToEndCorpusTests {
                         )
                     }
                 }
+                print("[corpus] [\(workshopID)] extract done")
             } catch {
                 hardFailures += 1
                 summary.append((workshopID, "extract_failed", String(describing: error)))
@@ -85,6 +98,7 @@ struct WPEEndToEndCorpusTests {
             )
             let renderer: WPEMetalSceneRenderer
             do {
+                print("[corpus] [\(workshopID)] renderer init begin")
                 renderer = try WPEMetalSceneRenderer(
                     descriptor: descriptor,
                     cacheRootURL: stage,
@@ -93,6 +107,7 @@ struct WPEEndToEndCorpusTests {
                     device: device,
                     pointerSampler: .fixed(SIMD2<Double>(0.5, 0.5))
                 )
+                print("[corpus] [\(workshopID)] renderer init done")
             } catch {
                 hardFailures += 1
                 summary.append((workshopID, "renderer_init_failed", String(describing: error)))
@@ -100,7 +115,9 @@ struct WPEEndToEndCorpusTests {
             }
 
             do {
+                print("[corpus] [\(workshopID)] load begin")
                 try await renderer.load()
+                print("[corpus] [\(workshopID)] load done")
                 if renderer.renderedTexture != nil {
                     rendered += 1
                     summary.append((workshopID, "rendered", "first frame produced"))

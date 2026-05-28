@@ -39,6 +39,18 @@ struct WPEMetalFrameState {
     var initializedTextures: Set<ObjectIdentifier> = []
     var depthTextures: [WPEMetalDepthTextureKey: MTLTexture] = [:]
 
+    init(
+        output: MTLTexture,
+        sceneSize: CGSize,
+        previousSceneTexture: MTLTexture? = nil,
+        previousNamedTextures: [String: MTLTexture] = [:]
+    ) {
+        self.output = output
+        self.sceneSize = sceneSize
+        self.latestSceneTexture = previousSceneTexture
+        self.latestNamedTextures = previousNamedTextures
+    }
+
     func latestTexture(for targetID: WPEMetalTargetID) -> MTLTexture? {
         switch targetID {
         case .scene:
@@ -51,6 +63,15 @@ struct WPEMetalFrameState {
     mutating func registerWrite(texture: MTLTexture, targetID: WPEMetalTargetID) {
         writtenTargets.insert(targetID)
         initializedTextures.insert(ObjectIdentifier(texture))
+        switch targetID {
+        case .scene:
+            latestSceneTexture = texture
+        case .named(let name):
+            latestNamedTextures[name] = texture
+        }
+    }
+
+    mutating func seedPreviousTexture(_ texture: MTLTexture, targetID: WPEMetalTargetID) {
         switch targetID {
         case .scene:
             latestSceneTexture = texture

@@ -1,4 +1,5 @@
 import Foundation
+import Metal
 import Testing
 @testable import LiveWallpaper
 
@@ -584,6 +585,71 @@ struct WPERenderPipelineBuilderTests {
         #expect(shader.fragmentSource.contains("gl_FragColor") == false)
         #expect(shader.fragmentSource.contains("#define texSample2DLod textureLod"))
         #expect(shader.fragmentSource.contains("#define lerp mix"))
+    }
+
+    @Test("Compatibility prelude keeps GLSL atan2 compiling through Metal")
+    func compatibilityPreludeAtan2CompilesThroughMetal() throws {
+        let fixture = try makeFixture(files: [
+            "shaders/effects/atan.vert": """
+            attribute vec3 a_Position;
+            varying vec2 v_TexCoord;
+            void main() {
+                gl_Position = vec4(a_Position, 1.0);
+                v_TexCoord = a_Position.xy;
+            }
+            """,
+            "shaders/effects/atan.frag": """
+            varying vec2 v_TexCoord;
+            void main() {
+                float angle = atan2(v_TexCoord.y - 0.5, v_TexCoord.x - 0.5);
+                gl_FragColor = vec4(angle, 0.0, 0.0, 1.0);
+            }
+            """
+        ])
+        defer { fixture.cleanup() }
+
+        let graph = WPERenderGraph(layers: [
+            WPERenderLayer(
+                objectID: "1",
+                objectName: "Layer",
+                imagePath: "materials/base.png",
+                materialPath: nil,
+                compositeA: "a",
+                compositeB: "b",
+                localFBOs: [],
+                passes: [
+                    WPERenderPass(
+                        id: "1.0",
+                        phase: .effect(file: "effects/atan/effect.json"),
+                        shader: "effects/atan",
+                        source: .image("materials/base.png"),
+                        target: .scene,
+                        textures: [:],
+                        binds: [:],
+                        constants: [:],
+                        combos: [:],
+                        blending: "normal",
+                        cullMode: "nocull",
+                        depthTest: "disabled",
+                        depthWrite: "disabled"
+                    )
+                ]
+            )
+        ])
+
+        let pipeline = try WPERenderPipelineBuilder(cacheRootURL: fixture.root).build(graph: graph)
+        let fragmentSource = try #require(pipeline.layers.first?.passes.first?.shader?.fragmentSource)
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "effects/atan",
+            preprocessedSource: fragmentSource
+        )
+
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+
+        #expect(result.mslSource.contains("atan2(v_TexCoord.y - 0.5, v_TexCoord.x - 0.5)"))
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
     @Test(

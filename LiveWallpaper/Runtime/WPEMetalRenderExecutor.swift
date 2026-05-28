@@ -57,6 +57,13 @@ final class WPEMetalRenderExecutor {
     /// Phase 2D-H: cache MTLRenderPipelineState built from translated
     /// shaders. Library + blend + format set is the key.
     private var translatedPipelineCache: [TranslatedPipelineKey: MTLRenderPipelineState] = [:]
+    private var previousFrameHistory: PreviousFrameHistory?
+
+    private struct PreviousFrameHistory {
+        let sceneSize: CGSize
+        let sceneTexture: MTLTexture?
+        let namedTextures: [String: MTLTexture]
+    }
 
     private struct TranslatedPipelineKey: Hashable {
         let libraryID: ObjectIdentifier
@@ -98,6 +105,7 @@ final class WPEMetalRenderExecutor {
 
     func releaseTransientResources() {
         targetPool.releaseAll()
+        previousFrameHistory = nil
     }
 
     func render(
@@ -113,8 +121,21 @@ final class WPEMetalRenderExecutor {
             throw WPEMetalRenderExecutorError.commandBufferFailed
         }
 
+        let reusableHistory: PreviousFrameHistory?
+        if let history = previousFrameHistory, history.sceneSize == size {
+            reusableHistory = history
+        } else {
+            reusableHistory = nil
+            previousFrameHistory = nil
+        }
+
         targetPool.prepare(pipeline: preparedPipeline)
-        var frameState = WPEMetalFrameState(output: output, sceneSize: size)
+        var frameState = WPEMetalFrameState(
+            output: output,
+            sceneSize: size,
+            previousSceneTexture: reusableHistory?.sceneTexture,
+            previousNamedTextures: reusableHistory?.namedTextures ?? [:]
+        )
         var didEncode = false
         let bypassEffects = Self.bypassEffectsForDebug
 
@@ -171,6 +192,13 @@ final class WPEMetalRenderExecutor {
         if commandBuffer.status == .error {
             throw WPEMetalRenderExecutorError.commandBufferFailed
         }
+        previousFrameHistory = PreviousFrameHistory(
+            sceneSize: size,
+            sceneTexture: frameState.latestSceneTexture,
+            namedTextures: frameState.latestNamedTextures.filter { entry in
+                !WPEMetalShaderInputs.isSceneAliasName(entry.key)
+            }
+        )
         return output
     }
 
@@ -451,13 +479,13 @@ final class WPEMetalRenderExecutor {
         frameState: inout WPEMetalFrameState
     ) throws {
         let targetID = WPEMetalTargetID(target: pass.pass.target)
-        let previousTextureForTarget = frameState.latestTexture(for: targetID)
+        let initialPreviousTextureForTarget = frameState.latestTexture(for: targetID)
         let readsCurrentTarget = passReadsCurrentTarget(pass, targetID: targetID)
         let destination = try targetTexture(
             for: pass.pass.target,
             layer: layer,
             frameState: &frameState,
-            avoiding: readsCurrentTarget ? previousTextureForTarget : nil
+            avoiding: readsCurrentTarget ? initialPreviousTextureForTarget : nil
         )
 
         try snapshotFullFrameBufferIfAliasingScene(
@@ -468,6 +496,18 @@ final class WPEMetalRenderExecutor {
             commandBuffer: commandBuffer,
             frameState: &frameState
         )
+
+        let previousTextureForTarget: MTLTexture?
+        if readsCurrentTarget {
+            previousTextureForTarget = try previousTextureForRead(
+                targetID: targetID,
+                matching: destination.texture,
+                commandBuffer: commandBuffer,
+                frameState: &frameState
+            )
+        } else {
+            previousTextureForTarget = initialPreviousTextureForTarget
+        }
 
         if readsCurrentTarget,
            let previousTextureForTarget,
@@ -600,14 +640,26 @@ final class WPEMetalRenderExecutor {
         frameState: inout WPEMetalFrameState
     ) throws {
         let targetID = WPEMetalTargetID(target: target)
-        let previousTextureForTarget = frameState.latestTexture(for: targetID)
+        let initialPreviousTextureForTarget = frameState.latestTexture(for: targetID)
         let readsCurrentTarget = reference == .previous
         let destination = try targetTexture(
             for: target,
             layer: layer,
             frameState: &frameState,
-            avoiding: readsCurrentTarget ? previousTextureForTarget : nil
+            avoiding: readsCurrentTarget ? initialPreviousTextureForTarget : nil
         )
+
+        let previousTextureForTarget: MTLTexture?
+        if readsCurrentTarget {
+            previousTextureForTarget = try previousTextureForRead(
+                targetID: targetID,
+                matching: destination.texture,
+                commandBuffer: commandBuffer,
+                frameState: &frameState
+            )
+        } else {
+            previousTextureForTarget = initialPreviousTextureForTarget
+        }
 
         if readsCurrentTarget,
            let previousTextureForTarget,
@@ -710,6 +762,53 @@ final class WPEMetalRenderExecutor {
             )
             return (targetID, texture)
         }
+    }
+
+    private func previousTextureForRead(
+        targetID: WPEMetalTargetID,
+        matching destination: MTLTexture,
+        commandBuffer: MTLCommandBuffer,
+        frameState: inout WPEMetalFrameState
+    ) throws -> MTLTexture {
+        if let texture = frameState.latestTexture(for: targetID) {
+            return texture
+        }
+        let texture = try makeClearedPreviousTexture(
+            matching: destination,
+            commandBuffer: commandBuffer
+        )
+        frameState.seedPreviousTexture(texture, targetID: targetID)
+        frameState.markInitialized(texture)
+        return texture
+    }
+
+    private func makeClearedPreviousTexture(
+        matching texture: MTLTexture,
+        commandBuffer: MTLCommandBuffer
+    ) throws -> MTLTexture {
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: texture.pixelFormat,
+            width: texture.width,
+            height: texture.height,
+            mipmapped: false
+        )
+        descriptor.usage = [.renderTarget, .shaderRead]
+        descriptor.storageMode = .private
+        guard let cleared = device.makeTexture(descriptor: descriptor) else {
+            throw WPEMetalTextureLoaderError.textureAllocationFailed
+        }
+        cleared.label = "WPE Metal bootstrap previous"
+
+        let renderPass = MTLRenderPassDescriptor()
+        renderPass.colorAttachments[0].texture = cleared
+        renderPass.colorAttachments[0].loadAction = .clear
+        renderPass.colorAttachments[0].storeAction = .store
+        renderPass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPass) else {
+            throw WPEMetalRenderExecutorError.commandBufferFailed
+        }
+        encoder.endEncoding()
+        return cleared
     }
 
     /// Phase 2D-E: shared dispatch path for single-input effect built-ins (opacity, scroll, pulse, iris, waterwaves).

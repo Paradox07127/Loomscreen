@@ -249,6 +249,8 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
                 return "unsupported Metal render target"
             case .pipelineStateBuildFailed(let name, let detail):
                 return "Metal pipeline '\(name)' rejected (likely stage_in mismatch): \(detail)"
+            case .renderTargetDimensionsExceedDeviceLimit(let targetName, let width, let height, let limit):
+                return "render target '\(targetName)' is \(width)x\(height), exceeding this device's \(limit)x\(limit) Metal texture limit"
             case .missingTexture(let reference):
                 switch reference {
                 case .previous:
@@ -1621,6 +1623,11 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
                 )
             case .unsupportedTarget:
                 return .materialUnresolved(layer: layerName, reason: "This wallpaper uses an unsupported rendering target.")
+            case .renderTargetDimensionsExceedDeviceLimit(let targetName, let width, let height, let limit):
+                return .materialUnresolved(
+                    layer: layerName,
+                    reason: "Render target \"\(targetName)\" is \(width)x\(height), exceeding this device's \(limit)x\(limit) Metal texture limit."
+                )
             case .missingTexture(let reference):
                 switch reference {
                 case .image(let path), .asset(let path), .fbo(let path):

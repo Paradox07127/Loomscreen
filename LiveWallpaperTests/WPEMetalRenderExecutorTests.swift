@@ -860,6 +860,10 @@ private let blendFixtures: [BlendFixture] = [
 ]
 
 private extension WPEMetalRenderExecutorTests {
+    static func maximumTextureDimension2D(for device: MTLDevice) -> Int {
+        WPEMetalTextureLimits.maximum2DTextureDimension(for: device)
+    }
+
     @Test("Routes layerComposite target into a later FBO source")
     func routesLayerCompositeTargetIntoScene() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
@@ -932,6 +936,36 @@ private extension WPEMetalRenderExecutorTests {
         #expect(pixel.a >= 250)
     }
 
+    @Test("Rejects oversized FBO targets before Metal descriptor allocation")
+    func rejectsOversizedFBOTargetBeforeMetalDescriptorAllocation() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let limit = Self.maximumTextureDimension2D(for: device)
+
+        let fbo = WPERenderFBO(name: "_rt_TooLarge", scale: Double(limit + 1), format: "rgba8888")
+        let writeFBO = solidPass(
+            id: "layer.0",
+            color: [1, 0, 0, 1],
+            target: .fbo(name: fbo.name),
+            blending: "disabled"
+        )
+        let pipeline = preparedPipeline(
+            localFBOs: [fbo],
+            passes: [preparedBuiltinPass(writeFBO, uniforms: ["g_Color": .vector([1, 0, 0, 1])])]
+        )
+
+        #expect(
+            throws: WPEMetalRenderExecutorError.renderTargetDimensionsExceedDeviceLimit(
+                targetName: fbo.name,
+                width: limit + 1,
+                height: limit + 1,
+                limit: limit
+            )
+        ) {
+            _ = try executor.render(pipeline: pipeline, size: CGSize(width: 1, height: 1), textures: [:])
+        }
+    }
+
     @Test("Resolves previous to the most recent write to the same FBO target")
     func resolvesPreviousWithinSameFBOTarget() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
@@ -981,26 +1015,158 @@ private extension WPEMetalRenderExecutorTests {
         #expect(try readPixel(output, x: 1, y: 1).g >= 250)
     }
 
-    @Test("Missing previous fails closed before any write to the current target")
-    func missingPreviousFailsClosed() throws {
+    @Test("Resolves previous to the prior render call's scene output")
+    func resolvesPreviousFromPriorSceneRender() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let executor = try WPEMetalRenderExecutor(device: device)
 
-        let fbo = WPERenderFBO(name: "_rt_Empty", scale: 1, format: "rgba8888")
-        let pass = copyPass(
+        let seedScene = solidPass(
+            id: "layer.0",
+            color: [1, 0, 0, 1],
+            target: .scene,
+            blending: "disabled"
+        )
+        let copyPreviousToScene = copyPass(
+            id: "layer.0",
+            source: .previous,
+            target: .scene,
+            blending: "disabled"
+        )
+
+        _ = try executor.render(
+            pipeline: preparedPipeline(
+                localFBOs: [],
+                passes: [preparedBuiltinPass(seedScene, uniforms: ["g_Color": .vector([1, 0, 0, 1])])]
+            ),
+            size: CGSize(width: 4, height: 4),
+            textures: [:]
+        )
+        let output = try executor.render(
+            pipeline: preparedPipeline(
+                localFBOs: [],
+                passes: [preparedBuiltinPass(copyPreviousToScene, bindings: [0: .previous])]
+            ),
+            size: CGSize(width: 4, height: 4),
+            textures: [:]
+        )
+        let pixel = try readPixel(output, x: 2, y: 2)
+
+        #expect(pixel.r >= 250)
+        #expect(pixel.g <= 5)
+        #expect(pixel.b <= 5)
+        #expect(pixel.a >= 250)
+    }
+
+    @Test("Resolves previous to the prior render call's named FBO output")
+    func resolvesPreviousFromPriorNamedFBORender() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+
+        let fbo = WPERenderFBO(name: "_rt_History", scale: 1, format: "rgba8888")
+        let seedFBO = solidPass(
+            id: "layer.0",
+            color: [0, 1, 0, 1],
+            target: .fbo(name: fbo.name),
+            blending: "disabled"
+        )
+        let copyPreviousBackIntoSameFBO = copyPass(
             id: "layer.0",
             source: .previous,
             target: .fbo(name: fbo.name),
             blending: "disabled"
         )
+        let copyFBOToScene = copyPass(
+            id: "layer.1",
+            source: .fbo(fbo.name),
+            target: .scene,
+            blending: "disabled"
+        )
+
+        _ = try executor.render(
+            pipeline: preparedPipeline(
+                localFBOs: [fbo],
+                passes: [preparedBuiltinPass(seedFBO, uniforms: ["g_Color": .vector([0, 1, 0, 1])])]
+            ),
+            size: CGSize(width: 4, height: 4),
+            textures: [:]
+        )
+        let output = try executor.render(
+            pipeline: preparedPipeline(
+                localFBOs: [fbo],
+                passes: [
+                    preparedBuiltinPass(copyPreviousBackIntoSameFBO, bindings: [0: .previous]),
+                    preparedBuiltinPass(copyFBOToScene, bindings: [0: .fbo(fbo.name)])
+                ]
+            ),
+            size: CGSize(width: 4, height: 4),
+            textures: [:]
+        )
+        let pixel = try readPixel(output, x: 2, y: 2)
+
+        #expect(pixel.r <= 5)
+        #expect(pixel.g >= 250)
+        #expect(pixel.b <= 5)
+        #expect(pixel.a >= 250)
+    }
+
+    @Test("Bootstraps missing scene previous with a cleared texture on first render")
+    func bootstrapsMissingScenePreviousOnFirstRender() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+
+        let pass = copyPass(
+            id: "layer.0",
+            source: .previous,
+            target: .scene,
+            blending: "disabled"
+        )
         let pipeline = preparedPipeline(
-            localFBOs: [fbo],
+            localFBOs: [],
             passes: [preparedBuiltinPass(pass, bindings: [0: .previous])]
         )
 
-        #expect(throws: WPEMetalRenderExecutorError.missingTexture(.previous)) {
-            _ = try executor.render(pipeline: pipeline, size: CGSize(width: 2, height: 2), textures: [:])
-        }
+        let output = try executor.render(pipeline: pipeline, size: CGSize(width: 2, height: 2), textures: [:])
+        let pixel = try readPixel(output, x: 1, y: 1)
+
+        #expect(pixel.r <= 5)
+        #expect(pixel.g <= 5)
+        #expect(pixel.b <= 5)
+        #expect(pixel.a >= 250)
+    }
+
+    @Test("Bootstraps missing FBO previous with a cleared texture on first render")
+    func bootstrapsMissingFBOPreviousOnFirstRender() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+
+        let fbo = WPERenderFBO(name: "_rt_Empty", scale: 1, format: "rgba8888")
+        let copyPreviousBackIntoSameFBO = copyPass(
+            id: "layer.0",
+            source: .previous,
+            target: .fbo(name: fbo.name),
+            blending: "disabled"
+        )
+        let copyFBOToScene = copyPass(
+            id: "layer.1",
+            source: .fbo(fbo.name),
+            target: .scene,
+            blending: "disabled"
+        )
+        let pipeline = preparedPipeline(
+            localFBOs: [fbo],
+            passes: [
+                preparedBuiltinPass(copyPreviousBackIntoSameFBO, bindings: [0: .previous]),
+                preparedBuiltinPass(copyFBOToScene, bindings: [0: .fbo(fbo.name)])
+            ]
+        )
+
+        let output = try executor.render(pipeline: pipeline, size: CGSize(width: 2, height: 2), textures: [:])
+        let pixel = try readPixel(output, x: 1, y: 1)
+
+        #expect(pixel.r <= 5)
+        #expect(pixel.g <= 5)
+        #expect(pixel.b <= 5)
+        #expect(pixel.a >= 250)
     }
 
     @Test("Applies WPE blend factors", arguments: blendFixtures)

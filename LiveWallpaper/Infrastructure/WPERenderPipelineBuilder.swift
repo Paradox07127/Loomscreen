@@ -856,7 +856,6 @@ private struct WPEShaderSourceLoader: Sendable {
             "#define ddx dFdx",
             "#define ddy dFdy",
             "#define fmod(x, y) ((x) - (y) * trunc((x) / (y)))",
-            "#define atan2(y, x) atan((y), (x))",
             "#define CAST2(x) (vec2(x))",
             "#define CAST3(x) (vec3(x))",
             "#define CAST4(x) (vec4(x))",

@@ -113,14 +113,20 @@ struct WPEShaderTranspiler {
 
         let translatedHelpers = applySubstitutions(preMain + "\n" + postMain)
         let translatedMain = translateMain(mainBody)
+        let helperResources = rewriteHelperResourceAccess(
+            helpers: translatedHelpers,
+            mainBody: translatedMain,
+            uniforms: uniforms,
+            samplers: sortedSamplers
+        )
 
         let msl = renderMSL(
             shaderName: shaderName,
             uniforms: uniforms,
             samplers: sortedSamplers,
             varyings: varyings,
-            helpers: translatedHelpers,
-            mainBody: translatedMain
+            helpers: helperResources.helpers,
+            mainBody: helperResources.mainBody
         )
 
         var layout: [WPEUniformSlot] = []
@@ -234,12 +240,27 @@ struct WPEShaderTranspiler {
         s = wordReplace(s, find: "lerp", replace: "mix")
 
         s = rewriteTextureCalls(s)
+        s = rewriteUnsignedFloatModuloAssignments(s)
 
         s = rewriteReferenceParameters(s)
 
         s = stripInParameterQualifier(s)
 
         return s
+    }
+
+    /// Rewrite WPE shaders that use GLSL-style float modulo for an unsigned bucket index.
+    private static func rewriteUnsignedFloatModuloAssignments(_ source: String) -> String {
+        let pattern = #"\buint\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^;\n]+?)\s*%\s*([A-Za-z_][A-Za-z0-9_]*|\d+)\s*;"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return source
+        }
+        let range = NSRange(source.startIndex..., in: source)
+        return regex.stringByReplacingMatches(
+            in: source,
+            range: range,
+            withTemplate: "uint $1 = uint(fmod(float($2), float($3)));"
+        )
     }
 
     /// Rewrite GLSL `inout T name` / `out T name` parameter qualifiers to Metal's `thread T& name`.
@@ -365,6 +386,396 @@ struct WPEShaderTranspiler {
         return result
     }
 
+    // MARK: - Helper resource threading
+
+    private struct HelperResource: Hashable {
+        let name: String
+        let parameterType: String
+    }
+
+    private struct HelperFunction {
+        let name: String
+        let parameterRange: Range<String.Index>
+        let bodyRange: Range<String.Index>
+    }
+
+    /// Metal helper functions live outside `wpe_translated_fragment`, so they cannot see
+    /// the sampler/uniform aliases emitted inside the fragment body. Thread those aliases
+    /// through helper parameters and through helper call sites.
+    private static func rewriteHelperResourceAccess(
+        helpers: String,
+        mainBody: String,
+        uniforms: [WPEUniformDecl],
+        samplers: [WPESamplerDecl]
+    ) -> (helpers: String, mainBody: String) {
+        let functions = parseHelperFunctions(in: helpers)
+        guard !functions.isEmpty else {
+            return (helpers, mainBody)
+        }
+
+        let resources = helperResources(uniforms: uniforms, samplers: samplers)
+        guard !resources.isEmpty else {
+            return (helpers, mainBody)
+        }
+        let macroDependencies = helperMacroDependencies(in: helpers, resources: resources)
+
+        let functionNames = Set(functions.map(\.name))
+        var dependenciesByFunction: [String: Set<String>] = [:]
+        var callsByFunction: [String: Set<String>] = [:]
+
+        for function in functions {
+            let body = String(helpers[function.bodyRange])
+            var dependencies = Set(
+                resources
+                    .filter { containsIdentifier($0.name, in: body) }
+                    .map(\.name)
+            )
+            for (macroName, macroResources) in macroDependencies where containsIdentifier(macroName, in: body) {
+                dependencies.formUnion(macroResources)
+            }
+            dependenciesByFunction[function.name] = dependencies
+            callsByFunction[function.name] = Set(
+                functionNames.filter { callee in
+                    callee != function.name && containsFunctionCall(callee, in: body)
+                }
+            )
+        }
+
+        var changed = true
+        while changed {
+            changed = false
+            for function in functions {
+                var dependencies = dependenciesByFunction[function.name] ?? []
+                for callee in callsByFunction[function.name] ?? [] {
+                    dependencies.formUnion(dependenciesByFunction[callee] ?? [])
+                }
+                if dependencies != dependenciesByFunction[function.name] {
+                    dependenciesByFunction[function.name] = dependencies
+                    changed = true
+                }
+            }
+        }
+
+        var rewrittenHelpers = helpers
+        for function in functions.sorted(by: { $0.bodyRange.lowerBound > $1.bodyRange.lowerBound }) {
+            let dependencies = dependenciesByFunction[function.name] ?? []
+            let originalBody = String(rewrittenHelpers[function.bodyRange])
+            rewrittenHelpers.replaceSubrange(
+                function.bodyRange,
+                with: rewriteHelperCalls(
+                    in: originalBody,
+                    dependenciesByFunction: dependenciesByFunction,
+                    resourceOrder: resources
+                )
+            )
+
+            guard !dependencies.isEmpty else { continue }
+            let originalParameters = String(rewrittenHelpers[function.parameterRange])
+            rewrittenHelpers.replaceSubrange(
+                function.parameterRange,
+                with: appendHelperParameters(
+                    to: originalParameters,
+                    dependencies: dependencies,
+                    resourceOrder: resources
+                )
+            )
+        }
+
+        let rewrittenMain = rewriteHelperCalls(
+            in: mainBody,
+            dependenciesByFunction: dependenciesByFunction,
+            resourceOrder: resources
+        )
+        return (rewrittenHelpers, rewrittenMain)
+    }
+
+    private static func helperResources(
+        uniforms: [WPEUniformDecl],
+        samplers: [WPESamplerDecl]
+    ) -> [HelperResource] {
+        let samplerResources = samplers.map {
+            HelperResource(name: $0.name, parameterType: "texture2d<float>")
+        }
+        let uniformResources = uniforms.map {
+            HelperResource(name: $0.name, parameterType: helperParameterType(for: $0))
+        }
+        return samplerResources + uniformResources
+    }
+
+    private static func helperMacroDependencies(
+        in source: String,
+        resources: [HelperResource]
+    ) -> [String: Set<String>] {
+        let pattern = #"(?m)^\s*#define\s+([A-Za-z_][A-Za-z0-9_]*)\b([^\n]*)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return [:]
+        }
+        let matches = regex.matches(in: source, range: NSRange(source.startIndex..., in: source))
+        var dependencies: [String: Set<String>] = [:]
+        var bodies: [String: String] = [:]
+
+        for match in matches {
+            guard match.numberOfRanges >= 3,
+                  let nameRange = Range(match.range(at: 1), in: source),
+                  let bodyRange = Range(match.range(at: 2), in: source) else {
+                continue
+            }
+            let name = String(source[nameRange])
+            let body = String(source[bodyRange])
+            bodies[name] = body
+            dependencies[name] = Set(
+                resources
+                    .filter { containsIdentifier($0.name, in: body) }
+                    .map(\.name)
+            )
+        }
+
+        var changed = true
+        while changed {
+            changed = false
+            for (macroName, body) in bodies {
+                let current = dependencies[macroName] ?? []
+                var merged = current
+                for (callee, calleeDependencies) in dependencies where callee != macroName {
+                    if containsIdentifier(callee, in: body) {
+                        merged.formUnion(calleeDependencies)
+                    }
+                }
+                if merged != current {
+                    dependencies[macroName] = merged
+                    changed = true
+                }
+            }
+        }
+
+        return dependencies
+    }
+
+    private static func helperParameterType(for uniform: WPEUniformDecl) -> String {
+        if uniform.arrayLength != nil {
+            switch uniform.type {
+            case "vec2": return "thread const float2*"
+            case "vec3": return "thread const float3*"
+            case "vec4": return "thread const float4*"
+            case "int":  return "thread const int*"
+            case "bool": return "thread const bool*"
+            default:     return "thread const float*"
+            }
+        }
+        return uniform.metalType
+    }
+
+    private static func parseHelperFunctions(in source: String) -> [HelperFunction] {
+        let pattern = #"(?m)(?:^|\n)\s*[A-Za-z_][A-Za-z0-9_<>,:&*\s]*\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*\{"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return []
+        }
+        let matches = regex.matches(in: source, range: NSRange(source.startIndex..., in: source))
+        var functions: [HelperFunction] = []
+
+        for match in matches {
+            guard match.numberOfRanges >= 3,
+                  let nameRange = Range(match.range(at: 1), in: source),
+                  let parametersRange = Range(match.range(at: 2), in: source),
+                  let matchRange = Range(match.range, in: source) else {
+                continue
+            }
+            let openBrace = source.index(before: matchRange.upperBound)
+            guard source[openBrace] == "{",
+                  let closeBrace = matchingDelimiter(in: source, open: openBrace, openChar: "{", closeChar: "}") else {
+                continue
+            }
+            let bodyRange = source.index(after: openBrace)..<closeBrace
+            functions.append(HelperFunction(
+                name: String(source[nameRange]),
+                parameterRange: parametersRange,
+                bodyRange: bodyRange
+            ))
+        }
+
+        return functions
+    }
+
+    private static func rewriteHelperCalls(
+        in source: String,
+        dependenciesByFunction: [String: Set<String>],
+        resourceOrder: [HelperResource]
+    ) -> String {
+        var result = ""
+        result.reserveCapacity(source.count)
+        var index = source.startIndex
+
+        while index < source.endIndex {
+            let ch = source[index]
+            guard isIdentifierStart(ch) else {
+                result.append(ch)
+                index = source.index(after: index)
+                continue
+            }
+
+            let identifierStart = index
+            var identifierEnd = source.index(after: index)
+            while identifierEnd < source.endIndex,
+                  isIdentifierCharacter(source[identifierEnd]) {
+                identifierEnd = source.index(after: identifierEnd)
+            }
+
+            let name = String(source[identifierStart..<identifierEnd])
+            var cursor = identifierEnd
+            while cursor < source.endIndex && source[cursor].isWhitespace {
+                cursor = source.index(after: cursor)
+            }
+
+            if let dependencies = dependenciesByFunction[name],
+               !dependencies.isEmpty,
+               cursor < source.endIndex,
+               source[cursor] == "(",
+               let closeParen = matchingDelimiter(in: source, open: cursor, openChar: "(", closeChar: ")") {
+                let argumentsRange = source.index(after: cursor)..<closeParen
+                let rewrittenArguments = rewriteHelperCalls(
+                    in: String(source[argumentsRange]),
+                    dependenciesByFunction: dependenciesByFunction,
+                    resourceOrder: resourceOrder
+                )
+                result += source[identifierStart..<cursor]
+                result += "("
+                result += appendHelperCallArguments(
+                    to: rewrittenArguments,
+                    dependencies: dependencies,
+                    resourceOrder: resourceOrder
+                )
+                result += ")"
+                index = source.index(after: closeParen)
+                continue
+            }
+
+            result += source[identifierStart..<identifierEnd]
+            index = identifierEnd
+        }
+
+        return result
+    }
+
+    private static func appendHelperParameters(
+        to parameters: String,
+        dependencies: Set<String>,
+        resourceOrder: [HelperResource]
+    ) -> String {
+        let additions = orderedResources(dependencies, resourceOrder: resourceOrder)
+            .map { "\($0.parameterType) \($0.name)" }
+            .joined(separator: ", ")
+        let trimmed = parameters.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed == "void" {
+            return additions
+        }
+        return "\(parameters), \(additions)"
+    }
+
+    private static func appendHelperCallArguments(
+        to arguments: String,
+        dependencies: Set<String>,
+        resourceOrder: [HelperResource]
+    ) -> String {
+        let additions = orderedResources(dependencies, resourceOrder: resourceOrder)
+            .map(\.name)
+            .joined(separator: ", ")
+        let trimmed = arguments.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed == "void" {
+            return additions
+        }
+        return "\(arguments), \(additions)"
+    }
+
+    private static func orderedResources(
+        _ dependencies: Set<String>,
+        resourceOrder: [HelperResource]
+    ) -> [HelperResource] {
+        resourceOrder.filter { dependencies.contains($0.name) }
+    }
+
+    private static func containsFunctionCall(_ name: String, in source: String) -> Bool {
+        var index = source.startIndex
+        while index < source.endIndex {
+            guard source[index...].hasPrefix(name),
+                  identifierBoundary(before: index, in: source) else {
+                index = source.index(after: index)
+                continue
+            }
+            let afterName = source.index(index, offsetBy: name.count)
+            guard identifierBoundary(after: afterName, in: source) else {
+                index = source.index(after: index)
+                continue
+            }
+            var cursor = afterName
+            while cursor < source.endIndex && source[cursor].isWhitespace {
+                cursor = source.index(after: cursor)
+            }
+            if cursor < source.endIndex && source[cursor] == "(" {
+                return true
+            }
+            index = source.index(after: index)
+        }
+        return false
+    }
+
+    private static func containsIdentifier(_ name: String, in source: String) -> Bool {
+        var index = source.startIndex
+        while index < source.endIndex {
+            guard source[index...].hasPrefix(name),
+                  identifierBoundary(before: index, in: source) else {
+                index = source.index(after: index)
+                continue
+            }
+            let afterName = source.index(index, offsetBy: name.count)
+            if identifierBoundary(after: afterName, in: source) {
+                return true
+            }
+            index = source.index(after: index)
+        }
+        return false
+    }
+
+    private static func matchingDelimiter(
+        in source: String,
+        open: String.Index,
+        openChar: Character,
+        closeChar: Character
+    ) -> String.Index? {
+        var depth = 0
+        var index = open
+        while index < source.endIndex {
+            let ch = source[index]
+            if ch == openChar {
+                depth += 1
+            } else if ch == closeChar {
+                depth -= 1
+                if depth == 0 {
+                    return index
+                }
+            }
+            index = source.index(after: index)
+        }
+        return nil
+    }
+
+    private static func identifierBoundary(before index: String.Index, in source: String) -> Bool {
+        guard index > source.startIndex else { return true }
+        return !isIdentifierCharacter(source[source.index(before: index)])
+    }
+
+    private static func identifierBoundary(after index: String.Index, in source: String) -> Bool {
+        guard index < source.endIndex else { return true }
+        return !isIdentifierCharacter(source[index])
+    }
+
+    private static func isIdentifierStart(_ ch: Character) -> Bool {
+        ch == "_" || ch.isLetter
+    }
+
+    private static func isIdentifierCharacter(_ ch: Character) -> Bool {
+        ch == "_" || ch.isLetter || ch.isNumber
+    }
+
     // MARK: - Render
 
     /// Emit the final MSL source with the fixed parameter signature so the dispatcher knows what to bind without doing runtime reflection.
@@ -398,6 +809,10 @@ struct WPEShaderTranspiler {
         }
 
         out.append("constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);")
+        out.append("inline float min(int lhs, float rhs) { return metal::min(float(lhs), rhs); }")
+        out.append("inline float min(float lhs, int rhs) { return metal::min(lhs, float(rhs)); }")
+        out.append("inline float max(int lhs, float rhs) { return metal::max(float(lhs), rhs); }")
+        out.append("inline float max(float lhs, int rhs) { return metal::max(lhs, float(rhs)); }")
         out.append("")
 
         if !helpers.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -422,17 +837,12 @@ struct WPEShaderTranspiler {
         }
         for varying in varyings {
             if varying.name == "uv" { continue }
-            switch varying.metalType {
-            case "float2":
-                out.append("    float2 \(varying.name) = in.uv;")
-            case "float3":
-                out.append("    float3 \(varying.name) = float3(in.uv, 0.0);")
-            case "float4":
-                out.append("    float4 \(varying.name) = float4(in.uv, in.uv);")
-            case "float":
-                out.append("    float \(varying.name) = in.uv.x;")
-            default:
-                out.append("    \(varying.metalType) \(varying.name) = \(varying.metalType)(0);")
+            let initializer = varyingInitializer(for: varying.metalType)
+            if let arrayLength = varying.arrayLength {
+                let initializers = Array(repeating: initializer, count: arrayLength).joined(separator: ", ")
+                out.append("    \(varying.metalType) \(varying.name)[\(arrayLength)] = { \(initializers) };")
+            } else {
+                out.append("    \(varying.metalType) \(varying.name) = \(initializer);")
             }
         }
         var slotCursor = 0
@@ -492,6 +902,21 @@ struct WPEShaderTranspiler {
         out.append(mainBody)
         out.append("}")
         return out.joined(separator: "\n")
+    }
+
+    private static func varyingInitializer(for metalType: String) -> String {
+        switch metalType {
+        case "float2":
+            return "in.uv"
+        case "float3":
+            return "float3(in.uv, 0.0)"
+        case "float4":
+            return "float4(in.uv, in.uv)"
+        case "float":
+            return "in.uv.x"
+        default:
+            return "\(metalType)(0)"
+        }
     }
 
     /// Map `g_Texture0` / `g_Texture1` etc. to a slot index by parsing the trailing digit.
@@ -604,6 +1029,7 @@ struct WPEVaryingDecl: Equatable {
     let type: String
     let name: String
     let metalType: String
+    let arrayLength: Int?
 
     static func parse(line: String) -> Self? {
         let prefix: String
@@ -619,7 +1045,28 @@ struct WPEVaryingDecl: Equatable {
         let decl = body[..<semicolon]
         let tokens = decl.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
         guard tokens.count >= 2 else { return nil }
-        return Self(type: tokens[0], name: tokens[1], metalType: WPEUniformDecl.mapType(tokens[0]))
+        let rawName = tokens[1]
+        let pattern = #"^([A-Za-z_][A-Za-z0-9_]*)(?:\[(\d+)\])?$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: rawName, range: NSRange(rawName.startIndex..., in: rawName)),
+              let nameRange = Range(match.range(at: 1), in: rawName) else {
+            return Self(type: tokens[0], name: rawName, metalType: WPEUniformDecl.mapType(tokens[0]), arrayLength: nil)
+        }
+
+        let arrayLength: Int?
+        if match.range(at: 2).location != NSNotFound,
+           let lengthRange = Range(match.range(at: 2), in: rawName) {
+            arrayLength = Int(rawName[lengthRange])
+        } else {
+            arrayLength = nil
+        }
+
+        return Self(
+            type: tokens[0],
+            name: String(rawName[nameRange]),
+            metalType: WPEUniformDecl.mapType(tokens[0]),
+            arrayLength: arrayLength
+        )
     }
 }
 #endif
