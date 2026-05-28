@@ -29,9 +29,11 @@ struct WPERenderGraphBuilder: Sendable {
             .map(\.id))
         var layerIDsToBuild = visibleLayerIDs
         var pendingIDs = Array(visibleLayerIDs)
+        var layerIDsRequiredAsComposite = Set<String>()
 
         while let id = pendingIDs.popLast(), let object = objectByID[id] {
             for dependencyID in Self.referencedLayerIDs(in: object) where objectByID[dependencyID] != nil {
+                layerIDsRequiredAsComposite.insert(dependencyID)
                 if layerIDsToBuild.insert(dependencyID).inserted {
                     pendingIDs.append(dependencyID)
                 }
@@ -43,7 +45,8 @@ struct WPERenderGraphBuilder: Sendable {
             .map { object in
                 try buildLayer(
                     object: object,
-                    finalUntargetedPassToScene: visibleLayerIDs.contains(object.id)
+                    finalUntargetedPassToScene: visibleLayerIDs.contains(object.id),
+                    preserveFinalCompositeForScene: layerIDsRequiredAsComposite.contains(object.id)
                 )
             }
         return WPERenderGraph(layers: layers)
@@ -81,7 +84,8 @@ struct WPERenderGraphBuilder: Sendable {
 
     private func buildLayer(
         object: WPESceneImageObject,
-        finalUntargetedPassToScene: Bool
+        finalUntargetedPassToScene: Bool,
+        preserveFinalCompositeForScene: Bool
     ) throws -> WPERenderLayer {
         let materialPath = try resolveMaterialPath(for: object)
         let compositeA = "_rt_imageLayerComposite_\(object.id)_a"
@@ -160,7 +164,10 @@ struct WPERenderGraphBuilder: Sendable {
             compositeA: compositeA,
             compositeB: compositeB,
             localFBOs: context.localFBOs,
-            passes: context.finalizedPasses(finalUntargetedPassToScene: finalUntargetedPassToScene),
+            passes: context.finalizedPasses(
+                finalUntargetedPassToScene: finalUntargetedPassToScene,
+                preserveFinalCompositeForScene: preserveFinalCompositeForScene
+            ),
             parallaxDepth: object.parallaxDepth
         )
     }
@@ -462,7 +469,10 @@ private struct LayerBuildContext {
     var passes: [WPERenderPass] = []
     var passTargetsWereExplicit: [Bool] = []
 
-    func finalizedPasses(finalUntargetedPassToScene: Bool) -> [WPERenderPass] {
+    func finalizedPasses(
+        finalUntargetedPassToScene: Bool,
+        preserveFinalCompositeForScene: Bool
+    ) -> [WPERenderPass] {
         guard let lastPass = passes.last,
               finalUntargetedPassToScene,
               passTargetsWereExplicit.indices.contains(passes.count - 1),
@@ -470,9 +480,41 @@ private struct LayerBuildContext {
             return passes.movingFirstBlendModeToFinalPass()
         }
 
+        if preserveFinalCompositeForScene,
+           let sceneSource = lastPass.target.textureReference {
+            var finalized = passes
+            finalized.append(WPERenderPass(
+                id: "\(object.id).\(passes.count)",
+                phase: .command(file: "materials/util/copy.json"),
+                shader: "materials/util/copy.json",
+                source: sceneSource,
+                target: .scene,
+                textures: [0: sceneSource],
+                binds: [:],
+                constants: [:],
+                combos: [:],
+                blending: lastPass.blending,
+                cullMode: "nocull",
+                depthTest: "disabled",
+                depthWrite: "disabled"
+            ))
+            return finalized.movingFirstBlendModeToFinalPass()
+        }
+
         var finalized = passes
         finalized[finalized.count - 1] = lastPass.replacingTarget(.scene)
         return finalized.movingFirstBlendModeToFinalPass()
+    }
+}
+
+private extension WPERenderTarget {
+    var textureReference: WPETextureReference? {
+        switch self {
+        case .layerComposite(let name), .fbo(let name):
+            return .fbo(name)
+        case .scene:
+            return nil
+        }
     }
 }
 

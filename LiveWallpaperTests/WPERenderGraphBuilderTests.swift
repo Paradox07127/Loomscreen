@@ -220,6 +220,91 @@ struct WPERenderGraphBuilderTests {
         #expect(visibleLayer.passes.last?.target == .scene)
     }
 
+    @Test("Visible image dependencies keep composites before drawing to scene")
+    func visibleImageDependenciesKeepCompositeThenDrawScene() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPERenderGraphBuilderTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        try writeJSON(["material": "materials/mask.json"], to: root.appendingPathComponent("models/mask.json"))
+        try writeJSON(["material": "materials/visible.json"], to: root.appendingPathComponent("models/visible.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "genericimage2",
+                "textures": ["mask_albedo"],
+                "blending": "translucent"
+            ]]
+        ], to: root.appendingPathComponent("materials/mask.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "genericimage2",
+                "textures": ["visible_albedo"]
+            ]]
+        ], to: root.appendingPathComponent("materials/visible.json"))
+        try writeJSON([
+            "passes": [[
+                "material": "materials/effects/masked.json",
+                "bind": [["index": 0, "name": "previous"]]
+            ]]
+        ], to: root.appendingPathComponent("effects/masked/effect.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "effects/masked",
+                "textures": [NSNull(), "_rt_imageLayerComposite_16613_a"]
+            ]]
+        ], to: root.appendingPathComponent("materials/effects/masked.json"))
+
+        let scenePayload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1920, "height": 1080, "auto": true]],
+            "objects": [
+                [
+                    "id": 16613,
+                    "name": "Visible Mask",
+                    "type": "image",
+                    "image": "models/mask.json"
+                ],
+                [
+                    "id": 4149,
+                    "name": "Masked Layer",
+                    "type": "image",
+                    "image": "models/visible.json",
+                    "dependencies": [16613],
+                    "effects": [[
+                        "id": 1317,
+                        "file": "effects/masked/effect.json",
+                        "passes": [[
+                            "textures": [NSNull(), "_rt_imageLayerComposite_16613_a"]
+                        ]]
+                    ]]
+                ]
+            ]
+        ]
+        let sceneData = try JSONSerialization.data(withJSONObject: scenePayload)
+        let document = try WPESceneDocumentParser.parse(data: sceneData)
+
+        let graph = try WPERenderGraphBuilder(cacheRootURL: root).build(document: document)
+
+        #expect(graph.layers.map(\.objectID) == ["16613", "4149"])
+        let maskLayer = try #require(graph.layers.first)
+        let maskedLayer = try #require(graph.layers.dropFirst().first)
+
+        #expect(maskLayer.passes.map(\.target) == [
+            .layerComposite(name: "_rt_imageLayerComposite_16613_a"),
+            .scene
+        ])
+        let compositePass = try #require(maskLayer.passes.first)
+        let scenePass = try #require(maskLayer.passes.dropFirst().first)
+        #expect(compositePass.blending == "normal")
+        #expect(scenePass.shader == "materials/util/copy.json")
+        #expect(scenePass.source == .fbo("_rt_imageLayerComposite_16613_a"))
+        #expect(scenePass.textures[0] == .fbo("_rt_imageLayerComposite_16613_a"))
+        #expect(scenePass.blending == "translucent")
+        #expect(maskedLayer.passes.last?.textures[1] == .fbo("_rt_imageLayerComposite_16613_a"))
+        #expect(maskedLayer.passes.last?.target == .scene)
+    }
+
     @Test("Builds built-in solid layer model without requiring packaged model JSON")
     func buildsBuiltinSolidLayerModel() throws {
         let root = FileManager.default.temporaryDirectory
