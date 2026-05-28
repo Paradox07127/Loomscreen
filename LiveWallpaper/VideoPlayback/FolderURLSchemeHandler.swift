@@ -51,6 +51,33 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
         "form-action 'none';"
     ].joined(separator: " ")
 
+    /// Per-handler CSP override. Tests inject one of the candidate policies
+    /// in `Report-Only` mode (via `CSPCompatibilityAuditTests`) so the
+    /// wallpaper runs unimpeded while the browser still emits
+    /// `securitypolicyviolation` events for the test corpus. `nil` (the
+    /// default) keeps the production enforced policy from
+    /// `contentSecurityPolicy`.
+    var cspOverride: ContentSecurityPolicyOverride?
+
+    /// Pair of directives + disposition (enforced vs. Report-Only). Held in
+    /// its own type so callers don't accidentally swap one field but forget
+    /// the other.
+    struct ContentSecurityPolicyOverride: Sendable, Equatable {
+        enum Disposition: Sendable, Equatable {
+            case enforced
+            case reportOnly
+        }
+        let directives: String
+        let disposition: Disposition
+
+        var headerName: String {
+            switch disposition {
+            case .enforced:   return "Content-Security-Policy"
+            case .reportOnly: return "Content-Security-Policy-Report-Only"
+            }
+        }
+    }
+
     private var activeFolderURL: URL?
     private var sessionNonce: String?
     private var activeTasks: [ObjectIdentifier: ActiveTask] = [:]
@@ -132,10 +159,19 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
         let rangeHeader = urlSchemeTask.request.value(forHTTPHeaderField: "Range")
         let delivery = SchemeTaskDelivery(urlSchemeTask)
         let taskID = ObjectIdentifier(urlSchemeTask as AnyObject)
+        // Snapshot the CSP for this request on the main thread so the detached
+        // worker can attach it without crossing actor boundaries to read the
+        // mutable `cspOverride` property.
+        let cspHeader: (name: String, value: String) = {
+            if let override = cspOverride {
+                return (override.headerName, override.directives)
+            }
+            return ("Content-Security-Policy", Self.contentSecurityPolicy)
+        }()
 
         activeTasks[taskID]?.cancel()
 
-        let worker = Task.detached(priority: .userInitiated) { [weak self, fileURL, mime, rangeHeader, url, delivery, taskID] in
+        let worker = Task.detached(priority: .userInitiated) { [weak self, fileURL, mime, rangeHeader, url, delivery, taskID, cspHeader] in
             do {
                 let fileSize = try Self.fileSize(for: fileURL)
                 let range = Self.byteRange(from: rangeHeader, totalLength: fileSize)
@@ -146,7 +182,7 @@ final class FolderURLSchemeHandler: NSObject, WKURLSchemeHandler, @unchecked Sen
                     "Content-Type": mime,
                     "Content-Length": "\(contentLength)",
                     "Accept-Ranges": "bytes",
-                    "Content-Security-Policy": Self.contentSecurityPolicy
+                    cspHeader.name: cspHeader.value
                 ]
                 // Range-served audio / video subresources need ACAO so the
                 // page can `<audio>`/`<video>` them across nested iframes;
