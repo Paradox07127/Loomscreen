@@ -8827,6 +8827,18 @@
         }
       }
     },
+    "error.render.executor.render_target_dimensions_exceed_device_limit" : {
+      "comment" : "Error shown when a Wallpaper Engine render target is larger than Metal allows on the current GPU.",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "WPE Metal render target '%1$@' is %2$lldx%3$lld, exceeding this device's %4$lldx%5$lld 2D texture limit."
+          }
+        }
+      }
+    },
     "error.render.executor.shader_translator_unavailable" : {
       "comment" : "Error shown when a custom WPE shader cannot be translated or compiled by the Metal renderer.",
       "localizations" : {
