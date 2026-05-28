@@ -1638,6 +1638,8 @@ struct WPEShaderTranspiler {
         helpers: String,
         mainBody: String
     ) -> String {
+        let warningCleanHelpers = neutralizeMetalStdlibMacroRedefinitions(helpers)
+        let warningCleanMainBody = neutralizeMetalStdlibMacroRedefinitions(mainBody)
         var out: [String] = [
             "#include <metal_stdlib>",
             "using namespace metal;",
@@ -1659,7 +1661,7 @@ struct WPEShaderTranspiler {
             out.append("")
         }
 
-        out.append("constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);")
+        out.append("[[maybe_unused]] constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);")
         out.append("inline float min(int lhs, float rhs) { return metal::min(float(lhs), rhs); }")
         out.append("inline float min(float lhs, int rhs) { return metal::min(lhs, float(rhs)); }")
         out.append("inline float max(int lhs, float rhs) { return metal::max(float(lhs), rhs); }")
@@ -1670,11 +1672,11 @@ struct WPEShaderTranspiler {
         out.append("inline float clamp(int value, int lower, float upper) { return metal::clamp(float(value), float(lower), upper); }")
         out.append("inline float clamp(int value, float lower, int upper) { return metal::clamp(float(value), lower, float(upper)); }")
         out.append("inline float clamp(float value, int lower, int upper) { return metal::clamp(value, float(lower), float(upper)); }")
-        appendCompatibilityPrelude(to: &out, helpers: helpers)
+        appendCompatibilityPrelude(to: &out, helpers: warningCleanHelpers)
         out.append("")
 
-        if !helpers.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            out.append(helpers)
+        if !warningCleanHelpers.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            out.append(warningCleanHelpers)
             out.append("")
         }
 
@@ -1691,16 +1693,16 @@ struct WPEShaderTranspiler {
         out.append(signature.joined(separator: "\n"))
 
         for (slot, sampler) in samplers.enumerated() {
-            out.append("    auto \(sampler.name) = tex\(slot);")
+            out.append("    [[maybe_unused]] auto \(sampler.name) = tex\(slot);")
         }
         for varying in varyings {
             if varying.name == "uv" { continue }
             let initializer = varyingInitializer(for: varying.metalType)
             if let arrayLength = varying.arrayLength {
                 let initializers = Array(repeating: initializer, count: arrayLength).joined(separator: ", ")
-                out.append("    \(varying.metalType) \(varying.name)[\(arrayLength)] = { \(initializers) };")
+                out.append("    [[maybe_unused]] \(varying.metalType) \(varying.name)[\(arrayLength)] = { \(initializers) };")
             } else {
-                out.append("    \(varying.metalType) \(varying.name) = \(initializer);")
+                out.append("    [[maybe_unused]] \(varying.metalType) \(varying.name) = \(initializer);")
             }
         }
         var slotCursor = 0
@@ -1715,7 +1717,7 @@ struct WPEShaderTranspiler {
                 case "bool": elementType = "bool"
                 default:     elementType = "float"
                 }
-                out.append("    \(elementType) \(u.name)[\(arrayLength)];")
+                out.append("    [[maybe_unused]] \(elementType) \(u.name)[\(arrayLength)];")
                 for i in 0..<arrayLength {
                     let read: String
                     switch elementType {
@@ -1734,34 +1736,70 @@ struct WPEShaderTranspiler {
             let slots = Self.slotCount(for: u.type)
             switch u.type {
             case "float":
-                out.append("    float \(u.name) = u.vals[\(slotCursor)].x;")
+                out.append("    [[maybe_unused]] float \(u.name) = u.vals[\(slotCursor)].x;")
             case "vec2":
-                out.append("    float2 \(u.name) = u.vals[\(slotCursor)].xy;")
+                out.append("    [[maybe_unused]] float2 \(u.name) = u.vals[\(slotCursor)].xy;")
             case "vec3":
-                out.append("    float3 \(u.name) = u.vals[\(slotCursor)].xyz;")
+                out.append("    [[maybe_unused]] float3 \(u.name) = u.vals[\(slotCursor)].xyz;")
             case "vec4":
-                out.append("    float4 \(u.name) = u.vals[\(slotCursor)];")
+                out.append("    [[maybe_unused]] float4 \(u.name) = u.vals[\(slotCursor)];")
             case "int":
-                out.append("    int \(u.name) = int(u.vals[\(slotCursor)].x);")
+                out.append("    [[maybe_unused]] int \(u.name) = int(u.vals[\(slotCursor)].x);")
             case "bool":
-                out.append("    bool \(u.name) = u.vals[\(slotCursor)].x > 0.5;")
+                out.append("    [[maybe_unused]] bool \(u.name) = u.vals[\(slotCursor)].x > 0.5;")
             case "mat2":
-                out.append("    float2x2 \(u.name) = float2x2(u.vals[\(slotCursor)].xy, u.vals[\(slotCursor + 1)].xy);")
+                out.append("    [[maybe_unused]] float2x2 \(u.name) = float2x2(u.vals[\(slotCursor)].xy, u.vals[\(slotCursor + 1)].xy);")
             case "mat3":
-                out.append("    float3x3 \(u.name) = float3x3(u.vals[\(slotCursor)].xyz, u.vals[\(slotCursor + 1)].xyz, u.vals[\(slotCursor + 2)].xyz);")
+                out.append("    [[maybe_unused]] float3x3 \(u.name) = float3x3(u.vals[\(slotCursor)].xyz, u.vals[\(slotCursor + 1)].xyz, u.vals[\(slotCursor + 2)].xyz);")
             case "mat4":
-                out.append("    float4x4 \(u.name) = float4x4(u.vals[\(slotCursor)], u.vals[\(slotCursor + 1)], u.vals[\(slotCursor + 2)], u.vals[\(slotCursor + 3)]);")
+                out.append("    [[maybe_unused]] float4x4 \(u.name) = float4x4(u.vals[\(slotCursor)], u.vals[\(slotCursor + 1)], u.vals[\(slotCursor + 2)], u.vals[\(slotCursor + 3)]);")
             default:
-                out.append("    \(u.metalType) \(u.name) = u.vals[\(slotCursor)].x;")
+                out.append("    [[maybe_unused]] \(u.metalType) \(u.name) = u.vals[\(slotCursor)].x;")
             }
             slotCursor += slots
         }
 
         out.append("    {")
-        out.append(mainBody)
+        out.append(warningCleanMainBody)
         out.append("    }")
         out.append("}")
         return out.joined(separator: "\n")
+    }
+
+    private static let metalStdlibMacroDefinitions: Set<String> = [
+        "M_PI_F"
+    ]
+
+    private static func neutralizeMetalStdlibMacroRedefinitions(_ source: String) -> String {
+        guard source.contains("#") else { return source }
+        return source.components(separatedBy: "\n").map { line in
+            guard let macroName = defineMacroName(in: line),
+                  metalStdlibMacroDefinitions.contains(macroName) else {
+                return line
+            }
+            return "// disabled duplicate Metal stdlib macro definition: \(macroName)"
+        }.joined(separator: "\n")
+    }
+
+    private static func defineMacroName(in line: String) -> String? {
+        var trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.first == "#" else { return nil }
+        trimmed.removeFirst()
+
+        let directive = trimmed.trimmingCharacters(in: .whitespaces)
+        guard directive.hasPrefix("define") else { return nil }
+
+        let afterDirective = directive.dropFirst("define".count)
+        guard afterDirective.first?.isWhitespace == true else { return nil }
+        let afterWhitespace = afterDirective.drop(while: { $0.isWhitespace })
+        guard let first = afterWhitespace.first, isIdentifierStart(first) else { return nil }
+
+        var name = ""
+        for ch in afterWhitespace {
+            guard isIdentifierCharacter(ch) else { break }
+            name.append(ch)
+        }
+        return name
     }
 
     private static func appendCompatibilityPrelude(to out: inout [String], helpers: String) {

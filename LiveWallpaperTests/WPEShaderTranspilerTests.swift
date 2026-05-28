@@ -380,4 +380,55 @@ struct WPEShaderTranspilerTests {
         opts.languageVersion = .version3_0
         _ = try device.makeLibrary(source: mslSource, options: opts)
     }
+
+    @Test("Generated resource aliases are warning-clean when unused")
+    func generatedResourceAliasesAreWarningCleanWhenUnused() throws {
+        let source = """
+        #version 410 core
+        #define M_PI_F 3.14159265358979323846f
+        uniform sampler2D g_Texture0;
+        uniform sampler2D g_Texture1;
+        uniform float g_Time;
+        in vec2 v_TexCoord;
+        in vec4 v_TexCoordMask;
+        void main() {
+            gl_FragColor = texture(g_Texture0, v_TexCoord);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "unused_generated_aliases",
+            preprocessedSource: source
+        )
+
+        #expect(result.mslSource.contains("[[maybe_unused]] auto g_Texture1 = tex1;"))
+        #expect(result.mslSource.contains("[[maybe_unused]] float g_Time = u.vals[0].x;"))
+        #expect(result.mslSource.contains("[[maybe_unused]] float4 v_TexCoordMask = float4(in.uv, in.uv);"))
+        #expect(!result.mslSource.contains("#define M_PI_F"))
+
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("Generated linear sampler is warning-clean when unused")
+    func generatedLinearSamplerIsWarningCleanWhenUnused() throws {
+        let source = """
+        #version 410 core
+        void main() {
+            gl_FragColor = vec4(1.0);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "unused_linear_sampler",
+            preprocessedSource: source
+        )
+
+        #expect(result.mslSource.contains("[[maybe_unused]] constexpr sampler linearSampler"))
+
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
 }
