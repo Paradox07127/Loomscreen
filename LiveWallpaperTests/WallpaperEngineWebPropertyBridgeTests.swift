@@ -42,6 +42,34 @@ struct WallpaperEngineWebPropertyBridgeTests {
         #expect(WallpaperEngineWebPropertyBridge.bootstrapScript(forFolder: folder) == nil)
     }
 
+    @Test("Bootstrap script installs a defineProperty hook on wallpaperPropertyListener")
+    func bootstrapInstallsDefinePropertyHook() throws {
+        // Regression: an earlier bootstrap implementation polled
+        // `wallpaperPropertyListener` via requestAnimationFrame for up to
+        // 120 frames (~2–4s). Wallpapers that assign the listener after
+        // that window never got their defaults applied. The new bootstrap
+        // installs an Object.defineProperty setter on `window` so the
+        // payload is delivered the moment the page assigns the listener.
+        let folder = try makeProjectFolder(manifest: """
+        {
+          "file": "index.html",
+          "type": "Web",
+          "general": {
+            "properties": {
+              "color": { "type": "color", "text": "Color", "value": "1 0 0" }
+            }
+          }
+        }
+        """)
+
+        let script = try #require(WallpaperEngineWebPropertyBridge.bootstrapScript(forFolder: folder))
+
+        #expect(script.contains("Object.defineProperty(window, 'wallpaperPropertyListener'"))
+        #expect(script.contains("set:"))
+        // Stage 1 (already-defined) and stage 3 (RAF poll fallback) stay in place.
+        #expect(script.contains("requestAnimationFrame"))
+    }
+
     @Test("Hot apply only sends Wallpaper Engine properties whose effective value changed")
     func hotApplyOnlySendsChangedProperties() throws {
         let schema = try WallpaperEngineProjectPropertySchema.parse(data: Data("""

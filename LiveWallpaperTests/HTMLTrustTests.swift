@@ -118,6 +118,28 @@ struct HTMLTrustVerdictTests {
         }
     }
 
+    @Test("effectiveMuteAudio force-mutes untrusted remote regardless of request")
+    func untrustedRemoteForcesMute() throws {
+        let origin = try #require(TrustedHTMLOrigin(url: URL(string: "https://evil.example")!))
+        let v = HTMLTrust.untrustedRemote(origin: origin)
+        #expect(v.effectiveMuteAudio(requested: false) == true)
+        #expect(v.effectiveMuteAudio(requested: true) == true)
+        #expect(v.effectiveAudioVolume(requested: 1.0) == 0)
+        #expect(v.effectiveAudioVolume(requested: 0.5) == 0)
+        #expect(v.effectiveAudioVolume(requested: 0.0) == 0)
+    }
+
+    @Test("effectiveMuteAudio passes request through for local + trusted")
+    func othersHonorAudioRequest() throws {
+        let origin = try #require(TrustedHTMLOrigin(url: URL(string: "https://x.com")!))
+        for v in [HTMLTrust.localContent, .trustedRemote(origin: origin)] {
+            #expect(v.effectiveMuteAudio(requested: false) == false)
+            #expect(v.effectiveMuteAudio(requested: true) == true)
+            #expect(v.effectiveAudioVolume(requested: 0.7) == 0.7)
+            #expect(v.effectiveAudioVolume(requested: 0.0) == 0.0)
+        }
+    }
+
     @Test("Origin raw value includes scheme, host, and effective port")
     func originRawValueIncludesTransportBoundary() throws {
         let defaultHTTPS = try #require(TrustedHTMLOrigin(url: URL(string: "https://Example.COM/path")!))
