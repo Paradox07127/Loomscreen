@@ -369,6 +369,83 @@ struct WPECorpusFailurePatternsTests {
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
+    @Test("Mask UV access through v_TexCoord zw compiles on the fullscreen path")
+    func maskTexCoordZWAccessFallsBackToBaseUV() throws {
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform sampler2D g_Texture1;
+        varying vec2 v_TexCoord;
+        void main() {
+            float mask = texture(g_Texture1, v_TexCoord.zw).r;
+            gl_FragColor = texture(g_Texture0, v_TexCoord) * mask;
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "mask_texcoord_zw",
+            preprocessedSource: source
+        )
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+
+        #expect(result.mslSource.contains("g_Texture1.sample(linearSampler, v_TexCoord.xy).r"))
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("Metal reserved local identifiers from WPE shaders are renamed")
+    func reservedLocalIdentifiersCompile() throws {
+        let source = """
+        #version 410 core
+        #define mul(x, y) ((y) * (x))
+        uniform sampler2D g_Texture0;
+        varying vec2 v_TexCoord;
+        void main() {
+            mat2 rot = mat2(1.0, 0.0, 0.0, 1.0);
+            vec2 o = v_TexCoord;
+            vec2 or = mul(o, rot);
+            float d = length(v_TexCoord - or);
+            gl_FragColor = vec4(d, 0.0, 0.0, 1.0);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "reserved_or_local",
+            preprocessedSource: source
+        )
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+
+        #expect(result.mslSource.contains("float2 orValue = mul(o, rot);"))
+        #expect(result.mslSource.contains("v_TexCoord - orValue"))
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("Texture resolution vec4 uniforms narrow to xy in vec2 compound assignments")
+    func textureResolutionNarrowsInVector2CompoundAssignments() throws {
+        let source = """
+        #version 410 core
+        uniform vec4 g_Texture0Resolution;
+        uniform sampler2D g_Texture0;
+        varying vec2 v_TexCoord;
+        void main() {
+            vec2 strength = vec2(1.0);
+            strength *= 500 / g_Texture0Resolution;
+            gl_FragColor = vec4(strength, 0.0, 1.0);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "texture_resolution_vec2_compound",
+            preprocessedSource: source
+        )
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+
+        #expect(result.mslSource.contains("500 / g_Texture0Resolution.xy"))
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
     @Test("GLSL vector array constructors become Metal initializer lists")
     func glslVectorArrayConstructorsBecomeMetalInitializerLists() throws {
         let source = """

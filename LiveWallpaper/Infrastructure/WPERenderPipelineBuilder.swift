@@ -1035,6 +1035,11 @@ private struct WPEShaderSourceLoader: Sendable {
                 return mix(A, result, opacity);
             }
 
+            vec3 ApplyBlending(int blendMode, vec3 A, vec3 B, vec3 opacity) {
+                vec3 result = ApplyBlending(blendMode, A, B, 1.0);
+                return mix(A, result, opacity);
+            }
+
             float ApplyBlendingAlpha(int blendMode, float a, float b, float opacity) {
                 // Most blend modes leave alpha unmodified; the source alpha
                 // gates how much of the blended colour shows through. The

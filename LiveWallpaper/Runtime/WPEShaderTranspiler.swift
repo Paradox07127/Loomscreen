@@ -641,7 +641,9 @@ struct WPEShaderTranspiler {
         s = rewriteTextureSampleNarrowing(s)
         s = rewriteUnsignedFloatModuloAssignments(s)
         s = rewriteFloatAssignmentsFromVectorExpressions(s)
+        s = rewriteTextureResolutionVector2Assignments(s)
         s = rewriteTexCoordVector2Arithmetic(s)
+        s = rewriteTexCoordMaskUVFallback(s)
         s = rewriteGLSLArrayConstructors(s)
 
         s = rewriteReferenceParameters(s)
@@ -692,9 +694,55 @@ struct WPEShaderTranspiler {
         return result
     }
 
+    /// WPE shaders sometimes use `g_TextureNResolution` as a vec2 scale in
+    /// compound assignments, even though the uniform is declared as vec4.
+    private static func rewriteTextureResolutionVector2Assignments(_ source: String) -> String {
+        let declarationPattern = #"\bfloat2\s+([A-Za-z_][A-Za-z0-9_]*)\b"#
+        guard let declarationRegex = try? NSRegularExpression(pattern: declarationPattern) else {
+            return source
+        }
+        let declarationMatches = declarationRegex.matches(
+            in: source,
+            range: NSRange(source.startIndex..., in: source)
+        )
+        let vector2Names = declarationMatches.compactMap { match -> String? in
+            guard let range = Range(match.range(at: 1), in: source) else {
+                return nil
+            }
+            return String(source[range])
+        }
+        guard !vector2Names.isEmpty else {
+            return source
+        }
+
+        var result = source
+        for name in vector2Names {
+            let escapedName = NSRegularExpression.escapedPattern(for: name)
+            let pattern = #"(\b"# + escapedName + #"\s*[+\-*/]?=\s*[^;\n]*?)\b(g_Texture[0-9]+Resolution)\b(?!\s*\.)"#
+            guard let regex = try? NSRegularExpression(pattern: pattern) else {
+                continue
+            }
+            let matches = regex.matches(in: result, range: NSRange(result.startIndex..., in: result))
+            for match in matches.reversed() {
+                guard let fullRange = Range(match.range(at: 0), in: result),
+                      let prefixRange = Range(match.range(at: 1), in: result),
+                      let resolutionRange = Range(match.range(at: 2), in: result) else {
+                    continue
+                }
+                result.replaceSubrange(
+                    fullRange,
+                    with: "\(result[prefixRange])\(result[resolutionRange]).xy"
+                )
+            }
+        }
+        return result
+    }
+
     /// Rename GLSL identifiers that are legal in WPE shaders but reserved by Metal.
     private static func rewriteReservedIdentifiers(_ source: String) -> String {
-        wordReplace(source, find: "kernel", replace: "kernelValues")
+        var result = wordReplace(source, find: "kernel", replace: "kernelValues")
+        result = wordReplace(result, find: "or", replace: "orValue")
+        return result
     }
 
     /// GLSL permits assigning a texture sample to narrower vector/scalar locals.
@@ -745,6 +793,13 @@ struct WPEShaderTranspiler {
             range: range,
             withTemplate: "v_TexCoord.xy $1 $2"
         )
+    }
+
+    /// Some WPE effects compute secondary mask UVs into `v_TexCoord.zw` in the
+    /// vertex shader, but this fullscreen Metal path only exposes base UVs.
+    /// Falling back to `.xy` preserves compilation and the common mask behavior.
+    private static func rewriteTexCoordMaskUVFallback(_ source: String) -> String {
+        source.replacingOccurrences(of: "v_TexCoord.zw", with: "v_TexCoord.xy")
     }
 
     /// Metal accepts aggregate array initializers, not GLSL constructor syntax

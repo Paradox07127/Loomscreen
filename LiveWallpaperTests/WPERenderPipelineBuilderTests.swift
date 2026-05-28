@@ -330,6 +330,7 @@ struct WPERenderPipelineBuilderTests {
         #expect(pass.comboValues["BLENDMODE"] == 31)
         #expect(shader.fragmentSource.contains("#define BLENDMODE 31"))
         #expect(shader.fragmentSource.contains("blendMode == 31"))
+        #expect(shader.fragmentSource.contains("vec3 ApplyBlending(int blendMode, vec3 A, vec3 B, vec3 opacity)"))
         #expect(shader.fragmentSource.contains("#include") == false)
     }
 
