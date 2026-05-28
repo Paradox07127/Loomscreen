@@ -181,4 +181,61 @@ struct WPECorpusFailurePatternsTests {
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
+    @Test("Common WPE shader helpers are available to translated fragments")
+    func commonWPEShaderHelpersCompile() throws {
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        in vec2 v_TexCoord;
+        void main() {
+            vec2 wrapped = mod(v_TexCoord * 2.0, 1.0);
+            vec4 sampleColor = texture(g_Texture0, wrapped);
+            float luma = greyscale(sampleColor.rgb);
+            vec3 color = hsv2rgb(rgb2hsv(sampleColor.rgb));
+            vec3 normal = DecompressNormal(sampleColor);
+            gl_FragColor = vec4(color * luma + normal * 0.0, sampleColor.a);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "common_wpe_shader_helpers",
+            preprocessedSource: source
+        )
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("Compatibility prelude does not redefine scene-authored helpers")
+    func compatibilityPreludeDoesNotRedefineSceneHelpers() throws {
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        in vec2 v_TexCoord;
+        vec3 DecompressNormal(vec4 packed) {
+            vec2 nxy = packed.xy * 2.0 - 1.0;
+            float nz = sqrt(max(0.0, 1.0 - dot(nxy, nxy)));
+            return vec3(nxy, nz);
+        }
+        vec3 DecompressNormal(vec3 packed) {
+            return DecompressNormal(vec4(packed, 0.0));
+        }
+        void main() {
+            vec4 sampleColor = texture(g_Texture0, v_TexCoord);
+            vec3 normal = DecompressNormal(sampleColor);
+            gl_FragColor = vec4(normal, sampleColor.a);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "scene_defined_common_helper",
+            preprocessedSource: source
+        )
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
 }

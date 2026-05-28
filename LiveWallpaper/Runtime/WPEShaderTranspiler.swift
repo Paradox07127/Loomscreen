@@ -813,6 +813,7 @@ struct WPEShaderTranspiler {
         out.append("inline float min(float lhs, int rhs) { return metal::min(lhs, float(rhs)); }")
         out.append("inline float max(int lhs, float rhs) { return metal::max(float(lhs), rhs); }")
         out.append("inline float max(float lhs, int rhs) { return metal::max(lhs, float(rhs)); }")
+        appendCompatibilityPrelude(to: &out, helpers: helpers)
         out.append("")
 
         if !helpers.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -902,6 +903,69 @@ struct WPEShaderTranspiler {
         out.append(mainBody)
         out.append("}")
         return out.joined(separator: "\n")
+    }
+
+    private static func appendCompatibilityPrelude(to out: inout [String], helpers: String) {
+        let existingFunctionNames = Set(parseHelperFunctions(in: helpers).map(\.name))
+
+        if !existingFunctionNames.contains("mod") {
+            out.append("inline float mod(float x, float y) { return x - y * floor(x / y); }")
+            out.append("inline float mod(float x, int y) { return mod(x, float(y)); }")
+            out.append("inline float2 mod(float2 x, float2 y) { return x - y * floor(x / y); }")
+            out.append("inline float2 mod(float2 x, float y) { return mod(x, float2(y)); }")
+            out.append("inline float2 mod(float2 x, int y) { return mod(x, float(y)); }")
+            out.append("inline float3 mod(float3 x, float3 y) { return x - y * floor(x / y); }")
+            out.append("inline float3 mod(float3 x, float y) { return mod(x, float3(y)); }")
+            out.append("inline float3 mod(float3 x, int y) { return mod(x, float(y)); }")
+            out.append("inline float4 mod(float4 x, float4 y) { return x - y * floor(x / y); }")
+            out.append("inline float4 mod(float4 x, float y) { return mod(x, float4(y)); }")
+            out.append("inline float4 mod(float4 x, int y) { return mod(x, float(y)); }")
+        }
+
+        if !existingFunctionNames.contains("greyscale") {
+            out.append("inline float greyscale(float3 c) { return dot(c, float3(0.299, 0.587, 0.114)); }")
+            out.append("inline float greyscale(float4 c) { return greyscale(c.rgb); }")
+        }
+
+        if !existingFunctionNames.contains("rgb2hsv") {
+            out.append(
+                """
+                inline float3 rgb2hsv(float3 c) {
+                    float4 K = float4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+                    float4 p = mix(float4(c.bg, K.wz), float4(c.gb, K.xy), step(c.b, c.g));
+                    float4 q = mix(float4(p.xyw, c.r), float4(c.r, p.yzx), step(p.x, c.r));
+                    float d = q.x - min(q.w, q.y);
+                    float e = 1.0e-10;
+                    return float3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+                }
+                """
+            )
+        }
+
+        if !existingFunctionNames.contains("hsv2rgb") {
+            out.append(
+                """
+                inline float3 hsv2rgb(float3 c) {
+                    float4 K = float4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+                    float3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+                    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+                }
+                """
+            )
+        }
+
+        if !existingFunctionNames.contains("DecompressNormal") {
+            out.append(
+                """
+                inline float3 DecompressNormal(float4 packed) {
+                    float2 nxy = packed.xy * 2.0 - 1.0;
+                    float nz = sqrt(max(0.0, 1.0 - dot(nxy, nxy)));
+                    return float3(nxy, nz);
+                }
+                """
+            )
+            out.append("inline float3 DecompressNormal(float3 packed) { return DecompressNormal(float4(packed, 0.0)); }")
+        }
     }
 
     private static func varyingInitializer(for metalType: String) -> String {
