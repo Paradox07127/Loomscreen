@@ -198,6 +198,7 @@ public struct WPESceneImageObject: Equatable, Sendable, Identifiable {
     public let blendMode: WPESceneBlendMode
     public let alignment: WPESceneAlignment
     public let size: CGSize?
+    public let dependencies: [String]
     public let effects: [WPESceneImageEffect]
     public let animationLayers: [WPESceneAnimationLayer]
     public let parallaxDepth: Double
@@ -217,6 +218,7 @@ public struct WPESceneImageObject: Equatable, Sendable, Identifiable {
         blendMode: WPESceneBlendMode,
         alignment: WPESceneAlignment,
         size: CGSize?,
+        dependencies: [String] = [],
         effects: [WPESceneImageEffect],
         animationLayers: [WPESceneAnimationLayer],
         parallaxDepth: Double = 0
@@ -235,6 +237,7 @@ public struct WPESceneImageObject: Equatable, Sendable, Identifiable {
         self.blendMode = blendMode
         self.alignment = alignment
         self.size = size
+        self.dependencies = dependencies
         self.effects = effects
         self.animationLayers = animationLayers
         self.parallaxDepth = parallaxDepth

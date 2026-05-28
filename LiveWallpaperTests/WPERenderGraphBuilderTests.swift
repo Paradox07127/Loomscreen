@@ -142,6 +142,84 @@ struct WPERenderGraphBuilderTests {
         #expect(layer.passes[1].target == .scene)
     }
 
+    @Test("Hidden image dependencies still write composites without drawing to scene")
+    func hiddenImageDependenciesWriteCompositeOnly() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPERenderGraphBuilderTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        try writeJSON(["material": "materials/dependency.json"], to: root.appendingPathComponent("models/dependency.json"))
+        try writeJSON(["material": "materials/visible.json"], to: root.appendingPathComponent("models/visible.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "genericimage2",
+                "textures": ["dependency_albedo"]
+            ]]
+        ], to: root.appendingPathComponent("materials/dependency.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "genericimage2",
+                "textures": ["visible_albedo"]
+            ]]
+        ], to: root.appendingPathComponent("materials/visible.json"))
+        try writeJSON([
+            "passes": [[
+                "material": "materials/effects/blend.json",
+                "bind": [["index": 0, "name": "previous"]]
+            ]]
+        ], to: root.appendingPathComponent("effects/blend/effect.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "effects/blend",
+                "textures": [NSNull(), "_rt_imageLayerComposite_14942_a"]
+            ]]
+        ], to: root.appendingPathComponent("materials/effects/blend.json"))
+
+        let scenePayload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1920, "height": 1080, "auto": true]],
+            "objects": [
+                [
+                    "id": 14942,
+                    "name": "Dependency",
+                    "type": "image",
+                    "image": "models/dependency.json",
+                    "visible": false
+                ],
+                [
+                    "id": 4604,
+                    "name": "Visible",
+                    "type": "image",
+                    "image": "models/visible.json",
+                    "dependencies": [14942],
+                    "effects": [[
+                        "id": 4607,
+                        "file": "effects/blend/effect.json",
+                        "passes": [[
+                            "textures": [NSNull(), "_rt_imageLayerComposite_14942_a"]
+                        ]]
+                    ]]
+                ]
+            ]
+        ]
+        let sceneData = try JSONSerialization.data(withJSONObject: scenePayload)
+        let document = try WPESceneDocumentParser.parse(data: sceneData)
+
+        #expect(document.imageObjects[1].dependencies == ["14942"])
+
+        let graph = try WPERenderGraphBuilder(cacheRootURL: root).build(document: document)
+
+        #expect(graph.layers.map(\.objectID) == ["14942", "4604"])
+        let dependencyLayer = try #require(graph.layers.first)
+        let visibleLayer = try #require(graph.layers.dropFirst().first)
+        #expect(dependencyLayer.passes.map(\.target) == [
+            .layerComposite(name: "_rt_imageLayerComposite_14942_a")
+        ])
+        #expect(visibleLayer.passes.last?.textures[1] == .fbo("_rt_imageLayerComposite_14942_a"))
+        #expect(visibleLayer.passes.last?.target == .scene)
+    }
+
     @Test("Builds built-in solid layer model without requiring packaged model JSON")
     func buildsBuiltinSolidLayerModel() throws {
         let root = FileManager.default.temporaryDirectory

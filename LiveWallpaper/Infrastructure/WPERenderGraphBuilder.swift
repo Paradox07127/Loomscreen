@@ -19,13 +19,70 @@ struct WPERenderGraphBuilder: Sendable {
     }
 
     func build(document: WPESceneDocument) throws -> WPERenderGraph {
+        var objectByID: [String: WPESceneImageObject] = [:]
+        for object in document.imageObjects where objectByID[object.id] == nil {
+            objectByID[object.id] = object
+        }
+
+        let visibleLayerIDs = Set(document.imageObjects
+            .filter(Self.compositesToScene)
+            .map(\.id))
+        var layerIDsToBuild = visibleLayerIDs
+        var pendingIDs = Array(visibleLayerIDs)
+
+        while let id = pendingIDs.popLast(), let object = objectByID[id] {
+            for dependencyID in Self.referencedLayerIDs(in: object) where objectByID[dependencyID] != nil {
+                if layerIDsToBuild.insert(dependencyID).inserted {
+                    pendingIDs.append(dependencyID)
+                }
+            }
+        }
+
         let layers = try document.imageObjects
-            .filter { $0.visible && $0.alpha > 0.001 }
-            .map(buildLayer)
+            .filter { layerIDsToBuild.contains($0.id) }
+            .map { object in
+                try buildLayer(
+                    object: object,
+                    finalUntargetedPassToScene: visibleLayerIDs.contains(object.id)
+                )
+            }
         return WPERenderGraph(layers: layers)
     }
 
-    private func buildLayer(object: WPESceneImageObject) throws -> WPERenderLayer {
+    private static func compositesToScene(_ object: WPESceneImageObject) -> Bool {
+        object.visible && object.alpha > 0.001
+    }
+
+    private static func referencedLayerIDs(in object: WPESceneImageObject) -> Set<String> {
+        var ids = Set(object.dependencies)
+        for effect in object.effects where effect.visible {
+            for passOverride in effect.passOverrides {
+                for texture in passOverride.textures.values {
+                    if let id = layerID(fromCompositeName: texture) {
+                        ids.insert(id)
+                    }
+                }
+            }
+        }
+        return ids
+    }
+
+    private static func layerID(fromCompositeName name: String) -> String? {
+        let prefix = "_rt_imageLayerComposite_"
+        guard name.hasPrefix(prefix),
+              name.hasSuffix("_a") || name.hasSuffix("_b") else {
+            return nil
+        }
+        let start = name.index(name.startIndex, offsetBy: prefix.count)
+        let end = name.index(name.endIndex, offsetBy: -2)
+        guard start < end else { return nil }
+        return String(name[start..<end])
+    }
+
+    private func buildLayer(
+        object: WPESceneImageObject,
+        finalUntargetedPassToScene: Bool
+    ) throws -> WPERenderLayer {
         let materialPath = try resolveMaterialPath(for: object)
         let compositeA = "_rt_imageLayerComposite_\(object.id)_a"
         let compositeB = "_rt_imageLayerComposite_\(object.id)_b"
@@ -103,7 +160,7 @@ struct WPERenderGraphBuilder: Sendable {
             compositeA: compositeA,
             compositeB: compositeB,
             localFBOs: context.localFBOs,
-            passes: context.finalizedPasses(),
+            passes: context.finalizedPasses(finalUntargetedPassToScene: finalUntargetedPassToScene),
             parallaxDepth: object.parallaxDepth
         )
     }
@@ -405,8 +462,9 @@ private struct LayerBuildContext {
     var passes: [WPERenderPass] = []
     var passTargetsWereExplicit: [Bool] = []
 
-    func finalizedPasses() -> [WPERenderPass] {
+    func finalizedPasses(finalUntargetedPassToScene: Bool) -> [WPERenderPass] {
         guard let lastPass = passes.last,
+              finalUntargetedPassToScene,
               passTargetsWereExplicit.indices.contains(passes.count - 1),
               passTargetsWereExplicit[passes.count - 1] == false else {
             return passes.movingFirstBlendModeToFinalPass()

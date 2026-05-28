@@ -415,6 +415,7 @@ enum WPESceneDocumentParser {
         }
 
         let materialRelativePath = dict["material"] as? String
+        let dependencies = parseDependencyIDs(dict["dependencies"])
         let effects = parseImageEffects(dict["effects"], imageName: name, diagnostics: &diagnostics)
         let animationLayers = parseAnimationLayers(dict["animationlayers"], imageName: name, diagnostics: &diagnostics)
 
@@ -449,10 +450,30 @@ enum WPESceneDocumentParser {
             blendMode: blend,
             alignment: alignment,
             size: size,
+            dependencies: dependencies,
             effects: effects,
             animationLayers: animationLayers,
             parallaxDepth: parallaxDepth
         )
+    }
+
+    private static func parseDependencyIDs(_ raw: Any?) -> [String] {
+        guard let array = raw as? [Any] else { return [] }
+        var seen = Set<String>()
+        var result: [String] = []
+        for value in array {
+            let id: String?
+            if let string = value as? String, !string.isEmpty {
+                id = string
+            } else if let int = parseInt(value) {
+                id = String(int)
+            } else {
+                id = nil
+            }
+            guard let id, seen.insert(id).inserted else { continue }
+            result.append(id)
+        }
+        return result
     }
 
     private static func parseImageEffects(
