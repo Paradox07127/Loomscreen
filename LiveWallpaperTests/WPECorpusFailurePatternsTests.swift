@@ -269,4 +269,52 @@ struct WPECorpusFailurePatternsTests {
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
+    @Test("Main locals may shadow generated varying aliases")
+    func mainLocalsMayShadowGeneratedVaryingAliases() throws {
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        in vec2 v_TexCoord;
+        varying vec4 timer;
+        void main() {
+            float timer = 0.5;
+            vec4 color = texture(g_Texture0, v_TexCoord);
+            gl_FragColor = color * timer;
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "varying_shadowed_by_main_local",
+            preprocessedSource: source
+        )
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("Float locals initialized from vec2 expressions infer the vector type")
+    func floatLocalsInitializedFromVec2ExpressionsInferVectorType() throws {
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform vec2 g_PointerPosition;
+        uniform float u_pointerSpeed;
+        varying vec4 v_TexCoord;
+        void main() {
+            float pointer = g_PointerPosition.xy * u_pointerSpeed;
+            gl_FragColor = texture(g_Texture0, v_TexCoord.xy + pointer);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "float_local_from_vec2_expression",
+            preprocessedSource: source
+        )
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
 }

@@ -638,6 +638,7 @@ struct WPEShaderTranspiler {
 
         s = rewriteTextureCalls(s)
         s = rewriteUnsignedFloatModuloAssignments(s)
+        s = rewriteFloatAssignmentsFromVectorExpressions(s)
 
         s = rewriteReferenceParameters(s)
 
@@ -658,6 +659,33 @@ struct WPEShaderTranspiler {
             range: range,
             withTemplate: "uint $1 = uint(fmod(float($2), float($3)));"
         )
+    }
+
+    /// Some WPE workshop shaders use HLSL-style inference in local declarations,
+    /// e.g. `float pointer = g_PointerPosition.xy * speed;`. Infer the MSL type
+    /// for obvious vector expressions, but leave texture samples alone because
+    /// `texture(...).r` style scalar extraction is a separate compatibility rule.
+    private static func rewriteFloatAssignmentsFromVectorExpressions(_ source: String) -> String {
+        let pattern = #"\bfloat\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^;\n]*(?:\.[xyzwrgba]{2,4}|float[234]\s*\()[^;\n]*);"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return source
+        }
+        var result = source
+        let matches = regex.matches(in: source, range: NSRange(source.startIndex..., in: source))
+        for match in matches.reversed() {
+            guard let fullRange = Range(match.range(at: 0), in: result),
+                  let nameRange = Range(match.range(at: 1), in: result),
+                  let rhsRange = Range(match.range(at: 2), in: result) else {
+                continue
+            }
+            let rhs = String(result[rhsRange])
+            guard !rhs.contains(".sample("), !rhs.contains("texture") else {
+                continue
+            }
+            let name = result[nameRange]
+            result.replaceSubrange(fullRange, with: "auto \(name) = \(rhs);")
+        }
+        return result
     }
 
     /// Rewrite GLSL `inout T name` / `out T name` parameter qualifiers to Metal's `thread T& name`.
@@ -1297,7 +1325,9 @@ struct WPEShaderTranspiler {
             slotCursor += slots
         }
 
+        out.append("    {")
         out.append(mainBody)
+        out.append("    }")
         out.append("}")
         return out.joined(separator: "\n")
     }
