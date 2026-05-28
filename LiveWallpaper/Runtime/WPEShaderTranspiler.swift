@@ -637,8 +637,10 @@ struct WPEShaderTranspiler {
         s = wordReplace(s, find: "lerp", replace: "mix")
 
         s = rewriteTextureCalls(s)
+        s = rewriteTextureSampleNarrowing(s)
         s = rewriteUnsignedFloatModuloAssignments(s)
         s = rewriteFloatAssignmentsFromVectorExpressions(s)
+        s = rewriteTexCoordVector2Arithmetic(s)
 
         s = rewriteReferenceParameters(s)
 
@@ -686,6 +688,56 @@ struct WPEShaderTranspiler {
             result.replaceSubrange(fullRange, with: "auto \(name) = \(rhs);")
         }
         return result
+    }
+
+    /// GLSL permits assigning a texture sample to narrower vector/scalar locals.
+    /// Metal samples return float4, so make the intended channel extraction explicit.
+    private static func rewriteTextureSampleNarrowing(_ source: String) -> String {
+        let pattern = #"\b(float|float2|float3)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z_][A-Za-z0-9_]*\.sample\([^;\n]+\))\s*;"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return source
+        }
+        var result = source
+        let matches = regex.matches(in: source, range: NSRange(source.startIndex..., in: source))
+        for match in matches.reversed() {
+            guard let fullRange = Range(match.range(at: 0), in: result),
+                  let typeRange = Range(match.range(at: 1), in: result),
+                  let nameRange = Range(match.range(at: 2), in: result),
+                  let rhsRange = Range(match.range(at: 3), in: result) else {
+                continue
+            }
+            let type = String(result[typeRange])
+            let name = result[nameRange]
+            let rhs = result[rhsRange]
+            let swizzle: String
+            switch type {
+            case "float":
+                swizzle = ".r"
+            case "float2":
+                swizzle = ".rg"
+            case "float3":
+                swizzle = ".rgb"
+            default:
+                continue
+            }
+            result.replaceSubrange(fullRange, with: "\(type) \(name) = \(rhs)\(swizzle);")
+        }
+        return result
+    }
+
+    /// WPE workshop shaders often declare v_TexCoord as vec3 while using it as
+    /// a vec2 UV in arithmetic with CAST2/vec2 values.
+    private static func rewriteTexCoordVector2Arithmetic(_ source: String) -> String {
+        let pattern = #"\bv_TexCoord\s*([+\-])\s*((?:float2|CAST2)\s*\()"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return source
+        }
+        let range = NSRange(source.startIndex..., in: source)
+        return regex.stringByReplacingMatches(
+            in: source,
+            range: range,
+            withTemplate: "v_TexCoord.xy $1 $2"
+        )
     }
 
     /// Rewrite GLSL `inout T name` / `out T name` parameter qualifiers to Metal's `thread T& name`.

@@ -317,4 +317,32 @@ struct WPECorpusFailurePatternsTests {
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
+    @Test("Texture samples narrow to scalar or RGB locals")
+    func textureSamplesNarrowToScalarOrRGBLocals() throws {
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform sampler2D g_Texture1;
+        varying vec3 v_TexCoord;
+        void main() {
+            vec3 albedo = texture(g_Texture0, v_TexCoord.xy);
+            float mask = texture(g_Texture1, v_TexCoord.xy);
+            float scale = length(abs(v_TexCoord - vec2(0.5)));
+            gl_FragColor = vec4(albedo * mask * scale, 1.0);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "texture_sample_narrowing",
+            preprocessedSource: source
+        )
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+
+        #expect(result.mslSource.contains("float3 albedo = g_Texture0.sample(linearSampler, v_TexCoord.xy).rgb;"))
+        #expect(result.mslSource.contains("float mask = g_Texture1.sample(linearSampler, v_TexCoord.xy).r;"))
+        #expect(result.mslSource.contains("v_TexCoord.xy - float2(0.5)"))
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
 }
