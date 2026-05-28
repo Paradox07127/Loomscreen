@@ -42,6 +42,7 @@ Loomscreen self-updates by checking GitHub Releases once per launch (12 h thrott
 | **Metal shader procedural wallpapers** | ✅ | — |
 | **Local copied project-folder import** | ✅ | — |
 | **Compatible Scene project rendering** | ✅ | — |
+| **Steam Workshop URL preview** (direct-distribution Pro only) | ✅ | — |
 | **Developer-tools harness** | ✅ | — |
 
 Lite is a **lightweight runtime, not a UI castration** — video / HTML / Aerials fidelity matches Pro one-for-one. The authoritative capability matrix lives in [ProductCapabilities.swift](Packages/LiveWallpaperCore/Sources/LiveWallpaperCore/Capabilities/ProductCapabilities.swift).
@@ -54,7 +55,21 @@ LiveWallpaper Pro can scan and import local project folders copied from a Window
 2. Copy the local folder containing numbered project folders to your Mac.
 3. In Pro, choose that folder. The app scans local `project.json` files and prepares supported projects for playback.
 
-LiveWallpaper does **not** sign in to Steam, connect to Steam Workshop, download Workshop items, bundle Wallpaper Engine content, or bypass creator permissions. Users are responsible for the rights to copy and use any imported project files. Projects requiring Windows executables / `.dll` plugins are skipped on macOS.
+LiveWallpaper does **not** bundle Wallpaper Engine content or bypass creator permissions. Users are responsible for the rights to copy and use any imported project files. Projects requiring Windows executables / `.dll` plugins are skipped on macOS.
+
+## LiveWallpaper Pro Steam Workshop preview
+
+The direct-distribution Pro build (not the Mac App Store / Lite variants) can fetch official metadata for a Steam Workshop item from a pasted URL — title, preview image, file size, last-updated time — by calling Valve's public `ISteamRemoteStorage/GetPublishedFileDetails` endpoint directly over HTTPS. **No Steam sign-in, no API key, no Loomscreen-side backend.**
+
+Workshop content is sandboxed when it eventually runs: every Workshop-sourced HTML wallpaper is forced into a fresh `WKWebsiteDataStore.nonPersistent()` session with a strict Content-Security-Policy that blocks `<frame>`, `<object>`, `<base>`, and `<form>` exfiltration paths.
+
+What we deliberately don't do:
+
+- Show a Steam password field anywhere in Loomscreen.
+- Collect, store, log, proxy, or transmit your Steam password, Steam Guard codes, or session tokens.
+- Embed a shared Steam Web API key, or send your Workshop requests through a Loomscreen server.
+
+Actually downloading Workshop content needs your own Steam account + the official Valve SteamCMD installed via Homebrew or Valve's tarball — that opt-in setup ships in a later release. Until then, the per-row "Open in Steam" action hands the user off to the real Steam client.
 
 ## Requirements
 
