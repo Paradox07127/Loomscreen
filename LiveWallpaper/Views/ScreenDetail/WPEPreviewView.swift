@@ -3,21 +3,16 @@ import SwiftUI
 import AppKit
 import ImageIO
 
-/// Square (1:1) preview tile for a Wallpaper Engine project.
-///
-/// Renders into a CALayer with `contentsGravity = .resizeAspectFill` so
-/// previews of any source aspect (square — WPE editor's 512×512 default,
-/// 16:9 wallpapers, 9:16 vertical, etc.) fill the slot without dead bars.
-/// GIF animation is preserved by stepping `CGImageSource` frames manually
-/// (NSImageView's built-in `.animates` cannot pair with `.aspectFill`).
-/// Whether the preview auto-plays its animation or only plays while hovered.
-/// `.autoPlay` is the back-compatible default for single-item detail surfaces;
-/// grid / list call sites pass `.hoverToPlay` to match the macOS Photos idiom.
+/// Whether the preview auto-plays or only plays while hovered. `.autoPlay` is
+/// the back-compatible default; grid / list call sites pass `.hoverToPlay`.
 enum WPEPreviewPlaybackMode {
     case autoPlay
     case hoverToPlay
 }
 
+/// Square (1:1) aspect-fill preview tile for a Wallpaper Engine project.
+/// CALayer-backed with manual `CGImageSource` frame stepping — NSImageView
+/// can't pair its built-in `.animates` with aspect-fill scaling.
 struct WPEPreviewView: View {
     let imageURL: URL?
     let securityScopedBookmarkData: Data?

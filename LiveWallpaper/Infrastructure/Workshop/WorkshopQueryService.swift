@@ -209,7 +209,7 @@ actor WorkshopQueryService {
     private let cache: WorkshopQueryCache
     private let logger = os.Logger(subsystem: "com.loomscreen.livewallpaper", category: "WorkshopQuery")
 
-    private var inflight: [WorkshopQueryRequest: Task<WorkshopQueryPage, Error>] = [:]
+    private var inflight: [String: Task<WorkshopQueryPage, Error>] = [:]
     private var tokenBucket = tokenCapacity
     private var tokenRefilledAt = Date()
 
@@ -224,20 +224,24 @@ actor WorkshopQueryService {
     }
 
     func fetch(_ request: WorkshopQueryRequest) async throws -> WorkshopQueryPage {
-        if let task = inflight[request] {
+        // Load the key up front so both the cache and the in-flight map are
+        // namespaced by it — a key swap mid-flight can't coalesce onto, or
+        // serve, a prior account's results.
+        let apiKey = try await loadAPIKey()
+        let cacheKey = Self.namespacedCacheKey(WorkshopQueryCacheKey.canonical(request), apiKey: apiKey)
+        if let task = inflight[cacheKey] {
             return try await task.value
         }
-        let baseCacheKey = WorkshopQueryCacheKey.canonical(request)
         let task = Task { [self] in
-            try await fetchFromCacheOrNetwork(request, baseCacheKey: baseCacheKey)
+            try await fetchFromCacheOrNetwork(request, cacheKey: cacheKey, apiKey: apiKey)
         }
-        inflight[request] = task
+        inflight[cacheKey] = task
         do {
             let page = try await task.value
-            inflight[request] = nil
+            inflight[cacheKey] = nil
             return page
         } catch {
-            inflight[request] = nil
+            inflight[cacheKey] = nil
             throw error
         }
     }
@@ -284,22 +288,20 @@ actor WorkshopQueryService {
         }
     }
 
-    private func fetchFromCacheOrNetwork(_ request: WorkshopQueryRequest, baseCacheKey: String) async throws -> WorkshopQueryPage {
-        // Load the key first so the cache namespace is keyed by it — a key swap
-        // (or removal) then can't serve a prior account's cached results.
-        let apiKey: String
+    private func loadAPIKey() async throws -> String {
         do {
             guard let storedKey = try await keychain.loadWebAPIKey() else {
                 throw WorkshopQueryError.missingAPIKey
             }
-            apiKey = storedKey
+            return storedKey
         } catch let error as WorkshopQueryError {
             throw error
         } catch {
             throw WorkshopQueryError.missingAPIKey
         }
+    }
 
-        let cacheKey = Self.namespacedCacheKey(baseCacheKey, apiKey: apiKey)
+    private func fetchFromCacheOrNetwork(_ request: WorkshopQueryRequest, cacheKey: String, apiKey: String) async throws -> WorkshopQueryPage {
         if let cached = await cache.read(forKey: cacheKey) {
             return cached
         }

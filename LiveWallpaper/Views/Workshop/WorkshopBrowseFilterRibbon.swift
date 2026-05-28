@@ -40,7 +40,7 @@ enum WorkshopRequestCounter {
 /// chip. Wrapped in `AdaptiveGlassContainer` for parity with the local
 /// library's header chrome.
 struct WorkshopBrowseFilterRibbon: View {
-    @Bindable var viewModel: WorkshopBrowseViewModel
+    let viewModel: WorkshopBrowseViewModel
     let hasWebAPIKey: Bool
     let onRequestKeyEntry: () -> Void
 

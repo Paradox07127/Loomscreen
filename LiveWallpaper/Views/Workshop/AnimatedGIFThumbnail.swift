@@ -201,7 +201,6 @@ final class GIFAnimationController {
                 let frame = await GIFAnimationController.decode(gif, at: index)
                 guard !Task.isCancelled else { break }
                 if let frame { self?.displayedFrame = frame }
-                GIFPlaybackCoordinator.shared.touch(id: id)
             }
         }
     }

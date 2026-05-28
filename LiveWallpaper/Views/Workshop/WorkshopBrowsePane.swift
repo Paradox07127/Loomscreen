@@ -7,7 +7,7 @@ import SwiftUI
 /// ribbon, the skeleton / populated / empty / error states, the load-more
 /// footer, the rate-limit countdown banner, and the per-item detail sheet.
 struct WorkshopBrowsePane: View {
-    @Bindable var viewModel: WorkshopBrowseViewModel
+    let viewModel: WorkshopBrowseViewModel
     let onRequestKeyEntry: () -> Void
 
     @Environment(WorkshopServices.self) private var services
@@ -37,11 +37,20 @@ struct WorkshopBrowsePane: View {
         }
         .background(DesignTokens.Colors.pageBackground)
         .onAppear {
-            viewModel.onAppear()
-            Task { await services.refreshAPIKeyStatus() }
+            rateLimitRemaining = currentRateLimitRemaining
+            Task {
+                await services.refreshAPIKeyStatus()
+                // Only hit Steam once a key is present — avoids a phantom
+                // request count + a `missingAPIKey` error on the empty state.
+                if services.hasWebAPIKey { viewModel.onAppear() }
+            }
+        }
+        .onChange(of: services.hasWebAPIKey) { _, hasKey in
+            guard hasKey, viewModel.items.isEmpty, !viewModel.isLoading else { return }
+            Task { await viewModel.reload() }
         }
         .onReceive(ticker) { _ in
-            rateLimitRemaining = max(0, viewModel.rateLimitUntil?.timeIntervalSinceNow ?? 0)
+            rateLimitRemaining = currentRateLimitRemaining
         }
         .onChange(of: viewModel.isLoading) { _, loading in
             if loading { WorkshopRequestCounter.increment() }
@@ -210,6 +219,10 @@ struct WorkshopBrowsePane: View {
         !viewModel.searchInput.isEmpty || viewModel.typeFilter != .all || viewModel.ageRating != .everyone
     }
 
+    private var currentRateLimitRemaining: TimeInterval {
+        max(0, viewModel.rateLimitUntil?.timeIntervalSinceNow ?? 0)
+    }
+
     private var emptyMessage: String {
         if !viewModel.searchInput.isEmpty {
             return String(localized: "No results for \"\(viewModel.searchInput)\".", comment: "Empty Workshop search result. Placeholder is the query.")
@@ -277,7 +290,6 @@ private struct WorkshopSkeletonCard: View {
             }
             .padding([.horizontal, .top], DesignTokens.Spacing.md)
 
-            // Mirror the action-button row.
             HStack(spacing: DesignTokens.Spacing.xs) {
                 WorkshopShimmer().frame(width: 96, height: 22).clipShape(RoundedRectangle(cornerRadius: DesignTokens.Corner.sm))
                 WorkshopShimmer().frame(width: 30, height: 22).clipShape(RoundedRectangle(cornerRadius: DesignTokens.Corner.sm))
