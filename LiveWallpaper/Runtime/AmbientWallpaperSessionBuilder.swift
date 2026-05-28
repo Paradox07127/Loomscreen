@@ -16,6 +16,8 @@ enum HTMLWallpaperCompatibilityPolicy {
         let trust = HTMLTrust.evaluate(source: source, trustedOrigins: trustedOrigins)
         var effective = config
         effective.allowJavaScript = trust.effectiveAllowJavaScript(requested: config.allowJavaScript)
+        effective.muteAudio = trust.effectiveMuteAudio(requested: config.muteAudio)
+        effective.audioVolume = trust.effectiveAudioVolume(requested: config.audioVolume)
 
         let shouldEnablePhysicalPixels = !effective.physicalPixelLayout
             && looksLikeWallpaperEngineFolder(source)
@@ -57,8 +59,13 @@ final class AmbientWallpaperSessionBuilder {
             trustedOrigins: TrustedHostStore.shared.originSet
         )
         let effective = compatibility.config
-        if case .untrustedRemote(let origin) = compatibility.trust, config.allowJavaScript {
-            Logger.warning("HTML wallpaper: dropping JS for untrusted origin \(origin.rawValue)", category: .screenManager)
+        if case .untrustedRemote(let origin) = compatibility.trust {
+            if config.allowJavaScript {
+                Logger.warning("HTML wallpaper: dropping JS for untrusted origin \(origin.rawValue)", category: .screenManager)
+            }
+            if !config.muteAudio || config.audioVolume > 0 {
+                Logger.warning("HTML wallpaper: force-muting untrusted origin \(origin.rawValue)", category: .screenManager)
+            }
         }
         if compatibility.enabledPhysicalPixelLayout {
             Logger.info("HTML wallpaper: detected Wallpaper Engine project — enabling physical-pixel layout", category: .screenManager)

@@ -130,4 +130,23 @@ public enum HTMLTrust: Equatable, Sendable {
         default: return requested
         }
     }
+
+    /// Effective audio gate. Untrusted remote URLs are force-muted regardless
+    /// of the per-screen `audioVolume` / `muteAudio` config — passive
+    /// playback policy already requires `mute=1` for autoplay, so this just
+    /// guarantees a user adding a random URL can't be ambushed by audio
+    /// from a hidden `<audio autoplay>` after clicking "Play sound" once.
+    public func effectiveMuteAudio(requested: Bool) -> Bool {
+        switch self {
+        case .untrustedRemote: return true
+        default: return requested
+        }
+    }
+
+    public func effectiveAudioVolume(requested: Double) -> Double {
+        switch self {
+        case .untrustedRemote: return 0
+        default: return requested
+        }
+    }
 }

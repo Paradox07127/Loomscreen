@@ -29,478 +29,9 @@ final class HTMLWebView: WKWebView {
     }
 }
 
-enum HTMLWallpaperRuntimeScript {
-    /// Format a `Double` for JS literal embedding with stable decimal output
-    /// (no locale-driven comma separators, no exponent notation).
-    static func jsNumber(_ value: Double) -> String {
-        guard value.isFinite else { return "0" }
-        return String(format: "%.6f", locale: Locale(identifier: "en_US_POSIX"), value)
-    }
+// `HTMLWallpaperRuntimeScript` lives in `HTMLWallpaperRuntimeScript.swift`.
+// Keep `HTMLWallpaperView.swift` focused on the WKWebView host + lifecycle.
 
-    /// Bootstraps the master audio controller. Sets up:
-    ///   1. MutationObserver — applies the current volume/mute to any `<audio>`
-    ///      or `<video>` element added later. Without this, dynamically-created
-    ///      media (the common case for game-style wallpapers) escapes the mute.
-    ///   2. `HTMLMediaElement.prototype.play` patch — enforces volume right
-    ///      before playback starts, in case the page set its own `volume`
-    ///      between creation and play.
-    ///   3. `new Audio()` patch — for standalone `Audio()` objects that never
-    ///      get appended to the DOM (the MutationObserver can't see them).
-    ///   4. `BaseAudioContext.destination` getter override — intercepts Web
-    ///      Audio API graphs and routes them through a per-context `GainNode`
-    ///      so audio synthesized via Web Audio respects the user's volume
-    ///      slider. This is the only way to cover game audio engines that
-    ///      bypass `<audio>` elements entirely.
-    ///
-    /// Exposes `window.__lwUpdateAudio__(volume, muted)` for runtime updates.
-    static func masterAudioController(initialVolume: Double, initialMuted: Bool) -> String {
-        let volumeLiteral = jsNumber(initialVolume)
-        let mutedLiteral = initialMuted ? "true" : "false"
-        return """
-        (function () {
-            if (window.__lwAudioInstalled__) {
-                if (typeof window.__lwUpdateAudio__ === 'function') {
-                    window.__lwUpdateAudio__(\(volumeLiteral), \(mutedLiteral));
-                }
-                return;
-            }
-            window.__lwAudioInstalled__ = true;
-            var __lwVolume__ = \(volumeLiteral);
-            var __lwMuted__ = \(mutedLiteral);
-            var __lwAudioContexts__ = [];
-
-            function effectiveLevel() { return __lwMuted__ ? 0 : __lwVolume__; }
-
-            function applyToElement(el) {
-                if (!el) return;
-                var tag = el.tagName;
-                if (tag !== 'AUDIO' && tag !== 'VIDEO') return;
-                try { el.volume = __lwVolume__; } catch (e) {}
-                try { el.muted = __lwMuted__; } catch (e) {}
-            }
-
-            function scanAndApply(root) {
-                if (!root) return;
-                if (root.nodeType === 1) applyToElement(root);
-                if (root.querySelectorAll) {
-                    var nodes = root.querySelectorAll('audio,video');
-                    for (var i = 0; i < nodes.length; i++) applyToElement(nodes[i]);
-                }
-            }
-
-            function startObserver() {
-                if (!document.body || window.__lwAudioObserver__) return;
-                try {
-                    var observer = new MutationObserver(function (mutations) {
-                        for (var m = 0; m < mutations.length; m++) {
-                            var added = mutations[m].addedNodes;
-                            for (var n = 0; n < added.length; n++) scanAndApply(added[n]);
-                        }
-                    });
-                    observer.observe(document.body, { childList: true, subtree: true });
-                    window.__lwAudioObserver__ = observer;
-                } catch (e) {}
-            }
-
-            if (window.HTMLMediaElement && HTMLMediaElement.prototype.play) {
-                var originalPlay = HTMLMediaElement.prototype.play;
-                HTMLMediaElement.prototype.play = function () {
-                    try { this.volume = __lwVolume__; } catch (e) {}
-                    try { this.muted = __lwMuted__; } catch (e) {}
-                    return originalPlay.apply(this, arguments);
-                };
-            }
-
-            if (window.Audio) {
-                var OriginalAudio = window.Audio;
-                function PatchedAudio() {
-                    var bound = Function.prototype.bind.apply(
-                        OriginalAudio,
-                        [null].concat(Array.prototype.slice.call(arguments))
-                    );
-                    var instance = new bound();
-                    try { instance.volume = __lwVolume__; } catch (e) {}
-                    try { instance.muted = __lwMuted__; } catch (e) {}
-                    return instance;
-                }
-                PatchedAudio.prototype = OriginalAudio.prototype;
-                try { window.Audio = PatchedAudio; } catch (e) {}
-            }
-
-            function findOriginalDestinationGetter(proto) {
-                // `destination` lives on BaseAudioContext.prototype, NOT on
-                // the AudioContext / webkitAudioContext subclass directly.
-                // `getOwnPropertyDescriptor` only inspects the given object,
-                // so walk the prototype chain until we find the getter.
-                var cursor = proto;
-                while (cursor && cursor !== Object.prototype) {
-                    try {
-                        var d = Object.getOwnPropertyDescriptor(cursor, 'destination');
-                        if (d && typeof d.get === 'function') return d.get;
-                    } catch (e) {}
-                    cursor = Object.getPrototypeOf(cursor);
-                }
-                return null;
-            }
-
-            function patchAudioContext(Ctor) {
-                if (!Ctor || !Ctor.prototype) return;
-                var originalGetter = findOriginalDestinationGetter(Ctor.prototype);
-                if (!originalGetter) return;
-                try {
-                    // Define on Ctor.prototype (most-derived) so we shadow the
-                    // inherited getter for this specific class without touching
-                    // BaseAudioContext directly — patching BaseAudioContext
-                    // would cause infinite recursion when subclasses also try
-                    // to install their own wrapper.
-                    Object.defineProperty(Ctor.prototype, 'destination', {
-                        configurable: true,
-                        get: function () {
-                            var real = originalGetter.call(this);
-                            if (!this.__lwGainNode__) {
-                                try {
-                                    var gain = this.createGain();
-                                    gain.gain.value = effectiveLevel();
-                                    gain.connect(real);
-                                    this.__lwGainNode__ = gain;
-                                    __lwAudioContexts__.push(this);
-                                } catch (e) {
-                                    return real;
-                                }
-                            }
-                            return this.__lwGainNode__;
-                        }
-                    });
-                } catch (e) {}
-            }
-            patchAudioContext(window.AudioContext);
-            patchAudioContext(window.webkitAudioContext);
-            patchAudioContext(window.OfflineAudioContext);
-            patchAudioContext(window.webkitOfflineAudioContext);
-
-            window.__lwUpdateAudio__ = function (volume, muted) {
-                if (typeof volume === 'number' && isFinite(volume)) {
-                    __lwVolume__ = Math.max(0, Math.min(1, volume));
-                }
-                __lwMuted__ = !!muted;
-                try {
-                    var nodes = document.querySelectorAll('audio,video');
-                    for (var i = 0; i < nodes.length; i++) applyToElement(nodes[i]);
-                } catch (e) {}
-                var level = effectiveLevel();
-                for (var k = 0; k < __lwAudioContexts__.length; k++) {
-                    var ctx = __lwAudioContexts__[k];
-                    if (ctx && ctx.__lwGainNode__) {
-                        try { ctx.__lwGainNode__.gain.value = level; } catch (e) {}
-                    }
-                }
-            };
-
-            if (document.body) {
-                startObserver();
-                scanAndApply(document);
-            } else if (document.addEventListener) {
-                document.addEventListener('DOMContentLoaded', function () {
-                    startObserver();
-                    scanAndApply(document);
-                });
-            }
-        })();
-        """
-    }
-
-    /// Applies a `transform: translate() rotate() scale()` chain to the
-    /// document body via an injected `<style>` block. Skips touching the
-    /// DOM when all four values are identity — avoids fighting layouts in
-    /// pages that pin their own `body` transform.
-    ///
-    /// Exposes `window.__lwUpdateTransform__(scale, tx, ty, rotation)`.
-    static func transformController(
-        scale: Double,
-        translateX: Double,
-        translateY: Double,
-        rotation: Double
-    ) -> String {
-        let s = jsNumber(scale)
-        let tx = jsNumber(translateX)
-        let ty = jsNumber(translateY)
-        let r = jsNumber(rotation)
-        return """
-        (function () {
-            function ensureStyle() {
-                var el = document.getElementById('__lw-transform-style__');
-                if (el) return el;
-                el = document.createElement('style');
-                el.id = '__lw-transform-style__';
-                (document.head || document.documentElement).appendChild(el);
-                return el;
-            }
-            function apply(scale, tx, ty, rotation) {
-                var identity = scale === 1 && tx === 0 && ty === 0 && rotation === 0;
-                var style = ensureStyle();
-                if (identity) {
-                    style.textContent = '';
-                    if (document.documentElement) {
-                        document.documentElement.classList.remove('lw-transformed');
-                    }
-                    return;
-                }
-                var transform = 'translate(' + tx + 'px,' + ty + 'px) rotate(' + rotation + 'deg) scale(' + scale + ')';
-                style.textContent =
-                    'html.lw-transformed{overflow:hidden!important;}' +
-                    'html.lw-transformed body{transform:' + transform + ';transform-origin:50% 50%;}';
-                if (document.documentElement) {
-                    document.documentElement.classList.add('lw-transformed');
-                }
-            }
-            window.__lwUpdateTransform__ = apply;
-            if (document.body) {
-                apply(\(s), \(tx), \(ty), \(r));
-            } else if (document.addEventListener) {
-                document.addEventListener('DOMContentLoaded', function () {
-                    apply(\(s), \(tx), \(ty), \(r));
-                });
-            }
-        })();
-        """
-    }
-
-    /// Forces `antialias: true` on every WebGL / WebGL 2 context created by
-    /// the page. WPE Spine workshop boilerplates routinely do
-    /// `canvas.getContext('webgl', { alpha: false })` without an explicit
-    /// `antialias` field — on WebKit this lands as MSAA-off, leaving harsh
-    /// polygon-edge aliasing on Spine character meshes. Patching `getContext`
-    /// at `documentStart` lets us flip the default without modifying any
-    /// wallpaper code. No-op for 2D / bitmaprenderer contexts; idempotent
-    /// across page navigations.
-    static func webglMSAAForcer() -> String {
-        return """
-        (function () {
-            if (window.__lwWebGLMSAAInstalled__) return;
-            window.__lwWebGLMSAAInstalled__ = true;
-            try {
-                var proto = HTMLCanvasElement && HTMLCanvasElement.prototype;
-                if (!proto || !proto.getContext) return;
-                var orig = proto.getContext;
-                proto.getContext = function (type, attrs) {
-                    if (type === 'webgl' || type === 'webgl2' || type === 'experimental-webgl') {
-                        var merged = {};
-                        if (attrs && typeof attrs === 'object') {
-                            for (var k in attrs) {
-                                if (Object.prototype.hasOwnProperty.call(attrs, k)) merged[k] = attrs[k];
-                            }
-                        }
-                        merged.antialias = true;
-                        return orig.call(this, type, merged);
-                    }
-                    return orig.apply(this, arguments);
-                };
-            } catch (e) {}
-        })();
-        """
-    }
-
-    /// Upgrades WebGL backing store to physical pixels for CSS-naive canvases
-    /// (e.g. `canvas.width = window.innerWidth`) so retina output is not
-    /// bilinear-upsampled by the compositor. Invariants:
-    /// - DPR scale applies only to WebGL canvases sized in CSS-pixel space;
-    ///   DPR-aware callers (spine-player, PIXI v8) pass through untouched.
-    /// - `viewport` / `scissor` are scaled only when the default framebuffer
-    ///   is bound; user FBOs keep author-specified rects. 2D canvases skipped.
-    static func canvasBackingStoreUpgrader() -> String {
-        return """
-        (function () {
-            if (window.__lwCanvasUpgraderInstalled__) return;
-            window.__lwCanvasUpgraderInstalled__ = true;
-
-            function nativeDPR() {
-                var v = window.__liveWallpaperNativeDevicePixelRatio;
-                if (typeof v === 'number' && v > 0) return v;
-                v = window.devicePixelRatio;
-                return (typeof v === 'number' && v > 0) ? v : 1;
-            }
-
-            if (nativeDPR() <= 1) return;
-
-            var wDesc, hDesc;
-            try {
-                wDesc = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'width');
-                hDesc = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'height');
-                if (!wDesc || !wDesc.set || !hDesc || !hDesc.set) return;
-            } catch (e) { return; }
-
-            try {
-                function installSetter(propName, desc, axis) {
-                    var ownedKey = (axis === 'w') ? '__lwOwnedStyleW__' : '__lwOwnedStyleH__';
-                    function adoptStyle(canvas, value) {
-                        // Only touch inline style if it's empty OR we last wrote it ourselves.
-                        // Author CSS (e.g. `canvas { width: 100vw }`) and manual
-                        // `canvas.style.width = …` stay authoritative.
-                        var current = canvas.style[propName];
-                        if (current !== '' && current !== canvas[ownedKey]) return;
-                        canvas.style[propName] = value;
-                        canvas[ownedKey] = value;
-                    }
-                    function releaseStyle(canvas) {
-                        if (canvas.style[propName] === canvas[ownedKey]) {
-                            canvas.style[propName] = '';
-                        }
-                        canvas[ownedKey] = undefined;
-                    }
-                    Object.defineProperty(HTMLCanvasElement.prototype, propName, {
-                        configurable: true,
-                        enumerable: desc.enumerable,
-                        get: function () {
-                            var stash = (axis === 'w') ? this.__lwLogicalW__ : this.__lwLogicalH__;
-                            return (typeof stash === 'number') ? stash : desc.get.call(this);
-                        },
-                        set: function (v) {
-                            var n = Number(v) || 0;
-                            if (axis === 'w') this.__lwLogicalW__ = n;
-                            else              this.__lwLogicalH__ = n;
-                            if (n <= 0 || !this.__lwIsWebGL__) {
-                                this.__lwScale__ = 1;
-                                releaseStyle(this);
-                                desc.set.call(this, n);
-                                return;
-                            }
-                            var dpr = nativeDPR();
-                            if (dpr <= 1) {
-                                this.__lwScale__ = 1;
-                                releaseStyle(this);
-                                desc.set.call(this, n);
-                                return;
-                            }
-                            // CSS-naive vs DPR-aware detection.
-                            // Page set `canvas.width = clientWidth * dpr` → already physical pixels, skip.
-                            // Page set `canvas.width = clientWidth` (or innerWidth) → upgrade.
-                            var clientSize = (axis === 'w') ? this.clientWidth : this.clientHeight;
-                            var innerSize  = (axis === 'w') ? window.innerWidth : window.innerHeight;
-                            var ref = Math.max(clientSize || 0, innerSize || 0, 1);
-                            if (n > ref * 1.05) {
-                                this.__lwScale__ = 1;
-                                releaseStyle(this);
-                                desc.set.call(this, n);
-                                return;
-                            }
-                            this.__lwScale__ = dpr;
-                            adoptStyle(this, n + 'px');
-                            desc.set.call(this, Math.round(n * dpr));
-                        }
-                    });
-                }
-                installSetter('width',  wDesc, 'w');
-                installSetter('height', hDesc, 'h');
-            } catch (e) {}
-
-            try {
-                var origGetContext = HTMLCanvasElement.prototype.getContext;
-                HTMLCanvasElement.prototype.getContext = function (type, attrs) {
-                    if (type === 'webgl' || type === 'webgl2' || type === 'experimental-webgl') {
-                        if (!this.__lwIsWebGL__) {
-                            this.__lwIsWebGL__ = true;
-                            var w = (typeof this.__lwLogicalW__ === 'number')
-                                ? this.__lwLogicalW__ : wDesc.get.call(this);
-                            var h = (typeof this.__lwLogicalH__ === 'number')
-                                ? this.__lwLogicalH__ : hDesc.get.call(this);
-                            this.width  = w;
-                            this.height = h;
-                        }
-                    }
-                    return origGetContext.apply(this, arguments);
-                };
-            } catch (e) {}
-
-            function hookContextPrototype(proto) {
-                if (!proto || proto.__lwGLHookInstalled__) return;
-                proto.__lwGLHookInstalled__ = true;
-                var origViewport     = proto.viewport;
-                var origScissor      = proto.scissor;
-                var origBindFB       = proto.bindFramebuffer;
-                var FRAMEBUFFER      = 0x8D40;
-                var DRAW_FRAMEBUFFER = 0x8CA9;
-
-                proto.bindFramebuffer = function (target, fb) {
-                    if (target === FRAMEBUFFER || target === DRAW_FRAMEBUFFER) {
-                        this.__lwBoundFB__ = fb;
-                    }
-                    return origBindFB.call(this, target, fb);
-                };
-
-                function scaledRect(ctx, x, y, w, h) {
-                    var canvas = ctx.canvas;
-                    var bound = ctx.__lwBoundFB__;
-                    if (bound != null) return null;
-                    var s = canvas && canvas.__lwScale__;
-                    if (!s || s === 1) return null;
-                    return [
-                        Math.round(x * s),
-                        Math.round(y * s),
-                        Math.round(w * s),
-                        Math.round(h * s)
-                    ];
-                }
-
-                proto.viewport = function (x, y, w, h) {
-                    var r = scaledRect(this, x, y, w, h);
-                    if (r) return origViewport.call(this, r[0], r[1], r[2], r[3]);
-                    return origViewport.call(this, x, y, w, h);
-                };
-
-                proto.scissor = function (x, y, w, h) {
-                    var r = scaledRect(this, x, y, w, h);
-                    if (r) return origScissor.call(this, r[0], r[1], r[2], r[3]);
-                    return origScissor.call(this, x, y, w, h);
-                };
-            }
-
-            try {
-                if (typeof WebGLRenderingContext !== 'undefined') {
-                    hookContextPrototype(WebGLRenderingContext.prototype);
-                }
-                if (typeof WebGL2RenderingContext !== 'undefined') {
-                    hookContextPrototype(WebGL2RenderingContext.prototype);
-                }
-            } catch (e) {}
-        })();
-        """
-    }
-
-    /// Records the host display's backing-scale factor on `window` so the
-    /// `canvasBackingStoreUpgrader` script can multiply by it regardless of
-    /// page-side `devicePixelRatio` manipulation. We deliberately do NOT
-    /// override `window.devicePixelRatio` — DPR-aware renderers like
-    /// `spine-player` derive their camera viewport size from
-    /// `clientWidth × devicePixelRatio`, so lying to them about DPR breaks
-    /// the world-space sizing and pushes content out of frame.
-    static func physicalPixelState(enabled: Bool, backingScale: CGFloat) -> String {
-        let scale = max(Double(backingScale), 1.0)
-        let scaleLiteral = String(format: "%.6f", locale: Locale(identifier: "en_US_POSIX"), scale)
-        return """
-        (function () {
-            window.__liveWallpaperNativeDevicePixelRatio = \(scaleLiteral);
-            window.__liveWallpaperPhysicalPixelLayout = \(enabled ? "true" : "false");
-        })();
-        """
-    }
-
-    static func wallpaperEngineGeneralProperties(fps: Int) -> String {
-        let clampedFPS = min(max(fps, 1), 240)
-        return """
-        (function () {
-            var properties = {"fps":\(clampedFPS)};
-            var listener = window.wallpaperPropertyListener;
-            if (listener && typeof listener.applyGeneralProperties === 'function') {
-                try {
-                    listener.applyGeneralProperties(properties);
-                } catch (error) {
-                    console.error('LiveWallpaper failed to apply Wallpaper Engine general properties', error);
-                }
-            }
-        })();
-        """
-    }
-}
 
 /// WKWebView-backed HTML wallpaper host.
 @MainActor
@@ -570,6 +101,31 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     /// requests originating from untrusted content.
     private var currentLocalReadAccessRoot: URL?
 
+    /// Snapshot overlay shown on top of the WKWebView while suspended, so
+    /// the desktop keeps a static last-frame image even though the
+    /// renderer is fully paused. Hidden under normal playback.
+    private let snapshotOverlay: NSImageView = {
+        let view = NSImageView()
+        view.imageScaling = .scaleAxesIndependently
+        view.imageAlignment = .alignCenter
+        view.isHidden = true
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor.clear.cgColor
+        return view
+    }()
+    /// Generation counter for snapshot capture — async snapshot replies
+    /// older than the latest profile-flip request are discarded so a stale
+    /// `webView.takeSnapshot` callback can't overwrite a fresh resume.
+    private var snapshotGeneration: UInt64 = 0
+    /// Observer token for `ProcessInfo.thermalStateDidChangeNotification`.
+    /// HTMLWallpaperView subscribes directly so it can drive the RAF
+    /// throttle on `.fair` independently of the global suspend/quality
+    /// signal that ScreenManager pushes through the runtime session.
+    nonisolated(unsafe) private var thermalObserver: NSObjectProtocol?
+    /// Last RAF throttle ratio pushed into the page. Tracked so a no-op
+    /// thermal-change notification doesn't re-issue redundant JS.
+    private var lastRafThrottleRatio: Int = 1
+
     /// Forwarded to the owning `AmbientWallpaperSession` so failures surface as
     /// `RuntimeErrorBanner` and can be retried from the screen-detail UI.
     var onError: (@MainActor (WallpaperRuntimeError) -> Void)?
@@ -598,9 +154,13 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
 
         configureWebView()
         addSubview(webView)
+        snapshotOverlay.frame = bounds
+        snapshotOverlay.autoresizingMask = [.width, .height]
+        addSubview(snapshotOverlay)
         #if !LITE_BUILD
         startObservingDeveloperMode()
         #endif
+        startObservingThermalState()
     }
 
     required init?(coder: NSCoder) {
@@ -613,6 +173,9 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             NotificationCenter.default.removeObserver(token)
         }
         #endif
+        if let token = thermalObserver {
+            NotificationCenter.default.removeObserver(token)
+        }
     }
 
     // MARK: - Configuration
@@ -679,21 +242,49 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         }
     }
 
-    /// 注入静态基线脚本 + 反映当前配置的状态脚本。
+    /// Re-installs all user scripts on the WKWebView. Called from `apply(_:)`
+    /// when a script-relevant toggle changes (custom CSS, browsing mode, JS
+    /// gate, ephemeral storage, physical-pixel layout, CSP, aggressiveSuspend).
+    /// Idempotent: every injected script guards with a `window.__lw…Installed__`
+    /// sentinel so re-installation on the same page is a no-op.
     private func installBaselineUserScripts(for config: HTMLConfig?) {
         let controller = webView.configuration.userContentController
         controller.removeAllUserScripts()
 
+        let baseline = makeBaselineScript(for: config)
+        controller.addUserScript(WKUserScript(
+            source: baseline,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        ))
+
+        if let wallpaperEnginePropertyBootstrapScript {
+            controller.addUserScript(WKUserScript(
+                source: wallpaperEnginePropertyBootstrapScript,
+                injectionTime: .atDocumentEnd,
+                forMainFrameOnly: true
+            ))
+        }
+    }
+
+    /// Composes the single user script injected at `.atDocumentStart`.
+    /// Split out from `installBaselineUserScripts` to keep that method
+    /// focused on the WKWebView wiring; this function only assembles JS.
+    private func makeBaselineScript(for config: HTMLConfig?) -> String {
         let cssLiteral = jsStringLiteral(config?.customCSS ?? "")
         let isBrowsing = (config?.allowMouseInteraction ?? false) ? "true" : "false"
-        let physicalPixelBootstrap = (config?.physicalPixelLayout ?? false)
+        let physicalPixel = config?.physicalPixelLayout ?? false
+        let physicalPixelBootstrap = physicalPixel
             ? HTMLWallpaperRuntimeScript.physicalPixelState(
                 enabled: true,
                 backingScale: effectiveBackingScaleFactor
             )
             : ""
-        let canvasUpgrader = (config?.physicalPixelLayout ?? false)
+        let canvasUpgrader = physicalPixel
             ? HTMLWallpaperRuntimeScript.canvasBackingStoreUpgrader()
+            : ""
+        let cspInjection = (config?.cspEnforcementEnabled ?? false)
+            ? HTMLWallpaperRuntimeScript.cspInjection()
             : ""
 
         let audioController = HTMLWallpaperRuntimeScript.masterAudioController(
@@ -708,9 +299,14 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         )
 
         let msaaForcer = HTMLWallpaperRuntimeScript.webglMSAAForcer()
+        let lifecycle = HTMLWallpaperRuntimeScript.lifecycleController(
+            aggressiveSuspend: config?.aggressiveSuspend ?? false
+        )
 
-        let baseline = """
+        return """
+        \(cspInjection)
         \(msaaForcer)
+        \(lifecycle)
         (function () {
             \(physicalPixelBootstrap)
             \(canvasUpgrader)
@@ -734,7 +330,8 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
                 }
             }
             bootstrap();
-            // <head> 在 documentStart 时可能尚未就绪 — 用 MutationObserver 做兜底。
+            // <head> may not be ready at documentStart — fall back to a
+            // MutationObserver that re-runs once it appears.
             if (!document.head) {
                 var mo = new MutationObserver(function () {
                     if (document.head) { bootstrap(); mo.disconnect(); }
@@ -745,20 +342,6 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         \(audioController)
         \(transformController)
         """
-
-        controller.addUserScript(WKUserScript(
-            source: baseline,
-            injectionTime: .atDocumentStart,
-            forMainFrameOnly: true
-        ))
-
-        if let wallpaperEnginePropertyBootstrapScript {
-            controller.addUserScript(WKUserScript(
-                source: wallpaperEnginePropertyBootstrapScript,
-                injectionTime: .atDocumentEnd,
-                forMainFrameOnly: true
-            ))
-        }
     }
 
     // MARK: - Hit Testing
@@ -860,6 +443,8 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             || (previous?.allowJavaScript != config.allowJavaScript)
             || (previous?.useEphemeralStorage != config.useEphemeralStorage)
             || (previous?.physicalPixelLayout != config.physicalPixelLayout)
+            || (previous?.cspEnforcementEnabled != config.cspEnforcementEnabled)
+            || (previous?.aggressiveSuspend != config.aggressiveSuspend)
 
         if needsScriptRebuild {
             installBaselineUserScripts(for: config)
@@ -877,15 +462,18 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             host.makeFirstResponder(webView)
         }
 
-        let physicalPixelToggleChanged = previous != nil
-            && previous?.physicalPixelLayout != config.physicalPixelLayout
+        let needsDocumentStartReload = previous != nil && (
+            previous?.physicalPixelLayout != config.physicalPixelLayout
+            || previous?.cspEnforcementEnabled != config.cspEnforcementEnabled
+            || previous?.aggressiveSuspend != config.aggressiveSuspend
+        )
         lastAppliedConfig = config
 
-        if physicalPixelToggleChanged {
-            // The canvas-upgrader hooks must attach at `documentStart` before
-            // the page calls `getContext('webgl')`. Hot-toggling on a loaded
-            // page can't retroactively install them, so reload the page to
-            // re-run the user scripts we just re-registered.
+        if needsDocumentStartReload {
+            // documentStart-only hooks (canvas upgrader, CSP meta tag,
+            // WebGL lose-context plumbing) cannot be retro-installed on
+            // a page that's already running. Reload so the freshly
+            // re-registered user scripts execute against a clean DOM.
             reloadCurrentSource()
         }
     }
@@ -973,13 +561,20 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     /// `seconds` value spins up a repeating MainActor task that calls
     /// `reloadCurrentSource()`; `0` tears the timer down. The task is owned
     /// by `refreshTimerTask` and cancelled on cleanup / suspend.
+    ///
+    /// Each tick adds ±10% jitter to the wait duration so multiple screens
+    /// configured with the same refresh interval don't reload in lockstep —
+    /// useful for dashboard-style wallpapers that hit a single API.
     private func applyRefreshInterval(_ seconds: Int) {
         refreshTimerTask?.cancel()
         refreshTimerTask = nil
         guard seconds > 0, !isCleaningUp else { return }
-        let interval = TimeInterval(seconds)
+        let baseInterval = TimeInterval(seconds)
         refreshTimerTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
+                let jitterRange = baseInterval * 0.1
+                let jitter = Double.random(in: -jitterRange...jitterRange)
+                let interval = max(1.0, baseInterval + jitter)
                 do {
                     try await Task.sleep(for: .seconds(interval))
                 } catch {
@@ -1037,7 +632,6 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
                 Logger.error("HTML folder load: failed to build scheme URL for \(indexFileName)", category: .screenManager)
                 return
             }
-            Logger.info("HTML folder load: \(url.absoluteString) (folder=\(folderURL.lastPathComponent))", category: .screenManager)
             webView.load(URLRequest(url: url))
         case .url(let url):
             guard HTMLWallpaperView.isAllowedRemoteURL(url) else { return }
@@ -1189,16 +783,131 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         setMediaPlaybackSuspended(false)
     }
 
+    /// Suspends or resumes the page's render loop, JS RAF, CSS animations,
+    /// Web Audio graphs, and `<audio>/<video>` playback.
+    ///
+    /// On suspend we kick three independent mechanisms in sequence so the
+    /// page actually stops consuming CPU/GPU instead of just freezing the
+    /// `<video>` track:
+    /// 1. `webView.setAllMediaPlaybackSuspended(true)` — native API,
+    ///    handles `<audio>` / `<video>` elements.
+    /// 2. `__lwSuspend__()` — JS-side page-lifecycle controller (see
+    ///    `HTMLWallpaperRuntimeScript.lifecycleController`).
+    /// 3. Snapshot-on-pause — capture the last frame and hang it over the
+    ///    WKWebView so WebKit can park the compositor.
+    ///
+    /// Resume reverses the order. Idempotent on repeat calls.
     private func setMediaPlaybackSuspended(_ suspended: Bool) {
         guard !isCleaningUp else { return }
+        guard mediaPlaybackSuspended != suspended else { return }
         mediaPlaybackSuspended = suspended
-        webView.setAllMediaPlaybackSuspended(suspended) {}
-        notifyWallpaperEngineGeneralProperties(fps: suspended ? 1 : 60)
+        if suspended {
+            invokeLifecycleHook(.suspend)
+            webView.setAllMediaPlaybackSuspended(true) {}
+            captureSuspendSnapshot()
+            notifyWallpaperEngineGeneralProperties(fps: 1)
+        } else {
+            hideSnapshotOverlay()
+            webView.setAllMediaPlaybackSuspended(false) {}
+            invokeLifecycleHook(.resume)
+            notifyWallpaperEngineGeneralProperties(fps: 60)
+            // Re-push the throttle ratio in case thermals shifted while suspended.
+            applyRafThrottleRatio(rafThrottleRatio(for: ProcessInfo.processInfo.thermalState))
+        }
+    }
+
+    private enum LifecycleHook: String {
+        case suspend = "__lwSuspend__"
+        case resume = "__lwResume__"
+    }
+
+    private func invokeLifecycleHook(_ hook: LifecycleHook) {
+        webView.evaluateJavaScript(
+            "if (typeof window.\(hook.rawValue) === 'function') { try { window.\(hook.rawValue)(); } catch (e) {} }",
+            completionHandler: nil
+        )
     }
 
     private func notifyWallpaperEngineGeneralProperties(fps: Int) {
         webView.evaluateJavaScript(
             HTMLWallpaperRuntimeScript.wallpaperEngineGeneralProperties(fps: fps),
+            completionHandler: nil
+        )
+    }
+
+    // MARK: - Snapshot Overlay
+
+    /// Async-captures the current WKWebView contents and shows them in the
+    /// `snapshotOverlay`. The webView is then hidden so WebKit can stop
+    /// updating the compositor surface. Generation-counted to discard
+    /// stale captures that arrive after a resume.
+    private func captureSuspendSnapshot() {
+        snapshotGeneration &+= 1
+        let generation = snapshotGeneration
+        let snapshotConfig = WKSnapshotConfiguration()
+        snapshotConfig.afterScreenUpdates = false
+        webView.takeSnapshot(with: snapshotConfig) { [weak self] image, _ in
+            Task { @MainActor [weak self] in
+                guard let self,
+                      !self.isCleaningUp,
+                      self.mediaPlaybackSuspended,
+                      self.snapshotGeneration == generation,
+                      let image else { return }
+                self.applySnapshotOverlay(image: image)
+            }
+        }
+    }
+
+    private func applySnapshotOverlay(image: NSImage) {
+        snapshotOverlay.image = image
+        snapshotOverlay.frame = bounds
+        snapshotOverlay.isHidden = false
+        webView.isHidden = true
+    }
+
+    private func hideSnapshotOverlay() {
+        snapshotOverlay.isHidden = true
+        snapshotOverlay.image = nil
+        webView.isHidden = false
+    }
+
+    // MARK: - Thermal Throttle (P2)
+
+    /// Subscribes to `ProcessInfo.thermalStateDidChangeNotification` so the
+    /// HTML page can self-throttle on `.fair` without waiting for the
+    /// global policy engine to push a profile change. The engine only
+    /// flips between `.quality` and `.suspended`; the intermediate
+    /// `.fair` tier is handled here by halving the RAF callback rate.
+    private func startObservingThermalState() {
+        let token = NotificationCenter.default.addObserver(
+            forName: ProcessInfo.thermalStateDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.applyRafThrottleRatio(self.rafThrottleRatio(for: ProcessInfo.processInfo.thermalState))
+            }
+        }
+        thermalObserver = token
+    }
+
+    private func rafThrottleRatio(for thermalState: ProcessInfo.ThermalState) -> Int {
+        switch thermalState {
+        case .nominal:  return 1
+        case .fair:     return 2
+        case .serious, .critical: return 1 // engine already suspended the page
+        @unknown default: return 1
+        }
+    }
+
+    private func applyRafThrottleRatio(_ ratio: Int) {
+        guard !isCleaningUp else { return }
+        guard ratio != lastRafThrottleRatio else { return }
+        lastRafThrottleRatio = ratio
+        let literal = String(ratio)
+        webView.evaluateJavaScript(
+            "if (typeof window.__lwSetRafThrottle__ === 'function') { try { window.__lwSetRafThrottle__(\(literal)); } catch (e) {} }",
             completionHandler: nil
         )
     }
@@ -1322,6 +1031,7 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
     override func layout() {
         super.layout()
         webView.frame = bounds
+        snapshotOverlay.frame = bounds
     }
 
     /// Re-pushes `__liveWallpaperNativeDevicePixelRatio` whenever the host
@@ -1374,6 +1084,10 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
             developerModeObserver = nil
         }
         #endif
+        if let token = thermalObserver {
+            NotificationCenter.default.removeObserver(token)
+            thermalObserver = nil
+        }
         webView.stopLoading()
         webView.navigationDelegate = nil
         webView.uiDelegate = nil
@@ -1384,6 +1098,8 @@ final class HTMLWallpaperView: NSView, HTMLWallpaperConfigApplying {
         }
         folderHandler.folderURL = nil
         stopActiveSecurityScope()
+        snapshotOverlay.image = nil
+        snapshotOverlay.isHidden = true
     }
 
     private func shouldIgnoreNavigationFailure(_ error: NSError) -> Bool {
@@ -1484,7 +1200,9 @@ extension HTMLWallpaperView: WKNavigationDelegate {
     /// 这里仅做 autoplay 推动，并对刚渲染好的元素再调一次 `__lwUpdateAudio__`
     /// 以保证 navigation-finish 时刻的状态与 `lastAppliedConfig` 同步。
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        Logger.info("HTML wallpaper finished loading: \(webView.url?.absoluteString ?? "<no url>")", category: .screenManager)
+        // Successful navigations don't need a per-load INFO entry —
+        // the inspector already shows the active URL and a healthy load
+        // produces zero failures. Surface only the failure / retry events.
         resetNavigationFailureState()
         let volume = HTMLWallpaperRuntimeScript.jsNumber(lastAppliedConfig?.audioVolume ?? 1.0)
         let muted = lastAppliedConfig?.muteAudio == true ? "true" : "false"
@@ -1508,6 +1226,17 @@ extension HTMLWallpaperView: WKNavigationDelegate {
         """
         webView.evaluateJavaScript(nudge, completionHandler: nil)
         notifyWallpaperEngineGeneralProperties(fps: mediaPlaybackSuspended ? 1 : 60)
+        // Reload while suspended (refresh timer / programmatic reload) needs
+        // the lifecycle controller re-suspended now that the user scripts
+        // have re-initialised on a fresh DOM.
+        if mediaPlaybackSuspended {
+            invokeLifecycleHook(.suspend)
+            captureSuspendSnapshot()
+        }
+        // Re-push the current thermal RAF throttle so the new page picks
+        // up the right ratio without waiting for the next thermal change.
+        lastRafThrottleRatio = 1
+        applyRafThrottleRatio(rafThrottleRatio(for: ProcessInfo.processInfo.thermalState))
     }
 
     /// Server-side / authentication failures.
@@ -1515,7 +1244,7 @@ extension HTMLWallpaperView: WKNavigationDelegate {
         let nsError = error as NSError
         guard !shouldIgnoreNavigationFailure(nsError) else { return }
         Logger.error(
-            "HTML wallpaper didFail [domain=\(nsError.domain) code=\(nsError.code)] url=\(webView.url?.absoluteString ?? "<no url>") — \(nsError.localizedDescription); userInfo=\(nsError.userInfo)",
+            "HTML wallpaper didFail [domain=\(nsError.domain) code=\(nsError.code)] url=\(webView.url?.absoluteString ?? "<no url>") — \(nsError.localizedDescription)",
             category: .screenManager
         )
         if shouldRetryNavigationFailure() { return }
@@ -1531,7 +1260,7 @@ extension HTMLWallpaperView: WKNavigationDelegate {
         let nsError = error as NSError
         guard !shouldIgnoreNavigationFailure(nsError) else { return }
         Logger.error(
-            "HTML wallpaper didFailProvisionalNavigation [domain=\(nsError.domain) code=\(nsError.code)] url=\(webView.url?.absoluteString ?? "<no url>") — \(nsError.localizedDescription); userInfo=\(nsError.userInfo)",
+            "HTML wallpaper didFailProvisionalNavigation [domain=\(nsError.domain) code=\(nsError.code)] url=\(webView.url?.absoluteString ?? "<no url>") — \(nsError.localizedDescription)",
             category: .screenManager
         )
         if shouldRetryNavigationFailure() { return }

@@ -399,6 +399,10 @@ struct ContentSecurityInspector: View {
                     ephemeralStorageRow
                     Divider()
                     trackerBlockingRow
+                    Divider()
+                    cspEnforcementRow
+                    Divider()
+                    aggressiveSuspendRow
                     if let origin = remoteOrigin {
                         Divider()
                         originTrustRow(for: origin)
@@ -433,6 +437,34 @@ struct ContentSecurityInspector: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .accessibilityLabel(Text("Block trackers"))
+        }
+    }
+
+    private var cspEnforcementRow: some View {
+        SettingRow(
+            icon: "lock.shield.fill",
+            iconColor: .indigo,
+            title: "Enforce Content Security Policy",
+            info: "Injects a strict CSP meta tag before the page evaluates its own scripts. Permits HTTPS + the bundled livewallpaper:// scheme; blocks data exfiltration via FTP / arbitrary schemes. Some wallpapers may break — toggling requires a reload."
+        ) {
+            Toggle("", isOn: htmlConfigBinding(\.cspEnforcementEnabled))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .accessibilityLabel(Text("Enforce content security policy"))
+        }
+    }
+
+    private var aggressiveSuspendRow: some View {
+        SettingRow(
+            icon: "bolt.slash.fill",
+            iconColor: .yellow,
+            title: "Aggressive Suspend",
+            info: "On suspend, force-release every WebGL context (loseContext). On resume, restore. Drops GPU usage to zero when the wallpaper is occluded or thermal-throttled, but some WebGL pages don't handle webglcontextrestored and stay black after the round-trip."
+        ) {
+            Toggle("", isOn: htmlConfigBinding(\.aggressiveSuspend))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .accessibilityLabel(Text("Aggressive suspend"))
         }
     }
 

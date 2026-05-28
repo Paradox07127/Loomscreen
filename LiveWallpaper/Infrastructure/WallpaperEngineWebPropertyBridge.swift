@@ -29,25 +29,63 @@ enum WallpaperEngineWebPropertyBridge {
             return nil
         }
 
+        // Two-stage delivery so we never lose a payload to startup-timing
+        // races:
+        //   1. If `wallpaperPropertyListener` already exists, push the
+        //      payload immediately (the common case for pages that set up
+        //      the listener at the top of their bundle).
+        //   2. Install an `Object.defineProperty` hook on `window` so the
+        //      payload is delivered the moment the page assigns the
+        //      listener. This collapses the worst-case wait from a hard
+        //      120-RAF poll (≈ 2–4s) to a single property-set callback.
+        //   3. A short RAF poll (60 frames ≈ 1s) remains as a fallback for
+        //      pages whose listener is created by mutating an *existing*
+        //      object property — `defineProperty` cannot intercept that
+        //      mutation without re-wrapping every assignment.
         return """
         (function () {
             var properties = \(json);
-            var attempts = 0;
-            function applyProperties() {
-                var listener = window.wallpaperPropertyListener;
-                if (listener && typeof listener.applyUserProperties === 'function') {
-                    try {
-                        listener.applyUserProperties(properties);
-                    } catch (error) {
-                        console.error('LiveWallpaper failed to apply Wallpaper Engine properties', error);
-                    }
-                    return;
-                }
-                if (attempts++ < 120) {
-                    window.requestAnimationFrame(applyProperties);
+            var delivered = false;
+
+            function deliver(listener) {
+                if (delivered || !listener || typeof listener.applyUserProperties !== 'function') return;
+                delivered = true;
+                try {
+                    listener.applyUserProperties(properties);
+                } catch (error) {
+                    console.error('LiveWallpaper failed to apply Wallpaper Engine properties', error);
                 }
             }
-            applyProperties();
+
+            // Stage 1 — listener already defined.
+            deliver(window.wallpaperPropertyListener);
+            if (delivered) return;
+
+            // Stage 2 — intercept the page's assignment of the listener.
+            try {
+                var current;
+                Object.defineProperty(window, 'wallpaperPropertyListener', {
+                    configurable: true,
+                    get: function () { return current; },
+                    set: function (value) {
+                        current = value;
+                        deliver(value);
+                    }
+                });
+            } catch (e) {}
+
+            // Stage 3 — short polling fallback for pages that mutate an
+            // already-defined property instead of assigning to the window.
+            var attempts = 0;
+            function pollFallback() {
+                if (delivered) return;
+                deliver(window.wallpaperPropertyListener);
+                if (delivered) return;
+                if (attempts++ < 60) {
+                    window.requestAnimationFrame(pollFallback);
+                }
+            }
+            pollFallback();
         })();
         """
     }

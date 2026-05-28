@@ -64,6 +64,25 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
     /// exhausted the runtime surfaces the error in the screen-detail banner.
     public var maxRetries: Int = 3
 
+    /// Injects a `<meta http-equiv="Content-Security-Policy">` tag before
+    /// the page evaluates its own scripts. The default policy permits any
+    /// HTTPS origin plus the local `livewallpaper://` scheme, but blocks
+    /// data exfiltration over arbitrary schemes (FTP / unknown protocol
+    /// pings). Useful for remote URL wallpapers from semi-trusted sources.
+    /// Off by default because aggressive CSPs break a non-trivial share
+    /// of wallpaper authoring (e.g. authors who load external Three.js
+    /// CDNs over HTTP).
+    public var cspEnforcementEnabled: Bool = false
+
+    /// When `true`, suspend additionally calls
+    /// `WEBGL_lose_context.loseContext()` on every WebGL canvas so the GPU
+    /// driver fully releases the backing surface. Resume calls
+    /// `restoreContext()`. Useful for known-heavy WebGL wallpapers that
+    /// you want to pin to zero GPU when occluded. Off by default because
+    /// many WebGL pages don't listen for `webglcontextrestored` and stay
+    /// black after the round-trip.
+    public var aggressiveSuspend: Bool = false
+
     /// Per-project Wallpaper Engine web user property overrides. These are
     /// intentionally separate from the generic HTML runtime controls above:
     /// `audioVolume`, `allowMouseInteraction`, and `transformScale` control
@@ -117,6 +136,8 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
         case physicalPixelLayout
         case useEphemeralStorage
         case maxRetries
+        case cspEnforcementEnabled
+        case aggressiveSuspend
         case wallpaperEngineProjectProperties
         case wallpaperEngineProjectPropertiesByProject
     }
@@ -136,6 +157,8 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
         physicalPixelLayout: Bool = false,
         useEphemeralStorage: Bool = false,
         maxRetries: Int = 3,
+        cspEnforcementEnabled: Bool = false,
+        aggressiveSuspend: Bool = false,
         wallpaperEngineProjectProperties: [String: WallpaperEngineProjectPropertyValue] = [:],
         wallpaperEngineProjectPropertiesByProject: [String: [String: WallpaperEngineProjectPropertyValue]] = [:]
     ) {
@@ -153,6 +176,8 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
         self.physicalPixelLayout = physicalPixelLayout
         self.useEphemeralStorage = useEphemeralStorage
         self.maxRetries = maxRetries
+        self.cspEnforcementEnabled = cspEnforcementEnabled
+        self.aggressiveSuspend = aggressiveSuspend
         self.wallpaperEngineProjectProperties = wallpaperEngineProjectProperties
         self.wallpaperEngineProjectPropertiesByProject = wallpaperEngineProjectPropertiesByProject
     }
@@ -180,6 +205,8 @@ public struct HTMLConfig: Codable, Equatable, Sendable {
         useEphemeralStorage = try c.decodeIfPresent(Bool.self, forKey: .useEphemeralStorage) ?? false
         let decodedRetries = try c.decodeIfPresent(Int.self, forKey: .maxRetries) ?? 3
         maxRetries = min(max(0, decodedRetries), 10)
+        cspEnforcementEnabled = try c.decodeIfPresent(Bool.self, forKey: .cspEnforcementEnabled) ?? false
+        aggressiveSuspend = try c.decodeIfPresent(Bool.self, forKey: .aggressiveSuspend) ?? false
         do {
             wallpaperEngineProjectProperties = try c.decodeIfPresent(
                 [String: WallpaperEngineProjectPropertyValue].self,
