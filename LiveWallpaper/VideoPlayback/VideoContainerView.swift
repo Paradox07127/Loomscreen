@@ -68,6 +68,10 @@ final class PlayerHostView: NSView {
         case .sRGB:        space = CGColorSpace(name: CGColorSpace.sRGB)
         case .displayP3:   space = CGColorSpace(name: CGColorSpace.displayP3)
         case .rec2020HDR:  space = CGColorSpace(name: CGColorSpace.itur_2020)
+        // `.forceSDR` relies on the Rec.709 `AVVideoComposition` installed
+        // by `WallpaperVideoPlayer` — the layer-level colorspace stays nil
+        // so the composition's color attachments drive the output.
+        case .forceSDR:    space = nil
         }
         // `CALayer.colorspace` is the right knob but the AVPlayerLayer Swift
         // surface doesn't expose it as a typed property — fall back to KVC.
@@ -79,10 +83,16 @@ final class PlayerHostView: NSView {
             playerLayer.setValue(nil, forKey: "colorspace")
         }
         // EDR coupling: HDR primaries are only meaningful with EDR output on.
-        // We don't disable EDR for the SDR cases — `applyHDRPreference` owns
-        // that and is driven by the source content's transfer function.
-        if preference == .rec2020HDR {
+        // For HDR primaries (`.rec2020HDR`) we force EDR on; for the explicit
+        // SDR override (`.forceSDR`) we force EDR off so the layer doesn't
+        // boost the tone-mapped Rec.709 frames back into HDR range.
+        switch preference {
+        case .rec2020HDR:
             setExtendedDynamicRangeEnabled(true)
+        case .forceSDR:
+            setExtendedDynamicRangeEnabled(false)
+        case .auto, .sRGB, .displayP3:
+            break
         }
     }
 

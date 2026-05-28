@@ -149,28 +149,55 @@ struct MenuBarContent: View {
         let cpuPercent = monitor.systemCpuUsage
         let gpuPercent = monitor.gpuUsage
         let ramPercent = monitor.systemMemoryUsage * 100
+        let thermalState = monitor.thermalState
 
-        return HStack(spacing: 18) {
+        return HStack(spacing: 8) {
             performanceItem(
-                icon: "cpu",
                 tint: usageColor(for: cpuPercent),
                 label: "CPU",
                 value: FormatUtils.formatPercent(cpuPercent.rounded())
             )
             performanceItem(
-                icon: "cpu.fill",
                 tint: usageColor(for: gpuPercent),
                 label: "GPU",
                 value: FormatUtils.formatPercent(gpuPercent.rounded())
             )
             performanceItem(
-                icon: "memorychip",
                 tint: usageColor(for: ramPercent),
                 label: "RAM",
                 value: FormatUtils.formatPercent(ramPercent.rounded())
             )
+            performanceItem(
+                tint: thermalColor(for: thermalState),
+                label: "TEMP",
+                value: thermalShortLabel(for: thermalState)
+            )
         }
         .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    /// Short status label intended for `performanceItem`'s value
+    /// column. `ProcessInfo.ThermalState` has no numeric percent, so we
+    /// surface a short word — the label + tint do most of the signaling, so
+    /// localised values that don't quite fit truncate gracefully.
+    private func thermalShortLabel(for state: ProcessInfo.ThermalState) -> String {
+        switch state {
+        case .nominal:  return String(localized: "OK", defaultValue: "OK", comment: "Menu bar TEMP status: thermal state nominal. Keep short — ideally ≤4 Latin characters or equivalent width.")
+        case .fair:     return String(localized: "Warm", defaultValue: "Warm", comment: "Menu bar TEMP status: thermal state fair. Keep short — ideally ≤4 Latin characters or equivalent width.")
+        case .serious:  return String(localized: "Hot", defaultValue: "Hot", comment: "Menu bar TEMP status: thermal state serious. Keep short — ideally ≤4 Latin characters or equivalent width.")
+        case .critical: return String(localized: "Crit", defaultValue: "Crit", comment: "Menu bar TEMP status: thermal state critical. Keep short — ideally ≤4 Latin characters or equivalent width.")
+        @unknown default: return "—"
+        }
+    }
+
+    private func thermalColor(for state: ProcessInfo.ThermalState) -> Color {
+        switch state {
+        case .nominal:  return .green
+        case .fair:     return .yellow
+        case .serious:  return .orange
+        case .critical: return .red
+        @unknown default: return .gray
+        }
     }
 
     /// Three-tier severity gradient for usage gauges:
@@ -184,21 +211,24 @@ struct MenuBarContent: View {
         return .green
     }
 
-    private func performanceItem(icon: String, tint: Color, label: String, value: String) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: icon)
-                .font(.callout.weight(.medium))
-                .foregroundStyle(tint)
-                .accessibilityHidden(true)
+    private func performanceItem(tint: Color, label: String, value: String) -> some View {
+        HStack(spacing: 4) {
             Text(verbatim: label)
-                .font(.caption.weight(.semibold))
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .frame(width: 28, alignment: .leading)
+
             Text(verbatim: value)
                 .font(.system(.callout, design: .monospaced).weight(.bold))
                 .foregroundStyle(tint)
                 .monospacedDigit()
-                .frame(width: 38, alignment: .trailing)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(width: 36, alignment: .trailing)
         }
+        .frame(width: 68)
         .animation(.easeInOut(duration: 0.25), value: tint)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text("\(label) \(value)"))
@@ -221,6 +251,14 @@ struct MenuBarContent: View {
             .frame(maxWidth: .infinity)
             .help(Text("Manage — open the LiveWallpaper settings window"))
             .accessibilityLabel(Text("Manage wallpapers"))
+
+            MenuBarFooterUtility(
+                systemImage: "gearshape",
+                role: .neutral,
+                action: invokeOpenSettings,
+                help: Text("Open General Settings"),
+                accessibilityLabel: Text("Open General Settings")
+            )
 
             MenuBarFooterUtility(
                 systemImage: "arrow.clockwise",

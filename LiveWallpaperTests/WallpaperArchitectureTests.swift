@@ -769,7 +769,9 @@ struct WallpaperPolicyEngineTests {
         let profile = WallpaperPolicyEngine.performanceProfile(
             globalSettings: settings,
             powerSource: .battery(level: 80),
-            isHiddenByFullScreen: false
+            isHiddenByFullScreen: false,
+            thermalState: .nominal,
+            isGameModeActive: false
         )
 
         #expect(profile == .quality)
@@ -786,7 +788,9 @@ struct WallpaperPolicyEngineTests {
         let profile = WallpaperPolicyEngine.performanceProfile(
             globalSettings: settings,
             powerSource: .external,
-            isHiddenByFullScreen: true
+            isHiddenByFullScreen: true,
+            thermalState: .nominal,
+            isGameModeActive: false
         )
 
         #expect(profile == .suspended)

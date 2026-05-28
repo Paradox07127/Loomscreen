@@ -28,6 +28,15 @@ final class VideoEffectsApplicationService {
             Logger.debug("Skip apply-effects: no active player for screen \(screenID) yet", category: .videoPlayer)
             return
         }
+        // Force SDR owns the `videoComposition` slot (Rec.709 tone-mapping).
+        // Writing a CIFilter composition over it would silently disable the
+        // SDR conversion the user asked for.
+        if player.isForceSDRActive {
+            Logger.debug("Skip apply-effects: Force SDR owns videoComposition for screen \(screenID)", category: .videoPlayer)
+            cancelInflight(for: screenID)
+            noEffectsHandler()
+            return
+        }
 
         let hasEffects = config.effectConfig.hasActiveEffect
         let fingerprint = AppliedFingerprint(effects: config.effectConfig, limit: config.frameRateLimit)
@@ -72,7 +81,8 @@ final class VideoEffectsApplicationService {
                 await MainActor.run { [weak self, weak player] in
                     guard let self,
                           let player,
-                          self.generations[screenID] == generation else { return }
+                          self.generations[screenID] == generation,
+                          !player.isForceSDRActive else { return }
                     player.setVideoComposition(composition)
                     self.inflightTasks[screenID] = nil
                     self.appliedFingerprints[screenID] = AppliedFingerprint(

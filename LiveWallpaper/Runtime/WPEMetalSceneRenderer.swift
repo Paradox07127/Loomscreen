@@ -1066,18 +1066,25 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
         try await load()
     }
 
+    /// Resolves the effective `preferredFramesPerSecond` honouring the
+    /// renderer-wide throttle (per-screen visibility) and the user's
+    /// frame-rate ceiling. Performance profile is intentionally not a knob
+    /// here — graduated FPS reduction conflicts with the user's per-screen
+    /// cap, so the runtime only switches between full quality and suspended.
+    private var effectivePreferredFramesPerSecond: Int {
+        isThrottled ? Self.throttledPreferredFPS : userPreferredFPS
+    }
+
     func setThrottled(_ throttled: Bool) {
         isThrottled = throttled
         guard currentProfile != .suspended else { return }
-        mtkView.preferredFramesPerSecond = throttled
-            ? Self.throttledPreferredFPS
-            : userPreferredFPS
+        mtkView.preferredFramesPerSecond = effectivePreferredFramesPerSecond
     }
 
     /// Applies the user-selected frame rate ceiling. `.unlimited` falls
     /// back to vsync (`unlimitedPreferredFPS`) so MTKView doesn't free-run.
-    /// Throttled / suspended states are not overridden here — the ceiling
-    /// takes effect on the next non-throttled transition.
+    /// Suspended state is not overridden here — the ceiling takes effect on
+    /// the next non-suspended transition.
     func setFrameRateLimit(_ limit: FrameRateLimit) {
         let resolved: Int
         switch limit {
@@ -1088,8 +1095,8 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
         }
         guard resolved != userPreferredFPS else { return }
         userPreferredFPS = resolved
-        guard currentProfile != .suspended, !isThrottled else { return }
-        mtkView.preferredFramesPerSecond = resolved
+        guard currentProfile != .suspended else { return }
+        mtkView.preferredFramesPerSecond = effectivePreferredFramesPerSecond
     }
 
     /// Forwards the inspector's mute toggle into the scene's audio
@@ -1129,9 +1136,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
         case .quality:
             mtkView.isPaused = !needsContinuousFrames
             mtkView.enableSetNeedsDisplay = !needsContinuousFrames
-            mtkView.preferredFramesPerSecond = isThrottled
-                ? Self.throttledPreferredFPS
-                : userPreferredFPS
+            mtkView.preferredFramesPerSecond = effectivePreferredFramesPerSecond
         case .suspended:
             mtkView.isPaused = true
             mtkView.enableSetNeedsDisplay = true

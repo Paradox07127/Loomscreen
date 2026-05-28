@@ -1009,7 +1009,6 @@ struct GlobalSettingsDecoderTests {
         #expect(decoded.preservePlaybackOnLock == false)
         #expect(decoded.startOnLogin == false)
         #expect(decoded.minimumBatteryLevel == nil)
-        #expect(decoded.defaultFrameRateLimit == .fps60)
         #expect(decoded.pauseOnFullScreen == true)
     }
 
@@ -1027,7 +1026,6 @@ struct GlobalSettingsDecoderTests {
         #expect(decoded.globalPauseOnBattery == false)
         #expect(decoded.minimumBatteryLevel == 0.2)
         #expect(decoded.pauseOnFullScreen == true)
-        #expect(decoded.defaultFrameRateLimit == .fps60)
     }
 
     @Test("Legacy JSON carrying `batteryResolutionCap` still decodes")
@@ -1050,7 +1048,6 @@ struct GlobalSettingsDecoderTests {
             preservePlaybackOnLock: true,
             startOnLogin: true,
             minimumBatteryLevel: 0.15,
-            defaultFrameRateLimit: .fps30,
             pauseOnFullScreen: false
         )
 
@@ -1061,8 +1058,22 @@ struct GlobalSettingsDecoderTests {
         #expect(decoded.preservePlaybackOnLock == true)
         #expect(decoded.startOnLogin == true)
         #expect(decoded.minimumBatteryLevel == 0.15)
-        #expect(decoded.defaultFrameRateLimit == .fps30)
         #expect(decoded.pauseOnFullScreen == false)
+    }
+
+    @Test("Legacy JSON carrying retired defaultFrameRateLimit decodes without error")
+    func legacyDefaultFrameRateLimitIgnored() throws {
+        // Older builds persisted this field; ensure existing settings files
+        // still load after the field was removed.
+        let legacyJSON = """
+        {
+            "defaultFrameRateLimit": 60,
+            "pauseOnFullScreen": true
+        }
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(GlobalSettings.self, from: legacyJSON)
+        #expect(decoded.pauseOnFullScreen == true)
     }
 }
 

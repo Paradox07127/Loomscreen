@@ -31,6 +31,11 @@ struct CommonPlaybackInspector: View {
     /// the audio path so HTML's `WKWebView` actually mutes its media
     /// elements — `AVPlayer.muted` is a no-op for HTML wallpapers.
     var htmlConfig: Binding<HTMLConfig>?
+    /// Current colour space override. When `.forceSDR`, the Rec.709
+    /// composition takes ownership of `AVPlayerItem.videoComposition`, so
+    /// the frame-rate cap (which writes the same slot) is dimmed and
+    /// ignored — the picker reflects that disabled state.
+    var videoColorSpace: VideoColorSpace = .auto
 
     @AppStorage("Inspector.PlaybackExpanded") private var isPlaybackExpanded = true
     @State private var lockScreenExtracted = false
@@ -140,10 +145,12 @@ struct CommonPlaybackInspector: View {
     }
 
     private var frameRateRow: some View {
-        SettingRow(
+        let forceSDRActive = videoColorSpace == .forceSDR
+        return SettingRow(
             icon: "gauge.with.dots.needle.bottom.50percent",
-            iconColor: .blue,
+            iconColor: forceSDRActive ? .secondary : .blue,
             title: "Frame Rate",
+            subtitle: forceSDRActive ? "Disabled while Force SDR is active" : nil,
             info: "Caps below 30 FPS force a compositing pass — useful when effects are active or to extend battery on long sessions. 60 FPS and Unlimited use the native playback path."
         ) {
             Picker("", selection: frameRateBinding) {
@@ -154,8 +161,11 @@ struct CommonPlaybackInspector: View {
             .pickerStyle(.menu)
             .labelsHidden()
             .fixedSize()
+            .disabled(forceSDRActive)
             .accessibilityLabel(Text("Frame rate limit"))
-            .accessibilityValue(Text(frameRateLimit.titleKey))
+            .accessibilityValue(forceSDRActive
+                ? Text("Disabled — Force SDR is active", comment: "Accessibility value when the frame-rate picker is dimmed because Force SDR owns the video composition slot.")
+                : Text(frameRateLimit.titleKey))
         }
     }
 

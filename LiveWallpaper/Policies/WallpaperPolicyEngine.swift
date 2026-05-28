@@ -6,13 +6,34 @@ enum WallpaperPolicyEngine {
     static func performanceProfile(
         globalSettings: GlobalSettings,
         powerSource: PowerMonitor.PowerSource,
-        isHiddenByFullScreen: Bool
+        isHiddenByFullScreen: Bool,
+        thermalState: ProcessInfo.ThermalState,
+        isGameModeActive: Bool
     ) -> WallpaperPerformanceProfile {
-        if globalSettings.pauseOnFullScreen && isHiddenByFullScreen {
-            return .suspended
-        }
+        let shouldSuspend = isGameModeActive ||
+            shouldPauseForPower(globalSettings: globalSettings, powerSource: powerSource) ||
+            shouldSuspendForThermal(thermalState) ||
+            shouldApplyFullScreenPolicy(
+                globalSettings: globalSettings,
+                isHiddenByFullScreen: isHiddenByFullScreen
+            )
 
-        return .quality
+        return shouldSuspend ? .suspended : .quality
+    }
+
+    /// Thermal mapping: `.serious / .critical` suspend playback to bleed
+    /// heat; `.fair / .nominal` rely on the user's per-screen frame-rate
+    /// cap and on lower-cost paths (VideoToolbox ASIC decode), so we don't
+    /// double-control via the profile.
+    private static func shouldSuspendForThermal(_ thermalState: ProcessInfo.ThermalState) -> Bool {
+        switch thermalState {
+        case .critical, .serious:
+            return true
+        case .fair, .nominal:
+            return false
+        @unknown default:
+            return true
+        }
     }
 
     static func shouldPauseForPower(

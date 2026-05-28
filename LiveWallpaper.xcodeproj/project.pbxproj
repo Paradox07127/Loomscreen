@@ -65,8 +65,6 @@
 		};
 		0C322C032D6950490033C48B /* LiveWallpaperTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-			);
 			path = LiveWallpaperTests;
 			sourceTree = "<group>";
 		};
@@ -231,10 +229,6 @@
 						CreatedOnToolsVersion = 16.2;
 						TestTargetID = 0C322BEE2D6950480033C48B;
 					};
-					0C322C092D6950490033C48B = {
-						CreatedOnToolsVersion = 16.2;
-						TestTargetID = 0C322BEE2D6950480033C48B;
-					};
 					0CA00000000000000000B001 = {
 						CreatedOnToolsVersion = 16.2;
 					};
@@ -253,11 +247,11 @@
 			mainGroup = 0C322BE62D6950480033C48B;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				0CA00000000000000000A001 /* XCLocalSwiftPackageReference "LiveWallpaperCore" */,
-				0CA00000000000000000A101 /* XCLocalSwiftPackageReference "LiveWallpaperVideoWeb" */,
-				0CA00000000000000000A201 /* XCLocalSwiftPackageReference "LiveWallpaperSharedUI" */,
-				0CA00000000000000000A301 /* XCLocalSwiftPackageReference "LiveWallpaperProWPE" */,
-				0CA00000000000000000A401 /* XCLocalSwiftPackageReference "LiveWallpaperProFeatures" */,
+				0CA00000000000000000A001 /* XCLocalSwiftPackageReference "Packages/LiveWallpaperCore" */,
+				0CA00000000000000000A101 /* XCLocalSwiftPackageReference "Packages/LiveWallpaperVideoWeb" */,
+				0CA00000000000000000A201 /* XCLocalSwiftPackageReference "Packages/LiveWallpaperSharedUI" */,
+				0CA00000000000000000A301 /* XCLocalSwiftPackageReference "Packages/LiveWallpaperProWPE" */,
+				0CA00000000000000000A401 /* XCLocalSwiftPackageReference "Packages/LiveWallpaperProFeatures" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 0C322BF02D6950480033C48B /* Products */;
@@ -678,23 +672,23 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		0CA00000000000000000A001 /* XCLocalSwiftPackageReference "LiveWallpaperCore" */ = {
+		0CA00000000000000000A001 /* XCLocalSwiftPackageReference "Packages/LiveWallpaperCore" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/LiveWallpaperCore;
 		};
-		0CA00000000000000000A101 /* XCLocalSwiftPackageReference "LiveWallpaperVideoWeb" */ = {
+		0CA00000000000000000A101 /* XCLocalSwiftPackageReference "Packages/LiveWallpaperVideoWeb" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/LiveWallpaperVideoWeb;
 		};
-		0CA00000000000000000A201 /* XCLocalSwiftPackageReference "LiveWallpaperSharedUI" */ = {
+		0CA00000000000000000A201 /* XCLocalSwiftPackageReference "Packages/LiveWallpaperSharedUI" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/LiveWallpaperSharedUI;
 		};
-		0CA00000000000000000A301 /* XCLocalSwiftPackageReference "LiveWallpaperProWPE" */ = {
+		0CA00000000000000000A301 /* XCLocalSwiftPackageReference "Packages/LiveWallpaperProWPE" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/LiveWallpaperProWPE;
 		};
-		0CA00000000000000000A401 /* XCLocalSwiftPackageReference "LiveWallpaperProFeatures" */ = {
+		0CA00000000000000000A401 /* XCLocalSwiftPackageReference "Packages/LiveWallpaperProFeatures" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/LiveWallpaperProFeatures;
 		};

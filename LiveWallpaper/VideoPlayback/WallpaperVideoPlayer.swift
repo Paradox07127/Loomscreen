@@ -71,12 +71,20 @@ final class WallpaperVideoPlayer {
     private var currentItemSubscription: AnyCancellable?
     private var accessToken = false
     private let initialFrame: CGRect
+    /// Screen used to cap decode resolution to the wallpaper framebuffer's
+    /// physical pixels. Resolved once at player creation.
+    /// TODO: refresh when a wallpaper window moves across displays.
+    private var attachedScreen: NSScreen?
     private var fitMode: VideoFitMode = .aspectFill
     private var hasRequestedPlaybackStart = false
     /// Last applied colorspace preference. Re-applied in
     /// `configurePlaybackComponents` so a preference set before the asset
     /// loaded survives the late `VideoContainerView` creation path.
     private var lastColorSpacePreference: VideoColorSpace = .auto
+
+    /// Read by composition writers (frame-rate cap, video effects) so they
+    /// stand down when Rec.709 tone-mapping owns the `videoComposition` slot.
+    var isForceSDRActive: Bool { lastColorSpacePreference == .forceSDR }
     
     // MARK: - Initialization
     init(url: URL, frame: CGRect, fitMode: VideoFitMode = .aspectFill, loadImmediately: Bool = true) {
@@ -321,18 +329,28 @@ final class WallpaperVideoPlayer {
     }
 
     private func configurePlaybackComponents(with asset: AVURLAsset, bufferDuration: TimeInterval) {
+        attachedScreen = Self.screen(matching: initialFrame)
         let playerItem = AVPlayerItem(asset: asset)
 
         playerItem.preferredForwardBufferDuration = bufferDuration
+        // Wallpaper sources are local file:// or lwmem:// assets. Avoid seek
+        // waits intended for composition-heavy editors, use the cheaper audio
+        // pitch path for ambient playback, and let local loops advance eagerly.
+        if #available(macOS 10.15, *) {
+            playerItem.seekingWaitsForVideoCompositionRendering = false
+        }
+        playerItem.audioTimePitchAlgorithm = .timeDomain
         playerItem.canUseNetworkResourcesForLiveStreamingWhilePaused = false
         Logger.debug("Forward buffer hint: \(String(format: "%.1f", bufferDuration))s", category: .videoPlayer)
 
-        Self.applyDecoderPreference(to: playerItem)
+        Self.applyResolutionCap(to: playerItem, screen: attachedScreen)
         applyAudioPolicy(to: playerItem)
 
         let queuePlayer = AVQueuePlayer()
         queuePlayer.actionAtItemEnd = .none
-        queuePlayer.automaticallyWaitsToMinimizeStalling = true
+        // All wallpaper video sources are local (file:// or lwmem://), so the
+        // remote-stream buffering heuristics only add loop-transition latency.
+        queuePlayer.automaticallyWaitsToMinimizeStalling = false
         queuePlayer.preventsDisplaySleepDuringVideoPlayback = false
         queuePlayer.volume = isMuted ? 0 : Float(audioVolume)
         queuePlayer.isMuted = isMuted
@@ -356,9 +374,14 @@ final class WallpaperVideoPlayer {
 
         // Late-binding: a preference set before the container existed only
         // applied to `lastColorSpacePreference`. Now that the container is
-        // live, push it onto the player layer.
+        // live, push it onto the player layer. `.forceSDR` additionally
+        // needs the Rec.709 composition, which couldn't install earlier
+        // because `templatePlayerItem` didn't exist yet.
         if lastColorSpacePreference != .auto {
             containerView.applyColorSpacePreference(lastColorSpacePreference)
+            if lastColorSpacePreference == .forceSDR {
+                installSDRComposition()
+            }
         }
 
         if let formatInfo {
@@ -429,13 +452,6 @@ final class WallpaperVideoPlayer {
                 }
                 .store(in: &cleanupTasks)
         }
-
-        NotificationCenter.default.publisher(for: .videoDecoderPreferenceDidChange)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.reapplyDecoderPreferenceToActiveItems()
-            }
-            .store(in: &cleanupTasks)
 
         let benignLooperCodes: Set<Int> = [-11847, -11858, -11878, -12504, -12509, -12784, -12823, -12852, -12860]
         NotificationCenter.default.publisher(for: .AVPlayerItemFailedToPlayToEndTime, object: nil)
@@ -568,40 +584,32 @@ final class WallpaperVideoPlayer {
         }
     }
 
-    /// Pushes the user's global decoder preference onto an `AVPlayerItem`.
+    /// Caps `AVPlayerItem.preferredMaximumResolution` at the wallpaper
+    /// surface's physical framebuffer pixels.
     ///
     /// AVFoundation never lets us pick the decoder backend (hardware vs.
-    /// software) directly — that decision lives in VideoToolbox. We can
-    /// however cap the *work* by capping `preferredMaximumResolution` and
-    /// `preferredPeakBitRate`. Battery Saver maps to a 1080p / 8 Mbps cap,
-    /// High Quality removes both caps explicitly, Auto leaves AVFoundation
-    /// defaults alone.
-    static func applyDecoderPreference(to playerItem: AVPlayerItem) {
-        let preference = SettingsManager.shared.loadGlobalSettings().videoDecoderPreference
-        switch preference {
-        case .auto:
-            break
-        case .batterySaver:
-            playerItem.preferredMaximumResolution = CGSize(width: 1920, height: 1080)
-            playerItem.preferredPeakBitRate = 8_000_000
-        case .highQuality:
-            playerItem.preferredMaximumResolution = .zero
-            playerItem.preferredPeakBitRate = 0
+    /// software) directly — that decision lives in VideoToolbox. What we
+    /// CAN do is stop the decoder from chewing through 8K data when the
+    /// framebuffer is only 4K. Capping at the framebuffer's physical
+    /// pixels is the information ceiling: anything above it would be
+    /// downsampled before display, so the cap saves GPU + memory without
+    /// any visible loss.
+    static func applyResolutionCap(to playerItem: AVPlayerItem, screen: NSScreen?) {
+        guard let screen else {
+            // No screen context yet — leave the defaults so AVFoundation
+            // picks something sane on the first frame. The cap will be
+            // re-applied once `attachedScreen` resolves.
+            return
         }
+        playerItem.preferredMaximumResolution = CGSize(
+            width: screen.frame.width * screen.backingScaleFactor,
+            height: screen.frame.height * screen.backingScaleFactor
+        )
+        playerItem.preferredPeakBitRate = 0
     }
 
-    /// Re-applies the active decoder preference to every player item in the
-    /// queue. Called by `WallpaperVideoPlayer` instances in response to the
-    /// `videoDecoderPreferenceDidChange` notification so existing sessions
-    /// react without a teardown.
-    func reapplyDecoderPreferenceToActiveItems() {
-        guard let player else { return }
-        if let templatePlayerItem {
-            Self.applyDecoderPreference(to: templatePlayerItem)
-        }
-        for item in player.items() {
-            Self.applyDecoderPreference(to: item)
-        }
+    private static func screen(matching frame: CGRect) -> NSScreen? {
+        NSScreen.screens.first { Self.areFramesEquivalent($0.frame, frame) }
     }
 
     private static func clampedVolume(_ value: Double) -> Double {
@@ -633,11 +641,55 @@ final class WallpaperVideoPlayer {
     /// for ~95% of users); the explicit cases let users debug colour drift
     /// or force wide-gamut output even when source metadata says SDR.
     ///
+    /// `.forceSDR` installs a Rec.709 `AVVideoComposition` so HDR sources
+    /// tone-map to standard dynamic range — composition-based, so it is
+    /// mutually exclusive with `setFrameRateLimit` (re-applying either
+    /// replaces the active composition).
+    ///
     /// Calling this is cheap and idempotent — `PlayerHostView` skips the
     /// `playerLayer.colorspace` assignment when the preference hasn't moved.
     func setVideoColorSpace(_ preference: VideoColorSpace) {
+        let previousPreference = lastColorSpacePreference
         lastColorSpacePreference = preference
         videoView?.applyColorSpacePreference(preference)
+
+        if preference == .forceSDR {
+            // Cancel any in-flight frame-rate composition build so its
+            // late completion can't race past the Rec.709 install.
+            frameRateLimitTask?.cancel()
+            frameRateLimitTask = nil
+            installSDRComposition()
+        } else if previousPreference == .forceSDR {
+            // Drop the Rec.709 composition when the user picks a non-forceSDR
+            // option so the natural HDR / wide-gamut path resumes. If a
+            // frame-rate limit was previously set, it now needs to be
+            // re-applied because `setFrameRateLimit` builds its own
+            // composition only when invoked explicitly.
+            setVideoComposition(nil)
+            if requestedFrameRateLimit > 0 {
+                setFrameRateLimit(requestedFrameRateLimit)
+            }
+        }
+    }
+
+    private func installSDRComposition() {
+        guard let templateItem = templatePlayerItem else {
+            // No asset yet — the composition gets installed on the late path
+            // by `configurePlaybackComponents`, which calls back into us via
+            // `lastColorSpacePreference`. Defer.
+            return
+        }
+        let asset = templateItem.asset
+        let composition = AVMutableVideoComposition(
+            asset: asset,
+            applyingCIFiltersWithHandler: { request in
+                request.finish(with: request.sourceImage, context: nil)
+            }
+        )
+        composition.colorPrimaries = AVVideoColorPrimaries_ITU_R_709_2
+        composition.colorTransferFunction = AVVideoTransferFunction_ITU_R_709_2
+        composition.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_709_2
+        setVideoComposition(composition)
     }
 
     func setSpanRenderConfiguration(_ configuration: VideoSpanRenderConfiguration?) {
@@ -665,7 +717,8 @@ final class WallpaperVideoPlayer {
             return
         }
 
-        if let window = window, !areFramesEquivalent(window.frame, newFrame) {
+        // TODO P2: refresh attachedScreen and reapply decoder caps on cross-display moves.
+        if let window = window, !Self.areFramesEquivalent(window.frame, newFrame) {
             Logger.debug("Updating video window frame to \(newFrame)", category: .videoPlayer)
             window.updateFrame(newFrame, animate: false)
         }
@@ -689,7 +742,7 @@ final class WallpaperVideoPlayer {
         !frame.isEmpty && frame.width > 0 && frame.height > 0
     }
 
-    private func areFramesEquivalent(_ frame1: CGRect, _ frame2: CGRect, tolerance: CGFloat = 1.0) -> Bool {
+    private static func areFramesEquivalent(_ frame1: CGRect, _ frame2: CGRect, tolerance: CGFloat = 1.0) -> Bool {
         abs(frame1.origin.x - frame2.origin.x) < tolerance &&
         abs(frame1.origin.y - frame2.origin.y) < tolerance &&
         abs(frame1.width - frame2.width) < tolerance &&
@@ -730,6 +783,17 @@ final class WallpaperVideoPlayer {
         requestedFrameRateLimit = framesPerSecond
         frameRateLimitTask?.cancel()
         frameRateLimitTask = nil
+
+        // Force SDR owns the active composition (Rec.709 tone-mapping). The
+        // frame-rate cap also writes through `videoComposition`, so trying
+        // to install both produces whichever was applied last. The UI text
+        // for `.forceSDR` documents this exclusion — honour it here so the
+        // SDR composition isn't silently overwritten by a profile-driven
+        // refresh.
+        guard lastColorSpacePreference != .forceSDR else {
+            Logger.debug("Skipping frame-rate composition while Force SDR is active", category: .videoPlayer)
+            return
+        }
 
         guard let playerItem = player?.currentItem else {
             Logger.debug("Deferring frame-rate limit until player item is ready", category: .videoPlayer)
@@ -802,7 +866,9 @@ final class WallpaperVideoPlayer {
                 }
 
                 await MainActor.run { [weak self] in
-                    guard let self else { return }
+                    // Bail if Force SDR took ownership of the composition
+                    // slot while we were building the frame-rate variant.
+                    guard let self, !self.isForceSDRActive else { return }
                     self.setVideoComposition(composition)
                     Logger.info("Frame rate limit set to \(Int(targetFPS)) FPS", category: .videoPlayer)
                 }

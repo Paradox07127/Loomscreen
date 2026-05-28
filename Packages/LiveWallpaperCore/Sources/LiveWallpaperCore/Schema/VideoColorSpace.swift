@@ -14,6 +14,12 @@ public enum VideoColorSpace: String, Codable, CaseIterable, Identifiable, Sendab
     case sRGB
     case displayP3
     case rec2020HDR
+    /// Forces an HDR video stream through a Rec.709 `AVVideoComposition` so
+    /// it renders as SDR. The escape hatch when an HDR source looks washed
+    /// out or oversaturated on an SDR-only external display.
+    /// Note: composition-based — mutually exclusive with the frame-rate cap
+    /// (re-applying either replaces the active composition).
+    case forceSDR
 
     public var id: String { rawValue }
 
@@ -23,6 +29,7 @@ public enum VideoColorSpace: String, Codable, CaseIterable, Identifiable, Sendab
         case .sRGB:        return "sRGB"
         case .displayP3:   return "Display P3"
         case .rec2020HDR:  return "Rec.2020 HDR"
+        case .forceSDR:    return "Force SDR"
         }
     }
 
@@ -36,6 +43,8 @@ public enum VideoColorSpace: String, Codable, CaseIterable, Identifiable, Sendab
             return "Wide-gamut output for P3-capable displays."
         case .rec2020HDR:
             return "HDR-aware output. Requires an HDR-capable display."
+        case .forceSDR:
+            return "Render HDR content as SDR via Rec.709. Disables frame-rate limit."
         }
     }
 }

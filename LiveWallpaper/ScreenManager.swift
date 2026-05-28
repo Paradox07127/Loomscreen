@@ -335,7 +335,49 @@ final class ScreenManager {
                 self?.handleScreenParameterChange()
             }
             .store(in: &cleanupTasks)
-        
+
+        NotificationCenter.default.publisher(for: ProcessInfo.thermalStateDidChangeNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                Logger.info(
+                    "Thermal state changed to \(ProcessInfo.processInfo.thermalState); refreshing wallpaper performance policy",
+                    category: .powerMonitor
+                )
+                self.refreshPerformancePolicyForAllScreens()
+                self.updatePlaybackState()
+            }
+            .store(in: &cleanupTasks)
+
+        // Low Power Mode toggles flip `GameModeDetector.isActive` without
+        // changing the frontmost app, so we need a dedicated subscription
+        // here — otherwise the policy refresh would wait for the next
+        // unrelated event. The notification name is the AppKit/Foundation
+        // Obj-C constant; Swift doesn't surface a typed alias on macOS.
+        NotificationCenter.default.publisher(for: Notification.Name.NSProcessInfoPowerStateDidChange)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                Logger.info(
+                    "Power state changed (Low Power Mode: \(ProcessInfo.processInfo.isLowPowerModeEnabled)); refreshing wallpaper performance policy",
+                    category: .powerMonitor
+                )
+                self.refreshPerformancePolicyForAllScreens()
+                self.updatePlaybackState()
+            }
+            .store(in: &cleanupTasks)
+
+        // GameMode signal piggybacks on frontmost-app activations — flipping
+        // to / from Steam, Epic, Battle.net etc. flips `GameModeDetector.isActive`.
+        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didActivateApplicationNotification)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.refreshPerformancePolicyForAllScreens()
+                self.updatePlaybackState()
+            }
+            .store(in: &cleanupTasks)
+
         NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.willSleepNotification)
             .sink { [weak self] _ in
                 self?.handleSystemSleep()
@@ -542,6 +584,9 @@ final class ScreenManager {
 
     private func handleFullScreenChange(_ hiddenScreens: [CGDirectDisplayID: Bool]) {
         let globalSettings = SettingsManager.shared.loadGlobalSettings()
+        let powerSource = powerMonitor.currentPowerSource
+        let thermalState = ProcessInfo.processInfo.thermalState
+        let isGameModeActive = globalSettings.pauseInGameMode && GameModeDetector.isActive
 
         for screen in screens {
             let isHidden = hiddenScreens[screen.id] ?? false
@@ -560,7 +605,7 @@ final class ScreenManager {
                    powerPolicy.wasPausedByFullScreen(screen.id) {
                     if WallpaperPolicyEngine.shouldResumeFromFullScreen(
                         globalSettings: globalSettings,
-                        powerSource: powerMonitor.currentPowerSource,
+                        powerSource: powerSource,
                         wasPausedByFullScreen: true
                     ) {
                         playback.play()
@@ -572,8 +617,10 @@ final class ScreenManager {
             applyPerformancePolicy(
                 to: screen,
                 globalSettings: globalSettings,
-                powerSource: powerMonitor.currentPowerSource,
-                isHiddenByFullScreen: shouldApplyFullScreenPolicy
+                powerSource: powerSource,
+                isHiddenByFullScreen: shouldApplyFullScreenPolicy,
+                thermalState: thermalState,
+                isGameModeActive: isGameModeActive
             )
         }
         updatePlaybackState()
@@ -960,6 +1007,8 @@ final class ScreenManager {
     // MARK: - Power Management
     private func handlePowerStateChange(_ powerSource: PowerMonitor.PowerSource) {
         let globalSettings = SettingsManager.shared.loadGlobalSettings()
+        let thermalState = ProcessInfo.processInfo.thermalState
+        let isGameModeActive = globalSettings.pauseInGameMode && GameModeDetector.isActive
 
         var updatedScreens = false
 
@@ -967,11 +1016,13 @@ final class ScreenManager {
             let isHiddenByFullScreen = globalSettings.pauseOnFullScreen &&
                 fullScreenDetector.isDesktopHidden(for: screen.id)
 
-            applyPerformancePolicy(
+            let profile = applyPerformancePolicy(
                 to: screen,
                 globalSettings: globalSettings,
                 powerSource: powerSource,
-                isHiddenByFullScreen: isHiddenByFullScreen
+                isHiddenByFullScreen: isHiddenByFullScreen,
+                thermalState: thermalState,
+                isGameModeActive: isGameModeActive
             )
 
             let shouldPauseForPower = WallpaperPolicyEngine.shouldPauseForPower(
@@ -989,7 +1040,12 @@ final class ScreenManager {
                     playback.pause()
                     powerPolicy.markPausedByPower(screen.id)
                     updatedScreens = true
-                } else if shouldResumeForPower, !playback.isPlaying {
+                } else if shouldResumeForPower, !playback.isPlaying, profile != .suspended {
+                    // Resume is only safe if the wider policy lets the
+                    // wallpaper run. Game Mode, critical thermal, or a
+                    // fullscreen takeover all keep `profile == .suspended`,
+                    // and racing the resume in those windows would undo the
+                    // performance policy decision we just applied.
                     Logger.debug("Resuming screen \(screen.id) due to external power (was paused by power management)", category: .powerMonitor)
                     playback.play()
                     powerPolicy.markResumedFromPower(screen.id)
@@ -1000,9 +1056,9 @@ final class ScreenManager {
                     Logger.debug("Suspending ambient session for screen \(screen.id) due to power policy", category: .powerMonitor)
                     runtimeSession.applyPerformanceProfile(.suspended)
                     powerPolicy.markPausedByPower(screen.id)
-                } else if shouldResumeForPower {
+                } else if shouldResumeForPower, profile != .suspended {
                     Logger.debug("Resuming ambient session for screen \(screen.id) due to external power", category: .powerMonitor)
-                    runtimeSession.applyPerformanceProfile(.quality)
+                    runtimeSession.applyPerformanceProfile(profile)
                     powerPolicy.markResumedFromPower(screen.id)
                 }
             }
@@ -1018,18 +1074,45 @@ final class ScreenManager {
         }
     }
 
+    @discardableResult
     private func applyPerformancePolicy(
         to screen: Screen,
         globalSettings: GlobalSettings,
         powerSource: PowerMonitor.PowerSource,
-        isHiddenByFullScreen: Bool
-    ) {
+        isHiddenByFullScreen: Bool,
+        thermalState: ProcessInfo.ThermalState,
+        isGameModeActive: Bool
+    ) -> WallpaperPerformanceProfile {
         let profile = WallpaperPolicyEngine.performanceProfile(
             globalSettings: globalSettings,
             powerSource: powerSource,
-            isHiddenByFullScreen: isHiddenByFullScreen
+            isHiddenByFullScreen: isHiddenByFullScreen,
+            thermalState: thermalState,
+            isGameModeActive: isGameModeActive
         )
         screen.runtimeSession?.applyPerformanceProfile(profile)
+        return profile
+    }
+
+    private func refreshPerformancePolicyForAllScreens() {
+        let globalSettings = SettingsManager.shared.loadGlobalSettings()
+        let powerSource = powerMonitor.currentPowerSource
+        let thermalState = ProcessInfo.processInfo.thermalState
+        let isGameModeActive = globalSettings.pauseInGameMode && GameModeDetector.isActive
+
+        for screen in screens {
+            let isHiddenByFullScreen = globalSettings.pauseOnFullScreen &&
+                fullScreenDetector.isDesktopHidden(for: screen.id)
+
+            applyPerformancePolicy(
+                to: screen,
+                globalSettings: globalSettings,
+                powerSource: powerSource,
+                isHiddenByFullScreen: isHiddenByFullScreen,
+                thermalState: thermalState,
+                isGameModeActive: isGameModeActive
+            )
+        }
     }
 
     private func updateFullScreenFallbackPolling() {
@@ -1491,7 +1574,9 @@ final class ScreenManager {
                 globalSettings: globalSettings,
                 powerSource: powerMonitor.currentPowerSource,
                 isHiddenByFullScreen: globalSettings.pauseOnFullScreen &&
-                    fullScreenDetector.isDesktopHidden(for: screen.id)
+                    fullScreenDetector.isDesktopHidden(for: screen.id),
+                thermalState: ProcessInfo.processInfo.thermalState,
+                isGameModeActive: globalSettings.pauseInGameMode && GameModeDetector.isActive
             )
             Logger.info("Set scene wallpaper (workshop \(descriptor.workshopID)) for screen \(screen.id)", category: .screenManager)
             notifyWallpaperSessionChanged()
@@ -1511,7 +1596,9 @@ final class ScreenManager {
             globalSettings: globalSettings,
             powerSource: powerMonitor.currentPowerSource,
             isHiddenByFullScreen: globalSettings.pauseOnFullScreen &&
-                fullScreenDetector.isDesktopHidden(for: screen.id)
+                fullScreenDetector.isDesktopHidden(for: screen.id),
+            thermalState: ProcessInfo.processInfo.thermalState,
+            isGameModeActive: globalSettings.pauseInGameMode && GameModeDetector.isActive
         )
         notifyWallpaperSessionChanged()
     }

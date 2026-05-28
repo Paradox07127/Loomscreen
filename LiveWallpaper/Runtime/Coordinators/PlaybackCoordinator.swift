@@ -606,7 +606,9 @@ final class PlaybackCoordinator {
         let profile = WallpaperPolicyEngine.performanceProfile(
             globalSettings: globalSettings,
             powerSource: powerMonitor.currentPowerSource,
-            isHiddenByFullScreen: isHiddenByFullScreen
+            isHiddenByFullScreen: isHiddenByFullScreen,
+            thermalState: ProcessInfo.processInfo.thermalState,
+            isGameModeActive: globalSettings.pauseInGameMode && GameModeDetector.isActive
         )
         screen.runtimeSession?.applyPerformanceProfile(profile)
     }

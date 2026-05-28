@@ -176,8 +176,20 @@ final class VideoWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackCon
     }
 
     func applyPerformanceProfile(_ profile: WallpaperPerformanceProfile) {
-        guard profile == .suspended else { return }
-        player?.pause()
+        switch profile {
+        case .quality:
+            if let wasPlayingBeforeSuspend {
+                self.wasPlayingBeforeSuspend = nil
+                if wasPlayingBeforeSuspend {
+                    player?.play()
+                }
+            }
+        case .suspended:
+            if wasPlayingBeforeSuspend == nil {
+                wasPlayingBeforeSuspend = player?.isPlaying ?? false
+            }
+            player?.pause()
+        }
     }
 
     func suspend() {

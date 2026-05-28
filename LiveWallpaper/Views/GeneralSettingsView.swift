@@ -14,16 +14,13 @@ struct GeneralSettingsView: View {
     @State private var minimumBatteryLevel: Double?
     @State private var useBatteryThreshold: Bool
     @State private var pauseOnFullScreen: Bool
+    @State private var pauseInGameMode: Bool
     @State private var showInDock: Bool
     /// Slider value held in MB for UI ergonomics — converted to bytes when
     /// persisted to `GlobalSettings.videoCacheMaxBytesPerScreen`. `Double`
     /// because SwiftUI's `Slider` is a `Double` ramp; the step ensures it
     /// always lands on a `% 32 == 0` MB boundary so the label reads cleanly.
     @State private var videoCacheBudgetMB: Double
-    /// Global decoder preference. AVPlayer does not expose a public knob to
-    /// force software / hardware decode, so the cases map to resolution /
-    /// bitrate hints instead. See `VideoDecoderPreference` for semantics.
-    @State private var videoDecoderPreference: VideoDecoderPreference
     /// Pro-only runtime opt-in for the Developer Tools sidebar entry and
     /// `WKWebView.isInspectable` on HTML wallpapers. Hidden in Lite via
     /// `#if !LITE_BUILD` + capability gate so the row never renders.
@@ -61,9 +58,9 @@ struct GeneralSettingsView: View {
         _minimumBatteryLevel = State(initialValue: settings.minimumBatteryLevel)
         _useBatteryThreshold = State(initialValue: settings.minimumBatteryLevel != nil)
         _pauseOnFullScreen = State(initialValue: settings.pauseOnFullScreen)
+        _pauseInGameMode = State(initialValue: settings.pauseInGameMode)
         _showInDock = State(initialValue: settings.showInDock)
         _videoCacheBudgetMB = State(initialValue: Double(settings.videoCacheMaxBytesPerScreen) / Double(1024 * 1024))
-        _videoDecoderPreference = State(initialValue: settings.videoDecoderPreference)
         _developerModeEnabled = State(initialValue: settings.developerModeEnabled)
         _weatherLocation = State(initialValue: settings.weatherLocation)
     }
@@ -241,8 +238,8 @@ struct GeneralSettingsView: View {
         minimumBatteryLevel = settings.minimumBatteryLevel
         useBatteryThreshold = settings.minimumBatteryLevel != nil
         pauseOnFullScreen = settings.pauseOnFullScreen
+        pauseInGameMode = settings.pauseInGameMode
         showInDock = settings.showInDock
-        videoDecoderPreference = settings.videoDecoderPreference
         developerModeEnabled = settings.developerModeEnabled
         weatherLocation = settings.weatherLocation
         postSettingsNotificationAsync(.developerModeDidChange)
@@ -363,6 +360,15 @@ struct GeneralSettingsView: View {
                         .accessibilityHint(Text("Automatically pause wallpapers when a full-screen app is active"))
                 }
 
+                SettingRow(icon: "gamecontroller", iconColor: .green, title: "Pause when a game is active", subtitle: "Yield the GPU when a known game launcher is frontmost or macOS enters Low Power Mode") {
+                    Toggle("", isOn: $pauseInGameMode)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .onChange(of: pauseInGameMode) { _, _ in updateGlobalSettings() }
+                        .accessibilityLabel(Text("Pause when a game is active"))
+                        .accessibilityHint(Text("Yield the GPU when a known game launcher is frontmost or macOS enters Low Power Mode"))
+                }
+
                 SettingRow(icon: "dock.rectangle", iconColor: .indigo, title: "Show in Dock", subtitle: "Make the app visible in the Dock and Cmd-Tab switcher") {
                     Toggle("", isOn: $showInDock)
                         .labelsHidden()
@@ -384,15 +390,13 @@ struct GeneralSettingsView: View {
 
             advancedSection
 
-            Section {
-                resetDefaultsRow
-            } header: {
-                Text("Reset")
-            } footer: {
-                Text("Erases all configurations and restores factory defaults. This cannot be undone — consider exporting a backup first in the Backup tab.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            // Standalone Reset button — placed loose in the Form so the
+            // grouped Section background doesn't render around it. The
+            // destructive label + alert confirmation already carry the
+            // "this is permanent" weight without needing a card frame.
+            resetDefaultsRow
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
         }
     }
 
@@ -421,10 +425,6 @@ struct GeneralSettingsView: View {
                 }
             } header: {
                 Text("Advanced", comment: "Section header for Developer Mode toggle in General settings.")
-            } footer: {
-                Text("Off by default. Turning this on exposes WebKit's Web Inspector for HTML wallpapers and adds a Developer Tools entry to the sidebar.", comment: "Footer for the Developer Mode toggle explaining what the switch surfaces.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
         }
         #endif
@@ -447,90 +447,68 @@ struct GeneralSettingsView: View {
                 icon: "memorychip",
                 iconColor: .pink,
                 title: "Video memory cache",
-                subtitle: cacheSubtitleKey
+                subtitle: "Per-screen RAM budget",
+                info: "Higher = fewer disk reads, more RAM. Lower = less RAM, video re-reads disk on every loop."
             ) {
-                EmptyView()
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text(videoCacheValueLabel)
-                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(.primary)
-                    Spacer()
-                    Text(videoCacheTotalLabel)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Slider(
-                    value: Binding(
-                        get: { videoCacheBudgetMB },
-                        set: { newValue in
-                            let snapped = (newValue / 32).rounded() * 32
-                            videoCacheBudgetMB = snapped
-                            updateGlobalSettings()
-                        }
-                    ),
-                    in: 0...Double(GlobalSettings.maxVideoCacheBytes / (1024 * 1024)),
-                    step: 32
-                ) {
-                    Text("Video memory cache")
-                } minimumValueLabel: {
-                    Text("0")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                } maximumValueLabel: {
-                    Text("1 GB")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                .accessibilityLabel(Text("Video memory cache per screen"))
-                .accessibilityValue(Text(videoCacheValueLabel))
-            }
-            .padding(.vertical, 4)
-
-            SettingRow(
-                icon: "cpu",
-                iconColor: .green,
-                title: "Playback Quality",
-                subtitle: LocalizedStringKey(videoDecoderPreference.descriptionKey),
-                info: "macOS always picks hardware vs. software decode itself — apps cannot force a choice. This control instead caps the resolution and bitrate AVPlayer is allowed to request, which is what actually moves the GPU / battery dial."
-            ) {
-                Picker("", selection: $videoDecoderPreference) {
-                    ForEach(VideoDecoderPreference.allCases) { preference in
-                        Text(LocalizedStringKey(preference.titleKey)).tag(preference)
+                // Slider sits in the SettingRow's trailing slot so the
+                // header, the affordance, and the current value all read as
+                // a single row group — matching the way macOS System
+                // Settings inlines a slider next to its labeled title.
+                // The value text stays right-aligned directly under the
+                // slider to keep the rightmost edge visually anchored.
+                VStack(alignment: .trailing, spacing: 4) {
+                    Slider(
+                        value: Binding(
+                            get: { videoCacheBudgetMB },
+                            set: { newValue in
+                                let snapped = (newValue / 32).rounded() * 32
+                                videoCacheBudgetMB = snapped
+                                updateGlobalSettings()
+                            }
+                        ),
+                        in: 0...Double(GlobalSettings.maxVideoCacheBytes / (1024 * 1024)),
+                        step: 32
+                    ) {
+                        Text("Video memory cache")
+                    } minimumValueLabel: {
+                        Text("Off")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    } maximumValueLabel: {
+                        Text("1 GB")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .frame(width: 240)
+                    .accessibilityLabel(Text("Video memory cache per screen"))
+                    .accessibilityValue(Text(videoCacheValueLabel))
+
+                    Text(videoCacheValueLabel)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
                 }
-                .labelsHidden()
-                .pickerStyle(.segmented)
-                .fixedSize()
-                .onChange(of: videoDecoderPreference) { _, _ in updateGlobalSettings() }
-                .accessibilityLabel(Text("Playback quality preference"))
             }
         } header: {
             Text("Performance")
         }
     }
 
+    /// Compact one-line representation of the current cache budget, in the
+    /// form `150 MB · 300 MB total` (per-screen · total across all screens).
+    /// Off-state collapses to a single `"Streaming only"` token so we never
+    /// surface a misleading "0 MB total" when the user disabled caching.
     private var videoCacheValueLabel: String {
-        if videoCacheBudgetMB <= 0 {
-            return "Streaming only"
-        }
-        return "\(Int(videoCacheBudgetMB)) MB / screen"
-    }
+        guard videoCacheBudgetMB > 0 else { return "Streaming only" }
 
-    private var videoCacheTotalLabel: String {
+        let perScreenMB = Int(videoCacheBudgetMB)
         let screenCount = max(screenManager.screens.count, 1)
-        if videoCacheBudgetMB <= 0 {
-            return "\(screenCount) screen\(screenCount == 1 ? "" : "s") — 0 MB cached"
+        if screenCount == 1 {
+            return "\(perScreenMB) MB"
         }
-        let totalMB = Int(videoCacheBudgetMB) * screenCount
-        return "\(screenCount) screen\(screenCount == 1 ? "" : "s") — up to \(totalMB) MB total"
-    }
-
-    private var cacheSubtitleKey: LocalizedStringKey {
-        "Higher = fewer disk reads, more RAM. Lower = less RAM, video re-reads disk on every loop."
+        let totalMB = perScreenMB * screenCount
+        return "\(perScreenMB) MB · \(totalMB) MB total"
     }
 
     /// Weather-reactive location source. Inlined here so the user does
@@ -541,7 +519,11 @@ struct GeneralSettingsView: View {
     @ViewBuilder
     private var weatherSection: some View {
         Section {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(spacing: 8) {
+                // Centered fixed-size pill matches macOS System Settings'
+                // top-of-section segmented controls (e.g. Display arrangement
+                // mode), reading as a "choose your input" hero rather than a
+                // dense form row.
                 Picker("Source", selection: weatherSourceBinding) {
                     Text("Off").tag(WeatherLocationPreference.Source.off)
                     Text("System").tag(WeatherLocationPreference.Source.coreLocation)
@@ -549,11 +531,8 @@ struct GeneralSettingsView: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+                .fixedSize()
                 .accessibilityLabel(Text("Weather location source"))
-
-                Text("Used by weather-reactive effects like rain, snow, and fog.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
 
                 if weatherLocation.source == .manual {
                     ManualLocationPicker(
@@ -563,10 +542,16 @@ struct GeneralSettingsView: View {
                             persistWeatherLocation()
                         }
                     )
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
+            .frame(maxWidth: .infinity)
         } header: {
             Text("Weather")
+        } footer: {
+            Text("Used by weather-reactive effects like rain, snow, and fog.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -897,7 +882,9 @@ struct GeneralSettingsView: View {
                     info: "The bundle includes all global preferences, the wallpaper library bookmarks, and the per-display playback / effect setup. Wallpaper files themselves are not copied — only references to them."
                 ) {
                     Button("Export…") { beginExport() }
+                        .buttonStyle(.bordered)
                         .controlSize(.small)
+                        .fixedSize()
                         .accessibilityHint(Text("Save the current settings, bookmarks, and per-display setup to a backup file"))
                 }
 
@@ -909,7 +896,9 @@ struct GeneralSettingsView: View {
                     info: "Importing replaces the current global preferences and per-display setup. Bookmarks from the backup are merged into your library — existing entries with the same source are kept."
                 ) {
                     Button("Import…") { beginImport() }
+                        .buttonStyle(.bordered)
                         .controlSize(.small)
+                        .fixedSize()
                         .accessibilityHint(Text("Restore settings, bookmarks, and per-display setup from a backup file"))
                 }
             } header: {
@@ -947,24 +936,20 @@ struct GeneralSettingsView: View {
     private func updateGlobalSettings() {
         var settings = SettingsManager.shared.loadGlobalSettings()
         let dockChanged = settings.showInDock != showInDock
-        let decoderChanged = settings.videoDecoderPreference != videoDecoderPreference
         let developerModeChanged = settings.developerModeEnabled != developerModeEnabled
         settings.globalPauseOnBattery = globalPauseOnBattery
         settings.preservePlaybackOnLock = preservePlaybackOnLock
         settings.startOnLogin = startOnLogin
         settings.minimumBatteryLevel = useBatteryThreshold ? minimumBatteryLevel : nil
         settings.pauseOnFullScreen = pauseOnFullScreen
+        settings.pauseInGameMode = pauseInGameMode
         settings.showInDock = showInDock
         settings.videoCacheMaxBytesPerScreen = Int(videoCacheBudgetMB) * 1024 * 1024
-        settings.videoDecoderPreference = videoDecoderPreference
         settings.developerModeEnabled = developerModeEnabled
         SettingsManager.shared.saveGlobalSettings(settings)
         screenManager.handleGlobalSettingsChanged()
         if dockChanged {
             postSettingsNotificationAsync(.dockVisibilityDidChange)
-        }
-        if decoderChanged {
-            postSettingsNotificationAsync(.videoDecoderPreferenceDidChange)
         }
         if developerModeChanged {
             postSettingsNotificationAsync(.developerModeDidChange)
@@ -988,8 +973,8 @@ struct GeneralSettingsView: View {
         minimumBatteryLevel = nil
         useBatteryThreshold = false
         pauseOnFullScreen = true
+        pauseInGameMode = true
         showInDock = false
-        videoDecoderPreference = .auto
         developerModeEnabled = false
         weatherLocation = .default
 

@@ -69,11 +69,6 @@ extension Notification.Name {
     /// `WeatherReactiveService` reacts by re-resolving its provider chain.
     public static let weatherLocationPreferenceDidChange = Notification.Name("WeatherLocationPreferenceDidChange")
 
-    /// `GlobalSettings.videoDecoderPreference` changed. `WallpaperVideoPlayer`
-    /// listens and re-applies the resolution / bitrate ceiling to any active
-    /// `AVPlayerItem` on the next reconcile.
-    public static let videoDecoderPreferenceDidChange = Notification.Name("VideoDecoderPreferenceDidChange")
-
     /// User toggled `GlobalSettings.developerModeEnabled`. Live `HTMLWebView`
     /// instances react by flipping `isInspectable` in place (no session
     /// rebuild); `ContentView` refreshes the Developer Tools sidebar entry
