@@ -105,7 +105,7 @@ struct WorkshopPaneView: View {
     private var tabBody: some View {
         switch selectedTab {
         case .installed:
-            WorkshopGalleryView(allowsTargetSelection: allowsTargetSelection, showsHeaderOverride: true)
+            WorkshopInstalledView(allowsTargetSelection: allowsTargetSelection)
         case .browseOnline:
             browseTab
         }
