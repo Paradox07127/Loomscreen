@@ -112,6 +112,34 @@ struct WPEShaderTranspilerTests {
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
+    @Test("CAST2X2/CAST4X4 matrix-cast macros translate to MSL float matrices and compile")
+    func translatesMatrixCastMacros() throws {
+        // Mirrors the prelude's matrix CAST helpers (now incl. CAST2X2/CAST4X4).
+        let source = """
+        #version 410 core
+        #define CAST2X2(x) (mat2(x))
+        #define CAST4X4(x) (mat4(x))
+        uniform sampler2D g_Texture0;
+        in vec2 v_TexCoord;
+        void main() {
+            mat2 a = CAST2X2(1.0);
+            mat4 b = CAST4X4(1.0);
+            vec4 c = texture(g_Texture0, v_TexCoord);
+            gl_FragColor = b * c + vec4(a[0], 0.0, 0.0);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "matcast",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains("float4x4"))
+        #expect(result.mslSource.contains("float2x2"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
     @Test("Translates a tint-style fragment with vec3 uniform")
     func translatesTintFragment() throws {
         let source = """

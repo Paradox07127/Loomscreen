@@ -558,7 +558,7 @@ private struct WPEShaderSourceLoader: Sendable {
         "mul", "lerp", "frac", "saturate",
         "texSample2D", "texSample2DLod", "texture2D",
         "ddx", "ddy", "fmod",
-        "CAST2", "CAST3", "CAST4", "CAST3X3"
+        "CAST2", "CAST3", "CAST4", "CAST2X2", "CAST3X3", "CAST4X4"
     ]
 
     private func expandIncludes(
@@ -884,7 +884,9 @@ private struct WPEShaderSourceLoader: Sendable {
             "#define CAST2(x) (vec2(x))",
             "#define CAST3(x) (vec3(x))",
             "#define CAST4(x) (vec4(x))",
+            "#define CAST2X2(x) (mat2(x))",
             "#define CAST3X3(x) (mat3(x))",
+            "#define CAST4X4(x) (mat4(x))",
             "#ifndef M_PI",
             "#define M_PI 3.14159265358979323846",
             "#endif",
