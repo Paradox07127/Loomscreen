@@ -647,6 +647,10 @@ struct WPEShaderTranspiler {
         s = wordReplace(s, find: "frac", replace: "fract")
         s = wordReplace(s, find: "atan2", replace: "atan2")
         s = wordReplace(s, find: "lerp", replace: "mix")
+        // GLSL derivative builtins → MSL spelling (no sign change: WPE's ddx/ddy
+        // map straight to dfdx/dfdy; the GL-only ddy(-x) negation is not wanted).
+        s = wordReplace(s, find: "dFdx", replace: "dfdx")
+        s = wordReplace(s, find: "dFdy", replace: "dfdy")
 
         if rewriteProgramScopeConsts {
             s = rewriteProgramScopeConstDeclarations(s)

@@ -85,6 +85,33 @@ struct WPEShaderTranspilerTests {
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
+    @Test("ddx/ddy (GLSL dFdx/dFdy) translate to MSL dfdx/dfdy and compile")
+    func translatesDerivativeFragment() throws {
+        // Mirrors prelude expansion: #define ddx dFdx / #define ddy dFdy.
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        in vec2 v_TexCoord;
+        void main() {
+            vec2 dx = dFdx(v_TexCoord);
+            vec2 dy = dFdy(v_TexCoord);
+            gl_FragColor = texture(g_Texture0, v_TexCoord + dx + dy);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "deriv",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains("dFdx(") == false)
+        #expect(result.mslSource.contains("dFdy(") == false)
+        #expect(result.mslSource.contains("dfdx("))
+        #expect(result.mslSource.contains("dfdy("))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
     @Test("Translates a tint-style fragment with vec3 uniform")
     func translatesTintFragment() throws {
         let source = """
