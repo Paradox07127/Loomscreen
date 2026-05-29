@@ -56,6 +56,29 @@ struct WPEShaderTranspilerTests {
         #expect(result.mslSource.contains("textureLod(") == false)
         #expect(result.mslSource.contains("g_Texture0.sample(linearSampler"))
         #expect(result.mslSource.contains("level("))
+        // The 3-arg LOD sample must still get the v_TexCoord -> .xy narrowing.
+        #expect(result.mslSource.contains("v_TexCoord.xy"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("Nested textureLod is fully rewritten (no textureLod survives) and compiles")
+    func translatesNestedTextureLodFragment() throws {
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        in vec2 v_TexCoord;
+        void main() {
+            gl_FragColor = textureLod(g_Texture0, textureLod(g_Texture0, v_TexCoord, 1.0).xy, 2.0);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "nestedlod",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains("textureLod(") == false)
         let device = try #require(MTLCreateSystemDefaultDevice())
         let opts = MTLCompileOptions()
         opts.languageVersion = .version3_0

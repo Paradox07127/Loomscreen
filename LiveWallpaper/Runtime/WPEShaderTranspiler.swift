@@ -861,7 +861,10 @@ struct WPEShaderTranspiler {
     /// Metal texture2d sampling requires float2 UVs. WPE often carries extra
     /// UV data in zw and passes the full v_TexCoord vector to texture().
     private static func rewriteTexCoordTextureSampleUVFallback(_ source: String) -> String {
-        let pattern = #"(\.sample\s*\(\s*linearSampler\s*,\s*)v_TexCoord(\s*\))"#
+        // Also narrow the 3-arg LOD form `.sample(linearSampler, v_TexCoord, level(lod))`,
+        // not just the 2-arg form, so vec3/vec4 v_TexCoord shaders that sample with an
+        // explicit LOD still resolve to a float2 coordinate.
+        let pattern = #"(\.sample\s*\(\s*linearSampler\s*,\s*)v_TexCoord(\s*(?:,\s*level\s*\([^;\n]+\))?\))"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else {
             return source
         }
@@ -1243,12 +1246,17 @@ struct WPEShaderTranspiler {
                        firstComma != lodComma,
                        cursor < source.endIndex {
                         let argStart = source.index(index, offsetBy: needle.count)
+                        // Recurse on uv/lod so a textureLod nested inside another
+                        // textureLod's arguments is also rewritten (the sampler arg is
+                        // always a plain identifier and cannot nest a call).
                         let sampler = source[argStart..<firstComma]
                             .trimmingCharacters(in: .whitespacesAndNewlines)
-                        let uv = source[source.index(after: firstComma)..<lodComma]
-                            .trimmingCharacters(in: .whitespacesAndNewlines)
-                        let lod = source[source.index(after: lodComma)..<cursor]
-                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        let uv = rewriteTextureLodCalls(
+                            String(source[source.index(after: firstComma)..<lodComma])
+                        ).trimmingCharacters(in: .whitespacesAndNewlines)
+                        let lod = rewriteTextureLodCalls(
+                            String(source[source.index(after: lodComma)..<cursor])
+                        ).trimmingCharacters(in: .whitespacesAndNewlines)
                         result += "\(sampler).sample(linearSampler, \(uv), level(\(lod)))"
                         index = source.index(after: cursor)
                         continue
