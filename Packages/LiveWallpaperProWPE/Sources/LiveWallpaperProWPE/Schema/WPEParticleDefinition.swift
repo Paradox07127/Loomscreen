@@ -27,6 +27,7 @@ public enum WPEParticleBlendMode: String, Sendable, CaseIterable, Equatable {
 /// default so partial schemas still produce a working emitter.
 public struct WPEParticleDefinition: Equatable, Sendable {
     public let materialRelativePath: String?
+    public let childRelativePaths: [String]
     public let maxCount: Int
     public let rate: Double
     public let startDelay: Double
@@ -70,6 +71,7 @@ public struct WPEParticleDefinition: Equatable, Sendable {
     public let turbulenceScale: Double
     public let turbulenceTimescale: Double
     public let turbulenceOffset: Double
+    public let turbulenceMask: SIMD3<Double>
     public let turbulencePhaseMin: Double
     public let turbulencePhaseMax: Double
     /// `sequencemultiplier` from the particle JSON. Multiplies the
@@ -80,6 +82,7 @@ public struct WPEParticleDefinition: Equatable, Sendable {
 
     public init(
         materialRelativePath: String?,
+        childRelativePaths: [String] = [],
         maxCount: Int,
         rate: Double,
         startDelay: Double,
@@ -112,11 +115,13 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         turbulenceScale: Double = 0.005,
         turbulenceTimescale: Double = 0.01,
         turbulenceOffset: Double = 0,
+        turbulenceMask: SIMD3<Double> = SIMD3<Double>(1, 1, 1),
         turbulencePhaseMin: Double = 0,
         turbulencePhaseMax: Double = 0,
         sequenceMultiplier: Double = 1
     ) {
         self.materialRelativePath = materialRelativePath
+        self.childRelativePaths = childRelativePaths
         self.maxCount = maxCount
         self.rate = rate
         self.startDelay = startDelay
@@ -149,9 +154,72 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         self.turbulenceScale = max(0, turbulenceScale)
         self.turbulenceTimescale = turbulenceTimescale
         self.turbulenceOffset = turbulenceOffset
+        self.turbulenceMask = SIMD3<Double>(
+            max(0, turbulenceMask.x),
+            max(0, turbulenceMask.y),
+            max(0, turbulenceMask.z)
+        )
         self.turbulencePhaseMin = min(turbulencePhaseMin, turbulencePhaseMax)
         self.turbulencePhaseMax = max(turbulencePhaseMin, turbulencePhaseMax)
         self.sequenceMultiplier = max(0, sequenceMultiplier)
+    }
+
+    public func applying(instanceOverride: WPESceneParticleInstanceOverride?) -> WPEParticleDefinition {
+        guard let instanceOverride else { return self }
+
+        let countScale = max(0, instanceOverride.count ?? 1)
+        let rateScale = max(0, instanceOverride.rate ?? countScale)
+        let lifetimeScale = max(0.0001, instanceOverride.lifetime ?? 1)
+        let sizeScale = max(0, instanceOverride.size ?? 1)
+        let speedScale = instanceOverride.speed ?? 1
+        let alphaScale = max(0, instanceOverride.alpha ?? 1)
+        let scaledMaxCount: Int
+        if countScale == 0 || maxCount == 0 {
+            scaledMaxCount = 0
+        } else {
+            scaledMaxCount = max(1, Int((Double(maxCount) * countScale).rounded()))
+        }
+
+        return WPEParticleDefinition(
+            materialRelativePath: materialRelativePath,
+            childRelativePaths: childRelativePaths,
+            maxCount: scaledMaxCount,
+            rate: rate * rateScale,
+            startDelay: startDelay,
+            lifetimeMin: lifetimeMin * lifetimeScale,
+            lifetimeMax: lifetimeMax * lifetimeScale,
+            sizeMin: sizeMin * sizeScale,
+            sizeMax: sizeMax * sizeScale,
+            originOffset: originOffset,
+            dispersalMin: dispersalMin,
+            dispersalMax: dispersalMax,
+            velocityMin: velocityMin * speedScale,
+            velocityMax: velocityMax * speedScale,
+            colorMin: instanceOverride.color ?? colorMin,
+            colorMax: instanceOverride.color ?? colorMax,
+            fadeInSeconds: fadeInSeconds,
+            directionMask: directionMask,
+            alphaMin: alphaMin * alphaScale,
+            alphaMax: alphaMax * alphaScale,
+            rotationMin: rotationMin,
+            rotationMax: rotationMax,
+            angularVelocityMin: angularVelocityMin * speedScale,
+            angularVelocityMax: angularVelocityMax * speedScale,
+            fadeOutSeconds: fadeOutSeconds,
+            gravity: gravity * speedScale,
+            drag: drag,
+            angularForceZ: angularForceZ * speedScale,
+            angularDrag: angularDrag,
+            turbulenceSpeedMin: turbulenceSpeedMin * speedScale,
+            turbulenceSpeedMax: turbulenceSpeedMax * speedScale,
+            turbulenceScale: turbulenceScale,
+            turbulenceTimescale: turbulenceTimescale,
+            turbulenceOffset: turbulenceOffset,
+            turbulenceMask: turbulenceMask,
+            turbulencePhaseMin: turbulencePhaseMin,
+            turbulencePhaseMax: turbulencePhaseMax,
+            sequenceMultiplier: sequenceMultiplier
+        )
     }
 
     public static let empty = WPEParticleDefinition(
@@ -189,6 +257,16 @@ public enum WPEParticleDefinitionParser {
         let def = WPEParticleDefinition.empty
 
         let material = json["material"] as? String
+        let childRelativePaths = (json["children"] as? [[String: Any]])?
+            .compactMap { child -> String? in
+                if let name = child["name"] as? String, !name.isEmpty {
+                    return name
+                }
+                if let particle = child["particle"] as? String, !particle.isEmpty {
+                    return particle
+                }
+                return nil
+            } ?? []
         let maxCount = (json["maxcount"] as? Int)
             ?? (json["maxcount"] as? Double).map { Int($0) }
             ?? 0
@@ -199,7 +277,12 @@ public enum WPEParticleDefinitionParser {
         var origin: SIMD3<Double> = SIMD3(0, 0, 0)
         var dispersalMin: Double = 0
         var dispersalMax: Double = 0
-        var directionMask: SIMD3<Double> = def.directionMask
+        // WPE scene particles render as 2D billboards unless an emitter
+        // explicitly opts into a Z axis. Defaulting missing `directions`
+        // to Z=1 collapses depth-only random offsets back onto the same
+        // screen-space center in the Metal 2D pipeline, creating bright
+        // additive piles for bokeh-style emitters.
+        var directionMask: SIMD3<Double> = SIMD3(1, 1, 0)
 
         if let emitters = json["emitter"] as? [[String: Any]], let first = emitters.first {
             rate = WPEValueParser.double(first["rate"]) ?? 0
@@ -230,6 +313,7 @@ public enum WPEParticleDefinitionParser {
         var turbulenceScale: Double = def.turbulenceScale
         var turbulenceTimescale: Double = def.turbulenceTimescale
         var turbulenceOffset: Double = def.turbulenceOffset
+        var turbulenceMask: SIMD3<Double> = def.turbulenceMask
         var turbulencePhaseMin: Double = def.turbulencePhaseMin
         var turbulencePhaseMax: Double = def.turbulencePhaseMax
 
@@ -317,6 +401,19 @@ public enum WPEParticleDefinitionParser {
                         angularForceZ = force.z
                     }
                     angularDrag = WPEValueParser.double(entry["drag"]) ?? angularDrag
+                case "turbulence":
+                    if let speedMin = WPEValueParser.double(entry["speedmin"]) {
+                        turbulenceSpeedMin = speedMin
+                        turbulenceSpeedMax = WPEValueParser.double(entry["speedmax"]) ?? speedMin
+                    } else if let speedMax = WPEValueParser.double(entry["speedmax"]) {
+                        turbulenceSpeedMax = speedMax
+                    }
+                    turbulenceScale = WPEValueParser.double(entry["scale"]) ?? turbulenceScale
+                    turbulenceTimescale = WPEValueParser.double(entry["timescale"]) ?? turbulenceTimescale
+                    turbulenceOffset = WPEValueParser.double(entry["offset"]) ?? turbulenceOffset
+                    if let mask = WPEValueParser.vector3(entry["mask"]) {
+                        turbulenceMask = mask
+                    }
                 default:
                     break
                 }
@@ -325,6 +422,7 @@ public enum WPEParticleDefinitionParser {
 
         return WPEParticleDefinition(
             materialRelativePath: material,
+            childRelativePaths: childRelativePaths,
             maxCount: max(0, maxCount),
             rate: max(0, rate),
             startDelay: max(0, startDelay),
@@ -357,6 +455,7 @@ public enum WPEParticleDefinitionParser {
             turbulenceScale: turbulenceScale,
             turbulenceTimescale: turbulenceTimescale,
             turbulenceOffset: turbulenceOffset,
+            turbulenceMask: turbulenceMask,
             turbulencePhaseMin: turbulencePhaseMin,
             turbulencePhaseMax: turbulencePhaseMax,
             sequenceMultiplier: sequenceMultiplier

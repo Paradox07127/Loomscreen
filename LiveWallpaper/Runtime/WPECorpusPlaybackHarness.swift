@@ -71,6 +71,10 @@ struct WPECorpusPlaybackReport: Codable, Sendable {
         /// chose. Nil for pre-router archives. Decoded leniently so old
         /// reports remain readable.
         let routedBy: WPESceneBackendRouter.RoutedBy?
+        /// First-frame readback summary for Metal corpus runs. Nil for
+        /// WebGL, skipped scenes, and archives produced before the visual
+        /// gate was added.
+        let visual: VisualSummary?
 
         var id: String { workshopID }
 
@@ -88,6 +92,24 @@ struct WPECorpusPlaybackReport: Codable, Sendable {
             let firstMisses: [String]
 
             static let empty = Self(events: 0, resolved: 0, missing: 0, firstMisses: [])
+        }
+
+        struct VisualSummary: Codable, Sendable {
+            let width: Int
+            let height: Int
+            let nonBlackPixelCount: Int
+            let nonTransparentPixelCount: Int
+            let nonBlackBounds: WPEMetalTextureVisualBounds?
+            let nonBlackCoversFullFrame: Bool
+
+            init(stats: WPEMetalTextureVisualStats) {
+                self.width = stats.width
+                self.height = stats.height
+                self.nonBlackPixelCount = stats.nonBlackPixelCount
+                self.nonTransparentPixelCount = stats.nonTransparentPixelCount
+                self.nonBlackBounds = stats.nonBlackBounds
+                self.nonBlackCoversFullFrame = stats.nonBlackCoversFullFrame
+            }
         }
     }
 }
@@ -329,6 +351,7 @@ final class WPECorpusPlaybackHarness {
                     startedAt: startedAt,
                     failureMessage: nil,
                     resolution: Self.resolutionSummary(from: headless.renderer.resolutionDiagnostics),
+                    visual: Self.visualSummary(from: headless.renderer),
                     routing: headless.routing
                 )
             } catch let error as TimeoutError {
@@ -341,6 +364,7 @@ final class WPECorpusPlaybackHarness {
                     startedAt: startedAt,
                     failureMessage: error.errorDescription,
                     resolution: Self.resolutionSummary(from: headless.renderer.resolutionDiagnostics),
+                    visual: Self.visualSummary(from: headless.renderer),
                     routing: headless.routing
                 )
             } catch {
@@ -354,6 +378,7 @@ final class WPECorpusPlaybackHarness {
                     startedAt: startedAt,
                     failureMessage: diagnosticMessage ?? Self.describe(error),
                     resolution: Self.resolutionSummary(from: headless.renderer.resolutionDiagnostics),
+                    visual: Self.visualSummary(from: headless.renderer),
                     routing: headless.routing
                 )
             }
@@ -522,6 +547,7 @@ final class WPECorpusPlaybackHarness {
         startedAt: Date,
         failureMessage: String?,
         resolution: WPECorpusPlaybackReport.Entry.ResolutionSummary,
+        visual: WPECorpusPlaybackReport.Entry.VisualSummary?,
         routing: WPESceneBackendRouter.Routing?
     ) -> WPECorpusPlaybackReport.Entry {
         WPECorpusPlaybackReport.Entry(
@@ -534,7 +560,8 @@ final class WPECorpusPlaybackHarness {
             failureMessage: failureMessage,
             resolution: resolution,
             renderer: routing?.backend.rawValue,
-            routedBy: routing?.routedBy
+            routedBy: routing?.routedBy,
+            visual: visual
         )
     }
 
@@ -556,8 +583,20 @@ final class WPECorpusPlaybackHarness {
             failureMessage: failureMessage,
             resolution: .empty,
             renderer: nil,
-            routedBy: nil
+            routedBy: nil,
+            visual: nil
         )
+    }
+
+    private static func visualSummary(
+        from renderer: WPESceneRenderer
+    ) -> WPECorpusPlaybackReport.Entry.VisualSummary? {
+        guard let metalRenderer = renderer as? WPEMetalSceneRenderer,
+              let texture = metalRenderer.renderedTexture,
+              let stats = WPEMetalTextureVisualStats.analyze(texture: texture) else {
+            return nil
+        }
+        return WPECorpusPlaybackReport.Entry.VisualSummary(stats: stats)
     }
 
     private static func readProject(from folderURL: URL) async throws -> WallpaperEngineProject {

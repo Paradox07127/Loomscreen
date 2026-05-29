@@ -30,8 +30,14 @@ public enum WPEValueParser {
         _ raw: Any?,
         boolAsNumber: Bool = false
     ) -> WPESceneShaderConstantValue? {
-        if let bool = raw as? Bool {
+        if let bool = strictBool(raw) {
             return .bool(bool)
+        }
+        if let animated = animatedValue(raw, boolAsNumber: boolAsNumber) {
+            return .animated(animated)
+        }
+        if let dict = raw as? [String: Any], dict["value"] != nil {
+            return shaderConstant(dict["value"], boolAsNumber: boolAsNumber)
         }
         if let vector = numberVector(raw, boolAsNumber: boolAsNumber) {
             return .vector(vector)
@@ -43,6 +49,66 @@ public enum WPEValueParser {
             return .string(string)
         }
         return nil
+    }
+
+    public static func animatedValue(
+        _ raw: Any?,
+        boolAsNumber: Bool = false
+    ) -> WPESceneAnimatedValue? {
+        guard let dict = raw as? [String: Any],
+              let animationDict = dict["animation"] as? [String: Any] else {
+            return nil
+        }
+        let tracks = animationTracks(in: animationDict, boolAsNumber: boolAsNumber)
+        guard !tracks.isEmpty else { return nil }
+
+        let options = animationDict["options"] as? [String: Any] ?? [:]
+        let valueRaw = dict["value"] ?? animationDict["previewvalue"]
+        let vectorFallback = numberVector(valueRaw, boolAsNumber: boolAsNumber, minimumCount: 1)
+            ?? numberVector(animationDict["previewvalue"], boolAsNumber: boolAsNumber, minimumCount: 1)
+        let scalarFallback = double(valueRaw, boolAsNumber: boolAsNumber)
+            ?? double(animationDict["previewvalue"], boolAsNumber: boolAsNumber)
+            ?? vectorFallback?.first
+
+        return WPESceneAnimatedValue(
+            animation: WPESceneNumericAnimation(
+                tracks: tracks,
+                fps: double(options["fps"], boolAsNumber: boolAsNumber) ?? 30,
+                length: double(options["length"], boolAsNumber: boolAsNumber) ?? 0,
+                mode: (options["mode"] as? String) ?? "single",
+                wrapLoop: bool(options["wraploop"]) ?? false
+            ),
+            scalarFallback: scalarFallback,
+            vectorFallback: vectorFallback
+        )
+    }
+
+    private static func animationTracks(
+        in animationDict: [String: Any],
+        boolAsNumber: Bool
+    ) -> [[WPESceneAnimationKeyframe]] {
+        let trackKeys = animationDict.keys.compactMap { key -> (name: String, index: Int)? in
+            guard key.first == "c",
+                  let index = Int(key.dropFirst()) else {
+                return nil
+            }
+            return (key, index)
+        }.sorted { $0.index < $1.index }
+
+        return trackKeys.compactMap { key in
+            guard let rawFrames = animationDict[key.name] as? [Any] else {
+                return nil
+            }
+            let frames = rawFrames.compactMap { raw -> WPESceneAnimationKeyframe? in
+                guard let dict = raw as? [String: Any],
+                      let frame = double(dict["frame"], boolAsNumber: boolAsNumber),
+                      let value = double(dict["value"], boolAsNumber: boolAsNumber) else {
+                    return nil
+                }
+                return WPESceneAnimationKeyframe(frame: frame, value: value)
+            }
+            return frames.isEmpty ? nil : frames
+        }
     }
 
     public static func numberVector(
@@ -78,7 +144,7 @@ public enum WPEValueParser {
     }
 
     public static func double(_ raw: Any?, boolAsNumber: Bool = false) -> Double? {
-        if boolAsNumber, let bool = raw as? Bool {
+        if boolAsNumber, let bool = strictBool(raw) {
             return bool ? 1 : 0
         }
         if let number = raw as? NSNumber {
@@ -97,7 +163,7 @@ public enum WPEValueParser {
     }
 
     public static func int(_ raw: Any?, boolAsNumber: Bool = false) -> Int? {
-        if boolAsNumber, let bool = raw as? Bool {
+        if boolAsNumber, let bool = strictBool(raw) {
             return bool ? 1 : 0
         }
         if let number = raw as? NSNumber {
@@ -130,5 +196,12 @@ public enum WPEValueParser {
             }
         }
         return nil
+    }
+
+    public static func strictBool(_ raw: Any?) -> Bool? {
+        if let number = raw as? NSNumber {
+            return CFGetTypeID(number) == CFBooleanGetTypeID() ? number.boolValue : nil
+        }
+        return raw as? Bool
     }
 }

@@ -37,6 +37,7 @@ struct WPERenderPipelineBuilderTests {
                 objectName: "Layer",
                 imagePath: "materials/base.png",
                 materialPath: "materials/base.json",
+                geometry: .identity,
                 compositeA: "_rt_imageLayerComposite_7_a",
                 compositeB: "_rt_imageLayerComposite_7_b",
                 localFBOs: [],
@@ -86,6 +87,208 @@ struct WPERenderPipelineBuilderTests {
         #expect(layer.passes[1].shader?.fragmentSource.contains("#define texSample2D") == true)
     }
 
+    @Test("Loads puppet model from render graph layer path")
+    func loadsPuppetModelFromRenderGraphLayerPath() throws {
+        let fixture = try makeFixture(dataFiles: [
+            "models/layer_puppet.mdl": makeSingleTrianglePuppetMDL()
+        ])
+        defer { fixture.cleanup() }
+
+        let graph = WPERenderGraph(layers: [
+            WPERenderLayer(
+                objectID: "7",
+                objectName: "Layer",
+                imagePath: "models/layer.json",
+                materialPath: "materials/layer.json",
+                puppetPath: "models/layer_puppet.mdl",
+                geometry: .identity,
+                compositeA: "_rt_imageLayerComposite_7_a",
+                compositeB: "_rt_imageLayerComposite_7_b",
+                localFBOs: [],
+                passes: [
+                    WPERenderPass(
+                        id: "7.0",
+                        phase: .material,
+                        shader: "genericimage4",
+                        source: .image("materials/layer.png"),
+                        target: .layerComposite(name: "_rt_imageLayerComposite_7_a"),
+                        textures: [:],
+                        binds: [:],
+                        constants: [:],
+                        combos: [:],
+                        blending: "normal",
+                        cullMode: "nocull",
+                        depthTest: "disabled",
+                        depthWrite: "disabled"
+                    )
+                ]
+            )
+        ])
+
+        let pipeline = try WPERenderPipelineBuilder(cacheRootURL: fixture.root).build(graph: graph)
+        let mesh = try #require(pipeline.layers.first?.puppetModel?.meshes.first)
+
+        #expect(mesh.vertices.count == 3)
+        #expect(mesh.indices == [0, 1, 2])
+        #expect(mesh.parts == [WPEPuppetMeshPart(id: 7, start: 0, count: 3)])
+    }
+
+    @Test("Loads puppet model through dependency mounts")
+    func loadsPuppetModelThroughDependencyMounts() throws {
+        let fixture = try makeFixture()
+        defer { fixture.cleanup() }
+        let dependencyRoot = fixture.root.appendingPathComponent("dependency-123", isDirectory: true)
+        let modelURL = dependencyRoot.appendingPathComponent("models/layer_puppet.mdl")
+        try FileManager.default.createDirectory(
+            at: modelURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try makeSingleTrianglePuppetMDL().write(to: modelURL)
+
+        let graph = WPERenderGraph(layers: [
+            WPERenderLayer(
+                objectID: "7",
+                objectName: "Layer",
+                imagePath: "models/layer.json",
+                materialPath: "materials/layer.json",
+                puppetPath: "../123/models/layer_puppet.mdl",
+                geometry: .identity,
+                compositeA: "_rt_imageLayerComposite_7_a",
+                compositeB: "_rt_imageLayerComposite_7_b",
+                localFBOs: [],
+                passes: [
+                    WPERenderPass(
+                        id: "7.0",
+                        phase: .material,
+                        shader: "genericimage4",
+                        source: .image("materials/layer.png"),
+                        target: .layerComposite(name: "_rt_imageLayerComposite_7_a"),
+                        textures: [:],
+                        binds: [:],
+                        constants: [:],
+                        combos: [:],
+                        blending: "normal",
+                        cullMode: "nocull",
+                        depthTest: "disabled",
+                        depthWrite: "disabled"
+                    )
+                ]
+            )
+        ])
+
+        let pipeline = try WPERenderPipelineBuilder(
+            cacheRootURL: fixture.root,
+            dependencyMounts: [WPEAssetMount(workshopID: "123", rootURL: dependencyRoot)]
+        ).build(graph: graph)
+        let mesh = try #require(pipeline.layers.first?.puppetModel?.meshes.first)
+
+        #expect(mesh.vertices.count == 3)
+        #expect(mesh.indices == [0, 1, 2])
+    }
+
+    @Test("Shader annotation numeric defaults stay numeric")
+    func shaderAnnotationNumericDefaultsStayNumeric() throws {
+        let fixture = try makeFixture(files: [
+            "shaders/effects/custom.vert": """
+            void main() { gl_Position = vec4(0.0); }
+            """,
+            "shaders/effects/custom.frag": """
+            uniform sampler2D g_Texture0;
+            uniform float u_alpha; // {"material":"Opacity","default":1,"range":[0,1]}
+            void main() { gl_FragColor = texSample2D(g_Texture0, vec2(0.5)) * u_alpha; }
+            """
+        ])
+        defer { fixture.cleanup() }
+
+        let graph = WPERenderGraph(layers: [
+            WPERenderLayer(
+                objectID: "7",
+                objectName: "Layer",
+                imagePath: "materials/base.png",
+                materialPath: "materials/base.json",
+                geometry: .identity,
+                compositeA: "_rt_imageLayerComposite_7_a",
+                compositeB: "_rt_imageLayerComposite_7_b",
+                localFBOs: [],
+                passes: [
+                    WPERenderPass(
+                        id: "7.0",
+                        phase: .effect(file: "effects/custom/effect.json"),
+                        shader: "effects/custom",
+                        source: .image("materials/base.png"),
+                        target: .scene,
+                        textures: [:],
+                        binds: [:],
+                        constants: [:],
+                        combos: [:],
+                        blending: "normal",
+                        cullMode: "nocull",
+                        depthTest: "disabled",
+                        depthWrite: "disabled"
+                    )
+                ]
+            )
+        ])
+
+        let pipeline = try WPERenderPipelineBuilder(cacheRootURL: fixture.root).build(graph: graph)
+        let alpha = try #require(pipeline.layers.first?.passes.first?.uniformValues["u_alpha"])
+
+        #expect(alpha.numberValue == 1)
+    }
+
+    @Test("WPE shader prelude defines M_PI_2 as full turn")
+    func shaderPreludeDefinesMPI2AsFullTurn() throws {
+        let fixture = try makeFixture(files: [
+            "shaders/effects/shake.vert": """
+            void main() { gl_Position = vec4(0.0); }
+            """,
+            "shaders/effects/shake.frag": """
+            #include "common.h"
+            uniform float g_Time;
+            void main() {
+                float offset = sin(frac(g_Time / M_PI_2) * M_PI_2);
+                gl_FragColor = vec4(offset);
+            }
+            """
+        ])
+        defer { fixture.cleanup() }
+
+        let graph = WPERenderGraph(layers: [
+            WPERenderLayer(
+                objectID: "1",
+                objectName: "Layer",
+                imagePath: "materials/base.png",
+                materialPath: nil,
+                geometry: .identity,
+                compositeA: "a",
+                compositeB: "b",
+                localFBOs: [],
+                passes: [
+                    WPERenderPass(
+                        id: "1.0",
+                        phase: .effect(file: "effects/shake/effect.json"),
+                        shader: "effects/shake",
+                        source: .image("materials/base.png"),
+                        target: .scene,
+                        textures: [:],
+                        binds: [:],
+                        constants: [:],
+                        combos: [:],
+                        blending: "normal",
+                        cullMode: "nocull",
+                        depthTest: "disabled",
+                        depthWrite: "disabled"
+                    )
+                ]
+            )
+        ])
+
+        let pipeline = try WPERenderPipelineBuilder(cacheRootURL: fixture.root).build(graph: graph)
+        let fragment = try #require(pipeline.layers.first?.passes.first?.shader?.fragmentSource)
+
+        #expect(fragment.contains("#define M_PI_2 6.28318530717958647692"))
+    }
+
     @Test("Missing shader source is reported with the pass shader name")
     func missingShaderSourceReportsName() throws {
         let fixture = try makeFixture(files: [:])
@@ -112,6 +315,7 @@ struct WPERenderPipelineBuilderTests {
                 objectName: "Layer",
                 imagePath: "materials/base.png",
                 materialPath: nil,
+                geometry: .identity,
                 compositeA: "a",
                 compositeB: "b",
                 localFBOs: [],
@@ -149,6 +353,7 @@ struct WPERenderPipelineBuilderTests {
                 objectName: "Layer",
                 imagePath: "materials/base.png",
                 materialPath: nil,
+                geometry: .identity,
                 compositeA: "a",
                 compositeB: "b",
                 localFBOs: [],
@@ -192,6 +397,7 @@ struct WPERenderPipelineBuilderTests {
                 objectName: "Layer",
                 imagePath: "materials/base.png",
                 materialPath: nil,
+                geometry: .identity,
                 compositeA: "a",
                 compositeB: "b",
                 localFBOs: [],
@@ -245,6 +451,7 @@ struct WPERenderPipelineBuilderTests {
                 objectName: "Layer",
                 imagePath: "materials/base.png",
                 materialPath: nil,
+                geometry: .identity,
                 compositeA: "a",
                 compositeB: "b",
                 localFBOs: [],
@@ -300,6 +507,7 @@ struct WPERenderPipelineBuilderTests {
                 objectName: "Layer",
                 imagePath: "materials/base.png",
                 materialPath: nil,
+                geometry: .identity,
                 compositeA: "a",
                 compositeB: "b",
                 localFBOs: [],
@@ -345,6 +553,7 @@ struct WPERenderPipelineBuilderTests {
                 objectName: "Solid",
                 imagePath: "models/util/solidlayer.json",
                 materialPath: "models/util/solidlayer.json",
+                geometry: .identity,
                 compositeA: "a",
                 compositeB: "b",
                 localFBOs: [],
@@ -387,6 +596,7 @@ struct WPERenderPipelineBuilderTests {
                 objectName: "Layer",
                 imagePath: "materials/base.png",
                 materialPath: nil,
+                geometry: .identity,
                 compositeA: "a",
                 compositeB: "b",
                 localFBOs: [],
@@ -441,6 +651,7 @@ struct WPERenderPipelineBuilderTests {
                 objectName: "Layer",
                 imagePath: "materials/base.png",
                 materialPath: nil,
+                geometry: .identity,
                 compositeA: "a",
                 compositeB: "b",
                 localFBOs: [],
@@ -497,6 +708,7 @@ struct WPERenderPipelineBuilderTests {
                     objectName: "Layer",
                     imagePath: "materials/base.png",
                     materialPath: nil,
+                    geometry: .identity,
                     compositeA: "a",
                     compositeB: "b",
                     localFBOs: [],
@@ -554,6 +766,7 @@ struct WPERenderPipelineBuilderTests {
                 objectName: "Layer",
                 imagePath: "materials/base.png",
                 materialPath: nil,
+                geometry: .identity,
                 compositeA: "a",
                 compositeB: "b",
                 localFBOs: [],
@@ -615,6 +828,7 @@ struct WPERenderPipelineBuilderTests {
                 objectName: "Layer",
                 imagePath: "materials/base.png",
                 materialPath: nil,
+                geometry: .identity,
                 compositeA: "a",
                 compositeB: "b",
                 localFBOs: [],
@@ -674,6 +888,7 @@ struct WPERenderPipelineBuilderTests {
                 objectName: "Layer",
                 imagePath: "materials/base.png",
                 materialPath: nil,
+                geometry: .identity,
                 compositeA: "a",
                 compositeB: "b",
                 localFBOs: [],
@@ -712,7 +927,10 @@ struct WPERenderPipelineBuilderTests {
         }
     }
 
-    private func makeFixture(files: [String: String]) throws -> Fixture {
+    private func makeFixture(
+        files: [String: String] = [:],
+        dataFiles: [String: Data] = [:]
+    ) throws -> Fixture {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("WPERenderPipelineBuilderTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -724,6 +942,102 @@ struct WPERenderPipelineBuilderTests {
             )
             try Data(contents.utf8).write(to: fileURL)
         }
+        for (relativePath, contents) in dataFiles {
+            let fileURL = root.appendingPathComponent(relativePath)
+            try FileManager.default.createDirectory(
+                at: fileURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try contents.write(to: fileURL)
+        }
         return Fixture(root: root)
+    }
+
+    private func makeSingleTrianglePuppetMDL() -> Data {
+        var data = Data()
+        data.append(contentsOf: Array("MDLV0023".utf8))
+        data.appendLE(UInt32(0x80000900))
+        data.append(UInt8(1))
+        data.appendLE(UInt32(1))
+        data.appendLE(UInt32(1))
+
+        data.appendCString("materials/layer.json")
+        data.appendLE(UInt32(0))
+        data.appendLE(Float(-10))
+        data.appendLE(Float(-20))
+        data.appendLE(Float(0))
+        data.appendLE(Float(10))
+        data.appendLE(Float(20))
+        data.appendLE(Float(0))
+        data.appendLE(UInt32(0x180000f))
+        let vertexData = Data.puppetVertices([
+            (SIMD3<Float>(-10, -20, 0), SIMD2<Float>(0, 1)),
+            (SIMD3<Float>(10, -20, 0), SIMD2<Float>(1, 1)),
+            (SIMD3<Float>(0, 20, 0), SIMD2<Float>(0.5, 0))
+        ])
+        data.appendLE(UInt32(vertexData.count))
+        data.append(vertexData)
+        data.appendLE(UInt32(3 * MemoryLayout<UInt16>.size))
+        data.appendLE(UInt16(0))
+        data.appendLE(UInt16(1))
+        data.appendLE(UInt16(2))
+
+        data.append(UInt8(0))
+        data.append(UInt8(1))
+        data.appendLE(UInt32(16))
+        data.appendLE(UInt32(7))
+        data.appendLE(UInt32(0))
+        data.appendLE(UInt32(0))
+        data.appendLE(UInt32(3))
+
+        return data
+    }
+}
+
+private extension Data {
+    mutating func appendLE(_ value: UInt16) {
+        var littleEndian = value.littleEndian
+        Swift.withUnsafeBytes(of: &littleEndian) { append(contentsOf: $0) }
+    }
+
+    mutating func appendLE(_ value: UInt32) {
+        var littleEndian = value.littleEndian
+        Swift.withUnsafeBytes(of: &littleEndian) { append(contentsOf: $0) }
+    }
+
+    mutating func appendLE(_ value: Float) {
+        appendLE(value.bitPattern)
+    }
+
+    mutating func appendCString(_ string: String) {
+        append(contentsOf: Array(string.utf8))
+        append(UInt8(0))
+    }
+
+    static func puppetVertices(_ vertices: [(position: SIMD3<Float>, uv: SIMD2<Float>)]) -> Data {
+        var data = Data()
+        for vertex in vertices {
+            data.appendLE(vertex.position.x)
+            data.appendLE(vertex.position.y)
+            data.appendLE(vertex.position.z)
+            data.appendLE(Float(0))
+            data.appendLE(Float(0))
+            data.appendLE(Float(1))
+            data.appendLE(Float(1))
+            data.appendLE(Float(0))
+            data.appendLE(Float(0))
+            data.appendLE(Float(1))
+            data.appendLE(Float(0))
+            data.appendLE(Float(0))
+            data.appendLE(Float(0))
+            data.appendLE(Float(0))
+            data.appendLE(Float(1))
+            data.appendLE(Float(0))
+            data.appendLE(Float(0))
+            data.appendLE(Float(0))
+            data.appendLE(vertex.uv.x)
+            data.appendLE(vertex.uv.y)
+        }
+        return data
     }
 }

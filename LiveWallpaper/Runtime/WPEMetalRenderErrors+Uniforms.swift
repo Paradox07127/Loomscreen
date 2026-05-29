@@ -129,6 +129,12 @@ struct WPESolidUniforms {
     var color: SIMD4<Float>
 }
 
+struct WPEComposeRegionUniforms {
+    var color: SIMD4<Float>
+    var texture0UVRect: SIMD4<Float>
+    var texture1UVRect: SIMD4<Float>
+}
+
 struct WPECopyUniforms {
     var uvOffset: SIMD2<Float>
     var padding: SIMD2<Float> = SIMD2<Float>(0, 0)
@@ -184,6 +190,25 @@ struct WPEGenericImageUniforms {
     var alphaMaskUV: SIMD4<Float>
 }
 
+struct WPEObjectQuadUniforms {
+    /// x/y = center in scene-centered pixel space, z/w = width/height in pixels.
+    var centerAndSize: SIMD4<Float>
+    /// x/y = scene width/height, z = z-axis rotation in radians, w reserved.
+    var sceneSizeAndRotation: SIMD4<Float>
+    /// x/y = UV sign for preserving negative WPE scale mirroring, z/w reserved.
+    var uvSignAndPadding: SIMD4<Float>
+}
+
+struct WPEMetalPuppetVertex {
+    var position: SIMD4<Float>
+    var uv: SIMD4<Float>
+}
+
+struct WPEPuppetMeshUniforms {
+    /// x/y = local layer-composite target size, z/w reserved.
+    var localSizeAndMode: SIMD4<Float>
+}
+
 struct WPEGenericParticleUniforms {
     var color: SIMD4<Float>
     /// x = alpha, y = brightness, z/w = padding (reserved for spectrum
@@ -195,9 +220,9 @@ struct WPEGenericParticleUniforms {
 
 struct WPEOpacityUniforms {
     var opacity: Float
-    var padding0: Float = 0
-    var padding1: Float = 0
-    var padding2: Float = 0
+    var hasMask: Float = 0
+    var maskScaleX: Float = 1
+    var maskScaleY: Float = 1
 }
 
 struct WPEScrollUniforms {

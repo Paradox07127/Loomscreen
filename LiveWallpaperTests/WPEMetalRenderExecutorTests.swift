@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import LiveWallpaperProWPE
 import Metal
 import Testing
 @testable import LiveWallpaper
@@ -147,6 +148,311 @@ struct WPEMetalRenderExecutorTests {
         #expect(pixel.a >= 250)
     }
 
+    @Test("Project effect shader source overrides native effect approximation")
+    func projectEffectShaderSourceOverridesNativeApproximation() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let input = try makeRGBAInputTexture(device: device, bytes: Data([
+            0, 0, 255, 255,
+            0, 0, 255, 255,
+            0, 0, 255, 255,
+            0, 0, 255, 255
+        ]))
+        let pass = WPERenderPass(
+            id: "waterwaves.0",
+            phase: .effect(file: "effects/waterwaves/effect.json"),
+            shader: "effects/waterwaves",
+            source: .image("materials/base.png"),
+            target: .scene,
+            textures: [0: .image("materials/base.png")],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: graphLayer(pass: pass),
+                passes: [WPEPreparedRenderPass(
+                    pass: pass,
+                    shader: WPEShaderProgram(
+                        name: "effects/waterwaves",
+                        vertexSource: "// fullscreen vertex from executor",
+                        fragmentSource: """
+                        uniform sampler2D g_Texture0;
+                        varying vec2 v_TexCoord;
+                        void main() {
+                            gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
+                        }
+                        """,
+                        isBuiltin: false
+                    ),
+                    textureBindings: [0: .image("materials/base.png")],
+                    comboValues: [:],
+                    uniformValues: [:]
+                )]
+            )
+        ])
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 2, height: 2),
+            textures: ["materials/base.png": input]
+        )
+        let pixel = try readPixel(output, x: 1, y: 1)
+
+        #expect(pixel.r >= 250)
+        #expect(pixel.g <= 5)
+        #expect(pixel.b <= 5)
+        #expect(pixel.a >= 250)
+    }
+
+    @Test("Translated waterwaves squares authored strength before sampling")
+    func translatedWaterwavesSquaresAuthoredStrengthBeforeSampling() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        var bytes = [UInt8](repeating: 0, count: 100 * 4)
+        for x in 53...56 {
+            let index = x * 4
+            bytes[index] = 255
+            bytes[index + 3] = 255
+        }
+        for x in 69...72 {
+            let index = x * 4
+            bytes[index + 1] = 255
+            bytes[index + 3] = 255
+        }
+        let input = try makeRGBAInputTexture(
+            device: device,
+            width: 100,
+            height: 1,
+            bytes: Data(bytes)
+        )
+        let mask = try makeRGBAInputTexture(
+            device: device,
+            width: 1,
+            height: 1,
+            bytes: Data([255, 255, 255, 255])
+        )
+        let pass = WPERenderPass(
+            id: "waterwaves.0",
+            phase: .effect(file: "effects/waterwaves/effect.json"),
+            shader: "effects/waterwaves",
+            source: .image("materials/base.png"),
+            target: .scene,
+            textures: [
+                0: .image("materials/base.png"),
+                1: .image("materials/mask.png")
+            ],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: graphLayer(pass: pass),
+                passes: [
+                    WPEPreparedRenderPass(
+                        pass: pass,
+                        shader: WPEShaderProgram(
+                            name: "effects/waterwaves",
+                            vertexSource: """
+                            uniform vec4 g_Texture1Resolution;
+                            uniform float g_Direction;
+                            varying vec4 v_TexCoord;
+                            varying vec2 v_Direction;
+                            """,
+                            fragmentSource: """
+                            uniform sampler2D g_Texture0;
+                            uniform sampler2D g_Texture1;
+                            uniform float g_Time;
+                            uniform float g_Speed;
+                            uniform float g_Scale;
+                            uniform float g_Exponent;
+                            uniform float g_Strength;
+                            varying vec4 v_TexCoord;
+                            varying vec2 v_Direction;
+                            void main() {
+                                float mask = texture(g_Texture1, v_TexCoord.zw).r;
+                                vec2 texCoord = v_TexCoord.xy;
+                                float distance = g_Time * g_Speed + dot(texCoord, v_Direction) * g_Scale;
+                                float strength = g_Strength * g_Strength;
+                                vec2 offset = vec2(v_Direction.y, -v_Direction.x);
+                                float val1 = sin(distance);
+                                float s1 = sign(val1);
+                                val1 = pow(abs(val1), g_Exponent);
+                                texCoord += val1 * s1 * offset * strength * mask;
+                                gl_FragColor = texture(g_Texture0, texCoord);
+                            }
+                            """,
+                            isBuiltin: false
+                        ),
+                        textureBindings: [
+                            0: .image("materials/base.png"),
+                            1: .image("materials/mask.png")
+                        ],
+                        comboValues: [:],
+                        uniformValues: [
+                            "g_Speed": .number(1),
+                            "g_Scale": .number(0),
+                            "g_Exponent": .number(1),
+                            "g_Strength": .number(0.2),
+                            "g_Direction": .number(0)
+                        ]
+                    )
+                ]
+            )
+        ])
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 100, height: 1),
+            textures: [
+                "materials/base.png": input,
+                "materials/mask.png": mask
+            ],
+            runtimeUniforms: WPEMetalRuntimeUniforms(
+                time: Double.pi / 2,
+                daytime: 0,
+                brightness: 1,
+                pointerPosition: SIMD2<Double>(0.5, 0.5)
+            )
+        )
+        let pixel = try readPixel(output, x: 50, y: 0)
+
+        #expect(pixel.r >= 200)
+        #expect(pixel.g <= 40)
+    }
+
+    @Test("Translated texture resolution uses texture-local dimensions")
+    func translatedTextureResolutionUsesTextureLocalDimensions() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let mask = try makeRGBAInputTexture(
+            device: device,
+            width: 8,
+            height: 4,
+            bytes: Data(repeating: 255, count: 8 * 4 * 4)
+        )
+        let destination = try makeRGBAInputTexture(
+            device: device,
+            width: 16,
+            height: 16,
+            bytes: Data(repeating: 0, count: 16 * 16 * 4)
+        )
+        let pass = WPERenderPass(
+            id: "resolution.0",
+            phase: .effect(file: "effects/resolution/effect.json"),
+            shader: "effects/resolution",
+            source: .image("materials/base.png"),
+            target: .scene,
+            textures: [:],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let prepared = WPEPreparedRenderPass(
+            pass: pass,
+            shader: nil,
+            textureBindings: [:],
+            comboValues: [:],
+            uniformValues: [:]
+        )
+        let slots = executor.packTranslatedUniforms(
+            for: prepared,
+            layout: [
+                WPEUniformSlot(
+                    name: "g_Texture1Resolution",
+                    glslType: "vec4",
+                    slot: 0,
+                    slotCount: 1
+                )
+            ],
+            texturesBySlot: [1: mask],
+            destinationTexture: destination
+        )
+
+        #expect(slots[0] == SIMD4<Float>(8, 4, 8, 4))
+    }
+
+    @Test("Translated texture resolution preserves TEX logical image size")
+    func translatedTextureResolutionPreservesTexLogicalImageSize() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let loader = WPEMetalTextureLoader(device: device)
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let payload = WPETexTexturePayload(
+            info: WPETexInfo(
+                containerVersion: 5,
+                infoVersion: 1,
+                width: 8,
+                height: 4,
+                textureFormatCode: WPETexFormat.rgba8888.rawValue,
+                format: .rgba8888,
+                mipmapCount: 1,
+                flags: 0,
+                imageWidth: 7,
+                imageHeight: 3
+            ),
+            mipmaps: [
+                WPETexTextureMipmap(
+                    index: 0,
+                    width: 8,
+                    height: 4,
+                    bytes: Data(repeating: 255, count: 8 * 4 * 4)
+                )
+            ],
+            hasAnimationFrames: false
+        )
+        let texture = try await loader.makeTexture(from: payload, label: "padded test tex")
+        let pass = WPERenderPass(
+            id: "resolution.0",
+            phase: .effect(file: "effects/resolution/effect.json"),
+            shader: "effects/resolution",
+            source: .image("materials/base.png"),
+            target: .scene,
+            textures: [:],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let prepared = WPEPreparedRenderPass(
+            pass: pass,
+            shader: nil,
+            textureBindings: [:],
+            comboValues: [:],
+            uniformValues: [:]
+        )
+        let slots = executor.packTranslatedUniforms(
+            for: prepared,
+            layout: [
+                WPEUniformSlot(
+                    name: "g_Texture0Resolution",
+                    glslType: "vec4",
+                    slot: 0,
+                    slotCount: 1
+                )
+            ],
+            texturesBySlot: [0: texture]
+        )
+
+        #expect(slots[0] == SIMD4<Float>(8, 4, 7, 3))
+    }
+
     @Test("Copies sampled input texture to offscreen output")
     func copiesInputTexture() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
@@ -233,6 +539,7 @@ struct WPEMetalRenderExecutorTests {
                     objectName: "Layer",
                     imagePath: "materials/base.png",
                     materialPath: nil,
+                    geometry: .identity,
                     compositeA: "a",
                     compositeB: "b",
                     localFBOs: [WPERenderFBO(name: "_rt_two_pass_intermediate", scale: 1, format: "rgba8888", unique: false)],
@@ -344,6 +651,844 @@ struct WPEMetalRenderExecutorTests {
         #expect(pixel.a >= 250)
     }
 
+    @Test("Material image pass renders with object quad geometry instead of fullscreen")
+    func materialImagePassUsesObjectQuadGeometry() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let input = try makeRGBAInputTexture(
+            device: device,
+            width: 4,
+            height: 4,
+            bytes: Data(repeating: 255, count: 4 * 4 * 4)
+        )
+        let pass = WPERenderPass(
+            id: "img2.0",
+            phase: .material,
+            shader: "genericimage2",
+            source: .image("materials/base.png"),
+            target: .scene,
+            textures: [0: .image("materials/base.png")],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let geometry = WPERenderLayerGeometry(
+            origin: SIMD3<Double>(8, 8, 0),
+            scale: SIMD3<Double>(1, 1, 1),
+            angles: SIMD3<Double>(0, 0, 0),
+            alignment: .center,
+            size: CGSize(width: 8, height: 8),
+            alpha: 1,
+            color: SIMD3<Double>(1, 1, 1),
+            brightness: 1
+        )
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: graphLayer(pass: pass, geometry: geometry),
+                passes: [WPEPreparedRenderPass(
+                    pass: pass,
+                    shader: WPEShaderProgram(name: "genericimage2", vertexSource: "", fragmentSource: "", isBuiltin: true),
+                    textureBindings: [0: .image("materials/base.png")],
+                    comboValues: [:],
+                    uniformValues: [:]
+                )]
+            )
+        ])
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 16, height: 16),
+            textures: ["materials/base.png": input]
+        )
+        let bounds = try #require(nonBlackBounds(output))
+
+        #expect(bounds == PixelBounds(minX: 4, minY: 4, maxX: 11, maxY: 11))
+    }
+
+    @Test("Puppet material pass renders all meshes into local composite instead of fullscreen atlas")
+    func puppetMaterialPassRendersMeshesIntoLocalComposite() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let input = try makeRGBAInputTexture(
+            device: device,
+            width: 4,
+            height: 4,
+            bytes: Data(repeating: 255, count: 4 * 4 * 4)
+        )
+        let materialPass = WPERenderPass(
+            id: "puppet.0",
+            phase: .material,
+            shader: "genericimage2",
+            source: .image("materials/base.png"),
+            target: .layerComposite(name: "_rt_imageLayerComposite_puppet_a"),
+            textures: [0: .image("materials/base.png")],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let scenePass = WPERenderPass(
+            id: "puppet.1",
+            phase: .command(file: "materials/util/copy.json"),
+            shader: "materials/util/copy.json",
+            source: .fbo("_rt_imageLayerComposite_puppet_a"),
+            target: .scene,
+            textures: [0: .fbo("_rt_imageLayerComposite_puppet_a")],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let geometry = WPERenderLayerGeometry(
+            origin: SIMD3<Double>(8, 8, 0),
+            scale: SIMD3<Double>(1, 1, 1),
+            angles: SIMD3<Double>(0, 0, 0),
+            alignment: .center,
+            size: CGSize(width: 8, height: 8),
+            alpha: 1,
+            color: SIMD3<Double>(1, 1, 1),
+            brightness: 1
+        )
+        let puppet = WPEPuppetModel(version: 23, meshes: [
+            WPEPuppetMesh(
+                materialPath: "materials/base.png",
+                vertices: [
+                    WPEPuppetVertex(position: SIMD3<Float>(-4, -4, 0), uv: SIMD2<Float>(0, 1)),
+                    WPEPuppetVertex(position: SIMD3<Float>(0, -4, 0), uv: SIMD2<Float>(1, 1)),
+                    WPEPuppetVertex(position: SIMD3<Float>(-4, 4, 0), uv: SIMD2<Float>(0, 0)),
+                    WPEPuppetVertex(position: SIMD3<Float>(0, 4, 0), uv: SIMD2<Float>(1, 0))
+                ],
+                indices: [0, 1, 2, 2, 1, 3],
+                parts: []
+            ),
+            WPEPuppetMesh(
+                materialPath: "materials/base.png",
+                vertices: [
+                    WPEPuppetVertex(position: SIMD3<Float>(0, -4, 0), uv: SIMD2<Float>(0, 1)),
+                    WPEPuppetVertex(position: SIMD3<Float>(4, -4, 0), uv: SIMD2<Float>(1, 1)),
+                    WPEPuppetVertex(position: SIMD3<Float>(0, 4, 0), uv: SIMD2<Float>(0, 0)),
+                    WPEPuppetVertex(position: SIMD3<Float>(4, 4, 0), uv: SIMD2<Float>(1, 0))
+                ],
+                indices: [0, 1, 2, 2, 1, 3],
+                parts: []
+            )
+        ])
+        let layer = WPERenderLayer(
+            objectID: "puppet",
+            objectName: "Puppet",
+            imagePath: "models/puppet.json",
+            materialPath: "materials/base.json",
+            puppetPath: "models/puppet.mdl",
+            geometry: geometry,
+            compositeA: "_rt_imageLayerComposite_puppet_a",
+            compositeB: "_rt_imageLayerComposite_puppet_b",
+            localFBOs: [],
+            passes: [materialPass, scenePass]
+        )
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: layer,
+                puppetModel: puppet,
+                passes: [
+                    WPEPreparedRenderPass(
+                        pass: materialPass,
+                        shader: WPEShaderProgram(name: "genericimage2", vertexSource: "", fragmentSource: "", isBuiltin: true),
+                        textureBindings: [0: .image("materials/base.png")],
+                        comboValues: [:],
+                        uniformValues: [:]
+                    ),
+                    WPEPreparedRenderPass(
+                        pass: scenePass,
+                        shader: WPEShaderProgram(name: "copy", vertexSource: "", fragmentSource: "", isBuiltin: true),
+                        textureBindings: [0: .fbo("_rt_imageLayerComposite_puppet_a")],
+                        comboValues: [:],
+                        uniformValues: [:]
+                    )
+                ]
+            )
+        ])
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 16, height: 16),
+            textures: ["materials/base.png": input]
+        )
+        let bounds = try #require(nonBlackBounds(output))
+
+        #expect(bounds == PixelBounds(minX: 4, minY: 4, maxX: 11, maxY: 11))
+    }
+
+    @Test("Object quad geometry treats 0...1 origins as normalized scene coordinates")
+    func objectQuadGeometryNormalizesUnitOrigins() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let input = try makeRGBAInputTexture(
+            device: device,
+            width: 4,
+            height: 4,
+            bytes: Data(repeating: 255, count: 4 * 4 * 4)
+        )
+        let pass = WPERenderPass(
+            id: "img2.0",
+            phase: .material,
+            shader: "genericimage2",
+            source: .image("materials/base.png"),
+            target: .scene,
+            textures: [0: .image("materials/base.png")],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let geometry = WPERenderLayerGeometry(
+            origin: SIMD3<Double>(0.5, 0.5, 0),
+            scale: SIMD3<Double>(1, 1, 1),
+            angles: SIMD3<Double>(0, 0, 0),
+            alignment: .center,
+            size: CGSize(width: 8, height: 8),
+            alpha: 1,
+            color: SIMD3<Double>(1, 1, 1),
+            brightness: 1
+        )
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: graphLayer(pass: pass, geometry: geometry),
+                passes: [WPEPreparedRenderPass(
+                    pass: pass,
+                    shader: WPEShaderProgram(name: "genericimage2", vertexSource: "", fragmentSource: "", isBuiltin: true),
+                    textureBindings: [0: .image("materials/base.png")],
+                    comboValues: [:],
+                    uniformValues: [:]
+                )]
+            )
+        ])
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 16, height: 16),
+            textures: ["materials/base.png": input]
+        )
+        let bounds = try #require(nonBlackBounds(output))
+
+        #expect(bounds == PixelBounds(minX: 4, minY: 4, maxX: 11, maxY: 11))
+    }
+
+    @Test("Object quad geometry preserves negative scale as texture mirroring")
+    func objectQuadGeometryMirrorsTextureForNegativeScale() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let input = try makeRGBAInputTexture(
+            device: device,
+            width: 4,
+            height: 1,
+            bytes: Data([
+                255, 0, 0, 255,
+                255, 0, 0, 255,
+                0, 255, 0, 255,
+                0, 255, 0, 255
+            ])
+        )
+        let pass = WPERenderPass(
+            id: "img2.0",
+            phase: .material,
+            shader: "genericimage2",
+            source: .image("materials/base.png"),
+            target: .scene,
+            textures: [0: .image("materials/base.png")],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let geometry = WPERenderLayerGeometry(
+            origin: SIMD3<Double>(8, 4, 0),
+            scale: SIMD3<Double>(-1, 1, 1),
+            angles: SIMD3<Double>(0, 0, 0),
+            alignment: .center,
+            size: CGSize(width: 8, height: 4),
+            alpha: 1,
+            color: SIMD3<Double>(1, 1, 1),
+            brightness: 1
+        )
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: graphLayer(pass: pass, geometry: geometry),
+                passes: [WPEPreparedRenderPass(
+                    pass: pass,
+                    shader: WPEShaderProgram(name: "genericimage2", vertexSource: "", fragmentSource: "", isBuiltin: true),
+                    textureBindings: [0: .image("materials/base.png")],
+                    comboValues: [:],
+                    uniformValues: [:]
+                )]
+            )
+        ])
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 16, height: 8),
+            textures: ["materials/base.png": input]
+        )
+        let leftPixel = try readPixel(output, x: 5, y: 4)
+        let rightPixel = try readPixel(output, x: 10, y: 4)
+
+        #expect(leftPixel.g > leftPixel.r + 80)
+        #expect(rightPixel.r > rightPixel.g + 80)
+    }
+
+    @Test("Solidcolor material pass renders with object quad geometry instead of fullscreen")
+    func solidColorMaterialPassUsesObjectQuadGeometry() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let pass = WPERenderPass(
+            id: "solid.0",
+            phase: .material,
+            shader: "solidcolor",
+            source: .previous,
+            target: .scene,
+            textures: [:],
+            binds: [:],
+            constants: ["g_Color": .vector([1, 0, 0, 1])],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let geometry = WPERenderLayerGeometry(
+            origin: SIMD3<Double>(8, 2, 0),
+            scale: SIMD3<Double>(1, 1, 1),
+            angles: SIMD3<Double>(0, 0, 0),
+            alignment: .center,
+            size: CGSize(width: 16, height: 4),
+            alpha: 1,
+            color: SIMD3<Double>(1, 1, 1),
+            brightness: 1
+        )
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: graphLayer(pass: pass, geometry: geometry),
+                passes: [WPEPreparedRenderPass(
+                    pass: pass,
+                    shader: WPEShaderProgram(name: "solidcolor", vertexSource: "", fragmentSource: "", isBuiltin: true),
+                    textureBindings: [:],
+                    comboValues: [:],
+                    uniformValues: ["g_Color": .vector([1, 0, 0, 1])]
+                )]
+            )
+        ])
+
+        let output = try executor.render(pipeline: pipeline, size: CGSize(width: 16, height: 16), textures: [:])
+        let bounds = try #require(nonBlackBounds(output))
+
+        #expect(bounds == PixelBounds(minX: 0, minY: 12, maxX: 15, maxY: 15))
+    }
+
+    @Test("Effect composite from object-sized solid layer preserves transparent FBO areas")
+    func solidLayerEffectCompositePreservesTransparentFBOAreas() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let background = solidPass(
+            id: "background.0",
+            color: [0, 0, 1, 1],
+            target: .scene,
+            blending: "disabled"
+        )
+        let compositeName = "_rt_solid_composite"
+        let solid = solidPass(
+            id: "solid.0",
+            color: [1, 1, 1, 1],
+            target: .layerComposite(name: compositeName),
+            blending: "disabled"
+        )
+        let tint = WPERenderPass(
+            id: "solid.1",
+            phase: .effect(file: "effects/tint/effect.json"),
+            shader: "effects/tint",
+            source: .fbo(compositeName),
+            target: .scene,
+            textures: [0: .fbo(compositeName)],
+            binds: [:],
+            constants: ["g_Color": .vector([0, 0, 0, 1])],
+            combos: [:],
+            blending: "normal",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let solidGeometry = WPERenderLayerGeometry(
+            origin: SIMD3<Double>(8, 2, 0),
+            scale: SIMD3<Double>(1, 1, 1),
+            angles: SIMD3<Double>(0, 0, 0),
+            alignment: .center,
+            size: CGSize(width: 16, height: 4),
+            alpha: 1,
+            color: SIMD3<Double>(1, 1, 1),
+            brightness: 1
+        )
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: graphLayer(pass: background),
+                passes: [preparedBuiltinPass(background, uniforms: ["g_Color": .vector([0, 0, 1, 1])])]
+            ),
+            WPEPreparedRenderLayer(
+                graphLayer: graphLayer(pass: solid, geometry: solidGeometry),
+                passes: [
+                    preparedBuiltinPass(solid, uniforms: ["g_Color": .vector([1, 1, 1, 1])]),
+                    preparedBuiltinPass(
+                        tint,
+                        bindings: [0: .fbo(compositeName)],
+                        uniforms: ["g_Color": .vector([0, 0, 0, 1])]
+                    )
+                ]
+            )
+        ])
+
+        let output = try executor.render(pipeline: pipeline, size: CGSize(width: 16, height: 16), textures: [:])
+        let outsideSolid = try readPixel(output, x: 8, y: 8)
+        let insideSolid = try readPixel(output, x: 8, y: 14)
+
+        #expect(outsideSolid.r <= 5)
+        #expect(outsideSolid.g <= 5)
+        #expect(outsideSolid.b >= 250)
+        #expect(outsideSolid.a >= 250)
+        #expect(insideSolid.r <= 5)
+        #expect(insideSolid.g <= 5)
+        #expect(insideSolid.b <= 5)
+        #expect(insideSolid.a >= 250)
+    }
+
+    @Test("Layer composite effects run in layer-local texture space before object compositing")
+    func layerCompositeEffectUsesLayerLocalTextureSpace() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+
+        let compositeName = "_rt_imageLayerComposite_layer_a"
+        let seedComposite = solidPass(
+            id: "layer.0",
+            color: [1, 1, 1, 1],
+            target: .layerComposite(name: compositeName),
+            blending: "disabled"
+        )
+        let localSpaceProbe = WPERenderPass(
+            id: "layer.1",
+            phase: .effect(file: "effects/local_space_probe/effect.json"),
+            shader: "effects/local_space_probe",
+            source: .fbo(compositeName),
+            target: .scene,
+            textures: [0: .fbo(compositeName)],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let geometry = WPERenderLayerGeometry(
+            origin: SIMD3<Double>(8, 8, 0),
+            scale: SIMD3<Double>(1, 1, 1),
+            angles: SIMD3<Double>(0, 0, 0),
+            alignment: .center,
+            size: CGSize(width: 4, height: 4),
+            alpha: 1,
+            color: SIMD3<Double>(1, 1, 1),
+            brightness: 1
+        )
+        let graphLayer = WPERenderLayer(
+            objectID: "layer",
+            objectName: "Layer",
+            imagePath: "materials/base.png",
+            materialPath: nil,
+            geometry: geometry,
+            compositeA: compositeName,
+            compositeB: "_rt_imageLayerComposite_layer_b",
+            localFBOs: [],
+            passes: [seedComposite, localSpaceProbe]
+        )
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: graphLayer,
+                passes: [
+                    preparedBuiltinPass(seedComposite, uniforms: ["g_Color": .vector([1, 1, 1, 1])]),
+                    WPEPreparedRenderPass(
+                        pass: localSpaceProbe,
+                        shader: WPEShaderProgram(
+                            name: "effects/local_space_probe",
+                            vertexSource: "// executor supplies the vertex stage",
+                            fragmentSource: """
+                            uniform sampler2D g_Texture0;
+                            uniform vec4 g_Texture0Resolution;
+                            varying vec2 v_TexCoord;
+                            void main() {
+                                float localWidth = 1.0 - step(4.5, g_Texture0Resolution.x);
+                                float leftHalf = 1.0 - step(0.5, v_TexCoord.x);
+                                gl_FragColor = vec4(localWidth * leftHalf, 0.0, 0.0, 1.0);
+                            }
+                            """,
+                            isBuiltin: false
+                        ),
+                        textureBindings: [0: .fbo(compositeName)],
+                        comboValues: [:],
+                        uniformValues: [:]
+                    )
+                ]
+            )
+        ])
+
+        let output = try executor.render(pipeline: pipeline, size: CGSize(width: 16, height: 16), textures: [:])
+        let leftInsideLayer = try readPixel(output, x: 6, y: 8)
+        let rightInsideLayer = try readPixel(output, x: 9, y: 8)
+        let outsideLayer = try readPixel(output, x: 1, y: 8)
+
+        #expect(leftInsideLayer.r >= 250)
+        #expect(rightInsideLayer.r <= 5)
+        #expect(outsideLayer.r <= 5)
+        #expect(outsideLayer.g <= 5)
+        #expect(outsideLayer.b <= 5)
+    }
+
+    @Test("Composelayer samples the matching scene region instead of squeezing the full frame")
+    func composelayerSamplesMatchingSceneRegion() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let sceneTexture = try makeRGBAInputTexture(
+            device: device,
+            width: 4,
+            height: 4,
+            bytes: Data([
+                255, 0, 0, 255, 255, 0, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255,
+                255, 0, 0, 255, 255, 0, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255,
+                0, 0, 255, 255, 0, 0, 255, 255, 255, 255, 0, 255, 255, 255, 0, 255,
+                0, 0, 255, 255, 0, 0, 255, 255, 255, 255, 0, 255, 255, 255, 0, 255
+            ])
+        )
+
+        let seedScene = WPERenderPass(
+            id: "background.0",
+            phase: .material,
+            shader: "genericimage2",
+            source: .image("materials/quadrants.png"),
+            target: .scene,
+            textures: [0: .image("materials/quadrants.png")],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let compositeName = "_rt_imageLayerComposite_region_a"
+        let captureRegion = WPERenderPass(
+            id: "region.0",
+            phase: .material,
+            shader: "compose",
+            source: .fbo("_rt_FullFrameBuffer"),
+            target: .layerComposite(name: compositeName),
+            textures: [0: .fbo("_rt_FullFrameBuffer")],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let drawRegion = WPERenderPass(
+            id: "region.1",
+            phase: .effect(file: "effects/opacity/effect.json"),
+            shader: "effects/opacity",
+            source: .fbo(compositeName),
+            target: .scene,
+            textures: [0: .fbo(compositeName)],
+            binds: [:],
+            constants: ["alpha": .number(1)],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let regionGeometry = WPERenderLayerGeometry(
+            origin: SIMD3<Double>(3, 1, 0),
+            scale: SIMD3<Double>(1, 1, 1),
+            angles: SIMD3<Double>(0, 0, 0),
+            alignment: .center,
+            size: CGSize(width: 2, height: 2),
+            alpha: 1,
+            color: SIMD3<Double>(1, 1, 1),
+            brightness: 1
+        )
+        let regionLayer = WPERenderLayer(
+            objectID: "region",
+            objectName: "Region",
+            imagePath: "models/util/composelayer.json",
+            materialPath: "materials/util/composelayer.json",
+            geometry: regionGeometry,
+            compositeA: compositeName,
+            compositeB: "_rt_imageLayerComposite_region_b",
+            localFBOs: [],
+            passes: [captureRegion, drawRegion]
+        )
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: graphLayer(pass: seedScene),
+                passes: [
+                    preparedBuiltinPass(
+                        seedScene,
+                        bindings: [0: .image("materials/quadrants.png")]
+                    )
+                ]
+            ),
+            WPEPreparedRenderLayer(
+                graphLayer: regionLayer,
+                passes: [
+                    preparedBuiltinPass(
+                        captureRegion,
+                        bindings: [0: .fbo("_rt_FullFrameBuffer")]
+                    ),
+                    preparedBuiltinPass(
+                        drawRegion,
+                        bindings: [0: .fbo(compositeName)],
+                        uniforms: ["alpha": .number(1)]
+                    )
+                ]
+            )
+        ])
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 4, height: 4),
+            textures: ["materials/quadrants.png": sceneTexture]
+        )
+        let coveredPixels = [
+            try readPixel(output, x: 2, y: 2),
+            try readPixel(output, x: 3, y: 2),
+            try readPixel(output, x: 2, y: 3),
+            try readPixel(output, x: 3, y: 3)
+        ]
+
+        for pixel in coveredPixels {
+            #expect(pixel.r >= 240)
+            #expect(pixel.g >= 240)
+            #expect(pixel.b <= 10)
+        }
+    }
+
+    @Test("Composelayer captures its scene-space region instead of the full frame")
+    func composelayerCapturesSceneSpaceRegion() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        var sourceBytes = Data()
+        for _ in 0..<4 {
+            for x in 0..<16 {
+                if x < 12 {
+                    sourceBytes.append(contentsOf: [255, 0, 0, 255])
+                } else {
+                    sourceBytes.append(contentsOf: [0, 255, 0, 255])
+                }
+            }
+        }
+        let sceneTexture = try makeRGBAInputTexture(
+            device: device,
+            width: 16,
+            height: 4,
+            bytes: sourceBytes
+        )
+
+        let seedScene = WPERenderPass(
+            id: "background.0",
+            phase: .material,
+            shader: "genericimage2",
+            source: .image("materials/halves.png"),
+            target: .scene,
+            textures: [0: .image("materials/halves.png")],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let compositeName = "_rt_imageLayerComposite_region_capture_a"
+        let captureRegion = WPERenderPass(
+            id: "region.0",
+            phase: .material,
+            shader: "compose",
+            source: .fbo("_rt_FullFrameBuffer"),
+            target: .layerComposite(name: compositeName),
+            textures: [0: .fbo("_rt_FullFrameBuffer")],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let drawRegion = WPERenderPass(
+            id: "region.1",
+            phase: .effect(file: "effects/opacity/effect.json"),
+            shader: "effects/opacity",
+            source: .fbo(compositeName),
+            target: .scene,
+            textures: [0: .fbo(compositeName)],
+            binds: [:],
+            constants: ["alpha": .number(1)],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let regionGeometry = WPERenderLayerGeometry(
+            origin: SIMD3<Double>(14, 2, 0),
+            scale: SIMD3<Double>(1, 1, 1),
+            angles: SIMD3<Double>(0, 0, 0),
+            alignment: .center,
+            size: CGSize(width: 4, height: 4),
+            alpha: 1,
+            color: SIMD3<Double>(1, 1, 1),
+            brightness: 1
+        )
+        let regionLayer = WPERenderLayer(
+            objectID: "region-capture",
+            objectName: "Region Capture",
+            imagePath: "models/util/composelayer.json",
+            materialPath: "materials/util/composelayer.json",
+            geometry: regionGeometry,
+            compositeA: compositeName,
+            compositeB: "_rt_imageLayerComposite_region_capture_b",
+            localFBOs: [],
+            passes: [captureRegion, drawRegion]
+        )
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: graphLayer(pass: seedScene),
+                passes: [
+                    preparedBuiltinPass(
+                        seedScene,
+                        bindings: [0: .image("materials/halves.png")]
+                    )
+                ]
+            ),
+            WPEPreparedRenderLayer(
+                graphLayer: regionLayer,
+                passes: [
+                    preparedBuiltinPass(
+                        captureRegion,
+                        bindings: [0: .fbo("_rt_FullFrameBuffer")]
+                    ),
+                    preparedBuiltinPass(
+                        drawRegion,
+                        bindings: [0: .fbo(compositeName)],
+                        uniforms: ["alpha": .number(1)]
+                    )
+                ]
+            )
+        ])
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 16, height: 4),
+            textures: ["materials/halves.png": sceneTexture]
+        )
+        let leftEdgeOfCapturedRegion = try readPixel(output, x: 12, y: 2)
+
+        #expect(leftEdgeOfCapturedRegion.r <= 5)
+        #expect(leftEdgeOfCapturedRegion.g >= 250)
+    }
+
+    @Test("Opacity effect uses mask texture to gate alpha")
+    func opacityEffectUsesMaskTextureToGateAlpha() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let source = try makeRGBAInputTexture(
+            device: device,
+            width: 2,
+            height: 2,
+            bytes: Data([
+                255, 0, 0, 255, 255, 0, 0, 255,
+                255, 0, 0, 255, 255, 0, 0, 255
+            ])
+        )
+        let mask = try makeRGBAInputTexture(
+            device: device,
+            width: 2,
+            height: 2,
+            bytes: Data([
+                0, 0, 0, 255, 255, 255, 255, 255,
+                0, 0, 0, 255, 255, 255, 255, 255
+            ])
+        )
+        let pass = WPERenderPass(
+            id: "opacity.0",
+            phase: .effect(file: "effects/opacity/effect.json"),
+            shader: "effects/opacity",
+            source: .image("materials/source.png"),
+            target: .scene,
+            textures: [
+                0: .image("materials/source.png"),
+                1: .image("materials/mask.png")
+            ],
+            binds: [:],
+            constants: ["alpha": .number(1)],
+            combos: [:],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: graphLayer(pass: pass),
+                passes: [
+                    preparedBuiltinPass(
+                        pass,
+                        bindings: [
+                            0: .image("materials/source.png"),
+                            1: .image("materials/mask.png")
+                        ],
+                        uniforms: ["alpha": .number(1)]
+                    )
+                ]
+            )
+        ])
+
+        let output = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 2, height: 2),
+            textures: [
+                "materials/source.png": source,
+                "materials/mask.png": mask
+            ]
+        )
+        let maskedOut = try readPixel(output, x: 0, y: 1)
+        let visible = try readPixel(output, x: 1, y: 1)
+
+        #expect(maskedOut.r <= 5)
+        #expect(maskedOut.a <= 5)
+        #expect(visible.r >= 250)
+        #expect(visible.a >= 250)
+    }
+
     @Test("genericimage4 alpha mask drops alpha when mask is opaque-black")
     func genericImage4AlphaMaskGatesOutput() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
@@ -405,6 +1550,142 @@ struct WPEMetalRenderExecutorTests {
         #expect(pixel.g <= 5)
     }
 
+    @Test("genericimage4 records distinct texture binding diagnostics")
+    func genericImage4RecordsDistinctTextureBindingDiagnostics() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let primary = try makeRGBAInputTexture(device: device, bytes: Data([
+            0, 255, 0, 255,
+            0, 255, 0, 255,
+            0, 255, 0, 255,
+            0, 255, 0, 255
+        ]))
+        primary.label = "base-texture"
+        let mask = try makeRGBAInputTexture(device: device, bytes: Data([
+            0, 0, 0, 0,
+            0, 0, 0, 0,
+            0, 0, 0, 0,
+            0, 0, 0, 0
+        ]))
+        mask.label = "mask-texture"
+        _ = WPESceneDebugArtifacts.shared.drainBindingDiagnosticsForTesting()
+        defer { _ = WPESceneDebugArtifacts.shared.drainBindingDiagnosticsForTesting() }
+
+        let pass = WPERenderPass(
+            id: "img4.0",
+            phase: .material,
+            shader: "genericimage4",
+            source: .image("materials/base.png"),
+            target: .scene,
+            textures: [0: .image("materials/base.png"), 1: .image("materials/mask.png")],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "normal",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: graphLayer(pass: pass),
+                passes: [WPEPreparedRenderPass(
+                    pass: pass,
+                    shader: WPEShaderProgram(name: "genericimage4", vertexSource: "", fragmentSource: "", isBuiltin: true),
+                    textureBindings: [
+                        0: .image("materials/base.png"),
+                        1: .image("materials/mask.png")
+                    ],
+                    comboValues: [:],
+                    uniformValues: [:]
+                )]
+            )
+        ])
+
+        _ = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 2, height: 2),
+            textures: [
+                "materials/base.png": primary,
+                "materials/mask.png": mask
+            ]
+        )
+
+        let events = WPESceneDebugArtifacts.shared.drainBindingDiagnosticsForTesting()
+        #expect(events.contains {
+            $0.contains("pass=img4.0")
+                && $0.contains("slot=0")
+                && $0.contains("reference=image(materials/base.png)")
+                && $0.contains("texture=base-texture")
+                && $0.contains("fallback=false")
+        })
+        #expect(events.contains {
+            $0.contains("pass=img4.0")
+                && $0.contains("slot=1")
+                && $0.contains("reference=image(materials/mask.png)")
+                && $0.contains("texture=mask-texture")
+                && $0.contains("fallback=false")
+        })
+    }
+
+    @Test("genericimage4 records primary fallback texture binding diagnostics")
+    func genericImage4RecordsPrimaryFallbackTextureBindingDiagnostics() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let primary = try makeRGBAInputTexture(device: device, bytes: Data([
+            0, 255, 0, 255,
+            0, 255, 0, 255,
+            0, 255, 0, 255,
+            0, 255, 0, 255
+        ]))
+        primary.label = "base-texture"
+        _ = WPESceneDebugArtifacts.shared.drainBindingDiagnosticsForTesting()
+        defer { _ = WPESceneDebugArtifacts.shared.drainBindingDiagnosticsForTesting() }
+
+        let pass = WPERenderPass(
+            id: "img4.1",
+            phase: .material,
+            shader: "genericimage4",
+            source: .image("materials/base.png"),
+            target: .scene,
+            textures: [0: .image("materials/base.png")],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "normal",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: graphLayer(pass: pass),
+                passes: [WPEPreparedRenderPass(
+                    pass: pass,
+                    shader: WPEShaderProgram(name: "genericimage4", vertexSource: "", fragmentSource: "", isBuiltin: true),
+                    textureBindings: [0: .image("materials/base.png")],
+                    comboValues: [:],
+                    uniformValues: [:]
+                )]
+            )
+        ])
+
+        _ = try executor.render(
+            pipeline: pipeline,
+            size: CGSize(width: 2, height: 2),
+            textures: ["materials/base.png": primary]
+        )
+
+        let events = WPESceneDebugArtifacts.shared.drainBindingDiagnosticsForTesting()
+        #expect(events.contains {
+            $0.contains("pass=img4.1")
+                && $0.contains("slot=1")
+                && $0.contains("reference=<primary>")
+                && $0.contains("texture=base-texture")
+                && $0.contains("fallback=true")
+        })
+    }
+
     @Test("Copies image layers that have no material passes")
     func copiesImageLayerWithoutPasses() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
@@ -420,6 +1701,7 @@ struct WPEMetalRenderExecutorTests {
             objectName: "Layer",
             imagePath: "materials/base.png",
             materialPath: nil,
+            geometry: .identity,
             compositeA: "a",
             compositeB: "b",
             localFBOs: [],
@@ -450,6 +1732,17 @@ private struct Pixel: Equatable {
     let a: UInt8
 }
 
+private struct PixelBounds: Equatable, CustomStringConvertible {
+    let minX: Int
+    let minY: Int
+    let maxX: Int
+    let maxY: Int
+
+    var description: String {
+        "PixelBounds(minX: \(minX), minY: \(minY), maxX: \(maxX), maxY: \(maxY))"
+    }
+}
+
 private func readPixel(_ texture: MTLTexture, x: Int, y: Int) throws -> Pixel {
     var bytes = [UInt8](repeating: 0, count: texture.width * texture.height * 4)
     texture.getBytes(
@@ -460,6 +1753,36 @@ private func readPixel(_ texture: MTLTexture, x: Int, y: Int) throws -> Pixel {
     )
     let index = (y * texture.width + x) * 4
     return Pixel(r: bytes[index], g: bytes[index + 1], b: bytes[index + 2], a: bytes[index + 3])
+}
+
+private func nonBlackBounds(_ texture: MTLTexture) -> PixelBounds? {
+    var bytes = [UInt8](repeating: 0, count: texture.width * texture.height * 4)
+    texture.getBytes(
+        &bytes,
+        bytesPerRow: texture.width * 4,
+        from: MTLRegionMake2D(0, 0, texture.width, texture.height),
+        mipmapLevel: 0
+    )
+    var minX = Int.max
+    var minY = Int.max
+    var maxX = Int.min
+    var maxY = Int.min
+    for y in 0..<texture.height {
+        for x in 0..<texture.width {
+            let index = (y * texture.width + x) * 4
+            let r = bytes[index]
+            let g = bytes[index + 1]
+            let b = bytes[index + 2]
+            if r > 10 || g > 10 || b > 10 {
+                minX = min(minX, x)
+                minY = min(minY, y)
+                maxX = max(maxX, x)
+                maxY = max(maxY, y)
+            }
+        }
+    }
+    guard minX != Int.max else { return nil }
+    return PixelBounds(minX: minX, minY: minY, maxX: maxX, maxY: maxY)
 }
 
 private func solidPass() -> WPERenderPass {
@@ -730,12 +2053,17 @@ private func makeRGBAInputTexture(
     return texture
 }
 
-private func graphLayer(pass: WPERenderPass, parallaxDepth: Double = 0) -> WPERenderLayer {
+private func graphLayer(
+    pass: WPERenderPass,
+    parallaxDepth: Double = 0,
+    geometry: WPERenderLayerGeometry = .identity
+) -> WPERenderLayer {
     WPERenderLayer(
         objectID: "layer",
         objectName: "Layer",
         imagePath: "materials/base.png",
         materialPath: nil,
+        geometry: geometry,
         compositeA: "a",
         compositeB: "b",
         localFBOs: [],
@@ -807,6 +2135,7 @@ private func preparedPipeline(
         objectName: "Layer",
         imagePath: "materials/base.png",
         materialPath: nil,
+        geometry: .identity,
         compositeA: "_rt_imageLayerComposite_layer_a",
         compositeB: "_rt_imageLayerComposite_layer_b",
         localFBOs: localFBOs,
@@ -848,8 +2177,7 @@ private struct BlendFixture: Sendable {
 // `translucent` is a WPE alias for the standard non-premultiplied alpha
 // blend (same factors as `normal`). Pre-fix it was wired as premultiplied
 // (`src.rgb*1 + dst.rgb*(1-src.a)`), which doubled any pass that wrote
-// `vec4(scene.rgb, 0)` into the scene — see the audio-visualizer
-// over-exposure investigation on workshop 2846660316.
+// `vec4(scene.rgb, 0)` into the scene.
 private let blendFixtures: [BlendFixture] = [
     BlendFixture(mode: "normal", expected: Pixel(r: 188, g: 0, b: 188, a: 255)),
     BlendFixture(mode: "additive", expected: Pixel(r: 188, g: 0, b: 255, a: 255)),
@@ -942,7 +2270,7 @@ private extension WPEMetalRenderExecutorTests {
         let executor = try WPEMetalRenderExecutor(device: device)
         let limit = Self.maximumTextureDimension2D(for: device)
 
-        let fbo = WPERenderFBO(name: "_rt_TooLarge", scale: Double(limit + 1), format: "rgba8888")
+        let fbo = WPERenderFBO(name: "_rt_TooLarge", scale: 1.0 / Double(limit + 1), format: "rgba8888")
         let writeFBO = solidPass(
             id: "layer.0",
             color: [1, 0, 0, 1],
@@ -964,6 +2292,70 @@ private extension WPEMetalRenderExecutorTests {
         ) {
             _ = try executor.render(pipeline: pipeline, size: CGSize(width: 1, height: 1), textures: [:])
         }
+    }
+
+    @Test("FBO scale downsamples declared render targets")
+    func fboScaleDownsamplesDeclaredRenderTargets() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let pool = WPEMetalRenderTargetPool(device: device)
+        let fbo = WPERenderFBO(name: "_downscaled", scale: 4, format: "rgba8888")
+        let layer = WPERenderLayer(
+            objectID: "layer",
+            objectName: "Layer",
+            imagePath: "materials/base.png",
+            materialPath: nil,
+            geometry: .identity,
+            compositeA: "_rt_imageLayerComposite_layer_a",
+            compositeB: "_rt_imageLayerComposite_layer_b",
+            localFBOs: [fbo],
+            passes: []
+        )
+
+        let texture = try pool.texture(
+            for: .fbo(name: fbo.name),
+            layer: layer,
+            sceneSize: CGSize(width: 8, height: 4),
+            avoiding: nil
+        )
+
+        #expect(texture.width == 2)
+        #expect(texture.height == 1)
+    }
+
+    @Test("Composelayer composite target uses scaled scene footprint")
+    func composelayerCompositeTargetUsesScaledSceneFootprint() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let pool = WPEMetalRenderTargetPool(device: device)
+        let layer = WPERenderLayer(
+            objectID: "compose",
+            objectName: "Compose",
+            imagePath: "models/util/composelayer.json",
+            materialPath: "materials/util/composelayer.json",
+            geometry: WPERenderLayerGeometry(
+                origin: SIMD3<Double>(512, 384, 0),
+                scale: SIMD3<Double>(2, 3, 1),
+                angles: SIMD3<Double>(0, 0, 0),
+                alignment: .center,
+                size: CGSize(width: 128, height: 64),
+                alpha: 1,
+                color: SIMD3<Double>(1, 1, 1),
+                brightness: 1
+            ),
+            compositeA: "_rt_imageLayerComposite_compose_a",
+            compositeB: "_rt_imageLayerComposite_compose_b",
+            localFBOs: [],
+            passes: []
+        )
+
+        let texture = try pool.texture(
+            for: .layerComposite(name: layer.compositeA),
+            layer: layer,
+            sceneSize: CGSize(width: 1024, height: 768),
+            avoiding: nil
+        )
+
+        #expect(texture.width == 256)
+        #expect(texture.height == 192)
     }
 
     @Test("Resolves previous to the most recent write to the same FBO target")
@@ -1134,7 +2526,7 @@ private extension WPEMetalRenderExecutorTests {
         #expect(pixel.a >= 250)
     }
 
-    @Test("Bootstraps missing FBO previous with a cleared texture on first render")
+    @Test("Bootstraps missing FBO previous with a transparent cleared texture on first render")
     func bootstrapsMissingFBOPreviousOnFirstRender() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let executor = try WPEMetalRenderExecutor(device: device)
@@ -1166,7 +2558,7 @@ private extension WPEMetalRenderExecutorTests {
         #expect(pixel.r <= 5)
         #expect(pixel.g <= 5)
         #expect(pixel.b <= 5)
-        #expect(pixel.a >= 250)
+        #expect(pixel.a <= 5)
     }
 
     @Test("Applies WPE blend factors", arguments: blendFixtures)

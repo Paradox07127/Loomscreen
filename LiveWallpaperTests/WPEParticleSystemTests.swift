@@ -44,6 +44,84 @@ struct WPEParticleSystemTests {
         #expect(def.colorMax.x == 255 && def.colorMax.y == 255)
     }
 
+    @Test("Parser captures child particle definitions")
+    func parserCapturesChildParticleDefinitions() throws {
+        let json = #"""
+        {
+            "children": [
+                {"id": 13, "name": "particles/presets/leaves2b.json"}
+            ],
+            "maxcount": 5,
+            "emitter": [{"rate": 1}]
+        }
+        """#
+
+        let def = try #require(WPEParticleDefinitionParser.parse(data: Data(json.utf8)))
+
+        #expect(def.childRelativePaths == ["particles/presets/leaves2b.json"])
+    }
+
+    @Test("Parser defaults sphere random emitters to 2D directions")
+    func parserDefaultsSphereRandomEmittersTo2DDirections() throws {
+        let json = #"""
+        {
+            "maxcount": 500,
+            "emitter": [{
+                "name": "sphererandom",
+                "rate": 5,
+                "distancemin": 64,
+                "distancemax": 1024
+            }]
+        }
+        """#
+
+        let def = try #require(WPEParticleDefinitionParser.parse(data: Data(json.utf8)))
+
+        #expect(def.directionMask == SIMD3<Double>(1, 1, 0))
+    }
+
+    @Test("Particle instance override scales count rate lifetime size and speed")
+    func particleInstanceOverrideScalesDefinition() {
+        let base = WPEParticleDefinition(
+            materialRelativePath: nil,
+            maxCount: 5,
+            rate: 1.7,
+            startDelay: 3,
+            lifetimeMin: 20, lifetimeMax: 20,
+            sizeMin: 100, sizeMax: 110,
+            originOffset: SIMD3(350, 750, 0),
+            dispersalMin: 0, dispersalMax: 750,
+            velocityMin: SIMD3(-200, -100, 0), velocityMax: SIMD3(-300, -15, 0),
+            colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 236, 0),
+            fadeInSeconds: 0.1,
+            turbulenceSpeedMin: 35,
+            turbulenceSpeedMax: 100
+        )
+        let override = WPESceneParticleInstanceOverride(
+            count: 0.2,
+            rate: 0.5,
+            lifetime: 1.77,
+            size: 0.69,
+            speed: 1.32,
+            alpha: 0.03,
+            color: SIMD3<Double>(192, 192, 192)
+        )
+
+        let scaled = base.applying(instanceOverride: override)
+
+        #expect(scaled.maxCount == 1)
+        #expect(abs(scaled.rate - 0.85) < 0.0001)
+        #expect(abs(scaled.lifetimeMin - 35.4) < 0.0001)
+        #expect(abs(scaled.sizeMin - 69) < 0.0001)
+        #expect(abs(scaled.sizeMax - 75.9) < 0.0001)
+        #expect(abs(scaled.velocityMin.x - (-264)) < 0.0001)
+        #expect(abs(scaled.turbulenceSpeedMax - 132) < 0.0001)
+        #expect(abs(scaled.alphaMin - 0.03) < 0.0001)
+        #expect(abs(scaled.alphaMax - 0.03) < 0.0001)
+        #expect(scaled.colorMin == SIMD3<Double>(192, 192, 192))
+        #expect(scaled.colorMax == SIMD3<Double>(192, 192, 192))
+    }
+
     @Test("Emitter respects start delay before spawning")
     func emitterRespectsStartDelay() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
@@ -310,6 +388,26 @@ struct WPEParticleSystemTests {
         #expect(def.turbulencePhaseMax > 6.2)
     }
 
+    @Test("Parser captures turbulence operator parameters")
+    func parserCapturesTurbulenceOperator() throws {
+        let json = #"""
+        {
+            "maxcount": 10,
+            "emitter": [{"rate": 5}],
+            "operator": [
+                {"name": "turbulence", "speedmin": 750, "speedmax": 900, "mask": "0.5 4 0"}
+            ]
+        }
+        """#
+        let def = try #require(WPEParticleDefinitionParser.parse(data: Data(json.utf8)))
+
+        #expect(def.turbulenceSpeedMin == 750)
+        #expect(def.turbulenceSpeedMax == 900)
+        #expect(def.turbulenceMask.x == 0.5)
+        #expect(def.turbulenceMask.y == 4)
+        #expect(def.turbulenceMask.z == 0)
+    }
+
     @Test("Turbulence produces non-zero position delta")
     func turbulenceProducesPositionDelta() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
@@ -419,5 +517,32 @@ struct WPEParticleSystemTests {
         system.prewarm(simulatedSeconds: 3)
         system.tick(now: 0)
         #expect(system.liveInstanceCount >= 8)
+    }
+
+    @Test("Pre-warm reanchors simulation clock to runtime zero")
+    func prewarmReanchorsSimulationClock() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let def = WPEParticleDefinition(
+            materialRelativePath: nil, maxCount: 1,
+            rate: 1000, startDelay: 0,
+            lifetimeMin: 10, lifetimeMax: 10,
+            sizeMin: 1, sizeMax: 1,
+            originOffset: SIMD3(0, 0, 0),
+            dispersalMin: 0, dispersalMax: 0,
+            velocityMin: SIMD3(100, 0, 0), velocityMax: SIMD3(100, 0, 0),
+            colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
+            fadeInSeconds: 0.05
+        )
+        let system = try #require(WPEParticleSystem(definition: def, device: device))
+        system.prewarm(simulatedSeconds: 2)
+        system.tick(now: 0)
+        let before = system.instanceBuffer.contents()
+            .bindMemory(to: WPEParticleInstance.self, capacity: 1)[0].positionAndSize.x
+
+        system.tick(now: 0.1)
+        let after = system.instanceBuffer.contents()
+            .bindMemory(to: WPEParticleInstance.self, capacity: 1)[0].positionAndSize.x
+
+        #expect(after > before + 5)
     }
 }

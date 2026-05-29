@@ -43,6 +43,7 @@ enum WPESceneDocumentParser {
         let general = parseGeneral(generalDict, diagnostics: &diagnostics)
 
         let rawObjects: [[String: Any]] = (root["objects"] as? [[String: Any]]) ?? []
+        let objectTransforms = resolvedObjectTransforms(rawObjects)
         var imageObjects: [WPESceneImageObject] = []
         var particleObjects: [WPESceneParticleObject] = []
         var textObjects: [WPESceneTextObject] = []
@@ -51,18 +52,23 @@ enum WPESceneDocumentParser {
         for entry in rawObjects {
             let objectName = entry["name"] as? String ?? "?"
             let resolution = objectKindResolution(for: entry)
+            let transform = objectID(in: entry).flatMap { objectTransforms[$0] }
+                ?? localTransform(in: entry)
             if resolution.isAmbiguous {
                 let declared = resolution.candidates.map(\.rawValue).joined(separator: ", ")
                 diagnostics.append(.init(severity: .warning, message: "Ambiguous object \(objectName) declares \(declared)"))
             }
 
-            if resolution.primary == .image, let object = parseImageObject(entry, diagnostics: &diagnostics) {
+            if resolution.primary == .image,
+               let object = parseImageObject(entry, transform: transform, diagnostics: &diagnostics) {
                 imageObjects.append(object)
             }
-            if resolution.primary == .particle, let object = parseParticleObject(entry, diagnostics: &diagnostics) {
+            if resolution.primary == .particle,
+               let object = parseParticleObject(entry, transform: transform, diagnostics: &diagnostics) {
                 particleObjects.append(object)
             }
-            if resolution.primary == .text, let object = parseTextObject(entry, diagnostics: &diagnostics) {
+            if resolution.primary == .text,
+               let object = parseTextObject(entry, transform: transform, diagnostics: &diagnostics) {
                 textObjects.append(object)
             }
             if resolution.primary == .sound, let object = parseSoundObject(entry, diagnostics: &diagnostics) {
@@ -128,6 +134,59 @@ enum WPESceneDocumentParser {
         )
     }
 
+    private static func resolvedObjectTransforms(_ rawObjects: [[String: Any]]) -> [String: SceneObjectTransform] {
+        var objectsByID: [String: [String: Any]] = [:]
+        for object in rawObjects {
+            guard let id = objectID(in: object), objectsByID[id] == nil else { continue }
+            objectsByID[id] = object
+        }
+
+        var memo: [String: SceneObjectTransform] = [:]
+
+        func resolve(id: String, stack: Set<String>) -> SceneObjectTransform {
+            if let cached = memo[id] { return cached }
+            guard let object = objectsByID[id] else { return .identity }
+            let local = localTransform(in: object)
+            guard let parent = parentID(in: object),
+                  parent != id,
+                  objectsByID[parent] != nil,
+                  !stack.contains(parent) else {
+                memo[id] = local
+                return local
+            }
+            let inherited = resolve(id: parent, stack: stack.union([id]))
+            let resolved = inherited.combining(child: local)
+            memo[id] = resolved
+            return resolved
+        }
+
+        for id in objectsByID.keys {
+            _ = resolve(id: id, stack: [])
+        }
+        return memo
+    }
+
+    private static func objectID(in dict: [String: Any], fallback: String? = nil) -> String? {
+        if let id = dict["id"] as? String, !id.isEmpty { return id }
+        if let id = parseInt(dict["id"]) { return String(id) }
+        if let name = dict["name"] as? String, !name.isEmpty { return name }
+        return fallback
+    }
+
+    private static func parentID(in dict: [String: Any]) -> String? {
+        if let id = dict["parent"] as? String, !id.isEmpty { return id }
+        if let id = parseInt(dict["parent"]) { return String(id) }
+        return nil
+    }
+
+    private static func localTransform(in dict: [String: Any]) -> SceneObjectTransform {
+        SceneObjectTransform(
+            origin: parseVector3(dict["origin"]) ?? SIMD3<Double>(0, 0, 0),
+            scale: parseVector3(dict["scale"]) ?? SIMD3<Double>(1, 1, 1),
+            angles: parseVector3(dict["angles"]) ?? SIMD3<Double>(0, 0, 0)
+        )
+    }
+
     private static func parseSoundObject(
         _ dict: [String: Any],
         diagnostics: inout [WPESceneDiagnostic]
@@ -174,6 +233,7 @@ enum WPESceneDocumentParser {
     /// Phase 2D-N: text objects shape per the corpus.
     private static func parseTextObject(
         _ dict: [String: Any],
+        transform: SceneObjectTransform,
         diagnostics: inout [WPESceneDiagnostic]
     ) -> WPESceneTextObject? {
         let raw = dict["text"]
@@ -209,9 +269,9 @@ enum WPESceneDocumentParser {
         let font = unwrapString(dict["font"])
         let pointSize = unwrapDouble(dict["pointsize"]) ?? unwrapDouble(dict["fontsize"]) ?? 32
         let color = unwrapVector3(dict["color"]) ?? SIMD3<Double>(1, 1, 1)
-        let alpha = unwrapDouble(dict["alpha"]) ?? 1
-        let origin = unwrapVector3(dict["origin"]) ?? SIMD3<Double>(0, 0, 0)
-        let scale = unwrapVector3(dict["scale"]) ?? SIMD3<Double>(1, 1, 1)
+        let alphaValue = parseAnimatedScalar(dict["alpha"], fallback: 1)
+        let origin = transform.origin
+        let scale = transform.scale
         let visible = (dict["visible"] as? Bool) ?? true
         let horiz = unwrapString(dict["horizontalalign"]) ?? "center"
         let vert = unwrapString(dict["verticalalign"]) ?? "middle"
@@ -226,7 +286,8 @@ enum WPESceneDocumentParser {
             fontRelativePath: font,
             pointSize: max(1, pointSize),
             color: color,
-            alpha: max(0, min(alpha, 1)),
+            alpha: max(0, min(alphaValue.value, 1)),
+            alphaAnimation: alphaValue.animation,
             origin: origin,
             scale: scale,
             visible: visible,
@@ -262,8 +323,30 @@ enum WPESceneDocumentParser {
         return nil
     }
 
+    private static func parseAnimatedScalar(
+        _ raw: Any?,
+        fallback: Double
+    ) -> (value: Double, animation: WPESceneAnimatedValue?) {
+        guard let constant = WPEValueParser.shaderConstant(raw) else {
+            return (parseDouble(raw) ?? fallback, nil)
+        }
+        switch constant {
+        case .number(let value):
+            return (value, nil)
+        case .vector(let vector):
+            return (vector.first ?? fallback, nil)
+        case .bool(let value):
+            return (value ? 1 : 0, nil)
+        case .string(let value):
+            return (Double(value) ?? fallback, nil)
+        case .animated(let value):
+            return (value.scalarFallback ?? value.scalar(at: 0) ?? fallback, value)
+        }
+    }
+
     private static func parseParticleObject(
         _ dict: [String: Any],
+        transform: SceneObjectTransform,
         diagnostics: inout [WPESceneDiagnostic]
     ) -> WPESceneParticleObject? {
         guard let path = dict["particle"] as? String, !path.isEmpty else {
@@ -282,13 +365,16 @@ enum WPESceneDocumentParser {
             ?? (dict["name"] as? String)
             ?? path
         let name = (dict["name"] as? String) ?? id
-        let origin = parseVector3(dict["origin"]) ?? SIMD3<Double>(0, 0, 0)
-        let scale = parseVector3(dict["scale"]) ?? SIMD3<Double>(1, 1, 1)
-        let angles = parseVector3(dict["angles"]) ?? SIMD3<Double>(0, 0, 0)
+        let origin = transform.origin
+        let scale = transform.scale
+        let angles = transform.angles
         let visible = parseBool(dict["visible"]) ?? true
-        let alpha = parseDouble(dict["alpha"]) ?? 1.0
+        let alphaValue = parseAnimatedScalar(dict["alpha"], fallback: 1)
         let color = parseVector3(dict["color"]) ?? SIMD3<Double>(1, 1, 1)
         let parallaxDepth = parseDouble(dict["parallaxDepth"]) ?? parseDouble(dict["parallaxdepth"]) ?? 0
+        let instanceOverride = parseParticleInstanceOverride(
+            dict["instanceoverride"] ?? dict["instanceOverride"]
+        )
         return WPESceneParticleObject(
             id: id,
             name: name,
@@ -297,9 +383,42 @@ enum WPESceneDocumentParser {
             scale: scale,
             angles: angles,
             visible: visible,
-            alpha: alpha,
+            alpha: alphaValue.value,
+            alphaAnimation: alphaValue.animation,
             color: color,
-            parallaxDepth: parallaxDepth
+            parallaxDepth: parallaxDepth,
+            instanceOverride: instanceOverride
+        )
+    }
+
+    private static func parseParticleInstanceOverride(_ raw: Any?) -> WPESceneParticleInstanceOverride? {
+        guard let dict = raw as? [String: Any] else { return nil }
+        let value = WPESceneParticleInstanceOverride(
+            count: parseDouble(dict["count"]),
+            rate: parseDouble(dict["rate"]),
+            lifetime: parseDouble(dict["lifetime"]),
+            size: parseDouble(dict["size"]),
+            speed: parseDouble(dict["speed"]),
+            alpha: parseDouble(dict["alpha"]),
+            color: parseNormalizedParticleColor(dict["colorn"]) ?? parseVector3(dict["color"])
+        )
+        return value.count == nil
+            && value.rate == nil
+            && value.lifetime == nil
+            && value.size == nil
+            && value.speed == nil
+            && value.alpha == nil
+            && value.color == nil
+            ? nil
+            : value
+    }
+
+    private static func parseNormalizedParticleColor(_ raw: Any?) -> SIMD3<Double>? {
+        guard let color = parseVector3(raw) else { return nil }
+        return SIMD3<Double>(
+            color.x * 255,
+            color.y * 255,
+            color.z * 255
         )
     }
 
@@ -379,6 +498,7 @@ enum WPESceneDocumentParser {
 
     private static func parseImageObject(
         _ dict: [String: Any],
+        transform: SceneObjectTransform,
         diagnostics: inout [WPESceneDiagnostic]
     ) -> WPESceneImageObject? {
         guard let imagePath = dict["image"] as? String, !imagePath.isEmpty else {
@@ -398,11 +518,11 @@ enum WPESceneDocumentParser {
             ?? (dict["name"] as? String)
             ?? imagePath
         let name = (dict["name"] as? String) ?? id
-        let origin = parseVector3(dict["origin"]) ?? SIMD3<Double>(0, 0, 0)
-        let scale = parseVector3(dict["scale"]) ?? SIMD3<Double>(1, 1, 1)
-        let angles = parseVector3(dict["angles"]) ?? SIMD3<Double>(0, 0, 0)
+        let origin = transform.origin
+        let scale = transform.scale
+        let angles = transform.angles
         let visible = parseBool(dict["visible"]) ?? true
-        let alpha = parseDouble(dict["alpha"]) ?? 1.0
+        let alphaValue = parseAnimatedScalar(dict["alpha"], fallback: 1)
         let color = parseVector3(dict["color"]) ?? SIMD3<Double>(1, 1, 1)
         let brightness = parseDouble(dict["brightness"]) ?? 1.0
         let blend = WPESceneBlendMode(rawWPEValue: dict["blendmode"] as? String)
@@ -444,7 +564,8 @@ enum WPESceneDocumentParser {
             scale: scale,
             angles: angles,
             visible: visible,
-            alpha: alpha,
+            alpha: alphaValue.value,
+            alphaAnimation: alphaValue.animation,
             color: color,
             brightness: brightness,
             blendMode: blend,
@@ -589,6 +710,41 @@ enum WPESceneDocumentParser {
 
     private static func parseBool(_ raw: Any?) -> Bool? {
         WPEValueParser.bool(raw)
+    }
+}
+
+private struct SceneObjectTransform {
+    let origin: SIMD3<Double>
+    let scale: SIMD3<Double>
+    let angles: SIMD3<Double>
+
+    static let identity = SceneObjectTransform(
+        origin: SIMD3<Double>(0, 0, 0),
+        scale: SIMD3<Double>(1, 1, 1),
+        angles: SIMD3<Double>(0, 0, 0)
+    )
+
+    func combining(child: SceneObjectTransform) -> SceneObjectTransform {
+        let scaledX = child.origin.x * scale.x
+        let scaledY = child.origin.y * scale.y
+        let cosine = cos(angles.z)
+        let sine = sin(angles.z)
+        let rotatedX = scaledX * cosine - scaledY * sine
+        let rotatedY = scaledX * sine + scaledY * cosine
+
+        return SceneObjectTransform(
+            origin: SIMD3<Double>(
+                origin.x + rotatedX,
+                origin.y + rotatedY,
+                origin.z + child.origin.z * scale.z
+            ),
+            scale: SIMD3<Double>(
+                scale.x * child.scale.x,
+                scale.y * child.scale.y,
+                scale.z * child.scale.z
+            ),
+            angles: angles + child.angles
+        )
     }
 }
 #endif

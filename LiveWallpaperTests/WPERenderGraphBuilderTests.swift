@@ -142,6 +142,52 @@ struct WPERenderGraphBuilderTests {
         #expect(layer.passes[1].target == .scene)
     }
 
+    @Test("Model puppet path is preserved on render layer")
+    func modelPuppetPathIsPreservedOnRenderLayer() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPERenderGraphBuilderTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        try writeJSON([
+            "material": "materials/layer.json",
+            "puppet": "models/layer_puppet.mdl"
+        ], to: root.appendingPathComponent("models/layer.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "genericimage4",
+                "textures": ["layer_albedo"]
+            ]]
+        ], to: root.appendingPathComponent("materials/layer.json"))
+
+        let scenePayload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1920, "height": 1080, "auto": true]],
+            "objects": [[
+                "id": "layer",
+                "name": "Layer",
+                "type": "image",
+                "image": "models/layer.json"
+            ]]
+        ]
+        let sceneData = try JSONSerialization.data(withJSONObject: scenePayload)
+        let document = try WPESceneDocumentParser.parse(data: sceneData)
+
+        let graph = try WPERenderGraphBuilder(cacheRootURL: root).build(document: document)
+        let layer = try #require(graph.layers.first)
+
+        #expect(layer.materialPath == "materials/layer.json")
+        #expect(layer.puppetPath == "models/layer_puppet.mdl")
+        #expect(layer.passes.map(\.target) == [
+            .layerComposite(name: "_rt_imageLayerComposite_layer_a"),
+            .scene
+        ])
+        #expect(layer.passes[0].phase == .material)
+        let scenePass = try #require(layer.passes.dropFirst().first)
+        #expect(scenePass.phase == .command(file: "materials/util/copy.json"))
+        #expect(scenePass.source == .fbo("_rt_imageLayerComposite_layer_a"))
+    }
+
     @Test("Hidden image dependencies still write composites without drawing to scene")
     func hiddenImageDependenciesWriteCompositeOnly() throws {
         let root = FileManager.default.temporaryDirectory
@@ -423,6 +469,49 @@ struct WPERenderGraphBuilderTests {
         ).build(document: document)
 
         #expect(graph.layers.first?.parallaxDepth == 0.2)
+    }
+
+    @Test("Render graph preserves image object geometry on layer")
+    func renderGraphPreservesImageObjectGeometry() throws {
+        let object = WPESceneImageObject(
+            id: "hero",
+            name: "Hero",
+            imageRelativePath: "materials/hero.png",
+            materialRelativePath: nil,
+            origin: SIMD3<Double>(120, 240, 3),
+            scale: SIMD3<Double>(1.5, 0.75, 1),
+            angles: SIMD3<Double>(0.1, 0.2, 0.3),
+            visible: true,
+            alpha: 0.65,
+            color: SIMD3<Double>(0.25, 0.5, 0.75),
+            brightness: 1.25,
+            blendMode: .translucent,
+            alignment: .bottomRight,
+            size: CGSize(width: 320, height: 180),
+            effects: [],
+            animationLayers: [],
+            parallaxDepth: 0.2
+        )
+        let document = WPESceneDocument(
+            camera: .defaultCamera,
+            general: .defaultGeneral,
+            imageObjects: [object],
+            diagnostics: []
+        )
+
+        let graph = try WPERenderGraphBuilder(
+            cacheRootURL: FileManager.default.temporaryDirectory
+        ).build(document: document)
+
+        let geometry = try #require(graph.layers.first?.geometry)
+        #expect(geometry.origin == SIMD3<Double>(120, 240, 3))
+        #expect(geometry.scale == SIMD3<Double>(1.5, 0.75, 1))
+        #expect(geometry.angles == SIMD3<Double>(0.1, 0.2, 0.3))
+        #expect(geometry.alignment == .bottomRight)
+        #expect(geometry.size == CGSize(width: 320, height: 180))
+        #expect(geometry.alpha == 0.65)
+        #expect(geometry.color == SIMD3<Double>(0.25, 0.5, 0.75))
+        #expect(geometry.brightness == 1.25)
     }
 
     @Test("Underscore-prefixed texture refs route through .fbo regardless of suffix")

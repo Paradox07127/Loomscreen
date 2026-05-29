@@ -17,6 +17,7 @@ final class WPEMetalPipelineCache {
     }
 
     func pipelineState(
+        vertexName: String = "wpe_fullscreen_vertex",
         fragmentName: String,
         blendMode: String,
         colorPixelFormat: MTLPixelFormat,
@@ -24,6 +25,7 @@ final class WPEMetalPipelineCache {
     ) throws -> MTLRenderPipelineState {
         let normalizedBlend = blendMode.lowercased()
         let key = WPEMetalPipelineKey(
+            vertexName: vertexName,
             fragmentName: fragmentName,
             blendMode: normalizedBlend,
             colorPixelFormat: colorPixelFormat,
@@ -33,7 +35,7 @@ final class WPEMetalPipelineCache {
             return cached
         }
 
-        guard let vertex = library.makeFunction(name: "wpe_fullscreen_vertex"),
+        guard let vertex = library.makeFunction(name: vertexName),
               let fragment = library.makeFunction(name: fragmentName) else {
             throw WPEMetalRenderExecutorError.pipelineUnavailable(fragmentName)
         }
@@ -53,6 +55,7 @@ final class WPEMetalPipelineCache {
             state = try device.makeRenderPipelineState(descriptor: descriptor)
         } catch {
             let detail = """
+            vertex: \(vertexName)
             fragment: \(fragmentName)
             blend: \(normalizedBlend)
             colorFormat: \(colorPixelFormat.rawValue)

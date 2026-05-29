@@ -100,6 +100,120 @@ struct WPESceneDocumentParserTests {
         #expect(layer.size == CGSize(width: 512, height: 512))
     }
 
+    @Test("Image and text alpha animations are preserved and resolve single-shot fades")
+    func alphaAnimationsPreserved() throws {
+        let alphaFade: [String: Any] = [
+            "value": 1,
+            "animation": [
+                "options": ["fps": 30, "length": 90, "mode": "single"],
+                "c0": [
+                    ["frame": 0, "value": 1],
+                    ["frame": 60, "value": 1],
+                    ["frame": 90, "value": 0]
+                ]
+            ]
+        ]
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1920, "height": 1080, "auto": true]],
+            "objects": [
+                [
+                    "id": "intro-image",
+                    "name": "Intro Image",
+                    "type": "image",
+                    "image": "materials/intro.png",
+                    "alpha": alphaFade
+                ],
+                [
+                    "id": "intro-text",
+                    "name": "Intro Text",
+                    "type": "text",
+                    "text": "By Author",
+                    "alpha": alphaFade
+                ]
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+
+        let document = try WPESceneDocumentParser.parse(data: data)
+
+        let image = try #require(document.imageObjects.first)
+        #expect(image.alpha == 1)
+        #expect(image.alphaAnimation != nil)
+        #expect(image.resolvedAlpha(at: 1) == 1)
+        #expect(image.resolvedAlpha(at: 4) == 0)
+
+        let text = try #require(document.textObjects.first)
+        #expect(text.alpha == 1)
+        #expect(text.alphaAnimation != nil)
+        #expect(text.resolvedAlpha(at: 1) == 1)
+        #expect(text.resolvedAlpha(at: 4) == 0)
+    }
+
+    @Test("Image object inherits parent transform from non-renderable group object")
+    func imageObjectInheritsParentTransform() throws {
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1920, "height": 1080, "auto": true]],
+            "objects": [
+                [
+                    "id": 10,
+                    "name": "Group",
+                    "origin": "100 200 3",
+                    "scale": "2 3 4",
+                    "angles": "0 0 1.5707963267948966"
+                ],
+                [
+                    "id": 11,
+                    "name": "Child",
+                    "image": "materials/child.png",
+                    "parent": 10,
+                    "origin": "10 20 5",
+                    "scale": "0.5 2 0.25",
+                    "angles": "0.1 0.2 0.3"
+                ]
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+
+        let document = try WPESceneDocumentParser.parse(data: data)
+
+        let layer = try #require(document.imageObjects.first)
+        #expect(abs(layer.origin.x - 40) < 0.0001)
+        #expect(abs(layer.origin.y - 220) < 0.0001)
+        #expect(layer.origin.z == 23)
+        #expect(layer.scale == SIMD3<Double>(1, 6, 1))
+        #expect(abs(layer.angles.z - 1.8707963267948966) < 0.0001)
+    }
+
+    @Test("Child image object adds parent-local Y in scene-up coordinates")
+    func childImageOriginYAddsInSceneUpCoordinates() throws {
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 3840, "height": 2160, "auto": true]],
+            "objects": [
+                [
+                    "id": 86,
+                    "name": "Parent",
+                    "origin": "1921 938 0"
+                ],
+                [
+                    "id": 106,
+                    "name": "Child",
+                    "image": "models/child.json",
+                    "parent": 86,
+                    "origin": "-607.5 222.5 0"
+                ]
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+
+        let document = try WPESceneDocumentParser.parse(data: data)
+
+        let layer = try #require(document.imageObjects.first)
+        #expect(layer.origin == SIMD3<Double>(1313.5, 1160.5, 0))
+    }
+
     @Test("Unsupported object types emit info diagnostics and do not abort the parse")
     func unsupportedObjectsEmitDiagnostics() throws {
         let payload: [String: Any] = [
@@ -274,5 +388,76 @@ struct WPESceneDocumentParserTests {
         let object = try #require(document.imageObjects.first)
 
         #expect(object.parallaxDepth == 0.125)
+    }
+
+    @Test("Particle object preserves instance overrides")
+    func particleObjectPreservesInstanceOverrides() throws {
+        let json = """
+        {
+          "camera": { "center": "0 0 0" },
+          "general": { "orthogonalprojection": { "width": 100, "height": 50, "auto": true } },
+          "objects": [{
+            "id": 17,
+            "name": "Leaves",
+            "type": "particle",
+            "particle": "particles/presets/leaves2.json",
+            "instanceoverride": {
+              "count": 0.2,
+              "rate": 0.7,
+              "lifetime": 1.77,
+              "size": 0.69,
+              "speed": 1.32,
+              "alpha": 0.03,
+              "colorn": "0.75294 0.75294 0.75294"
+            }
+          }]
+        }
+        """
+
+        let document = try WPESceneDocumentParser.parse(data: Data(json.utf8))
+        let object = try #require(document.particleObjects.first)
+        let override = try #require(object.instanceOverride)
+
+        #expect(override.count == 0.2)
+        #expect(override.rate == 0.7)
+        #expect(override.lifetime == 1.77)
+        #expect(override.size == 0.69)
+        #expect(override.speed == 1.32)
+        #expect(override.alpha == 0.03)
+        let color = try #require(override.color)
+        #expect(abs(color.x - 192) < 0.001)
+        #expect(abs(color.y - 192) < 0.001)
+        #expect(abs(color.z - 192) < 0.001)
+    }
+
+    @Test("Particle object inherits parent transform from group object")
+    func particleObjectInheritsParentTransform() throws {
+        let json = """
+        {
+          "camera": { "center": "0 0 0" },
+          "general": { "orthogonalprojection": { "width": 100, "height": 50, "auto": true } },
+          "objects": [
+            {
+              "id": "group",
+              "origin": "1920 1080 0",
+              "scale": "2 2 1"
+            },
+            {
+              "id": "leaves",
+              "type": "particle",
+              "particle": "particles/presets/leaves2.json",
+              "parent": "group",
+              "origin": "-10 15 0",
+              "scale": "0.5 0.25 1"
+            }
+          ]
+        }
+        """
+
+        let document = try WPESceneDocumentParser.parse(data: Data(json.utf8))
+        let object = try #require(document.particleObjects.first)
+
+        #expect(object.origin == SIMD3<Double>(1900, 1110, 0))
+        #expect(object.scale == SIMD3<Double>(1, 0.5, 1))
     }
 }

@@ -7,9 +7,9 @@ import simd
 /// Per-instance attributes the GPU vertex stage reads from. Layout MUST
 /// match `WPEParticleInstance` in `WPEMetalBuiltins.metal` exactly.
 struct WPEParticleInstance {
-    var positionAndSize: SIMD4<Float>   // x, y in centered scene pixels ; z (unused, reserved); w = size
+    var positionAndSize: SIMD4<Float>   // x, y in centered scene pixels ; z = signed sprite X scale; w = size
     var color: SIMD4<Float>             // rgb 0…1, a = current alpha (base × fade envelope)
-    var rotationAndLife: SIMD4<Float>   // x = rotationZ radians ; y = lifetimeFraction [0,1] ; z,w reserved
+    var rotationAndLife: SIMD4<Float>   // x = rotationZ radians ; y = lifetimeFraction [0,1] ; z = spriteFrameIndex; w = signed sprite Y scale
 }
 
 /// One-shot world-space placement applied to a `WPEParticleSystem` at
@@ -81,6 +81,24 @@ struct WPEParticleSceneTransform {
         // axes (Z is depth, irrelevant for the screen-space quad).
         return max(0.0001, (abs(objectScale.x) + abs(objectScale.y)) * 0.5)
     }
+
+    func visualScaleSigns() -> SIMD2<Float> {
+        SIMD2<Float>(
+            objectScale.x < 0 ? -1 : 1,
+            objectScale.y < 0 ? -1 : 1
+        )
+    }
+
+    func visualRotationZ(localRotationZ: Float) -> Float {
+        let signs = visualScaleSigns()
+        let localRotation = signs.x * signs.y < 0 ? -localRotationZ : localRotationZ
+        return -objectAngleZ + localRotation
+    }
+
+    func visualAngularZ(localAngularZ: Float) -> Float {
+        let signs = visualScaleSigns()
+        return signs.x * signs.y < 0 ? -localAngularZ : localAngularZ
+    }
 }
 
 /// CPU-side emitter + GPU buffer. One instance per scene particle object.
@@ -114,10 +132,11 @@ final class WPEParticleSystem {
     private var lastTickTime: Double?
     private var firstTickTime: Double?
     private var rng: SystemRandomNumberGenerator
-    /// Cached gravity in render space (Y-up). Mirrors the velocity rule
-    /// (no Y-flip) so a JSON `gravity = "0 -50 0"` actually pulls down
-    /// on screen.
+    /// Cached gravity in render space (Y-up). Mirrors the velocity rule:
+    /// flip emitter-local Y once, then apply the scene object's scale
+    /// and rotation without translating.
     private let gravity: SIMD3<Float>
+    private let turbulenceMask: SIMD3<Float>
 
     /// Hard ceiling so a single emitter can't blow the GPU memory budget.
     /// 8K particles × 48 bytes = 384 KB per system.
@@ -176,11 +195,17 @@ final class WPEParticleSystem {
         self.rng = SystemRandomNumberGenerator()
         // Emitter-internal Y-down: author writes `+gy` for "pull down
         // on screen" (Win32 graphics convention). Y-flip once into the
-        // Y-up simulator.
-        self.gravity = SIMD3<Float>(
+        // Y-up simulator, then honor object scale/rotation like velocity.
+        let localGravity = SIMD3<Float>(
             Float(definition.gravity.x),
             -Float(definition.gravity.y),
             Float(definition.gravity.z)
+        )
+        self.gravity = sceneTransform.applyModelDirection(localGravity)
+        self.turbulenceMask = SIMD3<Float>(
+            Float(definition.turbulenceMask.x),
+            Float(definition.turbulenceMask.y),
+            Float(definition.turbulenceMask.z)
         )
     }
 
@@ -198,6 +223,47 @@ final class WPEParticleSystem {
         )
     }
 
+    static func dispersalVector(
+        radius: Double,
+        theta: Double,
+        phi: Double,
+        mask: SIMD3<Float>
+    ) -> SIMD3<Float> {
+        let enabledX = abs(mask.x) > 0.0001
+        let enabledY = abs(mask.y) > 0.0001
+        let enabledZ = abs(mask.z) > 0.0001
+        let enabledCount = [enabledX, enabledY, enabledZ].filter { $0 }.count
+        let r = Float(radius)
+
+        switch enabledCount {
+        case 0:
+            return SIMD3<Float>(0, 0, 0)
+        case 1:
+            let sign: Float = cos(theta) >= 0 ? 1 : -1
+            return SIMD3<Float>(
+                enabledX ? r * sign * mask.x : 0,
+                enabledY ? r * sign * (-mask.y) : 0,
+                enabledZ ? r * sign * mask.z : 0
+            )
+        case 2:
+            let a = r * Float(cos(theta))
+            let b = r * Float(sin(theta))
+            if enabledX && enabledY {
+                return SIMD3<Float>(a * mask.x, b * (-mask.y), 0)
+            }
+            if enabledX && enabledZ {
+                return SIMD3<Float>(a * mask.x, 0, b * mask.z)
+            }
+            return SIMD3<Float>(0, a * (-mask.y), b * mask.z)
+        default:
+            return SIMD3<Float>(
+                Float(radius * sin(phi) * cos(theta) * Double(mask.x)),
+                Float(radius * sin(phi) * sin(theta) * Double(-mask.y)),
+                Float(radius * cos(phi) * Double(mask.z))
+            )
+        }
+    }
+
     /// Advance the simulator without writing the GPU instance buffer.
     /// Called once after scene load so the first real `tick(now:)`
     /// presents a population that's already past `startDelay` and has
@@ -212,6 +278,12 @@ final class WPEParticleSystem {
             virtualNow += step
             advance(now: virtualNow)
         }
+        // The renderer's real frame clock starts at 0 after load. Keep
+        // the prewarmed particle ages/positions, but re-anchor internal
+        // tick bookkeeping so the first live frames do not see a
+        // future `lastTickTime` and freeze until wall time catches up.
+        firstTickTime = -virtualNow
+        lastTickTime = 0
     }
 
     func tick(now: Double) {
@@ -240,6 +312,7 @@ final class WPEParticleSystem {
             frameCount = 1
             cyclesPerLifetime = 0
         }
+        let visualScaleSigns = sceneTransform.visualScaleSigns()
         var written = 0
         for index in 0..<capacity {
             guard particles[index].age != .greatestFiniteMagnitude else { continue }
@@ -256,10 +329,10 @@ final class WPEParticleSystem {
             }
             pointer[written] = WPEParticleInstance(
                 positionAndSize: SIMD4<Float>(
-                    particle.position.x, particle.position.y, particle.position.z, particle.size
+                    particle.position.x, particle.position.y, visualScaleSigns.x, particle.size
                 ),
                 color: SIMD4<Float>(particle.color.x, particle.color.y, particle.color.z, alpha),
-                rotationAndLife: SIMD4<Float>(particle.rotationZ, lifetimeFraction, frameIndex, 0)
+                rotationAndLife: SIMD4<Float>(particle.rotationZ, lifetimeFraction, frameIndex, visualScaleSigns.y)
             )
             written += 1
         }
@@ -283,7 +356,7 @@ final class WPEParticleSystem {
         let elapsed = now - (firstTickTime ?? now)
         let dragScalar: Float = max(0, 1 - Float(definition.drag) * dt)
         let angularDragScalar: Float = max(0, 1 - Float(definition.angularDrag) * dt)
-        let angularForce = Float(definition.angularForceZ)
+        let angularForce = sceneTransform.visualAngularZ(localAngularZ: Float(definition.angularForceZ))
         let turbulenceScale = Float(definition.turbulenceScale)
         let turbulenceTimescale = Float(definition.turbulenceTimescale)
         let turbulenceOffset = Float(definition.turbulenceOffset)
@@ -311,8 +384,8 @@ final class WPEParticleSystem {
                     y: pos.y * turbulenceScale,
                     t: t
                 )
-                step.x += noise.x * particles[index].turbulenceSpeed
-                step.y += noise.y * particles[index].turbulenceSpeed
+                step.x += noise.x * particles[index].turbulenceSpeed * turbulenceMask.x
+                step.y += noise.y * particles[index].turbulenceSpeed * turbulenceMask.y
             }
             particles[index].position += step * dt
             // Angular motion with force + drag.
@@ -369,11 +442,15 @@ final class WPEParticleSystem {
         // inside the emitter local frame: directions.y, emitter origin,
         // per-particle velocity. Scene-object origin (the outer T term
         // in the model matrix) is NOT flipped — see WPEParticleSceneTransform.
-        let mask = definition.directionMask
-        let dispersal = SIMD3<Float>(
-            Float(radius * sin(phi) * cos(theta) * mask.x),
-            Float(radius * sin(phi) * sin(theta) * (-mask.y)),
-            Float(radius * cos(phi) * mask.z)
+        let dispersal = Self.dispersalVector(
+            radius: radius,
+            theta: theta,
+            phi: phi,
+            mask: SIMD3<Float>(
+                Float(definition.directionMask.x),
+                Float(definition.directionMask.y),
+                Float(definition.directionMask.z)
+            )
         )
         let emitterOriginLocal = SIMD3<Float>(
             Float(definition.originOffset.x),
@@ -403,8 +480,8 @@ final class WPEParticleSystem {
                 min(max(rawColor.y / 255, 0), 1),
                 min(max(rawColor.z / 255, 0), 1)
             ),
-            rotationZ: rotationVec.z,
-            angularVelocityZ: angularVec.z,
+            rotationZ: sceneTransform.visualRotationZ(localRotationZ: rotationVec.z),
+            angularVelocityZ: sceneTransform.visualAngularZ(localAngularZ: angularVec.z),
             alphaBase: min(max(alpha, 0), 1),
             lifetime: max(0.0001, lifetime),
             age: 0,

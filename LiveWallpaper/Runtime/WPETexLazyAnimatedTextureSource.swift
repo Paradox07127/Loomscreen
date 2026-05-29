@@ -354,6 +354,7 @@ final class WPETexLazyAnimatedTextureSource: WPEDynamicTextureSource {
             throw Failure.textureAllocationFailed
         }
         texture.label = "\(label) lazy frame"
+        WPEMetalTextureMetadataRegistry.shared.register(texture: texture)
         workingTexture = texture
         workingTextureWidth = width
         workingTextureHeight = height

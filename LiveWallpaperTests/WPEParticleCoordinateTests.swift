@@ -162,6 +162,98 @@ struct WPEParticleCoordinateTests {
         #expect(inst.positionAndSize.y > 5)
     }
 
+    @Test("Gravity follows scene object scale and rotation like velocity")
+    func gravityUsesSceneObjectDirectionTransform() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let def = WPEParticleDefinition(
+            materialRelativePath: nil,
+            maxCount: 1,
+            rate: 1000,
+            startDelay: 0,
+            lifetimeMin: 10,
+            lifetimeMax: 10,
+            sizeMin: 1,
+            sizeMax: 1,
+            originOffset: SIMD3(0, 0, 0),
+            dispersalMin: 0,
+            dispersalMax: 0,
+            velocityMin: SIMD3(0, 0, 0),
+            velocityMax: SIMD3(0, 0, 0),
+            colorMin: SIMD3(255, 255, 255),
+            colorMax: SIMD3(255, 255, 255),
+            fadeInSeconds: 0.01,
+            gravity: SIMD3(10, 0, 0)
+        )
+        let transform = WPEParticleSceneTransform(
+            sceneSize: SIMD2<Float>(1920, 1080),
+            objectOrigin: SIMD3<Float>(960, 540, 0),
+            objectScale: SIMD3<Float>(-1, 1, 1),
+            objectAngleZ: 0
+        )
+        let system = try #require(WPEParticleSystem(
+            definition: def,
+            device: device,
+            blendMode: .translucent,
+            sceneTransform: transform
+        ))
+
+        system.tick(now: 0)
+        system.tick(now: 0.05)
+        let initialX = system.instanceBuffer.contents()
+            .bindMemory(to: WPEParticleInstance.self, capacity: 1)[0].positionAndSize.x
+        system.tick(now: 0.15)
+        let laterX = system.instanceBuffer.contents()
+            .bindMemory(to: WPEParticleInstance.self, capacity: 1)[0].positionAndSize.x
+
+        #expect(laterX < initialX)
+    }
+
+    @Test("Particle sprite carries scene object mirror signs and rotation")
+    func particleSpriteCarriesObjectMirrorAndRotation() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let def = WPEParticleDefinition(
+            materialRelativePath: nil,
+            maxCount: 1,
+            rate: 1000,
+            startDelay: 0,
+            lifetimeMin: 10,
+            lifetimeMax: 10,
+            sizeMin: 1,
+            sizeMax: 1,
+            originOffset: SIMD3(0, 0, 0),
+            dispersalMin: 0,
+            dispersalMax: 0,
+            velocityMin: SIMD3(0, 0, 0),
+            velocityMax: SIMD3(0, 0, 0),
+            colorMin: SIMD3(255, 255, 255),
+            colorMax: SIMD3(255, 255, 255),
+            fadeInSeconds: 0,
+            rotationMin: SIMD3(0, 0, 0),
+            rotationMax: SIMD3(0, 0, 0)
+        )
+        let transform = WPEParticleSceneTransform(
+            sceneSize: SIMD2<Float>(1920, 1080),
+            objectOrigin: SIMD3<Float>(960, 540, 0),
+            objectScale: SIMD3<Float>(-1, 1, 1),
+            objectAngleZ: 0.75
+        )
+        let system = try #require(WPEParticleSystem(
+            definition: def,
+            device: device,
+            blendMode: .translucent,
+            sceneTransform: transform
+        ))
+
+        system.tick(now: 0)
+        system.tick(now: 0.05)
+        let instance = system.instanceBuffer.contents()
+            .bindMemory(to: WPEParticleInstance.self, capacity: 1)[0]
+
+        #expect(instance.positionAndSize.z < 0)
+        #expect(instance.rotationAndLife.w > 0)
+        #expect(abs(instance.rotationAndLife.x - (-0.75)) < 0.001)
+    }
+
     @Test("Parser captures directions mask")
     func parserCapturesDirections() throws {
         let json = #"""
@@ -175,6 +267,19 @@ struct WPEParticleCoordinateTests {
         #expect(abs(def.directionMask.x - 1) < 0.0001)
         #expect(abs(def.directionMask.y - 0.2) < 0.0001)
         #expect(abs(def.directionMask.z - 0) < 0.0001)
+    }
+
+    @Test("2D sphere random dispersal does not collapse through disabled Z")
+    func sphereRandom2DDispersalDoesNotCollapseThroughDisabledZ() {
+        let dispersal = WPEParticleSystem.dispersalVector(
+            radius: 100,
+            theta: 0.25,
+            phi: 0,
+            mask: SIMD3<Float>(1, 1, 0)
+        )
+
+        #expect(abs(hypot(dispersal.x, dispersal.y) - 100) < 0.001)
+        #expect(abs(dispersal.z) < 0.001)
     }
 
     @Test("Direction mask zero collapses dispersal on that axis")

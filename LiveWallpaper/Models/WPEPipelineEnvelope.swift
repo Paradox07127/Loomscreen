@@ -76,6 +76,7 @@ struct WPERenderLayerPayload: Codable, Sendable {
     var objectName: String
     var imagePath: String
     var materialPath: String?
+    var geometry: WPERenderLayerGeometryPayload
     var compositeA: String
     var compositeB: String
     var parallaxDepth: Double
@@ -88,6 +89,7 @@ struct WPERenderLayerPayload: Codable, Sendable {
         self.objectName = layer.objectName
         self.imagePath = layer.imagePath
         self.materialPath = layer.materialPath
+        self.geometry = WPERenderLayerGeometryPayload(layer.geometry)
         self.compositeA = layer.compositeA
         self.compositeB = layer.compositeB
         self.parallaxDepth = layer.parallaxDepth
@@ -100,11 +102,46 @@ struct WPERenderLayerPayload: Codable, Sendable {
         case objectName = "object_name"
         case imagePath = "image_path"
         case materialPath = "material_path"
+        case geometry
         case compositeA = "composite_a"
         case compositeB = "composite_b"
         case parallaxDepth = "parallax_depth"
         case localFBOs = "local_fbos"
         case passes
+    }
+}
+
+struct WPERenderLayerGeometryPayload: Codable, Sendable {
+    var origin: WPEVector3Payload
+    var scale: WPEVector3Payload
+    var angles: WPEVector3Payload
+    var alignment: String
+    var size: WPESceneSizePayload?
+    var alpha: Double
+    var color: WPEVector3Payload
+    var brightness: Double
+
+    init(_ geometry: WPERenderLayerGeometry) {
+        self.origin = WPEVector3Payload(geometry.origin)
+        self.scale = WPEVector3Payload(geometry.scale)
+        self.angles = WPEVector3Payload(geometry.angles)
+        self.alignment = geometry.alignment.rawValue
+        self.size = geometry.size.map { WPESceneSizePayload(width: $0.width, height: $0.height) }
+        self.alpha = geometry.alpha
+        self.color = WPEVector3Payload(geometry.color)
+        self.brightness = geometry.brightness
+    }
+}
+
+struct WPEVector3Payload: Codable, Sendable {
+    var x: Double
+    var y: Double
+    var z: Double
+
+    init(_ value: SIMD3<Double>) {
+        self.x = value.x
+        self.y = value.y
+        self.z = value.z
     }
 }
 
@@ -248,6 +285,8 @@ enum WPEConstantValuePayload: Codable, Sendable {
             self = .string(string)
         case .vector(let vector):
             self = .vector(vector)
+        case .animated(let animated):
+            self.init(animated.resolvedValue(at: 0))
         }
     }
 

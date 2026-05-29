@@ -192,6 +192,8 @@ enum WPEMetalShaderInputs {
             return vector.first.map(Float.init)
         case .bool(let bool):
             return bool ? 1 : 0
+        case .animated(let value):
+            return value.scalar(at: 0).map(Float.init)
         case .string(let string):
             return Float(string)
         case nil:

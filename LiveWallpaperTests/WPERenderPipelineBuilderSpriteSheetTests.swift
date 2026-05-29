@@ -53,6 +53,7 @@ struct WPERenderPipelineBuilderSpriteSheetTests {
                 objectName: "Layer",
                 imagePath: "materials/base.tex",
                 materialPath: "materials/base.json",
+                geometry: .identity,
                 compositeA: "_rt_imageLayerComposite_1_a",
                 compositeB: "_rt_imageLayerComposite_1_b",
                 localFBOs: [],

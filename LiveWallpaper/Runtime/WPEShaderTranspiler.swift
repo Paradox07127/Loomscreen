@@ -1,5 +1,6 @@
 #if !LITE_BUILD
 import Foundation
+import LiveWallpaperProWPE
 
 /// Pure-Swift WPE-flavor GLSL → Metal Shading Language transpiler.
 ///
@@ -144,7 +145,9 @@ struct WPEShaderTranspiler {
                 glslType: u.type,
                 slot: nextSlot,
                 slotCount: slotCount,
-                arrayLength: u.arrayLength
+                arrayLength: u.arrayLength,
+                materialName: u.materialName,
+                defaultValue: u.defaultValue
             ))
             nextSlot += slotCount
         }
@@ -1695,16 +1698,6 @@ struct WPEShaderTranspiler {
         for (slot, sampler) in samplers.enumerated() {
             out.append("    [[maybe_unused]] auto \(sampler.name) = tex\(slot);")
         }
-        for varying in varyings {
-            if varying.name == "uv" { continue }
-            let initializer = varyingInitializer(for: varying.metalType)
-            if let arrayLength = varying.arrayLength {
-                let initializers = Array(repeating: initializer, count: arrayLength).joined(separator: ", ")
-                out.append("    [[maybe_unused]] \(varying.metalType) \(varying.name)[\(arrayLength)] = { \(initializers) };")
-            } else {
-                out.append("    [[maybe_unused]] \(varying.metalType) \(varying.name) = \(initializer);")
-            }
-        }
         var slotCursor = 0
         for u in uniforms {
             if let arrayLength = u.arrayLength {
@@ -1757,6 +1750,22 @@ struct WPEShaderTranspiler {
                 out.append("    [[maybe_unused]] \(u.metalType) \(u.name) = u.vals[\(slotCursor)].x;")
             }
             slotCursor += slots
+        }
+
+        let uniformNames = Set(uniforms.map(\.name))
+        for varying in varyings {
+            if varying.name == "uv" { continue }
+            let initializer = varyingInitializer(
+                for: varying,
+                shaderName: shaderName,
+                availableUniforms: uniformNames
+            )
+            if let arrayLength = varying.arrayLength {
+                let initializers = Array(repeating: initializer, count: arrayLength).joined(separator: ", ")
+                out.append("    [[maybe_unused]] \(varying.metalType) \(varying.name)[\(arrayLength)] = { \(initializers) };")
+            } else {
+                out.append("    [[maybe_unused]] \(varying.metalType) \(varying.name) = \(initializer);")
+            }
         }
 
         out.append("    {")
@@ -1863,10 +1872,163 @@ struct WPEShaderTranspiler {
             )
             out.append("inline float3 DecompressNormal(float3 packed) { return DecompressNormal(float4(packed, 0.0)); }")
         }
+
+        out.append(
+            """
+            inline float wpe_safe_ratio(float numerator, float denominator) {
+                return abs(denominator) > 0.000001 ? numerator / denominator : 0.0;
+            }
+            inline float2 wpe_rotate_vec2(float2 v, float angle) {
+                float c = cos(angle);
+                float s = sin(angle);
+                return float2(c * v.x - s * v.y, s * v.x + c * v.y);
+            }
+            inline float2 wpe_scroll_vector(float scrollX, float scrollY, float time) {
+                float2 scroll = float2(scrollX, scrollY);
+                return sign(scroll) * pow(abs(scroll), float2(2.0)) * time;
+            }
+            inline float4 wpe_texcoord_with_resolution(float2 uv, float4 resolution) {
+                float2 scale = float2(
+                    wpe_safe_ratio(resolution.z, resolution.x),
+                    wpe_safe_ratio(resolution.w, resolution.y)
+                );
+                return float4(uv, uv * scale);
+            }
+            inline float4 wpe_texcoord_mask(float2 uv, float4 resolution) {
+                float2 scale = float2(
+                    wpe_safe_ratio(resolution.z, resolution.x),
+                    wpe_safe_ratio(resolution.w, resolution.y)
+                );
+                return float4(uv * scale, scale);
+            }
+            inline float4 wpe_ripple_texcoord(float2 uv, float time, float animationSpeed, float scrollSpeed, float direction, float ratio, float scale, float4 texture0Resolution) {
+                float animation = time * animationSpeed * animationSpeed;
+                float2 scroll = wpe_rotate_vec2(float2(0.0, 1.0), direction) * scrollSpeed * scrollSpeed * time;
+                float4 ripple = float4(uv + animation + scroll, uv * 1.333 - animation + scroll) * scale;
+                ripple.xz *= wpe_safe_ratio(texture0Resolution.x, texture0Resolution.y);
+                ripple.yw *= ratio;
+                return ripple;
+            }
+            inline float2 wpe_iris_texcoord(float timeUniform, float speed, float phaseOffset, float rough, float noiseAmount, float2 scale) {
+                float time = timeUniform * speed + phaseOffset;
+                float lowDt = floor(time);
+                float2 motion2 = sin(1.9 * (lowDt + float2(0.0, 1.0)));
+                float4 motion4 = sin(2.5 * (lowDt + float4(0.0, 0.0, 1.0, 1.0)) + float4(1.0, 2.0, 1.0, 2.0));
+                float2 moveStart = motion2.xx + motion4.xy;
+                float2 moveEnd = motion2.yy + motion4.zw;
+                float eased = smoothstep(1.0 - rough, 1.0, cos(fract(time) * 3.14159265359) * -0.5 + 0.5);
+                float2 da = mix(moveStart, moveEnd, eased);
+                da.x += sin(time) * noiseAmount;
+                da.y += cos(time) * noiseAmount;
+                return da * scale * 0.001;
+            }
+            inline float wpe_foliage_aspect(float4 texture0Resolution, float ratio) {
+                float aspect = wpe_safe_ratio(texture0Resolution.z, texture0Resolution.w) * ratio;
+                return abs(aspect) > 0.000001 ? aspect : 1.0;
+            }
+            inline float4 wpe_foliage_texcoord_noise(float2 uv, float noiseScale, float ratio, float direction, float4 texture0Resolution) {
+                float aspect = wpe_foliage_aspect(texture0Resolution, ratio);
+                return float4(uv * noiseScale, wpe_rotate_vec2(float2(1.0 / aspect, aspect), direction));
+            }
+            inline float3 wpe_foliage_params(float2 uv, float direction, float strength) {
+                return float3(wpe_rotate_vec2(uv, direction), strength * strength * 0.005);
+            }
+            inline float2 wpe_bounds_vector(float2 bounds) {
+                return float2(bounds.x, 1.0 / max(bounds.y - bounds.x, 0.000001));
+            }
+            """
+        )
     }
 
-    private static func varyingInitializer(for metalType: String) -> String {
-        switch metalType {
+    private static func varyingInitializer(
+        for varying: WPEVaryingDecl,
+        shaderName: String,
+        availableUniforms: Set<String>
+    ) -> String {
+        switch varying.name {
+        case "v_TexCoord":
+            if varying.metalType == "float2" {
+                return "in.uv"
+            }
+            if varying.metalType == "float4",
+               let resolutionUniform = texCoordResolutionUniform(
+                shaderName: shaderName,
+                availableUniforms: availableUniforms
+               ) {
+                return "wpe_texcoord_with_resolution(in.uv, \(resolutionUniform))"
+            }
+        case "v_TexCoordMask":
+            if varying.metalType == "float4",
+               availableUniforms.contains("g_Texture3Resolution") {
+                return "wpe_texcoord_mask(in.uv, g_Texture3Resolution)"
+            }
+        case "v_Scroll":
+            if varying.metalType == "float2",
+               hasUniforms("g_ScrollX", "g_ScrollY", "g_Time", in: availableUniforms) {
+                return "wpe_scroll_vector(g_ScrollX, g_ScrollY, g_Time)"
+            }
+        case "v_Direction":
+            if varying.metalType == "float2",
+               availableUniforms.contains("g_Direction") {
+                return "wpe_rotate_vec2(float2(0.0, 1.0), g_Direction)"
+            }
+        case "v_TexCoordRipple":
+            if varying.metalType == "float4",
+               hasUniforms(
+                "g_Time",
+                "g_AnimationSpeed",
+                "g_ScrollSpeed",
+                "g_Direction",
+                "g_Ratio",
+                "g_Scale",
+                "g_Texture0Resolution",
+                in: availableUniforms
+               ) {
+                return "wpe_ripple_texcoord(in.uv, g_Time, g_AnimationSpeed, g_ScrollSpeed, g_Direction, g_Ratio, g_Scale, g_Texture0Resolution)"
+            }
+        case "v_TexCoordIris":
+            if varying.metalType == "float2",
+               hasUniforms(
+                "g_Time",
+                "g_Speed",
+                "g_PhaseOffset",
+                "g_Rough",
+                "g_NoiseAmount",
+                "g_Scale",
+                in: availableUniforms
+               ) {
+                return "wpe_iris_texcoord(g_Time, g_Speed, g_PhaseOffset, g_Rough, g_NoiseAmount, g_Scale)"
+            }
+        case "v_TexCoordNoise":
+            if varying.metalType == "float4",
+               hasUniforms(
+                "g_NoiseScale",
+                "g_Ratio",
+                "g_Direction",
+                "g_Texture0Resolution",
+                in: availableUniforms
+               ) {
+                return "wpe_foliage_texcoord_noise(in.uv, g_NoiseScale, g_Ratio, g_Direction, g_Texture0Resolution)"
+            }
+        case "v_Params":
+            if varying.metalType == "float3",
+               hasUniforms("g_Direction", "g_Strength", in: availableUniforms) {
+                return "wpe_foliage_params(in.uv, g_Direction, g_Strength)"
+            }
+        case "v_Bounds":
+            if varying.metalType == "float2",
+               availableUniforms.contains("g_Bounds") {
+                return "wpe_bounds_vector(g_Bounds)"
+            }
+        case "v_AudioPulse":
+            if varying.metalType == "float" {
+                return "0.0"
+            }
+        default:
+            break
+        }
+
+        switch varying.metalType {
         case "float2":
             return "in.uv"
         case "float3":
@@ -1876,8 +2038,29 @@ struct WPEShaderTranspiler {
         case "float":
             return "in.uv.x"
         default:
-            return "\(metalType)(0)"
+            return "\(varying.metalType)(0)"
         }
+    }
+
+    private static func hasUniforms(_ names: String..., in availableUniforms: Set<String>) -> Bool {
+        names.allSatisfy { availableUniforms.contains($0) }
+    }
+
+    private static func texCoordResolutionUniform(
+        shaderName: String,
+        availableUniforms: Set<String>
+    ) -> String? {
+        let lowercased = shaderName.lowercased()
+        if lowercased.contains("pulse"), availableUniforms.contains("g_Texture2Resolution") {
+            return "g_Texture2Resolution"
+        }
+        if availableUniforms.contains("g_Texture1Resolution") {
+            return "g_Texture1Resolution"
+        }
+        if availableUniforms.contains("g_Texture2Resolution") {
+            return "g_Texture2Resolution"
+        }
+        return nil
     }
 
     /// Map `g_Texture0` / `g_Texture1` etc. to a slot index by parsing the trailing digit.
@@ -1905,13 +2088,25 @@ struct WPEUniformSlot: Equatable {
     let slot: Int           // first float4 index occupied
     let slotCount: Int      // total number of slots used
     let arrayLength: Int?   // present when the source declared an array
+    let materialName: String?
+    let defaultValue: WPESceneShaderConstantValue?
 
-    init(name: String, glslType: String, slot: Int, slotCount: Int, arrayLength: Int? = nil) {
+    init(
+        name: String,
+        glslType: String,
+        slot: Int,
+        slotCount: Int,
+        arrayLength: Int? = nil,
+        materialName: String? = nil,
+        defaultValue: WPESceneShaderConstantValue? = nil
+    ) {
         self.name = name
         self.glslType = glslType
         self.slot = slot
         self.slotCount = slotCount
         self.arrayLength = arrayLength
+        self.materialName = materialName
+        self.defaultValue = defaultValue
     }
 }
 
@@ -1939,6 +2134,11 @@ struct WPEUniformDecl: Equatable {
     let metalType: String    // Translated for use in the Metal struct
     /// When the declaration is `float foo[16];` this is `16`; otherwise nil.
     let arrayLength: Int?
+    /// WPE shaders commonly expose editor values as JSON comments after
+    /// uniforms, e.g. `uniform float u_alpha; // {"material":"Opacity"}`.
+    /// Scene effect overrides use that material name, not the GLSL variable.
+    let materialName: String?
+    let defaultValue: WPESceneShaderConstantValue?
 
     static func parse(line: String) -> Self? {
         guard line.hasPrefix("uniform ") else { return nil }
@@ -1947,6 +2147,7 @@ struct WPEUniformDecl: Equatable {
         let trimmed = body.trimmingCharacters(in: .whitespaces)
         guard let semicolon = trimmed.firstIndex(of: ";") else { return nil }
         let decl = trimmed[..<semicolon]
+        let comment = trimmed[trimmed.index(after: semicolon)...]
         let tokens = decl.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
         guard tokens.count >= 2 else { return nil }
         let type = tokens[0]
@@ -1964,7 +2165,38 @@ struct WPEUniformDecl: Equatable {
         }
         guard !name.isEmpty else { return nil }
         let metal = mapType(type)
-        return Self(type: type, name: name, metalType: metal, arrayLength: arrayLength)
+        let metadata = Self.parseMetadataComment(String(comment))
+        return Self(
+            type: type,
+            name: name,
+            metalType: metal,
+            arrayLength: arrayLength,
+            materialName: metadata.materialName,
+            defaultValue: metadata.defaultValue
+        )
+    }
+
+    private static func parseMetadataComment(_ raw: String) -> (
+        materialName: String?,
+        defaultValue: WPESceneShaderConstantValue?
+    ) {
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        guard let start = trimmed.firstIndex(of: "{"),
+              let end = trimmed.lastIndex(of: "}"),
+              start <= end else {
+            return (nil, nil)
+        }
+        let jsonText = String(trimmed[start...end])
+        guard let json = try? JSONSerialization.jsonObject(
+            with: Data(jsonText.utf8),
+            options: [.allowFragments]
+        ) as? [String: Any] else {
+            return (nil, nil)
+        }
+        return (
+            json["material"] as? String,
+            json["default"].flatMap { WPEValueParser.shaderConstant($0) }
+        )
     }
 
     static func mapType(_ glsl: String) -> String {

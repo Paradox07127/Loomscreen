@@ -60,6 +60,7 @@ public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
     public let pointSize: Double
     public let color: SIMD3<Double>
     public let alpha: Double
+    public let alphaAnimation: WPESceneAnimatedValue?
     public let origin: SIMD3<Double>
     public let scale: SIMD3<Double>
     public let visible: Bool
@@ -77,6 +78,7 @@ public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
         pointSize: Double,
         color: SIMD3<Double>,
         alpha: Double,
+        alphaAnimation: WPESceneAnimatedValue? = nil,
         origin: SIMD3<Double>,
         scale: SIMD3<Double>,
         visible: Bool,
@@ -93,6 +95,7 @@ public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
         self.pointSize = pointSize
         self.color = color
         self.alpha = alpha
+        self.alphaAnimation = alphaAnimation
         self.origin = origin
         self.scale = scale
         self.visible = visible
@@ -100,6 +103,10 @@ public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
         self.verticalAlignment = verticalAlignment
         self.maxWidth = maxWidth
         self.parallaxDepth = parallaxDepth
+    }
+
+    public func resolvedAlpha(at time: Double) -> Double {
+        alphaAnimation?.scalar(at: time) ?? alpha
     }
 }
 
@@ -112,10 +119,12 @@ public struct WPESceneParticleObject: Equatable, Sendable, Identifiable {
     public let angles: SIMD3<Double>
     public let visible: Bool
     public let alpha: Double
+    public let alphaAnimation: WPESceneAnimatedValue?
     public let color: SIMD3<Double>
     public let parallaxDepth: Double
+    public let instanceOverride: WPESceneParticleInstanceOverride?
 
-    public init(id: String, name: String, particleRelativePath: String, origin: SIMD3<Double>, scale: SIMD3<Double>, angles: SIMD3<Double>, visible: Bool, alpha: Double, color: SIMD3<Double>, parallaxDepth: Double) {
+    public init(id: String, name: String, particleRelativePath: String, origin: SIMD3<Double>, scale: SIMD3<Double>, angles: SIMD3<Double>, visible: Bool, alpha: Double, alphaAnimation: WPESceneAnimatedValue? = nil, color: SIMD3<Double>, parallaxDepth: Double, instanceOverride: WPESceneParticleInstanceOverride? = nil) {
         self.id = id
         self.name = name
         self.particleRelativePath = particleRelativePath
@@ -124,8 +133,43 @@ public struct WPESceneParticleObject: Equatable, Sendable, Identifiable {
         self.angles = angles
         self.visible = visible
         self.alpha = alpha
+        self.alphaAnimation = alphaAnimation
         self.color = color
         self.parallaxDepth = parallaxDepth
+        self.instanceOverride = instanceOverride
+    }
+
+    public func resolvedAlpha(at time: Double) -> Double {
+        alphaAnimation?.scalar(at: time) ?? alpha
+    }
+}
+
+public struct WPESceneParticleInstanceOverride: Equatable, Sendable {
+    public let count: Double?
+    public let rate: Double?
+    public let lifetime: Double?
+    public let size: Double?
+    public let speed: Double?
+    public let alpha: Double?
+    /// Override color in the same 0...255 space as particle definitions.
+    public let color: SIMD3<Double>?
+
+    public init(
+        count: Double? = nil,
+        rate: Double? = nil,
+        lifetime: Double? = nil,
+        size: Double? = nil,
+        speed: Double? = nil,
+        alpha: Double? = nil,
+        color: SIMD3<Double>? = nil
+    ) {
+        self.count = count
+        self.rate = rate
+        self.lifetime = lifetime
+        self.size = size
+        self.speed = speed
+        self.alpha = alpha
+        self.color = color
     }
 }
 
@@ -193,6 +237,7 @@ public struct WPESceneImageObject: Equatable, Sendable, Identifiable {
     public let angles: SIMD3<Double>
     public let visible: Bool
     public let alpha: Double
+    public let alphaAnimation: WPESceneAnimatedValue?
     public let color: SIMD3<Double>
     public let brightness: Double
     public let blendMode: WPESceneBlendMode
@@ -213,6 +258,7 @@ public struct WPESceneImageObject: Equatable, Sendable, Identifiable {
         angles: SIMD3<Double>,
         visible: Bool,
         alpha: Double,
+        alphaAnimation: WPESceneAnimatedValue? = nil,
         color: SIMD3<Double>,
         brightness: Double,
         blendMode: WPESceneBlendMode,
@@ -232,6 +278,7 @@ public struct WPESceneImageObject: Equatable, Sendable, Identifiable {
         self.angles = angles
         self.visible = visible
         self.alpha = alpha
+        self.alphaAnimation = alphaAnimation
         self.color = color
         self.brightness = brightness
         self.blendMode = blendMode
@@ -241,6 +288,10 @@ public struct WPESceneImageObject: Equatable, Sendable, Identifiable {
         self.effects = effects
         self.animationLayers = animationLayers
         self.parallaxDepth = parallaxDepth
+    }
+
+    public func resolvedAlpha(at time: Double) -> Double {
+        alphaAnimation?.scalar(at: time) ?? alpha
     }
 }
 
@@ -282,20 +333,159 @@ public struct WPESceneEffectPassOverride: Equatable, Sendable {
     }
 }
 
+public struct WPESceneAnimationKeyframe: Equatable, Sendable {
+    public let frame: Double
+    public let value: Double
+
+    public init(frame: Double, value: Double) {
+        self.frame = frame
+        self.value = value
+    }
+}
+
+public struct WPESceneNumericAnimation: Equatable, Sendable {
+    public let tracks: [[WPESceneAnimationKeyframe]]
+    public let fps: Double
+    public let length: Double
+    public let mode: String
+    public let wrapLoop: Bool
+
+    public init(
+        tracks: [[WPESceneAnimationKeyframe]],
+        fps: Double,
+        length: Double,
+        mode: String,
+        wrapLoop: Bool
+    ) {
+        self.tracks = tracks.map { $0.sorted { $0.frame < $1.frame } }
+        self.fps = fps > 0 ? fps : 30
+        self.length = max(0, length)
+        self.mode = mode.lowercased()
+        self.wrapLoop = wrapLoop
+    }
+
+    public func values(at time: Double, fallbacks: [Double]) -> [Double] {
+        guard !tracks.isEmpty else { return fallbacks }
+        let frame = effectiveFrame(at: time)
+        return tracks.enumerated().map { index, track in
+            value(in: track, atFrame: frame, fallback: fallbacks[safe: index] ?? fallbacks.first ?? 0)
+        }
+    }
+
+    private func effectiveFrame(at time: Double) -> Double {
+        let rawFrame = max(0, time) * fps
+        if shouldLoop, length > 0 {
+            let wrapped = rawFrame.truncatingRemainder(dividingBy: length)
+            return wrapped >= 0 ? wrapped : wrapped + length
+        }
+        let lastTrackFrame = tracks
+            .compactMap(\.last?.frame)
+            .max() ?? 0
+        let clampFrame = length > 0 ? max(length, lastTrackFrame) : lastTrackFrame
+        return min(max(rawFrame, 0), clampFrame)
+    }
+
+    private var shouldLoop: Bool {
+        wrapLoop || mode == "loop" || mode == "mirror"
+    }
+
+    private func value(
+        in track: [WPESceneAnimationKeyframe],
+        atFrame frame: Double,
+        fallback: Double
+    ) -> Double {
+        guard let first = track.first else { return fallback }
+        if frame <= first.frame { return first.value }
+        guard let last = track.last else { return first.value }
+        if frame >= last.frame { return last.value }
+
+        for index in 0..<(track.count - 1) {
+            let start = track[index]
+            let end = track[index + 1]
+            guard frame >= start.frame && frame <= end.frame else { continue }
+            let span = max(end.frame - start.frame, 0.0001)
+            let t = min(max((frame - start.frame) / span, 0), 1)
+            return start.value + (end.value - start.value) * t
+        }
+        return last.value
+    }
+}
+
+public struct WPESceneAnimatedValue: Equatable, Sendable {
+    public let animation: WPESceneNumericAnimation
+    public let scalarFallback: Double?
+    public let vectorFallback: [Double]?
+
+    public init(
+        animation: WPESceneNumericAnimation,
+        scalarFallback: Double?,
+        vectorFallback: [Double]?
+    ) {
+        self.animation = animation
+        self.scalarFallback = scalarFallback
+        self.vectorFallback = vectorFallback
+    }
+
+    public func resolvedValue(at time: Double) -> WPESceneShaderConstantValue {
+        if let vectorFallback, animation.tracks.count > 1 {
+            return .vector(animation.values(at: time, fallbacks: vectorFallback))
+        }
+        return .number(scalar(at: time) ?? scalarFallback ?? 0)
+    }
+
+    public func scalar(at time: Double) -> Double? {
+        let fallback = scalarFallback ?? vectorFallback?.first ?? 0
+        return animation.values(at: time, fallbacks: [fallback]).first
+    }
+
+    public func vector(at time: Double) -> [Double]? {
+        guard let vectorFallback else {
+            return scalar(at: time).map { [$0] }
+        }
+        return animation.values(at: time, fallbacks: vectorFallback)
+    }
+}
+
 public enum WPESceneShaderConstantValue: Equatable, Sendable {
     case bool(Bool)
     case number(Double)
     case string(String)
     case vector([Double])
+    case animated(WPESceneAnimatedValue)
 
     public var numberValue: Double? {
-        if case .number(let value) = self { return value }
-        return nil
+        switch self {
+        case .number(let value):
+            return value
+        case .animated(let value):
+            return value.scalar(at: 0)
+        default:
+            return nil
+        }
     }
 
     public var vectorValue: [Double]? {
-        if case .vector(let value) = self { return value }
-        return nil
+        switch self {
+        case .vector(let value):
+            return value
+        case .animated(let value):
+            return value.vector(at: 0)
+        default:
+            return nil
+        }
+    }
+
+    public func resolved(at time: Double) -> WPESceneShaderConstantValue {
+        if case .animated(let value) = self {
+            return value.resolvedValue(at: time)
+        }
+        return self
+    }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
     }
 }
 

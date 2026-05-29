@@ -198,6 +198,7 @@ final class WPETextRenderer {
         descriptor.storageMode = .shared
         guard let texture = device.makeTexture(descriptor: descriptor) else { return nil }
         texture.label = "WPE text \(object.id)"
+        WPEMetalTextureMetadataRegistry.shared.register(texture: texture)
         let region = MTLRegionMake2D(0, 0, width, height)
         var packed = [UInt8](repeating: 0, count: bytesPerRow * height)
         for row in 0..<height {

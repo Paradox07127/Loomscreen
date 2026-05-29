@@ -3,6 +3,12 @@ import CoreGraphics
 import Foundation
 import Metal
 
+private func wpeRenderTargetDimension(_ base: CGFloat, scale: Double) -> Int {
+    // WPE effect FBO scale is a downsample divisor: scale 4 means one quarter size.
+    let divisor = scale.isFinite && scale > 0 ? scale : 1
+    return max(Int((Double(base) / divisor).rounded()), 1)
+}
+
 /// Identity for a pooled Metal render target. Same name + same scaled
 /// dimensions + same format share a slot; if a pass would read its own
 /// destination texture (e.g. `.previous` ping-pong), the pool returns the
@@ -10,17 +16,23 @@ import Metal
 /// into the same texture in one encoder.
 struct WPEMetalRenderTargetKey: Hashable {
     let name: String
-    let sceneWidth: Int
-    let sceneHeight: Int
-    let scale: Double
+    let width: Int
+    let height: Int
     let format: String
     let pixelFormat: MTLPixelFormat
 
     init(name: String, sceneSize: CGSize, scale: Double, format: String, pixelFormat: MTLPixelFormat) {
         self.name = name
-        self.sceneWidth = max(Int(sceneSize.width.rounded()), 1)
-        self.sceneHeight = max(Int(sceneSize.height.rounded()), 1)
-        self.scale = scale
+        self.width = wpeRenderTargetDimension(sceneSize.width, scale: scale)
+        self.height = wpeRenderTargetDimension(sceneSize.height, scale: scale)
+        self.format = format.lowercased()
+        self.pixelFormat = pixelFormat
+    }
+
+    init(name: String, width: Int, height: Int, format: String, pixelFormat: MTLPixelFormat) {
+        self.name = name
+        self.width = max(width, 1)
+        self.height = max(height, 1)
         self.format = format.lowercased()
         self.pixelFormat = pixelFormat
     }
@@ -80,11 +92,11 @@ final class WPEMetalRenderTargetPool {
     ) throws -> MTLTexture {
         let spec = targetSpec(for: target, layer: layer)
         let pixelFormat = Self.pixelFormat(forFBOFormat: spec.format)
-        let key = WPEMetalRenderTargetKey(
-            name: spec.name,
+        let key = targetKey(
+            for: target,
+            spec: spec,
+            layer: layer,
             sceneSize: sceneSize,
-            scale: spec.scale,
-            format: spec.format,
             pixelFormat: pixelFormat
         )
         let slot = slots[key] ?? Slot()
@@ -125,9 +137,77 @@ final class WPEMetalRenderTargetPool {
         }
     }
 
+    private func targetKey(
+        for target: WPERenderTarget,
+        spec: WPERenderFBO,
+        layer: WPERenderLayer,
+        sceneSize: CGSize,
+        pixelFormat: MTLPixelFormat
+    ) -> WPEMetalRenderTargetKey {
+        switch target {
+        case .layerComposite:
+            let localSize = Self.layerCompositeSize(for: layer, sceneSize: sceneSize)
+            return WPEMetalRenderTargetKey(
+                name: spec.name,
+                width: wpeRenderTargetDimension(localSize.width, scale: spec.scale),
+                height: wpeRenderTargetDimension(localSize.height, scale: spec.scale),
+                format: spec.format,
+                pixelFormat: pixelFormat
+            )
+        case .scene, .fbo:
+            return WPEMetalRenderTargetKey(
+                name: spec.name,
+                sceneSize: sceneSize,
+                scale: spec.scale,
+                format: spec.format,
+                pixelFormat: pixelFormat
+            )
+        }
+    }
+
+    private static func layerCompositeSize(for layer: WPERenderLayer, sceneSize: CGSize) -> CGSize {
+        guard layer.geometry != .identity,
+              let size = layer.geometry.size else {
+            return sceneSize
+        }
+
+        if isSceneCaptureUtilityLayer(layer) {
+            // composelayer/projectlayer capture a screen-space region that is
+            // later drawn at the object's scaled footprint.
+            let scaleX = finiteMagnitude(layer.geometry.scale.x, fallback: 1)
+            let scaleY = finiteMagnitude(layer.geometry.scale.y, fallback: 1)
+            return CGSize(
+                width: max(size.width * scaleX, 1),
+                height: max(size.height * scaleY, 1)
+            )
+        }
+
+        return CGSize(
+            width: max(size.width, 1),
+            height: max(size.height, 1)
+        )
+    }
+
+    private static func isSceneCaptureUtilityLayer(_ layer: WPERenderLayer) -> Bool {
+        let imagePath = normalizedPath(layer.imagePath)
+        return imagePath == "models/util/composelayer.json"
+            || imagePath == "models/util/projectlayer.json"
+    }
+
+    private static func normalizedPath(_ path: String) -> String {
+        path.replacingOccurrences(of: "\\", with: "/").lowercased()
+    }
+
+    private static func finiteMagnitude(_ value: Double, fallback: CGFloat) -> CGFloat {
+        guard value.isFinite else {
+            return fallback
+        }
+        return CGFloat(abs(value))
+    }
+
     private func makeAllocation(key: WPEMetalRenderTargetKey, label: String) throws -> Allocation {
-        let width = max(Int((Double(key.sceneWidth) * key.scale).rounded()), 1)
-        let height = max(Int((Double(key.sceneHeight) * key.scale).rounded()), 1)
+        let width = key.width
+        let height = key.height
         try validateTextureDimensions(targetName: key.name, width: width, height: height)
 
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
@@ -148,6 +228,7 @@ final class WPEMetalRenderTargetPool {
             if let heap = device.makeHeap(descriptor: heapDescriptor),
                let texture = heap.makeTexture(descriptor: descriptor) {
                 texture.label = "WPE \(key.name) \(label) heap texture"
+                WPEMetalTextureMetadataRegistry.shared.register(texture: texture)
                 return Allocation(texture: texture, heap: heap)
             }
         }
@@ -156,6 +237,7 @@ final class WPEMetalRenderTargetPool {
             throw WPEMetalTextureLoaderError.textureAllocationFailed
         }
         texture.label = "WPE \(key.name) \(label) texture"
+        WPEMetalTextureMetadataRegistry.shared.register(texture: texture)
         return Allocation(texture: texture, heap: nil)
     }
 

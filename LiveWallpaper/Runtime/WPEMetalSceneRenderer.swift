@@ -108,18 +108,10 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
     private(set) var renderPipeline: WPEPreparedRenderPipeline?
     private(set) var lastRuntimeUniforms: WPEMetalRuntimeUniforms?
 
-    /// Temporary diagnostic: emit one structured per-frame summary every
-    /// ~1s so we can see (a) time advancing, (b) dynamic texture sources
-    /// swapping frames, (c) output texture size. Used to validate the
-    /// Metal path for multi-frame `.tex` scenes (3725117707 repro).
+    /// Emits a structured per-frame summary roughly once per second so runtime
+    /// logs can show time advancement, dynamic texture swaps, and output size.
     private var lastHeartbeatTime: TimeInterval = -1
 
-    /// Temporary investigation flag: when true, the per-frame particle
-    /// draw is skipped. Reads
-    /// `UserDefaults.standard.bool(forKey: "WPEMetalSkipParticles")`
-    /// at scene load. Toggle via the shell + relaunch the app.
-    private let skipParticleRendering: Bool =
-        UserDefaults.standard.bool(forKey: "WPEMetalSkipParticles")
     var renderedTexture: MTLTexture? { outputTexture }
     /// CGImage readback of the most recent rendered frame; populated at the
     /// end of `performLoad()` so `WPESceneDetailView` can show a thumbnail
@@ -202,6 +194,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
         do {
             try await performLoad()
             loadDiagnostics = nil
+            WPESceneDebugArtifacts.shared.recordResolutionSummary(resolutionTracer.snapshot())
             WPESceneDebugArtifacts.shared.appendLog(
                 "load() succeeded; presented first frame",
                 level: .notice
@@ -213,6 +206,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
         } catch {
             loadDiagnostics = diagnostic(for: error)
             logSceneFailureDiagnostics(error: error)
+            WPESceneDebugArtifacts.shared.recordResolutionSummary(resolutionTracer.snapshot())
             WPESceneDebugArtifacts.shared.appendLog(
                 "load() failed: \(error)",
                 level: .error
@@ -332,6 +326,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
         let pipeline = try await Task.detached(priority: .userInitiated) {
             try WPERenderPipelineBuilder(
                 cacheRootURL: cacheRoot,
+                dependencyMounts: mounts,
                 engineAssetsRootURL: engineRoot
             ).build(graph: graph)
         }.value
@@ -364,6 +359,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
                 )
             }
         }
+        WPESceneDebugArtifacts.shared.recordPassList(pipeline)
         try Task.checkCancellation()
 
         renderGraph = graph
@@ -387,7 +383,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
         await loadParticleSystems(from: document)
         debugStage(
             "particles.load.done",
-            "systems=\(particleSystems.count) skipParticleRendering=\(skipParticleRendering)"
+            "systems=\(particleSystems.count)"
         )
         try Task.checkCancellation()
 
@@ -412,6 +408,9 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
 
         if let outputTexture {
             cachedSnapshot = snapshotter.snapshot(from: outputTexture)
+            if let stats = WPEMetalTextureVisualStats.analyze(texture: outputTexture) {
+                WPESceneDebugArtifacts.shared.recordFirstFrameStats(stats)
+            }
             dumpOutputTextureIfRequested(outputTexture)
         }
         hasPresentedFrame = true
@@ -777,12 +776,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
             runtimeUniforms: uniforms,
             cameraUniforms: cameraUniforms
         )
-        // Temporary scene-isolation switch for the 3725117707 visual
-        // investigation. Defaults to false (particles render normally).
-        // Flip via `defaults write Taijia.LiveWallpaper WPEMetalSkipParticles -bool YES`
-        // and relaunch — relaunch is required because we cache the value
-        // at scene load.
-        if !particleSystems.isEmpty && !skipParticleRendering {
+        if !particleSystems.isEmpty {
             for system in particleSystems {
                 system.tick(now: uniforms.time)
             }
@@ -796,7 +790,9 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
         if let textRenderer, !textObjects.isEmpty {
             var draws: [WPETextOverlayDraw] = []
             draws.reserveCapacity(textObjects.count)
-            for object in textObjects where object.visible && object.alpha > 0 {
+            for object in textObjects where object.visible {
+                let resolvedAlpha = object.resolvedAlpha(at: uniforms.time)
+                guard resolvedAlpha > 0 else { continue }
                 let liveObject: WPESceneTextObject
                 if let instance = textScriptInstances[object.id] {
                     let updated = instance.tickString()
@@ -809,7 +805,8 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
                             fontRelativePath: object.fontRelativePath,
                             pointSize: object.pointSize,
                             color: object.color,
-                            alpha: object.alpha,
+                            alpha: resolvedAlpha,
+                            alphaAnimation: object.alphaAnimation,
                             origin: object.origin,
                             scale: object.scale,
                             visible: object.visible,
@@ -819,10 +816,44 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
                             parallaxDepth: object.parallaxDepth
                         )
                     } else {
-                        liveObject = object
+                        liveObject = WPESceneTextObject(
+                            id: object.id,
+                            name: object.name,
+                            text: object.text,
+                            textScript: object.textScript,
+                            fontRelativePath: object.fontRelativePath,
+                            pointSize: object.pointSize,
+                            color: object.color,
+                            alpha: resolvedAlpha,
+                            alphaAnimation: object.alphaAnimation,
+                            origin: object.origin,
+                            scale: object.scale,
+                            visible: object.visible,
+                            horizontalAlignment: object.horizontalAlignment,
+                            verticalAlignment: object.verticalAlignment,
+                            maxWidth: object.maxWidth,
+                            parallaxDepth: object.parallaxDepth
+                        )
                     }
                 } else {
-                    liveObject = object
+                    liveObject = WPESceneTextObject(
+                        id: object.id,
+                        name: object.name,
+                        text: object.text,
+                        textScript: object.textScript,
+                        fontRelativePath: object.fontRelativePath,
+                        pointSize: object.pointSize,
+                        color: object.color,
+                        alpha: resolvedAlpha,
+                        alphaAnimation: object.alphaAnimation,
+                        origin: object.origin,
+                        scale: object.scale,
+                        visible: object.visible,
+                        horizontalAlignment: object.horizontalAlignment,
+                        verticalAlignment: object.verticalAlignment,
+                        maxWidth: object.maxWidth,
+                        parallaxDepth: object.parallaxDepth
+                    )
                 }
                 guard let entry = textRenderer.rasterize(liveObject) else { continue }
                 let halfWidth = Double(sceneRenderSize.width) * 0.5
@@ -875,9 +906,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
         // sound.volume the moment audio starts.
         runtime.setMuted(pendingAudioMuted)
         runtime.setMasterVolume(pendingAudioVolume)
-        let attachedCount = runtime.start(sounds: document.soundObjects)
-        if attachedCount == 0 {
-        }
+        _ = runtime.start(sounds: document.soundObjects)
         soundRuntime = runtime
     }
 
@@ -979,68 +1008,105 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
         particleSystems.removeAll(keepingCapacity: true)
         particleTextures.removeAll(keepingCapacity: true)
         for object in document.particleObjects where object.visible {
-            guard let particleURL = try? entryResolver.resolveExistingFileURL(relativePath: object.particleRelativePath),
-                  let data = try? Data(contentsOf: particleURL),
-                  let definition = WPEParticleDefinitionParser.parse(data: data) else {
-                continue
+            var visited = Set<String>()
+            var pending: [(path: String, parent: String?)] = [(object.particleRelativePath, nil)]
+            while let next = pending.popLast() {
+                let particlePath = resolvedParticleChildPath(next.path, parentPath: next.parent)
+                guard visited.insert(particlePath).inserted else { continue }
+                guard let parsedDefinition = loadParticleDefinition(at: particlePath) else {
+                    debugStage("particle", "skip \(object.name) — particle definition load failed: \(particlePath)")
+                    continue
+                }
+                let definition = parsedDefinition.applying(instanceOverride: object.instanceOverride)
+                await registerParticleSystem(
+                    definition: definition,
+                    object: object,
+                    particlePath: particlePath
+                )
+                for childPath in parsedDefinition.childRelativePaths.reversed() {
+                    pending.append((childPath, particlePath))
+                }
             }
-            let material = definition.materialRelativePath
-                .flatMap(parseParticleMaterial(at:))
-            let blendMode = material?.blendMode ?? .translucent
-            let sceneTransform = makeParticleSceneTransform(for: object)
-            guard let texturePath = material?.firstTexturePath else {
-                debugStage("particle", "skip \(object.name) — material missing texture binding")
-                continue
-            }
-            guard let texturePayload = try? await makeTextureResource(
-                relativePath: texturePath,
-                label: "particle texture \(texturePath)"
-            ) else {
-                debugStage("particle", "skip \(object.name) — texture load failed: \(texturePath)")
-                continue
-            }
-            let texture: MTLTexture?
-            switch texturePayload {
-            case .staticTexture(let t):
-                texture = t
-            case .dynamicSource(let source):
-                texture = source.texture(at: 0)
-            }
-            guard let resolved = texture else {
-                debugStage("particle", "skip \(object.name) — dynamic source yielded no texture")
-                continue
-            }
-            let spriteSheet = parseParticleSpriteSheet(
-                texturePath: texturePath,
-                atlasPixelSize: (width: resolved.width, height: resolved.height)
-            )
-            guard let system = WPEParticleSystem(
-                definition: definition,
-                device: executor.textureSourceDevice,
-                blendMode: blendMode,
-                sceneTransform: sceneTransform,
-                spriteSheet: spriteSheet
-            ) else { continue }
-            // Spread `startDelay + 2s` worth of spawn/integration across
-            // the first frame so the user doesn't see a one-particle-
-            // per-frame cold start — matches WPE's behaviour where the
-            // scene loads with a populated emitter.
-            let prewarmSeconds = max(0, definition.startDelay) + 2.0
-            system.prewarm(simulatedSeconds: prewarmSeconds)
-            particleSystems.append(system)
-            particleTextures[ObjectIdentifier(system)] = resolved
-            let textureLabel = resolved.label ?? "<unlabeled>"
-            let sheetDescription: String
-            if let sheet = spriteSheet {
-                sheetDescription = "sheet=\(sheet.cols)x\(sheet.rows)×\(sheet.frameCount) mask=\(sheet.isAlphaMask)"
-            } else {
-                sheetDescription = "sheet=none"
-            }
-            debugStage(
-                "particle.binding",
-                "\(object.name) blend=\(blendMode.rawValue) texturePath=\(texturePath) texture=\(textureLabel) \(sheetDescription)"
-            )
         }
+    }
+
+    private func resolvedParticleChildPath(_ childPath: String, parentPath: String?) -> String {
+        guard !childPath.contains("/"), let parentPath else {
+            return childPath
+        }
+        let directory = (parentPath as NSString).deletingLastPathComponent
+        return directory.isEmpty ? childPath : "\(directory)/\(childPath)"
+    }
+
+    private func loadParticleDefinition(at particlePath: String) -> WPEParticleDefinition? {
+        guard let particleURL = try? entryResolver.resolveExistingFileURL(relativePath: particlePath),
+              let data = try? Data(contentsOf: particleURL) else {
+            return nil
+        }
+        return WPEParticleDefinitionParser.parse(data: data)
+    }
+
+    private func registerParticleSystem(
+        definition: WPEParticleDefinition,
+        object: WPESceneParticleObject,
+        particlePath: String
+    ) async {
+        let material = definition.materialRelativePath
+            .flatMap(parseParticleMaterial(at:))
+        let blendMode = material?.blendMode ?? .translucent
+        let sceneTransform = makeParticleSceneTransform(for: object)
+        guard let texturePath = material?.firstTexturePath else {
+            debugStage("particle", "skip \(object.name) — material missing texture binding: \(particlePath)")
+            return
+        }
+        guard let texturePayload = try? await makeTextureResource(
+            relativePath: texturePath,
+            label: "particle texture \(texturePath)"
+        ) else {
+            debugStage("particle", "skip \(object.name) — texture load failed: \(texturePath)")
+            return
+        }
+        let texture: MTLTexture?
+        switch texturePayload {
+        case .staticTexture(let t):
+            texture = t
+        case .dynamicSource(let source):
+            texture = source.texture(at: 0)
+        }
+        guard let resolved = texture else {
+            debugStage("particle", "skip \(object.name) — dynamic source yielded no texture")
+            return
+        }
+        let spriteSheet = parseParticleSpriteSheet(
+            texturePath: texturePath,
+            atlasPixelSize: (width: resolved.width, height: resolved.height)
+        )
+        guard let system = WPEParticleSystem(
+            definition: definition,
+            device: executor.textureSourceDevice,
+            blendMode: blendMode,
+            sceneTransform: sceneTransform,
+            spriteSheet: spriteSheet
+        ) else { return }
+        // Spread `startDelay + 2s` worth of spawn/integration across
+        // the first frame so the user doesn't see a one-particle-
+        // per-frame cold start — matches WPE's behaviour where the
+        // scene loads with a populated emitter.
+        let prewarmSeconds = max(0, definition.startDelay) + 2.0
+        system.prewarm(simulatedSeconds: prewarmSeconds)
+        particleSystems.append(system)
+        particleTextures[ObjectIdentifier(system)] = resolved
+        let textureLabel = resolved.label ?? "<unlabeled>"
+        let sheetDescription: String
+        if let sheet = spriteSheet {
+            sheetDescription = "sheet=\(sheet.cols)x\(sheet.rows)×\(sheet.frameCount) mask=\(sheet.isAlphaMask)"
+        } else {
+            sheetDescription = "sheet=none"
+        }
+        debugStage(
+            "particle.binding",
+            "\(object.name) particle=\(particlePath) count=\(definition.maxCount) rate=\(definition.rate) blend=\(blendMode.rawValue) texturePath=\(texturePath) texture=\(textureLabel) \(sheetDescription)"
+        )
     }
 
     func reload() async throws {
@@ -1126,9 +1192,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
     /// the first frame (the operator and turbulence updates would never
     /// run again).
     private var needsContinuousFrames: Bool {
-        if !dynamicTextureSources.isEmpty { return true }
-        if !particleSystems.isEmpty && !skipParticleRendering { return true }
-        return false
+        !dynamicTextureSources.isEmpty || !particleSystems.isEmpty
     }
 
     func applyPerformanceProfile(_ profile: WallpaperPerformanceProfile) {
@@ -1460,6 +1524,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
             throw WPEMetalTextureLoaderError.textureAllocationFailed
         }
         texture.label = label
+        WPEMetalTextureMetadataRegistry.shared.register(texture: texture)
         var pixel: UInt32 = 0
         texture.replace(
             region: MTLRegionMake2D(0, 0, 1, 1),

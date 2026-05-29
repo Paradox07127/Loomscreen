@@ -2,6 +2,7 @@
 import AppKit
 import Foundation
 import LiveWallpaperCore
+import Metal
 
 /// Per-scene debug session that mirrors every shader compile + pipeline build
 /// failure to disk under `~/Library/.../Application Support/LiveWallpaper/scene-debug/<timestamp-id>/`,
@@ -29,6 +30,9 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
     private var session: ActiveSession?
     private let sessionLock = NSLock()
     private let writeQueue = DispatchQueue(label: "wpe.scene.debug.artifacts", qos: .utility)
+    private let bindingDiagnosticsLock = NSLock()
+    private var bindingDiagnostics: [String] = []
+    private let maxBindingDiagnostics = 512
     private let isoFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withYear, .withMonth, .withDay, .withTime]
@@ -146,6 +150,88 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
                 try? handle.write(contentsOf: data)
             }
         }
+    }
+
+    /// Trace the resolved Metal texture for a fragment slot. This remains
+    /// lightweight and bounded because DEBUG builds may record it every frame.
+    func recordTextureBinding(
+        passID: String,
+        shader: String,
+        slot: Int,
+        reference: WPETextureReference?,
+        texture: MTLTexture?,
+        fallbackToPrimary: Bool
+    ) {
+        guard isEnabled else { return }
+        let event = "[binding] pass=\(passID) shader=\(shader) slot=\(slot) reference=\(textureReferenceDescription(reference)) texture=\(textureDescription(texture)) fallback=\(fallbackToPrimary)"
+        bindingDiagnosticsLock.lock()
+        bindingDiagnostics.append(event)
+        if bindingDiagnostics.count > maxBindingDiagnostics {
+            bindingDiagnostics.removeFirst(bindingDiagnostics.count - maxBindingDiagnostics)
+        }
+        bindingDiagnosticsLock.unlock()
+        appendLog(event, level: fallbackToPrimary ? .warning : .debug)
+    }
+
+    func recordPassList(_ pipeline: WPEPreparedRenderPipeline) {
+        guard isEnabled else { return }
+        var lines: [String] = []
+        for (layerIndex, layer) in pipeline.layers.enumerated() {
+            lines.append("layer[\(layerIndex)] id=\(layer.graphLayer.objectID) name=\(layer.graphLayer.objectName)")
+            for pass in layer.passes {
+                let textures = pass.textureBindings
+                    .sorted { $0.key < $1.key }
+                    .map { "\($0.key)=\(textureReferenceDescription($0.value))" }
+                    .joined(separator: ",")
+                lines.append(
+                    "  pass=\(pass.pass.id) shader=\(pass.pass.shader) source=\(textureReferenceDescription(pass.pass.source)) target=\(targetDescription(pass.pass.target)) blend=\(pass.pass.blending) textures=[\(textures)]"
+                )
+            }
+        }
+        recordNote(name: "pass-list.txt", contents: lines.joined(separator: "\n"))
+        appendLog("[pass-list] wrote \(pipeline.layers.reduce(0) { $0 + $1.passes.count }) pass entries")
+    }
+
+    func recordFirstFrameStats(_ stats: WPEMetalTextureVisualStats) {
+        guard isEnabled else { return }
+        recordNote(name: "first-frame-stats.txt", contents: stats.description)
+        appendLog("[frame.stats] \(stats.oneLineDescription)")
+    }
+
+    func recordResolutionSummary(_ snapshot: WPEResolutionDiagnosticsSnapshot) {
+        guard isEnabled else { return }
+        let counts = snapshot.resolvedByOrigin
+        let dependencyCount = counts.reduce(0) { partial, entry in
+            if case .dependency = entry.key { return partial + entry.value }
+            return partial
+        }
+        var lines: [String] = [
+            "events: \(snapshot.events.count)",
+            "resolved: \(snapshot.resolvedCount)",
+            "missing: \(snapshot.missedRefs.count)",
+            "scene: \(counts[.scene, default: 0])",
+            "builtin: \(counts[.builtin, default: 0])",
+            "engineAssets: \(counts[.engineAssets, default: 0])",
+            "dependency: \(dependencyCount)"
+        ]
+        if !snapshot.missedRefs.isEmpty {
+            lines.append("misses:")
+            lines.append(contentsOf: snapshot.missedRefs.prefix(40).map {
+                "  \($0.ref) -> \($0.finalOutcome.debugLabel)"
+            })
+        }
+        recordNote(name: "resolution-summary.txt", contents: lines.joined(separator: "\n"))
+        appendLog(
+            "[resolution] events=\(snapshot.events.count) resolved=\(snapshot.resolvedCount) missing=\(snapshot.missedRefs.count)"
+        )
+    }
+
+    func drainBindingDiagnosticsForTesting() -> [String] {
+        bindingDiagnosticsLock.lock()
+        defer { bindingDiagnosticsLock.unlock() }
+        let current = bindingDiagnostics
+        bindingDiagnostics.removeAll(keepingCapacity: true)
+        return current
     }
 
     /// Dump a failed shader compile or pipeline build.
@@ -387,6 +473,39 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
 
     private func firstLine(of text: String) -> String {
         text.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+    }
+
+    private func textureReferenceDescription(_ reference: WPETextureReference?) -> String {
+        guard let reference else { return "<primary>" }
+        switch reference {
+        case .image(let path):
+            return "image(\(path))"
+        case .asset(let path):
+            return "asset(\(path))"
+        case .fbo(let name):
+            return "fbo(\(name))"
+        case .previous:
+            return "previous"
+        }
+    }
+
+    private func targetDescription(_ target: WPERenderTarget) -> String {
+        switch target {
+        case .scene:
+            return "scene"
+        case .layerComposite(let name):
+            return "layerComposite(\(name))"
+        case .fbo(let name):
+            return "fbo(\(name))"
+        }
+    }
+
+    private func textureDescription(_ texture: MTLTexture?) -> String {
+        guard let texture else { return "nil" }
+        if let label = texture.label, !label.isEmpty {
+            return label
+        }
+        return "\(texture.width)x\(texture.height):\(texture.pixelFormat.rawValue)"
     }
 
     private func levelTag(_ level: Logger.Level) -> String {

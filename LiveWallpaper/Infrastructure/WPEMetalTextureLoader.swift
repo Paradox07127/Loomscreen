@@ -143,6 +143,11 @@ struct WPEMetalTextureLoader {
                     ]
                 )
                 texture.label = label
+                WPEMetalTextureMetadataRegistry.shared.register(
+                    texture: texture,
+                    imageWidth: cgImage.width,
+                    imageHeight: cgImage.height
+                )
                 return texture
             } catch {
                 throw WPEMetalTextureLoaderError.malformedPayload(error.localizedDescription)
@@ -177,6 +182,11 @@ struct WPEMetalTextureLoader {
             throw WPEMetalTextureLoaderError.textureAllocationFailed
         }
         texture.label = label
+        WPEMetalTextureMetadataRegistry.shared.register(
+            texture: texture,
+            imageWidth: payload.info.imageWidth > 0 ? payload.info.imageWidth : mip.width,
+            imageHeight: payload.info.imageHeight > 0 ? payload.info.imageHeight : mip.height
+        )
 
         let expected = format.expectedByteCount(width: mip.width, height: mip.height)
         guard mip.bytes.count >= expected else {

@@ -53,7 +53,7 @@ struct WPERenderGraphBuilder: Sendable {
     }
 
     private static func compositesToScene(_ object: WPESceneImageObject) -> Bool {
-        object.visible && object.alpha > 0.001
+        object.visible && (object.alpha > 0.001 || object.alphaAnimation != nil)
     }
 
     private static func referencedLayerIDs(in object: WPESceneImageObject) -> Set<String> {
@@ -87,7 +87,8 @@ struct WPERenderGraphBuilder: Sendable {
         finalUntargetedPassToScene: Bool,
         preserveFinalCompositeForScene: Bool
     ) throws -> WPERenderLayer {
-        let materialPath = try resolveMaterialPath(for: object)
+        let model = try resolveModelDescriptor(for: object)
+        let materialPath = model.materialPath
         let compositeA = "_rt_imageLayerComposite_\(object.id)_a"
         let compositeB = "_rt_imageLayerComposite_\(object.id)_b"
 
@@ -161,12 +162,24 @@ struct WPERenderGraphBuilder: Sendable {
             objectName: object.name,
             imagePath: object.imageRelativePath,
             materialPath: materialPath,
+            puppetPath: model.puppetPath,
+            geometry: WPERenderLayerGeometry(
+                origin: object.origin,
+                scale: object.scale,
+                angles: object.angles,
+                alignment: object.alignment,
+                size: object.size,
+                alpha: object.alpha,
+                alphaAnimation: object.alphaAnimation,
+                color: object.color,
+                brightness: object.brightness
+            ),
             compositeA: compositeA,
             compositeB: compositeB,
             localFBOs: context.localFBOs,
             passes: context.finalizedPasses(
                 finalUntargetedPassToScene: finalUntargetedPassToScene,
-                preserveFinalCompositeForScene: preserveFinalCompositeForScene
+                preserveFinalCompositeForScene: preserveFinalCompositeForScene || model.puppetPath != nil
             ),
             parallaxDepth: object.parallaxDepth
         )
@@ -210,22 +223,36 @@ struct WPERenderGraphBuilder: Sendable {
         }
     }
 
-    private func resolveMaterialPath(for object: WPESceneImageObject) throws -> String? {
-        if let material = object.materialRelativePath, !material.isEmpty {
-            return material
-        }
+    private func resolveModelDescriptor(for object: WPESceneImageObject) throws -> WPEModelDescriptor {
+        let explicitMaterial = object.materialRelativePath?.isEmpty == false
+            ? object.materialRelativePath
+            : nil
         if isBuiltinModelPath(object.imageRelativePath) {
-            return object.imageRelativePath
+            return WPEModelDescriptor(materialPath: explicitMaterial ?? object.imageRelativePath, puppetPath: nil)
         }
         let extensionName = (object.imageRelativePath as NSString).pathExtension.lowercased()
         guard extensionName == "json" else {
-            return nil
+            return WPEModelDescriptor(materialPath: explicitMaterial, puppetPath: nil)
         }
-        let dict = try readJSONObject(path: object.imageRelativePath)
-        guard let material = dict["material"] as? String, !material.isEmpty else {
+
+        let dict: [String: Any]
+        do {
+            dict = try readJSONObject(path: object.imageRelativePath)
+        } catch {
+            guard let explicitMaterial else { throw error }
+            return WPEModelDescriptor(materialPath: explicitMaterial, puppetPath: nil)
+        }
+
+        guard let material = explicitMaterial ?? (dict["material"] as? String),
+              !material.isEmpty else {
             throw WPERenderGraphError.materialUnresolved(object.imageRelativePath)
         }
-        return inheritDependencyPrefix(material, from: object.imageRelativePath)
+        let puppetPath = (dict["puppet"] as? String)
+            .flatMap { $0.isEmpty ? nil : inheritDependencyPrefix($0, from: object.imageRelativePath) }
+        return WPEModelDescriptor(
+            materialPath: inheritDependencyPrefix(material, from: object.imageRelativePath),
+            puppetPath: puppetPath
+        )
     }
 
     private func isBuiltinModelPath(_ path: String) -> Bool {
@@ -505,6 +532,11 @@ private struct LayerBuildContext {
         finalized[finalized.count - 1] = lastPass.replacingTarget(.scene)
         return finalized.movingFirstBlendModeToFinalPass()
     }
+}
+
+private struct WPEModelDescriptor {
+    let materialPath: String?
+    let puppetPath: String?
 }
 
 private extension WPERenderTarget {

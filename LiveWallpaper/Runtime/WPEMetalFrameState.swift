@@ -90,6 +90,7 @@ struct WPEMetalFrameState {
 }
 
 struct WPEMetalPipelineKey: Hashable {
+    let vertexName: String
     let fragmentName: String
     let blendMode: String
     let colorPixelFormat: MTLPixelFormat
