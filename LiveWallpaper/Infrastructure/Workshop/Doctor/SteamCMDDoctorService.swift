@@ -256,6 +256,26 @@ final class SteamCMDDoctorService {
         await autoConfigureWorkdirIfNeeded()
     }
 
+    /// Brings the download gate up to date without a manual Doctor visit. The
+    /// probe verdicts are in-memory and reset every launch, so even a fully
+    /// configured install shows a greyed-out Download button until the
+    /// cached-login probe re-runs. When the binary + workdir + a valid username
+    /// are already bound, run that probe once (it's read-only: it checks
+    /// SteamCMD's *existing* cached session, never prompts for or stores a
+    /// password). Safe to call on every Workshop-pane appearance — it re-checks
+    /// while not green (so a fresh Terminal sign-in is picked up) and skips once
+    /// green or while a probe is already in flight.
+    func autoConfirmDownloadReadinessIfNeeded() async {
+        await autoConfigureIfNeeded()
+        guard binaryBookmarkData != nil,
+              workdirBookmarkData != nil,
+              (username.map(SteamCMDScriptWriter.validateUsername) ?? false),
+              !isGreen(.cachedLogin)
+        else { return }
+        if case .running? = probes[.cachedLogin]?.status { return }
+        await runProbe(.cachedLogin)
+    }
+
     /// Picks the working directory without asking: reuse the shared Steam
     /// library when the GUI client is already set up (no separate SteamCMD
     /// sign-in), otherwise an app-managed folder under Application Support.
