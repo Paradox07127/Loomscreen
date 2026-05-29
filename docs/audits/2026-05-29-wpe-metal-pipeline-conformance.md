@@ -114,6 +114,52 @@ Each is independently shippable and corpus-verifiable; none should be applied bl
 
 ---
 
+## 7. Windows/macOS coordinate ground truth (addendum)
+
+WPE is natively **Direct3D (Windows)**. **Metal matches D3D**; **OpenGL is the outlier**. This reframes every coordinate finding: the porting hazard is *inherited OpenGL-style flips* (e.g. from the `linux-wallpaperengine` GL reference) that are **wrong on Metal**.
+
+| Property | D3D (WPE native) | **Metal** | OpenGL |
+|---|---|---|---|
+| NDC/clip Y | +1 = top | **+1 = top (=D3D)** | +1 = top |
+| framebuffer/texture origin | top-left, V-down | **top-left, V-down (=D3D)** | bottom-left, V-up ❗ |
+| depth Z range | [0,1] | **[0,1] (=D3D)** | [-1,1] ❗ |
+| matrix / multiply | HLSL row `mul(v,M)` | column `M*v` | column `M*v` |
+
+**WPE scene space is top-left, Y-DOWN** (moving an object up *decreases* `origin.y`). Proof: `linux-wallpaperengine` `CImage::setup()` must flip `m_pos.y = scene_height/2 - m_pos.y` (X is only recentered; Y is recentered **and flipped**) to adapt WPE Y-down into its GL Y-up camera, and its ortho is `glm::ortho(-w/2,w/2,-h/2,h/2)` (Y-up). So a Metal port needs **exactly one** Y-down→clip-Y-up mapping — not the GL flip pile.
+
+### Re-framed P0-1 (with the correct formula)
+The ortho-matrix path flips Y (`WPEMetalRuntimeUniforms.swift:204`, `top=0,bottom=H`), but the object/particle/text vertex paths feed scene Y straight into Y-up NDC (`WPEMetalRenderExecutor.swift:903`, `WPEMetalBuiltins.metal:73`) → **off-center layers vertically mirrored**. Correct mapping for the built-in geometry path:
+```
+centerNDC.y = (sceneHeight/2 − originY) / (sceneHeight/2)   // negate vs current
+```
+Apply the flip **once** (either Y-down ortho OR vertex negation — never both). **Rotation handedness corollary:** flipping Y reverses spin (CW↔CCW), so `angles.z` must be **negated** when the Y flip is introduced, or every rotated layer turns the wrong way.
+
+### Per-difference verdicts (verified this pass)
+- ✅ **Matrix `mul` order — CORRECT.** `#define mul(x, y) ((y) * (x))` (`WPERenderPipelineBuilder.swift:874`) is exactly the HLSL-row→MSL-column swap. Not a gap.
+- ✅ **Depth range — not the GL [-1,1] trap.** Ortho uses a custom Z pack (`WPEMetalRuntimeUniforms.swift:205-210`), fine for 2D; re-verify only for `solidlayer_depthtest` layers (low pri).
+- ⚠️ **Texture transcoder Y-flip — suspect GL-ism (NEW, P1).** `WPETexMetalTranscoder.swift:207` flips V on the BC→rgba8 CPU path. Metal needs no flip (=D3D, =.tex top-row-first), so the native-BC-sample path and the transcode path may disagree on orientation → upside-down textures on the transcode path. Needs a BC-texture before/after.
+- ⚠️ **`ddx`/`ddy` (P2, refines Stage F):** must emit `dfdx`/`dfdy` (currently `dFdx`/`dFdy` = invalid MSL) **and must NOT negate ddy** — do not copy GL's `dFdy(-(x))`; on Metal no negation is correct (current code already doesn't negate — keep it).
+- ⚠️ **`gl_FragCoord` (when implemented):** use Metal `[[position]]` (top-left) directly; **no** GL `height−y` flip.
+- ⚠️ **Winding/cull:** only matters if culling 3D `.mdl`; set `MTLWinding` to match D3D CW. Low pri (no models in corpus).
+
+### macOS-specific (NOT D3D/Metal) gaps
+- **Pointer Y:** Cocoa mouse is bottom-left/Y-up; code does `y = 1 − localPoint.y/H` → top-left (matches WPE). Verify the host view isn't `isFlipped` (would double-correct). (`WPEMetalRuntimeUniforms.swift:143`)
+- **Retina/backing scale:** render at `drawableSize` (pixels), ortho in scene pixels; normalized pointer is scale-free. Verify drawableSize↔scene-size.
+- **Multi-monitor:** macOS global coords origin = main-display bottom-left, Y-up, neighbors can be negative; Windows top-left. Cross-display pointer/parallax mapping hazard.
+- **Asset path case-sensitivity (NEW, P1/P2):** WPE/Windows is case-INsensitive; Win-authored projects have mixed-case refs (`materials/Util/X.png`). macOS APFS is usually case-insensitive but **case-sensitive volumes exist** → asset lookups fail. The resolver should case-normalize as a fallback.
+- **sRGB/gamma (= P0-4):** the color analog — linear upload + in-shader gamma, not `_srgb`.
+
+### Register additions from this addendum
+- **P0-1** extended with the corrected formula + rotation-handedness sub-bug.
+- **P1-13 (NEW):** texture transcoder Y-flip / dual-BC-path orientation mismatch (`WPETexMetalTranscoder.swift:207`).
+- **P1-14 (NEW):** asset-path case-sensitivity on case-sensitive macOS volumes.
+- **P2 (refined):** `ddx/ddy` → `dfdx/dfdy` (no negation); `gl_FragCoord` top-left on implement; winding for 3D models.
+
+### Ground-truth sources
+linux-wallpaperengine (`CImage.cpp:250-254`, `Camera.cpp`, `ShaderUnit.cpp:30,51`); The Hacks of Life "Keeping the Blue Side Up"; Veldrid backend-differences; Apple `MTLWinding` + MSL spec; Microsoft HLSL matrix ordering.
+
+> Full per-subagent finding records (the 9 stage agents + codex + this coordinate ground-truth agent) are preserved under `docs/audits/2026-05-29-pipeline-audit/`.
+
 ## Sources
 - Official: docs.wallpaperengine.io/en/scene/{shader/{overview,variables,syntax,headers},particles/component/*,effects/effect/blend,parallax/introduction,scenescript/reference/class/ILayer,assets/overview}
 - Community: wallpaper-engine.fandom.com (Shader_Textures, Shader_engine_constants); Steam guide id=770802221; linux-wallpaperengine (TextureParser.cpp / Texture.h / CTexture.cpp); RePKG.
