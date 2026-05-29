@@ -49,6 +49,14 @@ struct WPEShaderTranspiler {
     /// switch to `setFragmentBuffer` first.
     static let uniformSlotMaximum = 256
 
+    /// Number of texture slots the custom-shader path declares/binds.
+    /// WPE shaders use g_Texture0–g_Texture7 (corpus max slot = 7, e.g.
+    /// `effects/blend`). The generated MSL declares tex0…tex(N-1) and the
+    /// dispatcher binds the same range; shaders using only low slots leave the
+    /// rest bound to fallback textures (unchanged behavior). Single source of
+    /// truth — the transpiler guards/signature and the dispatcher all use it.
+    static let customTextureSlotCount = 8
+
     /// Translate a preprocessed WPE fragment shader to MSL.
     static func translateFragment(
         shaderName: String,
@@ -96,18 +104,19 @@ struct WPEShaderTranspiler {
         let sortedSamplers = samplers.sorted { lhs, rhs in
             (Self.textureSlot(for: lhs.name) ?? .max) < (Self.textureSlot(for: rhs.name) ?? .max)
         }
-        guard sortedSamplers.count <= 4 else {
+        guard sortedSamplers.count <= Self.customTextureSlotCount else {
             throw WPEShaderCompilerError.translationFailed(
-                "shader '\(shaderName)' uses \(sortedSamplers.count) samplers; transpiler supports up to 4"
+                "shader '\(shaderName)' uses \(sortedSamplers.count) samplers; transpiler supports up to \(Self.customTextureSlotCount)"
             )
         }
-        // Wallpaper Engine allows sampler slots g_Texture0–g_Texture7, but this
-        // pipeline only declares tex0–tex3 and the dispatcher binds slots 0..<4.
-        // A sampler at slot ≥ 4 would alias to an undeclared `texN` (MSL compile
-        // failure), so reject it explicitly — the engine can't bind it anyway.
-        if let maxSlot = sortedSamplers.compactMap({ Self.textureSlot(for: $0.name) }).max(), maxSlot >= 4 {
+        // WPE allows sampler slots g_Texture0–g_Texture7; the generated MSL
+        // declares tex0…tex(customTextureSlotCount-1) and the dispatcher binds
+        // the same range. A sampler at a higher slot would alias to an
+        // undeclared `texN` (MSL compile failure), so reject it explicitly.
+        if let maxSlot = sortedSamplers.compactMap({ Self.textureSlot(for: $0.name) }).max(),
+           maxSlot >= Self.customTextureSlotCount {
             throw WPEShaderCompilerError.translationFailed(
-                "shader '\(shaderName)' binds texture slot \(maxSlot); transpiler supports slots 0–3"
+                "shader '\(shaderName)' binds texture slot \(maxSlot); transpiler supports slots 0–\(Self.customTextureSlotCount - 1)"
             )
         }
         _ = !varyings.isEmpty || activeSource.contains("v_TexCoord") || activeSource.contains("gl_FragCoord")
@@ -1767,8 +1776,8 @@ struct WPEShaderTranspiler {
         if !uniforms.isEmpty {
             signature.append("    constant WPEUniforms& u [[buffer(0)]],")
         }
-        for slot in 0..<4 {
-            let comma = slot < 3 ? "," : ""
+        for slot in 0..<Self.customTextureSlotCount {
+            let comma = slot < Self.customTextureSlotCount - 1 ? "," : ""
             signature.append("    texture2d<float> tex\(slot) [[texture(\(slot))]]\(comma)")
         }
         signature.append(") {")

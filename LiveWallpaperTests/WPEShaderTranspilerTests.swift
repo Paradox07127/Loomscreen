@@ -356,16 +356,44 @@ struct WPEShaderTranspilerTests {
         #expect(result.mslSource.contains("auto g_Texture1 = tex1;"))
     }
 
-    @Test("Sampler slots above the supported 0–3 range are rejected, not mis-emitted")
-    func rejectsTextureSlotsAboveSupportedRange() throws {
-        // WPE allows g_Texture0–g_Texture7, but this pipeline only binds tex0–tex3.
-        // A slot ≥ 4 must fail cleanly rather than alias to an undeclared texN.
+    @Test("Sampler slot 7 (g_Texture0–g_Texture7) compiles and aliases tex7")
+    func samplerSlot7CompilesAndAliasesTex7() throws {
+        // effects/blend binds g_Texture7; the transpiler must declare tex7 and
+        // alias g_Texture7 → tex7 (previously rejected at the old 0–3 cap, which
+        // aborted the whole scene).
         let source = """
         #version 410 core
-        uniform sampler2D g_Texture5;
+        uniform sampler2D g_Texture0;
+        uniform sampler2D g_Texture7;
         in vec2 v_TexCoord;
         void main() {
-            gl_FragColor = texture(g_Texture5, v_TexCoord);
+            vec4 base = texture(g_Texture0, v_TexCoord);
+            vec4 hi = texture(g_Texture7, v_TexCoord);
+            gl_FragColor = base * hi.a;
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "slot7",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains("auto g_Texture7 = tex7;"))
+        #expect(result.mslSource.contains("texture2d<float> tex7"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("Sampler slots above the supported 0–7 range are rejected, not mis-emitted")
+    func rejectsTextureSlotsAboveSupportedRange() throws {
+        // Slot 8 exceeds the tex0–tex7 binding range and must fail cleanly
+        // rather than alias to an undeclared texN.
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture8;
+        in vec2 v_TexCoord;
+        void main() {
+            gl_FragColor = texture(g_Texture8, v_TexCoord);
         }
         """
         #expect(throws: WPEShaderCompilerError.self) {

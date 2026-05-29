@@ -732,7 +732,7 @@ struct WPEMetalShaderDispatcher {
 
         var primary: MTLTexture? = nil
         var resolvedTexturesBySlot: [Int: MTLTexture] = [:]
-        for slot in 0..<4 {
+        for slot in 0..<WPEShaderTranspiler.customTextureSlotCount {
             let reference = pass.pass.binds[slot]
                 ?? pass.textureBindings[slot]
                 ?? pass.pass.textures[slot]
