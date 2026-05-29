@@ -155,7 +155,14 @@ final class SettingsManager {
         return settings
     }
 
-    // MARK: - Wallpaper Engine History (LRU, capped at 20)
+    // MARK: - Wallpaper Engine History (managed library, LRU-bounded)
+
+    /// Upper bound on the managed library. Each entry embeds a security-scoped
+    /// bookmark (~1–3 KB of JSON) and lives in the single `global-settings.json`
+    /// blob, so this caps that blob's growth rather than guarding a real
+    /// database. 200 covers a large hand-curated library; raise further (or move
+    /// to a dedicated store) if the library is meant to be effectively unbounded.
+    static let maxRecentWPEImports = 200
 
     func recordWPEImport(_ entry: WPEHistoryEntry) {
         var settings = loadGlobalSettings()
@@ -163,8 +170,8 @@ final class SettingsManager {
             $0.origin.workshopID != entry.origin.workshopID
         }
         recent.insert(entry, at: 0)
-        if recent.count > 20 {
-            recent = Array(recent.prefix(20))
+        if recent.count > Self.maxRecentWPEImports {
+            recent = Array(recent.prefix(Self.maxRecentWPEImports))
         }
         settings.recentWPEImports = recent
         saveGlobalSettings(settings)
