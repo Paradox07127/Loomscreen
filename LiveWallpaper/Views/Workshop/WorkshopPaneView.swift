@@ -25,6 +25,10 @@ struct WorkshopPaneView: View {
             header: { header },
             content: { tabBody }
         )
+        .overlay(alignment: .bottomTrailing) {
+            WorkshopDownloadToastHost()
+                .padding(DesignTokens.Spacing.lg)
+        }
         .sheet(isPresented: $isShowingOnboarding) {
             WorkshopOnboardingSheet { isShowingPasteSheet = true }
         }

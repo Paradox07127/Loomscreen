@@ -19,9 +19,22 @@ final class WorkshopDownloadCoordinator {
         case failed(String)
     }
 
+    /// A terminal download outcome, surfaced as a transient toast. The token
+    /// increments per event so re-downloading the same item re-triggers the UI.
+    struct DownloadEvent: Equatable, Sendable {
+        let token: Int
+        let itemID: UInt64
+        let title: String
+        let message: String
+        let isSuccess: Bool
+    }
+
     static let shared = WorkshopDownloadCoordinator()
 
     private(set) var phases: [UInt64: DownloadPhase] = [:]
+    private(set) var lastEvent: DownloadEvent?
+
+    @ObservationIgnored private var eventToken = 0
 
     @ObservationIgnored private let importService: WallpaperEngineImportService
     @ObservationIgnored private var tasks: [UInt64: Task<Void, Never>] = [:]
@@ -43,9 +56,10 @@ final class WorkshopDownloadCoordinator {
     func download(_ item: WorkshopQueryItem, using doctor: SteamCMDDoctorService) {
         let itemID = item.id
         guard !isBusy(itemID) else { return }
+        let title = item.title
         phases[itemID] = .downloading
         tasks[itemID] = Task { [weak self] in
-            await self?.run(itemID: itemID, doctor: doctor)
+            await self?.run(itemID: itemID, title: title, doctor: doctor)
         }
     }
 
@@ -55,7 +69,7 @@ final class WorkshopDownloadCoordinator {
         phases[itemID] = .idle
     }
 
-    private func run(itemID: UInt64, doctor: SteamCMDDoctorService) async {
+    private func run(itemID: UInt64, title: String, doctor: SteamCMDDoctorService) async {
         let result = await doctor.downloadWorkshopItem(itemID) { [weak self] folderURL -> WallpaperEngineImportService.ImportResult? in
             guard let self else { return nil }
             self.phases[itemID] = .importing
@@ -69,27 +83,27 @@ final class WorkshopDownloadCoordinator {
 
         switch result {
         case .imported(let importResult):
-            recordOrFail(importResult, itemID: itemID)
+            finishImport(importResult, itemID: itemID, title: title)
         case .notConfigured(let reason):
-            phases[itemID] = .failed(reason)
+            finish(itemID: itemID, title: title, phase: .failed(reason))
         case .loginRequired:
-            phases[itemID] = .failed(String(localized: "Sign in to SteamCMD in the Doctor (Settings → Workshop) first.", comment: "Workshop download blocked: no cached SteamCMD login."))
+            finish(itemID: itemID, title: title, phase: .failed(String(localized: "Sign in to SteamCMD in the Doctor (Settings → Workshop) first.", comment: "Workshop download blocked: no cached SteamCMD login.")))
         case .notEntitled:
-            phases[itemID] = .failed(String(localized: "This Steam account can't download Wallpaper Engine items — it may not own Wallpaper Engine, or downloads are region-restricted.", comment: "Workshop download blocked: account not entitled."))
+            finish(itemID: itemID, title: title, phase: .failed(String(localized: "This Steam account can't download Wallpaper Engine items — it may not own Wallpaper Engine, or downloads are region-restricted.", comment: "Workshop download blocked: account not entitled.")))
         case .removedFromSteam:
-            phases[itemID] = .failed(String(localized: "This item is no longer available on Steam.", comment: "Workshop download failed: item removed from Steam."))
+            finish(itemID: itemID, title: title, phase: .failed(String(localized: "This item is no longer available on Steam.", comment: "Workshop download failed: item removed from Steam.")))
         case .temporarilyUnavailable:
-            phases[itemID] = .failed(String(localized: "Steam is temporarily unreachable. Try again in a moment.", comment: "Workshop download failed: Steam unreachable."))
+            finish(itemID: itemID, title: title, phase: .failed(String(localized: "Steam is temporarily unreachable. Try again in a moment.", comment: "Workshop download failed: Steam unreachable.")))
         case .timedOut:
-            phases[itemID] = .failed(String(localized: "The download timed out. Try again.", comment: "Workshop download timed out."))
+            finish(itemID: itemID, title: title, phase: .failed(String(localized: "The download timed out. Try again.", comment: "Workshop download timed out.")))
         case .failed(let reason):
-            phases[itemID] = .failed(reason)
+            finish(itemID: itemID, title: title, phase: .failed(reason))
         }
     }
 
-    private func recordOrFail(_ result: WallpaperEngineImportService.ImportResult?, itemID: UInt64) {
+    private func finishImport(_ result: WallpaperEngineImportService.ImportResult?, itemID: UInt64, title: String) {
         guard let result else {
-            phases[itemID] = .failed(String(localized: "Couldn't read the downloaded files.", comment: "Workshop import failed: unreadable download."))
+            finish(itemID: itemID, title: title, phase: .failed(String(localized: "Couldn't read the downloaded files.", comment: "Workshop import failed: unreadable download.")))
             return
         }
         switch result {
@@ -97,10 +111,24 @@ final class WorkshopDownloadCoordinator {
             SettingsManager.shared.recordWPEImport(
                 WPEHistoryEntry(origin: origin, importedAt: Date(), lastUsedAt: nil)
             )
-            phases[itemID] = .succeeded
             logger.info("Imported downloaded Workshop item into the library")
+            finish(itemID: itemID, title: title, phase: .succeeded)
         case .rejected(let reason):
-            phases[itemID] = .failed(reason)
+            finish(itemID: itemID, title: title, phase: .failed(reason))
+        }
+    }
+
+    /// Sets the per-item phase and emits a terminal event for the toast.
+    private func finish(itemID: UInt64, title: String, phase: DownloadPhase) {
+        phases[itemID] = phase
+        eventToken += 1
+        switch phase {
+        case .succeeded:
+            lastEvent = DownloadEvent(token: eventToken, itemID: itemID, title: title, message: String(localized: "Added to your library.", comment: "Workshop download success toast subtitle."), isSuccess: true)
+        case .failed(let message):
+            lastEvent = DownloadEvent(token: eventToken, itemID: itemID, title: title, message: message, isSuccess: false)
+        default:
+            break
         }
     }
 }

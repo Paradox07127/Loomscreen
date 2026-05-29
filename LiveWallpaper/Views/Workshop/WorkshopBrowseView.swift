@@ -29,6 +29,10 @@ struct WorkshopBrowseView: View {
         }
         .frame(minWidth: 880, idealWidth: 960, minHeight: 600, idealHeight: 700)
         .background(DesignTokens.Colors.pageBackground)
+        .overlay(alignment: .bottomTrailing) {
+            WorkshopDownloadToastHost()
+                .padding(DesignTokens.Spacing.lg)
+        }
     }
 
     private var topBar: some View {
