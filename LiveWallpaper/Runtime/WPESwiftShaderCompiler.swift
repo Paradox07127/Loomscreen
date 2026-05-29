@@ -28,10 +28,14 @@ struct WPESwiftShaderCompiler: WPEShaderCompiling {
         }
 
         let translation: WPEShaderTranslationResult
+        let fragmentSource = Self.fragmentSourceByAddingVertexUniformsIfNeeded(
+            fragmentSource: request.processedFragmentSource,
+            vertexSource: request.processedVertexSource
+        )
         do {
             translation = try WPEShaderTranspiler.translateFragment(
                 shaderName: request.shaderName,
-                preprocessedSource: request.processedFragmentSource
+                preprocessedSource: fragmentSource
             )
         } catch let err as WPEShaderCompilerError {
             WPESceneDebugArtifacts.shared.recordShaderFailure(
@@ -101,6 +105,36 @@ struct WPESwiftShaderCompiler: WPEShaderCompiling {
             return nil
         }
         return "perspective vertex varying '\(perspectiveVarying)' requires custom vertex shader translation"
+    }
+
+    private static func fragmentSourceByAddingVertexUniformsIfNeeded(
+        fragmentSource: String,
+        vertexSource: String
+    ) -> String {
+        let existing = Set(uniformDeclarations(in: fragmentSource).map(\.name))
+        let missing = uniformDeclarations(in: vertexSource).filter { uniform in
+            !existing.contains(uniform.name) && shouldExposeVertexUniformToFragment(uniform)
+        }
+        guard !missing.isEmpty else { return fragmentSource }
+        let declarations = missing
+            .map { "uniform \($0.type) \($0.name)\(arraySuffix(for: $0));" }
+            .joined(separator: "\n")
+        return declarations + "\n" + fragmentSource
+    }
+
+    private static func uniformDeclarations(in source: String) -> [WPEUniformDecl] {
+        source.components(separatedBy: .newlines).compactMap { raw in
+            WPEUniformDecl.parse(line: raw.trimmingCharacters(in: .whitespaces))
+        }
+    }
+
+    private static func shouldExposeVertexUniformToFragment(_ uniform: WPEUniformDecl) -> Bool {
+        !uniform.type.hasPrefix("mat") && !uniform.name.hasPrefix("g_Model")
+    }
+
+    private static func arraySuffix(for uniform: WPEUniformDecl) -> String {
+        guard let arrayLength = uniform.arrayLength else { return "" }
+        return "[\(arrayLength)]"
     }
 }
 #endif

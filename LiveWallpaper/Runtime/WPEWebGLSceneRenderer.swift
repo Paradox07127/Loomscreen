@@ -242,6 +242,7 @@ final class WPEWebGLSceneRenderer: NSObject, WPESceneRenderer, WKNavigationDeleg
         let pipeline = try await Task.detached(priority: .userInitiated) {
             try WPERenderPipelineBuilder(
                 cacheRootURL: cacheRoot,
+                dependencyMounts: mounts,
                 engineAssetsRootURL: engineRoot,
                 tracer: tracer
             ).build(graph: graph)

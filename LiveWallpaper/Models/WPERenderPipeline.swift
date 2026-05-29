@@ -14,7 +14,18 @@ struct WPEPreparedRenderLayer: Equatable, Sendable, Identifiable {
     var id: String { graphLayer.id }
 
     let graphLayer: WPERenderLayer
+    let puppetModel: WPEPuppetModel?
     let passes: [WPEPreparedRenderPass]
+
+    init(
+        graphLayer: WPERenderLayer,
+        puppetModel: WPEPuppetModel? = nil,
+        passes: [WPEPreparedRenderPass]
+    ) {
+        self.graphLayer = graphLayer
+        self.puppetModel = puppetModel
+        self.passes = passes
+    }
 }
 
 struct WPEPreparedRenderPass: Equatable, Sendable, Identifiable {
@@ -42,10 +53,14 @@ extension WPEPreparedRenderPipeline {
     ) -> WPEPreparedRenderPipeline {
         WPEPreparedRenderPipeline(
             layers: layers.map { layer in
-                WPEPreparedRenderLayer(
-                    graphLayer: layer.graphLayer,
+                let resolvedGraphLayer = layer.graphLayer.resolved(at: runtimeUniforms.time)
+                return WPEPreparedRenderLayer(
+                    graphLayer: resolvedGraphLayer,
+                    puppetModel: layer.puppetModel,
                     passes: layer.passes.map { pass in
-                        var values = pass.uniformValues
+                        var values = pass.uniformValues.mapValues {
+                            $0.resolved(at: runtimeUniforms.time)
+                        }
                         for (key, value) in runtimeUniforms.uniformValues {
                             values[key] = value
                         }
@@ -62,6 +77,24 @@ extension WPEPreparedRenderPipeline {
                     }
                 )
             }
+        )
+    }
+}
+
+private extension WPERenderLayer {
+    func resolved(at time: Double) -> WPERenderLayer {
+        WPERenderLayer(
+            objectID: objectID,
+            objectName: objectName,
+            imagePath: imagePath,
+            materialPath: materialPath,
+            puppetPath: puppetPath,
+            geometry: geometry.resolved(at: time),
+            compositeA: compositeA,
+            compositeB: compositeB,
+            localFBOs: localFBOs,
+            passes: passes,
+            parallaxDepth: parallaxDepth
         )
     }
 }

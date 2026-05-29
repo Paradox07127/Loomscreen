@@ -67,6 +67,75 @@ struct WPEShaderTranspilerTests {
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
+    @Test("Translated shader uniforms resolve WPE material metadata names and defaults")
+    func translatedShaderUniformsResolveMaterialMetadataNamesAndDefaults() throws {
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform float u_alpha; // {"material":"Opacity","default":1,"range":[0,1]}
+        uniform float u_aperture; // {"material":"Aperture","default":1.25}
+        uniform float u_ratio; // {"material":"Ratio","default":2.39}
+        in vec2 v_TexCoord;
+        void main() {
+            vec4 albedo = texture(g_Texture0, v_TexCoord);
+            gl_FragColor = vec4(albedo.rgb * u_aperture * u_ratio, albedo.a * u_alpha);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "metadata",
+            preprocessedSource: source
+        )
+        let alphaSlot = try #require(result.uniformLayout.first { $0.name == "u_alpha" })
+        let apertureSlot = try #require(result.uniformLayout.first { $0.name == "u_aperture" })
+        let ratioSlot = try #require(result.uniformLayout.first { $0.name == "u_ratio" })
+        #expect(alphaSlot.materialName == "Opacity")
+        #expect(alphaSlot.defaultValue?.numberValue == 1)
+        #expect(apertureSlot.materialName == "Aperture")
+        #expect(ratioSlot.defaultValue?.numberValue == 2.39)
+
+        let pass = WPERenderPass(
+            id: "metadata.0",
+            phase: .effect(file: "effects/metadata/effect.json"),
+            shader: "workshop/metadata",
+            source: .previous,
+            target: .scene,
+            textures: [:],
+            binds: [:],
+            constants: [:],
+            combos: [:],
+            blending: "normal",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let preparedPass = WPEPreparedRenderPass(
+            pass: pass,
+            shader: WPEShaderProgram(
+                name: "workshop/metadata",
+                vertexSource: "",
+                fragmentSource: source,
+                isBuiltin: false
+            ),
+            textureBindings: [:],
+            comboValues: [:],
+            uniformValues: [
+                "Opacity": .number(0.25),
+                "Aperture": .number(2.5)
+            ]
+        )
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+
+        let slots = executor.packTranslatedUniforms(
+            for: preparedPass,
+            layout: result.uniformLayout
+        )
+
+        #expect(abs(slots[alphaSlot.slot].x - 0.25) < 0.0001)
+        #expect(abs(slots[apertureSlot.slot].x - 2.5) < 0.0001)
+        #expect(abs(slots[ratioSlot.slot].x - 2.39) < 0.0001)
+    }
+
     @Test("Type substitutions cover vec/mat families")
     func typeSubstitutions() throws {
         let source = """
@@ -142,6 +211,170 @@ struct WPEShaderTranspilerTests {
         #expect(result.fragmentFunctionName == "wpe_translated_fragment")
         #expect(!result.uniformLayout.isEmpty)
         #expect(result.library.makeFunction(name: "wpe_translated_fragment") != nil)
+    }
+
+    @Test("Project scroll shader uses vertex-computed scroll varying")
+    func projectScrollShaderUsesVertexComputedScrollVarying() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let compiler = WPESwiftShaderCompiler(device: device)
+        let request = WPEShaderCompileRequest(
+            shaderName: "effects/scroll",
+            processedVertexSource: """
+            #version 410 core
+            uniform mat4 g_ModelViewProjectionMatrix;
+            uniform float g_ScrollX;
+            uniform float g_ScrollY;
+            uniform float g_Time;
+            in vec3 a_Position;
+            in vec2 a_TexCoord;
+            out vec2 v_TexCoord;
+            out vec2 v_Scroll;
+            void main() {
+                v_TexCoord = a_TexCoord;
+                v_Scroll = sign(vec2(g_ScrollX, g_ScrollY)) * pow(abs(vec2(g_ScrollX, g_ScrollY)), vec2(2.0)) * g_Time;
+                gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);
+            }
+            """,
+            processedFragmentSource: """
+            #version 410 core
+            uniform sampler2D g_Texture0;
+            uniform vec2 g_Scale;
+            in vec2 v_TexCoord;
+            in vec2 v_Scroll;
+            void main() {
+                vec2 texCoord = fract((v_TexCoord + v_Scroll) * g_Scale);
+                gl_FragColor = texture(g_Texture0, texCoord);
+            }
+            """,
+            sourceHash: "scroll-varying-test",
+            comboValues: [:],
+            textureBindings: [:]
+        )
+
+        let result = try compiler.compile(request)
+
+        #expect(result.uniformLayout.contains { $0.name == "g_ScrollX" })
+        #expect(result.uniformLayout.contains { $0.name == "g_ScrollY" })
+        #expect(result.uniformLayout.contains { $0.name == "g_Time" })
+        #expect(!result.mslSource.contains("float2 v_Scroll = in.uv"))
+        #expect(result.mslSource.contains("wpe_scroll_vector(g_ScrollX, g_ScrollY, g_Time)"))
+    }
+
+    @Test("Project waterwaves shader uses vertex-computed direction and mask UV")
+    func projectWaterwavesShaderUsesVertexComputedDirectionAndMaskUV() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let compiler = WPESwiftShaderCompiler(device: device)
+        let request = WPEShaderCompileRequest(
+            shaderName: "effects/waterwaves",
+            processedVertexSource: """
+            #version 410 core
+            uniform mat4 g_ModelViewProjectionMatrix;
+            uniform vec4 g_Texture1Resolution;
+            uniform float g_Direction;
+            in vec3 a_Position;
+            in vec2 a_TexCoord;
+            out vec4 v_TexCoord;
+            out vec2 v_Direction;
+            void main() {
+                v_TexCoord.xy = a_TexCoord;
+                v_TexCoord.zw = vec2(v_TexCoord.x * g_Texture1Resolution.z / g_Texture1Resolution.x,
+                                     v_TexCoord.y * g_Texture1Resolution.w / g_Texture1Resolution.y);
+                v_Direction = rotateVec2(vec2(0, 1), g_Direction);
+                gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);
+            }
+            """,
+            processedFragmentSource: """
+            #version 410 core
+            uniform sampler2D g_Texture0;
+            uniform sampler2D g_Texture1;
+            uniform float g_Time;
+            uniform float g_Speed;
+            uniform float g_Scale;
+            uniform float g_Strength;
+            in vec4 v_TexCoord;
+            in vec2 v_Direction;
+            void main() {
+                float mask = texture(g_Texture1, v_TexCoord.zw).r;
+                vec2 texCoord = v_TexCoord.xy;
+                float distance = g_Time * g_Speed + dot(texCoord, v_Direction) * g_Scale;
+                texCoord += sin(distance) * vec2(v_Direction.y, -v_Direction.x) * g_Strength * mask;
+                gl_FragColor = texture(g_Texture0, texCoord);
+            }
+            """,
+            sourceHash: "waterwaves-varying-test",
+            comboValues: [:],
+            textureBindings: [:]
+        )
+
+        let result = try compiler.compile(request)
+
+        #expect(result.uniformLayout.contains { $0.name == "g_Direction" })
+        #expect(result.uniformLayout.contains { $0.name == "g_Texture1Resolution" })
+        #expect(!result.mslSource.contains("float2 v_Direction = in.uv"))
+        #expect(result.mslSource.contains("wpe_rotate_vec2(float2(0.0, 1.0), g_Direction)"))
+        #expect(result.mslSource.contains("wpe_texcoord_with_resolution(in.uv, g_Texture1Resolution)"))
+    }
+
+    @Test("Project foliage UV shader uses vertex-computed noise varyings")
+    func projectFoliageUVShaderUsesVertexComputedNoiseVaryings() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let compiler = WPESwiftShaderCompiler(device: device)
+        let request = WPEShaderCompileRequest(
+            shaderName: "effects/foliagesway",
+            processedVertexSource: """
+            #version 410 core
+            uniform mat4 g_ModelViewProjectionMatrix;
+            uniform float g_Strength;
+            uniform float g_NoiseScale;
+            uniform float g_Ratio;
+            uniform float g_Direction;
+            uniform vec4 g_Texture0Resolution;
+            in vec3 a_Position;
+            in vec2 a_TexCoord;
+            out vec4 v_TexCoordNoise;
+            out vec3 v_Params;
+            out vec4 v_TexCoord;
+            void main() {
+                float aspect = g_Texture0Resolution.z / g_Texture0Resolution.w * g_Ratio;
+                v_TexCoordNoise.zw = rotateVec2(vec2(1.0 / aspect, aspect), g_Direction);
+                v_TexCoordNoise.xy = a_TexCoord.xy * g_NoiseScale;
+                v_Params.xy = rotateVec2(a_TexCoord.xy, g_Direction);
+                v_Params.z = g_Strength * g_Strength * 0.005;
+                v_TexCoord.xy = a_TexCoord;
+                gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);
+            }
+            """,
+            processedFragmentSource: """
+            #version 410 core
+            uniform sampler2D g_Texture0;
+            uniform sampler2D g_Texture2;
+            uniform float g_Time;
+            uniform float g_Speed;
+            uniform float g_Power;
+            uniform float g_Phase;
+            in vec4 v_TexCoordNoise;
+            in vec3 v_Params;
+            in vec4 v_TexCoord;
+            void main() {
+                vec3 noise = texture(g_Texture2, v_TexCoordNoise.xy).rgb;
+                float phase = (noise.g * 3.14159265 * 2.0 + v_Params.x * 10.0 + v_Params.y * 5.0) * g_Phase;
+                vec2 offset = vec2(v_TexCoordNoise.z, v_TexCoordNoise.w) * sin(phase + g_Time * g_Speed) * v_Params.z;
+                gl_FragColor = texture(g_Texture0, offset + v_TexCoord.xy);
+            }
+            """,
+            sourceHash: "foliage-varying-test",
+            comboValues: [:],
+            textureBindings: [:]
+        )
+
+        let result = try compiler.compile(request)
+
+        #expect(result.uniformLayout.contains { $0.name == "g_Texture0Resolution" })
+        #expect(result.uniformLayout.contains { $0.name == "g_NoiseScale" })
+        #expect(!result.mslSource.contains("float4 v_TexCoordNoise = float4(in.uv, in.uv)"))
+        #expect(!result.mslSource.contains("float3 v_Params = float3(in.uv, 0.0)"))
+        #expect(result.mslSource.contains("wpe_foliage_texcoord_noise(in.uv"))
+        #expect(result.mslSource.contains("wpe_foliage_params(in.uv"))
     }
 
     @Test("Rejects perspective vertex varyings instead of synthesizing z=0")
@@ -379,5 +612,56 @@ struct WPEShaderTranspilerTests {
         let opts = MTLCompileOptions()
         opts.languageVersion = .version3_0
         _ = try device.makeLibrary(source: mslSource, options: opts)
+    }
+
+    @Test("Generated resource aliases are warning-clean when unused")
+    func generatedResourceAliasesAreWarningCleanWhenUnused() throws {
+        let source = """
+        #version 410 core
+        #define M_PI_F 3.14159265358979323846f
+        uniform sampler2D g_Texture0;
+        uniform sampler2D g_Texture1;
+        uniform float g_Time;
+        in vec2 v_TexCoord;
+        in vec4 v_TexCoordMask;
+        void main() {
+            gl_FragColor = texture(g_Texture0, v_TexCoord);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "unused_generated_aliases",
+            preprocessedSource: source
+        )
+
+        #expect(result.mslSource.contains("[[maybe_unused]] auto g_Texture1 = tex1;"))
+        #expect(result.mslSource.contains("[[maybe_unused]] float g_Time = u.vals[0].x;"))
+        #expect(result.mslSource.contains("[[maybe_unused]] float4 v_TexCoordMask = float4(in.uv, in.uv);"))
+        #expect(!result.mslSource.contains("#define M_PI_F"))
+
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
+    @Test("Generated linear sampler is warning-clean when unused")
+    func generatedLinearSamplerIsWarningCleanWhenUnused() throws {
+        let source = """
+        #version 410 core
+        void main() {
+            gl_FragColor = vec4(1.0);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "unused_linear_sampler",
+            preprocessedSource: source
+        )
+
+        #expect(result.mslSource.contains("[[maybe_unused]] constexpr sampler linearSampler"))
+
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 }

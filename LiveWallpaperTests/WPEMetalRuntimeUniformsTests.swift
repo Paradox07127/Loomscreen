@@ -115,6 +115,7 @@ struct WPEMetalRuntimeUniformsTests {
             objectName: "Layer",
             imagePath: "materials/base.png",
             materialPath: nil,
+            geometry: .identity,
             compositeA: "a",
             compositeB: "b",
             localFBOs: [],
@@ -160,5 +161,136 @@ struct WPEMetalRuntimeUniformsTests {
         #expect(values["g_Brightness"]?.numberValue == 1)
         #expect(values["g_PointerPosition"]?.vectorValue == [0.2, 0.8])
         #expect(values["g_ViewProjectionMatrix"]?.vectorValue?.count == 16)
+    }
+
+    @Test("Animated single shader constants clamp to final keyframe after their duration")
+    func animatedSingleShaderConstantsClampToFinalKeyframe() throws {
+        let animatedAlpha = try #require(Self.animatedScalarConstant(
+            mode: "single",
+            wrapLoop: nil,
+            length: 90,
+            keys: [
+                (0, 1),
+                (60, 1),
+                (90, 0)
+            ]
+        ))
+        let pipeline = Self.pipelineWithUniform("alpha", value: animatedAlpha)
+
+        let prepared = pipeline.addingMetalRuntimeUniforms(
+            WPEMetalRuntimeUniforms(
+                time: 4,
+                daytime: 0,
+                brightness: 1,
+                pointerPosition: SIMD2<Double>(0.5, 0.5)
+            ),
+            camera: .identity
+        )
+
+        #expect(prepared.layers[0].passes[0].uniformValues["alpha"]?.numberValue == 0)
+    }
+
+    @Test("Animated loop shader constants wrap by authored animation length")
+    func animatedLoopShaderConstantsWrapByLength() throws {
+        let animatedAlpha = try #require(Self.animatedScalarConstant(
+            mode: "loop",
+            wrapLoop: true,
+            length: 90,
+            keys: [
+                (0, 0),
+                (30, 1),
+                (90, 0)
+            ]
+        ))
+        let pipeline = Self.pipelineWithUniform("alpha", value: animatedAlpha)
+
+        let prepared = pipeline.addingMetalRuntimeUniforms(
+            WPEMetalRuntimeUniforms(
+                time: 4,
+                daytime: 0,
+                brightness: 1,
+                pointerPosition: SIMD2<Double>(0.5, 0.5)
+            ),
+            camera: .identity
+        )
+
+        #expect(prepared.layers[0].passes[0].uniformValues["alpha"]?.numberValue == 1)
+    }
+
+    private static func animatedScalarConstant(
+        mode: String,
+        wrapLoop: Bool?,
+        length: Int,
+        keys: [(frame: Int, value: Double)]
+    ) -> WPESceneShaderConstantValue? {
+        var options: [String: Any] = [
+            "fps": 30,
+            "length": length,
+            "mode": mode
+        ]
+        options["wraploop"] = wrapLoop as Any
+        return WPEValueParser.shaderConstant([
+            "value": keys.first?.value ?? 0,
+            "animation": [
+                "c0": keys.map { key in
+                    [
+                        "frame": key.frame,
+                        "value": key.value
+                    ]
+                },
+                "options": options
+            ]
+        ])
+    }
+
+    private static func pipelineWithUniform(
+        _ name: String,
+        value: WPESceneShaderConstantValue
+    ) -> WPEPreparedRenderPipeline {
+        let pass = WPERenderPass(
+            id: "opacity.0",
+            phase: .effect(file: "effects/opacity/effect.json"),
+            shader: "effects/opacity",
+            source: .previous,
+            target: .scene,
+            textures: [:],
+            binds: [:],
+            constants: [name: value],
+            combos: [:],
+            blending: "normal",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let layer = WPERenderLayer(
+            objectID: "layer",
+            objectName: "Layer",
+            imagePath: "models/layer.json",
+            materialPath: nil,
+            geometry: .identity,
+            compositeA: "a",
+            compositeB: "b",
+            localFBOs: [],
+            passes: [pass]
+        )
+        return WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: layer,
+                passes: [
+                    WPEPreparedRenderPass(
+                        pass: pass,
+                        shader: WPEShaderProgram(
+                            name: "effects/opacity",
+                            vertexSource: "",
+                            fragmentSource: "",
+                            isBuiltin: true
+                        ),
+                        textureBindings: [:],
+                        comboValues: [:],
+                        uniformValues: [name: value]
+                    )
+                ]
+            )
+        ])
     }
 }

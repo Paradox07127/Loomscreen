@@ -30,11 +30,29 @@ export interface RenderLayerPayload {
   objectName: string;
   imagePath: string;
   materialPath?: string | null;
+  geometry: RenderLayerGeometryPayload;
   compositeA: string;
   compositeB: string;
   parallaxDepth: number;
   localFBOs: RenderFBOPayload[];
   passes: RenderPassPayload[];
+}
+
+export interface RenderLayerGeometryPayload {
+  origin: Vector3Payload;
+  scale: Vector3Payload;
+  angles: Vector3Payload;
+  alignment: string;
+  size?: { width: number; height: number } | null;
+  alpha: number;
+  color: Vector3Payload;
+  brightness: number;
+}
+
+export interface Vector3Payload {
+  x: number;
+  y: number;
+  z: number;
 }
 
 export interface RenderFBOPayload {
@@ -141,11 +159,35 @@ function normalizeLayer(raw: unknown): RenderLayerPayload {
     objectName: (r.object_name ?? r.objectName) as string,
     imagePath: (r.image_path ?? r.imagePath ?? "") as string,
     materialPath: (r.material_path ?? r.materialPath ?? null) as string | null,
+    geometry: normalizeLayerGeometry(r.geometry),
     compositeA: (r.composite_a ?? r.compositeA ?? "") as string,
     compositeB: (r.composite_b ?? r.compositeB ?? "") as string,
     parallaxDepth: (r.parallax_depth ?? r.parallaxDepth ?? 0) as number,
     localFBOs: fbosRaw.map((f) => f as RenderFBOPayload),
     passes: passesRaw.map(normalizePass)
+  };
+}
+
+function normalizeLayerGeometry(raw: unknown): RenderLayerGeometryPayload {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  return {
+    origin: normalizeVector3(r.origin, { x: 0, y: 0, z: 0 }),
+    scale: normalizeVector3(r.scale, { x: 1, y: 1, z: 1 }),
+    angles: normalizeVector3(r.angles, { x: 0, y: 0, z: 0 }),
+    alignment: (r.alignment ?? "center") as string,
+    size: (r.size as { width: number; height: number } | null | undefined) ?? null,
+    alpha: (r.alpha ?? 1) as number,
+    color: normalizeVector3(r.color, { x: 1, y: 1, z: 1 }),
+    brightness: (r.brightness ?? 1) as number
+  };
+}
+
+function normalizeVector3(raw: unknown, fallback: Vector3Payload): Vector3Payload {
+  const r = raw as Record<string, number> | undefined;
+  return {
+    x: r?.x ?? fallback.x,
+    y: r?.y ?? fallback.y,
+    z: r?.z ?? fallback.z
   };
 }
 

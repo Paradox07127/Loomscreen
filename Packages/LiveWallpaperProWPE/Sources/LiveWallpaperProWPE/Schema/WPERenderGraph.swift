@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// Renderer-neutral IR for Wallpaper Engine scene execution.
@@ -21,6 +22,8 @@ public struct WPERenderLayer: Equatable, Sendable, Identifiable {
     public let objectName: String
     public let imagePath: String
     public let materialPath: String?
+    public let puppetPath: String?
+    public let geometry: WPERenderLayerGeometry
     public let compositeA: String
     public let compositeB: String
     public let localFBOs: [WPERenderFBO]
@@ -32,6 +35,8 @@ public struct WPERenderLayer: Equatable, Sendable, Identifiable {
         objectName: String,
         imagePath: String,
         materialPath: String?,
+        puppetPath: String? = nil,
+        geometry: WPERenderLayerGeometry,
         compositeA: String,
         compositeB: String,
         localFBOs: [WPERenderFBO],
@@ -42,12 +47,74 @@ public struct WPERenderLayer: Equatable, Sendable, Identifiable {
         self.objectName = objectName
         self.imagePath = imagePath
         self.materialPath = materialPath
+        self.puppetPath = puppetPath
+        self.geometry = geometry
         self.compositeA = compositeA
         self.compositeB = compositeB
         self.localFBOs = localFBOs
         self.passes = passes
         self.parallaxDepth = parallaxDepth
     }
+}
+
+public struct WPERenderLayerGeometry: Equatable, Sendable {
+    public let origin: SIMD3<Double>
+    public let scale: SIMD3<Double>
+    public let angles: SIMD3<Double>
+    public let alignment: WPESceneAlignment
+    public let size: CGSize?
+    public let alpha: Double
+    public let alphaAnimation: WPESceneAnimatedValue?
+    public let color: SIMD3<Double>
+    public let brightness: Double
+
+    public init(
+        origin: SIMD3<Double>,
+        scale: SIMD3<Double>,
+        angles: SIMD3<Double>,
+        alignment: WPESceneAlignment,
+        size: CGSize?,
+        alpha: Double,
+        alphaAnimation: WPESceneAnimatedValue? = nil,
+        color: SIMD3<Double>,
+        brightness: Double
+    ) {
+        self.origin = origin
+        self.scale = scale
+        self.angles = angles
+        self.alignment = alignment
+        self.size = size
+        self.alpha = alpha
+        self.alphaAnimation = alphaAnimation
+        self.color = color
+        self.brightness = brightness
+    }
+
+    public func resolved(at time: Double) -> WPERenderLayerGeometry {
+        WPERenderLayerGeometry(
+            origin: origin,
+            scale: scale,
+            angles: angles,
+            alignment: alignment,
+            size: size,
+            alpha: alphaAnimation?.scalar(at: time) ?? alpha,
+            alphaAnimation: alphaAnimation,
+            color: color,
+            brightness: brightness
+        )
+    }
+
+    public static let identity = WPERenderLayerGeometry(
+        origin: SIMD3<Double>(0, 0, 0),
+        scale: SIMD3<Double>(1, 1, 1),
+        angles: SIMD3<Double>(0, 0, 0),
+        alignment: .center,
+        size: nil,
+        alpha: 1,
+        alphaAnimation: nil,
+        color: SIMD3<Double>(1, 1, 1),
+        brightness: 1
+    )
 }
 
 public struct WPERenderFBO: Equatable, Sendable {

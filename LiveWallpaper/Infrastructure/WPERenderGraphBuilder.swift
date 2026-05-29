@@ -19,14 +19,76 @@ struct WPERenderGraphBuilder: Sendable {
     }
 
     func build(document: WPESceneDocument) throws -> WPERenderGraph {
+        var objectByID: [String: WPESceneImageObject] = [:]
+        for object in document.imageObjects where objectByID[object.id] == nil {
+            objectByID[object.id] = object
+        }
+
+        let visibleLayerIDs = Set(document.imageObjects
+            .filter(Self.compositesToScene)
+            .map(\.id))
+        var layerIDsToBuild = visibleLayerIDs
+        var pendingIDs = Array(visibleLayerIDs)
+        var layerIDsRequiredAsComposite = Set<String>()
+
+        while let id = pendingIDs.popLast(), let object = objectByID[id] {
+            for dependencyID in Self.referencedLayerIDs(in: object) where objectByID[dependencyID] != nil {
+                layerIDsRequiredAsComposite.insert(dependencyID)
+                if layerIDsToBuild.insert(dependencyID).inserted {
+                    pendingIDs.append(dependencyID)
+                }
+            }
+        }
+
         let layers = try document.imageObjects
-            .filter { $0.visible && $0.alpha > 0.001 }
-            .map(buildLayer)
+            .filter { layerIDsToBuild.contains($0.id) }
+            .map { object in
+                try buildLayer(
+                    object: object,
+                    finalUntargetedPassToScene: visibleLayerIDs.contains(object.id),
+                    preserveFinalCompositeForScene: layerIDsRequiredAsComposite.contains(object.id)
+                )
+            }
         return WPERenderGraph(layers: layers)
     }
 
-    private func buildLayer(object: WPESceneImageObject) throws -> WPERenderLayer {
-        let materialPath = try resolveMaterialPath(for: object)
+    private static func compositesToScene(_ object: WPESceneImageObject) -> Bool {
+        object.visible && (object.alpha > 0.001 || object.alphaAnimation != nil)
+    }
+
+    private static func referencedLayerIDs(in object: WPESceneImageObject) -> Set<String> {
+        var ids = Set(object.dependencies)
+        for effect in object.effects where effect.visible {
+            for passOverride in effect.passOverrides {
+                for texture in passOverride.textures.values {
+                    if let id = layerID(fromCompositeName: texture) {
+                        ids.insert(id)
+                    }
+                }
+            }
+        }
+        return ids
+    }
+
+    private static func layerID(fromCompositeName name: String) -> String? {
+        let prefix = "_rt_imageLayerComposite_"
+        guard name.hasPrefix(prefix),
+              name.hasSuffix("_a") || name.hasSuffix("_b") else {
+            return nil
+        }
+        let start = name.index(name.startIndex, offsetBy: prefix.count)
+        let end = name.index(name.endIndex, offsetBy: -2)
+        guard start < end else { return nil }
+        return String(name[start..<end])
+    }
+
+    private func buildLayer(
+        object: WPESceneImageObject,
+        finalUntargetedPassToScene: Bool,
+        preserveFinalCompositeForScene: Bool
+    ) throws -> WPERenderLayer {
+        let model = try resolveModelDescriptor(for: object)
+        let materialPath = model.materialPath
         let compositeA = "_rt_imageLayerComposite_\(object.id)_a"
         let compositeB = "_rt_imageLayerComposite_\(object.id)_b"
 
@@ -75,7 +137,7 @@ struct WPERenderGraphBuilder: Sendable {
                 case .command(let command, let source, let target):
                     let virtualPass = WPEMaterialPass(
                         shader: "commands/\(command)",
-                        textures: [0: source.map { textureReference($0, ownerPath: effect.fileRelativePath) } ?? .previous],
+                        textures: [0: source ?? .previous],
                         constants: [:],
                         combos: [:],
                         blending: "normal",
@@ -100,10 +162,25 @@ struct WPERenderGraphBuilder: Sendable {
             objectName: object.name,
             imagePath: object.imageRelativePath,
             materialPath: materialPath,
+            puppetPath: model.puppetPath,
+            geometry: WPERenderLayerGeometry(
+                origin: object.origin,
+                scale: object.scale,
+                angles: object.angles,
+                alignment: object.alignment,
+                size: object.size,
+                alpha: object.alpha,
+                alphaAnimation: object.alphaAnimation,
+                color: object.color,
+                brightness: object.brightness
+            ),
             compositeA: compositeA,
             compositeB: compositeB,
             localFBOs: context.localFBOs,
-            passes: context.finalizedPasses(),
+            passes: context.finalizedPasses(
+                finalUntargetedPassToScene: finalUntargetedPassToScene,
+                preserveFinalCompositeForScene: preserveFinalCompositeForScene || model.puppetPath != nil
+            ),
             parallaxDepth: object.parallaxDepth
         )
     }
@@ -146,22 +223,36 @@ struct WPERenderGraphBuilder: Sendable {
         }
     }
 
-    private func resolveMaterialPath(for object: WPESceneImageObject) throws -> String? {
-        if let material = object.materialRelativePath, !material.isEmpty {
-            return material
-        }
+    private func resolveModelDescriptor(for object: WPESceneImageObject) throws -> WPEModelDescriptor {
+        let explicitMaterial = object.materialRelativePath?.isEmpty == false
+            ? object.materialRelativePath
+            : nil
         if isBuiltinModelPath(object.imageRelativePath) {
-            return object.imageRelativePath
+            return WPEModelDescriptor(materialPath: explicitMaterial ?? object.imageRelativePath, puppetPath: nil)
         }
         let extensionName = (object.imageRelativePath as NSString).pathExtension.lowercased()
         guard extensionName == "json" else {
-            return nil
+            return WPEModelDescriptor(materialPath: explicitMaterial, puppetPath: nil)
         }
-        let dict = try readJSONObject(path: object.imageRelativePath)
-        guard let material = dict["material"] as? String, !material.isEmpty else {
+
+        let dict: [String: Any]
+        do {
+            dict = try readJSONObject(path: object.imageRelativePath)
+        } catch {
+            guard let explicitMaterial else { throw error }
+            return WPEModelDescriptor(materialPath: explicitMaterial, puppetPath: nil)
+        }
+
+        guard let material = explicitMaterial ?? (dict["material"] as? String),
+              !material.isEmpty else {
             throw WPERenderGraphError.materialUnresolved(object.imageRelativePath)
         }
-        return inheritDependencyPrefix(material, from: object.imageRelativePath)
+        let puppetPath = (dict["puppet"] as? String)
+            .flatMap { $0.isEmpty ? nil : inheritDependencyPrefix($0, from: object.imageRelativePath) }
+        return WPEModelDescriptor(
+            materialPath: inheritDependencyPrefix(material, from: object.imageRelativePath),
+            puppetPath: puppetPath
+        )
     }
 
     private func isBuiltinModelPath(_ path: String) -> Bool {
@@ -207,14 +298,17 @@ struct WPERenderGraphBuilder: Sendable {
 
     private func loadEffect(path: String) throws -> WPEEffectAsset {
         let dict = try readJSONObject(path: path)
+        let fbos = ((dict["fbos"] as? [Any]) ?? []).compactMap(parseFBO)
+        let declaredFBONames = Set(fbos.map(\.name))
         guard let rawPasses = dict["passes"] as? [Any] else {
             throw WPERenderGraphError.malformedEffect(path)
         }
-        let passes = rawPasses.compactMap { parseEffectPass($0, ownerPath: path) }
+        let passes = rawPasses.compactMap {
+            parseEffectPass($0, ownerPath: path, declaredFBONames: declaredFBONames)
+        }
         guard !passes.isEmpty else {
             throw WPERenderGraphError.malformedEffect(path)
         }
-        let fbos = ((dict["fbos"] as? [Any]) ?? []).compactMap(parseFBO)
         return WPEEffectAsset(path: path, passes: passes, fbos: fbos)
     }
 
@@ -261,9 +355,17 @@ struct WPERenderGraphBuilder: Sendable {
         )
     }
 
-    private func parseEffectPass(_ raw: Any, ownerPath: String) -> WPEEffectPass? {
+    private func parseEffectPass(
+        _ raw: Any,
+        ownerPath: String,
+        declaredFBONames: Set<String>
+    ) -> WPEEffectPass? {
         guard let dict = raw as? [String: Any] else { return nil }
-        let binds = parseBinds(dict["bind"], ownerPath: ownerPath)
+        let binds = parseBinds(
+            dict["bind"],
+            ownerPath: ownerPath,
+            declaredFBONames: declaredFBONames
+        )
         let target = dict["target"] as? String
         if let material = dict["material"] as? String, !material.isEmpty {
             return WPEEffectPass(
@@ -276,7 +378,9 @@ struct WPERenderGraphBuilder: Sendable {
             return WPEEffectPass(
                 kind: .command(
                     command,
-                    source: (dict["source"] as? String).map { inheritDependencyPrefix($0, from: ownerPath) },
+                    source: (dict["source"] as? String).map {
+                        textureReference($0, ownerPath: ownerPath, declaredFBONames: declaredFBONames)
+                    },
                     target: target
                 ),
                 binds: binds,
@@ -300,7 +404,11 @@ struct WPERenderGraphBuilder: Sendable {
         )
     }
 
-    private func parseBinds(_ raw: Any?, ownerPath: String) -> [Int: WPETextureReference] {
+    private func parseBinds(
+        _ raw: Any?,
+        ownerPath: String,
+        declaredFBONames: Set<String> = []
+    ) -> [Int: WPETextureReference] {
         guard let array = raw as? [Any] else { return [:] }
         var result: [Int: WPETextureReference] = [:]
         for entry in array {
@@ -310,7 +418,7 @@ struct WPERenderGraphBuilder: Sendable {
                   !name.isEmpty else {
                 continue
             }
-            result[index] = textureReference(name, ownerPath: ownerPath)
+            result[index] = textureReference(name, ownerPath: ownerPath, declaredFBONames: declaredFBONames)
         }
         return result
     }
@@ -326,9 +434,16 @@ struct WPERenderGraphBuilder: Sendable {
         return result
     }
 
-    private func textureReference(_ name: String, ownerPath: String) -> WPETextureReference {
+    private func textureReference(
+        _ name: String,
+        ownerPath: String,
+        declaredFBONames: Set<String> = []
+    ) -> WPETextureReference {
         if name == "previous" {
             return .previous
+        }
+        if declaredFBONames.contains(name) {
+            return .fbo(name)
         }
         if name.hasPrefix("_") {
             return .fbo(name)
@@ -381,16 +496,57 @@ private struct LayerBuildContext {
     var passes: [WPERenderPass] = []
     var passTargetsWereExplicit: [Bool] = []
 
-    func finalizedPasses() -> [WPERenderPass] {
+    func finalizedPasses(
+        finalUntargetedPassToScene: Bool,
+        preserveFinalCompositeForScene: Bool
+    ) -> [WPERenderPass] {
         guard let lastPass = passes.last,
+              finalUntargetedPassToScene,
               passTargetsWereExplicit.indices.contains(passes.count - 1),
               passTargetsWereExplicit[passes.count - 1] == false else {
             return passes.movingFirstBlendModeToFinalPass()
         }
 
+        if preserveFinalCompositeForScene,
+           let sceneSource = lastPass.target.textureReference {
+            var finalized = passes
+            finalized.append(WPERenderPass(
+                id: "\(object.id).\(passes.count)",
+                phase: .command(file: "materials/util/copy.json"),
+                shader: "materials/util/copy.json",
+                source: sceneSource,
+                target: .scene,
+                textures: [0: sceneSource],
+                binds: [:],
+                constants: [:],
+                combos: [:],
+                blending: lastPass.blending,
+                cullMode: "nocull",
+                depthTest: "disabled",
+                depthWrite: "disabled"
+            ))
+            return finalized.movingFirstBlendModeToFinalPass()
+        }
+
         var finalized = passes
         finalized[finalized.count - 1] = lastPass.replacingTarget(.scene)
         return finalized.movingFirstBlendModeToFinalPass()
+    }
+}
+
+private struct WPEModelDescriptor {
+    let materialPath: String?
+    let puppetPath: String?
+}
+
+private extension WPERenderTarget {
+    var textureReference: WPETextureReference? {
+        switch self {
+        case .layerComposite(let name), .fbo(let name):
+            return .fbo(name)
+        case .scene:
+            return nil
+        }
     }
 }
 
@@ -431,7 +587,7 @@ private struct WPEEffectPass {
 
     enum Kind {
         case material(String)
-        case command(String, source: String?, target: String?)
+        case command(String, source: WPETextureReference?, target: String?)
     }
 }
 

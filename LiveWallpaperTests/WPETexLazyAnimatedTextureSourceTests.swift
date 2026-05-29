@@ -66,6 +66,48 @@ struct WPETexLazyAnimatedTextureSourceTests {
         #expect(frame.width == 2)
     }
 
+    @Test("Rejects lazy frame uploads that exceed the Metal 2D texture size limit")
+    func rejectsLazyFrameUploadsPastTextureLimit() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let image = makeImage(width: 8, height: 8, blue: 0)
+        let mip = WPETexCompressedMipmap(
+            index: 0,
+            width: 8,
+            height: 8,
+            isCompressed: false,
+            compressedBytes: image,
+            decompressedByteCount: image.count
+        )
+        let payload = WPETexStreamingPayload(
+            info: WPETexInfo(
+                containerVersion: 5,
+                infoVersion: 1,
+                width: 8,
+                height: 8,
+                textureFormatCode: WPETexFormat.rgba8888.rawValue,
+                format: .rgba8888,
+                mipmapCount: 1,
+                flags: 0
+            ),
+            compressedImages: [
+                WPETexCompressedImage(width: 8, height: 8, payloads: [mip])
+            ],
+            frames: [
+                WPETexStreamingFrame(imageID: 0, subRect: CGRect(x: 0, y: 0, width: 8, height: 8), duration: 0.1)
+            ],
+            frameRate: 10,
+            loop: true
+        )
+        let source = try WPETexLazyAnimatedTextureSource(
+            payload: payload,
+            device: device,
+            label: "lazy-too-large",
+            maximumTextureDimension2D: 4
+        )
+
+        #expect(source.texture(at: 0) == nil)
+    }
+
     @Test("LZ4-compressed source payload inflates correctly during playback")
     func lz4CompressedPayloadInflatesCorrectly() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
@@ -135,7 +177,7 @@ struct WPETexLazyAnimatedTextureSourceTests {
         return dst.prefix(written)
     }
 
-    private func makeStreamingPayload() -> WPETexStreamingPayload {
+    private func makeStreamingPayload(frames: [WPETexStreamingFrame]? = nil) -> WPETexStreamingPayload {
         let image0 = makeImage(width: 4, height: 4, blue: 0)
         let image1 = makeImage(width: 4, height: 4, blue: 0x40)
         let mip0 = WPETexCompressedMipmap(
@@ -169,7 +211,7 @@ struct WPETexLazyAnimatedTextureSourceTests {
                 WPETexCompressedImage(width: 4, height: 4, payloads: [mip0]),
                 WPETexCompressedImage(width: 4, height: 4, payloads: [mip1])
             ],
-            frames: [
+            frames: frames ?? [
                 WPETexStreamingFrame(imageID: 0, subRect: CGRect(x: 0, y: 0, width: 2, height: 2), duration: 0.1),
                 WPETexStreamingFrame(imageID: 0, subRect: CGRect(x: 2, y: 0, width: 2, height: 2), duration: 0.1),
                 WPETexStreamingFrame(imageID: 1, subRect: CGRect(x: 0, y: 2, width: 2, height: 2), duration: 0.1),

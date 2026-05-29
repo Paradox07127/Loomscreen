@@ -22,6 +22,7 @@ enum WPEMetalRenderExecutorError: Error, Equatable, LocalizedError, Sendable {
     case pipelineStateBuildFailed(name: String, detail: String)
     case unsupportedTarget(WPERenderTarget)
     case missingTexture(WPETextureReference)
+    case renderTargetDimensionsExceedDeviceLimit(targetName: String, width: Int, height: Int, limit: Int)
     case noRenderablePasses
     case commandBufferFailed
 
@@ -77,6 +78,12 @@ enum WPEMetalRenderExecutorError: Error, Equatable, LocalizedError, Sendable {
                 defaultValue: "WPE Metal executor is missing texture \(referenceDescription).",
                 comment: "Error shown when the Metal renderer cannot find a required texture."
             )
+        case .renderTargetDimensionsExceedDeviceLimit(let targetName, let width, let height, let limit):
+            return String(
+                localized: "error.render.executor.render_target_dimensions_exceed_device_limit",
+                defaultValue: "WPE Metal render target '\(targetName)' is \(width)x\(height), exceeding this device's \(limit)x\(limit) 2D texture limit.",
+                comment: "Error shown when a Wallpaper Engine render target is larger than Metal allows on the current GPU."
+            )
         case .noRenderablePasses:
             return String(
                 localized: "error.render.executor.no_renderable_passes",
@@ -93,8 +100,39 @@ enum WPEMetalRenderExecutorError: Error, Equatable, LocalizedError, Sendable {
     }
 }
 
+enum WPEMetalTextureLimits {
+    /// Mirrors Apple's Metal feature-set table for maximum 2D texture
+    /// width/height, so invalid descriptors are rejected before Metal's
+    /// Objective-C validation aborts the current test/app process.
+    static func maximum2DTextureDimension(for device: MTLDevice) -> Int {
+        if device.supportsFamily(.apple10) {
+            return 32_768
+        }
+        if device.supportsFamily(.apple9)
+            || device.supportsFamily(.apple8)
+            || device.supportsFamily(.apple7)
+            || device.supportsFamily(.apple6)
+            || device.supportsFamily(.apple5)
+            || device.supportsFamily(.apple4)
+            || device.supportsFamily(.apple3)
+            || device.supportsFamily(.mac2) {
+            return 16_384
+        }
+        if device.supportsFamily(.apple2) {
+            return 8_192
+        }
+        return 8_192
+    }
+}
+
 struct WPESolidUniforms {
     var color: SIMD4<Float>
+}
+
+struct WPEComposeRegionUniforms {
+    var color: SIMD4<Float>
+    var texture0UVRect: SIMD4<Float>
+    var texture1UVRect: SIMD4<Float>
 }
 
 struct WPECopyUniforms {
@@ -152,6 +190,25 @@ struct WPEGenericImageUniforms {
     var alphaMaskUV: SIMD4<Float>
 }
 
+struct WPEObjectQuadUniforms {
+    /// x/y = center in scene-centered pixel space, z/w = width/height in pixels.
+    var centerAndSize: SIMD4<Float>
+    /// x/y = scene width/height, z = z-axis rotation in radians, w reserved.
+    var sceneSizeAndRotation: SIMD4<Float>
+    /// x/y = UV sign for preserving negative WPE scale mirroring, z/w reserved.
+    var uvSignAndPadding: SIMD4<Float>
+}
+
+struct WPEMetalPuppetVertex {
+    var position: SIMD4<Float>
+    var uv: SIMD4<Float>
+}
+
+struct WPEPuppetMeshUniforms {
+    /// x/y = local layer-composite target size, z/w reserved.
+    var localSizeAndMode: SIMD4<Float>
+}
+
 struct WPEGenericParticleUniforms {
     var color: SIMD4<Float>
     /// x = alpha, y = brightness, z/w = padding (reserved for spectrum
@@ -163,9 +220,9 @@ struct WPEGenericParticleUniforms {
 
 struct WPEOpacityUniforms {
     var opacity: Float
-    var padding0: Float = 0
-    var padding1: Float = 0
-    var padding2: Float = 0
+    var hasMask: Float = 0
+    var maskScaleX: Float = 1
+    var maskScaleY: Float = 1
 }
 
 struct WPEScrollUniforms {

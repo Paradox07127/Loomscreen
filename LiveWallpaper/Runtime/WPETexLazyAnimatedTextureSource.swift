@@ -21,6 +21,7 @@ final class WPETexLazyAnimatedTextureSource: WPEDynamicTextureSource {
         case missingMipmap(Int)
         case decompressionFailed(Int)
         case textureAllocationFailed
+        case textureDimensionsExceedDeviceLimit(width: Int, height: Int, limit: Int)
         case truncatedImageBytes
         case subRectNotBlockAligned(CGRect, blockSize: Int)
     }
@@ -32,6 +33,7 @@ final class WPETexLazyAnimatedTextureSource: WPEDynamicTextureSource {
     private let device: MTLDevice
     private let label: String
     private let mapping: WPEMetalTextureFormatMapping
+    private let maximumTextureDimension2D: Int
     private let frameStartTimes: [TimeInterval]
     private let totalDuration: TimeInterval
 
@@ -52,7 +54,8 @@ final class WPETexLazyAnimatedTextureSource: WPEDynamicTextureSource {
         payload: WPETexStreamingPayload,
         device: MTLDevice,
         label: String,
-        capabilities: WPEMetalTextureCapabilities? = nil
+        capabilities: WPEMetalTextureCapabilities? = nil,
+        maximumTextureDimension2D: Int? = nil
     ) throws {
         guard !payload.frames.isEmpty else { throw Failure.missingFrames }
         guard let format = payload.info.format else {
@@ -70,6 +73,8 @@ final class WPETexLazyAnimatedTextureSource: WPEDynamicTextureSource {
         self.loop = payload.loop
         self.device = device
         self.label = label
+        self.maximumTextureDimension2D = maximumTextureDimension2D
+            ?? WPEMetalTextureLimits.maximum2DTextureDimension(for: device)
 
         var cursor: TimeInterval = 0
         var starts: [TimeInterval] = []
@@ -244,6 +249,7 @@ final class WPETexLazyAnimatedTextureSource: WPEDynamicTextureSource {
             throw Failure.missingCompressedImage(frame.imageID)
         }
         let rect = pixelRect(frame.subRect, width: mipmap.width, height: mipmap.height)
+        try validateTextureDimensions(width: rect.width, height: rect.height)
 
         if let bytesPerPixel = mapping.bytesPerPixel {
             let sourceBytesPerRow = mipmap.width * bytesPerPixel
@@ -330,6 +336,7 @@ final class WPETexLazyAnimatedTextureSource: WPEDynamicTextureSource {
     }
 
     private func textureForUpload(width: Int, height: Int) throws -> MTLTexture {
+        try validateTextureDimensions(width: width, height: height)
         if let texture = workingTexture,
            workingTextureWidth == width,
            workingTextureHeight == height {
@@ -347,11 +354,24 @@ final class WPETexLazyAnimatedTextureSource: WPEDynamicTextureSource {
             throw Failure.textureAllocationFailed
         }
         texture.label = "\(label) lazy frame"
+        WPEMetalTextureMetadataRegistry.shared.register(texture: texture)
         workingTexture = texture
         workingTextureWidth = width
         workingTextureHeight = height
         lastUploadedFrameIndex = -1
         return texture
     }
+
+    private func validateTextureDimensions(width: Int, height: Int) throws {
+        guard width <= maximumTextureDimension2D,
+              height <= maximumTextureDimension2D else {
+            throw Failure.textureDimensionsExceedDeviceLimit(
+                width: width,
+                height: height,
+                limit: maximumTextureDimension2D
+            )
+        }
+    }
+
 }
 #endif

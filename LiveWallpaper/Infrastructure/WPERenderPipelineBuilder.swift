@@ -2,15 +2,24 @@
 import Foundation
 
 struct WPERenderPipelineBuilder: Sendable {
+    private let resolver: WPEMultiRootResourceResolver
     private let shaderLoader: WPEShaderSourceLoader
 
     init(
         cacheRootURL: URL,
+        dependencyMounts: [WPEAssetMount] = [],
         engineAssetsRootURL: URL? = nil,
         tracer: WPEResolutionTracer? = nil
     ) {
+        self.resolver = WPEMultiRootResourceResolver(
+            primaryRootURL: cacheRootURL,
+            dependencyMounts: dependencyMounts,
+            engineAssetsRootURL: engineAssetsRootURL,
+            tracer: tracer
+        )
         self.shaderLoader = WPEShaderSourceLoader(
             cacheRootURL: cacheRootURL,
+            dependencyMounts: dependencyMounts,
             engineAssetsRootURL: engineAssetsRootURL,
             tracer: tracer
         )
@@ -21,9 +30,24 @@ struct WPERenderPipelineBuilder: Sendable {
             let passes = try layer.passes.map { pass in
                 try preparedPass(for: pass)
             }
-            return WPEPreparedRenderLayer(graphLayer: layer, passes: passes)
+            return WPEPreparedRenderLayer(
+                graphLayer: layer,
+                puppetModel: loadPuppetModel(for: layer),
+                passes: passes
+            )
         }
         return WPEPreparedRenderPipeline(layers: layers)
+    }
+
+    private func loadPuppetModel(for layer: WPERenderLayer) -> WPEPuppetModel? {
+        guard let puppetPath = layer.puppetPath else { return nil }
+        do {
+            let url = try resolver.resolveExistingFileURL(relativePath: puppetPath)
+            let data = try Data(contentsOf: url)
+            return try WPEMdlParser.parse(data: data)
+        } catch {
+            return nil
+        }
     }
 
     private func preparedPass(for pass: WPERenderPass) throws -> WPEPreparedRenderPass {
@@ -67,12 +91,13 @@ private struct WPEShaderSourceLoader: Sendable {
 
     init(
         cacheRootURL: URL,
+        dependencyMounts: [WPEAssetMount] = [],
         engineAssetsRootURL: URL? = nil,
         tracer: WPEResolutionTracer? = nil
     ) {
         self.resolver = WPEMultiRootResourceResolver(
             primaryRootURL: cacheRootURL,
-            dependencyMounts: [],
+            dependencyMounts: dependencyMounts,
             engineAssetsRootURL: engineAssetsRootURL,
             tracer: tracer
         )
@@ -761,7 +786,7 @@ private struct WPEShaderSourceLoader: Sendable {
     }
 
     private func parseShaderConstant(_ raw: Any?, type: String) -> WPESceneShaderConstantValue? {
-        if let bool = raw as? Bool {
+        if let bool = WPEValueParser.strictBool(raw) {
             return .bool(bool)
         }
         switch type {
@@ -856,7 +881,6 @@ private struct WPEShaderSourceLoader: Sendable {
             "#define ddx dFdx",
             "#define ddy dFdy",
             "#define fmod(x, y) ((x) - (y) * trunc((x) / (y)))",
-            "#define atan2(y, x) atan((y), (x))",
             "#define CAST2(x) (vec2(x))",
             "#define CAST3(x) (vec3(x))",
             "#define CAST4(x) (vec4(x))",
@@ -864,8 +888,12 @@ private struct WPEShaderSourceLoader: Sendable {
             "#ifndef M_PI",
             "#define M_PI 3.14159265358979323846",
             "#endif",
+            // WPE shader sources use `M_PI_2` as a full turn (2π), not
+            // the mathematical π/2 constant. `shake.frag` and several
+            // workshop audio/shape shaders divide by it to normalize a
+            // complete sine/angle cycle.
             "#ifndef M_PI_2",
-            "#define M_PI_2 1.57079632679489661923",
+            "#define M_PI_2 6.28318530717958647692",
             "#endif",
             "#ifndef M_PI_4",
             "#define M_PI_4 0.78539816339744830962",
@@ -1033,6 +1061,11 @@ private struct WPEShaderSourceLoader: Sendable {
                 else if (blendMode == 31) { result = A + B; }                                         // WPE imageblending LinearDodge / Add
                 else if (blendMode == 7) { result = max(vec3(0.0), A - B); }                         // Subtract
                 else if (blendMode == 8) { result = vec3(1.0) - abs(vec3(1.0) - B - A); }            // Difference
+                return mix(A, result, opacity);
+            }
+
+            vec3 ApplyBlending(int blendMode, vec3 A, vec3 B, vec3 opacity) {
+                vec3 result = ApplyBlending(blendMode, A, B, 1.0);
                 return mix(A, result, opacity);
             }
 

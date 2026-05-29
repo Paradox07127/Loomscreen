@@ -10,6 +10,12 @@ struct WPESolidUniforms {
     float4 color;
 };
 
+struct WPEComposeRegionUniforms {
+    float4 color;
+    float4 texture0UVRect;
+    float4 texture1UVRect;
+};
+
 struct WPECopyUniforms {
     float2 uvOffset;
     float2 padding;
@@ -32,6 +38,74 @@ vertex WPEVertexOut wpe_fullscreen_vertex(uint vertexID [[vertex_id]]) {
     WPEVertexOut out;
     out.position = float4(positions[vertexID], 0.0, 1.0);
     out.uv = uvs[vertexID];
+    return out;
+}
+
+struct WPEObjectQuadUniforms {
+    float4 centerAndSize;        // x,y center in scene-centered pixels; z,w size in pixels
+    float4 sceneSizeAndRotation; // x,y scene size; z rotation around quad center
+    float4 uvSignAndPadding;     // x,y UV sign for negative WPE scale mirroring
+};
+
+vertex WPEVertexOut wpe_object_quad_vertex(
+    uint vertexID [[vertex_id]],
+    constant WPEObjectQuadUniforms& u [[buffer(1)]]
+) {
+    float2 corner;
+    float2 uv;
+    switch (vertexID) {
+        case 0: corner = float2(-0.5, -0.5); uv = float2(0.0, 1.0); break;
+        case 1: corner = float2( 0.5, -0.5); uv = float2(1.0, 1.0); break;
+        case 2: corner = float2(-0.5,  0.5); uv = float2(0.0, 0.0); break;
+        default: corner = float2( 0.5,  0.5); uv = float2(1.0, 0.0); break;
+    }
+
+    float rot = u.sceneSizeAndRotation.z;
+    float c = cos(rot);
+    float s = sin(rot);
+    float2 localPixels = corner * u.centerAndSize.zw;
+    float2 rotatedCorner = float2(
+        c * localPixels.x - s * localPixels.y,
+        s * localPixels.x + c * localPixels.y
+    );
+    float halfWidth = max(u.sceneSizeAndRotation.x, 1.0) * 0.5;
+    float halfHeight = max(u.sceneSizeAndRotation.y, 1.0) * 0.5;
+    float2 centerNDC = float2(
+        u.centerAndSize.x / halfWidth,
+        u.centerAndSize.y / halfHeight
+    );
+    float2 cornerNDC = rotatedCorner / float2(halfWidth, halfHeight);
+    uv = float2(
+        u.uvSignAndPadding.x < 0.0 ? 1.0 - uv.x : uv.x,
+        u.uvSignAndPadding.y < 0.0 ? 1.0 - uv.y : uv.y
+    );
+
+    WPEVertexOut out;
+    out.position = float4(centerNDC + cornerNDC, 0.0, 1.0);
+    out.uv = uv;
+    return out;
+}
+
+struct WPEPuppetVertex {
+    float4 position;
+    float4 uv;
+};
+
+struct WPEPuppetMeshUniforms {
+    float4 localSizeAndMode; // x,y local render target size; z=0 local composite
+};
+
+vertex WPEVertexOut wpe_puppet_mesh_vertex(
+    uint vertexID [[vertex_id]],
+    constant WPEPuppetVertex* vertices [[buffer(0)]],
+    constant WPEPuppetMeshUniforms& u [[buffer(1)]]
+) {
+    WPEPuppetVertex v = vertices[vertexID];
+    float2 halfSize = max(u.localSizeAndMode.xy * 0.5, float2(0.5));
+
+    WPEVertexOut out;
+    out.position = float4(v.position.xy / halfSize, 0.0, 1.0);
+    out.uv = v.uv.xy;
     return out;
 }
 
@@ -82,6 +156,29 @@ fragment half4 wpe_compose_fragment(
     constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
     float4 a = float4(texture0.sample(linearSampler, in.uv));
     float4 b = float4(texture1.sample(linearSampler, in.uv));
+    float4 composed = mix(a, b, b.a);
+    return half4(float4(composed.rgb * uniforms.color.rgb, composed.a * uniforms.color.a));
+}
+
+fragment half4 wpe_compose_region_fragment(
+    WPEVertexOut in [[stage_in]],
+    texture2d<half, access::sample> texture0 [[texture(0)]],
+    texture2d<half, access::sample> texture1 [[texture(1)]],
+    constant WPEComposeRegionUniforms& uniforms [[buffer(0)]]
+) {
+    constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
+    float2 uv0 = clamp(
+        uniforms.texture0UVRect.xy + in.uv * uniforms.texture0UVRect.zw,
+        float2(0.0),
+        float2(1.0)
+    );
+    float2 uv1 = clamp(
+        uniforms.texture1UVRect.xy + in.uv * uniforms.texture1UVRect.zw,
+        float2(0.0),
+        float2(1.0)
+    );
+    float4 a = float4(texture0.sample(linearSampler, uv0));
+    float4 b = float4(texture1.sample(linearSampler, uv1));
     float4 composed = mix(a, b, b.a);
     return half4(float4(composed.rgb * uniforms.color.rgb, composed.a * uniforms.color.a));
 }
@@ -253,9 +350,9 @@ struct WPEGenericParticleUniforms {
 // without a full 4x4 matrix.
 
 struct WPEParticleInstance {
-    float4 positionAndSize;   // x, y, z (unused), size in pixels
+    float4 positionAndSize;   // x, y, signed sprite X scale, size in pixels
     float4 color;             // rgb 0..1, a = current alpha
-    float4 rotationAndLife;   // x = rotationZ rad, y = lifetimeFraction, z = spriteFrameIndex, w reserved
+    float4 rotationAndLife;   // x = rotationZ rad, y = lifetimeFraction, z = spriteFrameIndex, w = signed sprite Y scale
 };
 
 struct WPEParticleVertexOut {
@@ -294,6 +391,11 @@ vertex WPEParticleVertexOut wpe_particle_vertex(
         default: corner = float2( 0.5,  0.5); unitUV = float2(1.0, 0.0); break;
     }
     WPEParticleInstance instance = instances[instanceID];
+    float2 spriteSign = float2(
+        instance.positionAndSize.z < 0.0 ? -1.0 : 1.0,
+        instance.rotationAndLife.w < 0.0 ? -1.0 : 1.0
+    );
+    corner *= spriteSign;
     // Spin the quad in screen space around its center. Z is the only
     // rotation axis we honour for 2D sprite particles; X/Y would need
     // a perspective particle pipeline (flags & 4 in the WPE JSON) that
@@ -445,20 +547,26 @@ fragment half4 wpe_genericparticle_fragment(
 
 struct WPEOpacityUniforms {
     float opacity;
-    float padding0;
-    float padding1;
-    float padding2;
+    float hasMask;
+    float maskScaleX;
+    float maskScaleY;
 };
 
 fragment half4 wpe_effect_opacity_fragment(
     WPEVertexOut in [[stage_in]],
     texture2d<half, access::sample> texture0 [[texture(0)]],
+    texture2d<half, access::sample> texture1 [[texture(1)]],
     constant WPEOpacityUniforms& uniforms [[buffer(0)]]
 ) {
     constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
     float4 sampled = float4(texture0.sample(linearSampler, in.uv));
-    float a = saturate(uniforms.opacity);
-    return half4(float4(sampled.rgb * a, sampled.a * a));
+    float mask = 1.0;
+    if (uniforms.hasMask > 0.5) {
+        float2 maskUV = in.uv * float2(uniforms.maskScaleX, uniforms.maskScaleY);
+        mask = float(texture1.sample(linearSampler, maskUV).r);
+    }
+    float alpha = sampled.a * mask * saturate(uniforms.opacity);
+    return half4(float4(sampled.rgb * alpha, alpha));
 }
 
 struct WPEScrollUniforms {

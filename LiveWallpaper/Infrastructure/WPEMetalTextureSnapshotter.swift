@@ -73,4 +73,121 @@ final class WPEMetalTextureSnapshotter: @unchecked Sendable {
         )
     }
 }
+
+struct WPEMetalTextureVisualBounds: Codable, Equatable, Sendable, CustomStringConvertible {
+    let minX: Int
+    let minY: Int
+    let maxX: Int
+    let maxY: Int
+
+    var width: Int {
+        maxX - minX + 1
+    }
+
+    var height: Int {
+        maxY - minY + 1
+    }
+
+    var description: String {
+        "bounds=(\(minX),\(minY))-(\(maxX),\(maxY)) size=\(width)x\(height)"
+    }
+
+    func coversFullFrame(width: Int, height: Int) -> Bool {
+        minX <= 0 && minY <= 0 && maxX >= width - 1 && maxY >= height - 1
+    }
+}
+
+struct WPEMetalTextureVisualStats: Codable, Equatable, Sendable, CustomStringConvertible {
+    let width: Int
+    let height: Int
+    let nonBlackPixelCount: Int
+    let nonTransparentPixelCount: Int
+    let nonBlackBounds: WPEMetalTextureVisualBounds?
+
+    var isAllBlack: Bool {
+        nonBlackPixelCount == 0
+    }
+
+    var nonBlackCoversFullFrame: Bool {
+        nonBlackBounds?.coversFullFrame(width: width, height: height) ?? false
+    }
+
+    var oneLineDescription: String {
+        let bounds = nonBlackBounds?.description ?? "bounds=nil"
+        return "size=\(width)x\(height) nonBlack=\(nonBlackPixelCount) nonTransparent=\(nonTransparentPixelCount) \(bounds)"
+    }
+
+    var description: String {
+        """
+        width: \(width)
+        height: \(height)
+        nonBlackPixelCount: \(nonBlackPixelCount)
+        nonTransparentPixelCount: \(nonTransparentPixelCount)
+        nonBlackBounds: \(nonBlackBounds?.description ?? "nil")
+        nonBlackCoversFullFrame: \(nonBlackCoversFullFrame)
+        """
+    }
+
+    static func analyze(
+        texture: MTLTexture,
+        colorThreshold: UInt8 = 10,
+        alphaThreshold: UInt8 = 0
+    ) -> WPEMetalTextureVisualStats? {
+        guard texture.width > 0, texture.height > 0 else {
+            return nil
+        }
+        guard texture.pixelFormat == .rgba8Unorm || texture.pixelFormat == .rgba8Unorm_srgb else {
+            return nil
+        }
+
+        let bytesPerPixel = 4
+        let bytesPerRow = texture.width * bytesPerPixel
+        var bytes = [UInt8](repeating: 0, count: bytesPerRow * texture.height)
+        texture.getBytes(
+            &bytes,
+            bytesPerRow: bytesPerRow,
+            from: MTLRegionMake2D(0, 0, texture.width, texture.height),
+            mipmapLevel: 0
+        )
+
+        var nonBlackPixelCount = 0
+        var nonTransparentPixelCount = 0
+        var minX = Int.max
+        var minY = Int.max
+        var maxX = Int.min
+        var maxY = Int.min
+
+        for y in 0..<texture.height {
+            for x in 0..<texture.width {
+                let index = (y * bytesPerRow) + (x * bytesPerPixel)
+                let r = bytes[index]
+                let g = bytes[index + 1]
+                let b = bytes[index + 2]
+                let a = bytes[index + 3]
+                if a > alphaThreshold {
+                    nonTransparentPixelCount += 1
+                }
+                guard r > colorThreshold || g > colorThreshold || b > colorThreshold else {
+                    continue
+                }
+                nonBlackPixelCount += 1
+                minX = min(minX, x)
+                minY = min(minY, y)
+                maxX = max(maxX, x)
+                maxY = max(maxY, y)
+            }
+        }
+
+        let bounds = minX == Int.max
+            ? nil
+            : WPEMetalTextureVisualBounds(minX: minX, minY: minY, maxX: maxX, maxY: maxY)
+        return WPEMetalTextureVisualStats(
+            width: texture.width,
+            height: texture.height,
+            nonBlackPixelCount: nonBlackPixelCount,
+            nonTransparentPixelCount: nonTransparentPixelCount,
+            nonBlackBounds: bounds
+        )
+    }
+}
 #endif
