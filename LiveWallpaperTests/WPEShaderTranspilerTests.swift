@@ -38,6 +38,30 @@ struct WPEShaderTranspilerTests {
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
+    @Test("texSample2DLod / textureLod translates to a Metal level() sample and compiles")
+    func translatesTextureLodFragment() throws {
+        // Mirrors the preprocessor output: texSample2DLod( -> textureLod(.
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        in vec2 v_TexCoord;
+        void main() {
+            gl_FragColor = textureLod(g_Texture0, v_TexCoord, 2.0);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "lod",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains("textureLod(") == false)
+        #expect(result.mslSource.contains("g_Texture0.sample(linearSampler"))
+        #expect(result.mslSource.contains("level("))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
     @Test("Translates a tint-style fragment with vec3 uniform")
     func translatesTintFragment() throws {
         let source = """

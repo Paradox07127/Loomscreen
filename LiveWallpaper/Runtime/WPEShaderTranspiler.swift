@@ -652,6 +652,7 @@ struct WPEShaderTranspiler {
             s = rewriteProgramScopeConstDeclarations(s)
         }
         s = rewriteReservedIdentifiers(s)
+        s = rewriteTextureLodCalls(s)
         s = rewriteTextureCalls(s)
         s = rewriteTexCoordTextureSampleUVFallback(s)
         s = rewriteTextureSampleNarrowing(s)
@@ -1195,6 +1196,63 @@ struct WPEShaderTranspiler {
                     result += replace
                     index = afterIndex
                     continue
+                }
+            }
+            result.append(source[index])
+            index = source.index(after: index)
+        }
+        return result
+    }
+
+    /// Rewrite `textureLod(<sampler>, <uv>, <lod>)` (from WPE's `texSample2DLod`)
+    /// into Metal `<sampler>.sample(linearSampler, <uv>, level(<lod>))`. `level()`
+    /// is the MSL explicit-LOD specifier; without this the literal `textureLod`
+    /// survives and `makeLibrary` fails. Runs before `rewriteTextureCalls` so the
+    /// `texture(` pass never sees `textureLod`.
+    private static func rewriteTextureLodCalls(_ source: String) -> String {
+        var result = ""
+        result.reserveCapacity(source.count)
+        var index = source.startIndex
+        let needle = "textureLod("
+        while index < source.endIndex {
+            if source[index...].hasPrefix(needle) {
+                let priorOK: Bool
+                if index == source.startIndex {
+                    priorOK = true
+                } else {
+                    let p = source[source.index(before: index)]
+                    priorOK = !p.isLetter && !p.isNumber && p != "_"
+                }
+                if priorOK {
+                    var cursor = source.index(index, offsetBy: needle.count)
+                    var depth = 1
+                    var commaIndices: [String.Index] = []
+                    while cursor < source.endIndex && depth > 0 {
+                        let ch = source[cursor]
+                        if ch == "(" { depth += 1 }
+                        else if ch == ")" { depth -= 1 }
+                        else if ch == "," && depth == 1 {
+                            commaIndices.append(cursor)
+                        }
+                        if depth > 0 {
+                            cursor = source.index(after: cursor)
+                        }
+                    }
+                    if let firstComma = commaIndices.first,
+                       let lodComma = commaIndices.last,
+                       firstComma != lodComma,
+                       cursor < source.endIndex {
+                        let argStart = source.index(index, offsetBy: needle.count)
+                        let sampler = source[argStart..<firstComma]
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        let uv = source[source.index(after: firstComma)..<lodComma]
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        let lod = source[source.index(after: lodComma)..<cursor]
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        result += "\(sampler).sample(linearSampler, \(uv), level(\(lod)))"
+                        index = source.index(after: cursor)
+                        continue
+                    }
                 }
             }
             result.append(source[index])
