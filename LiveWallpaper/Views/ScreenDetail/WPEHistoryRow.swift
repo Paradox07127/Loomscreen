@@ -36,10 +36,7 @@ struct WPEHistoryRow: View {
         .wpeProjectCardChrome(isHovering: isHovering, reduceMotion: reduceMotion)
         .onHover { isHovering = $0 }
         .accessibilityElement(children: allowsInlineApply ? .contain : .ignore)
-        .accessibilityLabel(Text(
-            "Imported project: \(entry.origin.title)",
-            comment: "A11y label for an imported project history row card. The placeholder is the project title."
-        ))
+        .accessibilityLabel(accessibilityCardLabel)
         .accessibilityHint(applyAccessibilityHint)
         .contextMenu {
             if allowsInlineApply {
@@ -150,6 +147,21 @@ struct WPEHistoryRow: View {
             .font(.system(size: 11, weight: .semibold))
             .lineLimit(1)
             .frame(maxWidth: .infinity)
+    }
+
+    /// In the inline-apply (Installed) layout the badge is a separately focusable
+    /// child, so the card label stays just the title. In the tap-to-apply (Scene
+    /// tab) layout children are `.ignore`d, so the compatibility badge ("Won't
+    /// run" / "Needs deps") would be silent to VoiceOver — fold it into the label.
+    private var accessibilityCardLabel: Text {
+        let base = Text(
+            "Imported project: \(entry.origin.title)",
+            comment: "A11y label for an imported project history row card. The placeholder is the project title."
+        )
+        if !allowsInlineApply, let badge = compatibilityBadge {
+            return base + Text(verbatim: " — ") + badge.accessibility
+        }
+        return base
     }
 
     private var applyAccessibilityHint: Text {

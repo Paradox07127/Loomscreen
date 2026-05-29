@@ -12,6 +12,7 @@ struct WorkshopSettingsView: View {
 
     @AppStorage("loomscreen.workshop.onboarding.shown.v1") private var onboardingShown: Bool = false
 
+    @State private var engineAssets = WPEEngineAssetsLibrary.shared
     @State private var showingDoctor = false
     @State private var showingKeyEntry = false
     @State private var showingCacheManagement = false
@@ -140,6 +141,27 @@ struct WorkshopSettingsView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            Section {
+                LabeledContent {
+                    engineAssetsControl
+                } label: {
+                    Label("Wallpaper Engine assets", systemImage: "shippingbox")
+                }
+                if let error = engineAssets.lastError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } header: {
+                Text("Scene rendering")
+            } footer: {
+                Text("Optional. Loomscreen bundles clean-room equivalents of the common Wallpaper Engine framework files, so most scenes render without a Wallpaper Engine install. Link one only for extra coverage of scenes that reference uncommon shared assets — read-only access, no files are modified.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .formStyle(.grouped)
         .padding(.horizontal, DesignTokens.Settings.formHorizontalMargin)
@@ -164,6 +186,32 @@ struct WorkshopSettingsView: View {
             }
         }
         .task { await workshopServices.refreshAPIKeyStatus() }
+    }
+
+    @ViewBuilder
+    private var engineAssetsControl: some View {
+        HStack(spacing: DesignTokens.Spacing.xs) {
+            if engineAssets.isAuthorized {
+                Label(engineAssets.engineRootDisplayName ?? String(localized: "Linked", comment: "Engine-assets status when authorized but no display name."), systemImage: "checkmark.seal.fill")
+                    .foregroundStyle(Color.green)
+                    .font(.system(size: 12, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Button("Change") { Task { _ = await engineAssets.requestAccess() } }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("Pick a different Wallpaper Engine install folder")
+                Button("Forget", role: .destructive) { engineAssets.clearAccess() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("Remove access to the Wallpaper Engine install folder")
+            } else {
+                Button("Link folder…") { Task { _ = await engineAssets.requestAccess() } }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("Grant read-only access to a Wallpaper Engine install for extra scene coverage")
+            }
+        }
     }
 
     @ViewBuilder

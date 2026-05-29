@@ -141,12 +141,17 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
         let executor = try WPEMetalRenderExecutor(device: device)
         let resolutionTracer = WPEResolutionTracer()
         let didStartEngineAssetsAccess = engineAssetsRootURL?.startAccessingSecurityScopedResource() ?? false
-        self.activeEngineAssetsRootURL = didStartEngineAssetsAccess ? engineAssetsRootURL : nil
+        // Only feed the engine-assets root to the resolver when its security
+        // scope actually opened — otherwise the resolver would attempt reads
+        // from an unauthorized root and the "fallback disabled" log below would
+        // be a lie.
+        let effectiveEngineAssetsRootURL = didStartEngineAssetsAccess ? engineAssetsRootURL : nil
+        self.activeEngineAssetsRootURL = effectiveEngineAssetsRootURL
         self.entryResolver = SceneResourceResolver(cacheRootURL: cacheRootURL)
         self.resourceResolver = WPEMultiRootResourceResolver(
             primaryRootURL: cacheRootURL,
             dependencyMounts: dependencyMounts,
-            engineAssetsRootURL: engineAssetsRootURL,
+            engineAssetsRootURL: effectiveEngineAssetsRootURL,
             tracer: resolutionTracer
         )
         self.resolutionTracer = resolutionTracer

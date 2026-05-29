@@ -105,7 +105,19 @@ extension WPEEngineAssetsLibrary {
 
         do {
             let resolution = try resolver(bookmarkData)
-            let rootURL = Self.validatedEngineRoot(from: resolution.url) ?? resolution.url
+            // A resolved root that no longer contains `assets/` can't serve any
+            // framework file, so treat it as unauthorized instead of handing a
+            // dead root to the resolver. The bookmark is preserved — the root
+            // may just be temporarily unreachable (e.g. an external drive).
+            guard let rootURL = Self.validatedEngineRoot(from: resolution.url) else {
+                Logger.warning(
+                    "Resolved Wallpaper Engine root has no assets folder; treating as unauthorized: \(resolution.url.path(percentEncoded: false))",
+                    category: .fileAccess
+                )
+                isAuthorized = false
+                engineRootDisplayName = nil
+                return nil
+            }
 
             if resolution.isStale {
                 Logger.info(
@@ -115,13 +127,6 @@ extension WPEEngineAssetsLibrary {
                 if let fresh = try? Self.createReadOnlyBookmark(for: rootURL) {
                     SettingsManager.shared.saveWPEEngineAssetsBookmark(fresh)
                 }
-            }
-
-            if !Self.hasAssetsSubdirectory(rootURL) {
-                Logger.warning(
-                    "Resolved Wallpaper Engine root has no assets folder: \(rootURL.path(percentEncoded: false))",
-                    category: .fileAccess
-                )
             }
 
             isAuthorized = true
@@ -205,6 +210,14 @@ extension WPEEngineAssetsLibrary {
             .resolvingSymlinksInPath()
         if hasAssetsSubdirectory(appResources, fileManager: fileManager) {
             return appResources
+        }
+
+        // The user may have drilled into the `assets` folder itself; its parent
+        // is the canonical root (the resolver appends `assets/` again).
+        if root.lastPathComponent == "assets",
+           directoryExists(root, fileManager: fileManager),
+           hasAssetsSubdirectory(root.deletingLastPathComponent(), fileManager: fileManager) {
+            return root.deletingLastPathComponent()
         }
         return nil
     }
