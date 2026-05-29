@@ -162,10 +162,8 @@ enum WPEMdlParser {
         var skinBlendIndices = SIMD4<Int32>(0, 0, 0, 0)
         var skinBlendWeights = SIMD4<Float>(0, 0, 0, 0)
         if meshFlags & WPEMdlMeshFlags.skinBlendIndices != 0 {
-            // MDLV skin blend indices are 4× little-endian Int32, not floats.
-            // Reading them as Float bit patterns collapses every index to 0
-            // (e.g. 0x00000007 ≈ 7e-44 → rounds to 0), which silently binds
-            // the whole mesh to bone 0.
+            // Skin-blend indices are 4× little-endian Int32 (not floats, which
+            // the old decode misread — collapsing every index to bone 0).
             skinBlendIndices = SIMD4<Int32>(
                 try reader.readInt32(),
                 try reader.readInt32(),
