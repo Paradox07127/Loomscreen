@@ -568,8 +568,10 @@ final class SteamCMDDoctorService {
                     command: nil
                 ))
             } else {
+                let tail = redacted(String(result.stdout.suffix(500)))
+                    .replacingOccurrences(of: "\n", with: " ⏎ ")
                 setProbe(.cachedLogin, status: .red(
-                    message: "Cached-login probe returned an unrecognized response. Use Export diagnostics for the raw output.",
+                    message: "Cached-login probe returned an unrecognized response. Raw tail: \(tail)",
                     command: nil
                 ))
             }
