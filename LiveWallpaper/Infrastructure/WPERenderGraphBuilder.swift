@@ -20,8 +20,10 @@ struct WPERenderGraphBuilder: Sendable {
 
     func build(document: WPESceneDocument) throws -> WPERenderGraph {
         var objectByID: [String: WPESceneImageObject] = [:]
-        for object in document.imageObjects where objectByID[object.id] == nil {
+        var originalIndexByID: [String: Int] = [:]
+        for (index, object) in document.imageObjects.enumerated() where objectByID[object.id] == nil {
             objectByID[object.id] = object
+            originalIndexByID[object.id] = index
         }
 
         let visibleLayerIDs = Set(document.imageObjects
@@ -40,8 +42,14 @@ struct WPERenderGraphBuilder: Sendable {
             }
         }
 
-        let layers = try document.imageObjects
-            .filter { layerIDsToBuild.contains($0.id) }
+        let orderedLayerIDs = Self.topologicallyOrderedLayerIDs(
+            layerIDsToBuild,
+            objectByID: objectByID,
+            originalIndexByID: originalIndexByID
+        )
+
+        let layers = try orderedLayerIDs
+            .compactMap { objectByID[$0] }
             .map { object in
                 try buildLayer(
                     object: object,
@@ -68,6 +76,89 @@ struct WPERenderGraphBuilder: Sendable {
             }
         }
         return ids
+    }
+
+    /// Orders the layers to build so every composite producer is emitted
+    /// before any consumer that references its `_rt_imageLayerComposite_*`
+    /// target. WPE scenes often author a consumer object ahead of the
+    /// producer it samples; the executor walks layers in array order and the
+    /// first frame has no previous named-texture bootstrap, so a producer
+    /// that runs later would surface as a fatal `missingTexture(.fbo)`.
+    ///
+    /// Stable topological sort (Kahn) keyed on the original scene index as a
+    /// tie-breaker, so unrelated layers keep their authored order. A
+    /// dependency cycle is non-fatal: the cyclic remainder is appended in
+    /// scene order and a diagnostic is emitted rather than dropping layers.
+    private static func topologicallyOrderedLayerIDs(
+        _ layerIDs: Set<String>,
+        objectByID: [String: WPESceneImageObject],
+        originalIndexByID: [String: Int]
+    ) -> [String] {
+        func originalIndex(_ id: String) -> Int {
+            originalIndexByID[id] ?? Int.max
+        }
+
+        func originalOrder(_ lhs: String, _ rhs: String) -> Bool {
+            let left = originalIndex(lhs)
+            let right = originalIndex(rhs)
+            if left != right { return left < right }
+            return lhs < rhs
+        }
+
+        let orderedIDs = layerIDs.sorted(by: originalOrder)
+        var inDegree = Dictionary(uniqueKeysWithValues: orderedIDs.map { ($0, 0) })
+        var dependentsByID: [String: Set<String>] = [:]
+
+        for consumerID in orderedIDs {
+            guard let consumer = objectByID[consumerID] else { continue }
+            for dependencyID in referencedLayerIDs(in: consumer)
+            where dependencyID != consumerID
+                && layerIDs.contains(dependencyID)
+                && objectByID[dependencyID] != nil {
+                if dependentsByID[dependencyID, default: []].insert(consumerID).inserted {
+                    inDegree[consumerID, default: 0] += 1
+                }
+            }
+        }
+
+        var ready = orderedIDs.filter { inDegree[$0, default: 0] == 0 }
+        var emitted: [String] = []
+        var emittedIDs = Set<String>()
+
+        while !ready.isEmpty {
+            ready.sort(by: originalOrder)
+            let id = ready.removeFirst()
+            guard emittedIDs.insert(id).inserted else { continue }
+            emitted.append(id)
+
+            let dependents = (dependentsByID[id] ?? []).sorted(by: originalOrder)
+            for dependentID in dependents {
+                let nextDegree = max((inDegree[dependentID] ?? 0) - 1, 0)
+                inDegree[dependentID] = nextDegree
+                if nextDegree == 0 {
+                    ready.append(dependentID)
+                }
+            }
+        }
+
+        if emitted.count < orderedIDs.count {
+            let cyclicRemainder = orderedIDs.filter { !emittedIDs.contains($0) }
+            logCompositeDependencyCycle(cyclicRemainder)
+            emitted.append(contentsOf: cyclicRemainder)
+        }
+
+        return emitted
+    }
+
+    private static func logCompositeDependencyCycle(_ ids: [String]) {
+        guard !ids.isEmpty else { return }
+        let detail = ids.joined(separator: ", ")
+        let message = "WPE render graph composite dependency cycle; preserving scene order for: \(detail)"
+        Logger.warning(message, category: .wpeRender)
+        WPESceneDebugArtifacts.shared.appendLog(
+            "[graph.cycle] \(message)",
+            level: .warning
+        )
     }
 
     private static func layerID(fromCompositeName name: String) -> String? {

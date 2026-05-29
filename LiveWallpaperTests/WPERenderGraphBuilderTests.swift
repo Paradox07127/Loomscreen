@@ -351,6 +351,172 @@ struct WPERenderGraphBuilderTests {
         #expect(maskedLayer.passes.last?.target == .scene)
     }
 
+    @Test("Composite dependency producer is emitted before an earlier consumer")
+    func compositeDependencyProducerIsEmittedBeforeEarlierConsumer() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPERenderGraphBuilderTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        try writeJSON(["material": "materials/consumer.json"], to: root.appendingPathComponent("models/consumer.json"))
+        try writeJSON(["material": "materials/producer.json"], to: root.appendingPathComponent("models/producer.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "genericimage2",
+                "textures": ["consumer_albedo"]
+            ]]
+        ], to: root.appendingPathComponent("materials/consumer.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "genericimage2",
+                "textures": ["producer_albedo"]
+            ]]
+        ], to: root.appendingPathComponent("materials/producer.json"))
+        try writeJSON([
+            "passes": [[
+                "material": "materials/effects/read_composite.json",
+                "bind": [["index": 0, "name": "previous"]]
+            ]]
+        ], to: root.appendingPathComponent("effects/read_composite/effect.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "effects/read_composite",
+                "textures": [NSNull(), "_rt_imageLayerComposite_411_a"]
+            ]]
+        ], to: root.appendingPathComponent("materials/effects/read_composite.json"))
+
+        let scenePayload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1920, "height": 1080, "auto": true]],
+            "objects": [
+                [
+                    "id": 1111,
+                    "name": "Consumer",
+                    "type": "image",
+                    "image": "models/consumer.json",
+                    "effects": [[
+                        "id": 1,
+                        "file": "effects/read_composite/effect.json",
+                        "passes": [[
+                            "textures": [NSNull(), "_rt_imageLayerComposite_411_a"]
+                        ]]
+                    ]]
+                ],
+                [
+                    "id": 411,
+                    "name": "Producer",
+                    "type": "image",
+                    "image": "models/producer.json"
+                ]
+            ]
+        ]
+        let sceneData = try JSONSerialization.data(withJSONObject: scenePayload)
+        let document = try WPESceneDocumentParser.parse(data: sceneData)
+
+        let graph = try WPERenderGraphBuilder(cacheRootURL: root).build(document: document)
+        let ids = graph.layers.map(\.objectID)
+
+        #expect(ids == ["411", "1111"])
+        let producerIndex = try #require(ids.firstIndex(of: "411"))
+        let consumerIndex = try #require(ids.firstIndex(of: "1111"))
+        #expect(producerIndex < consumerIndex)
+        #expect(graph.layers.last?.passes.last?.textures[1] == .fbo("_rt_imageLayerComposite_411_a"))
+    }
+
+    @Test("Unrelated image layers keep their original scene order")
+    func unrelatedImageLayersKeepOriginalSceneOrder() throws {
+        let document = WPESceneDocument(
+            camera: .defaultCamera,
+            general: .defaultGeneral,
+            imageObjects: [
+                plainImageObject(id: "first"),
+                plainImageObject(id: "second"),
+                plainImageObject(id: "third")
+            ],
+            diagnostics: []
+        )
+
+        let graph = try WPERenderGraphBuilder(
+            cacheRootURL: FileManager.default.temporaryDirectory
+        ).build(document: document)
+
+        #expect(graph.layers.map(\.objectID) == ["first", "second", "third"])
+    }
+
+    @Test("Composite dependency cycle keeps all layers in deterministic scene order")
+    func compositeDependencyCycleKeepsAllLayersInDeterministicSceneOrder() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPERenderGraphBuilderTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        try writeJSON(["material": "materials/a.json"], to: root.appendingPathComponent("models/a.json"))
+        try writeJSON(["material": "materials/b.json"], to: root.appendingPathComponent("models/b.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "genericimage2",
+                "textures": ["a_albedo"]
+            ]]
+        ], to: root.appendingPathComponent("materials/a.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "genericimage2",
+                "textures": ["b_albedo"]
+            ]]
+        ], to: root.appendingPathComponent("materials/b.json"))
+        try writeJSON([
+            "passes": [[
+                "material": "materials/effects/read_composite.json",
+                "bind": [["index": 0, "name": "previous"]]
+            ]]
+        ], to: root.appendingPathComponent("effects/read_composite/effect.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "effects/read_composite"
+            ]]
+        ], to: root.appendingPathComponent("materials/effects/read_composite.json"))
+
+        let scenePayload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1920, "height": 1080, "auto": true]],
+            "objects": [
+                [
+                    "id": "A",
+                    "name": "A",
+                    "type": "image",
+                    "image": "models/a.json",
+                    "effects": [[
+                        "id": 1,
+                        "file": "effects/read_composite/effect.json",
+                        "passes": [[
+                            "textures": [NSNull(), "_rt_imageLayerComposite_B_a"]
+                        ]]
+                    ]]
+                ],
+                [
+                    "id": "B",
+                    "name": "B",
+                    "type": "image",
+                    "image": "models/b.json",
+                    "effects": [[
+                        "id": 2,
+                        "file": "effects/read_composite/effect.json",
+                        "passes": [[
+                            "textures": [NSNull(), "_rt_imageLayerComposite_A_a"]
+                        ]]
+                    ]]
+                ]
+            ]
+        ]
+        let sceneData = try JSONSerialization.data(withJSONObject: scenePayload)
+        let document = try WPESceneDocumentParser.parse(data: sceneData)
+
+        let graph = try WPERenderGraphBuilder(cacheRootURL: root).build(document: document)
+
+        #expect(Set(graph.layers.map(\.objectID)) == Set(["A", "B"]))
+        #expect(graph.layers.map(\.objectID) == ["A", "B"])
+    }
+
     @Test("Builds built-in solid layer model without requiring packaged model JSON")
     func buildsBuiltinSolidLayerModel() throws {
         let root = FileManager.default.temporaryDirectory
@@ -631,6 +797,28 @@ struct WPERenderGraphBuilderTests {
         ])
         #expect(layer.passes[1].target == .fbo(name: "blur_start_2"))
         #expect(layer.passes[2].binds[0] == .fbo("blur_start_2"))
+    }
+
+    private func plainImageObject(id: String) -> WPESceneImageObject {
+        WPESceneImageObject(
+            id: id,
+            name: id,
+            imageRelativePath: "materials/\(id).png",
+            materialRelativePath: nil,
+            origin: SIMD3<Double>(0, 0, 0),
+            scale: SIMD3<Double>(1, 1, 1),
+            angles: SIMD3<Double>(0, 0, 0),
+            visible: true,
+            alpha: 1,
+            color: SIMD3<Double>(1, 1, 1),
+            brightness: 1,
+            blendMode: .normal,
+            alignment: .center,
+            size: nil,
+            effects: [],
+            animationLayers: [],
+            parallaxDepth: 0
+        )
     }
 
     private func writeJSON(_ object: Any, to url: URL) throws {
