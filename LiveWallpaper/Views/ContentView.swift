@@ -616,7 +616,7 @@ struct DetailContent: View {
             case .workshop:
                 #if !LITE_BUILD && DIRECT_DISTRIBUTION
                 if featureCatalog.isEnabled(.workshopOnline) {
-                    WorkshopPaneView(allowsTargetSelection: true)
+                    WorkshopPaneView()
                 } else {
                     WorkshopGalleryView(allowsTargetSelection: true)
                 }

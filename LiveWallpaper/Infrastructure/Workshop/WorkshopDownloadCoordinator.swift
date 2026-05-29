@@ -19,22 +19,9 @@ final class WorkshopDownloadCoordinator {
         case failed(String)
     }
 
-    /// A terminal download outcome, surfaced as a transient toast. The token
-    /// increments per event so re-downloading the same item re-triggers the UI.
-    struct DownloadEvent: Equatable, Sendable {
-        let token: Int
-        let itemID: UInt64
-        let title: String
-        let message: String
-        let isSuccess: Bool
-    }
-
     static let shared = WorkshopDownloadCoordinator()
 
     private(set) var phases: [UInt64: DownloadPhase] = [:]
-    private(set) var lastEvent: DownloadEvent?
-
-    @ObservationIgnored private var eventToken = 0
 
     @ObservationIgnored private let importService: WallpaperEngineImportService
     @ObservationIgnored private var tasks: [UInt64: Task<Void, Never>] = [:]
@@ -123,12 +110,21 @@ final class WorkshopDownloadCoordinator {
     /// Sets the per-item phase and emits a terminal event for the toast.
     private func finish(itemID: UInt64, title: String, phase: DownloadPhase) {
         phases[itemID] = phase
-        eventToken += 1
         switch phase {
         case .succeeded:
-            lastEvent = DownloadEvent(token: eventToken, itemID: itemID, title: title, message: String(localized: "Added to your library.", comment: "Workshop download success toast subtitle."), isSuccess: true)
+            WorkshopToastCenter.shared.post(
+                headline: String(localized: "Downloaded", comment: "Workshop download success toast headline."),
+                title: title,
+                message: String(localized: "Added to your library.", comment: "Workshop download success toast subtitle."),
+                isSuccess: true
+            )
         case .failed(let message):
-            lastEvent = DownloadEvent(token: eventToken, itemID: itemID, title: title, message: message, isSuccess: false)
+            WorkshopToastCenter.shared.post(
+                headline: String(localized: "Download failed", comment: "Workshop download failure toast headline."),
+                title: title,
+                message: message,
+                isSuccess: false
+            )
         default:
             break
         }

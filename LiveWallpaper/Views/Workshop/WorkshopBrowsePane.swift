@@ -17,8 +17,10 @@ struct WorkshopBrowsePane: View {
 
     private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
+    // Smaller tiles than before (was 260–360) so more wallpapers fit per row;
+    // closer to the Bookmarks / Aerials gallery density.
     private var gridColumns: [GridItem] {
-        [GridItem(.adaptive(minimum: 260, maximum: 360), spacing: DesignTokens.Spacing.lg)]
+        [GridItem(.adaptive(minimum: 200, maximum: 260), spacing: DesignTokens.Spacing.lg)]
     }
 
     var body: some View {

@@ -1,12 +1,13 @@
 #if !LITE_BUILD && DIRECT_DISTRIBUTION
 import SwiftUI
 
-/// Bottom-trailing toast announcing a finished Workshop download (success or
-/// the failure reason). Observes the shared download coordinator, so it fires
-/// even after the detail sheet that started the download has been dismissed.
+/// Bottom-trailing toast announcing a finished Workshop action (a SteamCMD
+/// download or a local folder import — success or the failure reason). Observes
+/// the shared `WorkshopToastCenter`, so it fires even after the detail sheet or
+/// panel that started the action has been dismissed.
 struct WorkshopDownloadToastHost: View {
-    private let coordinator = WorkshopDownloadCoordinator.shared
-    @State private var shown: WorkshopDownloadCoordinator.DownloadEvent?
+    private let center = WorkshopToastCenter.shared
+    @State private var shown: WorkshopToastEvent?
 
     var body: some View {
         VStack {
@@ -16,10 +17,10 @@ struct WorkshopDownloadToastHost: View {
             }
         }
         .animation(.easeOut(duration: 0.2), value: shown?.token)
-        // Reading `lastEvent` here ties this host to the @Observable coordinator
+        // Reading `lastEvent` here ties this host to the @Observable center
         // so each new terminal outcome re-fires the toast.
-        .onChange(of: coordinator.lastEvent?.token) { _, _ in
-            if let event = coordinator.lastEvent { shown = event }
+        .onChange(of: center.lastEvent?.token) { _, _ in
+            if let event = center.lastEvent { shown = event }
         }
         .task(id: shown?.token) {
             guard let event = shown else { return }
@@ -29,7 +30,7 @@ struct WorkshopDownloadToastHost: View {
         }
     }
 
-    private func toast(_ event: WorkshopDownloadCoordinator.DownloadEvent) -> some View {
+    private func toast(_ event: WorkshopToastEvent) -> some View {
         let tint = event.isSuccess ? Color.green : Color.red
         return HStack(spacing: 10) {
             ZStack {
@@ -39,14 +40,14 @@ struct WorkshopDownloadToastHost: View {
                     .foregroundStyle(tint)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(event.isSuccess ? "Downloaded" : "Download failed")
+                Text(verbatim: event.headline)
                     .font(.system(size: 13, weight: .semibold))
-                Text(event.title)
+                Text(verbatim: event.title)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Text(event.message)
+                Text(verbatim: event.message)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .lineLimit(2)
@@ -73,9 +74,7 @@ struct WorkshopDownloadToastHost: View {
         }
         .shadow(color: .black.opacity(0.18), radius: 14, x: 0, y: 6)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(Text(event.isSuccess
-            ? "Downloaded \(event.title). \(event.message)"
-            : "Download failed for \(event.title). \(event.message)"))
+        .accessibilityLabel(Text(verbatim: "\(event.headline): \(event.title). \(event.message)"))
     }
 }
 #endif

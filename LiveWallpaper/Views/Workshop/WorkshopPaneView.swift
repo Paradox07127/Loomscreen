@@ -7,13 +7,12 @@ import SwiftUI
 /// this pane owns the chrome); "Browse Online" embeds the online catalog. A
 /// "+" action keeps the paste-by-URL flow one click away.
 struct WorkshopPaneView: View {
-    let allowsTargetSelection: Bool
-
     @Environment(WorkshopServices.self) private var services
     @Environment(SteamCMDDoctorService.self) private var doctor
     @AppStorage("loomscreen.workshop.pane.selectedTab.v1") private var selectedTab: WorkshopPaneTab = .installed
     @AppStorage("loomscreen.workshop.onboarding.shown.v1") private var onboardingShown: Bool = false
 
+    @State private var folderImport = WorkshopFolderImportCoordinator.shared
     @State private var browseViewModel: WorkshopBrowseViewModel?
     @State private var isShowingPasteSheet = false
     @State private var isShowingOnboarding = false
@@ -63,6 +62,23 @@ struct WorkshopPaneView: View {
             actions: {
                 AdaptiveGlassContainer(spacing: 8) {
                     HStack(spacing: 8) {
+                        if selectedTab == .installed {
+                            Button {
+                                folderImport.presentImportPanel()
+                            } label: {
+                                if folderImport.isImporting {
+                                    ProgressView().controlSize(.small)
+                                } else {
+                                    Image(systemName: "folder.badge.plus")
+                                }
+                            }
+                            .adaptiveGlassButton(.regular)
+                            .controlSize(.regular)
+                            .disabled(folderImport.isImporting)
+                            .help(Text("Import Wallpaper Engine projects from a folder"))
+                            .accessibilityLabel(Text("Import from folder"))
+                        }
+
                         Button {
                             presentPasteFlow()
                         } label: {
@@ -105,7 +121,7 @@ struct WorkshopPaneView: View {
     private var tabBody: some View {
         switch selectedTab {
         case .installed:
-            WorkshopInstalledView(allowsTargetSelection: allowsTargetSelection)
+            WorkshopInstalledView()
         case .browseOnline:
             browseTab
         }
