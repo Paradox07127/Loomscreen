@@ -39,6 +39,14 @@
 	<true/>
 	<key>com.apple.security.network.client</key>
 	<true/>
+	<!--
+	    SteamCMD's networking (Steam datagram / UDP) explicitly bind()s a local
+	    socket, which the sandbox treats as a server operation. Without this the
+	    bind fails with EPERM ("CreateBoundSocket … Operation not permitted") and
+	    login reports "No Connection". Required for SteamCMD to connect.
+	-->
+	<key>com.apple.security.network.server</key>
+	<true/>
 	<key>com.apple.security.personal-information.location</key>
 	<true/>
 </dict>
