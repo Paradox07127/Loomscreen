@@ -89,22 +89,42 @@ vertex WPEVertexOut wpe_object_quad_vertex(
 struct WPEPuppetVertex {
     float4 position;
     float4 uv;
+    int4 skinIndices;
+    float4 skinWeights;
 };
 
 struct WPEPuppetMeshUniforms {
-    float4 localSizeAndMode; // x,y local render target size; z=0 local composite
+    float4 localSizeAndMode; // x,y local render target size; z=active bone palette count
 };
 
 vertex WPEVertexOut wpe_puppet_mesh_vertex(
     uint vertexID [[vertex_id]],
     constant WPEPuppetVertex* vertices [[buffer(0)]],
-    constant WPEPuppetMeshUniforms& u [[buffer(1)]]
+    constant WPEPuppetMeshUniforms& u [[buffer(1)]],
+    constant float4x4* bonePalette [[buffer(2)]]
 ) {
     WPEPuppetVertex v = vertices[vertexID];
     float2 halfSize = max(u.localSizeAndMode.xy * 0.5, float2(0.5));
 
+    // MDLV positions are puppet-warp source coordinates in bone-local space.
+    // The bone palette holds each bone's composed rest-world transform, so
+    // linear-blend skinning places every island at its bone's rest pose.
+    float4 localPosition = float4(v.position.xyz, 1.0);
+    float4 skinnedPosition = localPosition;
+    float weightSum = dot(v.skinWeights, float4(1.0));
+    if (u.localSizeAndMode.z > 0.5 && weightSum > 0.0001) {
+        int boneCount = max(int(u.localSizeAndMode.z), 1);
+        int4 boneIndices = clamp(v.skinIndices, int4(0), int4(boneCount - 1));
+        skinnedPosition =
+            (bonePalette[boneIndices.x] * localPosition) * v.skinWeights.x +
+            (bonePalette[boneIndices.y] * localPosition) * v.skinWeights.y +
+            (bonePalette[boneIndices.z] * localPosition) * v.skinWeights.z +
+            (bonePalette[boneIndices.w] * localPosition) * v.skinWeights.w;
+        skinnedPosition /= weightSum;
+    }
+
     WPEVertexOut out;
-    out.position = float4(v.position.xy / halfSize, 0.0, 1.0);
+    out.position = float4(skinnedPosition.xy / halfSize, 0.0, 1.0);
     out.uv = v.uv.xy;
     return out;
 }

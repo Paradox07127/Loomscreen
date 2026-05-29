@@ -4,6 +4,7 @@ import Foundation
 import LiveWallpaperProWPE
 import Metal
 import MetalKit
+import simd
 
 final class WPEMetalRenderExecutor {
     /// Phase 2A H3: every offscreen target and the on-screen swapchain share
@@ -12,6 +13,10 @@ final class WPEMetalRenderExecutor {
     /// rendered gamma matches the SpriteKit/CGImage fallback on the same
     /// scene fixture.
     static let outputPixelFormat: MTLPixelFormat = .rgba8Unorm_srgb
+
+    /// Bone palette is uploaded via `setVertexBytes` (≤4KB Metal limit);
+    /// 64 × 64-byte float4x4 = 4KB. Puppets with more bones keep the static path.
+    private static let maxPuppetBonePaletteEntries = 64
 
     /// Debug bisect flag: when `defaults write Taijia.LiveWallpaper
     /// WPEMetalBypassEffects -bool YES` is in effect (and the binary is
@@ -600,12 +605,13 @@ final class WPEMetalRenderExecutor {
     ) throws -> Bool {
         guard case .material = pass.pass.phase,
               case .layerComposite = pass.pass.target,
-              let meshes = puppetModel?.meshes.filter({
-                  !$0.vertices.isEmpty && !$0.indices.isEmpty
-              }),
-              !meshes.isEmpty else {
+              let puppetModel else {
             return false
         }
+        let meshes = puppetModel.meshes.filter {
+            !$0.vertices.isEmpty && !$0.indices.isEmpty
+        }
+        guard !meshes.isEmpty else { return false }
 
         let normalizedShader = WPEMetalShaderInputs.normalizedBuiltinShaderName(pass.pass.shader)
         guard normalizedShader == "genericimage2" || normalizedShader == "genericimage4" else {
@@ -655,11 +661,20 @@ final class WPEMetalRenderExecutor {
         var uniforms = genericImageUniforms(for: pass, layer: layer, hasMask: hasMask)
         encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEGenericImageUniforms>.stride, index: 0)
 
+        let bonePalette = Self.restBonePalette(for: puppetModel)
+        // Palette ships via setVertexBytes (≤4KB); puppets over the cap keep the
+        // static path (activeBoneCount == 0) rather than mis-skinning clamped indices.
+        let activeBoneCount = bonePalette.count <= Self.maxPuppetBonePaletteEntries
+            ? bonePalette.count
+            : 0
+        let boundBonePalette = activeBoneCount > 0
+            ? bonePalette
+            : [matrix_identity_float4x4]
         var meshUniforms = WPEPuppetMeshUniforms(
             localSizeAndMode: SIMD4<Float>(
                 Float(max(destination.texture.width, 1)),
                 Float(max(destination.texture.height, 1)),
-                0,
+                Float(activeBoneCount),
                 0
             )
         )
@@ -668,12 +683,19 @@ final class WPEMetalRenderExecutor {
             length: MemoryLayout<WPEPuppetMeshUniforms>.stride,
             index: 1
         )
+        boundBonePalette.withUnsafeBytes { rawBuffer in
+            if let base = rawBuffer.baseAddress {
+                encoder.setVertexBytes(base, length: rawBuffer.count, index: 2)
+            }
+        }
 
         for mesh in meshes {
             let vertices = mesh.vertices.map { vertex in
                 WPEMetalPuppetVertex(
                     position: SIMD4<Float>(vertex.position.x, vertex.position.y, vertex.position.z, 0),
-                    uv: SIMD4<Float>(vertex.uv.x, vertex.uv.y, 0, 0)
+                    uv: SIMD4<Float>(vertex.uv.x, vertex.uv.y, 0, 0),
+                    skinIndices: vertex.skinBlendIndices,
+                    skinWeights: vertex.skinBlendWeights
                 )
             }
             let vertexBuffer = vertices.withUnsafeBytes { rawBuffer in
@@ -716,6 +738,33 @@ final class WPEMetalRenderExecutor {
             }
         }
         return true
+    }
+
+    /// Composes each bone's rest-world transform from the MDLS hierarchy.
+    /// MDLS matrices are LOCAL (parent-relative): restWorld[b] =
+    /// restWorld[parent] · restLocal[b]. Bones are stored parent-before-child
+    /// (parent index < own index), so a single forward pass suffices.
+    private static func restBonePalette(for puppetModel: WPEPuppetModel) -> [simd_float4x4] {
+        func localMatrix(_ bone: WPEPuppetBone) -> simd_float4x4 {
+            guard bone.rawMatrix.count >= 16 else { return matrix_identity_float4x4 }
+            let m = bone.rawMatrix
+            return simd_float4x4(
+                SIMD4<Float>(m[0], m[1], m[2], m[3]),
+                SIMD4<Float>(m[4], m[5], m[6], m[7]),
+                SIMD4<Float>(m[8], m[9], m[10], m[11]),
+                SIMD4<Float>(m[12], m[13], m[14], m[15])
+            )
+        }
+        var world = [simd_float4x4](repeating: matrix_identity_float4x4, count: puppetModel.bones.count)
+        for (index, bone) in puppetModel.bones.enumerated() {
+            let local = localMatrix(bone)
+            if let parent = bone.parentIndex, parent >= 0, parent < index {
+                world[index] = world[parent] * local
+            } else {
+                world[index] = local
+            }
+        }
+        return world
     }
 
     /// Breaks the `_rt_*` scene-alias hazard.
