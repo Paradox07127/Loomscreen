@@ -18,6 +18,7 @@ final class WorkshopFolderImportCoordinator {
 
     private(set) var isImporting = false
 
+    @ObservationIgnored private var isIngesting = false
     @ObservationIgnored private let importService: WallpaperEngineImportService
     @ObservationIgnored private let fileManager: FileManager
     @ObservationIgnored private let logger = os.Logger(subsystem: "com.loomscreen.livewallpaper", category: "WorkshopFolderImport")
@@ -68,26 +69,58 @@ final class WorkshopFolderImportCoordinator {
         }
 
         var imported = 0
-        var skipped = 0
         for projectFolder in projectFolders {
-            do {
-                switch try await importService.importProject(folder: projectFolder) {
-                case .ready(_, let origin), .unsupported(let origin):
-                    SettingsManager.shared.recordWPEImport(
-                        WPEHistoryEntry(origin: origin, importedAt: Date(), lastUsedAt: nil)
-                    )
-                    imported += 1
-                case .rejected(let reason):
-                    skipped += 1
-                    logger.info("Skipped a project during folder import: \(reason, privacy: .public)")
-                }
-            } catch {
-                skipped += 1
-                logger.info("Failed to read a project during folder import: \(error.localizedDescription, privacy: .public)")
-            }
+            if await importOne(projectFolder) { imported += 1 }
         }
 
-        emitSummary(folder: folder, imported: imported, skipped: skipped)
+        emitSummary(folder: folder, imported: imported, skipped: projectFolders.count - imported)
+    }
+
+    /// Reconciles the managed library with what SteamCMD has on disk: imports
+    /// every downloaded project that isn't already recorded, so the Installed
+    /// tab reflects the SteamCMD download folder by default — including items
+    /// downloaded manually or before this ran. Silent unless it actually adds
+    /// something; re-runs are cheap (a directory scan + a set check).
+    func ingestSteamCMDDownloads(using doctor: SteamCMDDoctorService) async {
+        guard !isIngesting, !isImporting else { return }
+        isIngesting = true
+        defer { isIngesting = false }
+
+        let known = Set(SettingsManager.shared.loadGlobalSettings().recentWPEImports.map(\.origin.workshopID))
+        var added = 0
+        await doctor.enumerateDownloadedItemFolders { [weak self] folder in
+            guard let self else { return }
+            guard !known.contains(folder.lastPathComponent) else { return }
+            if await self.importOne(folder) { added += 1 }
+        }
+
+        guard added > 0 else { return }
+        WorkshopToastCenter.shared.post(
+            headline: String(localized: "Library synced", comment: "Toast headline after auto-importing existing SteamCMD downloads."),
+            title: String(localized: "SteamCMD downloads", comment: "Toast subject for the SteamCMD download sync."),
+            message: String(localized: "Added \(added) downloaded wallpaper(s) to your library.", comment: "Sync summary. Placeholder is the number of newly imported downloads."),
+            isSuccess: true
+        )
+    }
+
+    /// Imports one project folder into the managed library and records it.
+    /// Returns true when a `WPEHistoryEntry` was recorded.
+    private func importOne(_ projectFolder: URL) async -> Bool {
+        do {
+            switch try await importService.importProject(folder: projectFolder) {
+            case .ready(_, let origin), .unsupported(let origin):
+                SettingsManager.shared.recordWPEImport(
+                    WPEHistoryEntry(origin: origin, importedAt: Date(), lastUsedAt: nil)
+                )
+                return true
+            case .rejected(let reason):
+                logger.info("Skipped a project during import: \(reason, privacy: .public)")
+                return false
+            }
+        } catch {
+            logger.info("Failed to read a project during import: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
     }
 
     private func emitSummary(folder: URL, imported: Int, skipped: Int) {

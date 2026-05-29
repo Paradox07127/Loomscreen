@@ -745,6 +745,38 @@ final class SteamCMDDoctorService {
         }
     }
 
+    /// Walks the bound workdir's Workshop download tree
+    /// (`steamapps/workshop/content/431960/<id>/`) and hands each project folder
+    /// to `body` while the workdir's security scope is held. Lets the managed
+    /// library ingest items SteamCMD wrote outside the in-app download button
+    /// (a manual `steamcmd` run, a prior launch, a download whose import didn't
+    /// record). No-op when no workdir is bound.
+    func enumerateDownloadedItemFolders(_ body: @MainActor (URL) async -> Void) async {
+        guard let workdir = try? resolveWorkdirURL() else { return }
+        let scope = workdir.startAccessingSecurityScopedResource()
+        defer { if scope { workdir.stopAccessingSecurityScopedResource() } }
+
+        let contentRoot = workdir
+            .appendingPathComponent("steamapps", isDirectory: true)
+            .appendingPathComponent("workshop", isDirectory: true)
+            .appendingPathComponent("content", isDirectory: true)
+            .appendingPathComponent(String(Self.wallpaperEngineAppID), isDirectory: true)
+
+        guard let children = try? fileManager.contentsOfDirectory(
+            at: contentRoot,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else { return }
+
+        for child in children {
+            let isDir = (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+            guard isDir,
+                  fileManager.fileExists(atPath: child.appendingPathComponent("project.json").path(percentEncoded: false))
+            else { continue }
+            await body(child)
+        }
+    }
+
     /// Extracts the quoted destination from SteamCMD's
     /// `Success. Downloaded item <id> to "<path>"` line. Pure (no filesystem),
     /// so it is unit-testable without a real download.

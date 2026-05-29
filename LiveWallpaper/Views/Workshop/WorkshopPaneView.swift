@@ -28,6 +28,10 @@ struct WorkshopPaneView: View {
             WorkshopDownloadToastHost()
                 .padding(DesignTokens.Spacing.lg)
         }
+        // Reconcile the library with SteamCMD's on-disk downloads so they show
+        // in Installed by default — covers items downloaded manually or before
+        // the in-app button recorded them.
+        .task { await folderImport.ingestSteamCMDDownloads(using: doctor) }
         .sheet(isPresented: $isShowingOnboarding) {
             WorkshopOnboardingSheet { isShowingPasteSheet = true }
         }
