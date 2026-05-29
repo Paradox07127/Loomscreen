@@ -15,9 +15,8 @@ import LiveWallpaperProWPE
 ///       WPEStageIn in [[stage_in]],
 ///       constant WPEUniforms& u [[buffer(0)]],
 ///       texture2d<float> tex0 [[texture(0)]],
-///       texture2d<float> tex1 [[texture(1)]],
-///       texture2d<float> tex2 [[texture(2)]],
-///       texture2d<float> tex3 [[texture(3)]]
+///       ...                                  // one per slot, tex0 … tex7
+///       texture2d<float> tex7 [[texture(7)]] // see `customTextureSlotCount`
 ///   ) { ... }
 ///
 /// Out of scope (returns `.translationFailed`):

@@ -291,7 +291,7 @@ struct WPEShaderTranspilerTests {
     @Test("A lone non-zero sampler slot aliases to its actual texture index")
     func sparseSamplerSlotBindsToActualSlot() throws {
         // The custom-shader dispatcher binds textures by raw slot
-        // (setFragmentTexture(index: slot), slot 0..<4), so g_Texture2's texture
+        // (setFragmentTexture(index: slot), slots 0..<customTextureSlotCount), so g_Texture2's texture
         // lands at [[texture(2)]]. The MSL alias must read tex2, not tex0.
         let source = """
         #version 410 core
