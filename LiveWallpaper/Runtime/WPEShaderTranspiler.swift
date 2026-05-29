@@ -1695,7 +1695,14 @@ struct WPEShaderTranspiler {
         signature.append(") {")
         out.append(signature.joined(separator: "\n"))
 
-        for (slot, sampler) in samplers.enumerated() {
+        // Alias each sampler to its ACTUAL texture slot (`g_Texture2` → tex2),
+        // matching how the custom-shader dispatcher binds textures
+        // (`setFragmentTexture(index: slot)`). Enumeration order would mis-map
+        // any sparse / non-zero slot (`g_Texture2` → tex0) and sample the wrong
+        // texture. Non-`g_TextureN` samplers (no parsed slot) keep enumeration
+        // order as before.
+        for (index, sampler) in samplers.enumerated() {
+            let slot = Self.textureSlot(for: sampler.name) ?? index
             out.append("    [[maybe_unused]] auto \(sampler.name) = tex\(slot);")
         }
         var slotCursor = 0

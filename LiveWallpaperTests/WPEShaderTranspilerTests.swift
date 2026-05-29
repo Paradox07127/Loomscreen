@@ -186,6 +186,74 @@ struct WPEShaderTranspilerTests {
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
+    @Test("A lone non-zero sampler slot aliases to its actual texture index")
+    func sparseSamplerSlotBindsToActualSlot() throws {
+        // The custom-shader dispatcher binds textures by raw slot
+        // (setFragmentTexture(index: slot), slot 0..<4), so g_Texture2's texture
+        // lands at [[texture(2)]]. The MSL alias must read tex2, not tex0.
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture2;
+        in vec2 v_TexCoord;
+        void main() {
+            gl_FragColor = texture(g_Texture2, v_TexCoord);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "mask_only",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains("auto g_Texture2 = tex2;"))
+        #expect(!result.mslSource.contains("auto g_Texture2 = tex0;"))
+    }
+
+    @Test("Non-contiguous sampler slots each alias to their actual texture index")
+    func nonContiguousSamplersBindToActualSlots() throws {
+        // g_Texture0 + g_Texture2 (gap at slot 1). The dispatcher binds the
+        // slot-2 texture at [[texture(2)]], so g_Texture2 must read tex2 — under
+        // the old enumeration order it incorrectly read tex1.
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform sampler2D g_Texture2;
+        in vec2 v_TexCoord;
+        void main() {
+            vec4 base = texture(g_Texture0, v_TexCoord);
+            vec4 mask = texture(g_Texture2, v_TexCoord);
+            gl_FragColor = base * mask.a;
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "masked_base",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains("auto g_Texture0 = tex0;"))
+        #expect(result.mslSource.contains("auto g_Texture2 = tex2;"))
+    }
+
+    @Test("Contiguous sampler slots keep their identity mapping (regression guard)")
+    func contiguousSamplersKeepIdentityMapping() throws {
+        // Proves the actual-slot aliasing does NOT change the common contiguous
+        // case (enumeration index already equals the slot).
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform sampler2D g_Texture1;
+        in vec2 v_TexCoord;
+        void main() {
+            vec4 a = texture(g_Texture0, v_TexCoord);
+            vec4 b = texture(g_Texture1, v_TexCoord);
+            gl_FragColor = mix(a, b, 0.5);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "contiguous_blend",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains("auto g_Texture0 = tex0;"))
+        #expect(result.mslSource.contains("auto g_Texture1 = tex1;"))
+    }
+
     @Test("End-to-end via WPESwiftShaderCompiler builds MTLLibrary")
     func endToEndViaSwiftCompiler() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
