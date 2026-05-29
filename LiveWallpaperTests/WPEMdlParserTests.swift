@@ -36,6 +36,25 @@ struct WPEMdlParserTests {
         #expect(vertex.uv == SIMD2<Float>(0.65, 0.198))
     }
 
+    @Test("Parses MDLV19 header with the leading meshCount byte (same layout as v23)")
+    func parsesMDLV19HeaderWithLeadingByte() throws {
+        // MDLV0019 puppets carry the same `u8 + u32 meshCount + u32` header as
+        // MDLV0023. Reading them without the leading byte (the old `>= 23` gate)
+        // misaligned the cursor, inflated meshCount, and aborted the parse — the
+        // root cause of scattered facial features in v19 scenes (e.g. 3220362582).
+        let model = try WPEMdlParser.parse(data: makeSingleVertexSkinnedMDLV19())
+        let mesh = try #require(model.meshes.first)
+        let vertex = try #require(mesh.vertices.first)
+
+        #expect(model.version == 19)
+        #expect(model.meshes.count == 1)
+        #expect(mesh.materialPath == "materials/test.json")
+        #expect(vertex.skinBlendIndices == SIMD4<Int32>(7, 1, 1, 1))
+        #expect(vertex.skinBlendWeights == SIMD4<Float>(1, 0, 0, 0))
+        #expect(vertex.position == SIMD3<Float>(149.086, -686.59, 0))
+        #expect(vertex.uv == SIMD2<Float>(0.65, 0.198))
+    }
+
     @Test("Preserves MDLV vertex positions when MDLS skeleton metadata is present")
     func preservesVertexPositionsWithSkeletonMetadata() throws {
         let model = try WPEMdlParser.parse(data: makeSkinnedMDLV23WithSkeleton())
@@ -187,6 +206,38 @@ struct WPEMdlParserTests {
         data.appendLE(UInt32(0))
         data.append(UInt8(0))
         data.append(UInt8(0))
+
+        return data
+    }
+
+    /// MDLV0019 single skinned vertex. Mirrors `makeSingleVertexSkinnedMDLV23`
+    /// byte-for-byte except for the version tag and the absence of the v21+
+    /// parts trailer, matching the real corpus layout (mesh data runs straight
+    /// into the skeleton section). Used to lock the `version >= 19` header gate.
+    private func makeSingleVertexSkinnedMDLV19() -> Data {
+        var data = Data()
+        data.append(contentsOf: Array("MDLV0019".utf8))
+        data.appendLE(UInt32(0x80000900))
+        data.append(UInt8(1))
+        data.appendLE(UInt32(1))
+        data.appendLE(UInt32(1))
+
+        data.appendCString("materials/test.json")
+        data.appendLE(UInt32(0))
+        for _ in 0..<6 { data.appendLE(Float(0)) }
+        data.appendLE(UInt32(0x180000f))
+
+        var vertex = Data()
+        vertex.appendLE(Float(149.086)); vertex.appendLE(Float(-686.59)); vertex.appendLE(Float(0))
+        vertex.appendLE(Float(0)); vertex.appendLE(Float(0)); vertex.appendLE(Float(1))
+        vertex.appendLE(Float(1)); vertex.appendLE(Float(0)); vertex.appendLE(Float(0)); vertex.appendLE(Float(1))
+        vertex.appendLE(UInt32(7)); vertex.appendLE(UInt32(1)); vertex.appendLE(UInt32(1)); vertex.appendLE(UInt32(1))
+        vertex.appendLE(Float(1)); vertex.appendLE(Float(0)); vertex.appendLE(Float(0)); vertex.appendLE(Float(0))
+        vertex.appendLE(Float(0.65)); vertex.appendLE(Float(0.198))
+        data.appendLE(UInt32(vertex.count))
+        data.append(vertex)
+
+        data.appendLE(UInt32(0))
 
         return data
     }

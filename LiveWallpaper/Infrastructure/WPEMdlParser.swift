@@ -65,7 +65,13 @@ enum WPEMdlParser {
 
         let headerMeshFlags = try reader.readUInt32()
         let meshCount: UInt32
-        if version >= 23 {
+        // The model header carries a leading byte before `meshCount` for every
+        // puppet format observed in the corpus (MDLV0019/0021/0023 all use the
+        // `u8 + u32 meshCount + u32` layout). Routing v19/v21 down the
+        // no-leading-byte branch misaligns the cursor by one byte, which inflates
+        // `meshCount` to garbage and aborts the whole parse — the bug behind the
+        // "scattered facial features" puppets (e.g. MDLV0019 scene 3220362582).
+        if version >= 19 {
             _ = try reader.readUInt8()
             meshCount = try reader.readUInt32()
             _ = try reader.readUInt32()
