@@ -202,12 +202,10 @@ struct WPEObjectQuadUniforms {
 struct WPEMetalPuppetVertex {
     var position: SIMD4<Float>
     var uv: SIMD4<Float>
-    var skinIndices: SIMD4<Int32>
-    var skinWeights: SIMD4<Float>
 }
 
 struct WPEPuppetMeshUniforms {
-    /// x/y = local layer-composite target size, z = active bone palette count, w reserved.
+    /// x/y = local layer-composite target size, z/w reserved.
     var localSizeAndMode: SIMD4<Float>
 }
 
