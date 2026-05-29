@@ -44,7 +44,10 @@ struct WPERenderPipelineBuilder: Sendable {
         do {
             let url = try resolver.resolveExistingFileURL(relativePath: puppetPath)
             let data = try Data(contentsOf: url)
-            return try WPEMdlParser.parse(data: data)
+            let model = try WPEMdlParser.parse(data: data)
+            // Re-assemble the exploded older-generation bind layout (no-op for
+            // the modern generation, which is already assembled in MDLV space).
+            return WPEPuppetBindAssembler.assembleIfNeeded(model)
         } catch {
             return nil
         }
