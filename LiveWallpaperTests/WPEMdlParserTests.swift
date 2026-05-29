@@ -24,6 +24,18 @@ struct WPEMdlParserTests {
         ])
     }
 
+    @Test("Parses MDLV23 skin blend indices as little-endian Int32, not float bit patterns")
+    func parsesMDLV23SkinBlendIndicesAsInt32() throws {
+        let model = try WPEMdlParser.parse(data: makeSingleVertexSkinnedMDLV23())
+        let mesh = try #require(model.meshes.first)
+        let vertex = try #require(mesh.vertices.first)
+
+        #expect(vertex.skinBlendIndices == SIMD4<Int32>(7, 1, 1, 1))
+        #expect(vertex.skinBlendWeights == SIMD4<Float>(1, 0, 0, 0))
+        #expect(vertex.position == SIMD3<Float>(149.086, -686.59, 0))
+        #expect(vertex.uv == SIMD2<Float>(0.65, 0.198))
+    }
+
     @Test("Preserves MDLV vertex positions when MDLS skeleton metadata is present")
     func preservesVertexPositionsWithSkeletonMetadata() throws {
         let model = try WPEMdlParser.parse(data: makeSkinnedMDLV23WithSkeleton())
@@ -132,6 +144,36 @@ struct WPEMdlParserTests {
             ]
         )
         data.appendCString("{}")
+
+        return data
+    }
+
+    private func makeSingleVertexSkinnedMDLV23() -> Data {
+        var data = Data()
+        data.append(contentsOf: Array("MDLV0023".utf8))
+        data.appendLE(UInt32(0x80000900))
+        data.append(UInt8(1))
+        data.appendLE(UInt32(1))
+        data.appendLE(UInt32(1))
+
+        data.appendCString("materials/test.json")
+        data.appendLE(UInt32(0))
+        for _ in 0..<6 { data.appendLE(Float(0)) }
+        data.appendLE(UInt32(0x180000f))
+
+        var vertex = Data()
+        vertex.appendLE(Float(149.086)); vertex.appendLE(Float(-686.59)); vertex.appendLE(Float(0))
+        vertex.appendLE(Float(0)); vertex.appendLE(Float(0)); vertex.appendLE(Float(1))
+        vertex.appendLE(Float(1)); vertex.appendLE(Float(0)); vertex.appendLE(Float(0)); vertex.appendLE(Float(1))
+        vertex.appendLE(UInt32(7)); vertex.appendLE(UInt32(1)); vertex.appendLE(UInt32(1)); vertex.appendLE(UInt32(1))
+        vertex.appendLE(Float(1)); vertex.appendLE(Float(0)); vertex.appendLE(Float(0)); vertex.appendLE(Float(0))
+        vertex.appendLE(Float(0.65)); vertex.appendLE(Float(0.198))
+        data.appendLE(UInt32(vertex.count))
+        data.append(vertex)
+
+        data.appendLE(UInt32(0))
+        data.append(UInt8(0))
+        data.append(UInt8(0))
 
         return data
     }
