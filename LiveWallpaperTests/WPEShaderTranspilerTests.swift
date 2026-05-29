@@ -254,6 +254,26 @@ struct WPEShaderTranspilerTests {
         #expect(result.mslSource.contains("auto g_Texture1 = tex1;"))
     }
 
+    @Test("Sampler slots above the supported 0–3 range are rejected, not mis-emitted")
+    func rejectsTextureSlotsAboveSupportedRange() throws {
+        // WPE allows g_Texture0–g_Texture7, but this pipeline only binds tex0–tex3.
+        // A slot ≥ 4 must fail cleanly rather than alias to an undeclared texN.
+        let source = """
+        #version 410 core
+        uniform sampler2D g_Texture5;
+        in vec2 v_TexCoord;
+        void main() {
+            gl_FragColor = texture(g_Texture5, v_TexCoord);
+        }
+        """
+        #expect(throws: WPEShaderCompilerError.self) {
+            try WPEShaderTranspiler.translateFragment(
+                shaderName: "slot_overflow",
+                preprocessedSource: source
+            )
+        }
+    }
+
     @Test("End-to-end via WPESwiftShaderCompiler builds MTLLibrary")
     func endToEndViaSwiftCompiler() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())

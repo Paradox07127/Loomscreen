@@ -101,6 +101,15 @@ struct WPEShaderTranspiler {
                 "shader '\(shaderName)' uses \(sortedSamplers.count) samplers; transpiler supports up to 4"
             )
         }
+        // Wallpaper Engine allows sampler slots g_Texture0–g_Texture7, but this
+        // pipeline only declares tex0–tex3 and the dispatcher binds slots 0..<4.
+        // A sampler at slot ≥ 4 would alias to an undeclared `texN` (MSL compile
+        // failure), so reject it explicitly — the engine can't bind it anyway.
+        if let maxSlot = sortedSamplers.compactMap({ Self.textureSlot(for: $0.name) }).max(), maxSlot >= 4 {
+            throw WPEShaderCompilerError.translationFailed(
+                "shader '\(shaderName)' binds texture slot \(maxSlot); transpiler supports slots 0–3"
+            )
+        }
         _ = !varyings.isEmpty || activeSource.contains("v_TexCoord") || activeSource.contains("gl_FragCoord")
 
         let body = bodyLines.joined(separator: "\n")
