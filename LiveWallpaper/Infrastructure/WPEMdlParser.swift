@@ -273,8 +273,11 @@ enum WPEMdlParser {
         let skeletonTag = try reader.readFixedString(byteCount: 8)
         guard skeletonTag.hasPrefix("MDLS") else { return [] }
         _ = try reader.readUInt8()
-        _ = try reader.readUInt32()
+        let declaredSectionEnd = Int(try reader.readUInt32())
         let boneCount = try reader.readUInt32()
+        let skeletonSectionEnd = declaredSectionEnd > reader.currentOffset
+            ? min(declaredSectionEnd, reader.dataCount)
+            : reader.dataCount
 
         var bones: [WPEPuppetBone] = []
         bones.reserveCapacity(Int(boneCount))
@@ -297,12 +300,21 @@ enum WPEMdlParser {
                 }
             }
             _ = try reader.readCString()
+            if index + 1 < boneCount {
+                try reader.consumeOptionalSkeletonTrailingMarker(
+                    beforeNextBoneIndex: Int(index + 1),
+                    sectionEnd: skeletonSectionEnd
+                )
+            }
 
             bones.append(WPEPuppetBone(
                 index: Int(index),
                 parentIndex: parent >= 0 ? Int(parent) : nil,
                 rawMatrix: matrix
             ))
+        }
+        if skeletonSectionEnd <= reader.dataCount {
+            try reader.seek(to: skeletonSectionEnd)
         }
         return bones
     }
@@ -328,6 +340,7 @@ enum WPEMdlParserError: Error, Equatable, Sendable {
     case invalidVertexBuffer(byteCount: UInt32, stride: Int)
     case invalidIndexBuffer(UInt32)
     case invalidSkeletonMatrix(UInt32)
+    case invalidSkeletonTrailingMarker(offset: Int, value: UInt8)
 }
 
 private struct WPEMdlBinaryReader {
@@ -336,6 +349,10 @@ private struct WPEMdlBinaryReader {
 
     var currentOffset: Int {
         offset
+    }
+
+    var dataCount: Int {
+        data.count
     }
 
     init(data: Data) {
@@ -413,6 +430,67 @@ private struct WPEMdlBinaryReader {
             )
         }
         offset = newOffset
+    }
+
+    /// Some MDLS bone records carry a single trailing marker byte before the
+    /// next record. Consume it only when the bytes at the cursor do not already
+    /// look like the next bone record, and require the byte that follows to look
+    /// like a valid record — otherwise fail loud rather than drift into garbage.
+    mutating func consumeOptionalSkeletonTrailingMarker(
+        beforeNextBoneIndex nextBoneIndex: Int,
+        sectionEnd: Int
+    ) throws {
+        guard currentOffset < sectionEnd else { return }
+        if isLikelySkeletonBoneRecord(
+            at: currentOffset,
+            nextBoneIndex: nextBoneIndex,
+            sectionEnd: sectionEnd
+        ) {
+            return
+        }
+
+        let markerOffset = currentOffset
+        let marker = try readUInt8()
+        guard isLikelySkeletonBoneRecord(
+            at: currentOffset,
+            nextBoneIndex: nextBoneIndex,
+            sectionEnd: sectionEnd
+        ) else {
+            throw WPEMdlParserError.invalidSkeletonTrailingMarker(
+                offset: markerOffset,
+                value: marker
+            )
+        }
+    }
+
+    private func isLikelySkeletonBoneRecord(
+        at candidateOffset: Int,
+        nextBoneIndex: Int,
+        sectionEnd: Int
+    ) -> Bool {
+        guard candidateOffset >= 0,
+              candidateOffset + 13 <= sectionEnd,
+              let parent = readInt32(at: candidateOffset + 5),
+              parent >= -1,
+              parent < Int32(nextBoneIndex),
+              let matrixByteCount = readUInt32(at: candidateOffset + 9),
+              matrixByteCount >= 16 * UInt32(MemoryLayout<Float>.size),
+              matrixByteCount % UInt32(MemoryLayout<Float>.size) == 0 else {
+            return false
+        }
+        return candidateOffset + 13 + Int(matrixByteCount) <= sectionEnd
+    }
+
+    private func readInt32(at absoluteOffset: Int) -> Int32? {
+        readUInt32(at: absoluteOffset).map(Int32.init(bitPattern:))
+    }
+
+    private func readUInt32(at absoluteOffset: Int) -> UInt32? {
+        guard absoluteOffset >= 0, absoluteOffset + 4 <= data.count else { return nil }
+        return UInt32(data[absoluteOffset])
+            | (UInt32(data[absoluteOffset + 1]) << 8)
+            | (UInt32(data[absoluteOffset + 2]) << 16)
+            | (UInt32(data[absoluteOffset + 3]) << 24)
     }
 
     func findTag(_ tag: String, from start: Int) -> Int? {

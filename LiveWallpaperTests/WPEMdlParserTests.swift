@@ -45,6 +45,19 @@ struct WPEMdlParserTests {
         #expect(mesh.vertices[0].position == SIMD3<Float>(10, 20, 0))
     }
 
+    @Test("Parses MDLS skeleton records separated by an optional trailing marker byte")
+    func parsesSkeletonRecordsWithTrailingMarkerBytes() throws {
+        let model = try WPEMdlParser.parse(data: makeSkinnedMDLV23WithSkeletonTrailingMarker())
+
+        #expect(model.bones.count == 2)
+        #expect(model.bones[0].parentIndex == nil)
+        #expect(model.bones[0].rawMatrix[12] == 5)
+        #expect(model.bones[0].rawMatrix[13] == -7)
+        #expect(model.bones[1].parentIndex == 0)
+        #expect(model.bones[1].rawMatrix[12] == 12)
+        #expect(model.bones[1].rawMatrix[13] == -34)
+    }
+
     @Test("Preserves atlas target geometry when MDLE element matrices are present")
     func preservesAtlasTargetGeometryWithElementMatrices() throws {
         let model = try WPEMdlParser.parse(data: makeMDLV23WithElementMetadata())
@@ -178,6 +191,45 @@ struct WPEMdlParserTests {
         return data
     }
 
+    private func makeSkinnedMDLV23WithSkeletonTrailingMarker() -> Data {
+        var data = Data()
+        data.append(contentsOf: Array("MDLV0023".utf8))
+        data.appendLE(UInt32(0x80000900))
+        data.append(UInt8(1))
+        data.appendLE(UInt32(1))
+        data.appendLE(UInt32(1))
+
+        data.appendCString("materials/test.json")
+        data.appendLE(UInt32(0))
+        for _ in 0..<6 { data.appendLE(Float(0)) }
+        data.appendLE(UInt32(0x180000f))
+        let vertexData = Data.puppetVertices([
+            (SIMD3<Float>(10, 20, 0), SIMD2<Float>(0.5, 0.5))
+        ])
+        data.appendLE(UInt32(vertexData.count))
+        data.append(vertexData)
+
+        data.appendLE(UInt32(0))
+        data.append(UInt8(0))
+        data.append(UInt8(0))
+
+        data.append(contentsOf: Array("MDLS0004".utf8))
+        data.append(UInt8(0))
+        let sectionEndPatchOffset = data.count
+        data.appendLE(UInt32(0))
+        data.appendLE(UInt32(2))
+
+        data.appendSkeletonRecord(parent: nil, translation: SIMD3<Float>(5, -7, 0))
+        data.append(UInt8(0x31))
+        data.appendSkeletonRecord(parent: 0, translation: SIMD3<Float>(12, -34, 0))
+
+        let sectionEnd = data.count
+        data.replaceLE(UInt32(sectionEnd), at: sectionEndPatchOffset)
+        data.append(contentsOf: Array("MDLA0006".utf8))
+
+        return data
+    }
+
     private func makeMDLV23WithElementMetadata() -> Data {
         var data = Data()
         data.append(contentsOf: Array("MDLV0023".utf8))
@@ -257,6 +309,30 @@ private extension Data {
     mutating func appendCString(_ string: String) {
         append(contentsOf: Array(string.utf8))
         append(UInt8(0))
+    }
+
+    mutating func replaceLE(_ value: UInt32, at offset: Int) {
+        var littleEndian = value.littleEndian
+        Swift.withUnsafeBytes(of: &littleEndian) {
+            replaceSubrange(offset..<(offset + MemoryLayout<UInt32>.size), with: $0)
+        }
+    }
+
+    mutating func appendSkeletonRecord(parent: Int?, translation: SIMD3<Float>) {
+        appendLE(UInt32(0))
+        append(UInt8(0))
+        appendLE(parent.map(UInt32.init) ?? UInt32.max)
+        appendLE(UInt32(16 * MemoryLayout<Float>.size))
+        Data.appendMatrix(
+            to: &self,
+            rows: [
+                [1, 0, 0, 0],
+                [0, 1, 0, 0],
+                [0, 0, 1, 0],
+                [translation.x, translation.y, translation.z, 1]
+            ]
+        )
+        appendCString("{}")
     }
 
     static func puppetVertices(_ vertices: [(position: SIMD3<Float>, uv: SIMD2<Float>)]) -> Data {
