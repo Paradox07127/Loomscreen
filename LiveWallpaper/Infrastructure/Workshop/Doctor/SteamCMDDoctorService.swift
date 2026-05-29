@@ -75,6 +75,7 @@ enum SteamCMDDoctorError: Error, Equatable, Sendable, LocalizedError {
     case invalidUsername
     case workdirNotDirectory(URL)
     case steamLibraryMissingConfig(URL)
+    case untrustedBinary
 
     var errorDescription: String? {
         switch self {
@@ -94,6 +95,8 @@ enum SteamCMDDoctorError: Error, Equatable, Sendable, LocalizedError {
             return "SteamCMD working directory is not a folder: \(url.path(percentEncoded: false))"
         case .steamLibraryMissingConfig(let url):
             return "Shared Steam library must contain config/config.vdf: \(url.path(percentEncoded: false))"
+        case .untrustedBinary:
+            return "SteamCMD is not a verified Valve build."
         }
     }
 }
@@ -105,6 +108,7 @@ enum WorkshopItemDownloadResult<Imported: Sendable>: Sendable {
     case imported(Imported)
     case notConfigured(reason: String)
     case loginRequired
+    case untrustedBinary
     case notEntitled
     case removedFromSteam
     case temporarilyUnavailable
@@ -207,6 +211,7 @@ final class SteamCMDDoctorService {
         let bookmark = try Self.makeBookmark(for: canonicalURL, readOnly: true)
         binaryBookmarkData = bookmark
         lastBinarySHA256 = sha256
+        verifiedBinarySHA256 = nil
         binaryDisplayPath = canonicalURL.path(percentEncoded: false)
         // Invalidate every probe whose green-ness depends on which binary
         // we run — re-binding to a different SteamCMD must force a re-run.
@@ -328,6 +333,7 @@ final class SteamCMDDoctorService {
     func clearBinaryBinding() {
         binaryBookmarkData = nil
         lastBinarySHA256 = nil
+        verifiedBinarySHA256 = nil
         binaryDisplayPath = nil
         setProbe(.binaryIdentity, status: .notRun)
         setProbe(.codeSignature, status: .notRun)
@@ -387,6 +393,13 @@ final class SteamCMDDoctorService {
     private func runBinaryIdentityProbe() async {
         do {
             let binary = try resolveBinaryURL()
+            guard await ensureTrustedBinary(binary) else {
+                setProbe(.binaryIdentity, status: .red(
+                    message: "SteamCMD isn't a verified Valve build, so it wasn't run. Re-select the official SteamCMD.",
+                    command: nil
+                ))
+                return
+            }
             let didStart = binary.startAccessingSecurityScopedResource()
             defer { if didStart { binary.stopAccessingSecurityScopedResource() } }
 
@@ -429,7 +442,7 @@ final class SteamCMDDoctorService {
         do {
             let binary = try resolveBinaryURL()
             let result = await Self.runCodesignCheck(binary: binary)
-            if result.teamIdentifier == Self.valveTeamIdentifier {
+            if result.signatureValid, result.teamIdentifier == Self.valveTeamIdentifier {
                 let detail = result.isHardenedRuntime
                     ? "Verified Valve build (TeamIdentifier=MXGJJ98X76, Hardened Runtime)."
                     : "Verified Valve build (TeamIdentifier=MXGJJ98X76)."
@@ -488,6 +501,13 @@ final class SteamCMDDoctorService {
                 return
             }
 
+            guard await ensureTrustedBinary(binary) else {
+                setProbe(.gatekeeperQuarantine, status: .red(
+                    message: "SteamCMD isn't a verified Valve build, so it wasn't run.",
+                    command: nil
+                ))
+                return
+            }
             let didStart = binary.startAccessingSecurityScopedResource()
             defer { if didStart { binary.stopAccessingSecurityScopedResource() } }
             let result = await runner.run(
@@ -694,6 +714,11 @@ final class SteamCMDDoctorService {
 
         do {
             let binary = try resolveBinaryURL()
+            // Defense in depth: only run an intact Valve build — we're about to
+            // hand SteamCMD network + filesystem reach.
+            guard await ensureTrustedBinary(binary) else {
+                return .untrustedBinary
+            }
             let workdir = try resolveWorkdirURL()
             let workdirScope = workdir.startAccessingSecurityScopedResource()
             defer { if workdirScope { workdir.stopAccessingSecurityScopedResource() } }
@@ -760,17 +785,22 @@ final class SteamCMDDoctorService {
 
     nonisolated static func runCodesignCheck(binary: URL) async -> CodesignResult {
         let runner = SteamCMDProcessRunner()
-        // `codesign -dv --verbose=4` is the canonical inspection invocation;
-        // it emits `TeamIdentifier=<id>` + the CodeDirectory `flags` line
-        // that carries `runtime` when Hardened Runtime is enabled. The earlier
-        // `--team-identifier` flag is a `csreq`-only switch and would print
-        // "TeamIdentifier must be ..." here, blocking the Doctor's green path.
-        let result = await runner.run(
+        // `--verify --strict` validates signature *integrity* — a tampered
+        // binary fails here even if it can still display its metadata. It
+        // drives `signatureValid`. `-dv --verbose=4` only displays the
+        // TeamIdentifier + Hardened Runtime flags, so we run both and read the
+        // identity fields from the display pass.
+        let verify = await runner.run(
+            binary: URL(fileURLWithPath: "/usr/bin/codesign"),
+            args: ["--verify", "--strict", binary.path(percentEncoded: false)],
+            stdin: nil, timeout: 30, workingDirectory: nil
+        )
+        let display = await runner.run(
             binary: URL(fileURLWithPath: "/usr/bin/codesign"),
             args: ["-dv", "--verbose=4", binary.path(percentEncoded: false)],
             stdin: nil, timeout: 30, workingDirectory: nil
         )
-        let combined = "\(result.stdout)\n\(result.stderr)"
+        let combined = "\(display.stdout)\n\(display.stderr)"
         let teamIdentifier = firstCapture(in: combined, pattern: #"TeamIdentifier=([A-Z0-9]+)"#)
         // CodeDirectory line carries `flags=0xN(runtime,...)` when Hardened
         // Runtime is on. Plain `runtime` substring match also covers macOS
@@ -782,8 +812,25 @@ final class SteamCMDDoctorService {
         return CodesignResult(
             teamIdentifier: teamIdentifier,
             isHardenedRuntime: hardenedRuntime,
-            signatureValid: result.exitCode == 0 && !result.timedOut && !result.killed
+            signatureValid: verify.exitCode == 0 && !verify.timedOut && !verify.killed
         )
+    }
+
+    /// In-memory record of the last SHA-256 verified as an intact Valve build.
+    /// Transient — re-verified each launch and whenever the SHA changes.
+    @ObservationIgnored private var verifiedBinarySHA256: String?
+
+    /// Gate for every path that *executes* the user-selected SteamCMD. Returns
+    /// true only for an intact, Valve-signed build. Caches the verified SHA-256
+    /// so one "Run all" doesn't re-spawn codesign per executing probe; a
+    /// self-updated binary (changed SHA) is re-verified.
+    private func ensureTrustedBinary(_ binary: URL) async -> Bool {
+        let currentSHA = try? Self.streamingSHA256Hex(of: binary)
+        if let currentSHA, currentSHA == verifiedBinarySHA256 { return true }
+        let signature = await Self.runCodesignCheck(binary: binary)
+        let trusted = signature.signatureValid && signature.teamIdentifier == Self.valveTeamIdentifier
+        verifiedBinarySHA256 = trusted ? currentSHA : nil
+        return trusted
     }
 
     private func runSteamCMDScript(
@@ -792,6 +839,9 @@ final class SteamCMDDoctorService {
         workdir: URL,
         timeout: TimeInterval
     ) async throws -> SteamCMDRunResult {
+        guard await ensureTrustedBinary(binary) else {
+            throw SteamCMDDoctorError.untrustedBinary
+        }
         let binaryAccess = binary.startAccessingSecurityScopedResource()
         let workdirAccess = workdir.startAccessingSecurityScopedResource()
         defer {

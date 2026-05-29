@@ -88,6 +88,8 @@ final class WorkshopDownloadCoordinator {
             finish(itemID: itemID, title: title, phase: .failed(reason))
         case .loginRequired:
             finish(itemID: itemID, title: title, phase: .failed(String(localized: "Sign in to SteamCMD in the Doctor (Settings → Workshop) first.", comment: "Workshop download blocked: no cached SteamCMD login.")))
+        case .untrustedBinary:
+            finish(itemID: itemID, title: title, phase: .failed(String(localized: "SteamCMD isn't a verified Valve build, so the download was blocked. Re-select the official SteamCMD in the Doctor.", comment: "Workshop download blocked: unverified SteamCMD binary.")))
         case .notEntitled:
             finish(itemID: itemID, title: title, phase: .failed(String(localized: "This Steam account can't download Wallpaper Engine items — it may not own Wallpaper Engine, or downloads are region-restricted.", comment: "Workshop download blocked: account not entitled.")))
         case .removedFromSteam:

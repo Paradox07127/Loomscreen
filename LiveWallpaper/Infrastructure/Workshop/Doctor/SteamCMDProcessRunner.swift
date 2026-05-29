@@ -105,7 +105,7 @@ actor SteamCMDProcessRunner {
 
         var pid = pid_t(0)
         let argvStrings = [binary.path(percentEncoded: false)] + args
-        let envStrings = ProcessInfo.processInfo.environment
+        let envStrings = sanitizedChildEnvironment()
             .map { "\($0.key)=\($0.value)" }
             .sorted()
 
@@ -147,6 +147,24 @@ actor SteamCMDProcessRunner {
         guard result == 0 else {
             throw SteamCMDProcessRunnerError.spawnFailed("\(context): \(String(cString: strerror(result)))")
         }
+    }
+
+    /// Minimal, scrubbed environment for spawned tools (SteamCMD, codesign).
+    /// We never hand the app's full environment to a child: `DYLD_*` is dropped
+    /// (the SteamCMD Mach-O locates its own dylibs without it — verified), and
+    /// agent sockets / tokens / proxy secrets are excluded. `HOME` is the
+    /// sandbox container so SteamCMD's session + downloads stay container-local
+    /// and match the user's pinned-`HOME` Terminal sign-in.
+    private static func sanitizedChildEnvironment() -> [String: String] {
+        [
+            "HOME": NSHomeDirectory(),
+            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+            "TMPDIR": NSTemporaryDirectory(),
+            // Force a deterministic English UTF-8 locale so SteamCMD's status
+            // lines parse the same regardless of the user's system locale,
+            // rather than inheriting a launcher-controlled TMPDIR/LANG.
+            "LANG": "en_US.UTF-8",
+        ]
     }
 
     private static func withCStringArray<R>(
