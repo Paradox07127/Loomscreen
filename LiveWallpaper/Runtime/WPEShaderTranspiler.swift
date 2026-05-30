@@ -1366,14 +1366,20 @@ struct WPEShaderTranspiler {
 
         for function in functions {
             let body = String(helpers[function.bodyRange])
+            // A function parameter shadows a like-named global uniform/sampler, so
+            // a body reference resolves to the local — don't thread the global in
+            // (it would duplicate the parameter and the MSL would be rejected, e.g.
+            // tech_circle_barcode's `sectors(... float sectorCount, float seed)`).
+            let shadowedNames = parameterNames(in: String(helpers[function.parameterRange]))
             var dependencies = Set(
                 resources
-                    .filter { containsIdentifier($0.name, in: body) }
+                    .filter { containsIdentifier($0.name, in: body) && !shadowedNames.contains($0.name) }
                     .map(\.name)
             )
             for (macroName, macroResources) in macroDependencies where containsIdentifier(macroName, in: body) {
                 dependencies.formUnion(macroResources)
             }
+            dependencies.subtract(shadowedNames)
             dependenciesByFunction[function.name] = dependencies
             callsByFunction[function.name] = Set(
                 functionNames.filter { callee in
@@ -1595,6 +1601,24 @@ struct WPEShaderTranspiler {
         }
 
         return result
+    }
+
+    /// Extracts declared parameter names from a function parameter list
+    /// (e.g. `"float pos, vec2 puv, float sectorCount"` -> `["pos","puv","sectorCount"]`).
+    /// The name is the trailing identifier of each comma-separated declaration.
+    private static func parameterNames(in parameters: String) -> Set<String> {
+        let trimmed = parameters.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != "void" else { return [] }
+        var names = Set<String>()
+        for parameter in trimmed.split(separator: ",") {
+            let tokens = parameter.split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "\n" })
+            guard let last = tokens.last else { continue }
+            // Stop at the first non-identifier char so array params like `arr[4]`
+            // and qualified names resolve to the bare identifier.
+            let name = last.prefix { $0.isLetter || $0.isNumber || $0 == "_" }
+            if !name.isEmpty { names.insert(String(name)) }
+        }
+        return names
     }
 
     private static func appendHelperParameters(

@@ -702,6 +702,39 @@ struct WPEShaderTranspilerTests {
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
+    @Test("Helper parameters shadowing global uniforms are not threaded again")
+    func helperParameterShadowingGlobalUniform() throws {
+        // tech_circle_barcode declares `uniform float sectorCount/seed` AND a helper
+        // `sectors(... float sectorCount, float seed ...)` whose body references the
+        // locals. The transpiler must NOT append the globals as extra parameters —
+        // MSL rejects the duplicate parameter names ('redefinition of parameter').
+        let source = """
+        // stage: fragment
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform float sectorCount;
+        uniform float seed;
+        in vec2 v_TexCoord;
+        float sectors(float pos, float sectorCount, float seed) {
+            float d = floor(pos * sectorCount) / sectorCount;
+            return d + seed;
+        }
+        void main() {
+            float s = sectors(v_TexCoord.x, sectorCount, seed);
+            gl_FragColor = vec4(vec3(s), 1.0);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "tech_circle_barcode",
+            preprocessedSource: source
+        )
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        // Before the fix this threw: 'redefinition of parameter sectorCount/seed'.
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
     @Test("Translates audio-spectrum shader with uniform float array to MSL")
     func translatesAudioSpectrumArray() throws {
         let source = """
