@@ -482,6 +482,55 @@ final class WPEMetalRenderExecutor {
         }
     }
 
+    /// Whether a pass should `.load` the existing attachment contents instead of
+    /// `.clear`ing. A ping-pong composite's physical texture is reused across
+    /// passes, so a later source-over pass writing the SAME named target would
+    /// otherwise blend over an earlier logical pass's stale result (the
+    /// hair/staff "double displacement" ghost). Only load when the contents are
+    /// genuinely needed: a self/previous-target read (feedback), the scene
+    /// framebuffer (layer compositing), or an accumulation blend.
+    private func shouldLoadExistingAttachment(
+        for pass: WPEPreparedRenderPass,
+        targetID: WPEMetalTargetID,
+        destinationTexture: MTLTexture,
+        readsCurrentTarget: Bool,
+        frameState: WPEMetalFrameState
+    ) -> Bool {
+        guard frameState.hasInitialized(destinationTexture) else {
+            return false
+        }
+        if readsCurrentTarget {
+            return true
+        }
+        if case .scene = targetID {
+            return true
+        }
+        return blendModeRequiresExistingDestination(pass.pass.blending)
+    }
+
+    private func blendModeRequiresExistingDestination(_ blendMode: String) -> Bool {
+        let normalized = blendMode
+            .lowercased()
+            .replacingOccurrences(of: "-", with: "")
+            .replacingOccurrences(of: "_", with: "")
+            .replacingOccurrences(of: " ", with: "")
+        switch normalized {
+        case "add",
+             "additive",
+             "darken",
+             "lighten",
+             "multiply",
+             "negative",
+             "oneone",
+             "oneoneone",
+             "subtract",
+             "subtractive":
+            return true
+        default:
+            return false
+        }
+    }
+
     private func encode(
         pass: WPEPreparedRenderPass,
         layer: WPERenderLayer,
@@ -535,16 +584,24 @@ final class WPEMetalRenderExecutor {
 
         let needsDepth = depthCache.needsAttachment(for: pass)
 
+        let shouldLoadExistingAttachment = shouldLoadExistingAttachment(
+            for: pass,
+            targetID: targetID,
+            destinationTexture: destination.texture,
+            readsCurrentTarget: readsCurrentTarget,
+            frameState: frameState
+        )
+
         let descriptor = MTLRenderPassDescriptor()
         descriptor.colorAttachments[0].texture = destination.texture
-        descriptor.colorAttachments[0].loadAction = frameState.hasInitialized(destination.texture) ? .load : .clear
+        descriptor.colorAttachments[0].loadAction = shouldLoadExistingAttachment ? .load : .clear
         descriptor.colorAttachments[0].storeAction = .store
         descriptor.colorAttachments[0].clearColor = clearColor(for: targetID)
 
         if needsDepth {
             let depth = try depthCache.attachmentTexture(for: destination, frameState: &frameState)
             descriptor.depthAttachment.texture = depth
-            descriptor.depthAttachment.loadAction = frameState.hasInitialized(destination.texture) ? .load : .clear
+            descriptor.depthAttachment.loadAction = shouldLoadExistingAttachment ? .load : .clear
             descriptor.depthAttachment.storeAction = .store
             descriptor.depthAttachment.clearDepth = 1
         }

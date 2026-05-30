@@ -2077,6 +2077,7 @@ private func graphLayer(
 private func solidPass(
     id: String,
     color: [Double],
+    source: WPETextureReference = .previous,
     target: WPERenderTarget,
     blending: String = "normal",
     cullMode: String = "nocull",
@@ -2087,7 +2088,7 @@ private func solidPass(
         id: id,
         phase: .material,
         shader: "solidcolor",
-        source: .previous,
+        source: source,
         target: target,
         textures: [:],
         binds: [:],
@@ -2792,6 +2793,103 @@ private func expectPixel(
 }
 
 private extension WPEMetalRenderExecutorTests {
+    @Test("Source-over rewrite to reused composite clears stale physical texture")
+    func sourceOverRewriteToReusedCompositeClearsStalePhysicalTexture() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+
+        let compA = "_rt_imageLayerComposite_layer_a"
+        let compB = "_rt_imageLayerComposite_layer_b"
+        let staleBlue = solidPass(
+            id: "layer.1",
+            color: [0, 0, 1, 0.5],
+            source: .image("materials/base.png"),
+            target: .layerComposite(name: compB),
+            blending: "normal"
+        )
+        let intermediate = solidPass(
+            id: "layer.2",
+            color: [0, 1, 0, 1],
+            source: .image("materials/base.png"),
+            target: .layerComposite(name: compA),
+            blending: "disabled"
+        )
+        let replacementRed = solidPass(
+            id: "layer.3",
+            color: [1, 0, 0, 0.5],
+            source: .fbo(compA),
+            target: .layerComposite(name: compB),
+            blending: "normal"
+        )
+        let copyToScene = copyPass(
+            id: "layer.4",
+            source: .fbo(compB),
+            target: .scene,
+            blending: "disabled"
+        )
+
+        let pipeline = preparedPipeline(
+            localFBOs: [],
+            passes: [
+                preparedBuiltinPass(staleBlue, uniforms: ["g_Color": .vector([0, 0, 1, 0.5])]),
+                preparedBuiltinPass(intermediate, uniforms: ["g_Color": .vector([0, 1, 0, 1])]),
+                preparedBuiltinPass(replacementRed, uniforms: ["g_Color": .vector([1, 0, 0, 0.5])]),
+                preparedBuiltinPass(copyToScene, bindings: [0: .fbo(compB)])
+            ]
+        )
+
+        let output = try executor.render(pipeline: pipeline, size: CGSize(width: 4, height: 4), textures: [:])
+        let pixel = try readPixel(output, x: 2, y: 2)
+
+        #expect(pixel.r >= 120)
+        #expect(pixel.b <= 5, "Second source-over write must not retain stale blue from the earlier compB pass; got \(pixel)")
+        #expect(pixel.a >= 120)
+    }
+
+    @Test("Additive rewrite to reused composite preserves existing destination")
+    func additiveRewriteToReusedCompositePreservesExistingDestination() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+
+        let compB = "_rt_imageLayerComposite_layer_b"
+        let seedBlue = solidPass(
+            id: "layer.1",
+            color: [0, 0, 1, 1],
+            source: .image("materials/base.png"),
+            target: .layerComposite(name: compB),
+            blending: "disabled"
+        )
+        let additiveRed = solidPass(
+            id: "layer.2",
+            color: [1, 0, 0, 1],
+            source: .image("materials/base.png"),
+            target: .layerComposite(name: compB),
+            blending: "additive"
+        )
+        let copyToScene = copyPass(
+            id: "layer.3",
+            source: .fbo(compB),
+            target: .scene,
+            blending: "disabled"
+        )
+
+        let pipeline = preparedPipeline(
+            localFBOs: [],
+            passes: [
+                preparedBuiltinPass(seedBlue, uniforms: ["g_Color": .vector([0, 0, 1, 1])]),
+                preparedBuiltinPass(additiveRed, uniforms: ["g_Color": .vector([1, 0, 0, 1])]),
+                preparedBuiltinPass(copyToScene, bindings: [0: .fbo(compB)])
+            ]
+        )
+
+        let output = try executor.render(pipeline: pipeline, size: CGSize(width: 4, height: 4), textures: [:])
+        let pixel = try readPixel(output, x: 2, y: 2)
+
+        #expect(pixel.r >= 250)
+        #expect(pixel.b >= 250, "Additive writes intentionally accumulate on the existing destination; got \(pixel)")
+        #expect(pixel.a >= 250)
+    }
+
     @Test("Color balance built-in desaturates red to luminance")
     func colorBalanceDesaturatesRedToLuminance() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
