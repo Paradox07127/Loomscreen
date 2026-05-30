@@ -320,6 +320,7 @@ actor WorkshopQueryService {
 
     private func performQuery(_ request: WorkshopQueryRequest, apiKey: String) async throws -> WorkshopQueryPage {
         let url = try buildQueryURL(for: request, apiKey: apiKey)
+        logger.info("📡 Workshop query → \(Self.redactedURLString(url), privacy: .public)")
 
         for attempt in 0..<Self.maxAttempts {
             try Task.checkCancellation()
@@ -339,6 +340,11 @@ actor WorkshopQueryService {
             }
             guard let http = response as? HTTPURLResponse else {
                 throw WorkshopQueryError.responseParseFailure
+            }
+
+            if http.statusCode != 200 {
+                let snippet = String(decoding: data.prefix(300), as: UTF8.self)
+                logger.error("❌ Workshop query HTTP \(http.statusCode, privacy: .public): \(snippet, privacy: .public)")
             }
 
             switch http.statusCode {
@@ -436,18 +442,24 @@ actor WorkshopQueryService {
         do {
             envelope = try JSONDecoder().decode(QueryFilesEnvelope.self, from: data)
         } catch {
+            let snippet = String(decoding: data.prefix(300), as: UTF8.self)
+            logger.error("❌ Workshop decode failed: \(String(describing: error), privacy: .public) — body: \(snippet, privacy: .public)")
             throw WorkshopQueryError.responseParseFailure
         }
         if Self.messageIndicatesDisabled(envelope.response.resultmsg) {
             throw WorkshopQueryError.keyDisabled
         }
+        // Steam omits `publishedfiledetails` entirely when a query has zero
+        // results — treat that as an empty page, not a schema error.
         guard let details = envelope.response.publishedfiledetails else {
-            throw WorkshopQueryError.schemaMismatch
+            logger.warning("⚠️ Workshop query: no publishedfiledetails (total=\(envelope.response.total?.value ?? -1, privacy: .public)) — treating as empty page")
+            return WorkshopQueryPage(items: [], nextCursor: nil, totalAvailable: envelope.response.total?.value)
         }
         let items = details.compactMap { Self.item(from: $0, logger: logger) }
         let nextCursor = envelope.response.next_cursor?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .nilIfEmptyWorkshopQuery
+        logger.info("📡 Workshop query OK: \(items.count, privacy: .public) items (total=\(envelope.response.total?.value ?? -1, privacy: .public))")
         return WorkshopQueryPage(items: items, nextCursor: nextCursor, totalAvailable: envelope.response.total?.value)
     }
 
@@ -520,6 +532,15 @@ actor WorkshopQueryService {
 
     private static func steamBool(_ value: Bool) -> String {
         value ? "true" : "false"
+    }
+
+    /// Request URL with the `key` query value scrubbed, for safe logging.
+    private static func redactedURLString(_ url: URL) -> String {
+        guard var comps = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return url.path }
+        comps.queryItems = comps.queryItems?.map {
+            $0.name == "key" ? URLQueryItem(name: "key", value: "REDACTED") : $0
+        }
+        return comps.string ?? url.path
     }
 
     private static func isValidAPIKeyShape(_ key: String) -> Bool {
