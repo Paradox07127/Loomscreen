@@ -3,23 +3,22 @@ import AppKit
 import LiveWallpaperSharedUI
 import SwiftUI
 
-/// macOS-native detail sheet for a single Workshop item. `HSplitView` with an
-/// auto-playing hero preview + actions on the left and metadata + description
-/// on the right. "Download" runs SteamCMD through the configured Doctor and
-/// imports into the local library; it is enabled only once the Doctor is set
-/// up. "Open in Steam" and the copy actions are always live.
-struct WorkshopDetailSheet: View {
+/// Vertical detail content for a single Workshop item, shown in the trailing
+/// `.inspector` of the Browse grid (replaces the old detail sheet). A square
+/// auto-playing hero on top, then title + rating, the download / open / copy
+/// actions, metadata, tags, and the description. "Download" runs SteamCMD via
+/// the configured Doctor and imports into the local library; "Open in Steam"
+/// and the copy actions are always live.
+struct WorkshopInspectorContent: View {
     let item: WorkshopQueryItem
     let doctor: SteamCMDDoctorService
 
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
 
     private var downloadCoordinator: WorkshopDownloadCoordinator { .shared }
     private var downloadPhase: WorkshopDownloadCoordinator.DownloadPhase {
         downloadCoordinator.phase(for: item.id)
     }
-
     private var downloadProgressFraction: Double? {
         downloadCoordinator.progress[item.id]
     }
@@ -28,58 +27,94 @@ struct WorkshopDetailSheet: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HSplitView {
-                leftPane
-                    .frame(minWidth: 300, idealWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
-                rightPane
-                    .frame(minWidth: 300, idealWidth: 340, maxWidth: .infinity, maxHeight: .infinity)
-            }
-            .frame(maxHeight: .infinity)
+        ScrollView {
+            VStack(alignment: .leading, spacing: DesignTokens.Spacing.lg) {
+                hero
 
-            Divider()
-            footerBar
+                VStack(alignment: .leading, spacing: DesignTokens.Spacing.md) {
+                    Text(item.title)
+                        .font(.title3.weight(.semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    ratingRow
+                    metaRow
+                    statusBadge
+
+                    actionsColumn
+                    downloadStatusNote
+
+                    if !item.tags.isEmpty {
+                        tagsSection
+                    }
+
+                    descriptionSection
+                    steamLink
+                }
+                .padding(.horizontal, DesignTokens.Spacing.lg)
+                .padding(.bottom, DesignTokens.Spacing.lg)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
-        .frame(width: 720, height: 480)
         .background(DesignTokens.Colors.pageBackground)
     }
 
-    // MARK: - Left (hero + actions)
+    // MARK: - Hero
 
-    private var leftPane: some View {
-        VStack(spacing: 0) {
-            AnimatedGIFThumbnail(url: item.previewImageURL, playbackMode: .autoPlay)
-                .aspectRatio(16 / 9, contentMode: .fit)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.Corner.md, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: DesignTokens.Corner.md, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+    private var hero: some View {
+        AnimatedGIFThumbnail(url: item.previewImageURL, playbackMode: .autoPlay)
+            .aspectRatio(1, contentMode: .fit)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.Corner.md, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: DesignTokens.Corner.md, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+            }
+            .padding([.horizontal, .top], DesignTokens.Spacing.lg)
+    }
+
+    // MARK: - Rating
+
+    @ViewBuilder
+    private var ratingRow: some View {
+        if let score = item.voteScore, score > 0 {
+            let stars = min(max(score * 5, 0), 5)
+            HStack(spacing: 6) {
+                HStack(spacing: 1) {
+                    ForEach(0..<5, id: \.self) { index in
+                        Image(systemName: Self.starSymbol(for: index, rating: stars))
+                            .foregroundStyle(.yellow)
+                            .font(.system(size: 12))
+                    }
                 }
-                .padding(DesignTokens.Spacing.md)
-                .frame(maxHeight: .infinity)
-
-            Divider()
-            actionsBar
+                Text(verbatim: stars.formatted(.number.precision(.fractionLength(1))))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text("\(stars.formatted(.number.precision(.fractionLength(1)))) stars"))
         }
     }
 
-    private var actionsBar: some View {
+    private static func starSymbol(for index: Int, rating: Double) -> String {
+        let position = Double(index)
+        if rating >= position + 1 { return "star.fill" }
+        if rating >= position + 0.5 { return "star.leadinghalf.filled" }
+        return "star"
+    }
+
+    // MARK: - Actions
+
+    private var actionsColumn: some View {
         VStack(spacing: DesignTokens.Spacing.sm) {
-            HStack(spacing: DesignTokens.Spacing.sm) {
-                Button {
-                    openURL(item.steamCommunityURL)
-                } label: {
-                    Label("Open in Steam", systemImage: "arrow.up.forward.app")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(item.isBanned)
-                .help(Text("Open this item on the Steam Community website"))
-
-                downloadControl
+            Button {
+                openURL(item.steamCommunityURL)
+            } label: {
+                Label("Open in Steam", systemImage: "arrow.up.forward.app")
+                    .frame(maxWidth: .infinity)
             }
+            .buttonStyle(.borderedProminent)
+            .help(Text("Open this item on the Steam Community website"))
 
-            downloadStatusNote
+            downloadControl
 
             HStack(spacing: DesignTokens.Spacing.sm) {
                 Button {
@@ -99,7 +134,6 @@ struct WorkshopDetailSheet: View {
                 .controlSize(.small)
             }
         }
-        .padding(DesignTokens.Spacing.md)
     }
 
     @ViewBuilder
@@ -109,7 +143,7 @@ struct WorkshopDetailSheet: View {
             Button {
                 downloadCoordinator.download(item, using: doctor)
             } label: {
-                Label(isRetry ? "Retry" : "Download", systemImage: "arrow.down.circle")
+                Label(downloadButtonTitle, systemImage: "arrow.down.circle")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
@@ -137,11 +171,8 @@ struct WorkshopDetailSheet: View {
             downloadControlChrome {
                 VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
                     HStack(spacing: 6) {
-                        // Only the percent in the sheet's narrow left column; the
-                        // byte detail lives in the tooltip + the VoiceOver value
-                        // so it never truncates to an illegible ellipsis.
-                        Text(verbatim: progressPercentLabel(for: progress))
-                            .font(.caption.weight(.semibold))
+                        Text(verbatim: progressDetailLabel(for: progress))
+                            .font(.caption.weight(.medium))
                             .lineLimit(1)
                             .accessibilityHidden(true)
                         Spacer(minLength: 0)
@@ -163,8 +194,7 @@ struct WorkshopDetailSheet: View {
         downloadControlChrome {
             HStack(spacing: 6) {
                 ProgressView().controlSize(.small)
-                Text(title)
-                    .lineLimit(1)
+                Text(title).lineLimit(1)
                 Spacer(minLength: 0)
                 cancelDownloadButton
             }
@@ -196,7 +226,7 @@ struct WorkshopDetailSheet: View {
             actionNote(message, color: .red)
         } else if !doctor.isDownloadReady, downloadPhase == .idle {
             actionNote(
-                String(localized: "Downloads use SteamCMD (Settings → Workshop → SteamCMD Doctor), separate from the Web API key.", comment: "Hint in the Workshop detail sheet when SteamCMD isn't configured."),
+                String(localized: "Downloads use SteamCMD (Settings → Workshop → SteamCMD Doctor), separate from the Web API key.", comment: "Hint in the Workshop detail inspector when SteamCMD isn't configured."),
                 color: .secondary
             )
         }
@@ -215,9 +245,9 @@ struct WorkshopDetailSheet: View {
         return false
     }
 
-    private func progressPercentLabel(for fraction: Double) -> String {
-        "\(Int((fraction * 100).rounded()))%"
-    }
+    /// Typed `LocalizedStringKey` so the ternary literals localize (a bare
+    /// `String` ternary would bind to `Label`'s non-localized initializer).
+    private var downloadButtonTitle: LocalizedStringKey { isRetry ? "Retry" : "Download" }
 
     private func progressDetailLabel(for fraction: Double) -> String {
         let percent = Int((fraction * 100).rounded())
@@ -240,39 +270,7 @@ struct WorkshopDetailSheet: View {
         return nil
     }
 
-    // MARK: - Right (metadata + description)
-
-    private var rightPane: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: DesignTokens.Spacing.md) {
-                Text(item.title)
-                    .font(.title2.weight(.semibold))
-                    .fixedSize(horizontal: false, vertical: true)
-
-                metaRow
-                statusBadge
-
-                if !item.tags.isEmpty {
-                    tagsFlow
-                }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
-                    Text("Description")
-                        .font(.headline)
-                    Text(item.shortDescription.isEmpty
-                         ? String(localized: "No description provided.", comment: "Placeholder when a Workshop item has no description.")
-                         : item.shortDescription)
-                        .font(.body)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(DesignTokens.Spacing.lg)
-        }
-    }
+    // MARK: - Metadata
 
     private var metaRow: some View {
         HStack(spacing: 6) {
@@ -287,11 +285,12 @@ struct WorkshopDetailSheet: View {
                 }
             }
             if let size = item.fileSizeBytes {
-                Text(verbatim: Self.byteFormatter.string(fromByteCount: Int64(size)))
+                Text(verbatim: Self.byteFormatter.string(fromByteCount: Int64(clamping: size)))
             }
         }
         .font(.system(size: 11, weight: .medium))
         .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     @ViewBuilder
@@ -300,10 +299,11 @@ struct WorkshopDetailSheet: View {
             Label("Unavailable — removed or hidden on Steam", systemImage: "xmark.octagon.fill")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.red)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    private var tagsFlow: some View {
+    private var tagsSection: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 ForEach(item.tags, id: \.self) { tag in
@@ -318,23 +318,27 @@ struct WorkshopDetailSheet: View {
         }
     }
 
-    private var footerBar: some View {
-        HStack {
-            Button {
-                openURL(item.steamCommunityURL)
-            } label: {
-                Label("View on Steam Community", systemImage: "safari")
-            }
-            .buttonStyle(.link)
-
-            Spacer()
-
-            Button("Done") { dismiss() }
-                .keyboardShortcut(.cancelAction)
-                .buttonStyle(.borderedProminent)
+    private var descriptionSection: some View {
+        VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
+            Divider()
+            Text("Description")
+                .font(.headline)
+            Text(item.shortDescription.isEmpty
+                 ? String(localized: "No description provided.", comment: "Placeholder when a Workshop item has no description.")
+                 : item.shortDescription)
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, DesignTokens.Spacing.lg)
-        .padding(.vertical, DesignTokens.Spacing.md)
+    }
+
+    private var steamLink: some View {
+        Button {
+            openURL(item.steamCommunityURL)
+        } label: {
+            Label("View on Steam Community", systemImage: "safari")
+        }
+        .buttonStyle(.link)
     }
 
     // MARK: - Helpers
@@ -347,10 +351,10 @@ struct WorkshopDetailSheet: View {
 
     private func formatSubs(_ count: Int) -> String {
         if count >= 1_000_000 {
-            return String(format: "%.1fM subs", Double(count) / 1_000_000.0)
+            return String(format: "%.1fM subs", locale: .current, Double(count) / 1_000_000.0)
         }
         if count >= 1_000 {
-            return String(format: "%.1fK subs", Double(count) / 1_000.0)
+            return String(format: "%.1fK subs", locale: .current, Double(count) / 1_000.0)
         }
         return "\(count) subs"
     }

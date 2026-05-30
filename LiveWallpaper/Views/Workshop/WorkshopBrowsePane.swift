@@ -68,8 +68,18 @@ struct WorkshopBrowsePane: View {
         .onChange(of: viewModel.isLoadingMore) { _, loading in
             if loading { WorkshopRequestCounter.increment() }
         }
-        .sheet(item: $selectedItem) { item in
-            WorkshopDetailSheet(item: item, doctor: doctor)
+        .inspector(isPresented: Binding(
+            get: { selectedItem != nil },
+            set: { presented in if !presented { selectedItem = nil } }
+        )) {
+            Group {
+                if let selectedItem {
+                    WorkshopInspectorContent(item: selectedItem, doctor: doctor)
+                } else {
+                    inspectorPlaceholder
+                }
+            }
+            .inspectorColumnWidth(min: 280, ideal: 320, max: 420)
         }
     }
 
@@ -156,6 +166,20 @@ struct WorkshopBrowsePane: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(DesignTokens.Spacing.xl)
+    }
+
+    private var inspectorPlaceholder: some View {
+        VStack(spacing: DesignTokens.Spacing.sm) {
+            Image(systemName: "square.dashed")
+                .font(.system(size: 28))
+                .foregroundStyle(.tertiary)
+            Text("Select a wallpaper to see details.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(DesignTokens.Spacing.lg)
     }
 
     private var emptyState: some View {
