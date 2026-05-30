@@ -167,7 +167,7 @@ final class WPEMetalRenderTargetPool {
 
     private static func layerCompositeSize(for layer: WPERenderLayer, sceneSize: CGSize) -> CGSize {
         guard layer.geometry != .identity,
-              let declaredSize = layer.geometry.size else {
+              let size = layer.geometry.size else {
             return sceneSize
         }
 
@@ -177,16 +177,11 @@ final class WPEMetalRenderTargetPool {
             let scaleX = finiteMagnitude(layer.geometry.scale.x, fallback: 1)
             let scaleY = finiteMagnitude(layer.geometry.scale.y, fallback: 1)
             return CGSize(
-                width: max(declaredSize.width * scaleX, 1),
-                height: max(declaredSize.height * scaleY, 1)
+                width: max(size.width * scaleX, 1),
+                height: max(size.height * scaleY, 1)
             )
         }
 
-        // Puppet layers whose mesh exceeds the declared footprint render into a
-        // larger, aspect-locked local composite so the mesh is not clipped; that
-        // composite is later blitted (full UV) back into the declared scene
-        // footprint, shrinking the mesh uniformly. `nil` for everything else.
-        let size = layer.geometry.localCompositeSize ?? declaredSize
         return CGSize(
             width: max(size.width, 1),
             height: max(size.height, 1)
