@@ -25,6 +25,14 @@ struct WorkshopInstalledView: View {
     @State private var isDraggingEntry = false
     @State private var localDragEndMonitor: Any?
     @State private var globalDragEndMonitor: Any?
+    /// Workshop ids whose Steam item is newer than our import (the "Update"
+    /// badge), derived from `cachedRemoteUpdateEpochs` vs each entry's import time.
+    @State private var updatedWorkshopIDs: Set<String> = []
+    /// Cached remote `timeUpdated` (epoch seconds) per workshop id, persisted so
+    /// the badge survives relaunches and re-derives correctly after a re-download.
+    @State private var cachedRemoteUpdateEpochs: [String: Double] = [:]
+    @State private var isCheckingForUpdates = false
+    @AppStorage("loomscreen.workshop.updateCheck.epoch.v1") private var lastUpdateCheckEpoch: Double = 0
 
     // Match the online Browse grid density (square tiles, ~192px source).
     private let columns = [GridItem(.adaptive(minimum: 184, maximum: 220), spacing: DesignTokens.Spacing.lg)]
@@ -32,9 +40,16 @@ struct WorkshopInstalledView: View {
     var body: some View {
         content
             .background(DesignTokens.Colors.pageBackground)
-            .onAppear(perform: reload)
+            .onAppear {
+                reload()
+                loadUpdateFlags()
+            }
+            .task { await checkForUpdatesIfNeeded() }
             .onDisappear { removeDragEndMonitors() }
-            .onReceive(NotificationCenter.default.publisher(for: .wpeHistoryDidChange)) { _ in reload() }
+            .onReceive(NotificationCenter.default.publisher(for: .wpeHistoryDidChange)) { _ in
+                reload()
+                reconcileUpdateFlags()
+            }
     }
 
     // MARK: - Content
@@ -117,7 +132,8 @@ struct WorkshopInstalledView: View {
                             // Only offer "Add" when the item's content can actually
                             // be rebuilt into a bookmark; "Remove" stays available
                             // for anything already bookmarked.
-                            onBookmark: (bookmarked || canAddBookmark(entry)) ? { toggleBookmark(entry) } : nil
+                            onBookmark: (bookmarked || canAddBookmark(entry)) ? { toggleBookmark(entry) } : nil,
+                            hasUpdate: updatedWorkshopIDs.contains(entry.origin.workshopID)
                         )
                         .onDrag { beginEntryDrag(entry) }
                     }
@@ -405,6 +421,64 @@ struct WorkshopInstalledView: View {
 
     private func reload() {
         entries = SettingsManager.shared.loadGlobalSettings().recentWPEImports
+    }
+
+    // MARK: - "Update available" daily check
+
+    private static let remoteUpdateEpochsKey = "loomscreen.workshop.updateCheck.remoteEpochs.v1"
+
+    private func loadUpdateFlags() {
+        cachedRemoteUpdateEpochs = UserDefaults.standard.dictionary(forKey: Self.remoteUpdateEpochsKey) as? [String: Double] ?? [:]
+        reconcileUpdateFlags()
+    }
+
+    /// Derive the visible "Update" set from cached remote timestamps vs each
+    /// entry's current import time — so a re-download (newer `importedAt`) clears
+    /// the badge immediately, without waiting for the next daily fetch.
+    private func reconcileUpdateFlags() {
+        updatedWorkshopIDs = Set(entries.compactMap { entry in
+            guard let remoteEpoch = cachedRemoteUpdateEpochs[entry.origin.workshopID],
+                  remoteEpoch > entry.importedAt.timeIntervalSince1970 else { return nil }
+            return entry.origin.workshopID
+        })
+    }
+
+    /// Once per day, fetch each installed item's current Workshop metadata and
+    /// cache its remote `timeUpdated`. Runs inside `.task` so it's cancelled when
+    /// the tab goes away; single-flight; preserves prior cache on transient
+    /// failures and stops early on rate-limit (never erases known badges).
+    private func checkForUpdatesIfNeeded() async {
+        guard !isCheckingForUpdates else { return }
+        guard Date().timeIntervalSince1970 - lastUpdateCheckEpoch >= 86_400 else { return }
+        let snapshot = entries
+        guard !snapshot.isEmpty else { return }
+        isCheckingForUpdates = true
+        defer { isCheckingForUpdates = false }
+
+        let service = SteamWorkshopMetadataService()
+        let currentIDs = Set(snapshot.map(\.origin.workshopID))
+        var remoteEpochs = cachedRemoteUpdateEpochs.filter { currentIDs.contains($0.key) }
+
+        fetchLoop: for entry in snapshot {
+            if Task.isCancelled { return }
+            guard let id = UInt64(entry.origin.workshopID) else { continue }
+            switch await service.fetch(publishedFileID: id) {
+            case .success(let metadata):
+                if let remoteUpdated = metadata.timeUpdated {
+                    remoteEpochs[entry.origin.workshopID] = remoteUpdated.timeIntervalSince1970
+                } else {
+                    remoteEpochs.removeValue(forKey: entry.origin.workshopID)
+                }
+            case .failure(let error):
+                if case .rateLimited = error { break fetchLoop }
+                continue  // keep prior cached status for this id on transient failure
+            }
+        }
+
+        cachedRemoteUpdateEpochs = remoteEpochs
+        UserDefaults.standard.set(remoteEpochs, forKey: Self.remoteUpdateEpochsKey)
+        reconcileUpdateFlags()
+        lastUpdateCheckEpoch = Date().timeIntervalSince1970
     }
 }
 

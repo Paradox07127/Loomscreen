@@ -29,6 +29,9 @@ struct WPEHistoryRow: View {
     /// nil so its appearance/behavior is unchanged.
     var isBookmarked: Bool = false
     var onBookmark: (() -> Void)? = nil
+    /// "Update available" badge — set when the installed item's Workshop
+    /// `timeUpdated` is newer than its import (Installed library only).
+    var hasUpdate: Bool = false
 
     @State private var isHovering = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -100,6 +103,11 @@ struct WPEHistoryRow: View {
                             .foregroundStyle(.white)
                             .padding(DesignTokens.Spacing.sm)
                             .accessibilityLabel(badge.accessibility)
+                    }
+                }
+                .overlay(alignment: .topLeading) {
+                    if hasUpdate {
+                        updateBadge
                     }
                 }
 
@@ -183,6 +191,21 @@ struct WPEHistoryRow: View {
         }
     }
 
+    private var updateBadge: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .font(.system(size: 8, weight: .bold))
+            Text("Update")
+                .font(.system(size: 9, weight: .bold))
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(Color.orange.opacity(0.9), in: Capsule())
+        .padding(DesignTokens.Spacing.sm)
+        .accessibilityLabel(Text("Update available"))
+    }
+
     // MARK: - Inline apply control (Installed library)
 
     @ViewBuilder
@@ -224,14 +247,17 @@ struct WPEHistoryRow: View {
     /// tab) layout children are `.ignore`d, so the compatibility badge ("Won't
     /// run" / "Needs deps") would be silent to VoiceOver — fold it into the label.
     private var accessibilityCardLabel: Text {
-        let base = Text(
+        var label = Text(
             "Imported project: \(entry.origin.title)",
             comment: "A11y label for an imported project history row card. The placeholder is the project title."
         )
-        if !allowsInlineApply, let badge = compatibilityBadge {
-            return base + Text(verbatim: " — ") + badge.accessibility
+        if hasUpdate {
+            label = label + Text(verbatim: " — ") + Text("Update available", comment: "A11y: the installed item has a newer version on Steam.")
         }
-        return base
+        if !allowsInlineApply, let badge = compatibilityBadge {
+            label = label + Text(verbatim: " — ") + badge.accessibility
+        }
+        return label
     }
 
     private var applyAccessibilityHint: Text {
