@@ -44,7 +44,18 @@ struct WPERenderPipelineBuilder: Sendable {
         do {
             let url = try resolver.resolveExistingFileURL(relativePath: puppetPath)
             let data = try Data(contentsOf: url)
-            return try WPEMdlParser.parse(data: data)
+            let model = try WPEMdlParser.parse(data: data)
+            // Only the modern pre-assembled puppet generations (MDLV0021/0023)
+            // ship MDLV vertices already in assembled object space, which the
+            // renderer can draw directly. Older generations (e.g. MDLV0019)
+            // store an *exploded* "pieces" mesh whose assembled pose is produced
+            // by WPE's editor-side puppet solver and is not recoverable from the
+            // file (the bind/tp/MDLA data does not encode it). The reference
+            // linux-wallpaperengine likewise renders only MDLV0021/0023 and
+            // rejects older meshes. Degrade those objects to their flat material
+            // image rather than drawing scattered pieces.
+            guard model.version >= 21 else { return nil }
+            return model
         } catch {
             return nil
         }
