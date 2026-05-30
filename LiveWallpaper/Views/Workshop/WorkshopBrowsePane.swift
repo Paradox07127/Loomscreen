@@ -17,10 +17,11 @@ struct WorkshopBrowsePane: View {
 
     private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
-    // Smaller tiles than before (was 260–360) so more wallpapers fit per row;
-    // closer to the Bookmarks / Aerials gallery density.
+    // Square tiles sized to the ~192px source thumbnails — large enough to read
+    // the preview crisply without upscaling into blur, so the window width alone
+    // drives how many fit per row (no manual density control).
     private var gridColumns: [GridItem] {
-        [GridItem(.adaptive(minimum: 200, maximum: 260), spacing: DesignTokens.Spacing.lg)]
+        [GridItem(.adaptive(minimum: 184, maximum: 220), spacing: DesignTokens.Spacing.lg)]
     }
 
     var body: some View {
@@ -277,28 +278,20 @@ private struct WorkshopSkeletonCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             WorkshopShimmer()
-                .aspectRatio(16 / 9, contentMode: .fit)
+                .aspectRatio(1, contentMode: .fit)
 
-            // Mirror WorkshopBrowseCard's textInfo footprint (2-line title,
-            // subtitle, tag chips) so there is no layout shift on load.
+            // Mirror WorkshopBrowseCard's textInfo footprint (2-line title +
+            // type / meta row) so there is no layout shift on load.
             VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
                 WorkshopShimmer().frame(height: 13).frame(maxWidth: .infinity)
-                WorkshopShimmer().frame(width: 140, height: 13)
-                WorkshopShimmer().frame(width: 110, height: 11)
-                HStack(spacing: 4) {
-                    ForEach(0..<2, id: \.self) { _ in
-                        WorkshopShimmer().frame(width: 50, height: 16).clipShape(Capsule())
-                    }
+                WorkshopShimmer().frame(width: 120, height: 13)
+                HStack(spacing: 6) {
+                    WorkshopShimmer().frame(width: 46, height: 14).clipShape(Capsule())
+                    Spacer(minLength: 0)
+                    WorkshopShimmer().frame(width: 72, height: 11)
                 }
             }
-            .padding([.horizontal, .top], DesignTokens.Spacing.md)
-
-            HStack(spacing: DesignTokens.Spacing.xs) {
-                WorkshopShimmer().frame(width: 96, height: 22).clipShape(RoundedRectangle(cornerRadius: DesignTokens.Corner.sm))
-                WorkshopShimmer().frame(width: 30, height: 22).clipShape(RoundedRectangle(cornerRadius: DesignTokens.Corner.sm))
-            }
-            .padding([.horizontal, .bottom], DesignTokens.Spacing.md)
-            .padding(.top, DesignTokens.Spacing.sm)
+            .padding(DesignTokens.Spacing.md)
         }
         .background(Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.Corner.lg, style: .continuous))

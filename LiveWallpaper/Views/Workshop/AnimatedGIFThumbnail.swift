@@ -40,7 +40,9 @@ struct AnimatedGIFThumbnail: View {
             Rectangle().fill(Color.secondary.opacity(0.12))
             content
         }
-        .overlay(alignment: .topLeading) {
+        // Bottom-leading so it never collides with the top-leading rating pill
+        // the grid card overlays on the same tile.
+        .overlay(alignment: .bottomLeading) {
             if controller.isAnimating {
                 playingBadge
                     .padding(DesignTokens.Spacing.sm)
@@ -86,7 +88,7 @@ struct AnimatedGIFThumbnail: View {
         .foregroundStyle(.white)
         .padding(.horizontal, 7)
         .padding(.vertical, 3)
-        .background(.black.opacity(0.55), in: Capsule())
+        .background(.black.opacity(0.7), in: Capsule())
         .accessibilityHidden(true)
     }
 
