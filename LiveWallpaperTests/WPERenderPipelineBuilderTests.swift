@@ -87,6 +87,85 @@ struct WPERenderPipelineBuilderTests {
         #expect(layer.passes[1].shader?.fragmentSource.contains("#define texSample2D") == true)
     }
 
+    @Test("Texture-declared combo (MASK) auto-enables when its sampler slot is bound")
+    func textureDeclaredComboEnablesWhenSamplerSlotBound() throws {
+        // Mirrors waterwaves.frag: the opacity-mask sampler g_Texture1 declares
+        // `"combo":"MASK"`, gating the displacement mask behind `#if MASK`. WPE
+        // auto-enables MASK when the slot is bound (scene ships textures[1] but
+        // no explicit combos). If MASK stays off, `mask = 1.0` and the WHOLE
+        // layer displaces — the "ghost / stacked layers" artifact.
+        let fixture = try makeFixture(files: [
+            "shaders/effects/masked.vert": """
+            attribute vec3 a_Position;
+            void main() { gl_Position = vec4(a_Position, 1.0); }
+            """,
+            "shaders/effects/masked.frag": """
+            uniform sampler2D g_Texture0; // {"hidden":true}
+            uniform sampler2D g_Texture1; // {"mode":"opacitymask","combo":"MASK"}
+            void main() {
+            #if MASK
+                float mask = texSample2D(g_Texture1, vec2(0.5)).r;
+            #else
+                float mask = 1.0;
+            #endif
+                gl_FragColor = texSample2D(g_Texture0, vec2(0.5)) * mask;
+            }
+            """
+        ])
+        defer { fixture.cleanup() }
+
+        let graph = WPERenderGraph(layers: [
+            WPERenderLayer(
+                objectID: "9",
+                objectName: "Layer",
+                imagePath: "materials/base.png",
+                materialPath: "materials/base.json",
+                geometry: .identity,
+                compositeA: "_rt_imageLayerComposite_9_a",
+                compositeB: "_rt_imageLayerComposite_9_b",
+                localFBOs: [],
+                passes: [
+                    WPERenderPass(
+                        id: "9.0",
+                        phase: .material,
+                        shader: "genericimage2",
+                        source: .image("materials/base.png"),
+                        target: .layerComposite(name: "_rt_imageLayerComposite_9_a"),
+                        textures: [:],
+                        binds: [:],
+                        constants: [:],
+                        combos: [:],
+                        blending: "normal",
+                        cullMode: "nocull",
+                        depthTest: "disabled",
+                        depthWrite: "disabled"
+                    ),
+                    WPERenderPass(
+                        id: "9.1",
+                        phase: .effect(file: "effects/masked/effect.json"),
+                        shader: "effects/masked",
+                        source: .fbo("_rt_imageLayerComposite_9_a"),
+                        target: .scene,
+                        // Mask bound to slot 1; MASK combo deliberately NOT set
+                        // explicitly — it must be derived from the bound slot.
+                        textures: [1: .asset("masks/waterwaves_mask")],
+                        binds: [:],
+                        constants: [:],
+                        combos: [:],
+                        blending: "normal",
+                        cullMode: "nocull",
+                        depthTest: "disabled",
+                        depthWrite: "disabled"
+                    )
+                ]
+            )
+        ])
+
+        let pipeline = try WPERenderPipelineBuilder(cacheRootURL: fixture.root).build(graph: graph)
+        let effect = try #require(pipeline.layers.first?.passes.last?.shader)
+        #expect(effect.fragmentSource.contains("#define MASK 1"))
+    }
+
     @Test("Loads puppet model from render graph layer path")
     func loadsPuppetModelFromRenderGraphLayerPath() throws {
         let fixture = try makeFixture(dataFiles: [
