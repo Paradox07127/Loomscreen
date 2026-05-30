@@ -207,6 +207,8 @@ struct WPEMetalPuppetVertex {
 struct WPEPuppetMeshUniforms {
     /// x/y = local layer-composite target size, z/w reserved.
     var localSizeAndMode: SIMD4<Float>
+    /// x/y = raw MDLV mesh center in puppet model coordinates, z/w reserved.
+    var meshCenterAndPadding: SIMD4<Float>
 }
 
 struct WPEGenericParticleUniforms {

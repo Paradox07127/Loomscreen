@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import Testing
 @testable import LiveWallpaper
@@ -828,5 +829,213 @@ struct WPERenderGraphBuilderTests {
         )
         let data = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted])
         try data.write(to: url)
+    }
+
+    // MARK: - Puppet placement (mesh-bbox sizing + position-preserving re-origin)
+
+    @Test("Cropped puppet (Frieren) is re-placed to its mesh bbox at native size")
+    func croppedPuppetReplacedToMeshBboxFrieren() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPERenderGraphBuilderTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        try writePuppetModelJSON(root: root, path: "models/fll.json", puppetPath: "models/fll_puppet.mdl")
+        try writePuppetFixture(
+            vertices: boundsVertices(minX: -1865, minY: -1566, maxX: -60, maxY: 549),
+            to: root.appendingPathComponent("models/fll_puppet.mdl")
+        )
+
+        let graph = try buildPuppetGraph(
+            root: root, modelPath: "models/fll.json", objectID: "22",
+            size: "4028 2263", scale: "0.99 0.99 1", origin: "2233.56958 1499.62573 0",
+            projectionWidth: 3840, projectionHeight: 2160
+        )
+        let layer = try #require(graph.layers.first)
+        let size = try #require(layer.geometry.size)
+
+        // Composite + scene quad sized to the mesh bbox (native 1:1, no shrink).
+        #expect(abs(Double(size.width) - 1805) < 0.5)
+        #expect(abs(Double(size.height) - 2115) < 0.5)
+        // Mesh centered in its composite.
+        #expect(abs(layer.geometry.puppetMeshCenter.x - (-962.5)) < 0.01)
+        #expect(abs(layer.geometry.puppetMeshCenter.y - (-508.5)) < 0.01)
+        // Origin recomputed to preserve screen position (with the ~50px bottom
+        // clamp that brings the off-screen boots back into the 2160 frame).
+        #expect(abs(layer.geometry.origin.x - 1280.695) < 1.0)
+        #expect(abs(layer.geometry.origin.y - 1046.925) < 1.0)
+    }
+
+    @Test("Cropped puppet (Himmel) cross-validates the placement formula")
+    func croppedPuppetReplacedToMeshBboxHimmel() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPERenderGraphBuilderTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        try writePuppetModelJSON(root: root, path: "models/xme.json", puppetPath: "models/xme_puppet.mdl")
+        try writePuppetFixture(
+            vertices: boundsVertices(minX: -96, minY: -1117, maxX: 1574, maxY: 765),
+            to: root.appendingPathComponent("models/xme_puppet.mdl")
+        )
+
+        let graph = try buildPuppetGraph(
+            root: root, modelPath: "models/xme.json", objectID: "64",
+            size: "2808 2268", scale: "0.99 0.99 1", origin: "2047.19226 1189.41614 0",
+            projectionWidth: 3840, projectionHeight: 2160
+        )
+        let layer = try #require(graph.layers.first)
+        let size = try #require(layer.geometry.size)
+
+        #expect(abs(Double(size.width) - 1670) < 0.5)
+        #expect(abs(Double(size.height) - 1882) < 0.5)
+        #expect(abs(layer.geometry.puppetMeshCenter.x - 739) < 0.01)
+        #expect(abs(layer.geometry.puppetMeshCenter.y - (-176)) < 0.01)
+        #expect(abs(layer.geometry.origin.x - 2778.802) < 1.0)
+        #expect(abs(layer.geometry.origin.y - 1015.176) < 1.0)
+    }
+
+    @Test("Puppet whose mesh fits the declared size keeps its geometry (no-op)")
+    func fittingPuppetKeepsGeometry() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPERenderGraphBuilderTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        try writePuppetModelJSON(root: root, path: "models/p.json", puppetPath: "models/p_puppet.mdl")
+        // Mesh ±800 × ±900 fits inside a 2000×2000 object (local range [200,1800]×[100,1900]).
+        try writePuppetFixture(
+            vertices: boundsVertices(minX: -800, minY: -900, maxX: 800, maxY: 900),
+            to: root.appendingPathComponent("models/p_puppet.mdl")
+        )
+
+        let graph = try buildPuppetGraph(
+            root: root, modelPath: "models/p.json", objectID: "p",
+            size: "2000 2000", scale: "1 1 1", origin: "1000 1000 0",
+            projectionWidth: 3840, projectionHeight: 2160
+        )
+        let layer = try #require(graph.layers.first)
+
+        #expect(layer.geometry.size == CGSize(width: 2000, height: 2000))
+        #expect(layer.geometry.puppetMeshCenter == SIMD2<Double>(0, 0))
+        #expect(layer.geometry.origin == SIMD3<Double>(1000, 1000, 0))
+    }
+
+    private func buildPuppetGraph(
+        root: URL, modelPath: String, objectID: String,
+        size: String, scale: String, origin: String,
+        projectionWidth: Int, projectionHeight: Int
+    ) throws -> WPERenderGraph {
+        let scenePayload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": projectionWidth, "height": projectionHeight, "auto": true]],
+            "objects": [[
+                "id": objectID, "name": objectID, "type": "image", "image": modelPath,
+                "size": size, "scale": scale, "origin": origin
+            ]]
+        ]
+        let sceneData = try JSONSerialization.data(withJSONObject: scenePayload)
+        let document = try WPESceneDocumentParser.parse(data: sceneData)
+        return try WPERenderGraphBuilder(cacheRootURL: root).build(document: document)
+    }
+
+    private func writePuppetModelJSON(root: URL, path: String, puppetPath: String) throws {
+        try writeJSON([
+            "material": "materials/puppet.json",
+            "puppet": puppetPath,
+            "autosize": true
+        ], to: root.appendingPathComponent(path))
+        try writeJSON([
+            "passes": [["shader": "genericimage4", "textures": ["models/puppet_d"]]]
+        ], to: root.appendingPathComponent("materials/puppet.json"))
+    }
+
+    private func writePuppetFixture(
+        vertices: [(position: SIMD3<Float>, uv: SIMD2<Float>)],
+        to url: URL
+    ) throws {
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        try makePuppetModelData(vertices: vertices).write(to: url)
+    }
+
+    private func boundsVertices(
+        minX: Float, minY: Float, maxX: Float, maxY: Float
+    ) -> [(position: SIMD3<Float>, uv: SIMD2<Float>)] {
+        [
+            (SIMD3<Float>(minX, minY, 0), SIMD2<Float>(0, 1)),
+            (SIMD3<Float>(maxX, minY, 0), SIMD2<Float>(1, 1)),
+            (SIMD3<Float>(minX, maxY, 0), SIMD2<Float>(0, 0)),
+            (SIMD3<Float>(maxX, maxY, 0), SIMD2<Float>(1, 0))
+        ]
+    }
+
+    private func makePuppetModelData(vertices: [(position: SIMD3<Float>, uv: SIMD2<Float>)]) -> Data {
+        var data = Data()
+        data.append(contentsOf: Array("MDLV0023".utf8))
+        data.appendLittleEndian(UInt32(0x80000900))
+        data.append(UInt8(1))
+        data.appendLittleEndian(UInt32(1))
+        data.appendLittleEndian(UInt32(1))
+
+        data.appendCString("materials/test.json")
+        data.appendLittleEndian(UInt32(0))
+        for _ in 0..<6 { data.appendLittleEndian(Float(0)) }
+        data.appendLittleEndian(UInt32(0x180000f))
+
+        let vertexData = Data.wpePuppetVertices(vertices)
+        data.appendLittleEndian(UInt32(vertexData.count))
+        data.append(vertexData)
+
+        let indices: [UInt16] = vertices.count >= 4 ? [0, 1, 2, 2, 1, 3] : [0, 1, 2]
+        data.appendLittleEndian(UInt32(indices.count * MemoryLayout<UInt16>.size))
+        for index in indices { data.appendLittleEndian(index) }
+
+        data.append(UInt8(0))
+        data.append(UInt8(1))
+        data.appendLittleEndian(UInt32(16))
+        data.appendLittleEndian(UInt32(7))
+        data.appendLittleEndian(UInt32(0))
+        data.appendLittleEndian(UInt32(0))
+        data.appendLittleEndian(UInt32(indices.count))
+        return data
+    }
+}
+
+private extension Data {
+    mutating func appendLittleEndian(_ value: UInt16) {
+        var le = value.littleEndian
+        Swift.withUnsafeBytes(of: &le) { append(contentsOf: $0) }
+    }
+
+    mutating func appendLittleEndian(_ value: UInt32) {
+        var le = value.littleEndian
+        Swift.withUnsafeBytes(of: &le) { append(contentsOf: $0) }
+    }
+
+    mutating func appendLittleEndian(_ value: Float) {
+        appendLittleEndian(value.bitPattern)
+    }
+
+    mutating func appendCString(_ string: String) {
+        append(contentsOf: Array(string.utf8))
+        append(UInt8(0))
+    }
+
+    static func wpePuppetVertices(_ vertices: [(position: SIMD3<Float>, uv: SIMD2<Float>)]) -> Data {
+        var data = Data()
+        for vertex in vertices {
+            data.appendLittleEndian(vertex.position.x)
+            data.appendLittleEndian(vertex.position.y)
+            data.appendLittleEndian(vertex.position.z)
+            data.appendLittleEndian(Float(0)); data.appendLittleEndian(Float(0)); data.appendLittleEndian(Float(1))
+            data.appendLittleEndian(Float(1)); data.appendLittleEndian(Float(0)); data.appendLittleEndian(Float(0)); data.appendLittleEndian(Float(1))
+            data.appendLittleEndian(Float(0)); data.appendLittleEndian(Float(0)); data.appendLittleEndian(Float(0)); data.appendLittleEndian(Float(0))
+            data.appendLittleEndian(Float(1)); data.appendLittleEndian(Float(0)); data.appendLittleEndian(Float(0)); data.appendLittleEndian(Float(0))
+            data.appendLittleEndian(vertex.uv.x)
+            data.appendLittleEndian(vertex.uv.y)
+        }
+        return data
     }
 }

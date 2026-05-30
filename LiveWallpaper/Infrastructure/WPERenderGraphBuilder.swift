@@ -1,4 +1,5 @@
 #if !LITE_BUILD
+import CoreGraphics
 import Foundation
 
 struct WPERenderGraphBuilder: Sendable {
@@ -19,6 +20,10 @@ struct WPERenderGraphBuilder: Sendable {
     }
 
     func build(document: WPESceneDocument) throws -> WPERenderGraph {
+        let sceneSize = CGSize(
+            width: CGFloat(document.general.orthogonalProjection.width),
+            height: CGFloat(document.general.orthogonalProjection.height)
+        )
         var objectByID: [String: WPESceneImageObject] = [:]
         var originalIndexByID: [String: Int] = [:]
         for (index, object) in document.imageObjects.enumerated() where objectByID[object.id] == nil {
@@ -53,6 +58,7 @@ struct WPERenderGraphBuilder: Sendable {
             .map { object in
                 try buildLayer(
                     object: object,
+                    sceneSize: sceneSize,
                     finalUntargetedPassToScene: visibleLayerIDs.contains(object.id),
                     preserveFinalCompositeForScene: layerIDsRequiredAsComposite.contains(object.id)
                 )
@@ -175,11 +181,13 @@ struct WPERenderGraphBuilder: Sendable {
 
     private func buildLayer(
         object: WPESceneImageObject,
+        sceneSize: CGSize,
         finalUntargetedPassToScene: Bool,
         preserveFinalCompositeForScene: Bool
     ) throws -> WPERenderLayer {
         let model = try resolveModelDescriptor(for: object)
         let materialPath = model.materialPath
+        let puppetPlacement = model.puppetPlacement(for: object, sceneSize: sceneSize)
         let compositeA = "_rt_imageLayerComposite_\(object.id)_a"
         let compositeB = "_rt_imageLayerComposite_\(object.id)_b"
 
@@ -255,11 +263,12 @@ struct WPERenderGraphBuilder: Sendable {
             materialPath: materialPath,
             puppetPath: model.puppetPath,
             geometry: WPERenderLayerGeometry(
-                origin: object.origin,
+                origin: puppetPlacement?.origin ?? object.origin,
                 scale: object.scale,
                 angles: object.angles,
                 alignment: object.alignment,
-                size: object.size,
+                size: puppetPlacement?.size ?? object.size,
+                puppetMeshCenter: puppetPlacement?.meshCenter ?? SIMD2<Double>(0, 0),
                 alpha: object.alpha,
                 alphaAnimation: object.alphaAnimation,
                 color: object.color,
@@ -342,8 +351,21 @@ struct WPERenderGraphBuilder: Sendable {
             .flatMap { $0.isEmpty ? nil : inheritDependencyPrefix($0, from: object.imageRelativePath) }
         return WPEModelDescriptor(
             materialPath: inheritDependencyPrefix(material, from: object.imageRelativePath),
-            puppetPath: puppetPath
+            puppetPath: puppetPath,
+            puppetBounds: puppetPath.flatMap(loadPuppetBounds(path:))
         )
+    }
+
+    private func loadPuppetBounds(path: String) -> WPEPuppetBounds? {
+        do {
+            let url = try resolver.resolveExistingFileURL(relativePath: path)
+            let data = try Data(contentsOf: url)
+            let model = try WPEMdlParser.parse(data: data)
+            guard model.version >= 21 else { return nil }
+            return WPEPuppetBounds(model: model)
+        } catch {
+            return nil
+        }
     }
 
     private func isBuiltinModelPath(_ path: String) -> Bool {
@@ -628,6 +650,164 @@ private struct LayerBuildContext {
 private struct WPEModelDescriptor {
     let materialPath: String?
     let puppetPath: String?
+    let puppetBounds: WPEPuppetBounds?
+
+    init(
+        materialPath: String?,
+        puppetPath: String?,
+        puppetBounds: WPEPuppetBounds? = nil
+    ) {
+        self.materialPath = materialPath
+        self.puppetPath = puppetPath
+        self.puppetBounds = puppetBounds
+    }
+
+    /// Re-place a puppet whose raw MDLV mesh bbox is cropped by the declared
+    /// object.size local composite. Sizes the composite AND the scene quad to
+    /// the mesh bbox (native 1:1, no shrink/stretch), centers the mesh, and
+    /// recomputes the origin so the mesh-bbox center keeps its old on-screen
+    /// position. Returns nil (no-op) for non-puppets and puppets that already
+    /// fit — protecting every working puppet/image layer.
+    func puppetPlacement(for object: WPESceneImageObject, sceneSize: CGSize) -> WPEPuppetPlacement? {
+        guard puppetPath != nil,
+              let puppetBounds,
+              let objectSize = object.size else {
+            return nil
+        }
+
+        let objectWidth = Double(objectSize.width)
+        let objectHeight = Double(objectSize.height)
+        guard objectWidth > 0, objectHeight > 0 else { return nil }
+
+        let localMinX = objectWidth * 0.5 + puppetBounds.min.x
+        let localMaxX = objectWidth * 0.5 + puppetBounds.max.x
+        let localMinY = objectHeight * 0.5 - puppetBounds.max.y
+        let localMaxY = objectHeight * 0.5 - puppetBounds.min.y
+
+        let epsilon = 1.0
+        let isCropped = localMinX < -epsilon
+            || localMaxX > objectWidth + epsilon
+            || localMinY < -epsilon
+            || localMaxY > objectHeight + epsilon
+        guard isCropped else { return nil }
+
+        let scaleX = finiteMagnitude(object.scale.x, fallback: 1)
+        let scaleY = finiteMagnitude(object.scale.y, fallback: 1)
+        let oldWidth = objectWidth * scaleX
+        let oldHeight = objectHeight * scaleY
+        let oldOffset = alignmentCenterOffset(
+            alignment: object.alignment,
+            width: oldWidth,
+            height: oldHeight
+        )
+        let sceneHeight = Double(sceneSize.height)
+        let oldCenterX = object.origin.x + oldOffset.x
+        let oldCenterY = sceneHeight - object.origin.y - oldOffset.y
+        let oldLeft = oldCenterX - oldWidth * 0.5
+        let oldTop = oldCenterY - oldHeight * 0.5
+
+        let meshWidth = max(ceil(localMaxX - localMinX), 1)
+        let meshHeight = max(ceil(localMaxY - localMinY), 1)
+        let meshScaledWidth = meshWidth * scaleX
+        let meshScaledHeight = meshHeight * scaleY
+
+        let meshCenterX = oldLeft + (localMinX + localMaxX) * 0.5 * scaleX
+        var meshCenterY = oldTop + (localMinY + localMaxY) * 0.5 * scaleY
+
+        let meshBottom = oldTop + localMaxY * scaleY
+        if meshBottom > sceneHeight {
+            meshCenterY -= meshBottom - sceneHeight
+        }
+
+        let newOffset = alignmentCenterOffset(
+            alignment: object.alignment,
+            width: meshScaledWidth,
+            height: meshScaledHeight
+        )
+        let newOrigin = SIMD3<Double>(
+            meshCenterX - newOffset.x,
+            sceneHeight - meshCenterY - newOffset.y,
+            object.origin.z
+        )
+
+        return WPEPuppetPlacement(
+            origin: newOrigin,
+            size: CGSize(width: CGFloat(meshWidth), height: CGFloat(meshHeight)),
+            meshCenter: puppetBounds.center
+        )
+    }
+
+    private func finiteMagnitude(_ value: Double, fallback: Double) -> Double {
+        let magnitude = abs(value)
+        return magnitude.isFinite && magnitude > 0 ? magnitude : fallback
+    }
+
+    private func alignmentCenterOffset(
+        alignment: WPESceneAlignment,
+        width: Double,
+        height: Double
+    ) -> SIMD2<Double> {
+        switch alignment {
+        case .center:
+            return SIMD2<Double>(0, 0)
+        case .topLeft:
+            return SIMD2<Double>(width * 0.5, -height * 0.5)
+        case .topRight:
+            return SIMD2<Double>(-width * 0.5, -height * 0.5)
+        case .bottomLeft:
+            return SIMD2<Double>(width * 0.5, height * 0.5)
+        case .bottomRight:
+            return SIMD2<Double>(-width * 0.5, height * 0.5)
+        case .top:
+            return SIMD2<Double>(0, -height * 0.5)
+        case .bottom:
+            return SIMD2<Double>(0, height * 0.5)
+        case .left:
+            return SIMD2<Double>(width * 0.5, 0)
+        case .right:
+            return SIMD2<Double>(-width * 0.5, 0)
+        }
+    }
+}
+
+private struct WPEPuppetPlacement {
+    let origin: SIMD3<Double>
+    let size: CGSize
+    let meshCenter: SIMD2<Double>
+}
+
+private struct WPEPuppetBounds {
+    let min: SIMD2<Double>
+    let max: SIMD2<Double>
+
+    var center: SIMD2<Double> {
+        SIMD2<Double>(
+            (min.x + max.x) * 0.5,
+            (min.y + max.y) * 0.5
+        )
+    }
+
+    init?(model: WPEPuppetModel) {
+        let vertices = model.meshes.flatMap(\.vertices)
+        guard let first = vertices.first else { return nil }
+
+        var minX = Double(first.position.x)
+        var maxX = minX
+        var minY = Double(first.position.y)
+        var maxY = minY
+
+        for vertex in vertices.dropFirst() {
+            let x = Double(vertex.position.x)
+            let y = Double(vertex.position.y)
+            minX = Swift.min(minX, x)
+            maxX = Swift.max(maxX, x)
+            minY = Swift.min(minY, y)
+            maxY = Swift.max(maxY, y)
+        }
+
+        self.min = SIMD2<Double>(minX, minY)
+        self.max = SIMD2<Double>(maxX, maxY)
+    }
 }
 
 private extension WPERenderTarget {

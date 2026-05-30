@@ -661,6 +661,12 @@ final class WPEMetalRenderExecutor {
                 Float(max(destination.texture.height, 1)),
                 0,
                 0
+            ),
+            meshCenterAndPadding: SIMD4<Float>(
+                Float(layer.geometry.puppetMeshCenter.x),
+                Float(layer.geometry.puppetMeshCenter.y),
+                0,
+                0
             )
         )
         encoder.setVertexBytes(

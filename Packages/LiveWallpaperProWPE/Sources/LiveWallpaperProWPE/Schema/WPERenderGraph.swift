@@ -63,6 +63,10 @@ public struct WPERenderLayerGeometry: Equatable, Sendable {
     public let angles: SIMD3<Double>
     public let alignment: WPESceneAlignment
     public let size: CGSize?
+    /// Raw MDLV mesh-bbox center (puppet model coordinates) subtracted in the
+    /// puppet vertex shader so the mesh is centered in its mesh-bbox-sized local
+    /// composite. Zero for non-puppet layers and puppets that fit `size`.
+    public let puppetMeshCenter: SIMD2<Double>
     public let alpha: Double
     public let alphaAnimation: WPESceneAnimatedValue?
     public let color: SIMD3<Double>
@@ -74,6 +78,7 @@ public struct WPERenderLayerGeometry: Equatable, Sendable {
         angles: SIMD3<Double>,
         alignment: WPESceneAlignment,
         size: CGSize?,
+        puppetMeshCenter: SIMD2<Double> = SIMD2<Double>(0, 0),
         alpha: Double,
         alphaAnimation: WPESceneAnimatedValue? = nil,
         color: SIMD3<Double>,
@@ -84,6 +89,7 @@ public struct WPERenderLayerGeometry: Equatable, Sendable {
         self.angles = angles
         self.alignment = alignment
         self.size = size
+        self.puppetMeshCenter = puppetMeshCenter
         self.alpha = alpha
         self.alphaAnimation = alphaAnimation
         self.color = color
@@ -97,6 +103,7 @@ public struct WPERenderLayerGeometry: Equatable, Sendable {
             angles: angles,
             alignment: alignment,
             size: size,
+            puppetMeshCenter: puppetMeshCenter,
             alpha: alphaAnimation?.scalar(at: time) ?? alpha,
             alphaAnimation: alphaAnimation,
             color: color,
@@ -110,6 +117,7 @@ public struct WPERenderLayerGeometry: Equatable, Sendable {
         angles: SIMD3<Double>(0, 0, 0),
         alignment: .center,
         size: nil,
+        puppetMeshCenter: SIMD2<Double>(0, 0),
         alpha: 1,
         alphaAnimation: nil,
         color: SIMD3<Double>(1, 1, 1),
