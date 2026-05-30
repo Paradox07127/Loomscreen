@@ -17,7 +17,10 @@ struct WorkshopInstalledView: View {
     @State private var bookmarkStore = BookmarkStore.shared
     @State private var entries: [WPEHistoryEntry] = []
     @State private var searchText: String = ""
-    @State private var typeFilter: WPELibraryTypeFilter = .all
+    /// Multi-select type filter — empty means "all". Client-side OR (an item
+    /// matches if its kind is among the selected set), unlike the online Browse
+    /// type chip which must single-select against Steam's AND-only tag query.
+    @State private var selectedTypes: Set<WPELibraryTypeKind> = []
     @State private var sortOrder: WPELibrarySortOrder = .recommended
     @State private var errorMessage: String?
     /// Drives the drag-to-apply screen bar — set true when a card drag starts,
@@ -66,16 +69,7 @@ struct WorkshopInstalledView: View {
                     resultCount: visibleEntries.count,
                     totalCount: entries.count
                 ) {
-                    Picker("Type", selection: $typeFilter) {
-                        ForEach(WPELibraryTypeFilter.allCases) { filter in
-                            Text(verbatim: filter.title).tag(filter)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .controlSize(.small)
-                    .frame(width: 118)
-                    .help(Text("Filter by project type"))
+                    typeChipRow
 
                     Picker("Sort", selection: $sortOrder) {
                         ForEach(WPELibrarySortOrder.allCases) { order in
@@ -192,7 +186,7 @@ struct WorkshopInstalledView: View {
     private var visibleEntries: [WPEHistoryEntry] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let filtered = entries.filter { entry in
-            typeFilter.includes(entry) && matchesSearch(entry, query: query)
+            typeMatches(entry) && matchesSearch(entry, query: query)
         }
         switch sortOrder {
         case .recommended:
@@ -230,6 +224,37 @@ struct WorkshopInstalledView: View {
         case .application: return 3
         case .unknown: return 4
         }
+    }
+
+    // MARK: - Type filter chips (multi-select)
+
+    private var typeChipRow: some View {
+        HStack(spacing: 6) {
+            FilterChip(title: Text("All"), isSelected: selectedTypes.isEmpty) {
+                selectedTypes.removeAll()
+            }
+            .help(Text("Show every installed wallpaper"))
+
+            ForEach(WPELibraryTypeKind.allCases) { kind in
+                FilterChip(title: Text(verbatim: kind.title), isSelected: selectedTypes.contains(kind)) {
+                    toggleType(kind)
+                }
+                .help(kind.helpText)
+            }
+        }
+    }
+
+    private func toggleType(_ kind: WPELibraryTypeKind) {
+        if selectedTypes.contains(kind) {
+            selectedTypes.remove(kind)
+        } else {
+            selectedTypes.insert(kind)
+        }
+    }
+
+    private func typeMatches(_ entry: WPEHistoryEntry) -> Bool {
+        guard !selectedTypes.isEmpty else { return true }
+        return selectedTypes.contains { $0.matches(entry) }
     }
 
     // MARK: - Actions
@@ -484,14 +509,16 @@ struct WorkshopInstalledView: View {
 
 // MARK: - Filters
 
-private enum WPELibraryTypeFilter: String, CaseIterable, Identifiable {
-    case all, video, web, scene, unsupported
+/// Concrete library type kinds for the multi-select chip row (no `.all` case —
+/// an empty selection means "all"). `.unsupported` collects the project types
+/// macOS can't run.
+private enum WPELibraryTypeKind: String, CaseIterable, Identifiable {
+    case video, web, scene, unsupported
 
     var id: Self { self }
 
     var title: String {
         switch self {
-        case .all: return String(localized: "All", comment: "Workshop library type filter.")
         case .video: return WPEType.video.localizedDisplayName
         case .web: return WPEType.web.localizedDisplayName
         case .scene: return WPEType.scene.localizedDisplayName
@@ -499,9 +526,19 @@ private enum WPELibraryTypeFilter: String, CaseIterable, Identifiable {
         }
     }
 
-    func includes(_ entry: WPEHistoryEntry) -> Bool {
+    var helpText: Text {
         switch self {
-        case .all: return true
+        case .video: return Text("Show only video wallpapers")
+        case .web: return Text("Show only web / HTML wallpapers")
+        case .scene: return Text("Show only scene wallpapers")
+        case .unsupported:
+            // Explains issue #9's "when does unsupported appear?".
+            return Text("Windows-only items — a Windows .exe application wallpaper, or a project type macOS can't recognize. These can't run here.")
+        }
+    }
+
+    func matches(_ entry: WPEHistoryEntry) -> Bool {
+        switch self {
         case .video: return entry.origin.originalType == .video
         case .web: return entry.origin.originalType == .web
         case .scene: return entry.origin.originalType == .scene

@@ -93,9 +93,30 @@ struct WorkshopBrowseFilterRibbon: View {
         HStack(spacing: DesignTokens.Spacing.sm) {
             typeChips
             sortMenu
+            if viewModel.preferredSort == .trending {
+                trendingPeriodMenu
+            }
             filtersButton(includesPrimary: false)
         }
         .fixedSize(horizontal: true, vertical: false)
+    }
+
+    /// Trending (`query_type=3`) needs a time window — surface week / month /
+    /// year next to the sort control whenever Trending is the active sort.
+    private var trendingPeriodMenu: some View {
+        Picker("Period", selection: Binding(
+            get: { viewModel.trendingDays },
+            set: { viewModel.updateTrendingDays($0) }
+        )) {
+            ForEach(Self.trendingPeriods, id: \.days) { period in
+                Text(period.title).tag(period.days)
+            }
+        }
+        .pickerStyle(.menu)
+        .controlSize(.small)
+        .fixedSize()
+        .disabled(controlsDisabled)
+        .help(Text("Trending period"))
     }
 
     /// Narrow layout: a single Filters popover that holds everything (Type,
@@ -165,59 +186,122 @@ struct WorkshopBrowseFilterRibbon: View {
     }
 
     private func filtersPopover(includesPrimary: Bool) -> some View {
-        VStack(alignment: .leading, spacing: DesignTokens.Spacing.md) {
-            if includesPrimary {
-                filterGroup("Type") {
-                    // Horizontal scroll guards against clipping when localized
-                    // type names widen past the fixed popover width.
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 6) {
-                            ForEach(WorkshopContentTypeFilter.allCases) { type in
-                                FilterChip(
-                                    title: Text(type.displayName),
-                                    isSelected: viewModel.typeFilter == type
-                                ) {
-                                    viewModel.updateType(type)
+        ScrollView {
+            VStack(alignment: .leading, spacing: DesignTokens.Spacing.md) {
+                if includesPrimary {
+                    filterGroup("Type") {
+                        // Horizontal scroll guards against clipping when localized
+                        // type names widen past the fixed popover width.
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 6) {
+                                ForEach(WorkshopContentTypeFilter.allCases) { type in
+                                    FilterChip(
+                                        title: Text(type.displayName),
+                                        isSelected: viewModel.typeFilter == type
+                                    ) {
+                                        viewModel.updateType(type)
+                                    }
                                 }
                             }
                         }
                     }
+                    filterGroup("Sort") {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Picker("Sort", selection: Binding(
+                                get: { viewModel.preferredSort },
+                                set: { viewModel.updateSort($0) }
+                            )) {
+                                ForEach(Self.visibleSorts, id: \.self) { sort in
+                                    Text(sort.displayName).tag(sort)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .labelsHidden()
+
+                            if viewModel.preferredSort == .trending {
+                                Picker("Period", selection: Binding(
+                                    get: { viewModel.trendingDays },
+                                    set: { viewModel.updateTrendingDays($0) }
+                                )) {
+                                    ForEach(Self.trendingPeriods, id: \.days) { period in
+                                        Text(period.title).tag(period.days)
+                                    }
+                                }
+                                .pickerStyle(.segmented)
+                                .labelsHidden()
+                            }
+                        }
+                    }
                 }
-                filterGroup("Sort") {
-                    Picker("Sort", selection: Binding(
-                        get: { viewModel.preferredSort },
-                        set: { viewModel.updateSort($0) }
+
+                filterGroup("Maturity") {
+                    Picker("Maturity", selection: Binding(
+                        get: { viewModel.ageRating },
+                        set: { viewModel.updateAgeRating($0) }
                     )) {
-                        ForEach(Self.visibleSorts, id: \.self) { sort in
-                            Text(sort.displayName).tag(sort)
+                        ForEach(WorkshopAgeRatingFilter.allCases) { rating in
+                            Text(rating.displayName).tag(rating)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .help(Text("Maximum maturity to show — hides ratings above the chosen level."))
+                }
+
+                filterGroup("Resolution") {
+                    Picker("Resolution", selection: Binding(
+                        get: { viewModel.resolution },
+                        set: { viewModel.updateResolution($0) }
+                    )) {
+                        ForEach(WorkshopResolutionFilter.allCases) { resolution in
+                            Text(resolution.displayName).tag(resolution)
                         }
                     }
                     .pickerStyle(.menu)
                     .labelsHidden()
                 }
-            }
 
-            filterGroup("Maturity") {
-                Picker("Maturity", selection: Binding(
-                    get: { viewModel.ageRating },
-                    set: { viewModel.updateAgeRating($0) }
-                )) {
-                    ForEach(WorkshopAgeRatingFilter.allCases) { rating in
-                        Text(rating.displayName).tag(rating)
-                    }
+                filterGroup("Genre") {
+                    genreCheckboxGrid
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-            }
 
-            if activeFilterCount > 0 {
-                Button("Clear filters") { clearFilters() }
-                    .buttonStyle(.borderless)
-                    .controlSize(.small)
+                if activeFilterCount > 0 {
+                    Button("Clear filters") { clearFilters() }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                }
+            }
+            .padding(DesignTokens.Spacing.md)
+        }
+        .frame(width: 300)
+        .frame(maxHeight: 430)
+    }
+
+    /// Two-column checkbox grid of the official genre tags. Selecting several
+    /// ANDs them (Steam-native). Toggles route through the view-model's
+    /// debounced reload, so ticking three genres issues a single query.
+    private var genreCheckboxGrid: some View {
+        LazyVGrid(
+            columns: [
+                GridItem(.flexible(), alignment: .leading),
+                GridItem(.flexible(), alignment: .leading)
+            ],
+            alignment: .leading,
+            spacing: 4
+        ) {
+            ForEach(WorkshopGenre.allTags, id: \.self) { tag in
+                Toggle(isOn: Binding(
+                    get: { viewModel.selectedGenres.contains(tag) },
+                    set: { _ in viewModel.toggleGenre(tag) }
+                )) {
+                    Text(tag)
+                        .font(.system(size: 11))
+                        .lineLimit(1)
+                }
+                .toggleStyle(.checkbox)
+                .controlSize(.small)
             }
         }
-        .padding(DesignTokens.Spacing.md)
-        .frame(width: 240)
     }
 
     private func filterGroup<Content: View>(
@@ -325,14 +409,26 @@ struct WorkshopBrowseFilterRibbon: View {
         var count = 0
         if viewModel.typeFilter != .all { count += 1 }
         if viewModel.ageRating != .everyone { count += 1 }
+        if viewModel.resolution != .any { count += 1 }
+        count += viewModel.selectedGenres.count
         return count
     }
 
     private func clearFilters() {
+        // Each call schedules the same debounced reload, so they coalesce into
+        // a single query rather than firing one per cleared filter.
         if viewModel.typeFilter != .all { viewModel.updateType(.all) }
         if viewModel.ageRating != .everyone { viewModel.updateAgeRating(.everyone) }
+        if viewModel.resolution != .any { viewModel.updateResolution(.any) }
+        if !viewModel.selectedGenres.isEmpty { viewModel.clearGenres() }
     }
 
     private static let visibleSorts: [WorkshopSortMode] = [.topRated, .newest, .trending, .mostSubscribed]
+
+    private static let trendingPeriods: [(title: LocalizedStringKey, days: Int)] = [
+        ("Week", 7),
+        ("Month", 30),
+        ("Year", 365)
+    ]
 }
 #endif

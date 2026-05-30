@@ -12,6 +12,9 @@ import SwiftUI
 struct WorkshopInspectorContent: View {
     let item: WorkshopQueryItem
     let doctor: SteamCMDDoctorService
+    /// Dismisses the inspector. The native `.inspector` only auto-shows a toggle
+    /// when a toolbar hosts one, so we surface an explicit close control here.
+    var onClose: () -> Void = {}
 
     @Environment(\.openURL) private var openURL
 
@@ -29,6 +32,7 @@ struct WorkshopInspectorContent: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: DesignTokens.Spacing.lg) {
+                closeHeader
                 hero
 
                 VStack(alignment: .leading, spacing: DesignTokens.Spacing.md) {
@@ -56,6 +60,26 @@ struct WorkshopInspectorContent: View {
             }
         }
         .background(DesignTokens.Colors.pageBackground)
+    }
+
+    // MARK: - Close
+
+    private var closeHeader: some View {
+        HStack {
+            Spacer(minLength: 0)
+            Button(action: onClose) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(.secondary)
+                    .symbolRenderingMode(.hierarchical)
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut(.cancelAction)
+            .help(Text("Close"))
+            .accessibilityLabel(Text("Close details"))
+        }
+        .padding(.horizontal, DesignTokens.Spacing.lg)
+        .padding(.top, DesignTokens.Spacing.md)
     }
 
     // MARK: - Hero

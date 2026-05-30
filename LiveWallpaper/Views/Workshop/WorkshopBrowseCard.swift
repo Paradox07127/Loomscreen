@@ -74,7 +74,24 @@ struct WorkshopBrowseCard: View {
                     .padding(DesignTokens.Spacing.sm)
             }
         }
+        .overlay(alignment: .bottomTrailing) {
+            if let resolutionLabel {
+                resolutionPill(resolutionLabel)
+                    .padding(DesignTokens.Spacing.sm)
+            }
+        }
         .aspectRatio(1, contentMode: .fit)
+    }
+
+    private func resolutionPill(_ label: String) -> some View {
+        Text(verbatim: label)
+            .font(.system(size: 9, weight: .bold))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            // Same dark scrim as the rating pill — legible over any thumbnail.
+            .background(.black.opacity(0.7), in: Capsule())
+            .accessibilityHidden(true)
     }
 
     private var inLibraryBadge: some View {
@@ -204,15 +221,67 @@ struct WorkshopBrowseCard: View {
         return nil
     }
 
+    /// Subscriber count moved to the detail inspector (issue #4) — the card's
+    /// trailing slot now carries only the download size, with the resolution
+    /// surfaced as a thumbnail badge instead.
     private var metaTrailing: String {
-        var parts: [String] = []
-        if let subs = item.subscriptionCount, subs > 0 {
-            parts.append(String(localized: "\(formatSubs(subs)) subs", comment: "Workshop card subscriber count. Placeholder is an abbreviated number such as 1.2K."))
+        formattedSize ?? ""
+    }
+
+    /// Short resolution label derived from the item's resolution tag (e.g.
+    /// "1080p", "4K", "Ultrawide" → "UW", "Portrait"). Nil when no resolution
+    /// tag is present.
+    private var resolutionLabel: String? {
+        Self.resolutionShortLabel(for: item.tags)
+    }
+
+    static func resolutionShortLabel(for tags: [String]) -> String? {
+        for tag in tags {
+            if let mapped = knownResolutionLabels[tag] { return mapped }
         }
-        if let size = formattedSize {
-            parts.append(size)
+        for tag in tags {
+            if let derived = deriveResolutionLabel(from: tag) { return derived }
         }
-        return parts.joined(separator: " · ")
+        return nil
+    }
+
+    private static let knownResolutionLabels: [String: String] = [
+        "Standard Definition": "SD",
+        "1280 x 720": "720p",
+        "1920 x 1080": "1080p",
+        "2560 x 1440": "1440p",
+        "3840 x 2160": "4K",
+        "2560 x 1080": "UW",
+        "3440 x 1440": "UW",
+        "Dual 3840 x 1080": "Dual",
+        "5120 x 1440": "Dual",
+        "7680 x 2160": "Dual",
+        "1080 x 1920": "Portrait",
+        "720 x 1280": "Portrait",
+        "1440 x 2560": "Portrait",
+        "2160 x 3840": "Portrait"
+    ]
+
+    /// Derive a label from any embedded "W x H" tag (covers prefixes like
+    /// "Dual 3840 x 1080"). Ratio buckets ultrawide/dual; height buckets the
+    /// landscape resolutions.
+    private static func deriveResolutionLabel(from tag: String) -> String? {
+        guard tag.range(of: #"\d+\s*[xX×]\s*\d+"#, options: .regularExpression) != nil else { return nil }
+        let nums = tag.split(whereSeparator: { !$0.isNumber }).compactMap { Int($0) }
+        guard nums.count >= 2 else { return nil }
+        let width = nums[nums.count - 2], height = nums[nums.count - 1]
+        guard width > 0, height > 0 else { return nil }
+        if height > width { return "Portrait" }
+        let ratio = Double(width) / Double(height)
+        if ratio >= 3.0 { return "Dual" }
+        if ratio >= 2.0 { return "UW" }
+        switch height {
+        case 2160...: return "4K"
+        case 1440..<2160: return "1440p"
+        case 1080..<1440: return "1080p"
+        case 720..<1080: return "720p"
+        default: return "SD"
+        }
     }
 
     private var formattedSize: String? {
@@ -246,6 +315,9 @@ struct WorkshopBrowseCard: View {
         }
         if let type = contentType {
             parts.append(type.displayName)
+        }
+        if let resolutionLabel {
+            parts.append(resolutionLabel)
         }
         if let subs = item.subscriptionCount, subs > 0 {
             parts.append(String(localized: "\(formatSubs(subs)) subscribers", comment: "Workshop card VoiceOver subscriber count."))

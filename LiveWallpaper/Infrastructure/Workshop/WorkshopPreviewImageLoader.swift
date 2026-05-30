@@ -12,7 +12,10 @@ final class WorkshopPreviewImageLoader {
 
     static let shared = WorkshopPreviewImageLoader()
 
-    nonisolated static let maxBytes = 8 * 1024 * 1024
+    // Kept in sync with `WorkshopAnimatedGIF.maxBytes`. Workshop animated GIF
+    // previews routinely exceed 8 MiB; an 8 MiB transfer cap aborted them
+    // mid-stream and the card fell back to a blank placeholder.
+    nonisolated static let maxBytes = 32 * 1024 * 1024
 
     private var cache: [URL: NSImage] = [:]
     private var assetCache: [URL: WorkshopPreviewAsset] = [:]
