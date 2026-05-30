@@ -17,10 +17,9 @@ struct WorkshopInstalledView: View {
     @State private var bookmarkStore = BookmarkStore.shared
     @State private var entries: [WPEHistoryEntry] = []
     @State private var searchText: String = ""
-    /// Multi-select type filter — empty means "all". Client-side OR (an item
-    /// matches if its kind is among the selected set), unlike the online Browse
-    /// type chip which must single-select against Steam's AND-only tag query.
-    @State private var selectedTypes: Set<WPELibraryTypeKind> = []
+    /// Single-select type filter — `nil` means "all". Rendered as chip buttons
+    /// (pick one), matching the online Browse type chips.
+    @State private var selectedType: WPELibraryTypeKind? = nil
     @State private var sortOrder: WPELibrarySortOrder = .recommended
     @State private var errorMessage: String?
     /// Drives the drag-to-apply screen bar — set true when a card drag starts,
@@ -230,31 +229,23 @@ struct WorkshopInstalledView: View {
 
     private var typeChipRow: some View {
         HStack(spacing: 6) {
-            FilterChip(title: Text("All"), isSelected: selectedTypes.isEmpty) {
-                selectedTypes.removeAll()
+            FilterChip(title: Text("All"), isSelected: selectedType == nil) {
+                selectedType = nil
             }
             .help(Text("Show every installed wallpaper"))
 
             ForEach(WPELibraryTypeKind.allCases) { kind in
-                FilterChip(title: Text(verbatim: kind.title), isSelected: selectedTypes.contains(kind)) {
-                    toggleType(kind)
+                FilterChip(title: Text(verbatim: kind.title), isSelected: selectedType == kind) {
+                    selectedType = (selectedType == kind) ? nil : kind
                 }
                 .help(kind.helpText)
             }
         }
     }
 
-    private func toggleType(_ kind: WPELibraryTypeKind) {
-        if selectedTypes.contains(kind) {
-            selectedTypes.remove(kind)
-        } else {
-            selectedTypes.insert(kind)
-        }
-    }
-
     private func typeMatches(_ entry: WPEHistoryEntry) -> Bool {
-        guard !selectedTypes.isEmpty else { return true }
-        return selectedTypes.contains { $0.matches(entry) }
+        guard let selectedType else { return true }
+        return selectedType.matches(entry)
     }
 
     // MARK: - Actions
