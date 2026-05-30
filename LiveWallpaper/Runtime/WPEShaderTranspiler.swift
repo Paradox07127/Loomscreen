@@ -2030,6 +2030,53 @@ struct WPEShaderTranspiler {
             inline float2 wpe_bounds_vector(float2 bounds) {
                 return float2(bounds.x, 1.0 / max(bounds.y - bounds.x, 0.000001));
             }
+            inline float3x3 wpe_square_to_quad(float2 p0, float2 p1, float2 p2, float2 p3) {
+                float dx0 = p0.x, dy0 = p0.y;
+                float dx1 = p1.x, dy1 = p1.y;
+                float dx2 = p3.x, dy2 = p3.y;
+                float dx3 = p2.x, dy3 = p2.y;
+                float diffx1 = dx1 - dx3;
+                float diffy1 = dy1 - dy3;
+                float diffx2 = dx2 - dx3;
+                float diffy2 = dy2 - dy3;
+                float det = diffx1 * diffy2 - diffx2 * diffy1;
+                float sumx = dx0 - dx1 + dx3 - dx2;
+                float sumy = dy0 - dy1 + dy3 - dy2;
+                if (det == 0.0 || (sumx == 0.0 && sumy == 0.0)) {
+                    return float3x3(
+                        float3(dx1 - dx0, dy1 - dy0, 0.0),
+                        float3(dx3 - dx1, dy3 - dy1, 0.0),
+                        float3(dx0, dy0, 1.0)
+                    );
+                }
+                float ovdet = 1.0 / det;
+                float g = (sumx * diffy2 - diffx2 * sumy) * ovdet;
+                float h = (diffx1 * sumy - sumx * diffy1) * ovdet;
+                return float3x3(
+                    float3(dx1 - dx0 + g * dx1, dy1 - dy0 + g * dy1, g),
+                    float3(dx2 - dx0 + h * dx2, dy2 - dy0 + h * dy2, h),
+                    float3(dx0, dy0, 1.0)
+                );
+            }
+            inline float3x3 wpe_mat3_inverse(float3x3 m) {
+                float a00 = m[0][0], a01 = m[0][1], a02 = m[0][2];
+                float a10 = m[1][0], a11 = m[1][1], a12 = m[1][2];
+                float a20 = m[2][0], a21 = m[2][1], a22 = m[2][2];
+                float b01 = a22 * a11 - a12 * a21;
+                float b11 = -a22 * a10 + a12 * a20;
+                float b21 = a21 * a10 - a11 * a20;
+                float det = a00 * b01 + a01 * b11 + a02 * b21;
+                float invdet = abs(det) > 0.000001 ? 1.0 / det : 0.0;
+                return float3x3(
+                    float3(b01, -a22 * a01 + a02 * a21, a12 * a01 - a02 * a11) * invdet,
+                    float3(b11, a22 * a00 - a02 * a20, -a12 * a00 + a02 * a10) * invdet,
+                    float3(b21, -a21 * a00 + a01 * a20, a11 * a00 - a01 * a10) * invdet
+                );
+            }
+            inline float3 wpe_perspective_texcoord(float2 uv, float2 p0, float2 p1, float2 p2, float2 p3) {
+                // WPE: mul(vec3(uv,1), inverse(squareToQuad(...))); WPE mul(x,y) == y * x.
+                return wpe_mat3_inverse(wpe_square_to_quad(p0, p1, p2, p3)) * float3(uv, 1.0);
+            }
             """
         )
     }
@@ -2065,6 +2112,19 @@ struct WPEShaderTranspiler {
             if varying.metalType == "float2",
                availableUniforms.contains("g_Direction") {
                 return "wpe_rotate_vec2(float2(0.0, 1.0), g_Direction)"
+            }
+        case "v_Direction2":
+            // DUALWAVES second wave direction: rotateVec2((0,1), g_Direction2).
+            if varying.metalType == "float2",
+               availableUniforms.contains("g_Direction2") {
+                return "wpe_rotate_vec2(float2(0.0, 1.0), g_Direction2)"
+            }
+        case "v_TexCoordPerspective":
+            // PERSPECTIVE: mul(vec3(uv,1), inverse(squareToQuad(g_Point0..3))),
+            // matching WPE common_perspective.h byte-for-byte.
+            if varying.metalType == "float3",
+               hasUniforms("g_Point0", "g_Point1", "g_Point2", "g_Point3", in: availableUniforms) {
+                return "wpe_perspective_texcoord(in.uv, g_Point0, g_Point1, g_Point2, g_Point3)"
             }
         case "v_TexCoordRipple":
             if varying.metalType == "float4",

@@ -38,6 +38,43 @@ struct WPEShaderTranspilerTests {
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
+    @Test("Perspective + dual-wave varyings reconstruct to faithful MSL that compiles")
+    func reconstructsPerspectiveAndDualWaveVaryings() throws {
+        // waterwaves.vert builds v_TexCoordPerspective via inverse(squareToQuad(g_Point0..3))
+        // and v_Direction2 via rotateVec2((0,1), g_Direction2). When PERSPECTIVE/DUALWAVES
+        // are on, the fragment declares these varyings; the transpiler must reconstruct them
+        // (we run the builtin object-quad vertex, not the custom .vert).
+        let source = """
+        // stage: fragment
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform vec2 g_Point0;
+        uniform vec2 g_Point1;
+        uniform vec2 g_Point2;
+        uniform vec2 g_Point3;
+        uniform float g_Direction2;
+        in vec2 v_TexCoord;
+        in vec2 v_Direction2;
+        in vec3 v_TexCoordPerspective;
+        void main() {
+            vec2 motion = v_TexCoordPerspective.xy / v_TexCoordPerspective.z;
+            vec2 offset = vec2(v_Direction2.y, -v_Direction2.x);
+            gl_FragColor = texture(g_Texture0, motion + offset + v_TexCoord);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "waterwaves",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains("wpe_perspective_texcoord(in.uv, g_Point0, g_Point1, g_Point2, g_Point3)"))
+        #expect(result.mslSource.contains("wpe_rotate_vec2(float2(0.0, 1.0), g_Direction2)"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        // Compiling validates the wpe_square_to_quad / wpe_mat3_inverse / wpe_perspective_texcoord MSL.
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
     @Test("texSample2DLod / textureLod translates to a Metal level() sample and compiles")
     func translatesTextureLodFragment() throws {
         // Mirrors the preprocessor output: texSample2DLod( -> textureLod(.
