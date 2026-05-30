@@ -53,57 +53,93 @@ struct WorkshopPaneView: View {
 
     // MARK: - Header
 
+    // Three-column header: brand mark on the leading edge, the Installed /
+    // Workshop segmented switcher centered (the macOS-native toolbar idiom —
+    // the section identity is the tab pair, not a stacked subtitle), and the
+    // contextual actions trailing. The two flexible side columns share the
+    // leftover width equally, so the switcher stays optically centered and the
+    // sides push apart instead of overlapping it when the window narrows.
     private var header: some View {
-        DetailHeaderBar(
-            systemImage: "cube.transparent.fill",
-            title: { Text("Steam Workshop") },
-            metadata: {
-                Picker("Workshop tab", selection: $selectedTab) {
-                    ForEach(WorkshopPaneTab.allCases) { tab in
-                        Text(tab.title).tag(tab)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.segmented)
-                .controlSize(.small)
+        HStack(spacing: DesignTokens.DetailHeader.contentSpacing) {
+            brandMark
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            tabSwitcher
                 .frame(width: 220)
-                .accessibilityLabel(Text("Workshop tab"))
-            },
-            actions: {
-                AdaptiveGlassContainer(spacing: 8) {
-                    HStack(spacing: 8) {
-                        if selectedTab == .installed {
-                            Button {
-                                folderImport.presentImportPanel()
-                            } label: {
-                                if folderImport.isImporting {
-                                    ProgressView().controlSize(.small)
-                                } else {
-                                    Image(systemName: "folder.badge.plus")
-                                }
-                            }
-                            .adaptiveGlassButton(.regular)
-                            .controlSize(.regular)
-                            .disabled(folderImport.isImporting)
-                            .help(Text("Import Wallpaper Engine projects from a folder"))
-                            .accessibilityLabel(Text("Import from folder"))
-                        }
+                .layoutPriority(1)
 
-                        Button {
-                            presentPasteFlow()
-                        } label: {
-                            Image(systemName: "plus")
-                        }
-                        .adaptiveGlassButton(.regular)
-                        .controlSize(.regular)
-                        .help(Text("Add from a Steam Workshop URL"))
-                        .accessibilityLabel(Text("Add from Workshop URL"))
+            headerActions
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .padding(.horizontal, DesignTokens.DetailHeader.horizontalPadding)
+        .padding(.vertical, DesignTokens.DetailHeader.verticalPadding)
+    }
 
-                        overflowMenu
-                    }
-                }
+    private var brandMark: some View {
+        HStack(spacing: DesignTokens.Spacing.sm) {
+            ZStack {
+                Circle()
+                    .fill(Color.accentColor.opacity(0.15))
+                    .frame(width: 34, height: 34)
+                Image(systemName: "cube.transparent.fill")
+                    .font(.system(size: 17))
+                    .foregroundStyle(Color.accentColor)
+                    .symbolRenderingMode(.hierarchical)
             }
-        )
+            .accessibilityHidden(true)
+
+            Text("Steam Workshop")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .accessibilityAddTraits(.isHeader)
+        }
+    }
+
+    private var tabSwitcher: some View {
+        Picker("Workshop tab", selection: $selectedTab) {
+            ForEach(WorkshopPaneTab.allCases) { tab in
+                Text(tab.title).tag(tab)
+            }
+        }
+        .labelsHidden()
+        .pickerStyle(.segmented)
+        .accessibilityLabel(Text("Workshop tab"))
+    }
+
+    private var headerActions: some View {
+        AdaptiveGlassContainer(spacing: 8) {
+            HStack(spacing: 8) {
+                if selectedTab == .installed {
+                    Button {
+                        folderImport.presentImportPanel()
+                    } label: {
+                        if folderImport.isImporting {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "folder.badge.plus")
+                        }
+                    }
+                    .adaptiveGlassButton(.regular)
+                    .controlSize(.regular)
+                    .disabled(folderImport.isImporting)
+                    .help(Text("Import Wallpaper Engine projects from a folder"))
+                    .accessibilityLabel(Text("Import from folder"))
+                }
+
+                Button {
+                    presentPasteFlow()
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .adaptiveGlassButton(.regular)
+                .controlSize(.regular)
+                .help(Text("Add from a Steam Workshop URL"))
+                .accessibilityLabel(Text("Add from Workshop URL"))
+
+                overflowMenu
+            }
+        }
     }
 
     private var overflowMenu: some View {
@@ -170,7 +206,7 @@ enum WorkshopPaneTab: String, CaseIterable, Identifiable {
         case .installed:
             return String(localized: "Installed", comment: "Workshop pane tab for the locally installed library.")
         case .browseOnline:
-            return String(localized: "Browse Online", comment: "Workshop pane tab for the online Steam Workshop catalog.")
+            return String(localized: "Workshop", comment: "Workshop pane tab for the online Steam Workshop catalog (zh: 创意工坊).")
         }
     }
 }
