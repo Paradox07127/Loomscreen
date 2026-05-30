@@ -721,6 +721,21 @@ struct WPEMetalShaderDispatcher {
     ) throws {
         let result = try executor.compileCustomShader(for: pass)
         let usesObjectQuad = executor.usesObjectQuadGeometry(for: pass, layer: layer)
+        // Diagnostic for the hair/cloth "ghost": a displacement effect whose
+        // custom .vert builds v_Direction / a resolution-scaled mask UV gets
+        // that .vert discarded when usesObjectQuad forces the builtin
+        // object-quad vertex (scene-target pass). Logs which vertex each
+        // waterwaves-class pass actually runs + whether the mask is live.
+        if pass.pass.shader.lowercased().contains("wave")
+            || pass.pass.shader.lowercased().contains("flutter") {
+            let maskLive = pass.textureBindings[1] != nil || pass.pass.textures[1] != nil
+            WPESceneDebugArtifacts.shared.appendLog(
+                "🌊 [WPE.fx.vtx] \(pass.pass.shader) target=\(pass.pass.target) "
+                    + "vertex=\(usesObjectQuad ? "builtin_object_quad(drops v_Direction/.zw)" : "custom_vert") "
+                    + "maskSlot1=\(maskLive) MASK=\(pass.comboValues["MASK"] ?? 0)",
+                level: .warning
+            )
+        }
         let pipelineState = try executor.translatedPipelineState(
             for: result,
             vertexName: usesObjectQuad ? "wpe_object_quad_vertex" : nil,
