@@ -3,16 +3,11 @@ import Foundation
 
 struct WPEPuppetModel: Equatable, Sendable {
     let version: Int
-    /// MDLS section version (e.g. 2/3/4), when a skeleton is present. Older
-    /// skeleton generations (MDLV0019) store the mesh in an exploded bind
-    /// layout that must be re-assembled via per-bone target positions.
-    let skeletonVersion: Int?
     let meshes: [WPEPuppetMesh]
     let bones: [WPEPuppetBone]
 
-    init(version: Int, skeletonVersion: Int? = nil, meshes: [WPEPuppetMesh], bones: [WPEPuppetBone] = []) {
+    init(version: Int, meshes: [WPEPuppetMesh], bones: [WPEPuppetBone] = []) {
         self.version = version
-        self.skeletonVersion = skeletonVersion
         self.meshes = meshes
         self.bones = bones
     }
@@ -49,33 +44,8 @@ struct WPEPuppetVertex: Equatable, Sendable {
 struct WPEPuppetBone: Equatable, Sendable {
     let index: Int
     let parentIndex: Int?
-    /// Raw MDLS local (parent-relative) bind matrix, column-major. Parser must
-    /// not bake it into MDLV vertices; the bind assembler consumes its
-    /// translation separately for the exploded-mesh generation.
+    /// Raw MDLS metadata retained for future runtime animation. Parser must not bake it into MDLV vertices.
     let rawMatrix: [Float]
-    /// Assembled-pose target position from the bone's JSON metadata (`tp`).
-    /// Present for the exploded MDLV0019 generation; nil otherwise.
-    let targetPosition: SIMD3<Float>?
-    /// Target scale percent (`tm`, 100 == 1.0). Used to gate translation-only assembly.
-    let targetScalePercent: Float?
-    /// Target rotation (`rax`/`ray`/`raz`). Used to gate translation-only assembly.
-    let targetRotation: SIMD3<Float>?
-
-    init(
-        index: Int,
-        parentIndex: Int?,
-        rawMatrix: [Float],
-        targetPosition: SIMD3<Float>? = nil,
-        targetScalePercent: Float? = nil,
-        targetRotation: SIMD3<Float>? = nil
-    ) {
-        self.index = index
-        self.parentIndex = parentIndex
-        self.rawMatrix = rawMatrix
-        self.targetPosition = targetPosition
-        self.targetScalePercent = targetScalePercent
-        self.targetRotation = targetRotation
-    }
 }
 
 struct WPEPuppetMeshPart: Equatable, Sendable {
@@ -120,17 +90,10 @@ enum WPEMdlParser {
             ))
         }
 
-        // MDLV positions are the static target geometry for the modern (v23)
-        // generation. The skeleton is parsed for its bind/target metadata; the
-        // exploded older generation is re-assembled downstream by
-        // `WPEPuppetBindAssembler`, not here.
-        let skeleton = try parseSkeletonIfPresent(reader: &reader)
-        return WPEPuppetModel(
-            version: version,
-            skeletonVersion: skeleton.version,
-            meshes: meshes,
-            bones: skeleton.bones
-        )
+        // MDLV positions are already the static target geometry. Keep trailing skeleton
+        // metadata available without applying MDLS/MDLE transforms in the parser.
+        let bones = try parseSkeletonIfPresent(reader: &reader)
+        return WPEPuppetModel(version: version, meshes: meshes, bones: bones)
     }
 
     private static func parseMesh(
@@ -305,17 +268,14 @@ enum WPEMdlParser {
         return parts
     }
 
-    private static func parseSkeletonIfPresent(
-        reader: inout WPEMdlBinaryReader
-    ) throws -> (version: Int?, bones: [WPEPuppetBone]) {
+    private static func parseSkeletonIfPresent(reader: inout WPEMdlBinaryReader) throws -> [WPEPuppetBone] {
         guard let skeletonOffset = reader.findTag("MDLS", from: reader.currentOffset) else {
-            return (nil, [])
+            return []
         }
         try reader.seek(to: skeletonOffset)
 
         let skeletonTag = try reader.readFixedString(byteCount: 8)
-        guard skeletonTag.hasPrefix("MDLS") else { return (nil, []) }
-        let skeletonVersion = Int(skeletonTag.dropFirst(4))
+        guard skeletonTag.hasPrefix("MDLS") else { return [] }
         _ = try reader.readUInt8()
         let declaredSectionEnd = Int(try reader.readUInt32())
         let boneCount = try reader.readUInt32()
@@ -343,7 +303,7 @@ enum WPEMdlParser {
                     matrix.append(value)
                 }
             }
-            let metadataJSON = try reader.readCString()
+            _ = try reader.readCString()
             if index + 1 < boneCount {
                 try reader.consumeOptionalSkeletonTrailingMarker(
                     beforeNextBoneIndex: Int(index + 1),
@@ -351,53 +311,16 @@ enum WPEMdlParser {
                 )
             }
 
-            let metadata = parseBoneMetadata(metadataJSON)
             bones.append(WPEPuppetBone(
                 index: Int(index),
                 parentIndex: parent >= 0 ? Int(parent) : nil,
-                rawMatrix: matrix,
-                targetPosition: metadata.targetPosition,
-                targetScalePercent: metadata.targetScalePercent,
-                targetRotation: metadata.targetRotation
+                rawMatrix: matrix
             ))
         }
         if skeletonSectionEnd <= reader.dataCount {
             try reader.seek(to: skeletonSectionEnd)
         }
-        return (skeletonVersion, bones)
-    }
-
-    /// Decodes the per-bone JSON metadata string carried after each MDLS
-    /// record (e.g. `{"tp":"1046.6 0 0","tm":100.0,"rax":null,...}`). Returns
-    /// all-nil for empty or non-JSON names so callers degrade to "no target".
-    private static func parseBoneMetadata(
-        _ json: String
-    ) -> (targetPosition: SIMD3<Float>?, targetScalePercent: Float?, targetRotation: SIMD3<Float>?) {
-        guard let data = json.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return (nil, nil, nil)
-        }
-
-        var targetPosition: SIMD3<Float>?
-        if let raw = object["tp"] as? String {
-            let components = raw.split(separator: " ").compactMap { Float($0) }
-            if components.count >= 2 {
-                targetPosition = SIMD3<Float>(
-                    components[0],
-                    components[1],
-                    components.count >= 3 ? components[2] : 0
-                )
-            }
-        }
-
-        let targetScalePercent = (object["tm"] as? NSNumber)?.floatValue
-
-        let rotationComponents = ["rax", "ray", "raz"].map { (object[$0] as? NSNumber)?.floatValue }
-        let targetRotation = rotationComponents.contains(where: { $0 != nil })
-            ? SIMD3<Float>(rotationComponents[0] ?? 0, rotationComponents[1] ?? 0, rotationComponents[2] ?? 0)
-            : nil
-
-        return (targetPosition, targetScalePercent, targetRotation)
+        return bones
     }
 }
 
