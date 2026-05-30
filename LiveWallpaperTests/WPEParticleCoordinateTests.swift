@@ -89,15 +89,23 @@ struct WPEParticleCoordinateTests {
         #expect(abs(v.y - (-21)) < 0.0001)
     }
 
-    @Test("Object scale amplifies size through worldSizeMultiplier")
-    func sceneObjectScaleAffectsSize() {
+    @Test("Object scale spreads the emitter but does NOT enlarge sprite size")
+    func sceneObjectScaleAffectsEmitterNotSpriteSize() {
         let transform = WPEParticleSceneTransform(
             sceneSize: SIMD2<Float>(1920, 1080),
             objectOrigin: SIMD3<Float>(0, 0, 0),
             objectScale: SIMD3<Float>(3, 3, 1),
             objectAngleZ: 0
         )
-        #expect(abs(transform.worldSizeMultiplier() - 3) < 0.0001)
+        // Sprite size stays at its authored (scene-pixel) value — object
+        // scale must not fold into the billboard size, or large-scaled
+        // emitters (e.g. a 7×-scaled light-shaft layer) saturate the frame.
+        #expect(abs(transform.worldSizeMultiplier() - 1) < 0.0001)
+        // Object scale still spreads the emitter: a 10px dispersal offset
+        // scales to 30px at scale 3 (isolated via applyModelDirection, which
+        // applies scale+rotation without the origin translation).
+        let spread = transform.applyModelDirection(SIMD3<Float>(10, 0, 0))
+        #expect(abs(spread.x - 30) < 0.0001)
     }
 
     @Test("Emitter origin Y is flipped at spawn (Y-down emitter convention)")

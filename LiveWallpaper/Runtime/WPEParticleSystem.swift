@@ -77,9 +77,15 @@ struct WPEParticleSceneTransform {
     }
 
     func worldSizeMultiplier() -> Float {
-        // Particles are billboarded; size scales with the average of X/Y
-        // axes (Z is depth, irrelevant for the screen-space quad).
-        return max(0.0001, (abs(objectScale.x) + abs(objectScale.y)) * 0.5)
+        // WPE authors particle sizes in absolute scene pixels. The scene
+        // object's scale governs the *emitter* — it spreads spawn positions
+        // (applyModelMatrix) and velocities (applyModelDirection) — but must
+        // NOT enlarge each billboard sprite. Folding object scale into sprite
+        // size made large-scaled emitters (e.g. a light-shaft layer scaled
+        // ~7×, scene 3426865175) blow each 850–1000px sprite up to ~6500px,
+        // saturating the whole frame with additive glow. Keep sprite size at
+        // its authored value; only the emitter region scales.
+        return 1.0
     }
 
     func visualScaleSigns() -> SIMD2<Float> {
