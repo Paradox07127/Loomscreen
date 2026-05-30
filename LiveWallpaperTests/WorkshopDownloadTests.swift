@@ -43,6 +43,25 @@ struct WorkshopDownloadTests {
         let failure = "ERROR! Download item 1234567890 failed (No Connection)."
         #expect(SteamCMDDoctorService.capturedDownloadPath(stdout: failure, itemID: 1234567890) == nil)
     }
+
+    @Test("Parses streamed SteamCMD download progress")
+    func parsesSteamCMDDownloadProgress() throws {
+        let progress = try #require(
+            SteamCMDProcessRunner.parseDownloadProgressLine(
+                "Update state (0x61) downloading, progress: 42.34 (123456789 / 290000000)"
+            )
+        )
+
+        #expect(abs(progress.percent - 42.34) < 0.001)
+        #expect(progress.downloadedBytes == 123_456_789)
+        #expect(progress.totalBytes == 290_000_000)
+    }
+
+    @Test("Ignores non-progress SteamCMD lines")
+    func ignoresNonProgressSteamCMDLines() {
+        #expect(SteamCMDProcessRunner.parseDownloadProgressLine("Update state (0x5) verifying install") == nil)
+        #expect(SteamCMDProcessRunner.parseDownloadProgressLine("progress: nope (1 / 2)") == nil)
+    }
 }
 
 @Suite("SteamCMD binary resolution")
