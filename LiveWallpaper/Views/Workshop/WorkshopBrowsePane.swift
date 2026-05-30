@@ -309,7 +309,11 @@ struct WorkshopBrowsePane: View {
     // MARK: - Helpers
 
     private var hasActiveFilters: Bool {
-        !viewModel.searchInput.isEmpty || viewModel.typeFilter != .all || viewModel.ageRating != .everyone
+        !viewModel.searchInput.isEmpty
+            || viewModel.typeFilter != .all
+            || viewModel.ageRating != .everyone
+            || viewModel.resolution != .any
+            || !viewModel.selectedGenres.isEmpty
     }
 
     private var currentRateLimitRemaining: TimeInterval {
@@ -329,7 +333,9 @@ struct WorkshopBrowsePane: View {
     private func clearFilters() {
         viewModel.updateType(.all)
         viewModel.updateAgeRating(.everyone)
-        if !viewModel.searchInput.isEmpty { viewModel.updateSearch("") }
+        viewModel.updateResolution(.any)
+        viewModel.clearGenres()
+        if !viewModel.searchInput.isEmpty { Task { await viewModel.clearSearch() } }
     }
 
     private func reloadInstalledIDs() {

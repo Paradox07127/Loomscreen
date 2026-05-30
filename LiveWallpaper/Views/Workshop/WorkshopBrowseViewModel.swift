@@ -85,18 +85,24 @@ enum WorkshopResolutionFilter: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    /// Verbatim Wallpaper Engine Workshop labels — no renaming (issue: use the
+    /// original WPE tag text). `.any` is the only localized label.
     var displayName: String {
         switch self {
-        case .any: return String(localized: "All resolutions", comment: "Workshop resolution filter: no restriction.")
-        case .standardDefinition: return String(localized: "SD", comment: "Workshop resolution filter: standard definition.")
-        case .fullHD1080: return String(localized: "1080p", comment: "Workshop resolution filter.")
-        case .quadHD1440: return String(localized: "1440p", comment: "Workshop resolution filter.")
-        case .ultraHD4K: return String(localized: "4K", comment: "Workshop resolution filter.")
-        case .ultrawide: return String(localized: "Ultrawide", comment: "Workshop resolution filter.")
-        case .portrait: return String(localized: "Portrait", comment: "Workshop resolution filter.")
-        case .dual: return String(localized: "Dual monitor", comment: "Workshop resolution filter.")
+        case .any: return String(localized: "All", comment: "Workshop resolution filter: no restriction.")
+        case .standardDefinition: return "Standard Definition"
+        case .fullHD1080: return "1920 x 1080"
+        case .quadHD1440: return "2560 x 1440"
+        case .ultraHD4K: return "3840 x 2160"
+        case .ultrawide: return "3440 x 1440"
+        case .portrait: return "1080 x 1920"
+        case .dual: return "Dual 3840 x 1080"
         }
     }
+
+    /// True for the localized `.any` label (rendered as a normal `Text`); the
+    /// rest are verbatim resolution strings.
+    var isLocalizedLabel: Bool { self == .any }
 
     /// Exact Steam Workshop resolution tag, or `nil` for `.any`.
     var tag: String? {
@@ -166,7 +172,6 @@ final class WorkshopBrowseViewModel {
         !isRateLimited && !isLoading && !isPaging && cursorStack.count > 1
     }
 
-    @ObservationIgnored private var debounceTask: Task<Void, Never>?
     @ObservationIgnored private var filterDebounceTask: Task<Void, Never>?
     @ObservationIgnored private var inflightFetch: Task<Bool, Never>?
     @ObservationIgnored private var currentRequestToken: UInt64 = 0
@@ -185,7 +190,6 @@ final class WorkshopBrowseViewModel {
     func reload() async {
         guard !isRateLimited else { return }
         inflightFetch?.cancel()
-        debounceTask?.cancel()
         filterDebounceTask?.cancel()
         cursorStack = ["*"]
         pageIndex = 1
@@ -227,23 +231,30 @@ final class WorkshopBrowseViewModel {
         }
     }
 
-    func updateSearch(_ text: String) {
+    /// Search is now submit-driven (Return / the search button) rather than
+    /// debounced-on-keystroke — typing no longer fires partial queries and
+    /// wastes API calls. The text field binds `searchInput` directly; this just
+    /// runs the query for whatever's typed.
+    func submitSearch() async {
         guard !isRateLimited else { return }
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        searchInput = text
-        debounceTask?.cancel()
-        debounceTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 300_000_000)
-            guard let self, !Task.isCancelled else { return }
-            if trimmed != self.currentRequest.searchText {
-                await self.reload()
-            }
-        }
+        await reload()
     }
 
-    func updateSort(_ sort: WorkshopSortMode) {
-        guard !isRateLimited, sort != preferredSort else { return }
+    func clearSearch() async {
+        guard !isRateLimited, !searchInput.isEmpty else { return }
+        searchInput = ""
+        await reload()
+    }
+
+    /// Combined sort + trending-window update (the period is folded into the
+    /// sort menu, so there's a single control). Days are ignored for non-trending
+    /// sorts.
+    func updateSortOption(_ sort: WorkshopSortMode, days: Int) {
+        guard !isRateLimited else { return }
+        let changed = sort != preferredSort || (sort == .trending && days != trendingDays)
+        guard changed else { return }
         preferredSort = sort
+        if sort == .trending { trendingDays = days }
         scheduleFilterReload()
     }
 
@@ -263,12 +274,6 @@ final class WorkshopBrowseViewModel {
         guard !isRateLimited, resolution != self.resolution else { return }
         self.resolution = resolution
         scheduleFilterReload()
-    }
-
-    func updateTrendingDays(_ days: Int) {
-        guard !isRateLimited, days != trendingDays else { return }
-        trendingDays = days
-        if preferredSort == .trending { scheduleFilterReload() }
     }
 
     func toggleGenre(_ tag: String) {

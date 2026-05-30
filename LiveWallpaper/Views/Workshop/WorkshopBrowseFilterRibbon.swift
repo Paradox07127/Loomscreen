@@ -36,94 +36,55 @@ enum WorkshopRequestCounter {
 }
 
 /// Filter ribbon pinned under the pane header for the Workshop (online) tab.
-/// Adaptive layout (the core ask): a glass-capsule search matching the local
-/// library bar, then a filter cluster that renders inline — Type chips + Sort +
-/// a "Filters" popover — while it fits, and collapses everything into a single
-/// "Filters" popover when the window is too narrow (`ViewThatFits`). A refresh
-/// control and the trailing key-status / quota chip round it out.
+/// A glass-capsule search (submit-driven — no per-keystroke querying), the
+/// primary Type chips + a Sort menu that folds the Trending period into itself,
+/// and a "Filters" disclosure that expands a panel DOWNWARD (rather than a
+/// popover) holding Maturity / Resolution / Genre as horizontally-scrolling
+/// chip rows. A refresh control and the key-status / quota chip round it out.
 struct WorkshopBrowseFilterRibbon: View {
     let viewModel: WorkshopBrowseViewModel
     let hasWebAPIKey: Bool
     let onRequestKeyEntry: () -> Void
 
-    // One presentation source anchored on the container (below), so swapping
-    // the `ViewThatFits` branch on resize can't tear down a live popover.
-    // `popoverIncludesPrimary` records which layout opened it (collapsed mode
-    // folds Type + Sort in; inline mode shows only Maturity).
-    @State private var showPopover = false
-    @State private var popoverIncludesPrimary = false
+    @State private var isFilterPanelExpanded = false
     @FocusState private var isSearchFocused: Bool
 
     var body: some View {
         AdaptiveGlassContainer(spacing: DesignTokens.Spacing.sm) {
-            HStack(spacing: DesignTokens.Spacing.md) {
-                searchField
+            VStack(spacing: 0) {
+                topRow
+                    .padding(.horizontal, DesignTokens.Spacing.md)
+                    .padding(.vertical, DesignTokens.Spacing.sm)
 
-                ViewThatFits(in: .horizontal) {
-                    inlineControls
-                    collapsedControls
-                }
-
-                refreshButton
-
-                Spacer(minLength: DesignTokens.Spacing.sm)
-
-                if hasWebAPIKey {
-                    keyStatusChip
-                } else {
-                    setKeyButton
+                if isFilterPanelExpanded {
+                    Divider()
+                    filterPanel
+                        .disabled(controlsDisabled)
                 }
             }
-            .padding(.horizontal, DesignTokens.Spacing.md)
-            .padding(.vertical, DesignTokens.Spacing.sm)
-        }
-        .popover(isPresented: $showPopover, arrowEdge: .bottom) {
-            filtersPopover(includesPrimary: popoverIncludesPrimary)
-                .disabled(controlsDisabled)
         }
     }
 
-    // MARK: - Adaptive filter cluster
+    // MARK: - Top row
 
-    /// Wide layout: Type as inline chips + Sort menu + a Filters popover that
-    /// holds only the secondary (Maturity) controls. `fixedSize` makes it report
-    /// its full intrinsic width so `ViewThatFits` yields to `collapsedControls`
-    /// instead of letting the chips squeeze.
-    private var inlineControls: some View {
-        HStack(spacing: DesignTokens.Spacing.sm) {
+    private var topRow: some View {
+        HStack(spacing: DesignTokens.Spacing.md) {
+            searchField
+
             typeChips
             sortMenu
-            if viewModel.preferredSort == .trending {
-                trendingPeriodMenu
-            }
-            filtersButton(includesPrimary: false)
-        }
-        .fixedSize(horizontal: true, vertical: false)
-    }
+            filtersToggle
 
-    /// Trending (`query_type=3`) needs a time window — surface week / month /
-    /// year next to the sort control whenever Trending is the active sort.
-    private var trendingPeriodMenu: some View {
-        Picker("Period", selection: Binding(
-            get: { viewModel.trendingDays },
-            set: { viewModel.updateTrendingDays($0) }
-        )) {
-            ForEach(Self.trendingPeriods, id: \.days) { period in
-                Text(period.title).tag(period.days)
+            refreshButton
+
+            Spacer(minLength: DesignTokens.Spacing.sm)
+
+            if hasWebAPIKey {
+                keyStatusChip
+            } else {
+                setKeyButton
             }
         }
-        .pickerStyle(.menu)
-        .controlSize(.small)
-        .fixedSize()
-        .disabled(controlsDisabled)
-        .help(Text("Trending period"))
-    }
-
-    /// Narrow layout: a single Filters popover that holds everything (Type,
-    /// Sort, Maturity).
-    private var collapsedControls: some View {
-        filtersButton(includesPrimary: true)
-            .fixedSize(horizontal: true, vertical: false)
     }
 
     private var typeChips: some View {
@@ -138,15 +99,18 @@ struct WorkshopBrowseFilterRibbon: View {
                 .disabled(controlsDisabled)
             }
         }
+        .fixedSize(horizontal: true, vertical: false)
     }
 
+    /// Sort menu with the Trending window folded in as discrete entries, so
+    /// there's a single control (no separate period picker taking up space).
     private var sortMenu: some View {
         Picker("Sort", selection: Binding(
-            get: { viewModel.preferredSort },
-            set: { viewModel.updateSort($0) }
+            get: { currentSortOption },
+            set: { viewModel.updateSortOption($0.sort, days: $0.days) }
         )) {
-            ForEach(Self.visibleSorts, id: \.self) { sort in
-                Text(sort.displayName).tag(sort)
+            ForEach(Self.sortOptions) { option in
+                Text(option.title).tag(option)
             }
         }
         .pickerStyle(.menu)
@@ -156,10 +120,9 @@ struct WorkshopBrowseFilterRibbon: View {
         .help(Text("Sort criteria"))
     }
 
-    private func filtersButton(includesPrimary: Bool) -> some View {
+    private var filtersToggle: some View {
         Button {
-            popoverIncludesPrimary = includesPrimary
-            showPopover.toggle()
+            withAnimation(.easeInOut(duration: 0.2)) { isFilterPanelExpanded.toggle() }
         } label: {
             HStack(spacing: 5) {
                 Image(systemName: "line.3.horizontal.decrease")
@@ -172,6 +135,9 @@ struct WorkshopBrowseFilterRibbon: View {
                         .padding(.vertical, 1)
                         .background(Color.accentColor, in: Capsule())
                 }
+                Image(systemName: isFilterPanelExpanded ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.secondary)
             }
             .font(.system(size: 11, weight: .medium))
         }
@@ -185,135 +151,83 @@ struct WorkshopBrowseFilterRibbon: View {
             : Text("None active"))
     }
 
-    private func filtersPopover(includesPrimary: Bool) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: DesignTokens.Spacing.md) {
-                if includesPrimary {
-                    filterGroup("Type") {
-                        // Horizontal scroll guards against clipping when localized
-                        // type names widen past the fixed popover width.
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 6) {
-                                ForEach(WorkshopContentTypeFilter.allCases) { type in
-                                    FilterChip(
-                                        title: Text(type.displayName),
-                                        isSelected: viewModel.typeFilter == type
-                                    ) {
-                                        viewModel.updateType(type)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    filterGroup("Sort") {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Picker("Sort", selection: Binding(
-                                get: { viewModel.preferredSort },
-                                set: { viewModel.updateSort($0) }
-                            )) {
-                                ForEach(Self.visibleSorts, id: \.self) { sort in
-                                    Text(sort.displayName).tag(sort)
-                                }
-                            }
-                            .pickerStyle(.menu)
-                            .labelsHidden()
+    // MARK: - Expanding filter panel
 
-                            if viewModel.preferredSort == .trending {
-                                Picker("Period", selection: Binding(
-                                    get: { viewModel.trendingDays },
-                                    set: { viewModel.updateTrendingDays($0) }
-                                )) {
-                                    ForEach(Self.trendingPeriods, id: \.days) { period in
-                                        Text(period.title).tag(period.days)
-                                    }
-                                }
-                                .pickerStyle(.segmented)
-                                .labelsHidden()
-                            }
+    private var filterPanel: some View {
+        VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
+            filterRow("Maturity") {
+                HStack(spacing: 6) {
+                    ForEach(WorkshopAgeRatingFilter.allCases) { rating in
+                        FilterChip(
+                            title: Text(verbatim: rating.displayName),
+                            isSelected: viewModel.ageRating == rating
+                        ) {
+                            viewModel.updateAgeRating(rating)
                         }
                     }
                 }
+                .help(Text("Maximum maturity to show — hides ratings above the chosen level."))
+            }
 
-                filterGroup("Maturity") {
-                    Picker("Maturity", selection: Binding(
-                        get: { viewModel.ageRating },
-                        set: { viewModel.updateAgeRating($0) }
-                    )) {
-                        ForEach(WorkshopAgeRatingFilter.allCases) { rating in
-                            Text(rating.displayName).tag(rating)
+            filterRow("Resolution") {
+                chipScroll {
+                    ForEach(WorkshopResolutionFilter.allCases) { resolution in
+                        FilterChip(
+                            title: Text(verbatim: resolution.displayName),
+                            isSelected: viewModel.resolution == resolution
+                        ) {
+                            viewModel.updateResolution(resolution)
                         }
                     }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .help(Text("Maximum maturity to show — hides ratings above the chosen level."))
-                }
-
-                filterGroup("Resolution") {
-                    Picker("Resolution", selection: Binding(
-                        get: { viewModel.resolution },
-                        set: { viewModel.updateResolution($0) }
-                    )) {
-                        ForEach(WorkshopResolutionFilter.allCases) { resolution in
-                            Text(resolution.displayName).tag(resolution)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                }
-
-                filterGroup("Genre") {
-                    genreCheckboxGrid
-                }
-
-                if activeFilterCount > 0 {
-                    Button("Clear filters") { clearFilters() }
-                        .buttonStyle(.borderless)
-                        .controlSize(.small)
                 }
             }
-            .padding(DesignTokens.Spacing.md)
-        }
-        .frame(width: 300)
-        .frame(maxHeight: 430)
-    }
 
-    /// Two-column checkbox grid of the official genre tags. Selecting several
-    /// ANDs them (Steam-native). Toggles route through the view-model's
-    /// debounced reload, so ticking three genres issues a single query.
-    private var genreCheckboxGrid: some View {
-        LazyVGrid(
-            columns: [
-                GridItem(.flexible(), alignment: .leading),
-                GridItem(.flexible(), alignment: .leading)
-            ],
-            alignment: .leading,
-            spacing: 4
-        ) {
-            ForEach(WorkshopGenre.allTags, id: \.self) { tag in
-                Toggle(isOn: Binding(
-                    get: { viewModel.selectedGenres.contains(tag) },
-                    set: { _ in viewModel.toggleGenre(tag) }
-                )) {
-                    Text(tag)
-                        .font(.system(size: 11))
-                        .lineLimit(1)
+            filterRow("Genre") {
+                chipScroll {
+                    ForEach(WorkshopGenre.allTags, id: \.self) { tag in
+                        FilterChip(
+                            title: Text(verbatim: tag),
+                            isSelected: viewModel.selectedGenres.contains(tag)
+                        ) {
+                            viewModel.toggleGenre(tag)
+                        }
+                    }
                 }
-                .toggleStyle(.checkbox)
-                .controlSize(.small)
+            }
+
+            if activeFilterCount > 0 {
+                Button("Clear filters") { clearFilters() }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .padding(.leading, 74 + DesignTokens.Spacing.sm)
             }
         }
+        .padding(.horizontal, DesignTokens.Spacing.md)
+        .padding(.vertical, DesignTokens.Spacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .transition(.opacity.combined(with: .move(edge: .top)))
     }
 
-    private func filterGroup<Content: View>(
+    private func filterRow<Content: View>(
         _ title: LocalizedStringKey,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        HStack(alignment: .center, spacing: DesignTokens.Spacing.sm) {
             Text(title)
                 .font(.system(size: 10.5, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .textCase(.uppercase)
+                .frame(width: 74, alignment: .leading)
             content()
+        }
+    }
+
+    private func chipScroll<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                content()
+            }
+            .padding(.vertical, 1)
         }
     }
 
@@ -321,20 +235,32 @@ struct WorkshopBrowseFilterRibbon: View {
 
     private var searchField: some View {
         HStack(spacing: 7) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.secondary)
+            // Search is manual now (issue #5): clicking the glass or pressing
+            // Return runs the query — typing alone never fires a request.
+            Button {
+                Task { await viewModel.submitSearch() }
+            } label: {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .disabled(controlsDisabled)
+            .help(Text("Search"))
+
             TextField("Search Workshop", text: Binding(
                 get: { viewModel.searchInput },
-                set: { viewModel.updateSearch($0) }
+                set: { viewModel.searchInput = $0 }
             ))
             .textFieldStyle(.plain)
             .font(.system(size: 12))
             .focused($isSearchFocused)
             .disabled(controlsDisabled)
+            .onSubmit { Task { await viewModel.submitSearch() } }
+
             if !viewModel.searchInput.isEmpty {
                 Button {
-                    viewModel.updateSearch("")
+                    Task { await viewModel.clearSearch() }
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 11, weight: .semibold))
@@ -404,7 +330,7 @@ struct WorkshopBrowseFilterRibbon: View {
         !hasWebAPIKey || viewModel.isRateLimited
     }
 
-    /// Active non-default secondary filters, surfaced as the Filters badge.
+    /// Active non-default filters, surfaced as the Filters badge.
     private var activeFilterCount: Int {
         var count = 0
         if viewModel.typeFilter != .all { count += 1 }
@@ -423,12 +349,60 @@ struct WorkshopBrowseFilterRibbon: View {
         if !viewModel.selectedGenres.isEmpty { viewModel.clearGenres() }
     }
 
-    private static let visibleSorts: [WorkshopSortMode] = [.topRated, .newest, .trending, .mostSubscribed]
+    // MARK: - Sort options (Trending period folded in)
 
-    private static let trendingPeriods: [(title: LocalizedStringKey, days: Int)] = [
-        ("Week", 7),
-        ("Month", 30),
-        ("Year", 365)
+    private var currentSortOption: SortOption {
+        switch viewModel.preferredSort {
+        case .trending:
+            switch viewModel.trendingDays {
+            case 30: return .trendingMonth
+            case 365: return .trendingYear
+            default: return .trendingWeek
+            }
+        case .newest: return .newest
+        case .mostSubscribed: return .mostSubscribed
+        case .topRated, .search: return .topRated
+        }
+    }
+
+    private static let sortOptions: [SortOption] = [
+        .topRated, .newest, .trendingWeek, .trendingMonth, .trendingYear, .mostSubscribed
     ]
+
+    enum SortOption: Hashable, Identifiable {
+        case topRated, newest, mostSubscribed
+        case trendingWeek, trendingMonth, trendingYear
+
+        var id: Self { self }
+
+        var sort: WorkshopSortMode {
+            switch self {
+            case .topRated: return .topRated
+            case .newest: return .newest
+            case .mostSubscribed: return .mostSubscribed
+            case .trendingWeek, .trendingMonth, .trendingYear: return .trending
+            }
+        }
+
+        var days: Int {
+            switch self {
+            case .trendingWeek: return 7
+            case .trendingMonth: return 30
+            case .trendingYear: return 365
+            default: return 0
+            }
+        }
+
+        var title: LocalizedStringKey {
+            switch self {
+            case .topRated: return "Top Rated"
+            case .newest: return "Newest"
+            case .mostSubscribed: return "Most Subscribed"
+            case .trendingWeek: return "Trending · Week"
+            case .trendingMonth: return "Trending · Month"
+            case .trendingYear: return "Trending · Year"
+            }
+        }
+    }
 }
 #endif
