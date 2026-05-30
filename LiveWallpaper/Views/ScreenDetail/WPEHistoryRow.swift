@@ -20,6 +20,11 @@ struct WPEHistoryRow: View {
     var onApplyToAll: () -> Void = {}
     var onTap: () -> Void = {}
     let onRemove: () -> Void
+    /// Installed-library bookmark toggle. When `onBookmark` is non-nil a
+    /// context-menu item + indicator appear; the Scene-tab call site leaves it
+    /// nil so its appearance/behavior is unchanged.
+    var isBookmarked: Bool = false
+    var onBookmark: (() -> Void)? = nil
 
     @State private var isHovering = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -47,6 +52,10 @@ struct WPEHistoryRow: View {
                     Button("Apply to All Displays", action: onApplyToAll)
                 }
                 if !screens.isEmpty { Divider() }
+            }
+            if let onBookmark {
+                Button(isBookmarked ? "Remove Bookmark" : "Add Bookmark", action: onBookmark)
+                Divider()
             }
             Button("Show in Finder") { showInFinder() }
             Button("Remove", role: .destructive, action: onRemove)
@@ -90,6 +99,21 @@ struct WPEHistoryRow: View {
                         .foregroundStyle(.secondary)
 
                     Spacer(minLength: 4)
+
+                    // Visible, state-showing toggle (matches WorkshopGalleryView's
+                    // yellow bookmark idiom) — far more discoverable than a
+                    // context-menu-only action. Shown only when bookmarking is
+                    // wired (Installed library); the Scene tab passes no onBookmark.
+                    if let onBookmark {
+                        Button(action: onBookmark) {
+                            Image(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
+                                .font(.system(size: 11))
+                                .foregroundStyle(isBookmarked ? Color.yellow : Color.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help(isBookmarked ? Text("Remove Bookmark") : Text("Add Bookmark"))
+                        .accessibilityLabel(Text(isBookmarked ? "Remove Bookmark" : "Add Bookmark"))
+                    }
 
                     if isActive {
                         HStack(spacing: 3) {

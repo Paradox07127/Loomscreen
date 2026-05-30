@@ -10,6 +10,14 @@ struct SteamCMDRunResult: Sendable {
     let killed: Bool
 }
 
+typealias SteamCMDProgressHandler = @Sendable (_ percent: Double, _ downloadedBytes: UInt64?, _ totalBytes: UInt64?) -> Void
+
+struct SteamCMDDownloadProgress: Equatable, Sendable {
+    let percent: Double
+    let downloadedBytes: UInt64?
+    let totalBytes: UInt64?
+}
+
 /// Executes SteamCMD (or any sibling diagnostic tool) in its own process
 /// group so cancellation / timeouts can terminate SteamCMD's self-update
 /// child processes alongside the parent. Plain `Process.terminate()` would
@@ -21,7 +29,8 @@ actor SteamCMDProcessRunner {
         args: [String],
         stdin: String?,
         timeout: TimeInterval,
-        workingDirectory: URL?
+        workingDirectory: URL?,
+        onProgress: SteamCMDProgressHandler? = nil
     ) async -> SteamCMDRunResult {
         do {
             try Task.checkCancellation()
@@ -36,7 +45,8 @@ actor SteamCMDProcessRunner {
                 await Self.awaitCompletion(
                     spawned: spawned,
                     timeout: timeout,
-                    processGroup: processGroup
+                    processGroup: processGroup,
+                    onProgress: onProgress
                 )
             } onCancel: {
                 processGroup.terminate()
@@ -52,6 +62,33 @@ actor SteamCMDProcessRunner {
                 killed: false
             )
         }
+    }
+
+    /// Parses a SteamCMD download status line such as
+    /// `Update state (0x61) downloading, progress: 42.34 (12345 / 67890)`
+    /// into percent + downloaded/total bytes. Returns nil for non-progress lines.
+    nonisolated static func parseDownloadProgressLine(_ line: String) -> SteamCMDDownloadProgress? {
+        guard let progressRange = line.range(of: "progress:") else { return nil }
+        let tail = line[progressRange.upperBound...]
+        guard let bytesStart = tail.firstIndex(of: "("),
+              let bytesEnd = tail[bytesStart...].firstIndex(of: ")")
+        else { return nil }
+
+        let percentText = tail[..<bytesStart].trimmingCharacters(in: .whitespacesAndNewlines)
+        let bytesText = tail[tail.index(after: bytesStart)..<bytesEnd]
+        let byteParts = bytesText.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false)
+        guard byteParts.count == 2,
+              let percent = Double(percentText),
+              let downloaded = UInt64(byteParts[0].trimmingCharacters(in: .whitespacesAndNewlines)),
+              let total = UInt64(byteParts[1].trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            return nil
+        }
+
+        return SteamCMDDownloadProgress(
+            percent: percent,
+            downloadedBytes: downloaded,
+            totalBytes: total
+        )
     }
 
     // MARK: - Spawn
@@ -188,9 +225,10 @@ actor SteamCMDProcessRunner {
     private static func awaitCompletion(
         spawned: SteamCMDSpawnedProcess,
         timeout: TimeInterval,
-        processGroup: SteamCMDProcessGroup
+        processGroup: SteamCMDProcessGroup,
+        onProgress: SteamCMDProgressHandler?
     ) async -> SteamCMDRunResult {
-        let stdoutCapture = SteamCMDPipeCapture(handle: spawned.stdout)
+        let stdoutCapture = SteamCMDPipeCapture(handle: spawned.stdout, onProgress: onProgress)
         let stderrCapture = SteamCMDPipeCapture(handle: spawned.stderr)
         stdoutCapture.start()
         stderrCapture.start()
@@ -326,12 +364,17 @@ private final class SteamCMDProcessGroup: @unchecked Sendable {
 
 private final class SteamCMDPipeCapture: @unchecked Sendable {
     private let handle: FileHandle
+    private let onProgress: SteamCMDProgressHandler?
     private let lock = NSLock()
     private let eof = DispatchSemaphore(value: 0)
     private var data = Data()
+    private var lineBuffer = ""
     private var didReachEOF = false
 
-    init(handle: FileHandle) { self.handle = handle }
+    init(handle: FileHandle, onProgress: SteamCMDProgressHandler? = nil) {
+        self.handle = handle
+        self.onProgress = onProgress
+    }
 
     func start() {
         handle.readabilityHandler = { [weak self] fileHandle in
@@ -364,15 +407,61 @@ private final class SteamCMDPipeCapture: @unchecked Sendable {
     }
 
     private func append(_ chunk: Data) {
-        lock.lock(); data.append(chunk); lock.unlock()
+        let progress = appendAndParseProgress(chunk)
+        publish(progress)
+    }
+
+    private func appendAndParseProgress(_ chunk: Data) -> SteamCMDDownloadProgress? {
+        lock.lock()
+        defer { lock.unlock() }
+
+        data.append(chunk)
+        guard onProgress != nil else { return nil }
+
+        lineBuffer.append(String(decoding: chunk, as: UTF8.self))
+        return drainCompletedProgressLines()
     }
 
     private func markEOF() {
+        let progress: SteamCMDDownloadProgress?
+        let shouldSignal: Bool
+
         lock.lock()
-        let shouldSignal = !didReachEOF
+        if onProgress != nil, !lineBuffer.isEmpty {
+            progress = SteamCMDProcessRunner.parseDownloadProgressLine(lineBuffer)
+            lineBuffer.removeAll(keepingCapacity: true)
+        } else {
+            progress = nil
+        }
+        shouldSignal = !didReachEOF
         didReachEOF = true
         lock.unlock()
+
+        publish(progress)
         if shouldSignal { eof.signal() }
+    }
+
+    /// Splits the accumulated buffer on newlines and returns the latest parsable
+    /// progress line. Caller holds `lock`.
+    private func drainCompletedProgressLines() -> SteamCMDDownloadProgress? {
+        var latest: SteamCMDDownloadProgress?
+        while let terminator = lineBuffer.rangeOfCharacter(from: .newlines) {
+            let line = String(lineBuffer[..<terminator.lowerBound])
+            lineBuffer.removeSubrange(lineBuffer.startIndex..<terminator.upperBound)
+            if let progress = SteamCMDProcessRunner.parseDownloadProgressLine(line) {
+                latest = progress
+            }
+        }
+
+        if lineBuffer.count > 8192 {
+            lineBuffer = String(lineBuffer.suffix(8192))
+        }
+        return latest
+    }
+
+    private func publish(_ progress: SteamCMDDownloadProgress?) {
+        guard let progress else { return }
+        onProgress?(progress.percent, progress.downloadedBytes, progress.totalBytes)
     }
 }
 #endif

@@ -12,6 +12,7 @@ import SwiftUI
 struct WorkshopInstalledView: View {
     @Environment(ScreenManager.self) private var screenManager
     @State private var importCoordinator = WorkshopFolderImportCoordinator.shared
+    @State private var bookmarkStore = BookmarkStore.shared
     @State private var entries: [WPEHistoryEntry] = []
     @State private var searchText: String = ""
     @State private var typeFilter: WPELibraryTypeFilter = .all
@@ -93,6 +94,7 @@ struct WorkshopInstalledView: View {
                 }
                 LazyVGrid(columns: columns, spacing: 14) {
                     ForEach(visibleEntries, id: \.id) { entry in
+                        let bookmarked = bookmarkStore.containsWPEBookmark(workshopID: entry.origin.workshopID)
                         WPEHistoryRow(
                             entry: entry,
                             isActive: isActive(entry),
@@ -100,7 +102,12 @@ struct WorkshopInstalledView: View {
                             screens: screenManager.screens,
                             onApply: { screen in apply(entry, to: screen) },
                             onApplyToAll: { applyToAll(entry) },
-                            onRemove: { remove(entry) }
+                            onRemove: { remove(entry) },
+                            isBookmarked: bookmarked,
+                            // Only offer "Add" when the item's content can actually
+                            // be rebuilt into a bookmark; "Remove" stays available
+                            // for anything already bookmarked.
+                            onBookmark: (bookmarked || canAddBookmark(entry)) ? { toggleBookmark(entry) } : nil
                         )
                     }
                 }
@@ -226,6 +233,42 @@ struct WorkshopInstalledView: View {
     private func remove(_ entry: WPEHistoryEntry) {
         screenManager.removeWPEImport(workshopID: entry.id)
         reload()
+    }
+
+    /// Favorite ("收藏") a downloaded item as a real `WallpaperBookmark` — the
+    /// unified save mechanism (no separate "like" store). Only downloaded items
+    /// can be bookmarked because a bookmark is an applyable wallpaper, so we
+    /// rebuild the local content from the cached import via `WPECachedContentResolver`.
+    private func toggleBookmark(_ entry: WPEHistoryEntry) {
+        errorMessage = nil
+        let workshopID = entry.origin.workshopID
+        if bookmarkStore.containsWPEBookmark(workshopID: workshopID) {
+            bookmarkStore.removeWPEBookmarks(workshopID: workshopID)
+            return
+        }
+        guard let content = WPECachedContentResolver().content(for: entry.origin) else {
+            errorMessage = String(localized: "Couldn't add \(entry.origin.title) to Bookmarks.", comment: "Workshop installed bookmark failure. Placeholder is the wallpaper title.")
+            return
+        }
+        _ = bookmarkStore.add(
+            label: entry.origin.title,
+            content: content,
+            sourceDisplayName: workshopID,
+            wpeOrigin: entry.origin
+        )
+    }
+
+    /// A bookmark is an applyable wallpaper, so only items whose content the
+    /// `WPECachedContentResolver` can rebuild (cache-backed, supported type) can
+    /// be added. Mirrors the resolver's preconditions cheaply (no disk I/O).
+    private func canAddBookmark(_ entry: WPEHistoryEntry) -> Bool {
+        let origin = entry.origin
+        guard origin.resourceLocation == .cache,
+              let entryFile = origin.entryFile, !entryFile.isEmpty else { return false }
+        switch origin.originalType {
+        case .video, .web, .scene: return true
+        case .application, .unknown: return false
+        }
     }
 
     private func reload() {

@@ -14,6 +14,8 @@ struct WorkshopBrowsePane: View {
     @Environment(WorkshopServices.self) private var services
     @State private var selectedItem: WorkshopQueryItem?
     @State private var rateLimitRemaining: TimeInterval = 0
+    /// Workshop ids already in the local library, for the "In Library" badge.
+    @State private var installedWorkshopIDs: Set<String> = []
 
     private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -42,6 +44,7 @@ struct WorkshopBrowsePane: View {
         .background(DesignTokens.Colors.pageBackground)
         .onAppear {
             rateLimitRemaining = currentRateLimitRemaining
+            reloadInstalledIDs()
             Task {
                 await services.refreshAPIKeyStatus()
                 // Only hit Steam once a key is present — avoids a phantom
@@ -55,6 +58,9 @@ struct WorkshopBrowsePane: View {
         }
         .onReceive(ticker) { _ in
             rateLimitRemaining = currentRateLimitRemaining
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .wpeHistoryDidChange)) { _ in
+            reloadInstalledIDs()
         }
         .onChange(of: viewModel.isLoading) { _, loading in
             if loading { WorkshopRequestCounter.increment() }
@@ -86,7 +92,10 @@ struct WorkshopBrowsePane: View {
         ScrollView {
             LazyVGrid(columns: gridColumns, spacing: DesignTokens.Spacing.lg) {
                 ForEach(viewModel.items) { item in
-                    WorkshopBrowseCard(item: item) { selectedItem = item }
+                    WorkshopBrowseCard(
+                        item: item,
+                        isInLibrary: installedWorkshopIDs.contains(String(item.id))
+                    ) { selectedItem = item }
                 }
             }
             .padding(.horizontal, DesignTokens.Settings.formHorizontalMargin)
@@ -241,6 +250,12 @@ struct WorkshopBrowsePane: View {
         viewModel.updateType(.all)
         viewModel.updateAgeRating(.everyone)
         if !viewModel.searchInput.isEmpty { viewModel.updateSearch("") }
+    }
+
+    private func reloadInstalledIDs() {
+        installedWorkshopIDs = Set(
+            SettingsManager.shared.loadGlobalSettings().recentWPEImports.map { $0.origin.workshopID }
+        )
     }
 
     private static func countdown(_ seconds: TimeInterval) -> String {
