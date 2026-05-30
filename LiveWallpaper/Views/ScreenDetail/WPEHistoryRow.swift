@@ -15,6 +15,10 @@ struct WPEHistoryRow: View {
     let entry: WPEHistoryEntry
     let isActive: Bool
     var allowsInlineApply: Bool = false
+    /// Browse-consistent gallery presentation — square tile, controlBackground +
+    /// `galleryTileChrome`, uppercase type pill — so the Installed library matches
+    /// the redesigned online Browse cards. Default keeps the Scene-tab glass card.
+    var galleryStyle: Bool = false
     var screens: [Screen] = []
     var onApply: (Screen) -> Void = { _ in }
     var onApplyToAll: () -> Void = {}
@@ -25,20 +29,15 @@ struct WPEHistoryRow: View {
     /// nil so its appearance/behavior is unchanged.
     var isBookmarked: Bool = false
     var onBookmark: (() -> Void)? = nil
+    /// "Update available" badge — set when the installed item's Workshop
+    /// `timeUpdated` is newer than its import (Installed library only).
+    var hasUpdate: Bool = false
 
     @State private var isHovering = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        Group {
-            if allowsInlineApply {
-                card
-            } else {
-                Button(action: onTap) { card }
-                    .buttonStyle(.plain)
-            }
-        }
-        .wpeProjectCardChrome(isHovering: isHovering, reduceMotion: reduceMotion)
+        chromedCard
         .onHover { isHovering = $0 }
         .accessibilityElement(children: allowsInlineApply ? .contain : .ignore)
         .accessibilityLabel(accessibilityCardLabel)
@@ -62,6 +61,31 @@ struct WPEHistoryRow: View {
         }
     }
 
+    @ViewBuilder
+    private var cardContainer: some View {
+        if allowsInlineApply {
+            card
+        } else {
+            Button(action: onTap) { card }
+                .buttonStyle(.plain)
+        }
+    }
+
+    /// Browse-style gallery chrome (solid control surface + `galleryTileChrome`)
+    /// vs the legacy Scene-tab glass card. ScreenDetail leaves `galleryStyle`
+    /// off, so its rendering is unchanged.
+    @ViewBuilder
+    private var chromedCard: some View {
+        if galleryStyle {
+            cardContainer
+                .background(Color(nsColor: .controlBackgroundColor))
+                .galleryTileChrome(isHovering: isHovering, reduceMotion: reduceMotion)
+        } else {
+            cardContainer
+                .wpeProjectCardChrome(isHovering: isHovering, reduceMotion: reduceMotion)
+        }
+    }
+
     private var card: some View {
         VStack(spacing: 0) {
             WPEPreviewView(
@@ -77,26 +101,30 @@ struct WPEHistoryRow: View {
                             .padding(.vertical, 2)
                             .background(badge.tint.opacity(0.85), in: Capsule())
                             .foregroundStyle(.white)
-                            .padding(8)
+                            .padding(DesignTokens.Spacing.sm)
                             .accessibilityLabel(badge.accessibility)
                     }
                 }
+                .overlay(alignment: .topLeading) {
+                    if hasUpdate {
+                        updateBadge
+                    }
+                }
 
-            Divider()
+            // Gallery style keeps the thumbnail flush (like the Browse card);
+            // the legacy card separates it from the footer with a divider.
+            if !galleryStyle {
+                Divider()
+            }
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: galleryStyle ? DesignTokens.Spacing.xs : DesignTokens.Spacing.sm) {
                 Text(verbatim: entry.origin.title)
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 HStack(spacing: 6) {
-                    Circle()
-                        .fill(typeColor)
-                        .frame(width: 6, height: 6)
-                    Text(verbatim: entry.origin.localizedDisplayTypeName)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                    typeIndicator
 
                     Spacer(minLength: 4)
 
@@ -132,9 +160,50 @@ struct WPEHistoryRow: View {
                     applyControl
                 }
             }
-            .padding(12)
-            .frame(maxHeight: .infinity, alignment: .top)
+            .padding(DesignTokens.Spacing.md)
+            .frame(
+                maxWidth: galleryStyle ? .infinity : nil,
+                maxHeight: galleryStyle ? nil : .infinity,
+                alignment: .top
+            )
         }
+    }
+
+    /// Type as an uppercase pill (Browse idiom) in gallery style, or the legacy
+    /// colored dot + name otherwise.
+    @ViewBuilder
+    private var typeIndicator: some View {
+        if galleryStyle {
+            Text(verbatim: entry.origin.localizedDisplayTypeName.uppercased(with: .current))
+                .font(.system(size: 9, weight: .bold))
+                .tracking(0.5)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: DesignTokens.Corner.sm, style: .continuous))
+        } else {
+            Circle()
+                .fill(typeColor)
+                .frame(width: 6, height: 6)
+            Text(verbatim: entry.origin.localizedDisplayTypeName)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var updateBadge: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .font(.system(size: 8, weight: .bold))
+            Text("Update")
+                .font(.system(size: 9, weight: .bold))
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(Color.orange.opacity(0.9), in: Capsule())
+        .padding(DesignTokens.Spacing.sm)
+        .accessibilityLabel(Text("Update available"))
     }
 
     // MARK: - Inline apply control (Installed library)
@@ -178,14 +247,17 @@ struct WPEHistoryRow: View {
     /// tab) layout children are `.ignore`d, so the compatibility badge ("Won't
     /// run" / "Needs deps") would be silent to VoiceOver — fold it into the label.
     private var accessibilityCardLabel: Text {
-        let base = Text(
+        var label = Text(
             "Imported project: \(entry.origin.title)",
             comment: "A11y label for an imported project history row card. The placeholder is the project title."
         )
-        if !allowsInlineApply, let badge = compatibilityBadge {
-            return base + Text(verbatim: " — ") + badge.accessibility
+        if hasUpdate {
+            label = label + Text(verbatim: " — ") + Text("Update available", comment: "A11y: the installed item has a newer version on Steam.")
         }
-        return base
+        if !allowsInlineApply, let badge = compatibilityBadge {
+            label = label + Text(verbatim: " — ") + badge.accessibility
+        }
+        return label
     }
 
     private var applyAccessibilityHint: Text {

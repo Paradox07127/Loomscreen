@@ -67,9 +67,12 @@ struct AnimatedGIFThumbnail: View {
                 .clipped()
                 .accessibilityHidden(true)
         } else if phase == .loading, url != nil {
-            ProgressView()
-                .controlSize(.small)
-                .opacity(0.6)
+            // Pure-SwiftUI spinner (not `ProgressView`, whose NSProgressIndicator
+            // bridge spams "max length doesn't satisfy min <= max" layout faults
+            // when 50 tiles load at fractional grid widths).
+            LiquidGlassSpinner(size: 20, lineWidth: 2, tint: .secondary)
+                .opacity(0.7)
+                .accessibilityHidden(true)
         } else {
             Image(systemName: "cube.transparent")
                 .font(.system(size: 36, weight: .regular))
