@@ -93,7 +93,6 @@ struct WPEPuppetVertex {
 
 struct WPEPuppetMeshUniforms {
     float4 localSizeAndMode; // x,y local render target size; z=0 local composite
-    float4 vertexOffset;     // x,y model-space cropoffset correction
 };
 
 vertex WPEVertexOut wpe_puppet_mesh_vertex(
@@ -105,7 +104,7 @@ vertex WPEVertexOut wpe_puppet_mesh_vertex(
     float2 halfSize = max(u.localSizeAndMode.xy * 0.5, float2(0.5));
 
     WPEVertexOut out;
-    out.position = float4((v.position.xy + u.vertexOffset.xy) / halfSize, 0.0, 1.0);
+    out.position = float4(v.position.xy / halfSize, 0.0, 1.0);
     out.uv = v.uv.xy;
     return out;
 }

@@ -67,11 +67,6 @@ public struct WPERenderLayerGeometry: Equatable, Sendable {
     public let alphaAnimation: WPESceneAnimatedValue?
     public let color: SIMD3<Double>
     public let brightness: Double
-    /// Model-space translation (in puppet vertex units) applied before the
-    /// puppet local-clip normalization. Derived from the model's `cropoffset`
-    /// so that off-center puppets fit inside their local composite. Zero for
-    /// non-puppet layers and for puppets whose declared size already fits.
-    public let puppetVertexOffset: SIMD2<Double>
 
     public init(
         origin: SIMD3<Double>,
@@ -82,8 +77,7 @@ public struct WPERenderLayerGeometry: Equatable, Sendable {
         alpha: Double,
         alphaAnimation: WPESceneAnimatedValue? = nil,
         color: SIMD3<Double>,
-        brightness: Double,
-        puppetVertexOffset: SIMD2<Double> = SIMD2<Double>(0, 0)
+        brightness: Double
     ) {
         self.origin = origin
         self.scale = scale
@@ -94,7 +88,6 @@ public struct WPERenderLayerGeometry: Equatable, Sendable {
         self.alphaAnimation = alphaAnimation
         self.color = color
         self.brightness = brightness
-        self.puppetVertexOffset = puppetVertexOffset
     }
 
     public func resolved(at time: Double) -> WPERenderLayerGeometry {
@@ -107,8 +100,7 @@ public struct WPERenderLayerGeometry: Equatable, Sendable {
             alpha: alphaAnimation?.scalar(at: time) ?? alpha,
             alphaAnimation: alphaAnimation,
             color: color,
-            brightness: brightness,
-            puppetVertexOffset: puppetVertexOffset
+            brightness: brightness
         )
     }
 
@@ -121,8 +113,7 @@ public struct WPERenderLayerGeometry: Equatable, Sendable {
         alpha: 1,
         alphaAnimation: nil,
         color: SIMD3<Double>(1, 1, 1),
-        brightness: 1,
-        puppetVertexOffset: SIMD2<Double>(0, 0)
+        brightness: 1
     )
 }
 

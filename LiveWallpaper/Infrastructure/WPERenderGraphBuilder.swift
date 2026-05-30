@@ -1,5 +1,4 @@
 #if !LITE_BUILD
-import CoreGraphics
 import Foundation
 
 struct WPERenderGraphBuilder: Sendable {
@@ -181,7 +180,6 @@ struct WPERenderGraphBuilder: Sendable {
     ) throws -> WPERenderLayer {
         let model = try resolveModelDescriptor(for: object)
         let materialPath = model.materialPath
-        let effectiveSize = model.effectiveGeometrySize(declaredSize: object.size)
         let compositeA = "_rt_imageLayerComposite_\(object.id)_a"
         let compositeB = "_rt_imageLayerComposite_\(object.id)_b"
 
@@ -261,12 +259,11 @@ struct WPERenderGraphBuilder: Sendable {
                 scale: object.scale,
                 angles: object.angles,
                 alignment: object.alignment,
-                size: effectiveSize,
+                size: object.size,
                 alpha: object.alpha,
                 alphaAnimation: object.alphaAnimation,
                 color: object.color,
-                brightness: object.brightness,
-                puppetVertexOffset: model.puppetVertexOffset
+                brightness: object.brightness
             ),
             compositeA: compositeA,
             compositeB: compositeB,
@@ -343,29 +340,10 @@ struct WPERenderGraphBuilder: Sendable {
         }
         let puppetPath = (dict["puppet"] as? String)
             .flatMap { $0.isEmpty ? nil : inheritDependencyPrefix($0, from: object.imageRelativePath) }
-        let cropOffset = WPEValueParser.vector3(dict["cropoffset"])
-            .map { SIMD2<Double>($0.x, $0.y) } ?? SIMD2<Double>(0, 0)
         return WPEModelDescriptor(
             materialPath: inheritDependencyPrefix(material, from: object.imageRelativePath),
-            puppetPath: puppetPath,
-            cropOffset: cropOffset,
-            puppetBounds: puppetPath.flatMap { loadPuppetBounds(path: $0) }
+            puppetPath: puppetPath
         )
-    }
-
-    private func loadPuppetBounds(path: String) -> WPEPuppetBounds? {
-        do {
-            let url = try resolver.resolveExistingFileURL(relativePath: path)
-            let data = try Data(contentsOf: url)
-            let model = try WPEMdlParser.parse(data: data)
-            // Only the pre-assembled puppet generations (MDLV0021/0023) render;
-            // older exploded-atlas meshes are gated out elsewhere, so their
-            // bounds must not drive the local composite size.
-            guard model.version >= 21 else { return nil }
-            return WPEPuppetBounds(model: model)
-        } catch {
-            return nil
-        }
     }
 
     private func isBuiltinModelPath(_ path: String) -> Bool {
@@ -650,87 +628,6 @@ private struct LayerBuildContext {
 private struct WPEModelDescriptor {
     let materialPath: String?
     let puppetPath: String?
-    let cropOffset: SIMD2<Double>
-    let puppetBounds: WPEPuppetBounds?
-
-    init(
-        materialPath: String?,
-        puppetPath: String?,
-        cropOffset: SIMD2<Double> = SIMD2<Double>(0, 0),
-        puppetBounds: WPEPuppetBounds? = nil
-    ) {
-        self.materialPath = materialPath
-        self.puppetPath = puppetPath
-        self.cropOffset = cropOffset
-        self.puppetBounds = puppetBounds
-    }
-
-    /// Model-space shift applied to puppet vertices before local-clip
-    /// normalization. WPE `cropoffset` acts as a crop origin, so the mesh is
-    /// translated by `-cropoffset`. If device verification shows an equal and
-    /// opposite whole-body shift, flip this sign only.
-    var puppetVertexOffset: SIMD2<Double> {
-        guard puppetPath != nil else { return SIMD2<Double>(0, 0) }
-        return SIMD2<Double>(-cropOffset.x, -cropOffset.y)
-    }
-
-    /// Local composite size that contains the full (offset) puppet mesh.
-    /// Returns the declared size unchanged whenever the mesh already fits,
-    /// keeping every currently-working puppet/image layer a no-op.
-    func effectiveGeometrySize(declaredSize: CGSize?) -> CGSize? {
-        guard let declaredSize else { return nil }
-        guard let puppetBounds else { return declaredSize }
-
-        let declaredWidth = Double(declaredSize.width)
-        let declaredHeight = Double(declaredSize.height)
-        let requiredHalf = puppetBounds.requiredHalf(relativeTo: cropOffset)
-        let effectiveWidth = max(declaredWidth, requiredHalf.x * 2)
-        let effectiveHeight = max(declaredHeight, requiredHalf.y * 2)
-
-        guard effectiveWidth != declaredWidth || effectiveHeight != declaredHeight else {
-            return declaredSize
-        }
-        return CGSize(width: CGFloat(effectiveWidth), height: CGFloat(effectiveHeight))
-    }
-}
-
-private struct WPEPuppetBounds {
-    let min: SIMD2<Double>
-    let max: SIMD2<Double>
-
-    init?(model: WPEPuppetModel) {
-        var minX = Double.greatestFiniteMagnitude
-        var minY = Double.greatestFiniteMagnitude
-        var maxX = -Double.greatestFiniteMagnitude
-        var maxY = -Double.greatestFiniteMagnitude
-        var foundVertex = false
-
-        for mesh in model.meshes {
-            for vertex in mesh.vertices {
-                let x = Double(vertex.position.x)
-                let y = Double(vertex.position.y)
-                guard x.isFinite, y.isFinite else { continue }
-                minX = Swift.min(minX, x)
-                minY = Swift.min(minY, y)
-                maxX = Swift.max(maxX, x)
-                maxY = Swift.max(maxY, y)
-                foundVertex = true
-            }
-        }
-
-        guard foundVertex else { return nil }
-        self.min = SIMD2<Double>(minX, minY)
-        self.max = SIMD2<Double>(maxX, maxY)
-    }
-
-    /// Half-extent the local composite must cover so that every vertex, after
-    /// the `-cropoffset` shift, lands inside the normalized [-1, 1] clip range.
-    func requiredHalf(relativeTo cropOffset: SIMD2<Double>) -> SIMD2<Double> {
-        SIMD2<Double>(
-            Swift.max(abs(min.x - cropOffset.x), abs(max.x - cropOffset.x)),
-            Swift.max(abs(min.y - cropOffset.y), abs(max.y - cropOffset.y))
-        )
-    }
 }
 
 private extension WPERenderTarget {
