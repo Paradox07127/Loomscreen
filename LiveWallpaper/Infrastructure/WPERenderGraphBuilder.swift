@@ -181,7 +181,7 @@ struct WPERenderGraphBuilder: Sendable {
     ) throws -> WPERenderLayer {
         let model = try resolveModelDescriptor(for: object)
         let materialPath = model.materialPath
-        let effectiveSize = model.effectiveGeometrySize(declaredSize: object.size)
+        let localCompositeSize = model.localCompositeSize(declaredSize: object.size)
         let compositeA = "_rt_imageLayerComposite_\(object.id)_a"
         let compositeB = "_rt_imageLayerComposite_\(object.id)_b"
 
@@ -261,12 +261,13 @@ struct WPERenderGraphBuilder: Sendable {
                 scale: object.scale,
                 angles: object.angles,
                 alignment: object.alignment,
-                size: effectiveSize,
+                size: object.size,
                 alpha: object.alpha,
                 alphaAnimation: object.alphaAnimation,
                 color: object.color,
                 brightness: object.brightness,
-                puppetVertexOffset: model.puppetVertexOffset
+                puppetVertexOffset: model.puppetVertexOffset,
+                localCompositeSize: localCompositeSize
             ),
             compositeA: compositeA,
             compositeB: compositeB,
@@ -674,23 +675,29 @@ private struct WPEModelDescriptor {
         return SIMD2<Double>(-cropOffset.x, -cropOffset.y)
     }
 
-    /// Local composite size that contains the full (offset) puppet mesh.
-    /// Returns the declared size unchanged whenever the mesh already fits,
-    /// keeping every currently-working puppet/image layer a no-op.
-    func effectiveGeometrySize(declaredSize: CGSize?) -> CGSize? {
+    /// Off-screen local composite (crop canvas) size that contains the full
+    /// (offset) puppet mesh WITHOUT clipping, kept separate from the declared
+    /// scene footprint (`object.size`). The declared size is scaled UP by a
+    /// single uniform factor so the composite keeps the declared aspect ratio;
+    /// the full-UV composite→quad blit then shrinks the oversized mesh back
+    /// into the declared footprint with no horizontal/vertical distortion.
+    /// Returns `nil` when the mesh already fits (k == 1) so every fitting
+    /// puppet and every non-puppet layer is a strict no-op.
+    func localCompositeSize(declaredSize: CGSize?) -> CGSize? {
         guard let declaredSize else { return nil }
-        guard let puppetBounds else { return declaredSize }
+        guard let puppetBounds else { return nil }
 
         let declaredWidth = Double(declaredSize.width)
         let declaredHeight = Double(declaredSize.height)
-        let requiredHalf = puppetBounds.requiredHalf(relativeTo: cropOffset)
-        let effectiveWidth = max(declaredWidth, requiredHalf.x * 2)
-        let effectiveHeight = max(declaredHeight, requiredHalf.y * 2)
+        guard declaredWidth > 0, declaredHeight > 0 else { return nil }
 
-        guard effectiveWidth != declaredWidth || effectiveHeight != declaredHeight else {
-            return declaredSize
-        }
-        return CGSize(width: CGFloat(effectiveWidth), height: CGFloat(effectiveHeight))
+        let requiredHalf = puppetBounds.requiredHalf(relativeTo: cropOffset)
+        let kx = requiredHalf.x / (declaredWidth * 0.5)
+        let ky = requiredHalf.y / (declaredHeight * 0.5)
+        let k = max(1.0, kx, ky)
+        guard k > 1.000001 else { return nil }
+
+        return CGSize(width: CGFloat(declaredWidth * k), height: CGFloat(declaredHeight * k))
     }
 }
 

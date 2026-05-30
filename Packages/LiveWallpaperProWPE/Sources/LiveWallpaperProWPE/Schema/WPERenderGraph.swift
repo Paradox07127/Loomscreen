@@ -72,6 +72,14 @@ public struct WPERenderLayerGeometry: Equatable, Sendable {
     /// so that off-center puppets fit inside their local composite. Zero for
     /// non-puppet layers and for puppets whose declared size already fits.
     public let puppetVertexOffset: SIMD2<Double>
+    /// Off-screen local composite (crop canvas) size for puppet layers, kept
+    /// separate from `size` (the final scene footprint). When a puppet mesh
+    /// exceeds the declared size, this is `size` scaled UP uniformly — same
+    /// aspect ratio as `size` so the full-UV composite→quad blit introduces no
+    /// distortion — just large enough to contain the offset mesh without
+    /// clipping. `nil` for non-puppet layers and puppets that already fit, in
+    /// which case the composite falls back to `size`.
+    public let localCompositeSize: CGSize?
 
     public init(
         origin: SIMD3<Double>,
@@ -83,7 +91,8 @@ public struct WPERenderLayerGeometry: Equatable, Sendable {
         alphaAnimation: WPESceneAnimatedValue? = nil,
         color: SIMD3<Double>,
         brightness: Double,
-        puppetVertexOffset: SIMD2<Double> = SIMD2<Double>(0, 0)
+        puppetVertexOffset: SIMD2<Double> = SIMD2<Double>(0, 0),
+        localCompositeSize: CGSize? = nil
     ) {
         self.origin = origin
         self.scale = scale
@@ -95,6 +104,7 @@ public struct WPERenderLayerGeometry: Equatable, Sendable {
         self.color = color
         self.brightness = brightness
         self.puppetVertexOffset = puppetVertexOffset
+        self.localCompositeSize = localCompositeSize
     }
 
     public func resolved(at time: Double) -> WPERenderLayerGeometry {
@@ -108,7 +118,8 @@ public struct WPERenderLayerGeometry: Equatable, Sendable {
             alphaAnimation: alphaAnimation,
             color: color,
             brightness: brightness,
-            puppetVertexOffset: puppetVertexOffset
+            puppetVertexOffset: puppetVertexOffset,
+            localCompositeSize: localCompositeSize
         )
     }
 
@@ -122,7 +133,8 @@ public struct WPERenderLayerGeometry: Equatable, Sendable {
         alphaAnimation: nil,
         color: SIMD3<Double>(1, 1, 1),
         brightness: 1,
-        puppetVertexOffset: SIMD2<Double>(0, 0)
+        puppetVertexOffset: SIMD2<Double>(0, 0),
+        localCompositeSize: nil
     )
 }
 

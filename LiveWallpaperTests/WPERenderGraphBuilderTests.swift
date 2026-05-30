@@ -800,8 +800,8 @@ struct WPERenderGraphBuilderTests {
         #expect(layer.passes[2].binds[0] == .fbo("blur_start_2"))
     }
 
-    @Test("Puppet cropoffset expands geometry and stores inverse vertex offset")
-    func puppetCropOffsetExpandsGeometryAndStoresInverseVertexOffset() throws {
+    @Test("Puppet cropoffset keeps scene footprint and grows aspect-locked local composite")
+    func puppetCropOffsetKeepsFootprintAndGrowsAspectLockedComposite() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("WPERenderGraphBuilderTests-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -828,8 +828,16 @@ struct WPERenderGraphBuilderTests {
 
         #expect(layer.objectID == "22")
         #expect(layer.puppetPath == "models/fll_puppet.mdl")
-        #expect(layer.geometry.size == CGSize(width: 4028, height: 3498))
+        // Scene footprint stays the declared size — no overflow / no upscale of
+        // the on-screen character; only the off-screen composite grows.
+        #expect(layer.geometry.size == CGSize(width: 4028, height: 2263))
         #expect(layer.geometry.puppetVertexOffset == SIMD2<Double>(170, -183))
+        // Composite grows so height = 2 * requiredHalf.y = 2 * 1749 = 3498, and
+        // its aspect ratio matches the declared size so the full-UV blit back
+        // into the footprint introduces no horizontal/vertical distortion.
+        let composite = try #require(layer.geometry.localCompositeSize)
+        #expect(abs(Double(composite.height) - 3498) < 0.5)
+        #expect(abs(Double(composite.width / composite.height) - 4028.0 / 2263.0) < 1e-9)
     }
 
     @Test("Puppet bounds are no-op when cropoffset is absent and declared size contains mesh")
@@ -865,10 +873,12 @@ struct WPERenderGraphBuilderTests {
 
         #expect(layer.geometry.size == CGSize(width: 2000, height: 2000))
         #expect(layer.geometry.puppetVertexOffset == SIMD2<Double>(0, 0))
+        // Mesh already fits the declared footprint (k == 1) => strict no-op.
+        #expect(layer.geometry.localCompositeSize == nil)
     }
 
-    @Test("Frieren puppet vertices fit clip space after cropoffset and effective size")
-    func frierenPuppetVerticesFitClipSpaceAfterCropOffsetAndEffectiveSize() throws {
+    @Test("Frieren puppet vertices fit clip space inside the grown local composite")
+    func frierenPuppetVerticesFitClipSpaceInsideLocalComposite() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("WPERenderGraphBuilderTests-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -893,8 +903,10 @@ struct WPERenderGraphBuilderTests {
             size: "4028 2263"
         )
         let layer = try #require(graph.layers.first)
-        let size = try #require(layer.geometry.size)
-        let halfSize = SIMD2<Double>(Double(size.width) * 0.5, Double(size.height) * 0.5)
+        // The puppet vertex shader normalizes by the LOCAL COMPOSITE size, so
+        // every corrected vertex must land inside the composite clip range.
+        let composite = try #require(layer.geometry.localCompositeSize)
+        let halfSize = SIMD2<Double>(Double(composite.width) * 0.5, Double(composite.height) * 0.5)
 
         for vertex in vertices {
             let corrected = SIMD2<Double>(
