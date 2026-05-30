@@ -20,6 +20,13 @@ struct WorkshopDetailSheet: View {
         downloadCoordinator.phase(for: item.id)
     }
 
+    private var downloadProgressFraction: Double? {
+        downloadCoordinator.progress[item.id]
+    }
+    private var downloadProgressBytes: WorkshopDownloadCoordinator.DownloadProgressBytes? {
+        downloadCoordinator.progressBytes[item.id]
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HSplitView {
@@ -111,30 +118,76 @@ struct WorkshopDetailSheet: View {
                        ? "Download with SteamCMD and add it to your library"
                        : "Set up SteamCMD in Settings → Workshop → SteamCMD Doctor to enable downloads."))
 
-        case .downloading, .importing:
-            HStack(spacing: 6) {
-                ProgressView().controlSize(.small)
-                Text(downloadPhase == .importing ? "Importing…" : "Downloading…")
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-                Button {
-                    downloadCoordinator.cancel(item.id)
-                } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help(Text("Cancel download"))
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: DesignTokens.Corner.sm))
+        case .downloading:
+            downloadProgressControl
+
+        case .importing:
+            indeterminateDownloadControl("Importing…")
 
         case .succeeded:
             Label("Added to Library", systemImage: "checkmark.circle.fill")
                 .foregroundStyle(.green)
                 .frame(maxWidth: .infinity)
         }
+    }
+
+    @ViewBuilder
+    private var downloadProgressControl: some View {
+        if let progress = downloadProgressFraction {
+            downloadControlChrome {
+                VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
+                    HStack(spacing: 6) {
+                        // Only the percent in the sheet's narrow left column; the
+                        // byte detail lives in the tooltip + the VoiceOver value
+                        // so it never truncates to an illegible ellipsis.
+                        Text(verbatim: progressPercentLabel(for: progress))
+                            .font(.caption.weight(.semibold))
+                            .lineLimit(1)
+                            .accessibilityHidden(true)
+                        Spacer(minLength: 0)
+                        cancelDownloadButton
+                    }
+                    ProgressView(value: progress)
+                        .progressViewStyle(.linear)
+                        .accessibilityLabel(Text("Download progress"))
+                        .accessibilityValue(Text(verbatim: progressDetailLabel(for: progress)))
+                }
+            }
+            .help(Text(verbatim: progressDetailLabel(for: progress)))
+        } else {
+            indeterminateDownloadControl("Downloading…")
+        }
+    }
+
+    private func indeterminateDownloadControl(_ title: LocalizedStringKey) -> some View {
+        downloadControlChrome {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text(title)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                cancelDownloadButton
+            }
+        }
+    }
+
+    private func downloadControlChrome<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: DesignTokens.Corner.sm))
+    }
+
+    private var cancelDownloadButton: some View {
+        Button {
+            downloadCoordinator.cancel(item.id)
+        } label: {
+            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain)
+        .help(Text("Cancel download"))
+        .accessibilityLabel(Text("Cancel download"))
     }
 
     @ViewBuilder
@@ -160,6 +213,31 @@ struct WorkshopDetailSheet: View {
     private var isRetry: Bool {
         if case .failed = downloadPhase { return true }
         return false
+    }
+
+    private func progressPercentLabel(for fraction: Double) -> String {
+        "\(Int((fraction * 100).rounded()))%"
+    }
+
+    private func progressDetailLabel(for fraction: Double) -> String {
+        let percent = Int((fraction * 100).rounded())
+        guard let totalBytes = downloadProgressTotalBytes else { return "\(percent)%" }
+
+        let estimatedDownloaded = UInt64((Double(Int64(clamping: totalBytes)) * fraction).rounded())
+        let downloadedBytes = downloadProgressBytes?.downloaded ?? estimatedDownloaded
+        let downloadedText = Self.progressByteFormatter.string(fromByteCount: Int64(clamping: downloadedBytes))
+        let totalText = Self.progressByteFormatter.string(fromByteCount: Int64(clamping: totalBytes))
+        return "\(percent)% · \(downloadedText) / \(totalText)"
+    }
+
+    private var downloadProgressTotalBytes: UInt64? {
+        if let total = downloadProgressBytes?.total, total > 0 {
+            return total
+        }
+        if let fileSize = item.fileSizeBytes, fileSize > 0 {
+            return fileSize
+        }
+        return nil
     }
 
     // MARK: - Right (metadata + description)
@@ -285,6 +363,13 @@ struct WorkshopDetailSheet: View {
     }()
 
     private static let byteFormatter: ByteCountFormatter = {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useMB, .useGB]
+        formatter.countStyle = .file
+        return formatter
+    }()
+
+    private static let progressByteFormatter: ByteCountFormatter = {
         let formatter = ByteCountFormatter()
         formatter.allowedUnits = [.useMB, .useGB]
         formatter.countStyle = .file

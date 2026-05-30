@@ -11,6 +11,9 @@ import SwiftUI
 /// right-click context menu, keeping the tile itself clean.
 struct WorkshopBrowseCard: View {
     let item: WorkshopQueryItem
+    /// True when this online item's workshop id is already in the local library
+    /// (downloaded/imported) — surfaced as an "In Library" badge.
+    var isInLibrary: Bool = false
     /// Invoked when the card is activated — opens the detail sheet.
     var onSelect: () -> Void = {}
 
@@ -65,7 +68,27 @@ struct WorkshopBrowseCard: View {
                     .padding(DesignTokens.Spacing.sm)
             }
         }
+        .overlay(alignment: .topTrailing) {
+            if isInLibrary {
+                inLibraryBadge
+                    .padding(DesignTokens.Spacing.sm)
+            }
+        }
         .aspectRatio(1, contentMode: .fit)
+    }
+
+    private var inLibraryBadge: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 9, weight: .bold))
+            Text("In Library")
+                .font(.system(size: 9, weight: .bold))
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(Color.green.opacity(0.9), in: Capsule())
+        .accessibilityHidden(true)
     }
 
     private func ratingPill(_ rating: Double) -> some View {
@@ -229,6 +252,9 @@ struct WorkshopBrowseCard: View {
         }
         if let size = formattedSize {
             parts.append(size)
+        }
+        if isInLibrary {
+            parts.append(String(localized: "In Library", comment: "Workshop card VoiceOver: item is already downloaded to the local library."))
         }
         if let status = statusInfo {
             parts.append(status.text)

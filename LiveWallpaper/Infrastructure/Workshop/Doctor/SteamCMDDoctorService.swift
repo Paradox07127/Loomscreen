@@ -719,6 +719,7 @@ final class SteamCMDDoctorService {
     /// scope closes.
     func downloadWorkshopItem<Imported: Sendable>(
         _ itemID: UInt64,
+        onProgress: SteamCMDProgressHandler? = nil,
         onContentReady: @MainActor (URL) async -> Imported
     ) async -> WorkshopItemDownloadResult<Imported> {
         guard binaryBookmarkData != nil else {
@@ -744,7 +745,20 @@ final class SteamCMDDoctorService {
             defer { if workdirScope { workdir.stopAccessingSecurityScopedResource() } }
 
             let script = try SteamCMDScriptWriter.downloadItemScript(username: username, itemID: itemID)
-            let result = try await runSteamCMDScript(script, binary: binary, workdir: workdir, timeout: Self.downloadTimeout)
+            let result = try await runSteamCMDScript(
+                script,
+                binary: binary,
+                workdir: workdir,
+                timeout: Self.downloadTimeout,
+                onProgress: onProgress
+            )
+
+            // Terminal-state checks come BEFORE the folder import: a cancelled
+            // or timed-out run must never import a partial / stale folder that
+            // happens to exist in the workdir. (timedOut is checked first —
+            // a timeout also sets `killed` via the process-group terminate.)
+            if result.timedOut { return .timedOut }
+            if Task.isCancelled || result.killed { return .failed(reason: "Download cancelled.") }
 
             if let folder = Self.resolveDownloadedItemFolder(stdout: result.stdout, itemID: itemID, workdir: workdir, fileManager: fileManager) {
                 return .imported(await onContentReady(folder))
@@ -754,8 +768,6 @@ final class SteamCMDDoctorService {
             let out = result.stdout
             if out.contains("ERROR! Download item \(itemID) failed (No Connection).") { return .notEntitled }
             if out.contains("ERROR! Download item \(itemID) failed (No match).") { return .removedFromSteam }
-            if result.timedOut { return .timedOut }
-            if result.killed { return .failed(reason: "Download cancelled.") }
             if out.contains("ERROR! Download item \(itemID) failed (Failure).") { return .temporarilyUnavailable }
             return .failed(reason: "SteamCMD didn't report a successful download. Open the Doctor and use Export diagnostics for the raw output.")
         } catch SteamCMDScriptError.invalidUsername {
@@ -889,7 +901,8 @@ final class SteamCMDDoctorService {
         _ script: String,
         binary: URL,
         workdir: URL,
-        timeout: TimeInterval
+        timeout: TimeInterval,
+        onProgress: SteamCMDProgressHandler? = nil
     ) async throws -> SteamCMDRunResult {
         guard await ensureTrustedBinary(binary) else {
             throw SteamCMDDoctorError.untrustedBinary
@@ -906,7 +919,8 @@ final class SteamCMDDoctorService {
         return await runner.run(
             binary: binary,
             args: ["+runscript", scriptURL.path(percentEncoded: false)],
-            stdin: nil, timeout: timeout, workingDirectory: workdir
+            stdin: nil, timeout: timeout, workingDirectory: workdir,
+            onProgress: onProgress
         )
     }
 
