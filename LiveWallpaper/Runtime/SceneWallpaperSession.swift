@@ -65,6 +65,18 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
     /// reaching through `wallpaperWindow.contentView`.
     var sceneRenderer: WPESceneRenderer? { renderer }
 
+    /// Property-key → render-target bindings the active renderer exposes, or
+    /// empty when the renderer can't apply settings incrementally.
+    var scenePropertyBindings: [String: [WPEScenePropertyBinding]] {
+        (renderer as? any WPEScenePropertyRuntime)?.scenePropertyBindings ?? [:]
+    }
+
+    /// Attempts to apply a property change in place. Returns `false` when the
+    /// renderer can't (or won't) patch incrementally and a full reload is needed.
+    func applyScenePropertyPatch(_ patch: WPEScenePropertyPatch) -> Bool {
+        (renderer as? any WPEScenePropertyRuntime)?.applyScenePropertyPatch(patch) ?? false
+    }
+
     /// Returns the renderer when it owns its own frame-rate clock and
     /// can re-target it from the inspector's frame-rate picker.
     /// Currently the Metal renderer; the WebGL fallback uses

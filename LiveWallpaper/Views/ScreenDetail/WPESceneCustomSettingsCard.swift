@@ -28,6 +28,10 @@ struct WPESceneCustomSettingsCard: View {
 
     @Environment(ScreenManager.self) private var screenManager
     @AppStorage("Inspector.WPESceneCustomSettingsExpanded") private var isExpanded = true
+    /// Per-property debounce tasks coalescing rapid slider drags into a single
+    /// apply (~150ms after the last change) so continuous dragging doesn't fire
+    /// an apply/reload every frame.
+    @State private var sliderDebounceTasks: [String: Task<Void, Never>] = [:]
 
     var body: some View {
         GroupBox {
@@ -41,6 +45,7 @@ struct WPESceneCustomSettingsCard: View {
             }
         }
         .groupBoxStyle(ContainerGroupBoxStyle())
+        .onDisappear { flushPendingSliderApply() }
     }
 
     // MARK: - Reset
@@ -224,7 +229,7 @@ struct WPESceneCustomSettingsCard: View {
                     ?? property.minimum ?? 0
                 return clamp(raw, to: sliderRange(for: property))
             },
-            set: { setValue(.number(normalizedSliderValue($0, for: property)), for: property) }
+            set: { setSliderValue(.number(normalizedSliderValue($0, for: property)), for: property) }
         )
     }
 
@@ -255,10 +260,49 @@ struct WPESceneCustomSettingsCard: View {
         apply(next)
     }
 
-    private func apply(_ next: SceneDescriptor) {
+    /// Slider variant of `setValue`: updates `descriptor` immediately so the
+    /// control tracks the drag, but debounces the `updateSceneDescriptor` call
+    /// (~150ms) so a continuous drag triggers a single apply/reload.
+    private func setSliderValue(
+        _ value: WallpaperEngineProjectPropertyValue,
+        for property: WallpaperEngineProjectPropertySchema.Property
+    ) {
+        let matchesDefault = Self.matchesDefault(value: value, for: property)
+        let next = descriptor.updating(property: property.key, to: matchesDefault ? nil : value)
         guard descriptor != next else { return }
         descriptor = next
+        let key = property.key
+        sliderDebounceTasks[key]?.cancel()
+        sliderDebounceTasks[key] = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            sliderDebounceTasks[key] = nil
+            // Read the live descriptor so concurrent slider drags converge on
+            // the latest accumulated value rather than a stale snapshot.
+            screenManager.updateSceneDescriptor(descriptor, for: screen)
+        }
+    }
+
+    private func apply(_ next: SceneDescriptor) {
+        guard descriptor != next else { return }
+        // A discrete change (toggle/picker/color) supersedes any in-flight
+        // slider debounce; `next` already includes those slider values because
+        // `descriptor` is updated immediately on each drag.
+        cancelPendingSliderApplies()
+        descriptor = next
         screenManager.updateSceneDescriptor(next, for: screen)
+    }
+
+    private func cancelPendingSliderApplies() {
+        guard !sliderDebounceTasks.isEmpty else { return }
+        for task in sliderDebounceTasks.values { task.cancel() }
+        sliderDebounceTasks.removeAll()
+    }
+
+    private func flushPendingSliderApply() {
+        guard !sliderDebounceTasks.isEmpty else { return }
+        cancelPendingSliderApplies()
+        screenManager.updateSceneDescriptor(descriptor, for: screen)
     }
 
     // MARK: - Equality (color/number tolerance)

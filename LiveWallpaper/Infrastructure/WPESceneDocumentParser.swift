@@ -33,6 +33,9 @@ enum WPESceneDocumentParser {
         } catch {
             throw WPESceneDocumentError.invalidUTF8
         }
+        // Record property→target bindings BEFORE resolving envelopes, since
+        // resolution replaces `{"user":K}` with the literal value and loses the key.
+        let propertyBindings = extractUserPropertyBindings(in: json)
         let resolvedJSON = resolveUserPropertyEnvelopes(in: json, userValues: userValues)
         guard let root = resolvedJSON as? [String: Any] else {
             throw WPESceneDocumentError.rootNotObject
@@ -138,8 +141,115 @@ enum WPESceneDocumentParser {
             particleObjects: particleObjects,
             textObjects: textObjects,
             soundObjects: soundObjects,
+            propertyBindings: propertyBindings,
             diagnostics: diagnostics
         )
+    }
+
+    /// Scans the raw (pre-resolution) JSON and records, for each user-property
+    /// key, the concrete render targets it drives plus whether changing it can
+    /// be applied incrementally. Only `image`/`text` visibility is incremental
+    /// today; everything else is conservatively classified `.reload`.
+    private static func extractUserPropertyBindings(in json: Any) -> [String: [WPEScenePropertyBinding]] {
+        guard let root = json as? [String: Any],
+              let rawObjects = root["objects"] as? [[String: Any]] else {
+            return [:]
+        }
+        var result: [String: [WPEScenePropertyBinding]] = [:]
+
+        func append(
+            raw: Any?,
+            target: WPEScenePropertyBindingTarget,
+            kind: WPEScenePropertyBindingKind,
+            action: WPEScenePropertyBindingAction
+        ) {
+            for key in userPropertyKeys(in: raw).sorted() {
+                result[key, default: []].append(WPEScenePropertyBinding(
+                    propertyKey: key,
+                    target: target,
+                    kind: kind,
+                    action: action
+                ))
+            }
+        }
+
+        for object in rawObjects {
+            guard let objectID = objectID(in: object) else { continue }
+            switch objectKindResolution(for: object).primary {
+            case .image:
+                append(raw: object["visible"], target: .imageObject(id: objectID), kind: .visible, action: .incremental)
+                append(raw: object["color"], target: .imageObject(id: objectID), kind: .color, action: .reload)
+                append(raw: object["alpha"], target: .imageObject(id: objectID), kind: .alpha, action: .reload)
+                append(raw: object["brightness"], target: .imageObject(id: objectID), kind: .brightness, action: .reload)
+                append(raw: object["image"], target: .objectResource(objectID: objectID, field: "image"), kind: .resource, action: .reload)
+                append(raw: object["material"], target: .objectResource(objectID: objectID, field: "material"), kind: .resource, action: .reload)
+                if let effects = object["effects"] as? [[String: Any]] {
+                    for (effectIndex, effect) in effects.enumerated() {
+                        let effectIdentifier = effectID(in: effect, fallback: "\(effectIndex)")
+                        append(raw: effect["visible"], target: .imageEffect(objectID: objectID, effectID: effectIdentifier), kind: .visible, action: .reload)
+                        if let passes = effect["passes"] as? [[String: Any]] {
+                            for (passIndex, pass) in passes.enumerated() {
+                                let passID = parseInt(pass["id"]) ?? passIndex
+                                if let constants = pass["constantshadervalues"] as? [String: Any] {
+                                    for (name, raw) in constants {
+                                        append(raw: raw, target: .shaderUniform(objectID: objectID, effectID: effectIdentifier, passID: passID, name: name), kind: .uniform, action: .reload)
+                                    }
+                                }
+                                if let combos = pass["combos"] as? [String: Any] {
+                                    for (name, raw) in combos {
+                                        append(raw: raw, target: .shaderCombo(objectID: objectID, effectID: effectIdentifier, passID: passID, name: name), kind: .combo, action: .reload)
+                                    }
+                                }
+                                if let textures = pass["textures"] as? [Any] {
+                                    for (index, raw) in textures.enumerated() {
+                                        append(raw: raw, target: .textureSlot(objectID: objectID, effectID: effectIdentifier, passID: passID, index: index), kind: .texture, action: .reload)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            case .text:
+                append(raw: object["visible"], target: .textObject(id: objectID), kind: .visible, action: .incremental)
+                append(raw: object["color"], target: .textObject(id: objectID), kind: .color, action: .reload)
+                append(raw: object["alpha"], target: .textObject(id: objectID), kind: .alpha, action: .reload)
+            case .particle:
+                append(raw: object["visible"], target: .particleObject(id: objectID), kind: .visible, action: .reload)
+                append(raw: object["color"], target: .particleObject(id: objectID), kind: .color, action: .reload)
+                append(raw: object["alpha"], target: .particleObject(id: objectID), kind: .alpha, action: .reload)
+            default:
+                break
+            }
+        }
+        return result
+    }
+
+    private static func effectID(in dict: [String: Any], fallback: String) -> String {
+        if let id = dict["id"] as? String, !id.isEmpty { return id }
+        if let id = parseInt(dict["id"]) { return String(id) }
+        if let name = dict["name"] as? String, !name.isEmpty { return name }
+        return fallback
+    }
+
+    /// Recursively collects every `{"user":K, "value":...}` key reachable from
+    /// `raw` (a field value may be a scalar, a `{user}` envelope, or an array of
+    /// them — e.g. color components).
+    private static func userPropertyKeys(in raw: Any?) -> Set<String> {
+        guard let raw else { return [] }
+        if let array = raw as? [Any] {
+            return array.reduce(into: Set<String>()) { keys, value in
+                keys.formUnion(userPropertyKeys(in: value))
+            }
+        }
+        guard let dict = raw as? [String: Any] else { return [] }
+        var keys = Set<String>()
+        if let key = dict["user"] as? String, dict.keys.contains("value") {
+            keys.insert(key)
+        }
+        for value in dict.values {
+            keys.formUnion(userPropertyKeys(in: value))
+        }
+        return keys
     }
 
     private static func resolvedObjectTransforms(_ rawObjects: [[String: Any]]) -> [String: SceneObjectTransform] {

@@ -27,4 +27,14 @@ protocol WPESceneRenderer: AnyObject, WallpaperPerformanceConfigurable {
     func setThrottled(_ throttled: Bool)
     func cleanup()
 }
+
+/// Optional capability a scene renderer can adopt to apply project-property
+/// changes incrementally (without a full reload). `applyScenePropertyPatch`
+/// returns `false` when the patch can't be applied in place — the caller then
+/// falls back to the full reload path.
+@MainActor
+protocol WPEScenePropertyRuntime: AnyObject {
+    var scenePropertyBindings: [String: [WPEScenePropertyBinding]] { get }
+    func applyScenePropertyPatch(_ patch: WPEScenePropertyPatch) -> Bool
+}
 #endif

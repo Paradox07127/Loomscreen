@@ -25,6 +25,21 @@ struct WPESceneDocumentParserTests {
         let hidden = try WPESceneDocumentParser.parse(data: data, userValues: ["xme": .bool(false)])
         #expect(hidden.imageObjects.first?.visible == false)
 
+        // The binding table records xme → image-object visibility (incremental).
+        let visibleBinding = try #require(hidden.propertyBindings["xme"]?.first)
+        #expect(visibleBinding.target == .imageObject(id: "64"))
+        #expect(visibleBinding.kind == .visible)
+        #expect(visibleBinding.action == .incremental)
+
+        // A diff that only flips xme is incremental, not a reload.
+        let patch = WPEScenePropertyPatch(
+            bindingsByProperty: hidden.propertyBindings,
+            oldValues: ["xme": .bool(true)],
+            newValues: ["xme": .bool(false)]
+        )
+        #expect(!patch.requiresReload)
+        #expect(patch.incrementalBindings == [visibleBinding])
+
         // No override for xme → envelope's own default value (true) is kept.
         let shownDefault = try WPESceneDocumentParser.parse(data: data, userValues: [:])
         #expect(shownDefault.imageObjects.first?.visible == true)
@@ -32,6 +47,39 @@ struct WPESceneDocumentParserTests {
         // Legacy parse(data:) keeps working (no user values).
         let legacy = try WPESceneDocumentParser.parse(data: data)
         #expect(legacy.imageObjects.first?.visible == true)
+    }
+
+    @Test("Combo bindings are classified as reload")
+    func comboBindingsRequireReload() throws {
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1920, "height": 1080, "auto": true]],
+            "objects": [[
+                "id": "22",
+                "name": "Frieren",
+                "type": "image",
+                "image": "models/fll.json",
+                "effects": [[
+                    "id": "waves",
+                    "file": "effects/waterwaves/effect.json",
+                    "passes": [[
+                        "id": 1,
+                        "combos": ["QUALITY": ["user": "quality", "value": 0]]
+                    ]]
+                ]]
+            ]]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        let document = try WPESceneDocumentParser.parse(data: data, userValues: ["quality": .number(1)])
+        let binding = try #require(document.propertyBindings["quality"]?.first)
+
+        #expect(binding.kind == .combo)
+        #expect(binding.action == .reload)
+        #expect(WPEScenePropertyPatch(
+            bindingsByProperty: document.propertyBindings,
+            oldValues: ["quality": .number(0)],
+            newValues: ["quality": .number(1)]
+        ).requiresReload)
     }
 
     // MARK: - Required structure

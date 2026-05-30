@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import LiveWallpaperCore
 
 /// Phase 2.0 minimal model of a Wallpaper Engine `scene.json`. Only the
 /// fields that participate in the image-only render pipeline are first-class;
@@ -12,6 +13,10 @@ public struct WPESceneDocument: Equatable, Sendable {
     public let particleObjects: [WPESceneParticleObject]
     public let textObjects: [WPESceneTextObject]
     public let soundObjects: [WPESceneSoundObject]
+    /// Maps each user-property key (the `{"user":K}` envelopes found in
+    /// `scene.json`) to the render targets it drives, so a settings change
+    /// can be classified as incremental or reload without re-parsing.
+    public let propertyBindings: [String: [WPEScenePropertyBinding]]
     public let diagnostics: [WPESceneDiagnostic]
 
     public init(
@@ -21,6 +26,7 @@ public struct WPESceneDocument: Equatable, Sendable {
         particleObjects: [WPESceneParticleObject] = [],
         textObjects: [WPESceneTextObject] = [],
         soundObjects: [WPESceneSoundObject] = [],
+        propertyBindings: [String: [WPEScenePropertyBinding]] = [:],
         diagnostics: [WPESceneDiagnostic]
     ) {
         self.camera = camera
@@ -29,7 +35,98 @@ public struct WPESceneDocument: Equatable, Sendable {
         self.particleObjects = particleObjects
         self.textObjects = textObjects
         self.soundObjects = soundObjects
+        self.propertyBindings = propertyBindings
         self.diagnostics = diagnostics
+    }
+}
+
+/// One link between a user-defined project property and a concrete render
+/// target. `action` decides whether changing the property can be patched in
+/// place (`.incremental`) or requires a full pipeline reload (`.reload`).
+public struct WPEScenePropertyBinding: Equatable, Sendable {
+    public let propertyKey: String
+    public let target: WPEScenePropertyBindingTarget
+    public let kind: WPEScenePropertyBindingKind
+    public let action: WPEScenePropertyBindingAction
+
+    public init(
+        propertyKey: String,
+        target: WPEScenePropertyBindingTarget,
+        kind: WPEScenePropertyBindingKind,
+        action: WPEScenePropertyBindingAction
+    ) {
+        self.propertyKey = propertyKey
+        self.target = target
+        self.kind = kind
+        self.action = action
+    }
+}
+
+public enum WPEScenePropertyBindingTarget: Equatable, Sendable {
+    case imageObject(id: String)
+    case textObject(id: String)
+    case particleObject(id: String)
+    case imageEffect(objectID: String, effectID: String)
+    case shaderUniform(objectID: String, effectID: String?, passID: Int?, name: String)
+    case shaderCombo(objectID: String, effectID: String?, passID: Int?, name: String)
+    case textureSlot(objectID: String, effectID: String?, passID: Int?, index: Int)
+    case objectResource(objectID: String, field: String)
+}
+
+public enum WPEScenePropertyBindingKind: String, Equatable, Sendable {
+    case visible
+    case color
+    case alpha
+    case brightness
+    case uniform
+    case combo
+    case texture
+    case resource
+}
+
+public enum WPEScenePropertyBindingAction: String, Equatable, Sendable {
+    case incremental
+    case reload
+}
+
+/// A diff between two snapshots of effective property values, paired with the
+/// scene's binding table. Consumers ask `requiresReload` first; if false they
+/// apply `incrementalBindings` live.
+public struct WPEScenePropertyPatch: Equatable, Sendable {
+    public let bindingsByProperty: [String: [WPEScenePropertyBinding]]
+    public let oldValues: [String: WallpaperEngineProjectPropertyValue]
+    public let newValues: [String: WallpaperEngineProjectPropertyValue]
+    public let changedKeys: Set<String>
+
+    public init(
+        bindingsByProperty: [String: [WPEScenePropertyBinding]],
+        oldValues: [String: WallpaperEngineProjectPropertyValue],
+        newValues: [String: WallpaperEngineProjectPropertyValue]
+    ) {
+        self.bindingsByProperty = bindingsByProperty
+        self.oldValues = oldValues
+        self.newValues = newValues
+        let keys = Set(oldValues.keys).union(newValues.keys)
+        self.changedKeys = Set(keys.filter { oldValues[$0] != newValues[$0] })
+    }
+
+    public var changedBindings: [WPEScenePropertyBinding] {
+        changedKeys.sorted().flatMap { bindingsByProperty[$0] ?? [] }
+    }
+
+    /// A changed property with no known binding is treated conservatively as
+    /// reload, so an unmapped key never silently no-ops.
+    public var requiresReload: Bool {
+        for key in changedKeys {
+            let bindings = bindingsByProperty[key] ?? []
+            if bindings.isEmpty { return true }
+            if bindings.contains(where: { $0.action == .reload }) { return true }
+        }
+        return false
+    }
+
+    public var incrementalBindings: [WPEScenePropertyBinding] {
+        changedBindings.filter { $0.action == .incremental }
     }
 }
 

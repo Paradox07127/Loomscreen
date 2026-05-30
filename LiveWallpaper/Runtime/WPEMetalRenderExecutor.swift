@@ -142,6 +142,13 @@ final class WPEMetalRenderExecutor {
 
         for layer in preparedPipeline.layers {
             if layer.passes.isEmpty {
+                // Hidden plain-image layer: nothing composites elsewhere, so
+                // simply skip the scene blit. `didEncode` stays satisfied so an
+                // all-hidden scene renders empty instead of erroring.
+                guard layer.graphLayer.visible else {
+                    didEncode = true
+                    continue
+                }
                 try encodeCopy(
                     reference: .image(layer.graphLayer.imagePath),
                     target: .scene,
@@ -155,6 +162,10 @@ final class WPEMetalRenderExecutor {
                 continue
             }
             if bypassEffects, let firstSource = Self.bypassSourceReference(for: layer) {
+                guard layer.graphLayer.visible else {
+                    didEncode = true
+                    continue
+                }
                 // Debug bisect: skip every material/effect/command pass and
                 // blit the first pass's resolved source (the background
                 // image) straight to scene. Lets us prove the upload +
@@ -173,6 +184,19 @@ final class WPEMetalRenderExecutor {
                 continue
             }
             for pass in layer.passes {
+                // Hidden layer: still encode passes that write a composite/FBO
+                // (dependents may sample them), but skip the final scene draw so
+                // the layer is invisible. Toggling `visible` true re-includes it
+                // without a pipeline rebuild.
+                if !layer.graphLayer.visible {
+                    switch pass.pass.target {
+                    case .scene:
+                        didEncode = true
+                        continue
+                    case .layerComposite, .fbo:
+                        break
+                    }
+                }
                 try encode(
                     pass: pass,
                     layer: layer.graphLayer,

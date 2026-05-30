@@ -13,7 +13,7 @@ private struct WPEMetalTextureLoadContextError: Error {
 }
 
 @MainActor
-final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRateConfigurable, WallpaperAudioConfigurable, MTKViewDelegate {
+final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyRuntime, WallpaperFrameRateConfigurable, WallpaperAudioConfigurable, MTKViewDelegate {
     /// Default frame rate target when not throttled and no user override
     /// has been applied. 30 FPS matches Wallpaper Engine's stock default
     /// (Almamu's reference open-source impl ships `maximumFPS = 30`; the
@@ -107,6 +107,13 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
     private(set) var renderGraph: WPERenderGraph?
     private(set) var renderPipeline: WPEPreparedRenderPipeline?
     private(set) var lastRuntimeUniforms: WPEMetalRuntimeUniforms?
+    /// Property-key → render-target bindings for the loaded scene, used by the
+    /// incremental settings-apply path. Empty until `load()` completes.
+    private(set) var scenePropertyBindings: [String: [WPEScenePropertyBinding]] = [:]
+    /// Live per-object visibility, seeded from the document and mutated by
+    /// `applyScenePropertyPatch` so a settings toggle takes effect without reload.
+    private var liveLayerVisibility: [String: Bool] = [:]
+    private var liveTextVisibility: [String: Bool] = [:]
 
     /// Emits a structured per-frame summary roughly once per second so runtime
     /// logs can show time advancement, dynamic texture swaps, and output size.
@@ -375,6 +382,18 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
 
         renderGraph = graph
         renderPipeline = pipeline
+        // Seed incremental-apply state. The graph builder already baked each
+        // layer's authored `visible` into the pipeline, so these baselines
+        // simply mirror it for later diffing in `applyScenePropertyPatch`.
+        scenePropertyBindings = document.propertyBindings
+        liveLayerVisibility = Dictionary(
+            document.imageObjects.map { ($0.id, $0.visible) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        liveTextVisibility = Dictionary(
+            document.textObjects.map { ($0.id, $0.visible) },
+            uniquingKeysWith: { first, _ in first }
+        )
         cameraUniforms = WPEMetalCameraUniforms(
             orthogonalProjection: document.general.orthogonalProjection,
             sceneCamera: document.camera
@@ -801,7 +820,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
         if let textRenderer, !textObjects.isEmpty {
             var draws: [WPETextOverlayDraw] = []
             draws.reserveCapacity(textObjects.count)
-            for object in textObjects where object.visible {
+            for object in textObjects where liveTextVisibility[object.id] ?? object.visible {
                 let resolvedAlpha = object.resolvedAlpha(at: uniforms.time)
                 guard resolvedAlpha > 0 else { continue }
                 let liveObject: WPESceneTextObject
@@ -1126,6 +1145,9 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
         outputTexture = nil
         renderGraph = nil
         renderPipeline = nil
+        scenePropertyBindings = [:]
+        liveLayerVisibility = [:]
+        liveTextVisibility = [:]
         loadDiagnostics = nil
         resolutionTracer.reset()
         releaseDynamicTextureSources()
@@ -1143,6 +1165,43 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
         cachedSnapshot = nil
         executor.releaseTransientResources()
         try await load()
+    }
+
+    /// Applies a project-property change in place when every changed binding is
+    /// incremental; returns `false` (so the caller falls back to a full reload)
+    /// otherwise. Today only image/text visibility is incremental.
+    func applyScenePropertyPatch(_ patch: WPEScenePropertyPatch) -> Bool {
+        guard !patch.requiresReload else { return false }
+        guard !patch.changedKeys.isEmpty else { return true }
+        // A scene with no live pipeline can't be patched — only allow the no-op
+        // (no incremental bindings) case through; anything substantive reloads.
+        guard renderPipeline != nil || patch.incrementalBindings.isEmpty else { return false }
+
+        var nextLayerVisibility = liveLayerVisibility
+        var nextTextVisibility = liveTextVisibility
+
+        for binding in patch.incrementalBindings {
+            switch (binding.target, binding.kind) {
+            case (.imageObject(let id), .visible):
+                guard let value = patch.newValues[binding.propertyKey]?.boolValue else { return false }
+                nextLayerVisibility[id] = value
+            case (.textObject(let id), .visible):
+                guard let value = patch.newValues[binding.propertyKey]?.boolValue else { return false }
+                nextTextVisibility[id] = value
+            default:
+                // An incremental binding we don't yet know how to apply: bail to
+                // the safe full-reload path rather than silently dropping it.
+                return false
+            }
+        }
+
+        liveLayerVisibility = nextLayerVisibility
+        liveTextVisibility = nextTextVisibility
+        if let pipeline = renderPipeline {
+            renderPipeline = pipeline.applyingLayerVisibility(liveLayerVisibility)
+        }
+        mtkView.setNeedsDisplay(mtkView.bounds)
+        return true
     }
 
     /// Resolves the effective `preferredFramesPerSecond` honouring the
@@ -1225,6 +1284,9 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
     func cleanup() {
         mtkView.delegate = nil
         outputTexture = nil
+        scenePropertyBindings = [:]
+        liveLayerVisibility = [:]
+        liveTextVisibility = [:]
         releaseDynamicTextureSources()
         particleSystems.removeAll(keepingCapacity: false)
         particleTextures.removeAll(keepingCapacity: false)

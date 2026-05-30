@@ -46,6 +46,25 @@ struct WPEShaderProgram: Equatable, Sendable {
 }
 
 extension WPEPreparedRenderPipeline {
+    /// Returns a copy of the pipeline with each layer's `visible` flag replaced
+    /// by `visibility[objectID]` when present (falling back to the layer's own
+    /// value). Used to apply a live scene-visibility toggle without rebuilding
+    /// the pipeline; the executor reads `graphLayer.visible` to gate the scene draw.
+    func applyingLayerVisibility(_ visibility: [String: Bool]) -> WPEPreparedRenderPipeline {
+        guard !visibility.isEmpty else { return self }
+        return WPEPreparedRenderPipeline(
+            layers: layers.map { layer in
+                let resolved = visibility[layer.graphLayer.objectID] ?? layer.graphLayer.visible
+                guard resolved != layer.graphLayer.visible else { return layer }
+                return WPEPreparedRenderLayer(
+                    graphLayer: layer.graphLayer.applyingVisible(resolved),
+                    puppetModel: layer.puppetModel,
+                    passes: layer.passes
+                )
+            }
+        )
+    }
+
     /// Phase 2B: returns a copy of the pipeline with per-frame Metal runtime + camera uniforms merged into every pass's `uniformValues`.
     func addingMetalRuntimeUniforms(
         _ runtimeUniforms: WPEMetalRuntimeUniforms,
@@ -82,10 +101,28 @@ extension WPEPreparedRenderPipeline {
 }
 
 private extension WPERenderLayer {
+    func applyingVisible(_ visible: Bool) -> WPERenderLayer {
+        WPERenderLayer(
+            objectID: objectID,
+            objectName: objectName,
+            visible: visible,
+            imagePath: imagePath,
+            materialPath: materialPath,
+            puppetPath: puppetPath,
+            geometry: geometry,
+            compositeA: compositeA,
+            compositeB: compositeB,
+            localFBOs: localFBOs,
+            passes: passes,
+            parallaxDepth: parallaxDepth
+        )
+    }
+
     func resolved(at time: Double) -> WPERenderLayer {
         WPERenderLayer(
             objectID: objectID,
             objectName: objectName,
+            visible: visible,
             imagePath: imagePath,
             materialPath: materialPath,
             puppetPath: puppetPath,

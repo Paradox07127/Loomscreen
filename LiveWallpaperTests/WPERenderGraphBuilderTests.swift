@@ -267,6 +267,45 @@ struct WPERenderGraphBuilderTests {
         #expect(visibleLayer.passes.last?.target == .scene)
     }
 
+    @Test("User-toggleable hidden image stays in graph with a scene pass and visible=false")
+    func userToggleableHiddenImageStaysInGraph() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPERenderGraphBuilderTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        try writeJSON(["material": "materials/himmel.json"], to: root.appendingPathComponent("models/himmel.json"))
+        try writeJSON([
+            "passes": [[
+                "shader": "genericimage2",
+                "textures": ["himmel_albedo"]
+            ]]
+        ], to: root.appendingPathComponent("materials/himmel.json"))
+
+        let scenePayload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1920, "height": 1080, "auto": true]],
+            "objects": [[
+                "id": "64",
+                "name": "Himmel",
+                "type": "image",
+                "image": "models/himmel.json",
+                "visible": ["user": "xme", "value": true]
+            ]]
+        ]
+        let sceneData = try JSONSerialization.data(withJSONObject: scenePayload)
+        // Authored visible, but the user override hides it. Because the
+        // visibility is user-toggleable, the layer must still be built with a
+        // scene-target pass so a later toggle applies without a graph rebuild.
+        let document = try WPESceneDocumentParser.parse(data: sceneData, userValues: ["xme": .bool(false)])
+        #expect(document.imageObjects.first?.visible == false)
+
+        let graph = try WPERenderGraphBuilder(cacheRootURL: root).build(document: document)
+        let layer = try #require(graph.layers.first { $0.objectID == "64" })
+        #expect(layer.visible == false)
+        #expect(layer.passes.contains { $0.target == .scene })
+    }
+
     @Test("Visible image dependencies keep composites before drawing to scene")
     func visibleImageDependenciesKeepCompositeThenDrawScene() throws {
         let root = FileManager.default.temporaryDirectory

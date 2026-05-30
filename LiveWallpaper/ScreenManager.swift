@@ -1641,10 +1641,54 @@ final class ScreenManager {
             return
         }
         guard current != descriptor else { return }
+
+        #if !LITE_BUILD
+        // Fast path: if every changed property is incrementally applicable
+        // (e.g. a visibility toggle), patch the live renderer instead of a full
+        // reload. Falls through to the reload path when the renderer can't.
+        if let sceneSession = screen.runtimeSession as? SceneWallpaperSession {
+            let bindings = sceneSession.scenePropertyBindings
+            if !bindings.isEmpty {
+                let patch = WPEScenePropertyPatch(
+                    bindingsByProperty: bindings,
+                    oldValues: effectiveSceneValues(for: current),
+                    newValues: effectiveSceneValues(for: descriptor)
+                )
+                if sceneSession.applyScenePropertyPatch(patch) {
+                    configuration.activeWallpaper = .scene(descriptor)
+                    saveConfiguration(configuration)
+                    notifyWallpaperSessionChanged()
+                    return
+                }
+            }
+        }
+        #endif
+
         configuration.activeWallpaper = .scene(descriptor)
         saveConfiguration(configuration)
         restoreWallpaperSession(for: screen, configuration: configuration, preservingState: false)
     }
+
+    #if !LITE_BUILD
+    /// Effective property values (schema defaults merged with the descriptor's
+    /// overrides) used to diff old vs new settings for incremental apply.
+    private func effectiveSceneValues(for descriptor: SceneDescriptor) -> [String: WallpaperEngineProjectPropertyValue] {
+        guard WPEPathSafety.isSafeCacheRelativePath(descriptor.cacheRelativePath),
+              let supportRoot = try? FileManager.default.url(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: false
+              ).appendingPathComponent("LiveWallpaper", isDirectory: true) else {
+            return descriptor.propertyOverrides
+        }
+        let cacheRoot = supportRoot.appendingPathComponent(descriptor.cacheRelativePath, isDirectory: true)
+        return WallpaperEngineProjectPropertySchema.effectiveSceneValues(
+            descriptor: descriptor,
+            cacheRootURL: cacheRoot
+        )
+    }
+    #endif
 
     // MARK: - Metal Shader Wallpaper
 

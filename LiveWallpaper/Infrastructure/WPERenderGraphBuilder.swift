@@ -31,8 +31,13 @@ struct WPERenderGraphBuilder: Sendable {
             originalIndexByID[object.id] = index
         }
 
+        // Objects whose visibility a user property can toggle at runtime are
+        // kept in the graph (with a scene-target pass) even when authored
+        // hidden, so the toggle applies live without a pipeline rebuild. The
+        // executor skips the scene draw while `WPERenderLayer.visible` is false.
+        let liveVisibilityIDs = Self.userToggleableVisibilityIDs(in: document)
         let visibleLayerIDs = Set(document.imageObjects
-            .filter(Self.compositesToScene)
+            .filter { Self.compositesToScene($0, liveVisibilityIDs: liveVisibilityIDs) }
             .map(\.id))
         var layerIDsToBuild = visibleLayerIDs
         var pendingIDs = Array(visibleLayerIDs)
@@ -66,8 +71,23 @@ struct WPERenderGraphBuilder: Sendable {
         return WPERenderGraph(layers: layers)
     }
 
-    private static func compositesToScene(_ object: WPESceneImageObject) -> Bool {
-        object.visible && (object.alpha > 0.001 || object.alphaAnimation != nil)
+    private static func compositesToScene(_ object: WPESceneImageObject, liveVisibilityIDs: Set<String>) -> Bool {
+        guard object.alpha > 0.001 || object.alphaAnimation != nil else { return false }
+        return object.visible || liveVisibilityIDs.contains(object.id)
+    }
+
+    /// Image-object IDs that have an incremental (`visible`) property binding —
+    /// i.e. their on-screen visibility can be toggled live from project settings.
+    private static func userToggleableVisibilityIDs(in document: WPESceneDocument) -> Set<String> {
+        var ids = Set<String>()
+        for bindings in document.propertyBindings.values {
+            for binding in bindings where binding.kind == .visible && binding.action == .incremental {
+                if case .imageObject(let id) = binding.target {
+                    ids.insert(id)
+                }
+            }
+        }
+        return ids
     }
 
     private static func referencedLayerIDs(in object: WPESceneImageObject) -> Set<String> {
@@ -259,6 +279,7 @@ struct WPERenderGraphBuilder: Sendable {
         return WPERenderLayer(
             objectID: object.id,
             objectName: object.name,
+            visible: object.visible,
             imagePath: object.imageRelativePath,
             materialPath: materialPath,
             puppetPath: model.puppetPath,

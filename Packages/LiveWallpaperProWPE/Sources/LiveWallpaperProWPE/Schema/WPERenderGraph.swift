@@ -20,6 +20,11 @@ public struct WPERenderLayer: Equatable, Sendable, Identifiable {
 
     public let objectID: String
     public let objectName: String
+    /// Live scene visibility. Layers always stay in the graph (even when
+    /// hidden) so their composites remain available to dependents and so a
+    /// settings toggle can be applied without rebuilding the pipeline; the
+    /// executor skips the scene-target draw when this is false.
+    public let visible: Bool
     public let imagePath: String
     public let materialPath: String?
     public let puppetPath: String?
@@ -33,6 +38,7 @@ public struct WPERenderLayer: Equatable, Sendable, Identifiable {
     public init(
         objectID: String,
         objectName: String,
+        visible: Bool = true,
         imagePath: String,
         materialPath: String?,
         puppetPath: String? = nil,
@@ -45,6 +51,7 @@ public struct WPERenderLayer: Equatable, Sendable, Identifiable {
     ) {
         self.objectID = objectID
         self.objectName = objectName
+        self.visible = visible
         self.imagePath = imagePath
         self.materialPath = materialPath
         self.puppetPath = puppetPath
