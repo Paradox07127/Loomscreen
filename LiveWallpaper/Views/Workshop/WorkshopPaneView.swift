@@ -17,6 +17,8 @@ struct WorkshopPaneView: View {
     @State private var isShowingPasteSheet = false
     @State private var isShowingOnboarding = false
     @State private var isShowingKeyEntry = false
+    /// Installed-library size, for the header's statistics subtext.
+    @State private var installedCount = 0
 
     var body: some View {
         DetailPageScaffold(
@@ -37,6 +39,10 @@ struct WorkshopPaneView: View {
         .task {
             await doctor.autoConfirmDownloadReadinessIfNeeded()
             await folderImport.ingestSteamCMDDownloads(using: doctor)
+        }
+        .onAppear { refreshInstalledCount() }
+        .onReceive(NotificationCenter.default.publisher(for: .wpeHistoryDidChange)) { _ in
+            refreshInstalledCount()
         }
         .sheet(isPresented: $isShowingOnboarding) {
             WorkshopOnboardingSheet { isShowingPasteSheet = true }
@@ -75,25 +81,51 @@ struct WorkshopPaneView: View {
         .padding(.vertical, DesignTokens.DetailHeader.verticalPadding)
     }
 
+    // Bold title + statistics subtext, matching the Bookmarks / Aerials hero
+    // (`DetailHeaderBar`): icon disc, primary semibold title, caption stat line.
     private var brandMark: some View {
         HStack(spacing: DesignTokens.Spacing.sm) {
             ZStack {
                 Circle()
                     .fill(Color.accentColor.opacity(0.15))
-                    .frame(width: 34, height: 34)
+                    .frame(
+                        width: DesignTokens.DetailHeader.iconSize,
+                        height: DesignTokens.DetailHeader.iconSize
+                    )
                 Image(systemName: "cube.transparent.fill")
-                    .font(.system(size: 17))
+                    .font(.system(size: DesignTokens.DetailHeader.iconSymbolSize))
                     .foregroundStyle(Color.accentColor)
                     .symbolRenderingMode(.hierarchical)
             }
             .accessibilityHidden(true)
 
-            Text("Steam Workshop")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .accessibilityAddTraits(.isHeader)
+            VStack(alignment: .leading, spacing: DesignTokens.DetailHeader.textSpacing) {
+                Text("Steam Workshop")
+                    .font(.system(size: DesignTokens.DetailHeader.titleSize, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .accessibilityAddTraits(.isHeader)
+                Text(verbatim: headerStat)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
         }
+    }
+
+    /// Context-aware statistics subtext: library size on Installed, today's
+    /// honest request count on Workshop.
+    private var headerStat: String {
+        switch selectedTab {
+        case .installed:
+            return String(localized: "\(installedCount) installed", comment: "Workshop header stat: number of installed wallpapers.")
+        case .browseOnline:
+            return String(localized: "\(WorkshopRequestCounter.countForToday()) requests today", comment: "Workshop header stat: Steam Web API requests issued today.")
+        }
+    }
+
+    private func refreshInstalledCount() {
+        installedCount = SettingsManager.shared.loadGlobalSettings().recentWPEImports.count
     }
 
     private var tabSwitcher: some View {

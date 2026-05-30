@@ -35,11 +35,15 @@ struct WorkshopAnimatedGIF: @unchecked Sendable {
 
     private let source: CGImageSource
 
-    /// Reject inputs whose raw bytes exceed the loader's transfer cap.
-    static let maxBytes = 8 * 1024 * 1024
-    /// Reject animations with more frames than this.
+    /// Reject inputs whose raw bytes exceed the loader's transfer cap. Kept in
+    /// sync with `WorkshopPreviewImageLoader.maxBytes` — Workshop animated GIF
+    /// previews routinely run 8–24 MiB, so an 8 MiB cap silently blanked them.
+    static let maxBytes = 32 * 1024 * 1024
+    /// Animate at most this many frames; longer animations degrade to a static
+    /// poster (we never drop the preview entirely just because it's long).
     static let maxFrameCount = 120
-    /// Total decoded-pixel budget (RGBA bytes) across all frames.
+    /// Total decoded-pixel budget (RGBA bytes) across all frames before an
+    /// animation degrades to its static poster.
     static let maxDecodedPixelBytes = 96 * 1024 * 1024
     /// 30 FPS playback cap to bound CPU on long-running grids.
     static let minFrameDelay: TimeInterval = 0.033
@@ -64,16 +68,22 @@ extension WorkshopAnimatedGIF {
         let count = CGImageSourceGetCount(source)
         // Read dimensions from metadata (no full decode) and reject before
         // materializing the poster — guards against decompression bombs where
-        // a small compressed file expands to gigabytes of pixels.
+        // a small compressed file expands to gigabytes of pixels. The bomb
+        // guard is applied to the SINGLE poster frame so a high-res still is
+        // never rejected for its frame count.
         guard count > 0,
-              count <= maxFrameCount,
               let dimensions = imageDimensions(from: source, index: 0),
-              isWithinPixelBudget(width: dimensions.width, height: dimensions.height, frameCount: count),
+              isWithinPixelBudget(width: dimensions.width, height: dimensions.height, frameCount: 1),
               let poster = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
             return nil
         }
 
-        if count == 1 {
+        // Animate only within the frame-count + total decoded-pixel budgets;
+        // otherwise degrade to the static poster rather than showing nothing.
+        // (A long or large animated preview previously returned nil → blank.)
+        guard count > 1,
+              count <= maxFrameCount,
+              isWithinPixelBudget(width: dimensions.width, height: dimensions.height, frameCount: count) else {
             return .staticImage(poster)
         }
 

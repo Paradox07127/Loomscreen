@@ -208,6 +208,10 @@ struct WPEHistoryRow: View {
 
     // MARK: - Inline apply control (Installed library)
 
+    /// Prominent blue Apply control. Only rendered when `allowsInlineApply` is
+    /// set (the Installed library) — the Scene tab leaves it off, so this is
+    /// unchanged there. The native `.borderedProminent` style replaces the old
+    /// glass capsule, whose hover effect fought the card's own hover lift.
     @ViewBuilder
     private var applyControl: some View {
         if screens.count > 1 {
@@ -220,16 +224,22 @@ struct WPEHistoryRow: View {
             } label: {
                 applyLabel
             }
-            .menuStyle(.borderlessButton)
+            .menuStyle(.button)
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
             .menuIndicator(.hidden)
+            .tint(.blue)
             .help(Text("Apply"))
         } else if let only = screens.first {
             Button { onApply(only) } label: { applyLabel }
-                .buttonStyle(GlassCapsuleButtonStyle(fontSize: 11, horizontalPadding: 9, verticalPadding: 5))
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .tint(.blue)
                 .help(Text("Apply"))
         } else {
             Button {} label: { applyLabel }
-                .buttonStyle(GlassCapsuleButtonStyle(tint: .secondary, fontSize: 11, horizontalPadding: 9, verticalPadding: 5))
+                .buttonStyle(.bordered)
+                .controlSize(.small)
                 .disabled(true)
                 .help(Text("Open a display first, then apply"))
         }

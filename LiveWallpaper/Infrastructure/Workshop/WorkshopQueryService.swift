@@ -69,7 +69,7 @@ struct WorkshopQueryRequest: Equatable, Hashable, Sendable {
         self.cursor = cursor.isEmpty ? "*" : cursor
         self.numPerPage = min(max(numPerPage, 1), 100)
         self.language = Self.canonicalLanguage(language)
-        self.days = effectiveSort.requiresDays ? 7 : days.flatMap { $0 > 0 ? $0 : nil }
+        self.days = effectiveSort.requiresDays ? Self.canonicalTrendingDays(days) : days.flatMap { $0 > 0 ? $0 : nil }
         self.requiredTags = Self.canonicalTags(requiredTags)
         self.excludedTags = Self.canonicalTags(excludedTags)
         self.returnPreviews = returnPreviews
@@ -85,11 +85,26 @@ struct WorkshopQueryRequest: Equatable, Hashable, Sendable {
         return trimmed.lowercased(with: Locale(identifier: "en_US_POSIX"))
     }
 
+    /// Steam matches `requiredtags`/`excludedtags` against the item's EXACT
+    /// display-name tags (e.g. `Scene`, `Anime`, `3840 x 2160`, `Dual 3840 x 1080`).
+    /// Lower-casing them — as this used to — made every tag filter silently
+    /// match nothing. So we only trim, de-duplicate, and sort (sorting just keeps
+    /// the cache key stable; tag order is irrelevant to Steam).
     private static func canonicalTags(_ tags: [String]) -> [String] {
-        tags
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(with: Locale(identifier: "en_US_POSIX")) }
-            .filter { !$0.isEmpty }
+        var seen = Set<String>()
+        return tags
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
             .sorted()
+    }
+
+    /// Trending (`query_type=3`) requires a `days` window. Clamp the caller's
+    /// requested period to the values Steam's Workshop browse exposes (week /
+    /// month / quarter / half-year / year), defaulting to a week.
+    private static func canonicalTrendingDays(_ days: Int?) -> Int {
+        let allowed: Set<Int> = [1, 7, 30, 90, 180, 365]
+        guard let days, allowed.contains(days) else { return 7 }
+        return days
     }
 }
 

@@ -19,6 +19,9 @@ struct WorkshopBrowsePane: View {
 
     private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
+    /// Stable scroll anchor pinned at the top of the grid (for page steps).
+    private static let gridTopAnchor = "workshop.browse.grid.top"
+
     // Square tiles sized to the ~192px source thumbnails — large enough to read
     // the preview crisply without upscaling into blur, so the window width alone
     // drives how many fit per row (no manual density control).
@@ -65,8 +68,8 @@ struct WorkshopBrowsePane: View {
         .onChange(of: viewModel.isLoading) { _, loading in
             if loading { WorkshopRequestCounter.increment() }
         }
-        .onChange(of: viewModel.isLoadingMore) { _, loading in
-            if loading { WorkshopRequestCounter.increment() }
+        .onChange(of: viewModel.isPaging) { _, paging in
+            if paging { WorkshopRequestCounter.increment() }
         }
         .inspector(isPresented: Binding(
             get: { selectedItem != nil },
@@ -74,7 +77,9 @@ struct WorkshopBrowsePane: View {
         )) {
             Group {
                 if let selectedItem {
-                    WorkshopInspectorContent(item: selectedItem, doctor: doctor)
+                    WorkshopInspectorContent(item: selectedItem, doctor: doctor) {
+                        self.selectedItem = nil
+                    }
                 } else {
                     inspectorPlaceholder
                 }
@@ -99,35 +104,86 @@ struct WorkshopBrowsePane: View {
     }
 
     private var populatedGrid: some View {
-        ScrollView {
-            LazyVGrid(columns: gridColumns, spacing: DesignTokens.Spacing.lg) {
-                ForEach(viewModel.items) { item in
-                    WorkshopBrowseCard(
-                        item: item,
-                        isInLibrary: installedWorkshopIDs.contains(String(item.id))
-                    ) { selectedItem = item }
+        ScrollViewReader { proxy in
+            ScrollView {
+                // Top anchor so a page step returns the user to item 1.
+                Color.clear.frame(height: 0).id(Self.gridTopAnchor)
+
+                LazyVGrid(columns: gridColumns, spacing: DesignTokens.Spacing.lg) {
+                    ForEach(viewModel.items) { item in
+                        WorkshopBrowseCard(
+                            item: item,
+                            isInLibrary: installedWorkshopIDs.contains(String(item.id))
+                        ) { selectedItem = item }
+                        .id(item.id)
+                    }
+                }
+                .padding(.horizontal, DesignTokens.Settings.formHorizontalMargin)
+                .padding(.vertical, DesignTokens.Settings.formVerticalMargin)
+
+                paginationBar
+            }
+            // Opening the inspector narrows the grid and reflows the rows, which
+            // can push the selected tile off-screen — re-center it so it stays
+            // visible next to the detail panel. The brief delay lets the
+            // inspector's width animation settle before we measure.
+            .onChange(of: selectedItem?.id) { _, id in
+                guard let id else { return }
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 60_000_000)
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        proxy.scrollTo(id, anchor: .center)
+                    }
                 }
             }
-            .padding(.horizontal, DesignTokens.Settings.formHorizontalMargin)
-            .padding(.vertical, DesignTokens.Settings.formVerticalMargin)
+            .onChange(of: viewModel.pageIndex) { _, _ in
+                proxy.scrollTo(Self.gridTopAnchor, anchor: .top)
+            }
+        }
+    }
 
-            if viewModel.nextCursor != nil, viewModel.nextCursor != "*" {
+    /// Cursor-based prev/next pager. Steam's QueryFiles cursor only walks
+    /// forward (no jump-to-page-N), so we step the cursor stack; each page
+    /// replaces the previous results, keeping memory flat.
+    @ViewBuilder
+    private var paginationBar: some View {
+        if viewModel.pageIndex > 1 || viewModel.canGoNextPage {
+            HStack(spacing: DesignTokens.Spacing.md) {
                 Button {
-                    Task { await viewModel.loadMore() }
+                    Task { await viewModel.goToPrevPage() }
                 } label: {
-                    if viewModel.isLoadingMore {
-                        HStack(spacing: 6) {
-                            ProgressView().controlSize(.small)
-                            Text("Loading…")
-                        }
-                    } else {
-                        Text("Load more")
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                        Text("Previous")
                     }
                 }
                 .buttonStyle(.bordered)
-                .disabled(viewModel.isLoadingMore || viewModel.isRateLimited)
-                .padding(.bottom, DesignTokens.Spacing.xl)
+                .controlSize(.small)
+                .disabled(!viewModel.canGoPrevPage)
+
+                if viewModel.isPaging {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Text("Page \(viewModel.pageIndex)")
+                        .font(.system(size: 12, weight: .medium))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+
+                Button {
+                    Task { await viewModel.goToNextPage() }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("Next")
+                        Image(systemName: "chevron.right")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(!viewModel.canGoNextPage)
             }
+            .padding(.vertical, DesignTokens.Spacing.lg)
+            .frame(maxWidth: .infinity)
         }
     }
 
