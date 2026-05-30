@@ -71,6 +71,24 @@ struct WallpaperEngineProjectPropertySchema: Equatable, Sendable {
         defaultValues.merging(overrides) { _, override in override }
     }
 
+    /// Effective user-property values for a scene at render time: the project
+    /// schema defaults merged with the descriptor's persisted overrides. If the
+    /// cache has no readable `project.json`, falls back to just the overrides
+    /// (un-overridden fields then keep the scene envelope's own `value`).
+    static func effectiveSceneValues(
+        descriptor: SceneDescriptor,
+        cacheRootURL: URL
+    ) -> [String: WallpaperEngineProjectPropertyValue] {
+        do {
+            return try read(
+                from: cacheRootURL,
+                includeSchemeColor: true
+            ).effectiveValues(overrides: descriptor.propertyOverrides)
+        } catch {
+            return descriptor.propertyOverrides
+        }
+    }
+
     func visibleProperties(
         values: [String: WallpaperEngineProjectPropertyValue]
     ) -> [Property] {

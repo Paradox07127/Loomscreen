@@ -217,9 +217,15 @@ final class WPEWebGLSceneRenderer: NSObject, WPESceneRenderer, WKNavigationDeleg
         onProgress?("Reading scene")
         try Task.checkCancellation()
         let entryURLResolved = try entryResolver.resolveExistingFileURL(relativePath: descriptor.entryFile)
+        let sceneDescriptor = descriptor
+        let sceneCacheRoot = cacheRootURL
         let document = try await Task.detached(priority: .userInitiated) {
             let data = try Data(contentsOf: entryURLResolved)
-            return try WPESceneDocumentParser.parse(data: data)
+            let userValues = WallpaperEngineProjectPropertySchema.effectiveSceneValues(
+                descriptor: sceneDescriptor,
+                cacheRootURL: sceneCacheRoot
+            )
+            return try WPESceneDocumentParser.parse(data: data, userValues: userValues)
         }.value
         try Task.checkCancellation()
 

@@ -1,9 +1,38 @@
 import Foundation
+import LiveWallpaperCore
 import Testing
 @testable import LiveWallpaper
 
 @Suite("WPESceneDocumentParser")
 struct WPESceneDocumentParserTests {
+
+    @Test("User-property envelope on visible resolves from supplied user values")
+    func userPropertyVisibleResolvesFromUserValues() throws {
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1920, "height": 1080, "auto": true]],
+            "objects": [[
+                "id": "64",
+                "name": "Himmel",
+                "type": "image",
+                "image": "models/himmel.json",
+                "visible": ["user": "xme", "value": true]
+            ]]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload)
+
+        // Override xme=false → the bound `visible` flips to hidden.
+        let hidden = try WPESceneDocumentParser.parse(data: data, userValues: ["xme": .bool(false)])
+        #expect(hidden.imageObjects.first?.visible == false)
+
+        // No override for xme → envelope's own default value (true) is kept.
+        let shownDefault = try WPESceneDocumentParser.parse(data: data, userValues: [:])
+        #expect(shownDefault.imageObjects.first?.visible == true)
+
+        // Legacy parse(data:) keeps working (no user values).
+        let legacy = try WPESceneDocumentParser.parse(data: data)
+        #expect(legacy.imageObjects.first?.visible == true)
+    }
 
     // MARK: - Required structure
 

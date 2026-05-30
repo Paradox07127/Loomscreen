@@ -268,7 +268,11 @@ final class AmbientWallpaperSessionBuilder {
                 reason: "user selection \(userSelection.rawValue)"
             )
         }
-        guard let document = parseSceneDocument(at: entryURL) else {
+        guard let document = parseSceneDocument(
+            at: entryURL,
+            descriptor: descriptor,
+            cacheRootURL: cacheURL
+        ) else {
             return WPESceneBackendRouter.Routing(
                 backend: .metal,
                 routedBy: .automatic,
@@ -284,9 +288,17 @@ final class AmbientWallpaperSessionBuilder {
         )
     }
 
-    private func parseSceneDocument(at url: URL) -> WPESceneDocument? {
+    private func parseSceneDocument(
+        at url: URL,
+        descriptor: SceneDescriptor,
+        cacheRootURL: URL
+    ) -> WPESceneDocument? {
         guard let data = try? Data(contentsOf: url) else { return nil }
-        return try? WPESceneDocumentParser.parse(data: data)
+        let userValues = WallpaperEngineProjectPropertySchema.effectiveSceneValues(
+            descriptor: descriptor,
+            cacheRootURL: cacheRootURL
+        )
+        return try? WPESceneDocumentParser.parse(data: data, userValues: userValues)
     }
     #endif
 

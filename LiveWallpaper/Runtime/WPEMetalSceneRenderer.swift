@@ -304,9 +304,15 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WallpaperFrameRat
         onProgress?("Reading scene")
         try Task.checkCancellation()
         let entryURL = try entryResolver.resolveExistingFileURL(relativePath: descriptor.entryFile)
+        let sceneDescriptor = descriptor
+        let sceneCacheRoot = cacheRootURL
         let document = try await Task.detached(priority: .userInitiated) {
             let data = try Data(contentsOf: entryURL)
-            return try WPESceneDocumentParser.parse(data: data)
+            let userValues = WallpaperEngineProjectPropertySchema.effectiveSceneValues(
+                descriptor: sceneDescriptor,
+                cacheRootURL: sceneCacheRoot
+            )
+            return try WPESceneDocumentParser.parse(data: data, userValues: userValues)
         }.value
         debugStage("read.entry.done", "imageObjects=\(document.imageObjects.count) particles=\(document.particleObjects.count) text=\(document.textObjects.count) sound=\(document.soundObjects.count)")
         try Task.checkCancellation()

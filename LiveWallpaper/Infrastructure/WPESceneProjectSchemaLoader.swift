@@ -71,12 +71,10 @@ enum WPESceneProjectSchemaLoader {
             return nil
         }
         do {
-            // schemecolor is intentionally excluded: the Metal/WebGL
-            // renderer does not yet bind property overrides to the scene's
-            // tint uniform, so surfacing the picker would be a no-op
-            // knob. Flip back to `true` once the renderer reads
-            // SceneDescriptor.propertyOverrides.
-            let parsed = try WallpaperEngineProjectPropertySchema.read(from: folderURL)
+            let parsed = try WallpaperEngineProjectPropertySchema.read(
+                from: folderURL,
+                includeSchemeColor: true
+            )
             return makeOutcome(parsed: parsed, workshopID: workshopID, locationDescription: "cache at \(folderURL.path)")
         } catch {
             return Outcome(
@@ -101,7 +99,10 @@ enum WPESceneProjectSchemaLoader {
         case .success(let resolved):
             do {
                 let parsed = try SecurityScopedBookmarkResolver.withScopedAccess(resolved.url) { _ in
-                    try WallpaperEngineProjectPropertySchema.read(from: resolved.url)
+                    try WallpaperEngineProjectPropertySchema.read(
+                        from: resolved.url,
+                        includeSchemeColor: true
+                    )
                 }
                 return makeOutcome(parsed: parsed, workshopID: workshopID, locationDescription: "source folder at \(resolved.url.path)")
             } catch {

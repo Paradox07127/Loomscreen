@@ -17,6 +17,13 @@ import Foundation
 enum WPESceneDocumentParser {
 
     static func parse(data: Data) throws -> WPESceneDocument {
+        try parse(data: data, userValues: [:])
+    }
+
+    static func parse(
+        data: Data,
+        userValues: [String: WallpaperEngineProjectPropertyValue]
+    ) throws -> WPESceneDocument {
         guard !data.isEmpty else {
             throw WPESceneDocumentError.invalidUTF8
         }
@@ -26,7 +33,8 @@ enum WPESceneDocumentParser {
         } catch {
             throw WPESceneDocumentError.invalidUTF8
         }
-        guard let root = json as? [String: Any] else {
+        let resolvedJSON = resolveUserPropertyEnvelopes(in: json, userValues: userValues)
+        guard let root = resolvedJSON as? [String: Any] else {
             throw WPESceneDocumentError.rootNotObject
         }
 
@@ -272,7 +280,7 @@ enum WPESceneDocumentParser {
         let alphaValue = parseAnimatedScalar(dict["alpha"], fallback: 1)
         let origin = transform.origin
         let scale = transform.scale
-        let visible = (dict["visible"] as? Bool) ?? true
+        let visible = parseBool(dict["visible"]) ?? true
         let horiz = unwrapString(dict["horizontalalign"]) ?? "center"
         let vert = unwrapString(dict["verticalalign"]) ?? "middle"
         let maxWidth = unwrapDouble(dict["maxwidth"]) ?? unwrapDouble(dict["limitwidth"])
@@ -298,7 +306,57 @@ enum WPESceneDocumentParser {
         )
     }
 
-    /// Unwrap WPE's `{ "user": "...", "value": <X> }` envelope, recursing when the inner `value` is itself a property reference.
+    /// Recursively replace every WPE user-property envelope
+    /// `{ "user": K, "value": V }` with `userValues[K] ?? V` BEFORE field
+    /// parsing, so scene custom settings (e.g. toggling an object's `visible`
+    /// via its bound property) actually drive the parsed document.
+    private static func resolveUserPropertyEnvelopes(
+        in raw: Any,
+        userValues: [String: WallpaperEngineProjectPropertyValue]
+    ) -> Any {
+        if let array = raw as? [Any] {
+            return array.map {
+                resolveUserPropertyEnvelopes(in: $0, userValues: userValues)
+            }
+        }
+
+        guard let dict = raw as? [String: Any] else {
+            return raw
+        }
+
+        if let key = dict["user"] as? String,
+           dict.keys.contains("value") {
+            let fallback = resolveUserPropertyEnvelopes(
+                in: dict["value"] ?? NSNull(),
+                userValues: userValues
+            )
+            guard let override = userValues[key] else {
+                return fallback
+            }
+            return jsonValue(for: override)
+        }
+
+        var resolved: [String: Any] = [:]
+        resolved.reserveCapacity(dict.count)
+        for (key, value) in dict {
+            resolved[key] = resolveUserPropertyEnvelopes(
+                in: value,
+                userValues: userValues
+            )
+        }
+        return resolved
+    }
+
+    private static func jsonValue(for value: WallpaperEngineProjectPropertyValue) -> Any {
+        switch value {
+        case .bool(let value): return value
+        case .number(let value): return value
+        case .string(let value): return value
+        }
+    }
+
+    /// Accept legacy `{ "value": <X> }` wrappers. User-property envelopes are
+    /// resolved before field parsing so these helpers only see effective values.
     private static func unwrapDouble(_ raw: Any?) -> Double? {
         if let value = WPEValueParser.double(raw) { return value }
         if let dict = raw as? [String: Any] {
