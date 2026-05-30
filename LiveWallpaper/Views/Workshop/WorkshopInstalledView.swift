@@ -19,7 +19,8 @@ struct WorkshopInstalledView: View {
     @State private var sortOrder: WPELibrarySortOrder = .recommended
     @State private var errorMessage: String?
 
-    private let columns = [GridItem(.adaptive(minimum: 220), spacing: 14)]
+    // Match the online Browse grid density (square tiles, ~192px source).
+    private let columns = [GridItem(.adaptive(minimum: 184, maximum: 220), spacing: DesignTokens.Spacing.lg)]
 
     var body: some View {
         content
@@ -92,13 +93,14 @@ struct WorkshopInstalledView: View {
                         .padding(.horizontal, 20)
                         .padding(.top, DesignTokens.Spacing.sm)
                 }
-                LazyVGrid(columns: columns, spacing: 14) {
+                LazyVGrid(columns: columns, spacing: DesignTokens.Spacing.lg) {
                     ForEach(visibleEntries, id: \.id) { entry in
                         let bookmarked = bookmarkStore.containsWPEBookmark(workshopID: entry.origin.workshopID)
                         WPEHistoryRow(
                             entry: entry,
                             isActive: isActive(entry),
                             allowsInlineApply: true,
+                            galleryStyle: true,
                             screens: screenManager.screens,
                             onApply: { screen in apply(entry, to: screen) },
                             onApplyToAll: { applyToAll(entry) },
