@@ -860,10 +860,11 @@ struct WPERenderGraphBuilderTests {
         // Mesh centered in its composite.
         #expect(abs(layer.geometry.puppetMeshCenter.x - (-962.5)) < 0.01)
         #expect(abs(layer.geometry.puppetMeshCenter.y - (-508.5)) < 0.01)
-        // Origin recomputed to preserve screen position (with the ~50px bottom
-        // clamp that brings the off-screen boots back into the 2160 frame).
+        // Origin recomputed to preserve the mesh-bbox center's screen position
+        // (no bottom clamp — the authored boot cut edge stays flush at the
+        // screen bottom rather than floating up).
         #expect(abs(layer.geometry.origin.x - 1280.695) < 1.0)
-        #expect(abs(layer.geometry.origin.y - 1046.925) < 1.0)
+        #expect(abs(layer.geometry.origin.y - 996.211) < 1.0)
     }
 
     @Test("Cropped puppet (Himmel) cross-validates the placement formula")

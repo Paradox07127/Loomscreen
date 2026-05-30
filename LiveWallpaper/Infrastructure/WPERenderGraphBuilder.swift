@@ -712,12 +712,12 @@ private struct WPEModelDescriptor {
         let meshScaledHeight = meshHeight * scaleY
 
         let meshCenterX = oldLeft + (localMinX + localMaxX) * 0.5 * scaleX
-        var meshCenterY = oldTop + (localMinY + localMaxY) * 0.5 * scaleY
-
-        let meshBottom = oldTop + localMaxY * scaleY
-        if meshBottom > sceneHeight {
-            meshCenterY -= meshBottom - sceneHeight
-        }
+        // Keep the mesh-bbox center at its original on-screen position — no
+        // bottom clamp. WPE puppet art is authored already cropped at the
+        // boots, so that natural cut edge must sit flush against the screen
+        // bottom; lifting it (to avoid the final ~50px clip) would float the
+        // whole character upward, which is wrong.
+        let meshCenterY = oldTop + (localMinY + localMaxY) * 0.5 * scaleY
 
         let newOffset = alignmentCenterOffset(
             alignment: object.alignment,
