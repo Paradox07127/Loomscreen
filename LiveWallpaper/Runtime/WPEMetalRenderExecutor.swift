@@ -661,6 +661,12 @@ final class WPEMetalRenderExecutor {
                 Float(max(destination.texture.height, 1)),
                 0,
                 0
+            ),
+            vertexOffset: SIMD4<Float>(
+                Float(layer.geometry.puppetVertexOffset.x),
+                Float(layer.geometry.puppetVertexOffset.y),
+                0,
+                0
             )
         )
         encoder.setVertexBytes(

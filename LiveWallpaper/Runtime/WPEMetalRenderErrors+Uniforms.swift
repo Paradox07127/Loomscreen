@@ -207,6 +207,9 @@ struct WPEMetalPuppetVertex {
 struct WPEPuppetMeshUniforms {
     /// x/y = local layer-composite target size, z/w reserved.
     var localSizeAndMode: SIMD4<Float>
+    /// x/y = model-space cropoffset correction applied before local clip
+    /// normalization, z/w reserved.
+    var vertexOffset: SIMD4<Float>
 }
 
 struct WPEGenericParticleUniforms {
