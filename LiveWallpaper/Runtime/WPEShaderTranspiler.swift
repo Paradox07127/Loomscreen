@@ -2119,9 +2119,11 @@ struct WPEShaderTranspiler {
                availableUniforms.contains("g_Direction2") {
                 return "wpe_rotate_vec2(float2(0.0, 1.0), g_Direction2)"
             }
-        case "v_TexCoordPerspective":
-            // PERSPECTIVE: mul(vec3(uv,1), inverse(squareToQuad(g_Point0..3))),
-            // matching WPE common_perspective.h byte-for-byte.
+        case "v_TexCoordPerspective", "v_TexCoordFx":
+            // PERSPECTIVE / lightshafts: mul(vec3(uv,1), inverse(squareToQuad(g_Point0..3))),
+            // matching WPE common_perspective.h byte-for-byte. lightshafts.vert
+            // computes `v_TexCoordFx` identically and the fragment does its own
+            // `.xy/.z` perspective divide, so the raw homogeneous float3 is correct.
             if varying.metalType == "float3",
                hasUniforms("g_Point0", "g_Point1", "g_Point2", "g_Point3", in: availableUniforms) {
                 return "wpe_perspective_texcoord(in.uv, g_Point0, g_Point1, g_Point2, g_Point3)"

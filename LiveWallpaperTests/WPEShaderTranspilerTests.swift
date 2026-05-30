@@ -632,38 +632,38 @@ struct WPEShaderTranspilerTests {
         #expect(result.mslSource.contains("wpe_foliage_params(in.uv"))
     }
 
-    @Test("Rejects perspective vertex varyings instead of synthesizing z=0")
-    func rejectsPerspectiveVertexVaryings() throws {
-        let device = try #require(MTLCreateSystemDefaultDevice())
-        let compiler = WPESwiftShaderCompiler(device: device)
-        let request = WPEShaderCompileRequest(
-            shaderName: "effects/lightshafts",
-            processedVertexSource: """
-            #version 410 core
-            in vec3 a_Position;
-            in vec2 a_TexCoord;
-            out vec3 v_TexCoordFx;
-            void main() {
-                v_TexCoordFx = vec3(a_TexCoord, 1.0);
-                gl_Position = vec4(a_Position, 1.0);
-            }
-            """,
-            processedFragmentSource: """
-            #version 410 core
-            in vec3 v_TexCoordFx;
-            void main() {
-                vec2 fxCoord = v_TexCoordFx.xy / v_TexCoordFx.z;
-                gl_FragColor = vec4(fxCoord, 0.0, 1.0);
-            }
-            """,
-            sourceHash: "perspective-varying-test",
-            comboValues: [:],
-            textureBindings: [:]
-        )
-
-        #expect(throws: WPEShaderCompilerError.self) {
-            _ = try compiler.compile(request)
+    @Test("lightshafts v_TexCoordFx perspective varying reconstructs to faithful MSL that compiles")
+    func reconstructsLightshaftsPerspectiveVarying() throws {
+        // lightshafts.vert builds v_TexCoordFx = mul(vec3(uv,1), inverse(squareToQuad(g_Point0..3)))
+        // and the fragment does its own perspective divide (.xy/.z) + step(0, .z). Because we run
+        // the builtin object-quad vertex (not the custom .vert), the transpiler must reconstruct
+        // v_TexCoordFx in the fragment — identical to v_TexCoordPerspective.
+        let source = """
+        // stage: fragment
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        uniform vec2 g_Point0;
+        uniform vec2 g_Point1;
+        uniform vec2 g_Point2;
+        uniform vec2 g_Point3;
+        in vec2 v_TexCoord;
+        in vec3 v_TexCoordFx;
+        void main() {
+            vec2 fxCoord = v_TexCoordFx.xy / v_TexCoordFx.z;
+            float mask = step(0.0, v_TexCoordFx.z);
+            gl_FragColor = texture(g_Texture0, fxCoord) * mask;
         }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "effects/lightshafts",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains("wpe_perspective_texcoord(in.uv, g_Point0, g_Point1, g_Point2, g_Point3)"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        // Compiling validates the reconstructed perspective MSL is well-formed.
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
     @Test("Translates audio-spectrum shader with uniform float array to MSL")

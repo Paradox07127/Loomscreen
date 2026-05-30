@@ -14,19 +14,6 @@ struct WPESwiftShaderCompiler: WPEShaderCompiling {
     }
 
     func compile(_ request: WPEShaderCompileRequest) throws -> WPEShaderCompileResult {
-        if let reason = Self.unsupportedVertexVaryingReason(for: request) {
-            WPESceneDebugArtifacts.shared.recordShaderFailure(
-                shaderName: request.shaderName,
-                originalVertex: nil,
-                processedVertex: request.processedVertexSource,
-                originalFragment: nil,
-                processedFragment: request.processedFragmentSource,
-                translatedMSL: nil,
-                errorText: "translation rejected: \(reason)"
-            )
-            throw WPEShaderCompilerError.translationFailed(reason)
-        }
-
         let translation: WPEShaderTranslationResult
         let fragmentSource = Self.fragmentSourceByAddingVertexUniformsIfNeeded(
             fragmentSource: request.processedFragmentSource,
@@ -96,15 +83,6 @@ struct WPESwiftShaderCompiler: WPEShaderCompiling {
             uniformLayout: translation.uniformLayout,
             samplerNames: translation.samplers
         )
-    }
-
-    private static func unsupportedVertexVaryingReason(for request: WPEShaderCompileRequest) -> String? {
-        let perspectiveVarying = "v_TexCoordFx"
-        guard request.processedVertexSource.contains(perspectiveVarying),
-              request.processedFragmentSource.contains(perspectiveVarying) else {
-            return nil
-        }
-        return "perspective vertex varying '\(perspectiveVarying)' requires custom vertex shader translation"
     }
 
     private static func fragmentSourceByAddingVertexUniformsIfNeeded(
