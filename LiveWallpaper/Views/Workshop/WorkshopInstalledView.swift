@@ -1,6 +1,8 @@
 #if !LITE_BUILD && DIRECT_DISTRIBUTION
+import AppKit
 import LiveWallpaperSharedUI
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The pane's "Installed" tab, backed by the app-managed Wallpaper Engine
 /// library (the WPE import history + cache). Everything imported via
@@ -18,6 +20,11 @@ struct WorkshopInstalledView: View {
     @State private var typeFilter: WPELibraryTypeFilter = .all
     @State private var sortOrder: WPELibrarySortOrder = .recommended
     @State private var errorMessage: String?
+    /// Drives the drag-to-apply screen bar — set true when a card drag starts,
+    /// cleared on drop / mouse-up / Escape. The bar is NOT shown otherwise.
+    @State private var isDraggingEntry = false
+    @State private var localDragEndMonitor: Any?
+    @State private var globalDragEndMonitor: Any?
 
     // Match the online Browse grid density (square tiles, ~192px source).
     private let columns = [GridItem(.adaptive(minimum: 184, maximum: 220), spacing: DesignTokens.Spacing.lg)]
@@ -26,6 +33,7 @@ struct WorkshopInstalledView: View {
         content
             .background(DesignTokens.Colors.pageBackground)
             .onAppear(perform: reload)
+            .onDisappear { removeDragEndMonitors() }
             .onReceive(NotificationCenter.default.publisher(for: .wpeHistoryDidChange)) { _ in reload() }
     }
 
@@ -111,11 +119,18 @@ struct WorkshopInstalledView: View {
                             // for anything already bookmarked.
                             onBookmark: (bookmarked || canAddBookmark(entry)) ? { toggleBookmark(entry) } : nil
                         )
+                        .onDrag { beginEntryDrag(entry) }
                     }
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 14)
             }
+            .overlay(alignment: .top) {
+                if isDraggingEntry, !screenManager.screens.isEmpty {
+                    screenDropBar
+                }
+            }
+            .animation(.easeInOut(duration: 0.2), value: isDraggingEntry)
         }
     }
 
@@ -270,6 +285,121 @@ struct WorkshopInstalledView: View {
         switch origin.originalType {
         case .video, .web, .scene: return true
         case .application, .unknown: return false
+        }
+    }
+
+    // MARK: - Drag-to-apply screen bar
+
+    /// Floats in only while a card is being dragged (not persistent), listing the
+    /// open displays as drop targets — drop a wallpaper onto one to apply it there.
+    private var screenDropBar: some View {
+        HStack(spacing: DesignTokens.Spacing.md) {
+            Text("Drag onto a display")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+
+            ForEach(screenManager.screens, id: \.id) { screen in
+                screenDropTarget(screen)
+            }
+
+            Spacer(minLength: 0)
+
+            Button { endEntryDrag() } label: {
+                Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help(Text("Cancel"))
+            .accessibilityLabel(Text("Cancel"))
+        }
+        .padding(.horizontal, DesignTokens.Spacing.lg)
+        .padding(.vertical, DesignTokens.Spacing.sm)
+        .background(.regularMaterial)
+        .overlay(alignment: .bottom) { Divider() }
+        .transition(.move(edge: .top).combined(with: .opacity))
+    }
+
+    private func screenDropTarget(_ screen: Screen) -> some View {
+        VStack(spacing: 3) {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(Color.accentColor.opacity(0.5), style: StrokeStyle(lineWidth: 1.5, dash: [4]))
+                .background(Color.accentColor.opacity(0.06), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .frame(width: 96, height: 54)
+                .overlay {
+                    Image(systemName: "display")
+                        .font(.system(size: 18))
+                        .foregroundStyle(Color.accentColor)
+                }
+            Text(verbatim: screen.name)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .frame(maxWidth: 96)
+        }
+        .onDrop(of: [.plainText], isTargeted: nil) { providers in
+            handleScreenDrop(providers, to: screen)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text("Apply to \(screen.name)"))
+    }
+
+    private func handleScreenDrop(_ providers: [NSItemProvider], to screen: Screen) -> Bool {
+        guard let provider = providers.first(where: { $0.canLoadObject(ofClass: NSString.self) }) else {
+            endEntryDrag()
+            return false
+        }
+        _ = provider.loadObject(ofClass: NSString.self) { value, error in
+            // Extract Sendable values (String / Bool) before crossing to the main
+            // actor — NSString and Error are not Sendable under Swift 6.
+            let workshopID = value as? String
+            let loadFailed = error != nil
+            Task { @MainActor in
+                endEntryDrag()
+                guard !loadFailed, let workshopID else { return }
+                // Re-resolve the target in case the display topology changed mid-drag.
+                guard let target = screenManager.screens.first(where: { $0.id == screen.id }) else { return }
+                if let entry = entries.first(where: { $0.origin.workshopID == workshopID }) {
+                    apply(entry, to: target)
+                }
+            }
+        }
+        return true
+    }
+
+    private func beginEntryDrag(_ entry: WPEHistoryEntry) -> NSItemProvider {
+        isDraggingEntry = true
+        installDragEndMonitors()
+        return NSItemProvider(object: entry.origin.workshopID as NSString)
+    }
+
+    private func endEntryDrag() {
+        isDraggingEntry = false
+        removeDragEndMonitors()
+    }
+
+    /// SwiftUI's `.onDrag` gives a start signal but no end/cancel signal, so a
+    /// drop OUTSIDE every target would leave the bar stuck. Clear it on the next
+    /// mouse-up (anywhere) or Escape.
+    private func installDragEndMonitors() {
+        removeDragEndMonitors()
+        localDragEndMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp, .keyDown]) { event in
+            if event.type == .leftMouseUp || (event.type == .keyDown && event.keyCode == 53) {
+                Task { @MainActor in endEntryDrag() }
+            }
+            return event
+        }
+        globalDragEndMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseUp]) { _ in
+            Task { @MainActor in endEntryDrag() }
+        }
+    }
+
+    private func removeDragEndMonitors() {
+        if let localDragEndMonitor {
+            NSEvent.removeMonitor(localDragEndMonitor)
+            self.localDragEndMonitor = nil
+        }
+        if let globalDragEndMonitor {
+            NSEvent.removeMonitor(globalDragEndMonitor)
+            self.globalDragEndMonitor = nil
         }
     }
 
