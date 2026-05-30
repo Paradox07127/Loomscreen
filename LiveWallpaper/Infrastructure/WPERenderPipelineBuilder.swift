@@ -1100,6 +1100,21 @@ private struct WPEShaderSourceLoader: Sendable {
             vec3 BlendOpacity(vec3 A, float b, int blendMode, float opacity) {
                 return ApplyBlending(blendMode, A, vec3(b), opacity);
             }
+
+            // Contrast/saturation/brightness grade used by `color_grading` and
+            // similar workshop effects. Mirrors common_blending.h: luminance via
+            // LumCoeff, mix toward intensity for saturation, mix toward 0.5 grey
+            // for contrast. Without it the transpiler emits 'undeclared
+            // identifier ContrastSaturationBrightness'.
+            vec3 ContrastSaturationBrightness(vec3 color, float brt, float sat, float con) {
+                const vec3 LumCoeff = vec3(0.2125, 0.7154, 0.0721);
+                vec3 AvgLumin = vec3(0.5);
+                vec3 brtColor = color * brt;
+                vec3 intensity = vec3(dot(brtColor, LumCoeff));
+                vec3 satColor = mix(intensity, brtColor, sat);
+                vec3 conColor = mix(AvgLumin, satColor, con);
+                return conColor;
+            }
             #endif
             """
         case "common_composite.h":

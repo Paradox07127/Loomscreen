@@ -666,6 +666,42 @@ struct WPEShaderTranspilerTests {
         _ = try device.makeLibrary(source: result.mslSource, options: opts)
     }
 
+    @Test("ContrastSaturationBrightness (common_blending.h) translates to compilable MSL")
+    func translatesContrastSaturationBrightness() throws {
+        // The color_grading effect calls ContrastSaturationBrightness, provided by
+        // the common_blending.h stub. Validate the GLSL body translates to MSL that
+        // compiles (vec3(dot(...)), mix, const vec3 all survive the conversion).
+        let source = """
+        // stage: fragment
+        #version 410 core
+        uniform sampler2D g_Texture0;
+        in vec2 v_TexCoord;
+        vec3 ContrastSaturationBrightness(vec3 color, float brt, float sat, float con) {
+            const vec3 LumCoeff = vec3(0.2125, 0.7154, 0.0721);
+            vec3 AvgLumin = vec3(0.5);
+            vec3 brtColor = color * brt;
+            vec3 intensity = vec3(dot(brtColor, LumCoeff));
+            vec3 satColor = mix(intensity, brtColor, sat);
+            vec3 conColor = mix(AvgLumin, satColor, con);
+            return conColor;
+        }
+        void main() {
+            vec3 albedo = texture(g_Texture0, v_TexCoord).rgb;
+            albedo = ContrastSaturationBrightness(albedo, 1.1, 1.2, 0.9);
+            gl_FragColor = vec4(albedo, 1.0);
+        }
+        """
+        let result = try WPEShaderTranspiler.translateFragment(
+            shaderName: "color_grading",
+            preprocessedSource: source
+        )
+        #expect(result.mslSource.contains("ContrastSaturationBrightness"))
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let opts = MTLCompileOptions()
+        opts.languageVersion = .version3_0
+        _ = try device.makeLibrary(source: result.mslSource, options: opts)
+    }
+
     @Test("Translates audio-spectrum shader with uniform float array to MSL")
     func translatesAudioSpectrumArray() throws {
         let source = """
