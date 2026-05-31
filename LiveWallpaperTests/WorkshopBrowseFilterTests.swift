@@ -1,4 +1,5 @@
 #if !LITE_BUILD && DIRECT_DISTRIBUTION
+import Foundation
 import Testing
 @testable import LiveWallpaper
 
@@ -21,6 +22,33 @@ struct WorkshopBrowseFilterTests {
         #expect(WorkshopAgeRatingFilter.excludedTags(for: [.mature]) == ["Everyone", "Questionable"])
         // Everything checked → nothing excluded.
         #expect(WorkshopAgeRatingFilter.excludedTags(for: [.everyone, .questionable, .mature]).isEmpty)
+    }
+
+    @Test("Application is always excluded, alongside the unchecked maturity ratings")
+    func applicationAlwaysExcluded() {
+        // Application wallpapers can't run in this runtime, so EVERY query
+        // excludes them regardless of the maturity selection.
+        #expect(WorkshopBrowseViewModel.alwaysExcludedTags == ["Application"])
+        #expect(Set(WorkshopBrowseViewModel.requestExcludedTags(for: [.everyone])) == ["Application", "Mature", "Questionable"])
+        // Even with every maturity rating shown, Application stays excluded.
+        #expect(WorkshopBrowseViewModel.requestExcludedTags(for: [.everyone, .questionable, .mature]) == ["Application"])
+    }
+
+    @Test("Mature maturity tag drives the spoiler-blur flag (case-insensitive)")
+    func matureRatingDetection() {
+        func item(tags: [String]) -> WorkshopQueryItem {
+            WorkshopQueryItem(
+                id: 1, title: "t", shortDescription: "", creatorPersonaName: nil,
+                previewImageURL: nil, fileSizeBytes: nil, timeUpdated: nil,
+                subscriptionCount: nil, voteScore: nil, tags: tags,
+                visibility: .public, isBanned: false,
+                steamCommunityURL: URL(string: "https://steamcommunity.com/")!
+            )
+        }
+        #expect(item(tags: ["Scene", "Mature"]).isMatureRated)
+        #expect(item(tags: ["mature"]).isMatureRated)
+        #expect(!item(tags: ["Scene", "Questionable"]).isMatureRated)
+        #expect(!item(tags: ["Everyone"]).isMatureRated)
     }
 
     @Test("Filters flow into a canonicalized (de-duplicated, sorted, exact-case) request")

@@ -17,6 +17,14 @@ struct WorkshopInspectorContent: View {
     var onClose: () -> Void = {}
 
     @Environment(\.openURL) private var openURL
+    @AppStorage("loomscreen.workshop.blurMatureThumbnails.v1") private var blurMatureThumbnails = true
+    @State private var matureRevealed = false
+
+    /// Blur the hero until clicked, mirroring the grid card's spoiler gate so
+    /// opening details never auto-plays adult content unprompted.
+    private var shouldBlurHero: Bool {
+        blurMatureThumbnails && item.isMatureRated && !matureRevealed
+    }
 
     private var downloadCoordinator: WorkshopDownloadCoordinator { .shared }
     private var downloadPhase: WorkshopDownloadCoordinator.DownloadPhase {
@@ -85,13 +93,15 @@ struct WorkshopInspectorContent: View {
     // MARK: - Hero
 
     private var hero: some View {
-        AnimatedGIFThumbnail(url: item.previewImageURL, playbackMode: .autoPlay)
+        AnimatedGIFThumbnail(url: item.previewImageURL, playbackMode: .autoPlay, isBlurred: shouldBlurHero)
             .aspectRatio(1, contentMode: .fit)
             .clipShape(RoundedRectangle(cornerRadius: DesignTokens.Corner.md, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: DesignTokens.Corner.md, style: .continuous)
                     .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
             }
+            .contentShape(Rectangle())
+            .onTapGesture { if shouldBlurHero { matureRevealed = true } }
             .padding([.horizontal, .top], DesignTokens.Spacing.lg)
     }
 

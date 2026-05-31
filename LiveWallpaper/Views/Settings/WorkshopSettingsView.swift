@@ -11,6 +11,7 @@ struct WorkshopSettingsView: View {
     @Environment(WorkshopServices.self) private var workshopServices
 
     @AppStorage("loomscreen.workshop.onboarding.shown.v1") private var onboardingShown: Bool = false
+    @AppStorage("loomscreen.workshop.blurMatureThumbnails.v1") private var blurMatureThumbnails = true
 
     @State private var engineAssets = WPEEngineAssetsLibrary.shared
     @State private var showingDoctor = false
@@ -58,6 +59,18 @@ struct WorkshopSettingsView: View {
                     set: { onboardingShown = !$0 }
                 ))
                 .toggleStyle(.switch)
+            }
+
+            Section {
+                Toggle("Blur mature thumbnails until clicked", isOn: $blurMatureThumbnails)
+                    .toggleStyle(.switch)
+            } header: {
+                Text("Content")
+            } footer: {
+                Text("Wallpapers tagged Mature show a blurred cover in the browse grid and details until you click to reveal them. Application wallpapers are always hidden because they can't run here.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Section {

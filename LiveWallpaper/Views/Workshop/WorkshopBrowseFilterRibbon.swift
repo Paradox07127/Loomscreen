@@ -49,6 +49,12 @@ struct WorkshopBrowseFilterRibbon: View {
     @State private var isFilterPanelExpanded = false
     @FocusState private var isSearchFocused: Bool
 
+    /// One-time age confirmation: once the user confirms they're of age, opting
+    /// into Questionable/Mature no longer re-prompts. Persisted across launches.
+    @AppStorage("loomscreen.workshop.matureContentConfirmed.v1") private var matureConfirmed = false
+    /// The rating whose first opt-in is awaiting confirmation (drives the alert).
+    @State private var pendingMatureRating: WorkshopAgeRatingFilter?
+
     var body: some View {
         AdaptiveGlassContainer(spacing: DesignTokens.Spacing.sm) {
             VStack(spacing: 0) {
@@ -62,6 +68,39 @@ struct WorkshopBrowseFilterRibbon: View {
                         .disabled(controlsDisabled)
                 }
             }
+        }
+        .alert(
+            "Show mature content?",
+            isPresented: Binding(
+                get: { pendingMatureRating != nil },
+                set: { if !$0 { pendingMatureRating = nil } }
+            ),
+            presenting: pendingMatureRating
+        ) { rating in
+            Button(role: .cancel) { pendingMatureRating = nil } label: {
+                Text("Cancel")
+            }
+            Button(role: .destructive) {
+                matureConfirmed = true
+                viewModel.toggleAgeRating(rating)
+                pendingMatureRating = nil
+            } label: {
+                Text("I am 18 or older")
+            }
+        } message: { _ in
+            Text("This shows wallpapers tagged Questionable or Mature, which may contain suggestive or explicit adult content. By continuing you confirm you are at least 18 years old, or of legal age in your region.")
+        }
+    }
+
+    /// First opt-in to Questionable/Mature is gated behind a one-time age
+    /// confirmation. Selecting Everyone, or de-selecting any rating, is always
+    /// immediate.
+    private func handleMaturityTap(_ rating: WorkshopAgeRatingFilter) {
+        let isEnabling = !viewModel.selectedAgeRatings.contains(rating)
+        if isEnabling, rating != .everyone, !matureConfirmed {
+            pendingMatureRating = rating
+        } else {
+            viewModel.toggleAgeRating(rating)
         }
     }
 
@@ -166,7 +205,7 @@ struct WorkshopBrowseFilterRibbon: View {
                             title: Text(verbatim: rating.displayName),
                             isSelected: viewModel.selectedAgeRatings.contains(rating)
                         ) {
-                            viewModel.toggleAgeRating(rating)
+                            handleMaturityTap(rating)
                         }
                     }
                 }

@@ -17,6 +17,10 @@ enum GIFPlaybackMode {
 struct AnimatedGIFThumbnail: View {
     let url: URL?
     var playbackMode: GIFPlaybackMode = .hoverToPlay
+    /// When true the poster is heavily blurred behind a "click to reveal" cover
+    /// and playback is suppressed — the adult-content spoiler gate. Flipping it
+    /// back to false (the parent's reveal) resumes normal hover/auto playback.
+    var isBlurred: Bool = false
     @Binding var isHovered: Bool
 
     @State private var controller = GIFAnimationController()
@@ -28,10 +32,12 @@ struct AnimatedGIFThumbnail: View {
     init(
         url: URL?,
         playbackMode: GIFPlaybackMode = .hoverToPlay,
+        isBlurred: Bool = false,
         isHovered: Binding<Bool> = .constant(false)
     ) {
         self.url = url
         self.playbackMode = playbackMode
+        self.isBlurred = isBlurred
         self._isHovered = isHovered
     }
 
@@ -39,11 +45,15 @@ struct AnimatedGIFThumbnail: View {
         ZStack {
             Rectangle().fill(Color.secondary.opacity(0.12))
             content
+                .blur(radius: isBlurred ? 26 : 0)
+            if isBlurred {
+                matureCover
+            }
         }
         // Bottom-leading so it never collides with the top-leading rating pill
         // the grid card overlays on the same tile.
         .overlay(alignment: .bottomLeading) {
-            if controller.isAnimating {
+            if controller.isAnimating, !isBlurred {
                 playingBadge
                     .padding(DesignTokens.Spacing.sm)
                     .transition(.opacity)
@@ -54,7 +64,30 @@ struct AnimatedGIFThumbnail: View {
         .task(id: url) { await load() }
         .onChange(of: isHovered) { _, hovering in handleHover(hovering) }
         .onChange(of: reduceMotion) { _, reduce in handleReduceMotion(reduce) }
+        .onChange(of: isBlurred) { _, blurred in handleBlurChange(blurred) }
         .onDisappear { controller.stop(resetToPoster: false) }
+    }
+
+    /// Spoiler scrim shown over a blurred adult thumbnail. The eye glyph + label
+    /// double as the "this is mature content" warning; tapping the tile (handled
+    /// by the parent) reveals it.
+    private var matureCover: some View {
+        ZStack {
+            Color.black.opacity(0.45)
+            VStack(spacing: 5) {
+                Image(systemName: "eye.slash.fill")
+                    .font(.system(size: 22, weight: .semibold))
+                Text("Mature", comment: "Spoiler cover over an adult-rated Workshop thumbnail.")
+                    .font(.system(size: 11, weight: .bold))
+                Text("Click to reveal", comment: "Hint on the spoiler cover over an adult-rated Workshop thumbnail.")
+                    .font(.system(size: 9.5, weight: .medium))
+                    .opacity(0.85)
+            }
+            .foregroundStyle(.white)
+            .shadow(color: .black.opacity(0.4), radius: 2, y: 1)
+        }
+        .accessibilityElement()
+        .accessibilityLabel(Text("Mature content hidden. Activate to reveal."))
     }
 
     @ViewBuilder
@@ -107,7 +140,7 @@ struct AnimatedGIFThumbnail: View {
         guard !Task.isCancelled else { return }
         controller.setAsset(asset)
         phase = asset == nil ? .failed : .ready
-        guard asset != nil, !reduceMotion else { return }
+        guard asset != nil, !reduceMotion, !isBlurred else { return }
         // Begin immediately if the surface auto-plays, or if the pointer is
         // already resting on the tile when the load resolves.
         if playbackMode == .autoPlay || isHovered {
@@ -116,11 +149,21 @@ struct AnimatedGIFThumbnail: View {
     }
 
     private func handleHover(_ hovering: Bool) {
-        guard playbackMode == .hoverToPlay, !reduceMotion else { return }
+        guard playbackMode == .hoverToPlay, !reduceMotion, !isBlurred else { return }
         if hovering {
             controller.play(debounced: true)
         } else {
             controller.stop()
+        }
+    }
+
+    /// Resume / suppress playback when the parent toggles the spoiler gate.
+    private func handleBlurChange(_ blurred: Bool) {
+        guard !reduceMotion else { return }
+        if blurred {
+            controller.stop()
+        } else if playbackMode == .autoPlay || isHovered {
+            controller.play(debounced: false)
         }
     }
 

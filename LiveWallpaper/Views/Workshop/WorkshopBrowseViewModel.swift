@@ -61,6 +61,15 @@ enum WorkshopAgeRatingFilter: String, CaseIterable, Identifiable {
     }
 }
 
+extension WorkshopQueryItem {
+    /// True when the item carries Wallpaper Engine's `Mature` maturity tag.
+    /// Drives the click-to-reveal blur over adult thumbnails (Questionable is
+    /// intentionally not blurred — see the maturity-filter design).
+    var isMatureRated: Bool {
+        tags.contains { $0.caseInsensitiveCompare("Mature") == .orderedSame }
+    }
+}
+
 /// Official Wallpaper Engine Workshop genre tags (exact display strings — Steam
 /// matches `requiredtags` by exact case). Selecting more than one ANDs them,
 /// mirroring Steam's own Workshop browse (an item must carry every chosen tag).
@@ -132,6 +141,18 @@ final class WorkshopBrowseViewModel {
 
     @ObservationIgnored private let services: WorkshopServices
 
+    /// Tags excluded from EVERY query regardless of user filters. Application
+    /// wallpapers cannot run in this runtime, so we never surface them in the
+    /// browse results (server-side exclusion, not a client-side post-filter).
+    nonisolated static let alwaysExcludedTags = ["Application"]
+
+    /// `excludedtags` for a query: the unchecked maturity ratings PLUS the
+    /// always-excluded types. Canonicalization (trim / de-dup / sort) happens in
+    /// `WorkshopQueryRequest`, so order here is irrelevant.
+    nonisolated static func requestExcludedTags(for selection: Set<WorkshopAgeRatingFilter>) -> [String] {
+        WorkshopAgeRatingFilter.excludedTags(for: selection) + alwaysExcludedTags
+    }
+
     /// Pending search text. Edits here do NOT query — the user applies the whole
     /// filter set with the Search control (or Return). See `hasPendingChanges`.
     var searchInput: String = ""
@@ -194,7 +215,7 @@ final class WorkshopBrowseViewModel {
         // Questionable + Mature).
         self.currentRequest = WorkshopQueryRequest(
             sort: .topRated,
-            excludedTags: WorkshopAgeRatingFilter.excludedTags(for: WorkshopAgeRatingFilter.defaultSelection)
+            excludedTags: Self.requestExcludedTags(for: WorkshopAgeRatingFilter.defaultSelection)
         )
     }
 
@@ -368,7 +389,7 @@ final class WorkshopBrowseViewModel {
             numPerPage: 50,
             days: preferredSort == .trending ? trendingDays : nil,
             requiredTags: required,
-            excludedTags: WorkshopAgeRatingFilter.excludedTags(for: selectedAgeRatings)
+            excludedTags: Self.requestExcludedTags(for: selectedAgeRatings)
         )
     }
 }
