@@ -26,9 +26,9 @@ struct WorkshopInstalledView: View {
     /// Set when the user asks to delete an entry — drives the confirmation
     /// dialog before any real file removal.
     @State private var pendingDelete: WPEHistoryEntry?
-    /// Set when a card is tapped with multiple displays connected — drives the
-    /// "which display?" chooser so a click is never ambiguous.
-    @State private var pendingApplyChoice: WPEHistoryEntry?
+    /// Card tapped → open the trailing detail inspector (apply happens from
+    /// inside it, or by dragging a card onto a display). Mirrors online Browse.
+    @State private var selectedEntry: WPEHistoryEntry?
     /// Drives the drag-to-apply screen bar — set true when a card drag starts,
     /// cleared on drop / mouse-up / Escape. The bar is NOT shown otherwise.
     @State private var isDraggingEntry = false
@@ -81,19 +81,48 @@ struct WorkshopInstalledView: View {
                     Text("“\(entry.origin.title)” will be removed from your library. Its original files (imported from your own folder) are left untouched.")
                 }
             }
+            .inspector(isPresented: Binding(
+                get: { selectedEntry != nil },
+                set: { if !$0 { selectedEntry = nil } }
+            )) {
+                Group {
+                    if let entry = selectedEntry {
+                        WPEInstalledInspectorContent(
+                            entry: entry,
+                            screens: screenManager.screens,
+                            activeScreenIDs: activeScreenIDs(for: entry),
+                            isBookmarked: bookmarkStore.containsWPEBookmark(workshopID: entry.origin.workshopID),
+                            canBookmark: canAddBookmark(entry),
+                            hasUpdate: updatedWorkshopIDs.contains(entry.origin.workshopID),
+                            onApply: { apply(entry, to: $0) },
+                            onApplyToAll: { applyToAll(entry) },
+                            onToggleBookmark: { toggleBookmark(entry) },
+                            onShowInFinder: { showInFinder(entry) },
+                            onDelete: { pendingDelete = entry },
+                            onClose: { selectedEntry = nil }
+                        )
+                    } else {
+                        installedInspectorPlaceholder
+                    }
+                }
+                .inspectorColumnWidth(min: 300, ideal: 340, max: 440)
+            }
     }
 
-    /// Card tap: with a single display apply straight to it; with several,
-    /// present an explicit chooser so the target is never ambiguous (mirrors
-    /// Wallpaper Engine's explicit per-monitor selection). Dragging onto a
-    /// display remains the direct per-screen path.
-    private func handleCardTap(_ entry: WPEHistoryEntry) {
-        if screenManager.screens.count <= 1 {
-            applyToAll(entry)
-        } else {
-            pendingApplyChoice = entry
+    private var installedInspectorPlaceholder: some View {
+        VStack(spacing: DesignTokens.Spacing.sm) {
+            Image(systemName: "square.dashed")
+                .font(.system(size: 28))
+                .foregroundStyle(.tertiary)
+            Text("Select a wallpaper to see details.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(DesignTokens.Spacing.lg)
     }
+
 
     // MARK: - Content
 
@@ -161,7 +190,7 @@ struct WorkshopInstalledView: View {
                             screens: screenManager.screens,
                             onApply: { screen in apply(entry, to: screen) },
                             onApplyToAll: { applyToAll(entry) },
-                            onTap: { handleCardTap(entry) },
+                            onTap: { selectedEntry = entry },
                             onRemove: { pendingDelete = entry },
                             isBookmarked: bookmarked,
                             // Only offer "Add" when the item's content can actually
@@ -171,27 +200,6 @@ struct WorkshopInstalledView: View {
                             hasUpdate: updatedWorkshopIDs.contains(entry.origin.workshopID)
                         )
                         .onDrag({ beginEntryDrag(entry) }, preview: { dragPreview(entry) })
-                        .popover(
-                            isPresented: Binding(
-                                get: { pendingApplyChoice?.id == entry.id },
-                                set: { if !$0 { pendingApplyChoice = nil } }
-                            ),
-                            arrowEdge: .bottom
-                        ) {
-                            ScreenChooserPopover(
-                                title: entry.origin.title,
-                                screens: screenManager.screens,
-                                activeScreenIDs: activeScreenIDs(for: entry),
-                                onSelect: { screen in
-                                    apply(entry, to: screen)
-                                    pendingApplyChoice = nil
-                                },
-                                onApplyToAll: {
-                                    applyToAll(entry)
-                                    pendingApplyChoice = nil
-                                }
-                            )
-                        }
                     }
                 }
                 .padding(.horizontal, 20)
@@ -337,6 +345,19 @@ struct WorkshopInstalledView: View {
             .map(\.id))
     }
 
+    private func showInFinder(_ entry: WPEHistoryEntry) {
+        var isStale = false
+        guard let folder = try? URL(
+            resolvingBookmarkData: entry.origin.sourceFolderBookmark,
+            options: .withSecurityScope,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        ) else { return }
+        let didStart = folder.startAccessingSecurityScopedResource()
+        defer { if didStart { folder.stopAccessingSecurityScopedResource() } }
+        NSWorkspace.shared.activateFileViewerSelecting([folder])
+    }
+
     private func apply(_ entry: WPEHistoryEntry, to screen: Screen) {
         errorMessage = nil
         Task {
@@ -372,6 +393,8 @@ struct WorkshopInstalledView: View {
     /// never touched.
     private func performDelete(_ entry: WPEHistoryEntry) {
         errorMessage = nil
+        // Close the detail inspector if it's showing the item being removed.
+        if selectedEntry?.id == entry.id { selectedEntry = nil }
         let origin = entry.origin
         let workshopID = origin.workshopID
 
@@ -697,47 +720,194 @@ private enum WPELibrarySortOrder: String, CaseIterable, Identifiable {
     }
 }
 
-// MARK: - Screen chooser (non-modal popover)
+// MARK: - Installed detail inspector
 
-/// Anchored, non-modal popover shown when a card is tapped with multiple
-/// displays connected — replaces the modal confirmation dialog. Presents a
-/// physical mini-map of the displays so the choice maps to where each screen
-/// actually sits, plus an "Apply to All Displays" action.
-private struct ScreenChooserPopover: View {
-    let title: String
+/// Trailing detail inspector for an installed item (mirrors the online Browse
+/// inspector). Click a card to open it; apply happens HERE (per-display via the
+/// mini-map, or "All"), alongside bookmark / Show in Finder / Remove. Dragging a
+/// card onto a display remains the quick per-screen path.
+private struct WPEInstalledInspectorContent: View {
+    let entry: WPEHistoryEntry
     let screens: [Screen]
     let activeScreenIDs: Set<CGDirectDisplayID>
-    let onSelect: (Screen) -> Void
+    let isBookmarked: Bool
+    let canBookmark: Bool
+    let hasUpdate: Bool
+    let onApply: (Screen) -> Void
     let onApplyToAll: () -> Void
+    let onToggleBookmark: () -> Void
+    let onShowInFinder: () -> Void
+    let onDelete: () -> Void
+    let onClose: () -> Void
+
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
-        VStack(alignment: .leading, spacing: DesignTokens.Spacing.md) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Apply to display")
-                    .font(.system(size: 13, weight: .semibold))
-                Text(verbatim: title)
+        ScrollView {
+            VStack(alignment: .leading, spacing: DesignTokens.Spacing.lg) {
+                closeHeader
+                hero
+                VStack(alignment: .leading, spacing: DesignTokens.Spacing.md) {
+                    Text(verbatim: entry.origin.title)
+                        .font(.title3.weight(.semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    typePill
+                    if hasUpdate { updateNote }
+                    unsupportedWarning
+                    if !activeScreenIDs.isEmpty { inUseRow }
+
+                    Divider()
+                    applySection
+
+                    if canBookmark || isBookmarked { bookmarkButton }
+
+                    Divider()
+                    actionsSection
+                }
+                .padding(.horizontal, DesignTokens.Spacing.lg)
+                .padding(.bottom, DesignTokens.Spacing.lg)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .background(DesignTokens.Colors.pageBackground)
+    }
+
+    private var closeHeader: some View {
+        HStack {
+            Spacer(minLength: 0)
+            Button(action: onClose) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(.secondary)
+                    .symbolRenderingMode(.hierarchical)
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut(.cancelAction)
+            .help(Text("Close"))
+            .accessibilityLabel(Text("Close details"))
+        }
+        .padding(.horizontal, DesignTokens.Spacing.lg)
+        .padding(.top, DesignTokens.Spacing.md)
+    }
+
+    private var hero: some View {
+        WPEPreviewView(
+            imageURL: entry.origin.sourcePreviewURL,
+            securityScopedBookmarkData: entry.origin.sourceFolderBookmark,
+            playbackMode: .hoverToPlay
+        )
+        .aspectRatio(1, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.Corner.md, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: DesignTokens.Corner.md, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+        }
+        .padding([.horizontal, .top], DesignTokens.Spacing.lg)
+    }
+
+    private var typePill: some View {
+        Text(verbatim: entry.origin.localizedDisplayTypeName.uppercased(with: .current))
+            .font(.system(size: 9, weight: .bold))
+            .tracking(0.5)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: DesignTokens.Corner.sm, style: .continuous))
+    }
+
+    private var updateNote: some View {
+        Label("Update available on Steam", systemImage: "arrow.triangle.2.circlepath")
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.orange)
+    }
+
+    @ViewBuilder
+    private var unsupportedWarning: some View {
+        if entry.origin.originalType == .application || entry.origin.originalType == .unknown {
+            Label("This is a Windows-only wallpaper and can't run on macOS.", systemImage: "exclamationmark.triangle.fill")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var inUseRow: some View {
+        let names = screens.filter { activeScreenIDs.contains($0.id) }.map(\.name).joined(separator: ", ")
+        return Label("In use on \(names)", systemImage: "checkmark.circle.fill")
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(.green)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder
+    private var applySection: some View {
+        VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
+            Text("Apply to display").font(.headline)
+            if screens.isEmpty {
+                Text("Open a display first, then apply.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-
-            ScreenTopologyMap(
-                screens: screens,
-                activeScreenIDs: activeScreenIDs,
-                onSelect: onSelect
-            )
-            .frame(maxWidth: .infinity)
-
-            Button(action: onApplyToAll) {
-                Label("Apply to All Displays", systemImage: "rectangle.on.rectangle")
+            } else if screens.count == 1, let only = screens.first {
+                Button { onApply(only) } label: {
+                    Label(activeScreenIDs.contains(only.id) ? "Reapply" : "Apply", systemImage: "play.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+                .tint(.blue)
+            } else {
+                ScreenTopologyMap(screens: screens, activeScreenIDs: activeScreenIDs, onSelect: onApply)
                     .frame(maxWidth: .infinity)
+                Button(action: onApplyToAll) {
+                    Label("Apply to All Displays", systemImage: "rectangle.on.rectangle")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+                .tint(.blue)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.regular)
-            .tint(.blue)
         }
-        .padding(DesignTokens.Spacing.lg)
-        .frame(minWidth: 248)
+    }
+
+    private var bookmarkButton: some View {
+        Button(action: onToggleBookmark) {
+            Label(isBookmarked ? "Remove Bookmark" : "Add Bookmark",
+                  systemImage: isBookmarked ? "bookmark.fill" : "bookmark")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .tint(isBookmarked ? .yellow : nil)
+    }
+
+    private var actionsSection: some View {
+        HStack(spacing: DesignTokens.Spacing.sm) {
+            Button { onShowInFinder() } label: {
+                Label("Show in Finder", systemImage: "folder").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            if let url = steamURL {
+                Button { openURL(url) } label: {
+                    Label("Steam", systemImage: "arrow.up.forward.app").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+
+            Button(role: .destructive, action: onDelete) {
+                Label("Remove", systemImage: "trash").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+    }
+
+    private var steamURL: URL? {
+        guard UInt64(entry.origin.workshopID) != nil else { return nil }
+        return URL(string: "https://steamcommunity.com/sharedfiles/filedetails/?id=\(entry.origin.workshopID)")
     }
 }
 
