@@ -72,7 +72,6 @@ struct WorkshopInspectorContent: View {
                     }
 
                     descriptionSection
-                    steamLink
                 }
                 .padding(.horizontal, DesignTokens.Spacing.lg)
                 .padding(.bottom, DesignTokens.Spacing.lg)
@@ -226,7 +225,7 @@ struct WorkshopInspectorContent: View {
                 Button {
                     openURL(item.steamCommunityURL)
                 } label: {
-                    Image(systemName: "arrow.up.forward.app")
+                    Image(systemName: "safari")
                         .frame(width: 16, height: 16)
                 }
                 .buttonStyle(.bordered)
@@ -486,15 +485,6 @@ struct WorkshopInspectorContent: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-    }
-
-    private var steamLink: some View {
-        Button {
-            openURL(item.steamCommunityURL)
-        } label: {
-            Label("View on Steam Community", systemImage: "safari")
-        }
-        .buttonStyle(.link)
     }
 
     // MARK: - Helpers
