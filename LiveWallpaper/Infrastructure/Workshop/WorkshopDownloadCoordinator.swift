@@ -53,9 +53,16 @@ final class WorkshopDownloadCoordinator {
     }
 
     func download(_ item: WorkshopQueryItem, using doctor: SteamCMDDoctorService) {
-        let itemID = item.id
+        download(itemID: item.id, title: item.title, using: doctor)
+    }
+
+    /// Re-download path for the Installed library's "Update" action — the same
+    /// SteamCMD download + import as a fresh `download(_:)`, keyed only by the
+    /// Workshop id + title (no full `WorkshopQueryItem` needed). The re-import
+    /// overwrites the cache in place and records a fresher `importedAt`, which
+    /// clears the "update available" badge.
+    func download(itemID: UInt64, title: String, using doctor: SteamCMDDoctorService) {
         guard !isBusy(itemID) else { return }
-        let title = item.title
         let attemptID = UUID()
         attempts[itemID] = attemptID
         clearProgress(itemID)

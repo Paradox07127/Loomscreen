@@ -13,6 +13,7 @@ import UniformTypeIdentifiers
 /// `WorkshopPaneView` owns the chrome.
 struct WorkshopInstalledView: View {
     @Environment(ScreenManager.self) private var screenManager
+    @Environment(SteamCMDDoctorService.self) private var doctor
     @State private var importCoordinator = WorkshopFolderImportCoordinator.shared
     @State private var bookmarkStore = BookmarkStore.shared
     @State private var entries: [WPEHistoryEntry] = []
@@ -58,6 +59,7 @@ struct WorkshopInstalledView: View {
             .onReceive(NotificationCenter.default.publisher(for: .wpeHistoryDidChange)) { _ in
                 reload()
                 reconcileUpdateFlags()
+                refreshSelectedEntry()
             }
             .confirmationDialog(
                 Text("Delete this wallpaper?"),
@@ -94,8 +96,10 @@ struct WorkshopInstalledView: View {
                             isBookmarked: bookmarkStore.containsWPEBookmark(workshopID: entry.origin.workshopID),
                             canBookmark: canAddBookmark(entry),
                             hasUpdate: updatedWorkshopIDs.contains(entry.origin.workshopID),
+                            canUpdate: doctor.isDownloadReady,
                             onApply: { apply(entry, to: $0) },
                             onApplyToAll: { applyToAll(entry) },
+                            onUpdate: { updateEntry(entry) },
                             onToggleBookmark: { toggleBookmark(entry) },
                             onShowInFinder: { showInFinder(entry) },
                             onDelete: { pendingDelete = entry },
@@ -197,7 +201,8 @@ struct WorkshopInstalledView: View {
                             // be rebuilt into a bookmark; "Remove" stays available
                             // for anything already bookmarked.
                             onBookmark: (bookmarked || canAddBookmark(entry)) ? { toggleBookmark(entry) } : nil,
-                            hasUpdate: updatedWorkshopIDs.contains(entry.origin.workshopID)
+                            hasUpdate: updatedWorkshopIDs.contains(entry.origin.workshopID),
+                            onUpdate: doctor.isDownloadReady ? { updateEntry(entry) } : nil
                         )
                         .onDrag({ beginEntryDrag(entry) }, preview: { dragPreview(entry) })
                     }
@@ -377,6 +382,23 @@ struct WorkshopInstalledView: View {
             }
             reload()
         }
+    }
+
+    /// Re-download the item from Steam to pick up the newer Workshop version
+    /// (the "Update available" path). Reuses the same SteamCMD download + import
+    /// flow as a fresh download; on success the fresher `importedAt` clears the
+    /// badge via `reconcileUpdateFlags`.
+    private func updateEntry(_ entry: WPEHistoryEntry) {
+        guard let id = UInt64(entry.origin.workshopID) else { return }
+        WorkshopDownloadCoordinator.shared.download(itemID: id, title: entry.origin.title, using: doctor)
+    }
+
+    /// Keep the open inspector pointed at the latest entry for its item after a
+    /// library change (e.g. an Update re-import). Closes the inspector if the
+    /// item is gone (deleted).
+    private func refreshSelectedEntry() {
+        guard let current = selectedEntry else { return }
+        selectedEntry = entries.first { $0.origin.workshopID == current.origin.workshopID }
     }
 
     /// Whether deleting this entry will touch files on disk. Only items we
@@ -733,14 +755,30 @@ private struct WPEInstalledInspectorContent: View {
     let isBookmarked: Bool
     let canBookmark: Bool
     let hasUpdate: Bool
+    /// SteamCMD is wired up, so the Update (re-download) button can run.
+    let canUpdate: Bool
     let onApply: (Screen) -> Void
     let onApplyToAll: () -> Void
+    let onUpdate: () -> Void
     let onToggleBookmark: () -> Void
     let onShowInFinder: () -> Void
     let onDelete: () -> Void
     let onClose: () -> Void
 
     @Environment(\.openURL) private var openURL
+
+    /// Shared singleton (also drives the online Browse download UI) — reading it
+    /// here makes this view observe the re-download's phase + progress.
+    private var downloadCoordinator: WorkshopDownloadCoordinator { .shared }
+    private var itemID: UInt64? { UInt64(entry.origin.workshopID) }
+    private var updatePhase: WorkshopDownloadCoordinator.DownloadPhase {
+        guard let itemID else { return .idle }
+        return downloadCoordinator.phase(for: itemID)
+    }
+    private var isUpdateRetry: Bool {
+        if case .failed = updatePhase { return true }
+        return false
+    }
 
     var body: some View {
         ScrollView {
@@ -753,7 +791,7 @@ private struct WPEInstalledInspectorContent: View {
                         .fixedSize(horizontal: false, vertical: true)
 
                     typePill
-                    if hasUpdate { updateNote }
+                    if hasUpdate { updateSection }
                     unsupportedWarning
                     if !activeScreenIDs.isEmpty { inUseRow }
 
@@ -816,10 +854,68 @@ private struct WPEInstalledInspectorContent: View {
             .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: DesignTokens.Corner.sm, style: .continuous))
     }
 
-    private var updateNote: some View {
-        Label("Update available on Steam", systemImage: "arrow.triangle.2.circlepath")
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(.orange)
+    @ViewBuilder
+    private var updateSection: some View {
+        VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
+            Label("Update available on Steam", systemImage: "arrow.triangle.2.circlepath")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.orange)
+
+            switch updatePhase {
+            case .downloading, .importing:
+                updateProgressRow
+            default:
+                Button(action: onUpdate) {
+                    Label(isUpdateRetry ? "Retry Update" : "Update", systemImage: "arrow.down.circle")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(!canUpdate)
+                .help(canUpdate
+                      ? Text("Re-download the latest version from Steam")
+                      : Text("Set up SteamCMD in Settings → Workshop to enable updates."))
+
+                if case .failed(let message) = updatePhase {
+                    Text(verbatim: message)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if !canUpdate {
+                    Text("Updates use SteamCMD (Settings → Workshop → SteamCMD Doctor).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var updateProgressRow: some View {
+        HStack(spacing: DesignTokens.Spacing.sm) {
+            if let itemID, let fraction = downloadCoordinator.progress[itemID] {
+                ProgressView(value: fraction)
+                    .progressViewStyle(.linear)
+                Text(verbatim: "\(Int((fraction * 100).rounded()))%")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            } else {
+                ProgressView().controlSize(.small)
+                Text(updatePhase == .importing ? "Importing…" : "Downloading…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+            Button {
+                if let itemID { downloadCoordinator.cancel(itemID) }
+            } label: {
+                Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help(Text("Cancel update"))
+            .accessibilityLabel(Text("Cancel update"))
+        }
     }
 
     @ViewBuilder

@@ -32,6 +32,10 @@ struct WPEHistoryRow: View {
     /// "Update available" badge — set when the installed item's Workshop
     /// `timeUpdated` is newer than its import (Installed library only).
     var hasUpdate: Bool = false
+    /// Re-download the newer Workshop version. Non-nil only in the Installed
+    /// library when an update is available and SteamCMD is ready; adds a
+    /// context-menu item. The Scene tab leaves it nil.
+    var onUpdate: (() -> Void)? = nil
 
     @State private var isHovering = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -51,6 +55,12 @@ struct WPEHistoryRow: View {
                     Button("Apply to All Displays", action: onApplyToAll)
                 }
                 if !screens.isEmpty { Divider() }
+            }
+            if hasUpdate, let onUpdate {
+                Button(action: onUpdate) {
+                    Label("Update from Steam", systemImage: "arrow.triangle.2.circlepath")
+                }
+                Divider()
             }
             if let onBookmark {
                 Button(isBookmarked ? "Remove Bookmark" : "Add Bookmark", action: onBookmark)
