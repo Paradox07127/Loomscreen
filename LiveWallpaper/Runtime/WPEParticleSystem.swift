@@ -15,16 +15,26 @@ struct WPEParticleInstance {
 /// One-shot world-space placement applied to a `WPEParticleSystem` at
 /// load time.
 ///
-/// **Mixed coordinate convention** (do not unify naively):
+/// **Coordinate convention: WPE author space is Y-up, bottom-left
+/// origin throughout — NO Y-flip anywhere.** Scene-object `origin`,
+/// emitter `origin`, per-particle `velocity`, and `gravity` are all
+/// used as authored, and the Metal vertex stage is also Y-up, so the
+/// pipeline runs one consistent Y-up frame. Only the scene-object's
+/// `angles.z` rotation is negated (`Rz(-angleZ)`) because WPE's
+/// clockwise author rotation maps to the Y-up frame's counter-clockwise
+/// sense (that sign is about rotation *direction*, not position/velocity
+/// Y, and is verified independently).
 ///
-///   - **Scene-object `origin`** is in WPE's artist-friendly Y-up
-///     bottom-left frame; we center it (`-W/2, -H/2`).
-///   - **Everything inside the emitter** (emitter `origin`,
-///     `directions.y`, per-particle `velocity.y`, `gravity.y`, and
-///     `angles.x/z` on the scene-object's rotation) is Y-down
-///     top-left (D3D/Win32 convention). We Y-flip those once at spawn
-///     so the simulator runs in a single Y-up frame, and we negate
-///     `angles.x/z` on the rotation matrix to match.
+/// **Do NOT re-add an "emitter-internal Y-down" flip on
+/// `velocity.y`/`gravity.y`/`origin.y`.** P7 (`dfbccce`) did exactly
+/// that, believing it made leaves fall — it actually *inverted* every
+/// leaf scene. The trap: scenes 3526278753 (saber) and 3725117707 share
+/// ONE leaves preset but differ by a ~159° emitter rotation, so under
+/// the correct no-flip Y-up convention the saber's leaves fall (down)
+/// while 3725117707's rotated emitter sends them up. Whoever "fixes"
+/// one scene's direction by toggling the global flip silently inverts
+/// the other (this oscillated P4→P6→P7). The flip is the bug, not the
+/// fix.
 struct WPEParticleSceneTransform {
     /// Scene-object origin in the centered render frame.
     var renderOrigin: SIMD3<Float>
@@ -199,12 +209,11 @@ final class WPEParticleSystem {
         buffer.label = "WPE particle instances"
         self.instanceBuffer = buffer
         self.rng = SystemRandomNumberGenerator()
-        // Emitter-internal Y-down: author writes `+gy` for "pull down
-        // on screen" (Win32 graphics convention). Y-flip once into the
-        // Y-up simulator, then honor object scale/rotation like velocity.
+        // Y-up author space: gravity is used as authored (no flip), then
+        // honored through the scene object's scale/rotation like velocity.
         let localGravity = SIMD3<Float>(
             Float(definition.gravity.x),
-            -Float(definition.gravity.y),
+            Float(definition.gravity.y),
             Float(definition.gravity.z)
         )
         self.gravity = sceneTransform.applyModelDirection(localGravity)
@@ -444,10 +453,11 @@ final class WPEParticleSystem {
         let theta = Double.random(in: 0..<2 * .pi, using: &rng)
         let phi = Double.random(in: 0..<(.pi), using: &rng)
         let radius = uniform(definition.dispersalMin, definition.dispersalMax)
-        // Emitter-internal Y-down → Y-up Y-flip on everything that lives
-        // inside the emitter local frame: directions.y, emitter origin,
-        // per-particle velocity. Scene-object origin (the outer T term
-        // in the model matrix) is NOT flipped — see WPEParticleSceneTransform.
+        // Y-up author space: emitter origin and per-particle velocity are
+        // used as authored (no Y-flip). The scene object's scale/rotation
+        // is then applied via applyModelMatrix/applyModelDirection — that
+        // rotation is what makes the SAME leaves preset rise in a rotated
+        // emitter (3725117707) yet fall in an un-rotated one (saber).
         let dispersal = Self.dispersalVector(
             radius: radius,
             theta: theta,
@@ -460,12 +470,11 @@ final class WPEParticleSystem {
         )
         let emitterOriginLocal = SIMD3<Float>(
             Float(definition.originOffset.x),
-            -Float(definition.originOffset.y),
+            Float(definition.originOffset.y),
             Float(definition.originOffset.z)
         )
         let localPoint = emitterOriginLocal + dispersal
-        let sampledVelocity = uniformVector(definition.velocityMin, definition.velocityMax)
-        let localVelocity = SIMD3<Float>(sampledVelocity.x, -sampledVelocity.y, sampledVelocity.z)
+        let localVelocity = uniformVector(definition.velocityMin, definition.velocityMax)
         let position = sceneTransform.applyModelMatrix(toLocalPoint: localPoint)
         let velocity = sceneTransform.applyModelDirection(localVelocity)
         let sizeScale = sceneTransform.worldSizeMultiplier()

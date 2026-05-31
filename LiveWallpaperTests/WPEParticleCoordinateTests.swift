@@ -108,11 +108,11 @@ struct WPEParticleCoordinateTests {
         #expect(abs(spread.x - 30) < 0.0001)
     }
 
-    @Test("Emitter origin Y is flipped at spawn (Y-down emitter convention)")
-    func emitterOriginYFlippedAtSpawn() throws {
+    @Test("Emitter origin is used as authored — Y-up, no flip")
+    func emitterOriginIsNotYFlipped() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
-        // Author emitter origin (100, 200) in Y-down local frame
-        // → Y-flipped to (100, -200) before composition.
+        // Author emitter origin (100, 200) is Y-up bottom-left like the
+        // rest of the author space — used as-is, NOT flipped to -200.
         let def = makeDefinition(originOffset: SIMD3(100, 200, 0))
         let transform = WPEParticleSceneTransform(
             sceneSize: SIMD2<Float>(1920, 1080),
@@ -131,18 +131,18 @@ struct WPEParticleCoordinateTests {
         #expect(system.liveInstanceCount > 0)
         let inst = system.instanceBuffer.contents()
             .bindMemory(to: WPEParticleInstance.self, capacity: 4)[0]
-        // renderOrigin (40, 0) + emitter origin Y-flipped (100, -200) = (140, -200).
+        // renderOrigin (40, 0) + emitter origin as-authored (100, +200) = (140, +200).
         #expect(abs(inst.positionAndSize.x - 140) < 0.5)
-        #expect(abs(inst.positionAndSize.y - (-200)) < 0.5)
+        #expect(abs(inst.positionAndSize.y - 200) < 0.5)
     }
 
-    @Test("Velocity Y is flipped at spawn (emitter-local Y-down convention)")
-    func velocityIsYFlipped() throws {
+    @Test("Velocity is used as authored — Y-up, no flip (negative vy drifts down)")
+    func velocityIsNotYFlipped() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         // sceneObject origin (960, 540) → renderOrigin (0, 0)
-        // emitter origin (0,0,0) → emitter-local Y-flipped (0,0)
-        // velocity (0, -50) → Y-flipped (0, +50)
-        // spawn position = (0, 0); after ~0.2s of integration → y ≈ +10
+        // emitter origin (0,0,0); velocity (0, -50) used as-is (Y-up):
+        // negative vy → particle drifts DOWN (negative Y) on screen.
+        // This is the un-rotated case (saber 3526278753): leaves fall.
         let def = makeDefinition(
             originOffset: SIMD3(0, 0, 0),
             velocityMin: SIMD3(0, -50, 0),
@@ -165,8 +165,43 @@ struct WPEParticleCoordinateTests {
         }
         let inst = system.instanceBuffer.contents()
             .bindMemory(to: WPEParticleInstance.self, capacity: 4)[0]
-        // y > 0 confirms the Y-flip on velocity put the particle into
-        // the upper half despite the JSON's negative vy.
+        // y < 0 confirms no Y-flip: the JSON's negative vy drifts the
+        // particle DOWN, not up (the P7 flip wrongly sent it up).
+        #expect(inst.positionAndSize.y < -5)
+    }
+
+    @Test("Rotated emitter sends negative-vy leaves UP (3725117707 case)")
+    func rotatedEmitterInvertsVerticalDrift() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        // Same preset as the saber (velocity (0,-50), would fall down
+        // un-rotated), but the scene object is rotated ~159° like
+        // 3725117707's leaf layer. The rotation flips the vertical
+        // component, so the SAME negative vy now drifts the leaves UP.
+        // This is why a single no-flip convention yields opposite
+        // on-screen directions for the two scenes — and why toggling a
+        // global Y-flip to "fix" one silently inverts the other.
+        let def = makeDefinition(
+            originOffset: SIMD3(0, 0, 0),
+            velocityMin: SIMD3(0, -50, 0),
+            velocityMax: SIMD3(0, -50, 0)
+        )
+        let transform = WPEParticleSceneTransform(
+            sceneSize: SIMD2<Float>(4216, 2416),
+            objectOrigin: SIMD3<Float>(2108, 1208, 0), // renderOrigin (0, 0)
+            objectScale: SIMD3<Float>(3, 3, 1),
+            objectAngleZ: 2.77231
+        )
+        let system = try #require(WPEParticleSystem(
+            definition: def,
+            device: device,
+            blendMode: .translucent,
+            sceneTransform: transform
+        ))
+        for step in 1...5 {
+            system.tick(now: Double(step) * 0.05)
+        }
+        let inst = system.instanceBuffer.contents()
+            .bindMemory(to: WPEParticleInstance.self, capacity: 4)[0]
         #expect(inst.positionAndSize.y > 5)
     }
 
