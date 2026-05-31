@@ -310,10 +310,14 @@ struct WorkshopBrowsePane: View {
 
     private var hasActiveFilters: Bool {
         !viewModel.searchInput.isEmpty
-            || viewModel.typeFilter != .all
-            || viewModel.selectedAgeRatings != WorkshopAgeRatingFilter.defaultSelection
-            || viewModel.resolution != .any
-            || !viewModel.selectedGenres.isEmpty
+            || isNarrowing(viewModel.selectedTypes, total: WorkshopContentTypeFilter.selectableCases.count)
+            || isNarrowing(viewModel.selectedAgeRatings, total: WorkshopAgeRatingFilter.allCases.count)
+            || isNarrowing(viewModel.selectedResolutions, total: WorkshopResolutionFilter.selectableCases.count)
+            || isNarrowing(viewModel.selectedGenres, total: WorkshopGenre.allTags.count)
+    }
+
+    private func isNarrowing<T>(_ selected: Set<T>, total: Int) -> Bool {
+        !selected.isEmpty && selected.count < total
     }
 
     private var currentRateLimitRemaining: TimeInterval {
