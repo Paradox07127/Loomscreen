@@ -830,11 +830,30 @@ final class WPEMetalRenderExecutor {
             sceneSize: frameState.sceneSize,
             avoiding: destinationTexture
         )
-        if let source = frameState.latestSceneTexture {
+        if let source = frameState.currentFrameSceneTexture {
             try copyTexture(source, to: snapshot, commandBuffer: commandBuffer)
+            frameState.markInitialized(snapshot)
+        } else {
+            try clearTexture(snapshot, color: clearColor(for: .scene), commandBuffer: commandBuffer)
             frameState.markInitialized(snapshot)
         }
         frameState.latestNamedTextures[alias] = snapshot
+    }
+
+    private func clearTexture(
+        _ texture: MTLTexture,
+        color: MTLClearColor,
+        commandBuffer: MTLCommandBuffer
+    ) throws {
+        let descriptor = MTLRenderPassDescriptor()
+        descriptor.colorAttachments[0].texture = texture
+        descriptor.colorAttachments[0].loadAction = .clear
+        descriptor.colorAttachments[0].storeAction = .store
+        descriptor.colorAttachments[0].clearColor = color
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
+            throw WPEMetalRenderExecutorError.commandBufferFailed
+        }
+        encoder.endEncoding()
     }
 
     /// Phase 2C audit fix: blit-copies a prior physical texture into the pool's secondary slot so ping-pong renders that blend or depth-test have a defined source to load.

@@ -60,6 +60,10 @@ struct WPEMetalFrameState {
         }
     }
 
+    var currentFrameSceneTexture: MTLTexture? {
+        writtenTargets.contains(.scene) ? latestSceneTexture : nil
+    }
+
     mutating func registerWrite(texture: MTLTexture, targetID: WPEMetalTargetID) {
         writtenTargets.insert(targetID)
         initializedTextures.insert(ObjectIdentifier(texture))

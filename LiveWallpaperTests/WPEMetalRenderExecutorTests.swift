@@ -2229,6 +2229,49 @@ private extension WPEMetalRenderExecutorTests {
         #expect(pixel.a >= 250)
     }
 
+    @Test("Scene alias does not bootstrap from the previous frame")
+    func sceneAliasDoesNotBootstrapFromPreviousFrame() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+
+        let seedWhite = solidPass(
+            id: "seed.0",
+            color: [1, 1, 1, 1],
+            target: .scene,
+            blending: "disabled"
+        )
+        _ = try executor.render(
+            pipeline: preparedPipeline(
+                localFBOs: [],
+                passes: [preparedBuiltinPass(seedWhite, uniforms: ["g_Color": .vector([1, 1, 1, 1])])]
+            ),
+            size: CGSize(width: 4, height: 4),
+            textures: [:]
+        )
+
+        let readFullFrameBuffer = copyPass(
+            id: "alias.0",
+            source: .fbo("_rt_FullFrameBuffer"),
+            target: .scene,
+            blending: "disabled"
+        )
+        let output = try executor.render(
+            pipeline: preparedPipeline(
+                localFBOs: [],
+                passes: [
+                    preparedBuiltinPass(readFullFrameBuffer, bindings: [0: .fbo("_rt_FullFrameBuffer")])
+                ]
+            ),
+            size: CGSize(width: 4, height: 4),
+            textures: [:]
+        )
+
+        let pixel = try readPixel(output, x: 2, y: 2)
+        #expect(pixel.r <= 5)
+        #expect(pixel.g <= 5)
+        #expect(pixel.b <= 5)
+    }
+
     @Test("Routes declared non-underscore FBO target into a later FBO source")
     func routesDeclaredFBOTargetIntoScene() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())

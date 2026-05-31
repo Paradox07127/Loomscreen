@@ -42,7 +42,7 @@ enum WPEMetalShaderInputs {
                 return texture
             }
             if Self.isSceneAliasName(name) {
-                return frameState.latestSceneTexture ?? frameState.output
+                return frameState.currentFrameSceneTexture ?? frameState.output
             }
             if let aliased = resolveAliasedNamedTexture(name: name, frameState: frameState) {
                 return aliased

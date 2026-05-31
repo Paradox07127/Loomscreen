@@ -748,8 +748,17 @@ struct WPEMetalShaderDispatcher {
         var primary: MTLTexture? = nil
         var resolvedTexturesBySlot: [Int: MTLTexture] = [:]
         for slot in 0..<WPEShaderTranspiler.customTextureSlotCount {
-            let reference = pass.pass.binds[slot]
-                ?? pass.textureBindings[slot]
+            // `textureBindings` is the pipeline-builder's *normalized* binding
+            // table: it already rewrites an effect-bind `previous` to the pass's
+            // source (the layer composite feeding this effect). The raw
+            // `pass.pass.binds` still carries the literal `.previous`, which
+            // resolves to the black "bootstrap previous" texture on a target
+            // with no prior-frame history (e.g. shine_combine's slot-1 albedo
+            // bound `{name:"previous"}` → whole layer renders black). Prefer the
+            // normalized table first, matching every other dispatch path
+            // (`textureBindings[slot] ?? textures[slot] ?? source`).
+            let reference = pass.textureBindings[slot]
+                ?? pass.pass.binds[slot]
                 ?? pass.pass.textures[slot]
             let texture: MTLTexture?
             let resolvedReference: WPETextureReference?
