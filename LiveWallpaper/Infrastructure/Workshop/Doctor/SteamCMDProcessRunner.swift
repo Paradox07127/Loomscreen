@@ -70,25 +70,28 @@ actor SteamCMDProcessRunner {
     nonisolated static func parseDownloadProgressLine(_ line: String) -> SteamCMDDownloadProgress? {
         guard let progressRange = line.range(of: "progress:") else { return nil }
         let tail = line[progressRange.upperBound...]
-        guard let bytesStart = tail.firstIndex(of: "("),
-              let bytesEnd = tail[bytesStart...].firstIndex(of: ")")
-        else { return nil }
 
-        let percentText = tail[..<bytesStart].trimmingCharacters(in: .whitespacesAndNewlines)
-        let bytesText = tail[tail.index(after: bytesStart)..<bytesEnd]
-        let byteParts = bytesText.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false)
-        guard byteParts.count == 2,
-              let percent = Double(percentText),
-              let downloaded = UInt64(byteParts[0].trimmingCharacters(in: .whitespacesAndNewlines)),
-              let total = UInt64(byteParts[1].trimmingCharacters(in: .whitespacesAndNewlines)) else {
-            return nil
+        // Preferred form with byte detail: `progress: 42.34 (12345 / 67890)`.
+        if let bytesStart = tail.firstIndex(of: "("),
+           let bytesEnd = tail[bytesStart...].firstIndex(of: ")") {
+            let percentText = tail[..<bytesStart].trimmingCharacters(in: .whitespacesAndNewlines)
+            let bytesText = tail[tail.index(after: bytesStart)..<bytesEnd]
+            let byteParts = bytesText.split(separator: "/", maxSplits: 1, omittingEmptySubsequences: false)
+            if byteParts.count == 2,
+               let percent = Double(percentText),
+               let downloaded = UInt64(byteParts[0].trimmingCharacters(in: .whitespacesAndNewlines)),
+               let total = UInt64(byteParts[1].trimmingCharacters(in: .whitespacesAndNewlines)) {
+                return SteamCMDDownloadProgress(percent: percent, downloadedBytes: downloaded, totalBytes: total)
+            }
         }
 
-        return SteamCMDDownloadProgress(
-            percent: percent,
-            downloadedBytes: downloaded,
-            totalBytes: total
-        )
+        // Percent-only fallback: `progress: 42.34` (SteamCMD frequently omits the
+        // byte detail for workshop_download_item, which previously left the UI
+        // stuck on an indeterminate spinner with no progress bar). The download
+        // size for the label then comes from the item's known file size.
+        let numericPrefix = tail.drop(while: { $0 == " " }).prefix(while: { $0.isNumber || $0 == "." })
+        guard let percent = Double(numericPrefix), percent.isFinite, percent >= 0 else { return nil }
+        return SteamCMDDownloadProgress(percent: percent, downloadedBytes: nil, totalBytes: nil)
     }
 
     // MARK: - Spawn

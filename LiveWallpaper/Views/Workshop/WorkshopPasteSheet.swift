@@ -20,7 +20,7 @@ struct WorkshopPasteSheet: View {
             Divider()
             queueArea
         }
-        .frame(minWidth: 620, idealWidth: 720, minHeight: 520, idealHeight: 620)
+        .frame(minWidth: 440, idealWidth: 500, minHeight: 340, idealHeight: 420)
         .background(DesignTokens.Colors.pageBackground)
         .overlay(alignment: .bottom) {
             DiagnosticExportToast(isPresented: $toastVisible)
@@ -55,20 +55,25 @@ struct WorkshopPasteSheet: View {
             Button {
                 model.openAllInSteam()
             } label: {
-                Label("Open all in Steam", systemImage: "arrow.up.forward.app.fill")
-                    .font(.system(size: 12, weight: .medium))
+                Image(systemName: "arrow.up.forward.app.fill")
             }
+            .controlSize(.small)
             .disabled(model.rows.isEmpty)
+            .help(Text("Open all in Steam"))
+            .accessibilityLabel(Text("Open all in Steam"))
 
             Button(role: .destructive) {
                 model.removeAll()
             } label: {
-                Label("Clear queue", systemImage: "trash")
-                    .font(.system(size: 12, weight: .medium))
+                Image(systemName: "trash")
             }
+            .controlSize(.small)
             .disabled(model.rows.isEmpty)
+            .help(Text("Clear queue"))
+            .accessibilityLabel(Text("Clear queue"))
 
             Button("Done") { dismiss() }
+                .controlSize(.small)
                 .keyboardShortcut(.cancelAction)
         }
         .padding(.horizontal, DesignTokens.Settings.formHorizontalMargin)
@@ -105,7 +110,7 @@ struct WorkshopPasteSheet: View {
                         .allowsHitTesting(false)
                 }
             }
-            .frame(minHeight: 90, maxHeight: 130)
+            .frame(minHeight: 66, maxHeight: 96)
 
             HStack(spacing: 8) {
                 if let summary = model.lastIngestionSummary, summary != .init(added: 0, duplicates: 0, invalid: 0) {

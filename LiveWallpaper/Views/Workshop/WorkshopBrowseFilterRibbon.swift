@@ -71,7 +71,6 @@ struct WorkshopBrowseFilterRibbon: View {
         HStack(spacing: DesignTokens.Spacing.md) {
             searchField
 
-            typeChips
             sortMenu
             filtersToggle
 
@@ -89,21 +88,6 @@ struct WorkshopBrowseFilterRibbon: View {
                 setKeyButton
             }
         }
-    }
-
-    private var typeChips: some View {
-        HStack(spacing: 6) {
-            ForEach(WorkshopContentTypeFilter.allCases) { type in
-                FilterChip(
-                    title: Text(type.displayName),
-                    isSelected: viewModel.typeFilter == type
-                ) {
-                    viewModel.updateType(type)
-                }
-                .disabled(controlsDisabled)
-            }
-        }
-        .fixedSize(horizontal: true, vertical: false)
     }
 
     /// Sort menu with the Trending window folded in as discrete entries, so
@@ -159,10 +143,23 @@ struct WorkshopBrowseFilterRibbon: View {
 
     private var filterPanel: some View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
+            filterRow("Type") {
+                HStack(spacing: 6) {
+                    ForEach(WorkshopContentTypeFilter.selectableCases) { type in
+                        WorkshopFilterChip(
+                            title: Text(type.displayName),
+                            isSelected: viewModel.selectedTypes.contains(type)
+                        ) {
+                            viewModel.toggleType(type)
+                        }
+                    }
+                }
+            }
+
             filterRow("Maturity") {
                 HStack(spacing: 6) {
                     ForEach(WorkshopAgeRatingFilter.allCases) { rating in
-                        FilterChip(
+                        WorkshopFilterChip(
                             title: Text(verbatim: rating.displayName),
                             isSelected: viewModel.selectedAgeRatings.contains(rating)
                         ) {
@@ -170,17 +167,16 @@ struct WorkshopBrowseFilterRibbon: View {
                         }
                     }
                 }
-                .help(Text("Pick which maturity ratings to show — independent, multi-select."))
             }
 
             filterRow("Resolution") {
                 chipScroll {
-                    ForEach(WorkshopResolutionFilter.allCases) { resolution in
-                        FilterChip(
+                    ForEach(WorkshopResolutionFilter.selectableCases) { resolution in
+                        WorkshopFilterChip(
                             title: Text(verbatim: resolution.displayName),
-                            isSelected: viewModel.resolution == resolution
+                            isSelected: viewModel.selectedResolutions.contains(resolution)
                         ) {
-                            viewModel.updateResolution(resolution)
+                            viewModel.toggleResolution(resolution)
                         }
                     }
                 }
@@ -189,7 +185,7 @@ struct WorkshopBrowseFilterRibbon: View {
             filterRow("Genre") {
                 chipScroll {
                     ForEach(WorkshopGenre.allTags, id: \.self) { tag in
-                        FilterChip(
+                        WorkshopFilterChip(
                             title: Text(verbatim: tag),
                             isSelected: viewModel.selectedGenres.contains(tag)
                         ) {
@@ -357,14 +353,19 @@ struct WorkshopBrowseFilterRibbon: View {
         !hasWebAPIKey || viewModel.isRateLimited
     }
 
-    /// Active non-default filters, surfaced as the Filters badge.
+    /// Number of filter categories currently narrowing results (a proper,
+    /// non-empty subset), surfaced as the Filters badge.
     private var activeFilterCount: Int {
         var count = 0
-        if viewModel.typeFilter != .all { count += 1 }
-        if viewModel.selectedAgeRatings != WorkshopAgeRatingFilter.defaultSelection { count += 1 }
-        if viewModel.resolution != .any { count += 1 }
-        count += viewModel.selectedGenres.count
+        if isNarrowing(viewModel.selectedTypes, total: WorkshopContentTypeFilter.selectableCases.count) { count += 1 }
+        if isNarrowing(viewModel.selectedAgeRatings, total: WorkshopAgeRatingFilter.allCases.count) { count += 1 }
+        if isNarrowing(viewModel.selectedResolutions, total: WorkshopResolutionFilter.selectableCases.count) { count += 1 }
+        if isNarrowing(viewModel.selectedGenres, total: WorkshopGenre.allTags.count) { count += 1 }
         return count
+    }
+
+    private func isNarrowing<T>(_ selected: Set<T>, total: Int) -> Bool {
+        !selected.isEmpty && selected.count < total
     }
 
     // MARK: - Sort options (Trending period folded in)
@@ -421,6 +422,37 @@ struct WorkshopBrowseFilterRibbon: View {
             case .trendingYear: return "Trending · Year"
             }
         }
+    }
+}
+
+/// Multi-select filter chip with a clear blue border when selected (tap again
+/// to deselect). Scoped to the Workshop filter panel so the bolder selected
+/// treatment doesn't leak into the shared `FilterChip` used elsewhere.
+private struct WorkshopFilterChip: View {
+    let title: Text
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            title
+                .font(.system(size: 11, weight: .medium))
+                .lineLimit(1)
+                .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule().fill(isSelected ? Color.blue.opacity(0.12) : Color.primary.opacity(0.05))
+                )
+                .overlay(
+                    Capsule().strokeBorder(
+                        isSelected ? Color.blue : Color.primary.opacity(0.10),
+                        lineWidth: isSelected ? 1.5 : 0.5
+                    )
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 #endif

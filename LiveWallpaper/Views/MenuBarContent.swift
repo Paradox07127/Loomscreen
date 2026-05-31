@@ -20,7 +20,9 @@ struct MenuBarContent: View {
     private var monitor: SystemMonitor { .shared }
 
     private var isWallpaperEnabled: Bool {
-        screenManager.wallpaperOverviewStatus == .active
+        // The master switch reflects the independent render gate — NOT whether a
+        // screen is currently playing/paused (that's per-screen state).
+        screenManager.wallpapersGloballyEnabled
     }
 
     private var isWallpaperSwitchDisabled: Bool {

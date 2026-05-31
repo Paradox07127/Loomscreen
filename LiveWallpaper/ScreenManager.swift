@@ -74,6 +74,16 @@ final class ScreenManager {
     // MARK: - Properties
 
     private(set) var screens: [Screen] = []
+    /// Master render gate: whether ALL wallpaper pipelines may display. Persisted
+    /// and INDEPENDENT of per-screen play/pause — the menu-bar master switch
+    /// reflects exactly this flag, not whether any screen happens to be playing.
+    private(set) var wallpapersGloballyEnabled: Bool = ScreenManager.loadGloballyEnabled()
+
+    private static let globallyEnabledDefaultsKey = "loomscreen.wallpapers.globallyEnabled.v1"
+    private static func loadGloballyEnabled() -> Bool {
+        UserDefaults.standard.object(forKey: globallyEnabledDefaultsKey) as? Bool ?? true
+    }
+
     /// Single observable snapshot of derived wallpaper-session state. Every
     /// mutation flows through `commitWallpaperSessionState()`, which builds
     /// a new value, compares it against the current snapshot, and assigns
@@ -674,6 +684,13 @@ final class ScreenManager {
         updatePlaybackState()
         updateFullScreenFallbackPolling()
 
+        // Enforce a persisted "off" master gate on freshly-restored sessions.
+        // Only when disabled — when enabled we leave visibility to the normal
+        // power / full-screen policies rather than force-showing here.
+        if !wallpapersGloballyEnabled {
+            applyGlobalRenderGate()
+        }
+
         NotificationCenter.default.post(name: .screensRefreshed, object: nil)
     }
 
@@ -980,28 +997,34 @@ final class ScreenManager {
         updatePlaybackState()
     }
 
+    /// Master render gate. Toggles whether wallpaper pipelines render at all by
+    /// showing/suspending every session — deliberately WITHOUT touching
+    /// per-screen playback (`play()`/`pause()`), so flipping this neither reads
+    /// nor mutates whether an individual screen is paused. The flag is persisted
+    /// and is the single source of truth for the menu-bar master switch.
     func setWallpapersEnabled(_ enabled: Bool) {
-        guard !screens.isEmpty else { return }
+        wallpapersGloballyEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: Self.globallyEnabledDefaultsKey)
+        Logger.info("\(enabled ? "Enabling" : "Disabling") all wallpaper rendering (master gate)", category: .screenManager)
 
-        Logger.info("\(enabled ? "Enabling" : "Disabling") all wallpaper sessions from menu bar", category: .screenManager)
+        applyGlobalRenderGate()
+        markWallpaperSessionStateChanged()
+    }
 
+    /// Apply the master gate to every live session (show+resume when enabled,
+    /// suspend+hide when disabled). Idempotent; safe to call after sessions are
+    /// (re)built so the gate also holds across launches and new wallpapers.
+    func applyGlobalRenderGate() {
         for screen in screens {
             guard let session = screen.runtimeSession else { continue }
-
-            if enabled {
+            if wallpapersGloballyEnabled {
                 session.show()
-                if let playback = screen.playbackController {
-                    playback.play()
-                } else {
-                    session.resume()
-                }
+                session.resume()
             } else {
-                screen.playbackController?.pause()
+                session.suspend()
                 session.hide()
             }
         }
-
-        markWallpaperSessionStateChanged()
     }
     
     // MARK: - Power Management

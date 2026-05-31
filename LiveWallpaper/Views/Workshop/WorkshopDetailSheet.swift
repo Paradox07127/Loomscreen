@@ -17,6 +17,10 @@ struct WorkshopInspectorContent: View {
     var onClose: () -> Void = {}
 
     @Environment(\.openURL) private var openURL
+    @Environment(ScreenManager.self) private var screenManager
+    /// The installed-library entry for this item, if it's already downloaded —
+    /// drives the Download → Apply swap.
+    @State private var installedEntry: WPEHistoryEntry?
 
     private var downloadCoordinator: WorkshopDownloadCoordinator { .shared }
     private var downloadPhase: WorkshopDownloadCoordinator.DownloadPhase {
@@ -40,6 +44,13 @@ struct WorkshopInspectorContent: View {
                         .font(.title3.weight(.semibold))
                         .fixedSize(horizontal: false, vertical: true)
 
+                    if let author = item.creatorPersonaName, !author.isEmpty {
+                        Text("by \(author)", comment: "Workshop item author line. Placeholder is the creator's Steam persona name.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
                     ratingRow
                     metaRow
                     statusBadge
@@ -60,6 +71,17 @@ struct WorkshopInspectorContent: View {
             }
         }
         .background(DesignTokens.Colors.pageBackground)
+        .onAppear { refreshInstalledEntry() }
+        .onChange(of: item.id) { _, _ in refreshInstalledEntry() }
+        .onReceive(NotificationCenter.default.publisher(for: .wpeHistoryDidChange)) { _ in
+            refreshInstalledEntry()
+        }
+    }
+
+    private func refreshInstalledEntry() {
+        let id = String(item.id)
+        installedEntry = SettingsManager.shared.loadGlobalSettings().recentWPEImports
+            .first { $0.origin.workshopID == id }
     }
 
     // MARK: - Close
@@ -163,30 +185,74 @@ struct WorkshopInspectorContent: View {
     @ViewBuilder
     private var downloadControl: some View {
         switch downloadPhase {
-        case .idle, .failed:
-            Button {
-                downloadCoordinator.download(item, using: doctor)
-            } label: {
-                Label(downloadButtonTitle, systemImage: "arrow.down.circle")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            .disabled(!doctor.isDownloadReady || item.isBanned)
-            .help(Text(doctor.isDownloadReady
-                       ? "Download with SteamCMD and add it to your library"
-                       : "Set up SteamCMD in Settings → Workshop → SteamCMD Doctor to enable downloads."))
-
         case .downloading:
             downloadProgressControl
-
         case .importing:
             indeterminateDownloadControl("Importing…")
+        default:
+            // Once it's in the library (just downloaded OR previously installed)
+            // the control becomes Apply; otherwise it's Download / Retry.
+            if let installedEntry {
+                applyControl(for: installedEntry)
+            } else {
+                downloadButton
+            }
+        }
+    }
 
-        case .succeeded:
-            Label("Added to Library", systemImage: "checkmark.circle.fill")
-                .foregroundStyle(.green)
+    private var downloadButton: some View {
+        Button {
+            downloadCoordinator.download(item, using: doctor)
+        } label: {
+            Label(downloadButtonTitle, systemImage: "arrow.down.circle")
                 .frame(maxWidth: .infinity)
         }
+        .buttonStyle(.bordered)
+        .disabled(!doctor.isDownloadReady || item.isBanned)
+        .help(Text(doctor.isDownloadReady
+                   ? "Download with SteamCMD and add it to your library"
+                   : "Set up SteamCMD in Settings → Workshop → SteamCMD Doctor to enable downloads."))
+    }
+
+    /// Prominent blue Apply — targets the open display(s), mirroring the
+    /// Installed library. Shown once the item is in the local library.
+    @ViewBuilder
+    private func applyControl(for entry: WPEHistoryEntry) -> some View {
+        let screens = screenManager.screens
+        if screens.count > 1 {
+            Menu {
+                ForEach(screens, id: \.id) { screen in
+                    Button("Apply to \(screen.name)") { apply(entry, to: screen) }
+                }
+                Divider()
+                Button("Apply to All Displays") { for screen in screens { apply(entry, to: screen) } }
+            } label: {
+                applyLabel
+            }
+            .menuStyle(.button)
+            .buttonStyle(.borderedProminent)
+            .controlSize(.regular)
+            .menuIndicator(.hidden)
+            .tint(.blue)
+        } else if let only = screens.first {
+            Button { apply(entry, to: only) } label: { applyLabel }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+                .tint(.blue)
+        } else {
+            Button {} label: { applyLabel }
+                .buttonStyle(.bordered)
+                .disabled(true)
+                .help(Text("Open a display first, then apply"))
+        }
+    }
+
+    private var applyLabel: some View {
+        Label("Apply", systemImage: "play.fill").frame(maxWidth: .infinity)
+    }
+
+    private func apply(_ entry: WPEHistoryEntry, to screen: Screen) {
+        Task { await screenManager.activateWPEHistoryEntry(entry, for: screen) }
     }
 
     @ViewBuilder
