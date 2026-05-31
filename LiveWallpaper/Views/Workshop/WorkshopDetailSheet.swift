@@ -285,30 +285,26 @@ struct WorkshopInspectorContent: View {
     @ViewBuilder
     private func applyControl(for entry: WPEHistoryEntry) -> some View {
         let screens = screenManager.screens
-        if screens.count > 1 {
-            Menu {
-                ForEach(screens, id: \.id) { screen in
-                    Button("Apply to \(screen.name)") { apply(entry, to: screen) }
-                }
-                Divider()
-                Button("Apply to All Displays") { for screen in screens { apply(entry, to: screen) } }
-            } label: {
-                applyLabel
-            }
-            .menuStyle(.button)
-            .buttonStyle(.borderedProminent)
-            .controlSize(.regular)
-            .menuIndicator(.hidden)
-        } else if let only = screens.first {
-            Button { apply(entry, to: only) } label: { applyLabel }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.regular)
-        } else {
+        if screens.isEmpty {
             Button {} label: { applyLabel }
                 .buttonStyle(.bordered)
                 .controlSize(.regular)
                 .disabled(true)
                 .help(Text("Open a display first, then apply"))
+        } else if screens.count == 1, let only = screens.first {
+            Button { apply(entry, to: only) } label: { applyLabel }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+        } else {
+            // Multiple displays: apply to all from here. A Menu can't render as a
+            // reliable full-width prominent button, and per-display targeting
+            // already lives in the Installed library (topology map + drag).
+            Button { for screen in screens { apply(entry, to: screen) } } label: {
+                Label("Apply to All Displays", systemImage: "play.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.regular)
         }
     }
 
