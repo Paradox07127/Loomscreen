@@ -27,6 +27,7 @@ struct WorkshopBrowseCard: View {
     @AppStorage("loomscreen.workshop.matureContentConfirmed.v1") private var matureConfirmed = false
     @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     /// Blur the tile until the user clicks to reveal: enabled in settings, the
     /// item is Mature-rated, and it hasn't been revealed yet.
@@ -141,7 +142,7 @@ struct WorkshopBrowseCard: View {
         .foregroundStyle(.white)
         .padding(.horizontal, 6)
         .padding(.vertical, 3)
-        .background { glassBadgeBackground(Color.green.opacity(0.85)) }
+        .background { glassBadgeBackground(Self.inLibraryGreen, opacity: 0.85) }
         .accessibilityHidden(true)
     }
 
@@ -159,13 +160,19 @@ struct WorkshopBrowseCard: View {
         .accessibilityHidden(true)
     }
 
-    /// Liquid-glass scrim for thumbnail overlay badges. The base stays a
-    /// mode-independent dark (or branded) fill so the white glyphs read over any
+    /// Deep brand green for the "In Library" badge — dark enough that the white
+    /// glyphs clear WCAG AA contrast even over bright previews (system green is
+    /// too light). Explicit RGB so it stays constant across light/dark mode.
+    private static let inLibraryGreen = Color(red: 0.08, green: 0.35, blue: 0.15)
+
+    /// Liquid-glass scrim for thumbnail overlay badges. The fill stays a
+    /// mode-independent dark (or branded) tint so the white glyphs read over any
     /// preview — including bright ones, where a translucent material would wash
     /// out — and a thin top-edge specular highlight supplies the glass feel.
-    private func glassBadgeBackground(_ base: Color = .black.opacity(0.6)) -> some View {
+    /// Under Reduce Transparency the fill goes fully opaque for max legibility.
+    private func glassBadgeBackground(_ tint: Color = .black, opacity: Double = 0.6) -> some View {
         Capsule()
-            .fill(base)
+            .fill(tint.opacity(reduceTransparency ? 1 : opacity))
             .overlay(
                 Capsule().strokeBorder(
                     LinearGradient(
@@ -212,7 +219,7 @@ struct WorkshopBrowseCard: View {
         HStack(spacing: 3) {
             if let symbol = Self.typeSymbol(for: type) {
                 Image(systemName: symbol)
-                    .font(.system(size: 8, weight: .bold))
+                    .font(.system(size: 9, weight: .semibold))
             }
             Text(verbatim: type.displayName.uppercased(with: .current))
                 .font(.system(size: 9, weight: .bold))

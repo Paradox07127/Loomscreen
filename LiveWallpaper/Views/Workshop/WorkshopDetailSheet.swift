@@ -219,7 +219,8 @@ struct WorkshopInspectorContent: View {
                 Label("Open in Steam", systemImage: "arrow.up.forward.app")
                     .frame(maxWidth: .infinity)
             }
-            .adaptiveGlassButton(.prominent)
+            .buttonStyle(.bordered)
+            .controlSize(.regular)
             .help(Text("Open this item on the Steam Community website"))
 
             downloadControl
@@ -269,7 +270,7 @@ struct WorkshopInspectorContent: View {
             Label(downloadButtonTitle, systemImage: "arrow.down.circle")
                 .frame(maxWidth: .infinity)
         }
-        .buttonStyle(.bordered)
+        .adaptiveGlassButton(.prominent)
         .disabled(!doctor.isDownloadReady || item.isBanned)
         .help(Text(doctor.isDownloadReady
                    ? "Download with SteamCMD and add it to your library"
