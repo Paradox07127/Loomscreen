@@ -855,7 +855,6 @@ private struct WPEInstalledInspectorContent: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
-                .tint(.blue)
             } else {
                 ScreenTopologyMap(screens: screens, activeScreenIDs: activeScreenIDs, onSelect: onApply)
                     .frame(maxWidth: .infinity)
@@ -865,7 +864,6 @@ private struct WPEInstalledInspectorContent: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
-                .tint(.blue)
             }
         }
     }

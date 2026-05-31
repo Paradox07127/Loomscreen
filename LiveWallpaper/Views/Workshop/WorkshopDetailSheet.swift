@@ -267,12 +267,10 @@ struct WorkshopInspectorContent: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.regular)
             .menuIndicator(.hidden)
-            .tint(.blue)
         } else if let only = screens.first {
             Button { apply(entry, to: only) } label: { applyLabel }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
-                .tint(.blue)
         } else {
             Button {} label: { applyLabel }
                 .buttonStyle(.bordered)
