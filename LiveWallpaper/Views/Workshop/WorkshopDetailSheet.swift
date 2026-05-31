@@ -217,26 +217,27 @@ struct WorkshopInspectorContent: View {
             // link, then the tertiary copy actions — top-down by importance.
             downloadControl
 
-            // Secondary actions, icon-only to stay compact — open the Steam page
-            // and copy the item ID. Labels live in tooltips + VoiceOver.
+            // Secondary actions — compact icon buttons (not full-width), trailing:
+            // open the Steam page and copy the item ID. Labels in tooltips/VoiceOver.
             HStack(spacing: DesignTokens.Spacing.sm) {
+                Spacer(minLength: 0)
                 Button {
                     openURL(item.steamCommunityURL)
                 } label: {
-                    Image(systemName: "arrow.up.forward.app").frame(maxWidth: .infinity)
+                    Image(systemName: "arrow.up.forward.app")
                 }
                 .buttonStyle(.bordered)
-                .controlSize(.regular)
+                .controlSize(.small)
                 .help(Text("Open this item on the Steam Community website"))
                 .accessibilityLabel(Text("Open in Steam"))
 
                 Button {
                     copy(String(item.id))
                 } label: {
-                    Image(systemName: "doc.on.doc").frame(maxWidth: .infinity)
+                    Image(systemName: "doc.on.doc")
                 }
                 .buttonStyle(.bordered)
-                .controlSize(.regular)
+                .controlSize(.small)
                 .help(Text("Copy the Workshop item ID"))
                 .accessibilityLabel(Text("Copy ID"))
             }
@@ -268,7 +269,7 @@ struct WorkshopInspectorContent: View {
             Label(downloadButtonTitle, systemImage: "arrow.down.circle")
                 .frame(maxWidth: .infinity)
         }
-        .adaptiveGlassButton(.prominent)
+        .buttonStyle(.borderedProminent)
         .controlSize(.regular)
         .disabled(!doctor.isDownloadReady || item.isBanned)
         .help(Text(doctor.isDownloadReady
@@ -292,23 +293,18 @@ struct WorkshopInspectorContent: View {
                 applyLabel
             }
             .menuStyle(.button)
-            .adaptiveGlassButton(.prominent)
+            .buttonStyle(.borderedProminent)
             .controlSize(.regular)
             .menuIndicator(.hidden)
-            // A Menu sizes to its label intrinsically and ignores the label's
-            // maxWidth, so pin the menu itself to full width (matches Download).
-            .frame(maxWidth: .infinity)
         } else if let only = screens.first {
             Button { apply(entry, to: only) } label: { applyLabel }
-                .adaptiveGlassButton(.prominent)
+                .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
-                .frame(maxWidth: .infinity)
         } else {
             Button {} label: { applyLabel }
                 .buttonStyle(.bordered)
                 .controlSize(.regular)
                 .disabled(true)
-                .frame(maxWidth: .infinity)
                 .help(Text("Open a display first, then apply"))
         }
     }
