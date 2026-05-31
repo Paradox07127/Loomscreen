@@ -366,12 +366,7 @@ struct Sidebar: View {
                 // "+" action inside the pane.
                 if featureCatalog.isEnabled(.workshopOnline) {
                     NavigationLink(value: Navigation.workshop) {
-                        HStack {
-                            Label("Steam Workshop", systemImage: "cube.transparent.fill")
-                            Spacer()
-                            ProBadge()
-                        }
-                        .contentShape(Rectangle())
+                        Label("Steam Workshop", systemImage: "cube.transparent.fill")
                     }
                     .accessibilityLabel(Text("Steam Workshop"))
                     .accessibilityHint(Text("Browse installed and online Workshop wallpapers"))
@@ -459,34 +454,6 @@ private struct SidebarSectionHeader: View {
             .padding(.bottom, DesignTokens.Sidebar.sectionHeaderBottomPadding)
     }
 }
-
-#if !LITE_BUILD && DIRECT_DISTRIBUTION
-/// Compact accent pill rendered next to Pro-only sidebar entries so users
-/// understand the feature is part of the Pro distribution. Visual sibling
-/// of [`DevPill`] (`DEV`) and reuses the accent color instead of orange so
-/// the two badges remain distinguishable in the sidebar.
-private struct ProBadge: View {
-    var body: some View {
-        Text(verbatim: "PRO")
-            .font(.system(size: 9, weight: .bold))
-            .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: true)
-            .tracking(0.4)
-            .padding(.horizontal, 5)
-            .padding(.vertical, 1.5)
-            .foregroundStyle(Color.accentColor)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(Color.accentColor.opacity(0.15))
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .strokeBorder(Color.accentColor.opacity(0.35), lineWidth: 0.5)
-            )
-            .accessibilityHidden(true)
-    }
-}
-#endif
 
 // MARK: - Screen Row
 struct ScreenRow: View {

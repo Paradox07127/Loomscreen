@@ -27,11 +27,6 @@ struct WorkshopSettingsView: View {
                         .foregroundStyle(Color.green)
                         .font(.system(size: 12, weight: .semibold))
                 }
-                LabeledContent("Build") {
-                    Text("Pro · Direct distribution")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                }
             } header: {
                 Text("Steam Workshop")
             } footer: {
