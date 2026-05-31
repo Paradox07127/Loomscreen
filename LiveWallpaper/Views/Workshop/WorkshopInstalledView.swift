@@ -26,6 +26,9 @@ struct WorkshopInstalledView: View {
     /// Set when the user asks to delete an entry — drives the confirmation
     /// dialog before any real file removal.
     @State private var pendingDelete: WPEHistoryEntry?
+    /// Set when a card is tapped with multiple displays connected — drives the
+    /// "which display?" chooser so a click is never ambiguous.
+    @State private var pendingApplyChoice: WPEHistoryEntry?
     /// Drives the drag-to-apply screen bar — set true when a card drag starts,
     /// cleared on drop / mouse-up / Escape. The bar is NOT shown otherwise.
     @State private var isDraggingEntry = false
@@ -78,6 +81,40 @@ struct WorkshopInstalledView: View {
                     Text("“\(entry.origin.title)” will be removed from your library. Its original files (imported from your own folder) are left untouched.")
                 }
             }
+            .confirmationDialog(
+                Text("Apply to which display?"),
+                isPresented: Binding(
+                    get: { pendingApplyChoice != nil },
+                    set: { if !$0 { pendingApplyChoice = nil } }
+                ),
+                presenting: pendingApplyChoice
+            ) { entry in
+                ForEach(screenManager.screens, id: \.id) { screen in
+                    Button(screen.name) {
+                        apply(entry, to: screen)
+                        pendingApplyChoice = nil
+                    }
+                }
+                Button("All Displays") {
+                    applyToAll(entry)
+                    pendingApplyChoice = nil
+                }
+                Button("Cancel", role: .cancel) { pendingApplyChoice = nil }
+            } message: { entry in
+                Text("Choose which display to set “\(entry.origin.title)” on. Tip: drag a card directly onto a display to skip this.")
+            }
+    }
+
+    /// Card tap: with a single display apply straight to it; with several,
+    /// present an explicit chooser so the target is never ambiguous (mirrors
+    /// Wallpaper Engine's explicit per-monitor selection). Dragging onto a
+    /// display remains the direct per-screen path.
+    private func handleCardTap(_ entry: WPEHistoryEntry) {
+        if screenManager.screens.count <= 1 {
+            applyToAll(entry)
+        } else {
+            pendingApplyChoice = entry
+        }
     }
 
     // MARK: - Content
@@ -146,7 +183,7 @@ struct WorkshopInstalledView: View {
                             screens: screenManager.screens,
                             onApply: { screen in apply(entry, to: screen) },
                             onApplyToAll: { applyToAll(entry) },
-                            onTap: { applyToAll(entry) },
+                            onTap: { handleCardTap(entry) },
                             onRemove: { pendingDelete = entry },
                             isBookmarked: bookmarked,
                             // Only offer "Add" when the item's content can actually
