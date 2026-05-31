@@ -168,7 +168,10 @@ struct WorkshopBrowseCard: View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
             Text(item.title)
                 .font(.system(size: 13, weight: .semibold))
-                .lineLimit(2)
+                // Always reserve two lines so 1- and 2-line titles produce
+                // equal-height cards (no ragged grid). Long titles truncate;
+                // the card's `.help(item.title)` shows the full text on hover.
+                .lineLimit(2, reservesSpace: true)
                 .foregroundStyle(.primary)
                 .frame(maxWidth: .infinity, alignment: .leading)
 

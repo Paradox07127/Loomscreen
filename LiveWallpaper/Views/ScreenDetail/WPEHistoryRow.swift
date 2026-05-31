@@ -119,7 +119,10 @@ struct WPEHistoryRow: View {
             VStack(alignment: .leading, spacing: galleryStyle ? DesignTokens.Spacing.xs : DesignTokens.Spacing.sm) {
                 Text(verbatim: entry.origin.title)
                     .font(.system(size: 13, weight: .semibold))
-                    .lineLimit(2)
+                    // Gallery (Installed) reserves two lines so cards are equal
+                    // height; the Scene tab keeps its original single-/two-line
+                    // sizing (reservesSpace off) so its layout is unchanged.
+                    .lineLimit(2, reservesSpace: galleryStyle)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 HStack(spacing: 6) {
