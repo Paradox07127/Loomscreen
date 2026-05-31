@@ -18,15 +18,29 @@ struct WorkshopBrowseCard: View {
     var onSelect: () -> Void = {}
 
     @State private var isHovered = false
+    /// Per-tile reveal of an adult thumbnail. Ephemeral by design — recreated
+    /// tiles (paging, filter change, relaunch) blur again.
+    @State private var matureRevealed = false
+    @State private var showingAgeConfirm = false
+    @AppStorage("loomscreen.workshop.blurMatureThumbnails.v1") private var blurMatureThumbnails = true
+    /// One-time 18+ confirmation, shared with the detail inspector via `@AppStorage`.
+    @AppStorage("loomscreen.workshop.matureContentConfirmed.v1") private var matureConfirmed = false
     @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Blur the tile until the user clicks to reveal: enabled in settings, the
+    /// item is Mature-rated, and it hasn't been revealed yet.
+    private var shouldBlur: Bool {
+        blurMatureThumbnails && item.isMatureRated && !matureRevealed
+    }
 
     var body: some View {
         // A real Button (not a tap gesture) so the tile is keyboard-focusable
         // and Return/Space activates it. `galleryTileChrome` owns the single
         // clip + hairline stroke + resting/hover shadow + 1.02× lift for the
         // whole card, so the call site contributes only the artwork + footer.
-        Button(action: onSelect) {
+        // A blurred tile's first activation reveals it; a second opens details.
+        Button(action: { if shouldBlur { requestReveal() } else { onSelect() } }) {
             VStack(alignment: .leading, spacing: 0) {
                 thumbnailArea
                 textInfo
@@ -44,13 +58,36 @@ struct WorkshopBrowseCard: View {
         // metadata sighted users see; the per-item actions stay on the rotor.
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(accessibilityLabelText))
-        .accessibilityHint(Text("Show details"))
+        .accessibilityHint(shouldBlur
+            ? Text("Mature content hidden. Activate to reveal.")
+            : Text("Show details"))
         .accessibilityAction(named: Text("Open in Steam")) {
             guard !item.isBanned else { return }
             openURL(item.steamCommunityURL)
         }
         .accessibilityAction(named: Text("Copy link")) { copy(item.steamCommunityURL.absoluteString) }
         .accessibilityAction(named: Text("Copy ID")) { copy(String(item.id)) }
+        .alert("Show mature content?", isPresented: $showingAgeConfirm) {
+            Button(role: .cancel) {} label: { Text("Cancel") }
+            Button(role: .destructive) {
+                matureConfirmed = true
+                matureRevealed = true
+            } label: {
+                Text("I am 18 or older")
+            }
+        } message: {
+            Text("This wallpaper is tagged Mature and may contain explicit adult content. By revealing it you confirm you are at least 18 years old, or of legal age in your region.")
+        }
+    }
+
+    /// Reveal a blurred Mature tile — gated by a one-time 18+ confirmation
+    /// (remembered across the app once accepted).
+    private func requestReveal() {
+        if matureConfirmed {
+            matureRevealed = true
+        } else {
+            showingAgeConfirm = true
+        }
     }
 
     // MARK: - Thumbnail
@@ -60,10 +97,11 @@ struct WorkshopBrowseCard: View {
             AnimatedGIFThumbnail(
                 url: item.previewImageURL,
                 playbackMode: .hoverToPlay,
+                isBlurred: shouldBlur,
                 isHovered: $isHovered
             )
 
-            if let rating = ratingValue {
+            if let rating = ratingValue, !shouldBlur {
                 ratingPill(rating)
                     .padding(DesignTokens.Spacing.sm)
             }
@@ -75,7 +113,7 @@ struct WorkshopBrowseCard: View {
             }
         }
         .overlay(alignment: .bottomTrailing) {
-            if let resolutionLabel {
+            if let resolutionLabel, !shouldBlur {
                 resolutionPill(resolutionLabel)
                     .padding(DesignTokens.Spacing.sm)
             }

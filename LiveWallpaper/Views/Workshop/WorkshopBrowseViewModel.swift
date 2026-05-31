@@ -63,6 +63,15 @@ enum WorkshopAgeRatingFilter: String, CaseIterable, Identifiable {
     static let defaultSelection: Set<WorkshopAgeRatingFilter> = Set(allCases)
 }
 
+extension WorkshopQueryItem {
+    /// True when the item carries Wallpaper Engine's `Mature` maturity tag.
+    /// Drives the click-to-reveal blur over adult thumbnails (Questionable is
+    /// intentionally not blurred — see the maturity-filter design).
+    var isMatureRated: Bool {
+        tags.contains { $0.caseInsensitiveCompare("Mature") == .orderedSame }
+    }
+}
+
 /// Official Wallpaper Engine Workshop genre tags (exact display strings — Steam
 /// matches tags by exact case). Used in the deselect-to-narrow model: all are
 /// selected by default; deselected genres become `excludedtags`.
@@ -136,6 +145,11 @@ enum WorkshopResolutionFilter: String, CaseIterable, Identifiable {
 final class WorkshopBrowseViewModel {
 
     @ObservationIgnored private let services: WorkshopServices
+
+    /// Tags excluded from EVERY query regardless of user filters. Application
+    /// wallpapers cannot run in this runtime, so we never surface them in the
+    /// browse results (server-side exclusion, not a client-side post-filter).
+    nonisolated static let alwaysExcludedTags = ["Application"]
 
     /// Pending search text. Edits here do NOT query — the user applies the whole
     /// filter set with the Search control (or Return). See `hasPendingChanges`.
@@ -404,6 +418,8 @@ final class WorkshopBrowseViewModel {
         excluded += deselectedTags(in: selectedAgeRatings, all: WorkshopAgeRatingFilter.allCases) { $0.tag }
         excluded += deselectedTags(in: selectedResolutions, all: WorkshopResolutionFilter.selectableCases) { $0.tag }
         excluded += deselectedGenreTags()
+        // Application wallpapers can't run here — always hide them.
+        excluded += Self.alwaysExcludedTags
 
         return WorkshopQueryRequest(
             sort: preferredSort,

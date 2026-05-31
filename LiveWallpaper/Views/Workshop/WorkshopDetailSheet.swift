@@ -22,6 +22,18 @@ struct WorkshopInspectorContent: View {
     /// drives the Download → Apply swap.
     @State private var installedEntry: WPEHistoryEntry?
 
+    @AppStorage("loomscreen.workshop.blurMatureThumbnails.v1") private var blurMatureThumbnails = true
+    /// One-time 18+ confirmation, shared with the grid card via `@AppStorage`.
+    @AppStorage("loomscreen.workshop.matureContentConfirmed.v1") private var matureConfirmed = false
+    @State private var matureRevealed = false
+    @State private var showingAgeConfirm = false
+
+    /// Blur the hero until clicked, mirroring the grid card's spoiler gate so
+    /// opening details never auto-plays adult content unprompted.
+    private var shouldBlurHero: Bool {
+        blurMatureThumbnails && item.isMatureRated && !matureRevealed
+    }
+
     private var downloadCoordinator: WorkshopDownloadCoordinator { .shared }
     private var downloadPhase: WorkshopDownloadCoordinator.DownloadPhase {
         downloadCoordinator.phase(for: item.id)
@@ -107,14 +119,36 @@ struct WorkshopInspectorContent: View {
     // MARK: - Hero
 
     private var hero: some View {
-        AnimatedGIFThumbnail(url: item.previewImageURL, playbackMode: .autoPlay)
+        AnimatedGIFThumbnail(url: item.previewImageURL, playbackMode: .autoPlay, isBlurred: shouldBlurHero)
             .aspectRatio(1, contentMode: .fit)
             .clipShape(RoundedRectangle(cornerRadius: DesignTokens.Corner.md, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: DesignTokens.Corner.md, style: .continuous)
                     .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
             }
+            .contentShape(Rectangle())
+            .onTapGesture { if shouldBlurHero { requestReveal() } }
             .padding([.horizontal, .top], DesignTokens.Spacing.lg)
+            .alert("Show mature content?", isPresented: $showingAgeConfirm) {
+                Button(role: .cancel) {} label: { Text("Cancel") }
+                Button(role: .destructive) {
+                    matureConfirmed = true
+                    matureRevealed = true
+                } label: {
+                    Text("I am 18 or older")
+                }
+            } message: {
+                Text("This wallpaper is tagged Mature and may contain explicit adult content. By revealing it you confirm you are at least 18 years old, or of legal age in your region.")
+            }
+    }
+
+    /// Reveal a blurred Mature hero — gated by a one-time 18+ confirmation.
+    private func requestReveal() {
+        if matureConfirmed {
+            matureRevealed = true
+        } else {
+            showingAgeConfirm = true
+        }
     }
 
     // MARK: - Rating
