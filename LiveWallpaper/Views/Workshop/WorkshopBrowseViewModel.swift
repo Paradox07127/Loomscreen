@@ -404,7 +404,7 @@ final class WorkshopBrowseViewModel {
                 // Drop the result if a newer fetch has started since.
                 guard token == self.currentRequestToken else { return false }
                 if replacingItems {
-                    self.items = page.items
+                    self.items = Self.displayable(page.items)
                 }
                 self.totalAvailable = page.totalAvailable
                 self.lastError = nil
@@ -432,6 +432,17 @@ final class WorkshopBrowseViewModel {
         }
         inflightFetch = task
         return await task.value
+    }
+
+    /// Drops items we never surface in the browse grid. Normal browse already
+    /// excludes `Application` server-side (so this is a no-op there); the
+    /// creator-scoped GetUserFiles path can't, so this enforces it client-side.
+    private static func displayable(_ items: [WorkshopQueryItem]) -> [WorkshopQueryItem] {
+        items.filter { item in
+            !item.tags.contains { tag in
+                alwaysExcludedTags.contains { tag.caseInsensitiveCompare($0) == .orderedSame }
+            }
+        }
     }
 
     private func makeRequest(page: Int) -> WorkshopQueryRequest {
