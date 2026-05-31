@@ -33,13 +33,19 @@ struct WorkshopBrowsePane: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            WorkshopBrowseFilterRibbon(
-                viewModel: viewModel,
-                hasWebAPIKey: services.hasWebAPIKey,
-                onRequestKeyEntry: onRequestKeyEntry
-            )
-            .padding(.horizontal, DesignTokens.Settings.formHorizontalMargin)
-            .padding(.vertical, DesignTokens.Spacing.sm)
+            if let creator = viewModel.creatorFilter {
+                creatorFilterBanner(creator)
+                    .padding(.horizontal, DesignTokens.Settings.formHorizontalMargin)
+                    .padding(.vertical, DesignTokens.Spacing.sm)
+            } else {
+                WorkshopBrowseFilterRibbon(
+                    viewModel: viewModel,
+                    hasWebAPIKey: services.hasWebAPIKey,
+                    onRequestKeyEntry: onRequestKeyEntry
+                )
+                .padding(.horizontal, DesignTokens.Settings.formHorizontalMargin)
+                .padding(.vertical, DesignTokens.Spacing.sm)
+            }
 
             Divider()
 
@@ -79,9 +85,15 @@ struct WorkshopBrowsePane: View {
         )) {
             Group {
                 if let selectedItem {
-                    WorkshopInspectorContent(item: selectedItem, doctor: doctor) {
-                        self.selectedItem = nil
-                    }
+                    WorkshopInspectorContent(
+                        item: selectedItem,
+                        doctor: doctor,
+                        onBrowseCreator: { steamID, name in
+                            self.selectedItem = nil
+                            Task { await viewModel.browseCreator(steamID: steamID, name: name) }
+                        },
+                        onClose: { self.selectedItem = nil }
+                    )
                 } else {
                     inspectorPlaceholder
                 }
@@ -300,6 +312,37 @@ struct WorkshopBrowsePane: View {
         .padding(DesignTokens.Spacing.xl)
     }
 
+    /// Replaces the filter ribbon while the grid is scoped to one creator —
+    /// a "Back" affordance plus the creator's name. Filters don't apply here.
+    private func creatorFilterBanner(_ creator: WorkshopBrowseViewModel.CreatorFilter) -> some View {
+        HStack(spacing: DesignTokens.Spacing.sm) {
+            Button {
+                Task { await viewModel.clearCreatorFilter() }
+            } label: {
+                Label("Back to Browse", systemImage: "chevron.left")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(viewModel.isLoading || viewModel.isPaging)
+
+            Spacer(minLength: 0)
+
+            HStack(spacing: 6) {
+                Image(systemName: "person.crop.circle")
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                Text(creator.name.map { String(localized: "Works by \($0)", comment: "Workshop creator-scoped browse header. Placeholder is the creator's name.") }
+                     ?? String(localized: "Works by this creator", comment: "Workshop creator-scoped browse header when the name is unknown."))
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .contain)
+    }
+
     @ViewBuilder
     private var rateLimitBanner: some View {
         if viewModel.isRateLimited {
@@ -334,7 +377,9 @@ struct WorkshopBrowsePane: View {
     // MARK: - Helpers
 
     private var hasActiveFilters: Bool {
-        !viewModel.searchInput.isEmpty
+        // Filters don't apply in creator-scoped mode, so never offer "Clear filters".
+        guard viewModel.creatorFilter == nil else { return false }
+        return !viewModel.searchInput.isEmpty
             || isNarrowing(viewModel.selectedTypes, total: WorkshopContentTypeFilter.selectableCases.count)
             || isNarrowing(viewModel.selectedAgeRatings, total: WorkshopAgeRatingFilter.allCases.count)
             || isNarrowing(viewModel.selectedResolutions, total: WorkshopResolutionFilter.selectableCases.count)
@@ -350,6 +395,12 @@ struct WorkshopBrowsePane: View {
     }
 
     private var emptyMessage: String {
+        if let creator = viewModel.creatorFilter {
+            if let name = creator.name {
+                return String(localized: "\(name) hasn't published any wallpapers here.", comment: "Empty creator-scoped Workshop browse. Placeholder is the creator's name.")
+            }
+            return String(localized: "This creator hasn't published any wallpapers here.", comment: "Empty creator-scoped Workshop browse, name unknown.")
+        }
         if !viewModel.searchInput.isEmpty {
             return String(localized: "No results for \"\(viewModel.searchInput)\".", comment: "Empty Workshop search result. Placeholder is the query.")
         }

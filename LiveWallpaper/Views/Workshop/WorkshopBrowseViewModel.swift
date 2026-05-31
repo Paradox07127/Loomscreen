@@ -144,6 +144,13 @@ enum WorkshopResolutionFilter: String, CaseIterable, Identifiable {
 @Observable
 final class WorkshopBrowseViewModel {
 
+    /// A creator the grid is currently scoped to (their SteamID64 + resolved
+    /// persona name for the banner).
+    struct CreatorFilter: Equatable {
+        let steamID: String
+        let name: String?
+    }
+
     @ObservationIgnored private let services: WorkshopServices
 
     /// Tags excluded from EVERY query regardless of user filters. Application
@@ -166,6 +173,10 @@ final class WorkshopBrowseViewModel {
     /// Trending window in days (week / month / year …); only used when the sort
     /// is `.trending`.
     private(set) var trendingDays: Int = 7
+    /// When set, the grid shows only this creator's published files (via
+    /// GetUserFiles) and the normal filter ribbon is replaced by a "Works by …"
+    /// banner. Cleared to return to the normal filtered browse.
+    private(set) var creatorFilter: CreatorFilter?
     private(set) var currentRequest: WorkshopQueryRequest
     private(set) var items: [WorkshopQueryItem] = []
     private(set) var totalAvailable: Int?
@@ -275,6 +286,23 @@ final class WorkshopBrowseViewModel {
     func clearSearch() async {
         guard !isRateLimited, !searchInput.isEmpty else { return }
         searchInput = ""
+        await reload()
+    }
+
+    /// Scope the grid to one creator's published files (the author-link path).
+    /// Leaves the user's normal filter selection untouched so exiting restores it.
+    func browseCreator(steamID: String, name: String?) async {
+        guard !isRateLimited else { return }
+        let trimmed = steamID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        creatorFilter = CreatorFilter(steamID: trimmed, name: name)
+        await reload()
+    }
+
+    /// Return to the normal filtered browse from a creator-scoped view.
+    func clearCreatorFilter() async {
+        guard creatorFilter != nil else { return }
+        creatorFilter = nil
         await reload()
     }
 
@@ -407,6 +435,17 @@ final class WorkshopBrowseViewModel {
     }
 
     private func makeRequest(page: Int) -> WorkshopQueryRequest {
+        // Creator-scoped browse ignores sort / search / tag filters — it lists
+        // that one creator's published files via GetUserFiles.
+        if let creatorFilter {
+            return WorkshopQueryRequest(
+                sort: .newest,
+                page: page,
+                numPerPage: Self.perPage,
+                creatorSteamID: creatorFilter.steamID
+            )
+        }
+
         let trimmed = searchInput.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // Pure-exclusion model: the user starts with everything selected and

@@ -12,6 +12,9 @@ import SwiftUI
 struct WorkshopInspectorContent: View {
     let item: WorkshopQueryItem
     let doctor: SteamCMDDoctorService
+    /// Scope the Browse grid to this item's creator (SteamID64 + persona name) —
+    /// the author-link path. nil disables the link (plain author text).
+    var onBrowseCreator: ((String, String?) -> Void)? = nil
     /// Dismisses the inspector. The native `.inspector` only auto-shows a toggle
     /// when a toolbar hosts one, so we surface an explicit close control here.
     var onClose: () -> Void = {}
@@ -56,12 +59,7 @@ struct WorkshopInspectorContent: View {
                         .font(.title3.weight(.semibold))
                         .fixedSize(horizontal: false, vertical: true)
 
-                    if let author = item.creatorPersonaName, !author.isEmpty {
-                        Text("by \(author)", comment: "Workshop item author line. Placeholder is the creator's Steam persona name.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
+                    authorLine
 
                     ratingRow
                     metaRow
@@ -148,6 +146,36 @@ struct WorkshopInspectorContent: View {
             matureRevealed = true
         } else {
             showingAgeConfirm = true
+        }
+    }
+
+    // MARK: - Author
+
+    @ViewBuilder
+    private var authorLine: some View {
+        if let author = item.creatorPersonaName, !author.isEmpty {
+            if let creatorID = item.creatorID, let onBrowseCreator {
+                Button {
+                    onBrowseCreator(creatorID, author)
+                } label: {
+                    HStack(spacing: 3) {
+                        Text("by \(author)", comment: "Workshop item author line. Placeholder is the creator's Steam persona name.")
+                            .lineLimit(1)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(Color.accentColor)
+                }
+                .buttonStyle(.plain)
+                .help(Text("Show more wallpapers from \(author)"))
+                .accessibilityLabel(Text("Show more wallpapers from \(author)"))
+            } else {
+                Text("by \(author)", comment: "Workshop item author line. Placeholder is the creator's Steam persona name.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
         }
     }
 

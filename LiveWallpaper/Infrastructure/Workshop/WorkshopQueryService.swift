@@ -49,6 +49,11 @@ struct WorkshopQueryRequest: Equatable, Hashable, Sendable {
     let returnTags: Bool
     let returnMetadata: Bool
     let returnShortDescription: Bool
+    /// When set, the query lists this creator's published files via
+    /// `IPublishedFileService/GetUserFiles` instead of the global `QueryFiles`
+    /// browse. Sort / search / tag filters don't apply in this mode (GetUserFiles
+    /// ignores them); only `page` + `numperpage` matter.
+    let creatorSteamID: String?
 
     init(
         sort: WorkshopSortMode,
@@ -62,7 +67,8 @@ struct WorkshopQueryRequest: Equatable, Hashable, Sendable {
         returnPreviews: Bool = true,
         returnTags: Bool = true,
         returnMetadata: Bool = true,
-        returnShortDescription: Bool = true
+        returnShortDescription: Bool = true,
+        creatorSteamID: String? = nil
     ) {
         let normalizedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let effectiveSort: WorkshopSortMode = normalizedSearch.isEmpty ? sort : .search
@@ -79,6 +85,9 @@ struct WorkshopQueryRequest: Equatable, Hashable, Sendable {
         self.returnTags = returnTags
         self.returnMetadata = returnMetadata
         self.returnShortDescription = returnShortDescription
+        self.creatorSteamID = creatorSteamID?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nilIfEmptyWorkshopQuery
     }
 
     private static func canonicalLanguage(_ language: String?) -> String? {
@@ -170,7 +179,8 @@ enum WorkshopQueryCacheKey {
             returnPreviews: request.returnPreviews,
             returnTags: request.returnTags,
             returnMetadata: request.returnMetadata,
-            returnShortDescription: request.returnShortDescription
+            returnShortDescription: request.returnShortDescription,
+            creatorSteamID: request.creatorSteamID
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
@@ -195,6 +205,7 @@ enum WorkshopQueryCacheKey {
         let returnTags: Bool
         let returnMetadata: Bool
         let returnShortDescription: Bool
+        let creatorSteamID: String?
 
         private enum CodingKeys: String, CodingKey {
             case appid
@@ -210,6 +221,7 @@ enum WorkshopQueryCacheKey {
             case returnTags = "return_tags"
             case returnMetadata = "return_metadata"
             case returnShortDescription = "return_short_description"
+            case creatorSteamID = "creator_steamid"
         }
     }
 }
@@ -219,6 +231,7 @@ actor WorkshopQueryService {
     static let wallpaperEngineAppID = 431960
 
     private static let queryFilesEndpoint = URL(string: "https://api.steampowered.com/IPublishedFileService/QueryFiles/v1/")!
+    private static let getUserFilesEndpoint = URL(string: "https://api.steampowered.com/IPublishedFileService/GetUserFiles/v1/")!
     private static let supportedAPIListEndpoint = URL(string: "https://api.steampowered.com/ISteamWebAPIUtil/GetSupportedAPIList/v1/")!
     private static let maxAttempts = 3
     private static let tokenCapacity = 5.0
@@ -445,6 +458,11 @@ actor WorkshopQueryService {
     }
 
     private func buildQueryURL(for request: WorkshopQueryRequest, apiKey: String) throws -> URL {
+        // Creator-scoped browse uses a different endpoint that lists one user's
+        // published files (sort / search / tag filters don't apply there).
+        if let creatorSteamID = request.creatorSteamID {
+            return try buildUserFilesURL(for: request, steamID: creatorSteamID, apiKey: apiKey)
+        }
         var components = URLComponents(url: Self.queryFilesEndpoint, resolvingAgainstBaseURL: false)!
         var queryItems: [URLQueryItem] = [
             URLQueryItem(name: "key", value: apiKey),
@@ -476,6 +494,27 @@ actor WorkshopQueryService {
             queryItems.append(URLQueryItem(name: "excludedtags[\(index)]", value: tag))
         }
         components.queryItems = queryItems
+        guard let url = components.url else { throw WorkshopQueryError.schemaMismatch }
+        return url
+    }
+
+    /// Lists a single creator's published Wallpaper Engine files. The response
+    /// shape matches `QueryFiles` (`response.publishedfiledetails` + `total`), so
+    /// the same `decodeQueryPage` path handles it.
+    private func buildUserFilesURL(for request: WorkshopQueryRequest, steamID: String, apiKey: String) throws -> URL {
+        var components = URLComponents(url: Self.getUserFilesEndpoint, resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "key", value: apiKey),
+            URLQueryItem(name: "steamid", value: steamID),
+            URLQueryItem(name: "appid", value: String(Self.wallpaperEngineAppID)),
+            URLQueryItem(name: "numperpage", value: String(request.numPerPage)),
+            URLQueryItem(name: "page", value: String(request.page)),
+            URLQueryItem(name: "return_previews", value: Self.steamBool(request.returnPreviews)),
+            URLQueryItem(name: "return_tags", value: Self.steamBool(request.returnTags)),
+            URLQueryItem(name: "return_metadata", value: Self.steamBool(request.returnMetadata)),
+            URLQueryItem(name: "return_short_description", value: Self.steamBool(request.returnShortDescription)),
+            URLQueryItem(name: "return_vote_data", value: "true")
+        ]
         guard let url = components.url else { throw WorkshopQueryError.schemaMismatch }
         return url
     }
