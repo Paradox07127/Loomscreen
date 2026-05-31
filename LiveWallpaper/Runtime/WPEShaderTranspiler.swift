@@ -59,7 +59,8 @@ struct WPEShaderTranspiler {
     /// Translate a preprocessed WPE fragment shader to MSL.
     static func translateFragment(
         shaderName: String,
-        preprocessedSource: String
+        preprocessedSource: String,
+        comboValues: [String: Int] = [:]
     ) throws -> WPEShaderTranslationResult {
         let scrubbedSource = Self.scrubFragmentOutDeclarations(preprocessedSource)
         let activeSource = Self.stripInactivePreprocessorBranches(in: scrubbedSource)
@@ -145,7 +146,8 @@ struct WPEShaderTranspiler {
             samplers: sortedSamplers,
             varyings: varyings,
             helpers: helperResources.helpers,
-            mainBody: helperResources.mainBody
+            mainBody: helperResources.mainBody,
+            comboValues: comboValues
         )
 
         var layout: [WPEUniformSlot] = []
@@ -1750,7 +1752,8 @@ struct WPEShaderTranspiler {
         samplers: [WPESamplerDecl],
         varyings: [WPEVaryingDecl],
         helpers: String,
-        mainBody: String
+        mainBody: String,
+        comboValues: [String: Int] = [:]
     ) -> String {
         let warningCleanHelpers = neutralizeMetalStdlibMacroRedefinitions(helpers)
         let warningCleanMainBody = neutralizeMetalStdlibMacroRedefinitions(mainBody)
@@ -1876,7 +1879,8 @@ struct WPEShaderTranspiler {
             let initializer = varyingInitializer(
                 for: varying,
                 shaderName: shaderName,
-                availableUniforms: uniformNames
+                availableUniforms: uniformNames,
+                comboValues: comboValues
             )
             if let arrayLength = varying.arrayLength {
                 let initializers = Array(repeating: initializer, count: arrayLength).joined(separator: ", ")
@@ -2108,7 +2112,8 @@ struct WPEShaderTranspiler {
     private static func varyingInitializer(
         for varying: WPEVaryingDecl,
         shaderName: String,
-        availableUniforms: Set<String>
+        availableUniforms: Set<String>,
+        comboValues: [String: Int] = [:]
     ) -> String {
         switch varying.name {
         case "v_TexCoord":
@@ -2118,7 +2123,8 @@ struct WPEShaderTranspiler {
             if varying.metalType == "float4",
                let resolutionUniform = texCoordResolutionUniform(
                 shaderName: shaderName,
-                availableUniforms: availableUniforms
+                availableUniforms: availableUniforms,
+                comboValues: comboValues
                ) {
                 return "wpe_texcoord_with_resolution(in.uv, \(resolutionUniform))"
             }
@@ -2228,9 +2234,22 @@ struct WPEShaderTranspiler {
 
     private static func texCoordResolutionUniform(
         shaderName: String,
-        availableUniforms: Set<String>
+        availableUniforms: Set<String>,
+        comboValues: [String: Int] = [:]
     ) -> String? {
         let lowercased = shaderName.lowercased()
+        // WPE distortion shaders (waterwaves/waterripple/foliagesway…) scale
+        // `v_TexCoord.zw` by the *active auxiliary texture's* resolution,
+        // mirroring the `#if MASK / #elif TIMEOFFSET` ladder in the .vert:
+        // MASK uses the opacity-mask texture (g_Texture1), TIMEOFFSET uses the
+        // time-offset texture (g_Texture2). The previous combo-blind heuristic
+        // always picked g_Texture1Resolution, mis-scaling the TIMEOFFSET case.
+        if comboValues["MASK"] == 1, availableUniforms.contains("g_Texture1Resolution") {
+            return "g_Texture1Resolution"
+        }
+        if comboValues["TIMEOFFSET"] == 1, availableUniforms.contains("g_Texture2Resolution") {
+            return "g_Texture2Resolution"
+        }
         if lowercased.contains("pulse"), availableUniforms.contains("g_Texture2Resolution") {
             return "g_Texture2Resolution"
         }

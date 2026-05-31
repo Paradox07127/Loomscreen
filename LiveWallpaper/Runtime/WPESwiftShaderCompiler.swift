@@ -22,7 +22,8 @@ struct WPESwiftShaderCompiler: WPEShaderCompiling {
         do {
             translation = try WPEShaderTranspiler.translateFragment(
                 shaderName: request.shaderName,
-                preprocessedSource: fragmentSource
+                preprocessedSource: fragmentSource,
+                comboValues: request.comboValues
             )
         } catch let err as WPEShaderCompilerError {
             WPESceneDebugArtifacts.shared.recordShaderFailure(

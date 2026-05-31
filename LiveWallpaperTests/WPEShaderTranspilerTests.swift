@@ -570,6 +570,65 @@ struct WPEShaderTranspilerTests {
         #expect(result.mslSource.contains("wpe_texcoord_with_resolution(in.uv, g_Texture1Resolution)"))
     }
 
+    @Test("Waterwaves TIMEOFFSET combo scales v_TexCoord.zw by g_Texture2Resolution")
+    func waterwavesTimeOffsetUsesTexture2Resolution() throws {
+        // Real waterwaves.vert scales v_TexCoord.zw by the auxiliary texture's
+        // resolution following a `#if MASK / #elif TIMEOFFSET` ladder:
+        // MASK → g_Texture1Resolution, TIMEOFFSET → g_Texture2Resolution. The
+        // combo-blind heuristic always picked g_Texture1Resolution, mis-scaling
+        // the TIMEOFFSET case. With comboValues plumbed through, TIMEOFFSET=1
+        // must select g_Texture2Resolution.
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let compiler = WPESwiftShaderCompiler(device: device)
+        let request = WPEShaderCompileRequest(
+            shaderName: "effects/waterwaves",
+            processedVertexSource: """
+            #version 410 core
+            uniform mat4 g_ModelViewProjectionMatrix;
+            uniform vec4 g_Texture1Resolution;
+            uniform vec4 g_Texture2Resolution;
+            uniform float g_Direction;
+            in vec3 a_Position;
+            in vec2 a_TexCoord;
+            out vec4 v_TexCoord;
+            out vec2 v_Direction;
+            void main() {
+                v_TexCoord.xy = a_TexCoord;
+                v_TexCoord.zw = vec2(v_TexCoord.x * g_Texture2Resolution.z / g_Texture2Resolution.x,
+                                     v_TexCoord.y * g_Texture2Resolution.w / g_Texture2Resolution.y);
+                v_Direction = rotateVec2(vec2(0, 1), g_Direction);
+                gl_Position = g_ModelViewProjectionMatrix * vec4(a_Position, 1.0);
+            }
+            """,
+            processedFragmentSource: """
+            #version 410 core
+            uniform sampler2D g_Texture0;
+            uniform sampler2D g_Texture2;
+            uniform float g_Time;
+            uniform float g_Speed;
+            uniform float g_Scale;
+            uniform float g_Strength;
+            in vec4 v_TexCoord;
+            in vec2 v_Direction;
+            void main() {
+                float timeOffset = texture(g_Texture2, v_TexCoord.zw).r;
+                vec2 texCoord = v_TexCoord.xy;
+                float distance = g_Time * g_Speed + dot(texCoord, v_Direction) * g_Scale + timeOffset;
+                texCoord += sin(distance) * vec2(v_Direction.y, -v_Direction.x) * g_Strength;
+                gl_FragColor = texture(g_Texture0, texCoord);
+            }
+            """,
+            sourceHash: "waterwaves-timeoffset-test",
+            comboValues: ["TIMEOFFSET": 1],
+            textureBindings: [:]
+        )
+
+        let result = try compiler.compile(request)
+
+        #expect(result.mslSource.contains("wpe_texcoord_with_resolution(in.uv, g_Texture2Resolution)"))
+        #expect(!result.mslSource.contains("wpe_texcoord_with_resolution(in.uv, g_Texture1Resolution)"))
+    }
+
     @Test("Project foliage UV shader uses vertex-computed noise varyings")
     func projectFoliageUVShaderUsesVertexComputedNoiseVaryings() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
