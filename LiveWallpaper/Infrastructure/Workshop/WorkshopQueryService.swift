@@ -36,7 +36,10 @@ enum WorkshopSortMode: String, Sendable, Equatable, CaseIterable {
 struct WorkshopQueryRequest: Equatable, Hashable, Sendable {
     let sort: WorkshopSortMode
     let searchText: String
-    let cursor: String
+    /// 1-based page index. Steam's QueryFiles supports BOTH cursor and `page`;
+    /// using `page` lets us jump to an arbitrary page and show "Page N of M"
+    /// (cursor can only walk forward).
+    let page: Int
     let numPerPage: Int
     let language: String?
     let days: Int?
@@ -50,7 +53,7 @@ struct WorkshopQueryRequest: Equatable, Hashable, Sendable {
     init(
         sort: WorkshopSortMode,
         searchText: String = "",
-        cursor: String = "*",
+        page: Int = 1,
         numPerPage: Int = 50,
         language: String? = nil,
         days: Int? = nil,
@@ -66,7 +69,7 @@ struct WorkshopQueryRequest: Equatable, Hashable, Sendable {
 
         self.sort = effectiveSort
         self.searchText = normalizedSearch
-        self.cursor = cursor.isEmpty ? "*" : cursor
+        self.page = max(1, page)
         self.numPerPage = min(max(numPerPage, 1), 100)
         self.language = Self.canonicalLanguage(language)
         self.days = effectiveSort.requiresDays ? Self.canonicalTrendingDays(days) : days.flatMap { $0 > 0 ? $0 : nil }
@@ -158,7 +161,7 @@ enum WorkshopQueryCacheKey {
             appid: WorkshopQueryService.wallpaperEngineAppID,
             queryType: request.sort.queryTypeCode,
             searchText: request.searchText,
-            cursor: request.cursor,
+            page: request.page,
             numPerPage: request.numPerPage,
             language: request.language,
             days: request.days,
@@ -182,7 +185,7 @@ enum WorkshopQueryCacheKey {
         let appid: Int
         let queryType: Int
         let searchText: String
-        let cursor: String
+        let page: Int
         let numPerPage: Int
         let language: String?
         let days: Int?
@@ -197,7 +200,7 @@ enum WorkshopQueryCacheKey {
             case appid
             case queryType = "query_type"
             case searchText = "search_text"
-            case cursor
+            case page
             case numPerPage = "numperpage"
             case language
             case days
@@ -448,7 +451,7 @@ actor WorkshopQueryService {
             URLQueryItem(name: "appid", value: String(Self.wallpaperEngineAppID)),
             URLQueryItem(name: "numperpage", value: String(request.numPerPage)),
             URLQueryItem(name: "query_type", value: String(request.sort.queryTypeCode)),
-            URLQueryItem(name: "cursor", value: request.cursor),
+            URLQueryItem(name: "page", value: String(request.page)),
             URLQueryItem(name: "return_previews", value: Self.steamBool(request.returnPreviews)),
             URLQueryItem(name: "return_tags", value: Self.steamBool(request.returnTags)),
             URLQueryItem(name: "return_metadata", value: Self.steamBool(request.returnMetadata)),

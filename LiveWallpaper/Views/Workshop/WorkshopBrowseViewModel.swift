@@ -154,33 +154,40 @@ final class WorkshopBrowseViewModel {
     private(set) var trendingDays: Int = 7
     private(set) var currentRequest: WorkshopQueryRequest
     private(set) var items: [WorkshopQueryItem] = []
-    private(set) var nextCursor: String?
     private(set) var totalAvailable: Int?
     private(set) var isLoading: Bool = false
-    /// True while stepping to an adjacent page (prev/next) — current results
-    /// stay on screen until the new page replaces them, so memory stays bounded.
+    /// True while jumping to another page — current results stay on screen until
+    /// the new page replaces them, so memory stays bounded.
     private(set) var isPaging: Bool = false
     private(set) var lastError: WorkshopQueryError?
     /// Set when Steam returns HTTP 429; controls stay disabled until it lapses.
     private(set) var rateLimitUntil: Date?
 
-    /// 1-based page number for the prev/next pager. Steam's QueryFiles cursor
-    /// pagination only walks forward, so we keep the cursor that opened each
-    /// visited page and step the stack instead of jumping to an arbitrary page.
+    private static let perPage = 50
+
+    /// 1-based current page. Steam's QueryFiles `page` parameter lets us jump to
+    /// any page directly (so we can show "Page N of M" and jump-to-page).
     private(set) var pageIndex: Int = 1
-    @ObservationIgnored private var cursorStack: [String] = ["*"]
 
     var isRateLimited: Bool {
         (rateLimitUntil ?? .distantPast) > Date()
     }
 
+    /// Total pages from Steam's reported result count, when available.
+    var totalPages: Int? {
+        guard let total = totalAvailable, total > 0 else { return nil }
+        return max(1, (total + Self.perPage - 1) / Self.perPage)
+    }
+
     var canGoNextPage: Bool {
-        guard !isRateLimited, !isLoading, !isPaging, let cursor = nextCursor else { return false }
-        return !cursor.isEmpty && cursor != "*"
+        guard !isRateLimited, !isLoading, !isPaging else { return false }
+        if let totalPages { return pageIndex < totalPages }
+        // Unknown total: allow next while the page came back full.
+        return items.count >= Self.perPage
     }
 
     var canGoPrevPage: Bool {
-        !isRateLimited && !isLoading && !isPaging && cursorStack.count > 1
+        !isRateLimited && !isLoading && !isPaging && pageIndex > 1
     }
 
     @ObservationIgnored private var inflightFetch: Task<Bool, Never>?
@@ -190,7 +197,7 @@ final class WorkshopBrowseViewModel {
     /// displayed — drives the "Search" button's enabled/prominent state. Filter
     /// edits accumulate here and only hit the network when the user applies them.
     var hasPendingChanges: Bool {
-        makeRequest(cursor: "*") != currentRequest
+        makeRequest(page: 1) != currentRequest
     }
 
     init(services: WorkshopServices) {
@@ -199,7 +206,7 @@ final class WorkshopBrowseViewModel {
         // Restore the user's last filter selection, then seed `currentRequest`
         // to match it so `hasPendingChanges` is false on launch.
         loadPersistedFilters()
-        self.currentRequest = makeRequest(cursor: "*")
+        self.currentRequest = makeRequest(page: 1)
     }
 
     func onAppear() {
@@ -211,12 +218,10 @@ final class WorkshopBrowseViewModel {
     func reload() async {
         guard !isRateLimited else { return }
         inflightFetch?.cancel()
-        cursorStack = ["*"]
         pageIndex = 1
-        let request = makeRequest(cursor: "*")
+        let request = makeRequest(page: 1)
         currentRequest = request
         items = []
-        nextCursor = nil
         totalAvailable = nil
         isLoading = true
         isPaging = false
@@ -224,30 +229,23 @@ final class WorkshopBrowseViewModel {
         _ = await runFetch(request, replacingItems: true, paging: false)
     }
 
-    /// Step forward one page (cursor walk). Current results stay visible until
-    /// the new page arrives; the stack only advances on success so a failed
-    /// step leaves the pager consistent.
-    func goToNextPage() async {
-        guard canGoNextPage, let cursor = nextCursor else { return }
-        isPaging = true
-        let request = makeRequest(cursor: cursor)
-        let ok = await runFetch(request, replacingItems: true, paging: true)
-        if ok {
-            cursorStack.append(cursor)
-            pageIndex += 1
-        }
-    }
+    func goToNextPage() async { await goToPage(pageIndex + 1) }
+    func goToPrevPage() async { await goToPage(pageIndex - 1) }
 
-    /// Step back to the previously visited page using its remembered cursor.
-    func goToPrevPage() async {
-        guard canGoPrevPage, cursorStack.count > 1 else { return }
-        let target = cursorStack[cursorStack.count - 2]
+    /// Jump directly to a 1-based page. Clamped to `totalPages` when known. The
+    /// page index only commits on a successful fetch, so a failed jump leaves
+    /// the pager consistent.
+    func goToPage(_ target: Int) async {
+        guard !isRateLimited, !isLoading, !isPaging else { return }
+        let upperBound = totalPages ?? Int.max
+        let clamped = min(max(target, 1), upperBound)
+        guard clamped != pageIndex else { return }
         isPaging = true
-        let request = makeRequest(cursor: target)
+        let request = makeRequest(page: clamped)
         let ok = await runFetch(request, replacingItems: true, paging: true)
         if ok {
-            cursorStack.removeLast()
-            pageIndex -= 1
+            pageIndex = clamped
+            currentRequest = request
         }
     }
 
@@ -362,7 +360,6 @@ final class WorkshopBrowseViewModel {
                 if replacingItems {
                     self.items = page.items
                 }
-                self.nextCursor = page.nextCursor
                 self.totalAvailable = page.totalAvailable
                 self.lastError = nil
                 self.rateLimitUntil = nil
@@ -391,7 +388,7 @@ final class WorkshopBrowseViewModel {
         return await task.value
     }
 
-    private func makeRequest(cursor: String) -> WorkshopQueryRequest {
+    private func makeRequest(page: Int) -> WorkshopQueryRequest {
         let trimmed = searchInput.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // Pure-exclusion model: the user starts with everything selected and
@@ -407,8 +404,8 @@ final class WorkshopBrowseViewModel {
         return WorkshopQueryRequest(
             sort: preferredSort,
             searchText: trimmed,
-            cursor: cursor,
-            numPerPage: 50,
+            page: page,
+            numPerPage: Self.perPage,
             days: preferredSort == .trending ? trendingDays : nil,
             requiredTags: [],
             excludedTags: excluded
