@@ -81,28 +81,6 @@ struct WorkshopInstalledView: View {
                     Text("“\(entry.origin.title)” will be removed from your library. Its original files (imported from your own folder) are left untouched.")
                 }
             }
-            .confirmationDialog(
-                Text("Apply to which display?"),
-                isPresented: Binding(
-                    get: { pendingApplyChoice != nil },
-                    set: { if !$0 { pendingApplyChoice = nil } }
-                ),
-                presenting: pendingApplyChoice
-            ) { entry in
-                ForEach(screenManager.screens, id: \.id) { screen in
-                    Button(screen.name) {
-                        apply(entry, to: screen)
-                        pendingApplyChoice = nil
-                    }
-                }
-                Button("All Displays") {
-                    applyToAll(entry)
-                    pendingApplyChoice = nil
-                }
-                Button("Cancel", role: .cancel) { pendingApplyChoice = nil }
-            } message: { entry in
-                Text("Choose which display to set “\(entry.origin.title)” on. Tip: drag a card directly onto a display to skip this.")
-            }
     }
 
     /// Card tap: with a single display apply straight to it; with several,
@@ -193,6 +171,27 @@ struct WorkshopInstalledView: View {
                             hasUpdate: updatedWorkshopIDs.contains(entry.origin.workshopID)
                         )
                         .onDrag({ beginEntryDrag(entry) }, preview: { dragPreview(entry) })
+                        .popover(
+                            isPresented: Binding(
+                                get: { pendingApplyChoice?.id == entry.id },
+                                set: { if !$0 { pendingApplyChoice = nil } }
+                            ),
+                            arrowEdge: .bottom
+                        ) {
+                            ScreenChooserPopover(
+                                title: entry.origin.title,
+                                screens: screenManager.screens,
+                                activeScreenIDs: activeScreenIDs(for: entry),
+                                onSelect: { screen in
+                                    apply(entry, to: screen)
+                                    pendingApplyChoice = nil
+                                },
+                                onApplyToAll: {
+                                    applyToAll(entry)
+                                    pendingApplyChoice = nil
+                                }
+                            )
+                        }
                     }
                 }
                 .padding(.horizontal, 20)
@@ -328,6 +327,14 @@ struct WorkshopInstalledView: View {
         screenManager.screens.contains { screen in
             screenManager.getConfiguration(for: screen)?.wpeOrigin?.workshopID == entry.origin.workshopID
         }
+    }
+
+    /// Displays currently running this entry — drives the green highlight in the
+    /// screen-chooser mini-map.
+    private func activeScreenIDs(for entry: WPEHistoryEntry) -> Set<CGDirectDisplayID> {
+        Set(screenManager.screens
+            .filter { screenManager.getConfiguration(for: $0)?.wpeOrigin?.workshopID == entry.origin.workshopID }
+            .map(\.id))
     }
 
     private func apply(_ entry: WPEHistoryEntry, to screen: Screen) {
@@ -687,6 +694,128 @@ private enum WPELibrarySortOrder: String, CaseIterable, Identifiable {
         case .name: return String(localized: "Name", comment: "Workshop library sort order.")
         case .type: return String(localized: "Type", comment: "Workshop library sort order.")
         }
+    }
+}
+
+// MARK: - Screen chooser (non-modal popover)
+
+/// Anchored, non-modal popover shown when a card is tapped with multiple
+/// displays connected — replaces the modal confirmation dialog. Presents a
+/// physical mini-map of the displays so the choice maps to where each screen
+/// actually sits, plus an "Apply to All Displays" action.
+private struct ScreenChooserPopover: View {
+    let title: String
+    let screens: [Screen]
+    let activeScreenIDs: Set<CGDirectDisplayID>
+    let onSelect: (Screen) -> Void
+    let onApplyToAll: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: DesignTokens.Spacing.md) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Apply to display")
+                    .font(.system(size: 13, weight: .semibold))
+                Text(verbatim: title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            ScreenTopologyMap(
+                screens: screens,
+                activeScreenIDs: activeScreenIDs,
+                onSelect: onSelect
+            )
+            .frame(maxWidth: .infinity)
+
+            Button(action: onApplyToAll) {
+                Label("Apply to All Displays", systemImage: "rectangle.on.rectangle")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.regular)
+            .tint(.blue)
+        }
+        .padding(DesignTokens.Spacing.lg)
+        .frame(minWidth: 248)
+    }
+}
+
+/// Miniature, to-scale layout of the connected displays (positions + relative
+/// sizes from each `Screen.frame`, y-flipped to top-down). Each display is a
+/// tappable tile; the one(s) already running this wallpaper are accent-highlighted.
+private struct ScreenTopologyMap: View {
+    let screens: [Screen]
+    let activeScreenIDs: Set<CGDirectDisplayID>
+    let onSelect: (Screen) -> Void
+
+    private let maxCanvas = CGSize(width: 248, height: 132)
+
+    private var bounds: CGRect {
+        screens.reduce(CGRect.null) { $0.union($1.frame) }
+    }
+
+    private var scale: CGFloat {
+        let b = bounds
+        guard b.width > 0, b.height > 0 else { return 1 }
+        return min(maxCanvas.width / b.width, maxCanvas.height / b.height)
+    }
+
+    private var canvasSize: CGSize {
+        let b = bounds
+        return CGSize(width: max(b.width * scale, 1), height: max(b.height * scale, 1))
+    }
+
+    var body: some View {
+        let b = bounds
+        let s = scale
+        let canvas = canvasSize
+        ZStack(alignment: .topLeading) {
+            ForEach(screens) { screen in
+                let f = screen.frame
+                let tileWidth = max(f.width * s - 6, 30)
+                let tileHeight = max(f.height * s - 6, 24)
+                // macOS global frames are y-up; flip to a top-down mini-map.
+                let rawX = (f.midX - b.minX) * s
+                let rawY = canvas.height - (f.midY - b.minY) * s
+                // Clamp the centre so a tile bumped up to its minimum size can't
+                // overflow the canvas edges (many displays / very uneven sizes).
+                let centerX = min(max(tileWidth / 2 + 3, rawX), canvas.width - tileWidth / 2 - 3)
+                let centerY = min(max(tileHeight / 2 + 3, rawY), canvas.height - tileHeight / 2 - 3)
+                tile(screen, width: tileWidth, height: tileHeight)
+                    .position(x: centerX, y: centerY)
+            }
+        }
+        .frame(width: canvas.width, height: canvas.height)
+        .padding(3)
+    }
+
+    private func tile(_ screen: Screen, width: CGFloat, height: CGFloat) -> some View {
+        let isActive = activeScreenIDs.contains(screen.id)
+        return Button { onSelect(screen) } label: {
+            VStack(spacing: 2) {
+                Image(systemName: "desktopcomputer")
+                    .font(.system(size: max(min(width, height) * 0.3, 12)))
+                Text(verbatim: screen.name)
+                    .font(.system(size: 8, weight: .medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+            .frame(width: width, height: height)
+            .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(isActive ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.06))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .strokeBorder(isActive ? Color.accentColor : Color.primary.opacity(0.18), lineWidth: isActive ? 1.5 : 0.5)
+            )
+        }
+        .buttonStyle(.plain)
+        .help(Text("Apply to \(screen.name)"))
+        .accessibilityLabel(Text("Apply to \(screen.name)"))
+        .accessibilityAddTraits(isActive ? .isSelected : [])
     }
 }
 #endif
