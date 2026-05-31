@@ -516,6 +516,51 @@ struct WPECachedContentResolver {
     }
 
     func content(for origin: WPEOrigin) -> WallpaperContent? {
+        switch origin.resourceLocation {
+        case .cache:
+            return cacheContent(for: origin)
+        case .sourceFolder:
+            return sourceFolderContent(for: origin)
+        default:
+            return nil
+        }
+    }
+
+    /// Rebuilds content for `.sourceFolder` items — unpackaged video/web
+    /// downloads that reference their files in place (e.g. inside the SteamCMD
+    /// workdir) rather than our managed cache. Without this, freshly-downloaded
+    /// unpackaged wallpapers couldn't be bookmarked. Scene needs the cache.
+    private func sourceFolderContent(for origin: WPEOrigin) -> WallpaperContent? {
+        guard let entryFile = origin.entryFile, !entryFile.isEmpty else { return nil }
+        var isStale = false
+        guard let folderURL = try? URL(
+            resolvingBookmarkData: origin.sourceFolderBookmark,
+            options: .withSecurityScope,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        ) else { return nil }
+        let didStart = folderURL.startAccessingSecurityScopedResource()
+        defer { if didStart { folderURL.stopAccessingSecurityScopedResource() } }
+
+        guard let entryURL = resourceURL(root: folderURL, relativePath: entryFile),
+              fileManager.fileExists(atPath: entryURL.path) else { return nil }
+
+        switch origin.originalType {
+        case .video:
+            guard let bookmark = makeBookmark(entryURL) else { return nil }
+            return .video(bookmarkData: bookmark)
+        case .web:
+            guard let bookmark = makeBookmark(folderURL) else { return nil }
+            return .html(
+                source: .folder(bookmarkData: bookmark, indexFileName: entryFile),
+                config: HTMLConfig(physicalPixelLayout: true, originKind: origin.originKind)
+            )
+        case .scene, .application, .unknown:
+            return nil
+        }
+    }
+
+    private func cacheContent(for origin: WPEOrigin) -> WallpaperContent? {
         guard origin.resourceLocation == .cache,
               let cacheRelativePath = origin.cacheRelativePath,
               WPEPathSafety.isSafeCacheRelativePath(cacheRelativePath),

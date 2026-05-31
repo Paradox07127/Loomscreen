@@ -61,14 +61,13 @@ struct WPEHistoryRow: View {
         }
     }
 
-    @ViewBuilder
+    /// The whole card is a tap target that applies the wallpaper — in the
+    /// Installed library (`allowsInlineApply`) this replaces the separate Apply
+    /// button, so a click (or a drag) sets the wallpaper. The bookmark toggle in
+    /// the footer is a nested button and keeps working on its own hit area.
     private var cardContainer: some View {
-        if allowsInlineApply {
-            card
-        } else {
-            Button(action: onTap) { card }
-                .buttonStyle(.plain)
-        }
+        Button(action: onTap) { card }
+            .buttonStyle(.plain)
     }
 
     /// Browse-style gallery chrome (solid control surface + `galleryTileChrome`)
@@ -155,10 +154,6 @@ struct WPEHistoryRow: View {
                         .background(Color.green.opacity(0.15), in: Capsule())
                     }
                 }
-
-                if allowsInlineApply {
-                    applyControl
-                }
             }
             .padding(DesignTokens.Spacing.md)
             .frame(
@@ -206,52 +201,6 @@ struct WPEHistoryRow: View {
         .accessibilityLabel(Text("Update available"))
     }
 
-    // MARK: - Inline apply control (Installed library)
-
-    /// Prominent blue Apply control. Only rendered when `allowsInlineApply` is
-    /// set (the Installed library) — the Scene tab leaves it off, so this is
-    /// unchanged there. The native `.borderedProminent` style replaces the old
-    /// glass capsule, whose hover effect fought the card's own hover lift.
-    @ViewBuilder
-    private var applyControl: some View {
-        if screens.count > 1 {
-            Menu {
-                ForEach(screens, id: \.id) { screen in
-                    Button("Apply to \(screen.name)") { onApply(screen) }
-                }
-                Divider()
-                Button("Apply to All Displays", action: onApplyToAll)
-            } label: {
-                applyLabel
-            }
-            .menuStyle(.button)
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-            .menuIndicator(.hidden)
-            .tint(.blue)
-            .help(Text("Apply"))
-        } else if let only = screens.first {
-            Button { onApply(only) } label: { applyLabel }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .tint(.blue)
-                .help(Text("Apply"))
-        } else {
-            Button {} label: { applyLabel }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(true)
-                .help(Text("Open a display first, then apply"))
-        }
-    }
-
-    private var applyLabel: some View {
-        Label(isActive ? "Reapply" : "Apply", systemImage: "play.fill")
-            .font(.system(size: 11, weight: .semibold))
-            .lineLimit(1)
-            .frame(maxWidth: .infinity)
-    }
-
     /// In the inline-apply (Installed) layout the badge is a separately focusable
     /// child, so the card label stays just the title. In the tap-to-apply (Scene
     /// tab) layout children are `.ignore`d, so the compatibility badge ("Won't
@@ -272,7 +221,7 @@ struct WPEHistoryRow: View {
 
     private var applyAccessibilityHint: Text {
         if allowsInlineApply {
-            return Text("Use the Apply control to set this wallpaper on a display.", comment: "A11y hint for an Installed-library history card with an inline apply control.")
+            return Text("Tap to apply to all displays, or drag onto a display.", comment: "A11y hint for an Installed-library card: the whole card applies the wallpaper.")
         }
         return isActive
             ? Text("Currently in use. Tap to reactivate.", comment: "A11y hint for a WPE history row that is the active wallpaper.")
