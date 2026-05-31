@@ -818,18 +818,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
 
     /// Test-only: render `frames` successive full frames through the real
     /// `renderCurrentFrame` path (so cross-frame `previousFrameHistory` feedback
-    /// accumulates exactly like on-device), returning each frame's
-    /// (nonBlackFraction, nearWhiteFraction, meanLuma) sampled on a center grid.
-    func debugRenderSuccessiveFrames(_ frames: Int) throws -> [(nonBlack: Double, white: Double, luma: Double)] {
-        var out: [(Double, Double, Double)] = []
-        for _ in 0..<frames {
-            let tex = try renderCurrentFrame()
-            outputTexture = tex
-            out.append(Self.debugFrameStats(of: tex))
-        }
-        return out
-    }
-
+    /// accumulates exactly like on-device), returning each frame's output texture.
     func debugRenderSuccessiveFrameTextures(_ frames: Int) throws -> [MTLTexture] {
         var out: [MTLTexture] = []
         out.reserveCapacity(frames)
@@ -1712,7 +1701,9 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
                 }
             }
         }
-        if time - lastHeartbeatTime >= 1.0 || lastHeartbeatTime < 0 {
+        // Heartbeat throttled to 10s so it confirms liveness without spamming
+        // the log every second. (Was 1s — see Log filtering guidance.)
+        if time - lastHeartbeatTime >= 10.0 || lastHeartbeatTime < 0 {
             lastHeartbeatTime = time
             let scene = "\(Int(sceneRenderSize.width))x\(Int(sceneRenderSize.height))"
             let output = outputTexture.map { "\($0.width)x\($0.height)" } ?? "nil"

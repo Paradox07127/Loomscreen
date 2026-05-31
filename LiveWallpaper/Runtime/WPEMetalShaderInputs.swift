@@ -42,6 +42,14 @@ enum WPEMetalShaderInputs {
                 return texture
             }
             if Self.isSceneAliasName(name) {
+                // WPE's `_rt_FullFrameBuffer` (and the other scene aliases) means
+                // "what is CURRENTLY rendered to the background's output" — never
+                // the previous frame. `currentFrameSceneTexture` is non-nil only
+                // once a scene-target pass has written this frame; before that we
+                // fall back to `output`, which the executor clears to the scene
+                // clear color at frame start. Using last frame's content here
+                // would create a positive-feedback loop (shine_combine COPYBG +
+                // `albedo.a = saturate(albedo.a + rays.a)` ramps the layer white).
                 return frameState.currentFrameSceneTexture ?? frameState.output
             }
             if let aliased = resolveAliasedNamedTexture(name: name, frameState: frameState) {

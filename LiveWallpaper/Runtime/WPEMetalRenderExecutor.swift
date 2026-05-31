@@ -131,6 +131,15 @@ final class WPEMetalRenderExecutor {
         }
 
         targetPool.prepare(pipeline: preparedPipeline)
+        // The per-frame output texture is freshly allocated and `.shared`; its
+        // backing store is NOT zeroed by Metal. A scene-alias read of
+        // `_rt_FullFrameBuffer` before any scene-target pass writes (e.g.
+        // shine_combine's COPYBG, which samples the full-frame buffer while
+        // still rendering into a layer composite) would otherwise sample this
+        // garbage and, with shine's `albedo.a = saturate(albedo.a + rays.a)`
+        // accumulation, ramp the whole layer to white within a few seconds.
+        // Clear to the scene clear color so any pre-write alias read sees black.
+        try clearTexture(output, color: clearColor(for: .scene), commandBuffer: commandBuffer)
         var frameState = WPEMetalFrameState(
             output: output,
             sceneSize: size,
@@ -221,9 +230,24 @@ final class WPEMetalRenderExecutor {
         previousFrameHistory = PreviousFrameHistory(
             sceneSize: size,
             sceneTexture: frameState.latestSceneTexture,
-            namedTextures: frameState.latestNamedTextures.filter { entry in
-                !WPEMetalShaderInputs.isSceneAliasName(entry.key)
-            }
+            // Carry ONLY targets actually read back via cross-frame `.previous`
+            // (persistent feedback). Scene aliases and effect scratch buffers
+            // (`_rt_HalfCompoBuffer*` etc.) are recomputed every frame and must
+            // not persist, or the shine chain ramps the layer white over ~5s.
+            // Do NOT carry named FBOs across frames. They are per-frame scratch
+            // (`_rt_HalfCompoBuffer*` shine cast/gaussian) or same-frame ping-pong
+            // composites (`_rt_imageLayerComposite_*`), none of which represent
+            // last-frame state. Carrying them let the shine chain re-blend its
+            // own previous output and, via `saturate(albedo.a + rays.a)`, ramp
+            // the whole layer to white within ~5s (scene 3526278753).
+            // Cross-frame scene feedback still works through `sceneTexture` above.
+            // A precise "carry only `.previous`-read targets" filter was tried and
+            // REGRESSED: effect-bind `{name:"previous"}` lowers to the SAME
+            // `.previous` token as true cross-frame feedback, so it mis-carried
+            // the shine composite and the white-out returned. Empty carry is the
+            // verified-correct behavior; revisit only if a real persistent-trail
+            // effect needs named-target history (none in the corpus today).
+            namedTextures: [:]
         )
         return output
     }
@@ -447,12 +471,6 @@ final class WPEMetalRenderExecutor {
             #endif
             return false
         }
-        #if DEBUG
-        Logger.debug(
-            "[present] source=\(source.width)x\(source.height) fmt=\(source.pixelFormat.rawValue) → drawable=\(drawable.texture.width)x\(drawable.texture.height) fmt=\(drawable.texture.pixelFormat.rawValue) view.bounds=\(view.bounds) view.frame=\(view.frame) drawableSize=\(view.drawableSize)",
-            category: .wpeRender
-        )
-        #endif
         guard let commandBuffer = commandQueue.makeCommandBuffer() else {
             throw WPEMetalRenderExecutorError.commandBufferFailed
         }
@@ -479,15 +497,11 @@ final class WPEMetalRenderExecutor {
 
         commandBuffer.present(drawable)
         #if DEBUG
-        commandBuffer.addCompletedHandler { [weak source] cb in
+        // Keep only the error case; the per-frame "completed" line spammed the log.
+        commandBuffer.addCompletedHandler { cb in
             if cb.status == .error {
                 Logger.warning(
                     "[present] commandBuffer ERROR after present: \(cb.error?.localizedDescription ?? "unknown")",
-                    category: .wpeRender
-                )
-            } else if let source {
-                Logger.debug(
-                    "[present] commandBuffer completed status=\(cb.status.rawValue) source.label=\(source.label ?? "nil")",
                     category: .wpeRender
                 )
             }
