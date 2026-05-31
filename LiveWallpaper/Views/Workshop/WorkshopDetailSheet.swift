@@ -217,32 +217,28 @@ struct WorkshopInspectorContent: View {
             // link, then the tertiary copy actions — top-down by importance.
             downloadControl
 
-            Button {
-                openURL(item.steamCommunityURL)
-            } label: {
-                Label("Open in Steam", systemImage: "arrow.up.forward.app")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.regular)
-            .help(Text("Open this item on the Steam Community website"))
-
+            // Secondary actions, icon-only to stay compact — open the Steam page
+            // and copy the item ID. Labels live in tooltips + VoiceOver.
             HStack(spacing: DesignTokens.Spacing.sm) {
                 Button {
-                    copy(item.steamCommunityURL.absoluteString)
+                    openURL(item.steamCommunityURL)
                 } label: {
-                    Label("Copy link", systemImage: "link").frame(maxWidth: .infinity)
+                    Image(systemName: "arrow.up.forward.app").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
-                .controlSize(.small)
+                .controlSize(.regular)
+                .help(Text("Open this item on the Steam Community website"))
+                .accessibilityLabel(Text("Open in Steam"))
 
                 Button {
                     copy(String(item.id))
                 } label: {
-                    Label("Copy ID", systemImage: "doc.on.doc").frame(maxWidth: .infinity)
+                    Image(systemName: "doc.on.doc").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
-                .controlSize(.small)
+                .controlSize(.regular)
+                .help(Text("Copy the Workshop item ID"))
+                .accessibilityLabel(Text("Copy ID"))
             }
         }
     }
@@ -299,14 +295,20 @@ struct WorkshopInspectorContent: View {
             .adaptiveGlassButton(.prominent)
             .controlSize(.regular)
             .menuIndicator(.hidden)
+            // A Menu sizes to its label intrinsically and ignores the label's
+            // maxWidth, so pin the menu itself to full width (matches Download).
+            .frame(maxWidth: .infinity)
         } else if let only = screens.first {
             Button { apply(entry, to: only) } label: { applyLabel }
                 .adaptiveGlassButton(.prominent)
                 .controlSize(.regular)
+                .frame(maxWidth: .infinity)
         } else {
             Button {} label: { applyLabel }
                 .buttonStyle(.bordered)
+                .controlSize(.regular)
                 .disabled(true)
+                .frame(maxWidth: .infinity)
                 .help(Text("Open a display first, then apply"))
         }
     }
