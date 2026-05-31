@@ -44,7 +44,6 @@ enum WorkshopRequestCounter {
 struct WorkshopBrowseFilterRibbon: View {
     let viewModel: WorkshopBrowseViewModel
     let hasWebAPIKey: Bool
-    let onRequestKeyEntry: () -> Void
 
     @State private var isFilterPanelExpanded = false
     @FocusState private var isSearchFocused: Bool
@@ -71,22 +70,17 @@ struct WorkshopBrowseFilterRibbon: View {
         HStack(spacing: DesignTokens.Spacing.md) {
             searchField
 
-            sortMenu
             filtersToggle
 
             if viewModel.hasPendingChanges {
                 searchButton
             }
 
-            refreshButton
-
             Spacer(minLength: DesignTokens.Spacing.sm)
 
-            if hasWebAPIKey {
-                keyStatusChip
-            } else {
-                setKeyButton
-            }
+            // Sort sits on the trailing edge (right-aligned). The key status and
+            // today's request count now live in the pane hero, not in this row.
+            sortMenu
         }
     }
 
@@ -195,21 +189,15 @@ struct WorkshopBrowseFilterRibbon: View {
                 }
             }
 
-            HStack(spacing: DesignTokens.Spacing.md) {
-                if viewModel.hasPendingChanges {
-                    Button("Search") { Task { await viewModel.submitSearch() } }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                        .disabled(controlsDisabled)
-                        .help(Text("Apply these filters"))
-                }
-                if activeFilterCount > 0 {
-                    Button("Clear filters") { viewModel.resetFilters() }
-                        .buttonStyle(.borderless)
-                        .controlSize(.small)
-                }
+            // Apply lives in the top row's single "Search" button (issue: two
+            // Search controls appeared once the panel was open). Here we keep
+            // only the panel-scoped reset.
+            if activeFilterCount > 0 {
+                Button("Clear filters") { viewModel.resetFilters() }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .padding(.leading, 74 + DesignTokens.Spacing.sm)
             }
-            .padding(.leading, 74 + DesignTokens.Spacing.sm)
         }
         .padding(.horizontal, DesignTokens.Spacing.md)
         .padding(.vertical, DesignTokens.Spacing.sm)
@@ -307,46 +295,6 @@ struct WorkshopBrowseFilterRibbon: View {
         .help(Text("Apply filters and search"))
     }
 
-    private var refreshButton: some View {
-        Button {
-            Task { await viewModel.reload() }
-        } label: {
-            Image(systemName: "arrow.clockwise")
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
-        .disabled(controlsDisabled || viewModel.isLoading)
-        .help(Text("Refresh"))
-    }
-
-    private var keyStatusChip: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "checkmark.seal.fill")
-                .foregroundStyle(.green)
-                .font(.system(size: 11))
-            Text("API key · \(WorkshopRequestCounter.countForToday()) today")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 4)
-        .background(Color.primary.opacity(0.04), in: Capsule())
-        .overlay(Capsule().strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
-        .help(Text("Steam doesn't expose remaining quota; we only count requests this Mac has issued today (\(WorkshopRequestCounter.countForToday()))."))
-    }
-
-    private var setKeyButton: some View {
-        Button {
-            onRequestKeyEntry()
-        } label: {
-            Label("Set Web API key", systemImage: "key.fill")
-                .font(.system(size: 11, weight: .semibold))
-        }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.small)
-    }
-
     // MARK: - Helpers
 
     private var controlsDisabled: Bool {
@@ -425,9 +373,12 @@ struct WorkshopBrowseFilterRibbon: View {
     }
 }
 
-/// Multi-select filter chip with a clear blue border when selected (tap again
-/// to deselect). Scoped to the Workshop filter panel so the bolder selected
-/// treatment doesn't leak into the shared `FilterChip` used elsewhere.
+/// Multi-select filter chip in the *deselect-to-hide* model: every option is
+/// selected (shown) by default, and tapping a chip deselects it to exclude that
+/// tag. To make that reverse semantics self-evident WITHOUT a hint line, a
+/// deselected chip reads as "switched off" — dimmed, struck through, faint
+/// border — while a selected chip keeps the solid accent treatment. Scoped to
+/// the Workshop filter panel so it doesn't leak into the shared `FilterChip`.
 private struct WorkshopFilterChip: View {
     let title: Text
     let isSelected: Bool
@@ -438,11 +389,13 @@ private struct WorkshopFilterChip: View {
             title
                 .font(.system(size: 11, weight: .medium))
                 .lineLimit(1)
+                .strikethrough(!isSelected, color: .secondary)
                 .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                .opacity(isSelected ? 1 : 0.5)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
                 .background(
-                    Capsule().fill(isSelected ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.05))
+                    Capsule().fill(isSelected ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.04))
                 )
                 .overlay(
                     Capsule().strokeBorder(
@@ -453,6 +406,7 @@ private struct WorkshopFilterChip: View {
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityValue(isSelected ? Text("Shown") : Text("Hidden"))
     }
 }
 #endif

@@ -40,8 +40,7 @@ struct WorkshopBrowsePane: View {
             } else {
                 WorkshopBrowseFilterRibbon(
                     viewModel: viewModel,
-                    hasWebAPIKey: services.hasWebAPIKey,
-                    onRequestKeyEntry: onRequestKeyEntry
+                    hasWebAPIKey: services.hasWebAPIKey
                 )
                 .padding(.horizontal, DesignTokens.Settings.formHorizontalMargin)
                 .padding(.vertical, DesignTokens.Spacing.sm)

@@ -105,21 +105,42 @@ struct WorkshopPaneView: View {
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                     .accessibilityAddTraits(.isHeader)
-                Text(verbatim: headerStat)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                headerStatView
             }
         }
     }
 
-    /// Context-aware statistics subtext: library size on Installed, today's
-    /// honest request count on Workshop.
+    /// Hero subtitle. On Workshop it prefixes the request count with the API-key
+    /// status seal (the ribbon no longer carries a key chip), so key health and
+    /// today's honest request count read in one place.
+    private var headerStatView: some View {
+        HStack(spacing: 4) {
+            if selectedTab == .browseOnline, services.hasWebAPIKey {
+                Image(systemName: "checkmark.seal.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.green)
+                    .accessibilityHidden(true)
+            }
+            Text(verbatim: headerStat)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .help(selectedTab == .browseOnline && services.hasWebAPIKey
+            ? Text("Steam doesn't expose remaining quota; this counts only the requests this Mac has issued today.")
+            : Text(""))
+    }
+
+    /// Context-aware statistics subtext: library size on Installed, key status +
+    /// today's honest request count on Workshop.
     private var headerStat: String {
         switch selectedTab {
         case .installed:
             return String(localized: "\(installedCount) installed", comment: "Workshop header stat: number of installed wallpapers.")
         case .browseOnline:
+            if !services.hasWebAPIKey {
+                return String(localized: "API key required", comment: "Workshop header stat when no Steam Web API key is set.")
+            }
             return String(localized: "\(WorkshopRequestCounter.countForToday()) requests today", comment: "Workshop header stat: Steam Web API requests issued today.")
         }
     }
@@ -176,6 +197,15 @@ struct WorkshopPaneView: View {
 
     private var overflowMenu: some View {
         Menu {
+            if selectedTab == .browseOnline, let browseViewModel {
+                Button {
+                    Task { await browseViewModel.reload() }
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .disabled(browseViewModel.isLoading || browseViewModel.isRateLimited)
+                Divider()
+            }
             Button {
                 isShowingKeyEntry = true
             } label: {
