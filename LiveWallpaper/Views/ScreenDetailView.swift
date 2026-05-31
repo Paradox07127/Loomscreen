@@ -571,13 +571,15 @@ struct ScreenDetailView: View {
         }
     }
 
-    /// Per-type clear: only drops the saved state for the tab the user is on
-    /// (Video / HTML / Shader / Scene) and stops the matching runtime. Other
-    /// tabs' saved picks are preserved. Falls back to whatever other type is
-    /// still saved before resorting to a full screen clear.
+    /// Full clear: the trash button removes the screen's WHOLE wallpaper
+    /// configuration and tears down the live session, whatever type is running.
+    /// The previous per-type clear only dropped the selected tab's saved state —
+    /// so with mixed types (e.g. a video tab open while a web wallpaper is
+    /// active) it left the running pipeline alive / fell back to the other saved
+    /// type instead of actually clearing the screen.
     private func performClearWallpaper() {
         cleanupPreviewPlayer()
-        screenManager.clearWallpaperOfType(draft.selectedWallpaperType, for: screen)
+        screenManager.clearWallpaperForScreen(screen)
     }
 
     private func requestApplyToAll() {

@@ -14,6 +14,8 @@ struct WorkshopBrowsePane: View {
     @Environment(WorkshopServices.self) private var services
     @State private var selectedItem: WorkshopQueryItem?
     @State private var rateLimitRemaining: TimeInterval = 0
+    /// Editable page-number field in the pager (jump-to-page).
+    @State private var pageJumpText: String = "1"
     /// Workshop ids already in the local library, for the "In Library" badge.
     @State private var installedWorkshopIDs: Set<String> = []
 
@@ -161,13 +163,26 @@ struct WorkshopBrowsePane: View {
                 .controlSize(.small)
                 .disabled(!viewModel.canGoPrevPage)
 
-                if viewModel.isPaging {
-                    ProgressView().controlSize(.small)
-                } else {
-                    Text("Page \(viewModel.pageIndex)")
-                        .font(.system(size: 12, weight: .medium))
-                        .monospacedDigit()
+                // Editable page number → jump directly to any page (Steam's
+                // `page` parameter). Total shown when Steam reports a count.
+                HStack(spacing: 4) {
+                    if viewModel.isPaging { ProgressView().controlSize(.small) }
+                    Text("Page")
+                        .font(.system(size: 12))
                         .foregroundStyle(.secondary)
+                    TextField("", text: $pageJumpText)
+                        .frame(width: 46)
+                        .multilineTextAlignment(.center)
+                        .textFieldStyle(.roundedBorder)
+                        .monospacedDigit()
+                        .disabled(viewModel.isPaging || viewModel.isLoading)
+                        .onSubmit { jumpToTypedPage() }
+                    if let total = viewModel.totalPages {
+                        Text("of \(total)")
+                            .font(.system(size: 12))
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Button {
@@ -184,7 +199,17 @@ struct WorkshopBrowsePane: View {
             }
             .padding(.vertical, DesignTokens.Spacing.lg)
             .frame(maxWidth: .infinity)
+            .onAppear { pageJumpText = String(viewModel.pageIndex) }
+            .onChange(of: viewModel.pageIndex) { _, page in pageJumpText = String(page) }
         }
+    }
+
+    private func jumpToTypedPage() {
+        guard let page = Int(pageJumpText.trimmingCharacters(in: .whitespaces)) else {
+            pageJumpText = String(viewModel.pageIndex)
+            return
+        }
+        Task { await viewModel.goToPage(page) }
     }
 
     private var loadingSkeleton: some View {
@@ -310,10 +335,14 @@ struct WorkshopBrowsePane: View {
 
     private var hasActiveFilters: Bool {
         !viewModel.searchInput.isEmpty
-            || viewModel.typeFilter != .all
-            || viewModel.selectedAgeRatings != WorkshopAgeRatingFilter.defaultSelection
-            || viewModel.resolution != .any
-            || !viewModel.hiddenGenres.isEmpty
+            || isNarrowing(viewModel.selectedTypes, total: WorkshopContentTypeFilter.selectableCases.count)
+            || isNarrowing(viewModel.selectedAgeRatings, total: WorkshopAgeRatingFilter.allCases.count)
+            || isNarrowing(viewModel.selectedResolutions, total: WorkshopResolutionFilter.selectableCases.count)
+            || isNarrowing(viewModel.selectedGenres, total: WorkshopGenre.allTags.count)
+    }
+
+    private func isNarrowing<T>(_ selected: Set<T>, total: Int) -> Bool {
+        !selected.isEmpty && selected.count < total
     }
 
     private var currentRateLimitRemaining: TimeInterval {

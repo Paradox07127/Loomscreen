@@ -23,6 +23,9 @@ struct WorkshopInstalledView: View {
     @State private var selectedTypes: Set<WPELibraryTypeKind> = []
     @State private var sortOrder: WPELibrarySortOrder = .recommended
     @State private var errorMessage: String?
+    /// Set when the user asks to delete an entry — drives the confirmation
+    /// dialog before any real file removal.
+    @State private var pendingDelete: WPEHistoryEntry?
     /// Drives the drag-to-apply screen bar — set true when a card drag starts,
     /// cleared on drop / mouse-up / Escape. The bar is NOT shown otherwise.
     @State private var isDraggingEntry = false
@@ -52,6 +55,28 @@ struct WorkshopInstalledView: View {
             .onReceive(NotificationCenter.default.publisher(for: .wpeHistoryDidChange)) { _ in
                 reload()
                 reconcileUpdateFlags()
+            }
+            .confirmationDialog(
+                Text("Delete this wallpaper?"),
+                isPresented: Binding(
+                    get: { pendingDelete != nil },
+                    set: { if !$0 { pendingDelete = nil } }
+                ),
+                presenting: pendingDelete
+            ) { entry in
+                Button(role: .destructive) {
+                    performDelete(entry)
+                    pendingDelete = nil
+                } label: {
+                    Text(deletesFiles(entry) ? "Delete & Move Files to Trash" : "Remove from Library")
+                }
+                Button("Cancel", role: .cancel) { pendingDelete = nil }
+            } message: { entry in
+                if deletesFiles(entry) {
+                    Text("“\(entry.origin.title)” will be removed from your library and its downloaded files moved to the Trash. You can restore them from the Trash if needed.")
+                } else {
+                    Text("“\(entry.origin.title)” will be removed from your library. Its original files (imported from your own folder) are left untouched.")
+                }
             }
     }
 
@@ -121,7 +146,8 @@ struct WorkshopInstalledView: View {
                             screens: screenManager.screens,
                             onApply: { screen in apply(entry, to: screen) },
                             onApplyToAll: { applyToAll(entry) },
-                            onRemove: { remove(entry) },
+                            onTap: { applyToAll(entry) },
+                            onRemove: { pendingDelete = entry },
                             isBookmarked: bookmarked,
                             // Only offer "Add" when the item's content can actually
                             // be rebuilt into a bookmark; "Remove" stays available
@@ -129,7 +155,7 @@ struct WorkshopInstalledView: View {
                             onBookmark: (bookmarked || canAddBookmark(entry)) ? { toggleBookmark(entry) } : nil,
                             hasUpdate: updatedWorkshopIDs.contains(entry.origin.workshopID)
                         )
-                        .onDrag { beginEntryDrag(entry) }
+                        .onDrag({ beginEntryDrag(entry) }, preview: { dragPreview(entry) })
                     }
                 }
                 .padding(.horizontal, 20)
@@ -288,8 +314,38 @@ struct WorkshopInstalledView: View {
         }
     }
 
-    private func remove(_ entry: WPEHistoryEntry) {
-        screenManager.removeWPEImport(workshopID: entry.id)
+    /// Whether deleting this entry will touch files on disk. Only items we
+    /// downloaded/extracted into our managed cache do — folder imports point at
+    /// the user's own files, which we must never delete.
+    private func deletesFiles(_ entry: WPEHistoryEntry) -> Bool {
+        entry.origin.resourceLocation == .cache
+    }
+
+    /// Real, confirmed deletion. Always removes the library entry + any bookmark.
+    /// For cache-backed items it ALSO moves our managed copy
+    /// (`…/wpe-cache/<id>/`) to the Trash — a recoverable, path-validated delete
+    /// that can never escape the cache root. User-imported source folders are
+    /// never touched.
+    private func performDelete(_ entry: WPEHistoryEntry) {
+        errorMessage = nil
+        let origin = entry.origin
+        let workshopID = origin.workshopID
+
+        if bookmarkStore.containsWPEBookmark(workshopID: workshopID) {
+            bookmarkStore.removeWPEBookmarks(workshopID: workshopID)
+        }
+        screenManager.removeWPEImport(workshopID: workshopID)
+
+        if origin.resourceLocation == .cache, !workshopID.isEmpty {
+            do {
+                try WallpaperEngineCache().moveToTrash(workshopID: workshopID)
+            } catch {
+                errorMessage = String(
+                    localized: "Removed \(origin.title) from the library, but its files couldn't be moved to the Trash.",
+                    comment: "Workshop delete: history removed but cache files couldn't be trashed."
+                )
+            }
+        }
         reload()
     }
 
@@ -321,11 +377,22 @@ struct WorkshopInstalledView: View {
     /// be added. Mirrors the resolver's preconditions cheaply (no disk I/O).
     private func canAddBookmark(_ entry: WPEHistoryEntry) -> Bool {
         let origin = entry.origin
-        guard origin.resourceLocation == .cache,
-              let entryFile = origin.entryFile, !entryFile.isEmpty else { return false }
-        switch origin.originalType {
-        case .video, .web, .scene: return true
-        case .application, .unknown: return false
+        guard let entryFile = origin.entryFile, !entryFile.isEmpty else { return false }
+        switch origin.resourceLocation {
+        case .cache:
+            switch origin.originalType {
+            case .video, .web, .scene: return true
+            case .application, .unknown: return false
+            }
+        case .sourceFolder:
+            // Unpackaged video/web downloads reference files in place (e.g. the
+            // SteamCMD workdir); the resolver can rebuild those. Scene needs cache.
+            switch origin.originalType {
+            case .video, .web: return true
+            case .scene, .application, .unknown: return false
+            }
+        default:
+            return false
         }
     }
 
@@ -334,53 +401,78 @@ struct WorkshopInstalledView: View {
     /// Floats in only while a card is being dragged (not persistent), listing the
     /// open displays as drop targets — drop a wallpaper onto one to apply it there.
     private var screenDropBar: some View {
-        HStack(spacing: DesignTokens.Spacing.md) {
-            Text("Drag onto a display")
-                .font(.system(size: 11, weight: .medium))
+        VStack(spacing: DesignTokens.Spacing.sm) {
+            Text("Drop onto a display to apply")
+                .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
 
-            ForEach(screenManager.screens, id: \.id) { screen in
-                screenDropTarget(screen)
+            HStack(spacing: DesignTokens.Spacing.lg) {
+                ForEach(screenManager.screens, id: \.id) { screen in
+                    screenDropTarget(screen)
+                }
             }
-
-            Spacer(minLength: 0)
-
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, DesignTokens.Spacing.lg)
+        .padding(.vertical, DesignTokens.Spacing.md)
+        .background(.regularMaterial)
+        .overlay(alignment: .topTrailing) {
             Button { endEntryDrag() } label: {
-                Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
+            .padding(DesignTokens.Spacing.sm)
             .help(Text("Cancel"))
             .accessibilityLabel(Text("Cancel"))
         }
-        .padding(.horizontal, DesignTokens.Spacing.lg)
-        .padding(.vertical, DesignTokens.Spacing.sm)
-        .background(.regularMaterial)
         .overlay(alignment: .bottom) { Divider() }
         .transition(.move(edge: .top).combined(with: .opacity))
     }
 
     private func screenDropTarget(_ screen: Screen) -> some View {
-        VStack(spacing: 3) {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .strokeBorder(Color.accentColor.opacity(0.5), style: StrokeStyle(lineWidth: 1.5, dash: [4]))
-                .background(Color.accentColor.opacity(0.06), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                .frame(width: 96, height: 54)
+        VStack(spacing: 5) {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color.accentColor.opacity(0.6), style: StrokeStyle(lineWidth: 2, dash: [5]))
+                .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .frame(width: 150, height: 90)
                 .overlay {
                     Image(systemName: "display")
-                        .font(.system(size: 18))
+                        .font(.system(size: 30))
                         .foregroundStyle(Color.accentColor)
                 }
             Text(verbatim: screen.name)
-                .font(.system(size: 10))
+                .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-                .frame(maxWidth: 96)
+                .frame(maxWidth: 150)
         }
         .onDrop(of: [.plainText], isTargeted: nil) { providers in
             handleScreenDrop(providers, to: screen)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Text("Apply to \(screen.name)"))
+    }
+
+    /// Small icon shown under the cursor while dragging — deliberately NOT the
+    /// preview image, so it doesn't obscure which display you're hovering.
+    private func dragPreview(_ entry: WPEHistoryEntry) -> some View {
+        Image(systemName: dragIconName(for: entry.origin.originalType))
+            .font(.system(size: 22, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: 54, height: 54)
+            .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private func dragIconName(for type: WPEType) -> String {
+        switch type {
+        case .video: return "play.rectangle.fill"
+        case .web: return "globe"
+        case .scene: return "cube.transparent.fill"
+        case .application: return "app.dashed"
+        case .unknown: return "questionmark.square.dashed"
+        }
     }
 
     private func handleScreenDrop(_ providers: [NSItemProvider], to screen: Screen) -> Bool {

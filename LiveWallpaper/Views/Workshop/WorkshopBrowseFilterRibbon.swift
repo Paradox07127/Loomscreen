@@ -49,12 +49,6 @@ struct WorkshopBrowseFilterRibbon: View {
     @State private var isFilterPanelExpanded = false
     @FocusState private var isSearchFocused: Bool
 
-    /// One-time age confirmation: once the user confirms they're of age, opting
-    /// into Questionable/Mature no longer re-prompts. Persisted across launches.
-    @AppStorage("loomscreen.workshop.matureContentConfirmed.v1") private var matureConfirmed = false
-    /// The rating whose first opt-in is awaiting confirmation (drives the alert).
-    @State private var pendingMatureRating: WorkshopAgeRatingFilter?
-
     var body: some View {
         AdaptiveGlassContainer(spacing: DesignTokens.Spacing.sm) {
             VStack(spacing: 0) {
@@ -69,39 +63,6 @@ struct WorkshopBrowseFilterRibbon: View {
                 }
             }
         }
-        .alert(
-            "Show mature content?",
-            isPresented: Binding(
-                get: { pendingMatureRating != nil },
-                set: { if !$0 { pendingMatureRating = nil } }
-            ),
-            presenting: pendingMatureRating
-        ) { rating in
-            Button(role: .cancel) { pendingMatureRating = nil } label: {
-                Text("Cancel")
-            }
-            Button(role: .destructive) {
-                matureConfirmed = true
-                viewModel.toggleAgeRating(rating)
-                pendingMatureRating = nil
-            } label: {
-                Text("I am 18 or older")
-            }
-        } message: { _ in
-            Text("This shows wallpapers tagged Questionable or Mature, which may contain suggestive or explicit adult content. By continuing you confirm you are at least 18 years old, or of legal age in your region.")
-        }
-    }
-
-    /// First opt-in to Questionable/Mature is gated behind a one-time age
-    /// confirmation. Selecting Everyone, or de-selecting any rating, is always
-    /// immediate.
-    private func handleMaturityTap(_ rating: WorkshopAgeRatingFilter) {
-        let isEnabling = !viewModel.selectedAgeRatings.contains(rating)
-        if isEnabling, rating != .everyone, !matureConfirmed {
-            pendingMatureRating = rating
-        } else {
-            viewModel.toggleAgeRating(rating)
-        }
     }
 
     // MARK: - Top row
@@ -110,7 +71,6 @@ struct WorkshopBrowseFilterRibbon: View {
         HStack(spacing: DesignTokens.Spacing.md) {
             searchField
 
-            typeChips
             sortMenu
             filtersToggle
 
@@ -128,21 +88,6 @@ struct WorkshopBrowseFilterRibbon: View {
                 setKeyButton
             }
         }
-    }
-
-    private var typeChips: some View {
-        HStack(spacing: 6) {
-            ForEach(WorkshopContentTypeFilter.allCases) { type in
-                FilterChip(
-                    title: Text(type.displayName),
-                    isSelected: viewModel.typeFilter == type
-                ) {
-                    viewModel.updateType(type)
-                }
-                .disabled(controlsDisabled)
-            }
-        }
-        .fixedSize(horizontal: true, vertical: false)
     }
 
     /// Sort menu with the Trending window folded in as discrete entries, so
@@ -198,28 +143,40 @@ struct WorkshopBrowseFilterRibbon: View {
 
     private var filterPanel: some View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
-            filterRow("Maturity") {
+            filterRow("Type") {
                 HStack(spacing: 6) {
-                    ForEach(WorkshopAgeRatingFilter.allCases) { rating in
-                        FilterChip(
-                            title: Text(verbatim: rating.displayName),
-                            isSelected: viewModel.selectedAgeRatings.contains(rating)
+                    ForEach(WorkshopContentTypeFilter.selectableCases) { type in
+                        WorkshopFilterChip(
+                            title: Text(type.displayName),
+                            isSelected: viewModel.selectedTypes.contains(type)
                         ) {
-                            handleMaturityTap(rating)
+                            viewModel.toggleType(type)
                         }
                     }
                 }
-                .help(Text("Pick which maturity ratings to show — independent, multi-select."))
+            }
+
+            filterRow("Maturity") {
+                HStack(spacing: 6) {
+                    ForEach(WorkshopAgeRatingFilter.allCases) { rating in
+                        WorkshopFilterChip(
+                            title: Text(verbatim: rating.displayName),
+                            isSelected: viewModel.selectedAgeRatings.contains(rating)
+                        ) {
+                            viewModel.toggleAgeRating(rating)
+                        }
+                    }
+                }
             }
 
             filterRow("Resolution") {
                 chipScroll {
-                    ForEach(WorkshopResolutionFilter.allCases) { resolution in
-                        FilterChip(
+                    ForEach(WorkshopResolutionFilter.selectableCases) { resolution in
+                        WorkshopFilterChip(
                             title: Text(verbatim: resolution.displayName),
-                            isSelected: viewModel.resolution == resolution
+                            isSelected: viewModel.selectedResolutions.contains(resolution)
                         ) {
-                            viewModel.updateResolution(resolution)
+                            viewModel.toggleResolution(resolution)
                         }
                     }
                 }
@@ -228,16 +185,14 @@ struct WorkshopBrowseFilterRibbon: View {
             filterRow("Genre") {
                 chipScroll {
                     ForEach(WorkshopGenre.allTags, id: \.self) { tag in
-                        // WPE-style: a genre is shown (selected) until de-selected.
-                        FilterChip(
+                        WorkshopFilterChip(
                             title: Text(verbatim: tag),
-                            isSelected: !viewModel.hiddenGenres.contains(tag)
+                            isSelected: viewModel.selectedGenres.contains(tag)
                         ) {
                             viewModel.toggleGenre(tag)
                         }
                     }
                 }
-                .help(Text("All genres show by default — deselect the ones you don't want to see."))
             }
 
             HStack(spacing: DesignTokens.Spacing.md) {
@@ -398,14 +353,19 @@ struct WorkshopBrowseFilterRibbon: View {
         !hasWebAPIKey || viewModel.isRateLimited
     }
 
-    /// Active non-default filters, surfaced as the Filters badge.
+    /// Number of filter categories currently narrowing results (a proper,
+    /// non-empty subset), surfaced as the Filters badge.
     private var activeFilterCount: Int {
         var count = 0
-        if viewModel.typeFilter != .all { count += 1 }
-        if viewModel.selectedAgeRatings != WorkshopAgeRatingFilter.defaultSelection { count += 1 }
-        if viewModel.resolution != .any { count += 1 }
-        count += viewModel.hiddenGenres.count
+        if isNarrowing(viewModel.selectedTypes, total: WorkshopContentTypeFilter.selectableCases.count) { count += 1 }
+        if isNarrowing(viewModel.selectedAgeRatings, total: WorkshopAgeRatingFilter.allCases.count) { count += 1 }
+        if isNarrowing(viewModel.selectedResolutions, total: WorkshopResolutionFilter.selectableCases.count) { count += 1 }
+        if isNarrowing(viewModel.selectedGenres, total: WorkshopGenre.allTags.count) { count += 1 }
         return count
+    }
+
+    private func isNarrowing<T>(_ selected: Set<T>, total: Int) -> Bool {
+        !selected.isEmpty && selected.count < total
     }
 
     // MARK: - Sort options (Trending period folded in)
@@ -462,6 +422,37 @@ struct WorkshopBrowseFilterRibbon: View {
             case .trendingYear: return "Trending · Year"
             }
         }
+    }
+}
+
+/// Multi-select filter chip with a clear blue border when selected (tap again
+/// to deselect). Scoped to the Workshop filter panel so the bolder selected
+/// treatment doesn't leak into the shared `FilterChip` used elsewhere.
+private struct WorkshopFilterChip: View {
+    let title: Text
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            title
+                .font(.system(size: 11, weight: .medium))
+                .lineLimit(1)
+                .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule().fill(isSelected ? Color.blue.opacity(0.12) : Color.primary.opacity(0.05))
+                )
+                .overlay(
+                    Capsule().strokeBorder(
+                        isSelected ? Color.blue : Color.primary.opacity(0.10),
+                        lineWidth: isSelected ? 1.5 : 0.5
+                    )
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 #endif

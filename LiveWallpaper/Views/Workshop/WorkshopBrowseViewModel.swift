@@ -28,6 +28,13 @@ enum WorkshopContentTypeFilter: String, CaseIterable, Identifiable {
         case .web: return ["Web"]
         }
     }
+
+    /// Concrete selectable types (excludes `.all`, which was only the old
+    /// single-select "no restriction" sentinel).
+    static var selectableCases: [WorkshopContentTypeFilter] { [.scene, .video, .web] }
+
+    /// The single Workshop tag for this type (nil for `.all`).
+    var tag: String? { requiredTags.first }
 }
 
 /// One of Wallpaper Engine's three maturity ratings, each an independent
@@ -52,13 +59,8 @@ enum WorkshopAgeRatingFilter: String, CaseIterable, Identifiable {
 
     var tag: String { displayName }
 
-    /// Default selection: hide Questionable + Mature.
-    static let defaultSelection: Set<WorkshopAgeRatingFilter> = [.everyone]
-
-    /// `excludedtags` for a given inclusion set — the ratings NOT checked.
-    static func excludedTags(for selection: Set<WorkshopAgeRatingFilter>) -> [String] {
-        allCases.filter { !selection.contains($0) }.map(\.tag)
-    }
+    /// Default = all selected (show everything); the user narrows by deselecting.
+    static let defaultSelection: Set<WorkshopAgeRatingFilter> = Set(allCases)
 }
 
 extension WorkshopQueryItem {
@@ -71,10 +73,8 @@ extension WorkshopQueryItem {
 }
 
 /// Official Wallpaper Engine Workshop genre tags (exact display strings — Steam
-/// matches tags by exact case). WPE-style filtering: every genre is shown by
-/// default and the user DESELECTS the ones they don't want to see, so the
-/// de-selected genres become `excludedtags` (hide-this-category), not
-/// `requiredtags`. An item is hidden if it carries ANY de-selected genre.
+/// matches tags by exact case). Used in the deselect-to-narrow model: all are
+/// selected by default; deselected genres become `excludedtags`.
 enum WorkshopGenre {
     static let allTags: [String] = [
         "Abstract", "Animal", "Anime", "Cartoon", "CGI", "Cyberpunk", "Fantasy",
@@ -118,6 +118,9 @@ enum WorkshopResolutionFilter: String, CaseIterable, Identifiable {
     /// rest are verbatim resolution strings.
     var isLocalizedLabel: Bool { self == .any }
 
+    /// Concrete selectable resolutions (excludes `.any`).
+    static var selectableCases: [WorkshopResolutionFilter] { allCases.filter { $0 != .any } }
+
     /// Exact Steam Workshop resolution tag, or `nil` for `.any`.
     var tag: String? {
         switch self {
@@ -148,58 +151,57 @@ final class WorkshopBrowseViewModel {
     /// browse results (server-side exclusion, not a client-side post-filter).
     nonisolated static let alwaysExcludedTags = ["Application"]
 
-    /// `excludedtags` for a query: the unchecked maturity ratings PLUS the
-    /// always-excluded types. Canonicalization (trim / de-dup / sort) happens in
-    /// `WorkshopQueryRequest`, so order here is irrelevant.
-    nonisolated static func requestExcludedTags(for selection: Set<WorkshopAgeRatingFilter>) -> [String] {
-        WorkshopAgeRatingFilter.excludedTags(for: selection) + alwaysExcludedTags
-    }
-
     /// Pending search text. Edits here do NOT query — the user applies the whole
     /// filter set with the Search control (or Return). See `hasPendingChanges`.
     var searchInput: String = ""
     var preferredSort: WorkshopSortMode = .topRated
-    var typeFilter: WorkshopContentTypeFilter = .all
-    /// Multi-select maturity ratings (independent toggles). Inclusion via the
-    /// complement as `excludedtags`.
+    // All four filters share one model: a multi-select Set, default = every
+    // option (no filter), and an empty set is treated the same as "all".
+    // Narrowing works by DESELECTING — the deselected options become
+    // `excludedtags`. The selections persist across launches.
+    private(set) var selectedTypes: Set<WorkshopContentTypeFilter> = Set(WorkshopContentTypeFilter.selectableCases)
     private(set) var selectedAgeRatings: Set<WorkshopAgeRatingFilter> = WorkshopAgeRatingFilter.defaultSelection
-    /// Genres the user has DE-selected (WPE-style "deselect to hide"). Empty =
-    /// every genre shown (the default). These flow into `excludedtags`, so an
-    /// item carrying any hidden genre is filtered out.
-    private(set) var hiddenGenres: Set<String> = []
-    var resolution: WorkshopResolutionFilter = .any
+    private(set) var selectedResolutions: Set<WorkshopResolutionFilter> = Set(WorkshopResolutionFilter.selectableCases)
+    private(set) var selectedGenres: Set<String> = Set(WorkshopGenre.allTags)
     /// Trending window in days (week / month / year …); only used when the sort
     /// is `.trending`.
     private(set) var trendingDays: Int = 7
     private(set) var currentRequest: WorkshopQueryRequest
     private(set) var items: [WorkshopQueryItem] = []
-    private(set) var nextCursor: String?
     private(set) var totalAvailable: Int?
     private(set) var isLoading: Bool = false
-    /// True while stepping to an adjacent page (prev/next) — current results
-    /// stay on screen until the new page replaces them, so memory stays bounded.
+    /// True while jumping to another page — current results stay on screen until
+    /// the new page replaces them, so memory stays bounded.
     private(set) var isPaging: Bool = false
     private(set) var lastError: WorkshopQueryError?
     /// Set when Steam returns HTTP 429; controls stay disabled until it lapses.
     private(set) var rateLimitUntil: Date?
 
-    /// 1-based page number for the prev/next pager. Steam's QueryFiles cursor
-    /// pagination only walks forward, so we keep the cursor that opened each
-    /// visited page and step the stack instead of jumping to an arbitrary page.
+    private static let perPage = 50
+
+    /// 1-based current page. Steam's QueryFiles `page` parameter lets us jump to
+    /// any page directly (so we can show "Page N of M" and jump-to-page).
     private(set) var pageIndex: Int = 1
-    @ObservationIgnored private var cursorStack: [String] = ["*"]
 
     var isRateLimited: Bool {
         (rateLimitUntil ?? .distantPast) > Date()
     }
 
+    /// Total pages from Steam's reported result count, when available.
+    var totalPages: Int? {
+        guard let total = totalAvailable, total > 0 else { return nil }
+        return max(1, (total + Self.perPage - 1) / Self.perPage)
+    }
+
     var canGoNextPage: Bool {
-        guard !isRateLimited, !isLoading, !isPaging, let cursor = nextCursor else { return false }
-        return !cursor.isEmpty && cursor != "*"
+        guard !isRateLimited, !isLoading, !isPaging else { return false }
+        if let totalPages { return pageIndex < totalPages }
+        // Unknown total: allow next while the page came back full.
+        return items.count >= Self.perPage
     }
 
     var canGoPrevPage: Bool {
-        !isRateLimited && !isLoading && !isPaging && cursorStack.count > 1
+        !isRateLimited && !isLoading && !isPaging && pageIndex > 1
     }
 
     @ObservationIgnored private var inflightFetch: Task<Bool, Never>?
@@ -209,18 +211,16 @@ final class WorkshopBrowseViewModel {
     /// displayed — drives the "Search" button's enabled/prominent state. Filter
     /// edits accumulate here and only hit the network when the user applies them.
     var hasPendingChanges: Bool {
-        makeRequest(cursor: "*") != currentRequest
+        makeRequest(page: 1) != currentRequest
     }
 
     init(services: WorkshopServices) {
         self.services = services
-        // Seed with the default filter state's request so `hasPendingChanges`
-        // is false before the first load (default age selection excludes
-        // Questionable + Mature).
-        self.currentRequest = WorkshopQueryRequest(
-            sort: .topRated,
-            excludedTags: Self.requestExcludedTags(for: WorkshopAgeRatingFilter.defaultSelection)
-        )
+        self.currentRequest = WorkshopQueryRequest(sort: .topRated)   // placeholder
+        // Restore the user's last filter selection, then seed `currentRequest`
+        // to match it so `hasPendingChanges` is false on launch.
+        loadPersistedFilters()
+        self.currentRequest = makeRequest(page: 1)
     }
 
     func onAppear() {
@@ -232,12 +232,10 @@ final class WorkshopBrowseViewModel {
     func reload() async {
         guard !isRateLimited else { return }
         inflightFetch?.cancel()
-        cursorStack = ["*"]
         pageIndex = 1
-        let request = makeRequest(cursor: "*")
+        let request = makeRequest(page: 1)
         currentRequest = request
         items = []
-        nextCursor = nil
         totalAvailable = nil
         isLoading = true
         isPaging = false
@@ -245,30 +243,23 @@ final class WorkshopBrowseViewModel {
         _ = await runFetch(request, replacingItems: true, paging: false)
     }
 
-    /// Step forward one page (cursor walk). Current results stay visible until
-    /// the new page arrives; the stack only advances on success so a failed
-    /// step leaves the pager consistent.
-    func goToNextPage() async {
-        guard canGoNextPage, let cursor = nextCursor else { return }
-        isPaging = true
-        let request = makeRequest(cursor: cursor)
-        let ok = await runFetch(request, replacingItems: true, paging: true)
-        if ok {
-            cursorStack.append(cursor)
-            pageIndex += 1
-        }
-    }
+    func goToNextPage() async { await goToPage(pageIndex + 1) }
+    func goToPrevPage() async { await goToPage(pageIndex - 1) }
 
-    /// Step back to the previously visited page using its remembered cursor.
-    func goToPrevPage() async {
-        guard canGoPrevPage, cursorStack.count > 1 else { return }
-        let target = cursorStack[cursorStack.count - 2]
+    /// Jump directly to a 1-based page. Clamped to `totalPages` when known. The
+    /// page index only commits on a successful fetch, so a failed jump leaves
+    /// the pager consistent.
+    func goToPage(_ target: Int) async {
+        guard !isRateLimited, !isLoading, !isPaging else { return }
+        let upperBound = totalPages ?? Int.max
+        let clamped = min(max(target, 1), upperBound)
+        guard clamped != pageIndex else { return }
         isPaging = true
-        let request = makeRequest(cursor: target)
+        let request = makeRequest(page: clamped)
         let ok = await runFetch(request, replacingItems: true, paging: true)
         if ok {
-            cursorStack.removeLast()
-            pageIndex -= 1
+            pageIndex = clamped
+            currentRequest = request
         }
     }
 
@@ -298,43 +289,76 @@ final class WorkshopBrowseViewModel {
         if sort == .trending { trendingDays = days }
     }
 
-    func updateType(_ type: WorkshopContentTypeFilter) {
-        typeFilter = type
+    // NOTE: each toggle mutates its property directly (no `inout` helper).
+    // Passing `&selectedTypes` as inout held exclusive access to the @Observable
+    // property across the whole call, and `persistFilters()` reads it again →
+    // "simultaneous accesses … requires exclusive access" crash. Mutating in
+    // place first, then persisting, keeps the accesses non-overlapping.
+    func toggleType(_ type: WorkshopContentTypeFilter) {
+        if selectedTypes.contains(type) { selectedTypes.remove(type) } else { selectedTypes.insert(type) }
+        persistFilters()
     }
 
     func toggleAgeRating(_ rating: WorkshopAgeRatingFilter) {
-        if selectedAgeRatings.contains(rating) {
-            selectedAgeRatings.remove(rating)
-        } else {
-            selectedAgeRatings.insert(rating)
-        }
+        if selectedAgeRatings.contains(rating) { selectedAgeRatings.remove(rating) } else { selectedAgeRatings.insert(rating) }
+        persistFilters()
     }
 
-    func updateResolution(_ resolution: WorkshopResolutionFilter) {
-        self.resolution = resolution
+    func toggleResolution(_ resolution: WorkshopResolutionFilter) {
+        if selectedResolutions.contains(resolution) { selectedResolutions.remove(resolution) } else { selectedResolutions.insert(resolution) }
+        persistFilters()
     }
 
-    /// Flip a genre between shown and hidden. Hiding adds it to `hiddenGenres`
-    /// (→ `excludedtags`); showing removes it.
     func toggleGenre(_ tag: String) {
-        if hiddenGenres.contains(tag) {
-            hiddenGenres.remove(tag)
-        } else {
-            hiddenGenres.insert(tag)
-        }
+        if selectedGenres.contains(tag) { selectedGenres.remove(tag) } else { selectedGenres.insert(tag) }
+        persistFilters()
     }
 
-    /// Show every genre again (clear the genre filter).
-    func clearGenres() {
-        hiddenGenres.removeAll()
-    }
-
-    /// Reset every filter (not search/sort) to defaults. Pending until applied.
+    /// Reset every filter (not search/sort) to all-selected (= no filter).
     func resetFilters() {
-        typeFilter = .all
+        selectedTypes = Set(WorkshopContentTypeFilter.selectableCases)
         selectedAgeRatings = WorkshopAgeRatingFilter.defaultSelection
-        resolution = .any
-        hiddenGenres = []
+        selectedResolutions = Set(WorkshopResolutionFilter.selectableCases)
+        selectedGenres = Set(WorkshopGenre.allTags)
+        persistFilters()
+    }
+
+    // MARK: - Persistence
+
+    private enum FilterKey {
+        static let types = "loomscreen.workshop.filter.types.v1"
+        static let ages = "loomscreen.workshop.filter.ages.v1"
+        static let resolutions = "loomscreen.workshop.filter.resolutions.v1"
+        static let genres = "loomscreen.workshop.filter.genres.v1"
+    }
+
+    private func persistFilters() {
+        let defaults = UserDefaults.standard
+        defaults.set(selectedTypes.map(\.rawValue), forKey: FilterKey.types)
+        defaults.set(selectedAgeRatings.map(\.rawValue), forKey: FilterKey.ages)
+        defaults.set(selectedResolutions.map(\.rawValue), forKey: FilterKey.resolutions)
+        defaults.set(Array(selectedGenres), forKey: FilterKey.genres)
+    }
+
+    private func loadPersistedFilters() {
+        let defaults = UserDefaults.standard
+        // Absent key → keep the default (all selected). Present (even empty) →
+        // honor the saved selection (an empty set is treated as "all" at query
+        // time anyway).
+        if let raw = defaults.array(forKey: FilterKey.types) as? [String] {
+            selectedTypes = Set(raw.compactMap(WorkshopContentTypeFilter.init(rawValue:)))
+                .intersection(Set(WorkshopContentTypeFilter.selectableCases))
+        }
+        if let raw = defaults.array(forKey: FilterKey.ages) as? [String] {
+            selectedAgeRatings = Set(raw.compactMap(WorkshopAgeRatingFilter.init(rawValue:)))
+        }
+        if let raw = defaults.array(forKey: FilterKey.resolutions) as? [String] {
+            selectedResolutions = Set(raw.compactMap(WorkshopResolutionFilter.init(rawValue:)))
+                .intersection(Set(WorkshopResolutionFilter.selectableCases))
+        }
+        if let raw = defaults.array(forKey: FilterKey.genres) as? [String] {
+            selectedGenres = Set(raw).intersection(Set(WorkshopGenre.allTags))
+        }
     }
 
     /// Runs the query; returns `true` on a successful page load. `replacingItems`
@@ -354,7 +378,6 @@ final class WorkshopBrowseViewModel {
                 if replacingItems {
                     self.items = page.items
                 }
-                self.nextCursor = page.nextCursor
                 self.totalAvailable = page.totalAvailable
                 self.lastError = nil
                 self.rateLimitUntil = nil
@@ -383,23 +406,46 @@ final class WorkshopBrowseViewModel {
         return await task.value
     }
 
-    private func makeRequest(cursor: String) -> WorkshopQueryRequest {
+    private func makeRequest(page: Int) -> WorkshopQueryRequest {
         let trimmed = searchInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Type + resolution are inclusive (`requiredtags`, ANDed). Genres are
-        // WPE-style exclusion: de-selected genres are hidden via `excludedtags`.
-        var required = typeFilter.requiredTags
-        if let resolutionTag = resolution.tag {
-            required.append(resolutionTag)
-        }
+
+        // Pure-exclusion model: the user starts with everything selected and
+        // narrows by deselecting; the DESELECTED options become `excludedtags`.
+        // A category that's fully selected OR empty contributes nothing
+        // ("empty == all"). No `requiredtags` are sent.
+        var excluded: [String] = []
+        excluded += deselectedTags(in: selectedTypes, all: WorkshopContentTypeFilter.selectableCases) { $0.tag }
+        excluded += deselectedTags(in: selectedAgeRatings, all: WorkshopAgeRatingFilter.allCases) { $0.tag }
+        excluded += deselectedTags(in: selectedResolutions, all: WorkshopResolutionFilter.selectableCases) { $0.tag }
+        excluded += deselectedGenreTags()
+        // Application wallpapers can't run here — always hide them.
+        excluded += Self.alwaysExcludedTags
+
         return WorkshopQueryRequest(
             sort: preferredSort,
             searchText: trimmed,
-            cursor: cursor,
-            numPerPage: 50,
+            page: page,
+            numPerPage: Self.perPage,
             days: preferredSort == .trending ? trendingDays : nil,
-            requiredTags: required,
-            excludedTags: Self.requestExcludedTags(for: selectedAgeRatings) + hiddenGenres.sorted()
+            requiredTags: [],
+            excludedTags: excluded
         )
+    }
+
+    /// Tags for the deselected options of a category — empty when the category
+    /// is fully selected or fully empty (both mean "no filter").
+    private func deselectedTags<T: Hashable>(
+        in selected: Set<T>,
+        all: [T],
+        tag: (T) -> String?
+    ) -> [String] {
+        guard !selected.isEmpty, selected.count < all.count else { return [] }
+        return all.filter { !selected.contains($0) }.compactMap(tag)
+    }
+
+    private func deselectedGenreTags() -> [String] {
+        guard !selectedGenres.isEmpty, selectedGenres.count < WorkshopGenre.allTags.count else { return [] }
+        return WorkshopGenre.allTags.filter { !selectedGenres.contains($0) }
     }
 }
 #endif
