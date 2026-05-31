@@ -442,11 +442,11 @@ private struct WorkshopFilterChip: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
                 .background(
-                    Capsule().fill(isSelected ? Color.blue.opacity(0.12) : Color.primary.opacity(0.05))
+                    Capsule().fill(isSelected ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.05))
                 )
                 .overlay(
                     Capsule().strokeBorder(
-                        isSelected ? Color.blue : Color.primary.opacity(0.10),
+                        isSelected ? Color.accentColor : Color.primary.opacity(0.10),
                         lineWidth: isSelected ? 1.5 : 0.5
                     )
                 )

@@ -127,8 +127,7 @@ struct WorkshopBrowseCard: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
-            // Same dark scrim as the rating pill — legible over any thumbnail.
-            .background(.black.opacity(0.7), in: Capsule())
+            .background { glassBadgeBackground() }
             .accessibilityHidden(true)
     }
 
@@ -142,7 +141,7 @@ struct WorkshopBrowseCard: View {
         .foregroundStyle(.white)
         .padding(.horizontal, 6)
         .padding(.vertical, 3)
-        .background(Color.green.opacity(0.9), in: Capsule())
+        .background { glassBadgeBackground(Color.green.opacity(0.85)) }
         .accessibilityHidden(true)
     }
 
@@ -156,10 +155,27 @@ struct WorkshopBrowseCard: View {
         .foregroundStyle(.white)
         .padding(.horizontal, 6)
         .padding(.vertical, 3)
-        // Fixed dark scrim keeps the white glyphs legible over any thumbnail
-        // (a translucent material would wash out over a light preview corner).
-        .background(.black.opacity(0.7), in: Capsule())
+        .background { glassBadgeBackground() }
         .accessibilityHidden(true)
+    }
+
+    /// Liquid-glass scrim for thumbnail overlay badges. The base stays a
+    /// mode-independent dark (or branded) fill so the white glyphs read over any
+    /// preview — including bright ones, where a translucent material would wash
+    /// out — and a thin top-edge specular highlight supplies the glass feel.
+    private func glassBadgeBackground(_ base: Color = .black.opacity(0.6)) -> some View {
+        Capsule()
+            .fill(base)
+            .overlay(
+                Capsule().strokeBorder(
+                    LinearGradient(
+                        colors: [.white.opacity(0.35), .white.opacity(0.05)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: 0.5
+                )
+            )
     }
 
     // MARK: - Footer
@@ -193,13 +209,31 @@ struct WorkshopBrowseCard: View {
     }
 
     private func typePill(_ type: WorkshopContentTypeFilter) -> some View {
-        Text(verbatim: type.displayName.uppercased(with: .current))
-            .font(.system(size: 9, weight: .bold))
-            .tracking(0.5)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: DesignTokens.Corner.sm, style: .continuous))
+        HStack(spacing: 3) {
+            if let symbol = Self.typeSymbol(for: type) {
+                Image(systemName: symbol)
+                    .font(.system(size: 8, weight: .bold))
+            }
+            Text(verbatim: type.displayName.uppercased(with: .current))
+                .font(.system(size: 9, weight: .bold))
+                .tracking(0.5)
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: DesignTokens.Corner.sm, style: .continuous))
+    }
+
+    /// Leading type glyph, matching the app's existing drag-preview iconography
+    /// (`WorkshopInstalledView.dragIconName`) so Scene/Video/Web read the same
+    /// everywhere.
+    private static func typeSymbol(for type: WorkshopContentTypeFilter) -> String? {
+        switch type {
+        case .scene: return "cube.transparent.fill"
+        case .video: return "play.rectangle.fill"
+        case .web: return "globe"
+        case .all: return nil
+        }
     }
 
     @ViewBuilder

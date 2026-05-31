@@ -219,7 +219,7 @@ struct WorkshopInspectorContent: View {
                 Label("Open in Steam", systemImage: "arrow.up.forward.app")
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
+            .adaptiveGlassButton(.prominent)
             .help(Text("Open this item on the Steam Community website"))
 
             downloadControl
@@ -292,12 +292,12 @@ struct WorkshopInspectorContent: View {
                 applyLabel
             }
             .menuStyle(.button)
-            .buttonStyle(.borderedProminent)
+            .adaptiveGlassButton(.prominent)
             .controlSize(.regular)
             .menuIndicator(.hidden)
         } else if let only = screens.first {
             Button { apply(entry, to: only) } label: { applyLabel }
-                .buttonStyle(.borderedProminent)
+                .adaptiveGlassButton(.prominent)
                 .controlSize(.regular)
         } else {
             Button {} label: { applyLabel }
