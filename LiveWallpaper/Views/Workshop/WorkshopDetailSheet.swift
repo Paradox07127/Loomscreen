@@ -213,6 +213,10 @@ struct WorkshopInspectorContent: View {
 
     private var actionsColumn: some View {
         VStack(spacing: DesignTokens.Spacing.sm) {
+            // Primary CTA first (Download → Apply), then the secondary external
+            // link, then the tertiary copy actions — top-down by importance.
+            downloadControl
+
             Button {
                 openURL(item.steamCommunityURL)
             } label: {
@@ -222,8 +226,6 @@ struct WorkshopInspectorContent: View {
             .buttonStyle(.bordered)
             .controlSize(.regular)
             .help(Text("Open this item on the Steam Community website"))
-
-            downloadControl
 
             HStack(spacing: DesignTokens.Spacing.sm) {
                 Button {
@@ -271,6 +273,7 @@ struct WorkshopInspectorContent: View {
                 .frame(maxWidth: .infinity)
         }
         .adaptiveGlassButton(.prominent)
+        .controlSize(.regular)
         .disabled(!doctor.isDownloadReady || item.isBanned)
         .help(Text(doctor.isDownloadReady
                    ? "Download with SteamCMD and add it to your library"
