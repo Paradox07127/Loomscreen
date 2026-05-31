@@ -56,11 +56,24 @@ enum WPETexPixelDecoder {
     }
 
     /// Two-channel red+green expanded into RGBA(r,g,0,255).
+    /// WPE stores two distinct things in `RG88`:
+    ///   - **Normal maps / data textures** (default): R and G are independent
+    ///     channels (e.g. normal.xy). Keep (R, G, 0, 255) so shaders reading
+    ///     `.xy` (waterripple's `DecompressNormal`) stay correct.
+    ///   - **Grayscale + alpha glows** (`alphaChannelPriority`, the TEXI
+    ///     `0x80000` flag): a legacy LUMINANCE_ALPHA texture — R is luminance,
+    ///     G is alpha (the shape/falloff). It must expand to (R, R, R, G),
+    ///     exactly how GL samples LUMINANCE_ALPHA. Light shafts / beams
+    ///     (light_shafts_0/3, beam_1) are this kind; decoding them as
+    ///     (R, G, 0, 255) forced alpha to 1.0, so additive sprites stacked at
+    ///     one point saturated the whole quad into a solid block — the
+    ///     "red square light" artifact (scene 3426865175).
     static func decodeRG88(
         _ bytes: Data,
         width: Int,
         height: Int,
-        mipmap: Int
+        mipmap: Int,
+        alphaChannelPriority: Bool = false
     ) throws -> DecodedRGBAImage {
         let expected = width * height * 2
         guard bytes.count == expected else {
@@ -76,10 +89,19 @@ enum WPETexPixelDecoder {
                 let src = input.bindMemory(to: UInt8.self).baseAddress!
                 let dst = out.bindMemory(to: UInt8.self).baseAddress!
                 for i in 0..<pixelCount {
-                    dst[i * 4 + 0] = src[i * 2 + 0]
-                    dst[i * 4 + 1] = src[i * 2 + 1]
-                    dst[i * 4 + 2] = 0
-                    dst[i * 4 + 3] = 255
+                    let r = src[i * 2 + 0]
+                    let g = src[i * 2 + 1]
+                    if alphaChannelPriority {
+                        dst[i * 4 + 0] = r
+                        dst[i * 4 + 1] = r
+                        dst[i * 4 + 2] = r
+                        dst[i * 4 + 3] = g
+                    } else {
+                        dst[i * 4 + 0] = r
+                        dst[i * 4 + 1] = g
+                        dst[i * 4 + 2] = 0
+                        dst[i * 4 + 3] = 255
+                    }
                 }
             }
         }

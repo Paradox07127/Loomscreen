@@ -21,6 +21,30 @@ struct WPETexDecoderTests {
         #expect(offset == 0)
     }
 
+    @Test("RG88 alphaChannelPriority expands to luminance+alpha (R,R,R,G)")
+    func rg88AlphaChannelPriorityExpandsToLuminanceAlpha() throws {
+        // Two pixels: (R=200, G=50) and (R=10, G=255).
+        let input = Data([200, 50, 10, 255])
+
+        // Default (normal-map style): independent channels, opaque.
+        let normal = try WPETexPixelDecoder.decodeRG88(input, width: 2, height: 1, mipmap: 0)
+        #expect(
+            Array(normal.pixels) == [200, 50, 0, 255, 10, 255, 0, 255],
+            "default RG88 must stay (R, G, 0, 255) so normal maps read .xy correctly"
+        )
+
+        // Alpha-channel-priority (light glow): LUMINANCE_ALPHA → (R, R, R, G).
+        // This is the fix for the "red square light" artifact: the glow's
+        // falloff lives in G (alpha), not a forced 255.
+        let glow = try WPETexPixelDecoder.decodeRG88(
+            input, width: 2, height: 1, mipmap: 0, alphaChannelPriority: true
+        )
+        #expect(
+            Array(glow.pixels) == [200, 200, 200, 50, 10, 10, 10, 255],
+            "alphaChannelPriority RG88 must expand to (R, R, R, G) = luminance + alpha"
+        )
+    }
+
     @Test("Unknown container magic surfaces unsupportedContainer")
     func unknownContainerMagic() {
         var buffer = Data()
