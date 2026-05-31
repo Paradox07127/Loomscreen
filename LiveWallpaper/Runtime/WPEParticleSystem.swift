@@ -95,6 +95,17 @@ struct WPEParticleSceneTransform {
         // ~7×, scene 3426865175) blow each 850–1000px sprite up to ~6500px,
         // saturating the whole frame with additive glow. Keep sprite size at
         // its authored value; only the emitter region scales.
+        //
+        // KNOWN LIMITATION (deferred to a visual-fidelity pass): the WPE
+        // reference (Almamu CParticle model matrix `T·R·S(scale)`) DOES scale
+        // the sprite quad by object scale, so this 1.0 under-sizes moderately
+        // scaled particle scenes — e.g. 3725117707's leaves (object scale 3×)
+        // render at ~70px instead of the original's ~210px. The right fix is
+        // to restore the scale→size coupling but CLAMP the result (cap near
+        // scene height) so the pathological 7.8× light-shaft can't saturate,
+        // rather than disabling it globally. Re-enable when tuning effect
+        // appearance; verify both 3725117707 (too small now) and 3426865175
+        // (must not re-saturate) on device.
         return 1.0
     }
 
