@@ -122,17 +122,23 @@ struct WorkshopBrowsePane: View {
                 // Top anchor so a page step returns the user to item 1.
                 Color.clear.frame(height: 0).id(Self.gridTopAnchor)
 
-                LazyVGrid(columns: gridColumns, spacing: DesignTokens.Spacing.lg) {
-                    ForEach(viewModel.items) { item in
-                        WorkshopBrowseCard(
-                            item: item,
-                            isInLibrary: installedWorkshopIDs.contains(String(item.id))
-                        ) { selectedItem = item }
-                        .id(item.id)
+                if viewModel.displayedItems.isEmpty {
+                    // The page loaded, but the All / New / Installed scope hid
+                    // every item on it — explain rather than show a blank grid.
+                    scopeEmptyNote
+                } else {
+                    LazyVGrid(columns: gridColumns, spacing: DesignTokens.Spacing.lg) {
+                        ForEach(viewModel.displayedItems) { item in
+                            WorkshopBrowseCard(
+                                item: item,
+                                isInLibrary: installedWorkshopIDs.contains(String(item.id))
+                            ) { selectedItem = item }
+                            .id(item.id)
+                        }
                     }
+                    .padding(.horizontal, DesignTokens.Settings.formHorizontalMargin)
+                    .padding(.vertical, DesignTokens.Settings.formVerticalMargin)
                 }
-                .padding(.horizontal, DesignTokens.Settings.formHorizontalMargin)
-                .padding(.vertical, DesignTokens.Settings.formVerticalMargin)
 
                 paginationBar
             }
@@ -291,6 +297,36 @@ struct WorkshopBrowsePane: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    /// Shown inside the grid when the active library scope (New / Installed)
+    /// excludes every item on the loaded page.
+    private var scopeEmptyNote: some View {
+        VStack(spacing: DesignTokens.Spacing.sm) {
+            Image(systemName: viewModel.installedScope == .installed ? "tray" : "sparkles")
+                .font(.system(size: 30))
+                .foregroundStyle(.tertiary)
+            Text(scopeEmptyMessage)
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Button("Show all") { viewModel.setInstalledScope(.all) }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, DesignTokens.Spacing.xl)
+    }
+
+    private var scopeEmptyMessage: String {
+        switch viewModel.installedScope {
+        case .installed:
+            return String(localized: "None of these results are in your library yet.", comment: "Workshop browse: the Installed scope hid every item on the page.")
+        case .new:
+            return String(localized: "Every result on this page is already in your library.", comment: "Workshop browse: the New scope hid every item on the page.")
+        case .all:
+            return ""
+        }
+    }
+
     private func errorState(_ error: WorkshopQueryError) -> some View {
         VStack(spacing: DesignTokens.Spacing.md) {
             Image(systemName: "exclamationmark.triangle.fill")
@@ -419,6 +455,9 @@ struct WorkshopBrowsePane: View {
         installedWorkshopIDs = Set(
             SettingsManager.shared.loadGlobalSettings().recentWPEImports.map { $0.origin.workshopID }
         )
+        // Hand the set to the view-model so the All / New / Installed scope and
+        // the grid's `displayedItems` stay in sync with the local library.
+        viewModel.installedWorkshopIDs = installedWorkshopIDs
     }
 
     private static func countdown(_ seconds: TimeInterval) -> String {

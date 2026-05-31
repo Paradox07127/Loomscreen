@@ -1,4 +1,5 @@
 #if !LITE_BUILD && DIRECT_DISTRIBUTION
+import AppKit
 import LiveWallpaperSharedUI
 import SwiftUI
 
@@ -72,6 +73,12 @@ struct WorkshopBrowseFilterRibbon: View {
 
             filtersToggle
 
+            // Show the All / New / Installed scope only once the user actually has
+            // a library to scope against (progressive disclosure).
+            if !viewModel.installedWorkshopIDs.isEmpty {
+                installedScopeMenu
+            }
+
             if viewModel.hasPendingChanges {
                 searchButton
             }
@@ -82,6 +89,23 @@ struct WorkshopBrowseFilterRibbon: View {
             // today's request count now live in the pane hero, not in this row.
             sortMenu
         }
+    }
+
+    /// All / New (hide installed) / Installed scope over the loaded page.
+    private var installedScopeMenu: some View {
+        Picker("Library scope", selection: Binding(
+            get: { viewModel.installedScope },
+            set: { viewModel.setInstalledScope($0) }
+        )) {
+            ForEach(WorkshopInstalledScope.allCases) { scope in
+                Label(scope.displayName, systemImage: scope.symbol).tag(scope)
+            }
+        }
+        .pickerStyle(.menu)
+        .controlSize(.small)
+        .fixedSize()
+        .disabled(controlsDisabled)
+        .help(Text("Show all results, only new ones, or only items already in your library"))
     }
 
     /// Sort menu with the Trending window folded in as discrete entries, so
@@ -142,7 +166,8 @@ struct WorkshopBrowseFilterRibbon: View {
                     ForEach(WorkshopContentTypeFilter.selectableCases) { type in
                         WorkshopFilterChip(
                             title: Text(type.displayName),
-                            isSelected: viewModel.selectedTypes.contains(type)
+                            isSelected: viewModel.selectedTypes.contains(type),
+                            onIsolate: { viewModel.isolateType(type) }
                         ) {
                             viewModel.toggleType(type)
                         }
@@ -155,7 +180,8 @@ struct WorkshopBrowseFilterRibbon: View {
                     ForEach(WorkshopAgeRatingFilter.allCases) { rating in
                         WorkshopFilterChip(
                             title: Text(verbatim: rating.displayName),
-                            isSelected: viewModel.selectedAgeRatings.contains(rating)
+                            isSelected: viewModel.selectedAgeRatings.contains(rating),
+                            onIsolate: { viewModel.isolateAgeRating(rating) }
                         ) {
                             viewModel.toggleAgeRating(rating)
                         }
@@ -164,11 +190,12 @@ struct WorkshopBrowseFilterRibbon: View {
             }
 
             filterRow("Resolution") {
-                chipScroll {
+                chipFlow {
                     ForEach(WorkshopResolutionFilter.selectableCases) { resolution in
                         WorkshopFilterChip(
                             title: Text(verbatim: resolution.displayName),
-                            isSelected: viewModel.selectedResolutions.contains(resolution)
+                            isSelected: viewModel.selectedResolutions.contains(resolution),
+                            onIsolate: { viewModel.isolateResolution(resolution) }
                         ) {
                             viewModel.toggleResolution(resolution)
                         }
@@ -177,11 +204,12 @@ struct WorkshopBrowseFilterRibbon: View {
             }
 
             filterRow("Genre") {
-                chipScroll {
+                chipFlow {
                     ForEach(WorkshopGenre.allTags, id: \.self) { tag in
                         WorkshopFilterChip(
                             title: Text(verbatim: tag),
-                            isSelected: viewModel.selectedGenres.contains(tag)
+                            isSelected: viewModel.selectedGenres.contains(tag),
+                            onIsolate: { viewModel.isolateGenre(tag) }
                         ) {
                             viewModel.toggleGenre(tag)
                         }
@@ -209,23 +237,26 @@ struct WorkshopBrowseFilterRibbon: View {
         _ title: LocalizedStringKey,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        HStack(alignment: .center, spacing: DesignTokens.Spacing.sm) {
+        // Top-aligned so the category label pins to the first chip row when the
+        // chips wrap onto several lines (Genre / Resolution).
+        HStack(alignment: .top, spacing: DesignTokens.Spacing.sm) {
             Text(title)
                 .font(.system(size: 10.5, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .textCase(.uppercase)
                 .frame(width: 74, alignment: .leading)
+                .padding(.top, 4)
             content()
         }
     }
 
-    private func chipScroll<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                content()
-            }
-            .padding(.vertical, 1)
+    /// Wrapping chip row — every tag stays visible across as many lines as it
+    /// takes (replaces a horizontal scroll that hid most options off-screen).
+    private func chipFlow<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        WorkshopChipFlow(spacing: 6, lineSpacing: 6) {
+            content()
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Search / refresh / status
@@ -382,10 +413,19 @@ struct WorkshopBrowseFilterRibbon: View {
 private struct WorkshopFilterChip: View {
     let title: Text
     let isSelected: Bool
+    /// Option-click handler: collapse the category to just this option. `nil`
+    /// disables the shortcut (and its hint).
+    var onIsolate: (() -> Void)? = nil
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            if let onIsolate, NSEvent.modifierFlags.contains(.option) {
+                onIsolate()
+            } else {
+                action()
+            }
+        } label: {
             title
                 .font(.system(size: 11, weight: .medium))
                 .lineLimit(1)
@@ -405,8 +445,67 @@ private struct WorkshopFilterChip: View {
                 )
         }
         .buttonStyle(.plain)
+        .help(onIsolate != nil
+            ? Text("Click to show/hide · Option-click to show only this")
+            : Text(""))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityValue(isSelected ? Text("Shown") : Text("Hidden"))
+    }
+}
+
+/// Minimal flow layout: lays chips left-to-right and wraps to a new line when
+/// the next one would overflow the proposed width, so a long tag list stays
+/// fully visible (vs a horizontal scroll that hides most of it).
+private struct WorkshopChipFlow: Layout {
+    var spacing: CGFloat = 6
+    var lineSpacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        let rows = computeRows(maxWidth: maxWidth, subviews: subviews)
+        let height = rows.reduce(0) { $0 + $1.height } + lineSpacing * CGFloat(max(0, rows.count - 1))
+        let widest = rows.map(\.width).max() ?? 0
+        return CGSize(width: maxWidth == .infinity ? widest : min(widest, maxWidth), height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) {
+        let rows = computeRows(maxWidth: bounds.width, subviews: subviews)
+        var y = bounds.minY
+        for row in rows {
+            var x = bounds.minX
+            for index in row.indices {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(at: CGPoint(x: x, y: y), anchor: .topLeading, proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+            y += row.height + lineSpacing
+        }
+    }
+
+    private struct Row {
+        var indices: [Int] = []
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+    }
+
+    private func computeRows(maxWidth: CGFloat, subviews: Subviews) -> [Row] {
+        var rows: [Row] = []
+        var current = Row()
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            let projected = current.indices.isEmpty ? size.width : current.width + spacing + size.width
+            if projected > maxWidth, !current.indices.isEmpty {
+                rows.append(current)
+                current = Row(indices: [index], width: size.width, height: size.height)
+            } else {
+                if !current.indices.isEmpty { current.width += spacing }
+                current.indices.append(index)
+                current.width += size.width
+                current.height = max(current.height, size.height)
+            }
+        }
+        if !current.indices.isEmpty { rows.append(current) }
+        return rows
     }
 }
 #endif

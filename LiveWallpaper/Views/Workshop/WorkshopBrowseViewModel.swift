@@ -136,6 +136,34 @@ enum WorkshopResolutionFilter: String, CaseIterable, Identifiable {
     }
 }
 
+/// View-level scope over the already-loaded page: every result, only items not
+/// yet in the local library (discover-new), or only installed ones (revisit).
+/// This is a CLIENT-SIDE filter over `items` — it never alters the Steam query,
+/// so it can't change pagination or the reported result count.
+enum WorkshopInstalledScope: String, CaseIterable, Identifiable {
+    case all
+    case new
+    case installed
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .all: return String(localized: "All", comment: "Workshop library-scope filter: show every result.")
+        case .new: return String(localized: "New", comment: "Workshop library-scope filter: hide items already installed.")
+        case .installed: return String(localized: "Installed", comment: "Workshop library-scope filter: only items already installed.")
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .all: return "square.grid.2x2"
+        case .new: return "sparkles"
+        case .installed: return "checkmark.circle"
+        }
+    }
+}
+
 /// Drives `WorkshopBrowseView`. Holds the request shape, accumulates pages
 /// across the cursor pagination, debounces search input, and surfaces
 /// network / API errors for inline rendering. The view-model owns no
@@ -177,6 +205,13 @@ final class WorkshopBrowseViewModel {
     /// GetUserFiles) and the normal filter ribbon is replaced by a "Works by …"
     /// banner. Cleared to return to the normal filtered browse.
     private(set) var creatorFilter: CreatorFilter?
+    /// Workshop ids already in the local library, pushed in by the pane so the
+    /// grid can scope by install state. Observed → the grid re-derives
+    /// `displayedItems` when the library changes underneath it.
+    var installedWorkshopIDs: Set<String> = []
+    /// Client-side scope over the loaded page (all / new / installed). Persisted.
+    private(set) var installedScope: WorkshopInstalledScope = .all
+    private static let installedScopeKey = "loomscreen.workshop.installedScope.v1"
     private(set) var currentRequest: WorkshopQueryRequest
     private(set) var items: [WorkshopQueryItem] = []
     private(set) var totalAvailable: Int?
@@ -196,6 +231,24 @@ final class WorkshopBrowseViewModel {
 
     var isRateLimited: Bool {
         (rateLimitUntil ?? .distantPast) > Date()
+    }
+
+    /// The loaded page's items after applying the installed scope. The grid
+    /// renders these; `items` stays the raw page so pagination/counts are intact.
+    var displayedItems: [WorkshopQueryItem] {
+        switch installedScope {
+        case .all:
+            return items
+        case .new:
+            return items.filter { !installedWorkshopIDs.contains(String($0.id)) }
+        case .installed:
+            return items.filter { installedWorkshopIDs.contains(String($0.id)) }
+        }
+    }
+
+    func setInstalledScope(_ scope: WorkshopInstalledScope) {
+        installedScope = scope
+        UserDefaults.standard.set(scope.rawValue, forKey: Self.installedScopeKey)
     }
 
     /// Total pages from Steam's reported result count, when available.
@@ -342,6 +395,33 @@ final class WorkshopBrowseViewModel {
         persistFilters()
     }
 
+    // Option-click "isolate" — collapse a category to just one option (show only
+    // this), or, if it's already the lone selection, restore the full set.
+    func isolateType(_ type: WorkshopContentTypeFilter) {
+        selectedTypes = isolated(type, in: selectedTypes, all: WorkshopContentTypeFilter.selectableCases)
+        persistFilters()
+    }
+
+    func isolateAgeRating(_ rating: WorkshopAgeRatingFilter) {
+        selectedAgeRatings = isolated(rating, in: selectedAgeRatings, all: WorkshopAgeRatingFilter.allCases)
+        persistFilters()
+    }
+
+    func isolateResolution(_ resolution: WorkshopResolutionFilter) {
+        selectedResolutions = isolated(resolution, in: selectedResolutions, all: WorkshopResolutionFilter.selectableCases)
+        persistFilters()
+    }
+
+    func isolateGenre(_ tag: String) {
+        selectedGenres = isolated(tag, in: selectedGenres, all: WorkshopGenre.allTags)
+        persistFilters()
+    }
+
+    private func isolated<T: Hashable>(_ option: T, in current: Set<T>, all: [T]) -> Set<T> {
+        if current.count == 1, current.contains(option) { return Set(all) }
+        return [option]
+    }
+
     /// Reset every filter (not search/sort) to all-selected (= no filter).
     func resetFilters() {
         selectedTypes = Set(WorkshopContentTypeFilter.selectableCases)
@@ -386,6 +466,10 @@ final class WorkshopBrowseViewModel {
         }
         if let raw = defaults.array(forKey: FilterKey.genres) as? [String] {
             selectedGenres = Set(raw).intersection(Set(WorkshopGenre.allTags))
+        }
+        if let raw = defaults.string(forKey: Self.installedScopeKey),
+           let scope = WorkshopInstalledScope(rawValue: raw) {
+            installedScope = scope
         }
     }
 
