@@ -13,21 +13,29 @@ struct WorkshopBrowseFilterTests {
         #expect(WorkshopContentTypeFilter.web.requiredTags == ["Web"])
     }
 
-    @Test("Age filter excludes Mature only for Everyone")
+    @Test("Age filter excludes the unchecked maturity ratings (complement)")
     func ageRatingTags() {
-        #expect(WorkshopAgeRatingFilter.everyone.excludedTags == ["Mature"])
-        #expect(WorkshopAgeRatingFilter.mature.excludedTags.isEmpty)
+        // Multi-select inclusion is expressed as the complement: only the
+        // CHECKED ratings are shown, so every unchecked rating is excluded.
+        #expect(WorkshopAgeRatingFilter.excludedTags(for: [.everyone]) == ["Questionable", "Mature"])
+        #expect(WorkshopAgeRatingFilter.excludedTags(for: [.mature]) == ["Everyone", "Questionable"])
+        // Everything checked → nothing excluded.
+        #expect(WorkshopAgeRatingFilter.excludedTags(for: [.everyone, .questionable, .mature]).isEmpty)
     }
 
-    @Test("Filters flow into a canonicalized (lowercased) query request")
+    @Test("Filters flow into a canonicalized (de-duplicated, sorted, exact-case) request")
     func filtersCanonicalizeIntoRequest() {
         let request = WorkshopQueryRequest(
             sort: .topRated,
             requiredTags: WorkshopContentTypeFilter.scene.requiredTags,
-            excludedTags: WorkshopAgeRatingFilter.everyone.excludedTags
+            // Everyone checked → Questionable + Mature excluded.
+            excludedTags: WorkshopAgeRatingFilter.excludedTags(for: [.everyone])
         )
-        #expect(request.requiredTags == ["scene"])
-        #expect(request.excludedTags == ["mature"])
+        // Steam matches tags by their EXACT display name, so canonicalization
+        // preserves case (it does NOT lowercase) and only trims, de-duplicates,
+        // and sorts — hence Mature precedes Questionable.
+        #expect(request.requiredTags == ["Scene"])
+        #expect(request.excludedTags == ["Mature", "Questionable"])
     }
 
     @Test("No filters produce an unconstrained request")
@@ -35,7 +43,8 @@ struct WorkshopBrowseFilterTests {
         let request = WorkshopQueryRequest(
             sort: .topRated,
             requiredTags: WorkshopContentTypeFilter.all.requiredTags,
-            excludedTags: WorkshopAgeRatingFilter.mature.excludedTags
+            // All ratings checked → nothing excluded.
+            excludedTags: WorkshopAgeRatingFilter.excludedTags(for: [.everyone, .questionable, .mature])
         )
         #expect(request.requiredTags.isEmpty)
         #expect(request.excludedTags.isEmpty)
