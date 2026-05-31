@@ -30,9 +30,10 @@ enum WorkshopContentTypeFilter: String, CaseIterable, Identifiable {
     }
 }
 
-/// Maturity threshold — Wallpaper Engine tags items with one of three age
-/// ratings. This is a ceiling, expressed via `excludedTags` so it works whether
-/// or not "Everyone" is a literal tag: each tier hides the ratings above it.
+/// One of Wallpaper Engine's three maturity ratings, each an independent
+/// multi-select toggle (verbatim WPE text). Inclusion is expressed by EXCLUDING
+/// the unchecked ratings (`excludedtags`), so e.g. checking only Everyone hides
+/// Questionable + Mature.
 enum WorkshopAgeRatingFilter: String, CaseIterable, Identifiable {
     case everyone
     case questionable
@@ -40,21 +41,23 @@ enum WorkshopAgeRatingFilter: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    /// Verbatim Wallpaper Engine maturity label / tag.
     var displayName: String {
         switch self {
-        case .everyone: return String(localized: "Everyone", comment: "Workshop maturity filter: hide questionable + mature content.")
-        case .questionable: return String(localized: "Questionable", comment: "Workshop maturity filter: allow questionable, hide mature.")
-        case .mature: return String(localized: "Mature", comment: "Workshop maturity filter: include all content.")
+        case .everyone: return "Everyone"
+        case .questionable: return "Questionable"
+        case .mature: return "Mature"
         }
     }
 
-    /// Hide every rating stricter than the chosen ceiling.
-    var excludedTags: [String] {
-        switch self {
-        case .everyone: return ["Questionable", "Mature"]
-        case .questionable: return ["Mature"]
-        case .mature: return []
-        }
+    var tag: String { displayName }
+
+    /// Default selection: hide Questionable + Mature.
+    static let defaultSelection: Set<WorkshopAgeRatingFilter> = [.everyone]
+
+    /// `excludedtags` for a given inclusion set — the ratings NOT checked.
+    static func excludedTags(for selection: Set<WorkshopAgeRatingFilter>) -> [String] {
+        allCases.filter { !selection.contains($0) }.map(\.tag)
     }
 }
 
@@ -129,12 +132,14 @@ final class WorkshopBrowseViewModel {
 
     @ObservationIgnored private let services: WorkshopServices
 
-    /// Current search input as the user types it. The view-model debounces
-    /// `searchText` changes into `currentRequest` updates.
+    /// Pending search text. Edits here do NOT query — the user applies the whole
+    /// filter set with the Search control (or Return). See `hasPendingChanges`.
     var searchInput: String = ""
     var preferredSort: WorkshopSortMode = .topRated
     var typeFilter: WorkshopContentTypeFilter = .all
-    var ageRating: WorkshopAgeRatingFilter = .everyone
+    /// Multi-select maturity ratings (independent toggles). Inclusion via the
+    /// complement as `excludedtags`.
+    private(set) var selectedAgeRatings: Set<WorkshopAgeRatingFilter> = WorkshopAgeRatingFilter.defaultSelection
     /// Multi-select genre tags (AND semantics, Steam-native).
     private(set) var selectedGenres: Set<String> = []
     var resolution: WorkshopResolutionFilter = .any
@@ -172,13 +177,25 @@ final class WorkshopBrowseViewModel {
         !isRateLimited && !isLoading && !isPaging && cursorStack.count > 1
     }
 
-    @ObservationIgnored private var filterDebounceTask: Task<Void, Never>?
     @ObservationIgnored private var inflightFetch: Task<Bool, Never>?
     @ObservationIgnored private var currentRequestToken: UInt64 = 0
 
+    /// True when the pending filter/search state differs from what's currently
+    /// displayed — drives the "Search" button's enabled/prominent state. Filter
+    /// edits accumulate here and only hit the network when the user applies them.
+    var hasPendingChanges: Bool {
+        makeRequest(cursor: "*") != currentRequest
+    }
+
     init(services: WorkshopServices) {
         self.services = services
-        self.currentRequest = WorkshopQueryRequest(sort: .topRated)
+        // Seed with the default filter state's request so `hasPendingChanges`
+        // is false before the first load (default age selection excludes
+        // Questionable + Mature).
+        self.currentRequest = WorkshopQueryRequest(
+            sort: .topRated,
+            excludedTags: WorkshopAgeRatingFilter.excludedTags(for: WorkshopAgeRatingFilter.defaultSelection)
+        )
     }
 
     func onAppear() {
@@ -190,7 +207,6 @@ final class WorkshopBrowseViewModel {
     func reload() async {
         guard !isRateLimited else { return }
         inflightFetch?.cancel()
-        filterDebounceTask?.cancel()
         cursorStack = ["*"]
         pageIndex = 1
         let request = makeRequest(cursor: "*")
@@ -246,63 +262,51 @@ final class WorkshopBrowseViewModel {
         await reload()
     }
 
-    /// Combined sort + trending-window update (the period is folded into the
-    /// sort menu, so there's a single control). Days are ignored for non-trending
-    /// sorts.
+    // Filter mutations below are PURE STATE EDITS — none of them query. The user
+    // batches selections and applies them all at once via `submitSearch()`
+    // (the Search control / Return), so adding five tags costs one request, not
+    // five. `hasPendingChanges` reflects unapplied edits.
+
+    /// Combined sort + trending-window update (period folded into the sort menu).
     func updateSortOption(_ sort: WorkshopSortMode, days: Int) {
-        guard !isRateLimited else { return }
-        let changed = sort != preferredSort || (sort == .trending && days != trendingDays)
-        guard changed else { return }
         preferredSort = sort
         if sort == .trending { trendingDays = days }
-        scheduleFilterReload()
     }
 
     func updateType(_ type: WorkshopContentTypeFilter) {
-        guard !isRateLimited, type != typeFilter else { return }
         typeFilter = type
-        scheduleFilterReload()
     }
 
-    func updateAgeRating(_ rating: WorkshopAgeRatingFilter) {
-        guard !isRateLimited, rating != ageRating else { return }
-        ageRating = rating
-        scheduleFilterReload()
+    func toggleAgeRating(_ rating: WorkshopAgeRatingFilter) {
+        if selectedAgeRatings.contains(rating) {
+            selectedAgeRatings.remove(rating)
+        } else {
+            selectedAgeRatings.insert(rating)
+        }
     }
 
     func updateResolution(_ resolution: WorkshopResolutionFilter) {
-        guard !isRateLimited, resolution != self.resolution else { return }
         self.resolution = resolution
-        scheduleFilterReload()
     }
 
     func toggleGenre(_ tag: String) {
-        guard !isRateLimited else { return }
         if selectedGenres.contains(tag) {
             selectedGenres.remove(tag)
         } else {
             selectedGenres.insert(tag)
         }
-        scheduleFilterReload()
     }
 
     func clearGenres() {
-        guard !isRateLimited, !selectedGenres.isEmpty else { return }
         selectedGenres.removeAll()
-        scheduleFilterReload()
     }
 
-    /// Coalesce rapid multi-select toggles (and back-to-back single-select
-    /// changes) into ONE request — the key API-economy lever: checking three
-    /// genres fires a single reload, not three. The 5-minute query cache then
-    /// de-dupes any repeated combination.
-    private func scheduleFilterReload() {
-        filterDebounceTask?.cancel()
-        filterDebounceTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 450_000_000)
-            guard let self, !Task.isCancelled else { return }
-            await self.reload()
-        }
+    /// Reset every filter (not search/sort) to defaults. Pending until applied.
+    func resetFilters() {
+        typeFilter = .all
+        selectedAgeRatings = WorkshopAgeRatingFilter.defaultSelection
+        resolution = .any
+        selectedGenres = []
     }
 
     /// Runs the query; returns `true` on a successful page load. `replacingItems`
@@ -364,7 +368,7 @@ final class WorkshopBrowseViewModel {
             numPerPage: 50,
             days: preferredSort == .trending ? trendingDays : nil,
             requiredTags: required,
-            excludedTags: ageRating.excludedTags
+            excludedTags: WorkshopAgeRatingFilter.excludedTags(for: selectedAgeRatings)
         )
     }
 }
