@@ -75,6 +75,10 @@ struct WorkshopBrowseFilterRibbon: View {
             sortMenu
             filtersToggle
 
+            if viewModel.hasPendingChanges {
+                searchButton
+            }
+
             refreshButton
 
             Spacer(minLength: DesignTokens.Spacing.sm)
@@ -160,13 +164,13 @@ struct WorkshopBrowseFilterRibbon: View {
                     ForEach(WorkshopAgeRatingFilter.allCases) { rating in
                         FilterChip(
                             title: Text(verbatim: rating.displayName),
-                            isSelected: viewModel.ageRating == rating
+                            isSelected: viewModel.selectedAgeRatings.contains(rating)
                         ) {
-                            viewModel.updateAgeRating(rating)
+                            viewModel.toggleAgeRating(rating)
                         }
                     }
                 }
-                .help(Text("Maximum maturity to show — hides ratings above the chosen level."))
+                .help(Text("Pick which maturity ratings to show — independent, multi-select."))
             }
 
             filterRow("Resolution") {
@@ -195,12 +199,21 @@ struct WorkshopBrowseFilterRibbon: View {
                 }
             }
 
-            if activeFilterCount > 0 {
-                Button("Clear filters") { clearFilters() }
-                    .buttonStyle(.borderless)
-                    .controlSize(.small)
-                    .padding(.leading, 74 + DesignTokens.Spacing.sm)
+            HStack(spacing: DesignTokens.Spacing.md) {
+                if viewModel.hasPendingChanges {
+                    Button("Search") { Task { await viewModel.submitSearch() } }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .disabled(controlsDisabled)
+                        .help(Text("Apply these filters"))
+                }
+                if activeFilterCount > 0 {
+                    Button("Clear filters") { viewModel.resetFilters() }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                }
             }
+            .padding(.leading, 74 + DesignTokens.Spacing.sm)
         }
         .padding(.horizontal, DesignTokens.Spacing.md)
         .padding(.vertical, DesignTokens.Spacing.sm)
@@ -284,6 +297,20 @@ struct WorkshopBrowseFilterRibbon: View {
         .opacity(controlsDisabled ? 0.5 : 1)
     }
 
+    /// Appears only when there are unapplied filter/search edits — the single
+    /// "apply everything now" action (issue: stop querying on every tag toggle).
+    private var searchButton: some View {
+        Button {
+            Task { await viewModel.submitSearch() }
+        } label: {
+            Text("Search")
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.small)
+        .disabled(controlsDisabled)
+        .help(Text("Apply filters and search"))
+    }
+
     private var refreshButton: some View {
         Button {
             Task { await viewModel.reload() }
@@ -334,19 +361,10 @@ struct WorkshopBrowseFilterRibbon: View {
     private var activeFilterCount: Int {
         var count = 0
         if viewModel.typeFilter != .all { count += 1 }
-        if viewModel.ageRating != .everyone { count += 1 }
+        if viewModel.selectedAgeRatings != WorkshopAgeRatingFilter.defaultSelection { count += 1 }
         if viewModel.resolution != .any { count += 1 }
         count += viewModel.selectedGenres.count
         return count
-    }
-
-    private func clearFilters() {
-        // Each call schedules the same debounced reload, so they coalesce into
-        // a single query rather than firing one per cleared filter.
-        if viewModel.typeFilter != .all { viewModel.updateType(.all) }
-        if viewModel.ageRating != .everyone { viewModel.updateAgeRating(.everyone) }
-        if viewModel.resolution != .any { viewModel.updateResolution(.any) }
-        if !viewModel.selectedGenres.isEmpty { viewModel.clearGenres() }
     }
 
     // MARK: - Sort options (Trending period folded in)

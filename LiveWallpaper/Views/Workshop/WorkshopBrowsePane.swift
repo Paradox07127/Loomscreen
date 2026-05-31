@@ -311,7 +311,7 @@ struct WorkshopBrowsePane: View {
     private var hasActiveFilters: Bool {
         !viewModel.searchInput.isEmpty
             || viewModel.typeFilter != .all
-            || viewModel.ageRating != .everyone
+            || viewModel.selectedAgeRatings != WorkshopAgeRatingFilter.defaultSelection
             || viewModel.resolution != .any
             || !viewModel.selectedGenres.isEmpty
     }
@@ -331,11 +331,9 @@ struct WorkshopBrowsePane: View {
     }
 
     private func clearFilters() {
-        viewModel.updateType(.all)
-        viewModel.updateAgeRating(.everyone)
-        viewModel.updateResolution(.any)
-        viewModel.clearGenres()
-        if !viewModel.searchInput.isEmpty { Task { await viewModel.clearSearch() } }
+        viewModel.searchInput = ""
+        viewModel.resetFilters()
+        Task { await viewModel.submitSearch() }
     }
 
     private func reloadInstalledIDs() {
