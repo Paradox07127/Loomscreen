@@ -275,24 +275,28 @@ final class WorkshopBrowseViewModel {
         if sort == .trending { trendingDays = days }
     }
 
+    // NOTE: each toggle mutates its property directly (no `inout` helper).
+    // Passing `&selectedTypes` as inout held exclusive access to the @Observable
+    // property across the whole call, and `persistFilters()` reads it again →
+    // "simultaneous accesses … requires exclusive access" crash. Mutating in
+    // place first, then persisting, keeps the accesses non-overlapping.
     func toggleType(_ type: WorkshopContentTypeFilter) {
-        toggle(type, in: &selectedTypes)
+        if selectedTypes.contains(type) { selectedTypes.remove(type) } else { selectedTypes.insert(type) }
+        persistFilters()
     }
 
     func toggleAgeRating(_ rating: WorkshopAgeRatingFilter) {
-        toggle(rating, in: &selectedAgeRatings)
+        if selectedAgeRatings.contains(rating) { selectedAgeRatings.remove(rating) } else { selectedAgeRatings.insert(rating) }
+        persistFilters()
     }
 
     func toggleResolution(_ resolution: WorkshopResolutionFilter) {
-        toggle(resolution, in: &selectedResolutions)
+        if selectedResolutions.contains(resolution) { selectedResolutions.remove(resolution) } else { selectedResolutions.insert(resolution) }
+        persistFilters()
     }
 
     func toggleGenre(_ tag: String) {
-        toggle(tag, in: &selectedGenres)
-    }
-
-    private func toggle<T: Hashable>(_ value: T, in set: inout Set<T>) {
-        if set.contains(value) { set.remove(value) } else { set.insert(value) }
+        if selectedGenres.contains(tag) { selectedGenres.remove(tag) } else { selectedGenres.insert(tag) }
         persistFilters()
     }
 
