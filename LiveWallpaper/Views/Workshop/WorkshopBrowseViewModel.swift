@@ -71,8 +71,10 @@ extension WorkshopQueryItem {
 }
 
 /// Official Wallpaper Engine Workshop genre tags (exact display strings — Steam
-/// matches `requiredtags` by exact case). Selecting more than one ANDs them,
-/// mirroring Steam's own Workshop browse (an item must carry every chosen tag).
+/// matches tags by exact case). WPE-style filtering: every genre is shown by
+/// default and the user DESELECTS the ones they don't want to see, so the
+/// de-selected genres become `excludedtags` (hide-this-category), not
+/// `requiredtags`. An item is hidden if it carries ANY de-selected genre.
 enum WorkshopGenre {
     static let allTags: [String] = [
         "Abstract", "Animal", "Anime", "Cartoon", "CGI", "Cyberpunk", "Fantasy",
@@ -161,8 +163,10 @@ final class WorkshopBrowseViewModel {
     /// Multi-select maturity ratings (independent toggles). Inclusion via the
     /// complement as `excludedtags`.
     private(set) var selectedAgeRatings: Set<WorkshopAgeRatingFilter> = WorkshopAgeRatingFilter.defaultSelection
-    /// Multi-select genre tags (AND semantics, Steam-native).
-    private(set) var selectedGenres: Set<String> = []
+    /// Genres the user has DE-selected (WPE-style "deselect to hide"). Empty =
+    /// every genre shown (the default). These flow into `excludedtags`, so an
+    /// item carrying any hidden genre is filtered out.
+    private(set) var hiddenGenres: Set<String> = []
     var resolution: WorkshopResolutionFilter = .any
     /// Trending window in days (week / month / year …); only used when the sort
     /// is `.trending`.
@@ -310,16 +314,19 @@ final class WorkshopBrowseViewModel {
         self.resolution = resolution
     }
 
+    /// Flip a genre between shown and hidden. Hiding adds it to `hiddenGenres`
+    /// (→ `excludedtags`); showing removes it.
     func toggleGenre(_ tag: String) {
-        if selectedGenres.contains(tag) {
-            selectedGenres.remove(tag)
+        if hiddenGenres.contains(tag) {
+            hiddenGenres.remove(tag)
         } else {
-            selectedGenres.insert(tag)
+            hiddenGenres.insert(tag)
         }
     }
 
+    /// Show every genre again (clear the genre filter).
     func clearGenres() {
-        selectedGenres.removeAll()
+        hiddenGenres.removeAll()
     }
 
     /// Reset every filter (not search/sort) to defaults. Pending until applied.
@@ -327,7 +334,7 @@ final class WorkshopBrowseViewModel {
         typeFilter = .all
         selectedAgeRatings = WorkshopAgeRatingFilter.defaultSelection
         resolution = .any
-        selectedGenres = []
+        hiddenGenres = []
     }
 
     /// Runs the query; returns `true` on a successful page load. `replacingItems`
@@ -378,7 +385,9 @@ final class WorkshopBrowseViewModel {
 
     private func makeRequest(cursor: String) -> WorkshopQueryRequest {
         let trimmed = searchInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        var required = typeFilter.requiredTags + selectedGenres.sorted()
+        // Type + resolution are inclusive (`requiredtags`, ANDed). Genres are
+        // WPE-style exclusion: de-selected genres are hidden via `excludedtags`.
+        var required = typeFilter.requiredTags
         if let resolutionTag = resolution.tag {
             required.append(resolutionTag)
         }
@@ -389,7 +398,7 @@ final class WorkshopBrowseViewModel {
             numPerPage: 50,
             days: preferredSort == .trending ? trendingDays : nil,
             requiredTags: required,
-            excludedTags: Self.requestExcludedTags(for: selectedAgeRatings)
+            excludedTags: Self.requestExcludedTags(for: selectedAgeRatings) + hiddenGenres.sorted()
         )
     }
 }

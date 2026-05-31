@@ -313,7 +313,7 @@ struct WorkshopBrowsePane: View {
             || viewModel.typeFilter != .all
             || viewModel.selectedAgeRatings != WorkshopAgeRatingFilter.defaultSelection
             || viewModel.resolution != .any
-            || !viewModel.selectedGenres.isEmpty
+            || !viewModel.hiddenGenres.isEmpty
     }
 
     private var currentRateLimitRemaining: TimeInterval {

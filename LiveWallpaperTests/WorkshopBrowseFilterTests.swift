@@ -51,6 +51,21 @@ struct WorkshopBrowseFilterTests {
         #expect(!item(tags: ["Everyone"]).isMatureRated)
     }
 
+    @Test("De-selected genres become excludedtags (WPE-style hide), never requiredtags")
+    func deselectedGenresExcluded() {
+        // WPE shows every genre by default; the user de-selects ones they don't
+        // want, which become `excludedtags` (an item with any of them is hidden).
+        // Genres must NOT land in requiredtags (that would AND-intersect them).
+        let request = WorkshopQueryRequest(
+            sort: .topRated,
+            requiredTags: WorkshopContentTypeFilter.scene.requiredTags,
+            excludedTags: WorkshopBrowseViewModel.requestExcludedTags(for: [.everyone]) + ["Anime", "Memes"]
+        )
+        #expect(request.requiredTags == ["Scene"])
+        // Merged with maturity complement + Application, canonical (sorted, exact-case).
+        #expect(request.excludedTags == ["Anime", "Application", "Mature", "Memes", "Questionable"])
+    }
+
     @Test("Filters flow into a canonicalized (de-duplicated, sorted, exact-case) request")
     func filtersCanonicalizeIntoRequest() {
         let request = WorkshopQueryRequest(

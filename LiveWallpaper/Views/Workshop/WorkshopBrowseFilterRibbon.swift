@@ -228,14 +228,16 @@ struct WorkshopBrowseFilterRibbon: View {
             filterRow("Genre") {
                 chipScroll {
                     ForEach(WorkshopGenre.allTags, id: \.self) { tag in
+                        // WPE-style: a genre is shown (selected) until de-selected.
                         FilterChip(
                             title: Text(verbatim: tag),
-                            isSelected: viewModel.selectedGenres.contains(tag)
+                            isSelected: !viewModel.hiddenGenres.contains(tag)
                         ) {
                             viewModel.toggleGenre(tag)
                         }
                     }
                 }
+                .help(Text("All genres show by default — deselect the ones you don't want to see."))
             }
 
             HStack(spacing: DesignTokens.Spacing.md) {
@@ -402,7 +404,7 @@ struct WorkshopBrowseFilterRibbon: View {
         if viewModel.typeFilter != .all { count += 1 }
         if viewModel.selectedAgeRatings != WorkshopAgeRatingFilter.defaultSelection { count += 1 }
         if viewModel.resolution != .any { count += 1 }
-        count += viewModel.selectedGenres.count
+        count += viewModel.hiddenGenres.count
         return count
     }
 
