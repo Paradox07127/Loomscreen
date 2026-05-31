@@ -40,6 +40,13 @@ struct WorkshopInspectorContent: View {
                         .font(.title3.weight(.semibold))
                         .fixedSize(horizontal: false, vertical: true)
 
+                    if let author = item.creatorPersonaName, !author.isEmpty {
+                        Text("by \(author)", comment: "Workshop item author line. Placeholder is the creator's Steam persona name.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
                     ratingRow
                     metaRow
                     statusBadge

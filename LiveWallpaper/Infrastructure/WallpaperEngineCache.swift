@@ -139,6 +139,22 @@ actor WallpaperEngineCache {
         Logger.info("WPE cache purged workshop \(workshopID)", category: .screenManager)
     }
 
+    /// Like `purge`, but moves the per-workshop cache directory to the Trash
+    /// (recoverable) rather than unlinking it. The target path goes through the
+    /// exact same `cacheDirectory` validation (`WPEPathSafety.isSafeWorkshopID`
+    /// + containment-within-`wpe-cache`), so it can only ever resolve to
+    /// `…/wpe-cache/<id>/` — never a parent, sibling, or arbitrary location.
+    /// Returns `true` if something was trashed.
+    @discardableResult
+    func moveToTrash(workshopID: String) throws -> Bool {
+        let cacheURL = try cacheDirectory(for: workshopID)
+        guard fileManager.fileExists(atPath: cacheURL.path) else { return false }
+        var resultingURL: NSURL?
+        try fileManager.trashItem(at: cacheURL, resultingItemURL: &resultingURL)
+        Logger.info("WPE cache moved to Trash for workshop \(workshopID)", category: .screenManager)
+        return true
+    }
+
     /// Aggregate stats over every per-workshop subdirectory under the root.
     func stats() -> WPECacheStats {
         guard fileManager.fileExists(atPath: rootURL.path),

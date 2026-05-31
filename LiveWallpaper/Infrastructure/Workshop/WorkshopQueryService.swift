@@ -112,7 +112,10 @@ struct WorkshopQueryItem: Identifiable, Sendable, Equatable {
     let id: UInt64
     let title: String
     let shortDescription: String
-    let creatorPersonaName: String?
+    /// Creator's SteamID64 (from the query) — resolved to `creatorPersonaName`
+    /// via a batched GetPlayerSummaries lookup.
+    let creatorID: String?
+    var creatorPersonaName: String?
     /// Already filtered through `WorkshopCDNHostAllowList`. Load via
     /// `WorkshopPreviewImageLoader` (the existing v1 loader).
     let previewImageURL: URL?
@@ -364,7 +367,8 @@ actor WorkshopQueryService {
 
             switch http.statusCode {
             case 200:
-                return try decodeQueryPage(data)
+                let page = try decodeQueryPage(data)
+                return await resolveCreatorNames(in: page, apiKey: apiKey)
             case 401:
                 throw WorkshopQueryError.unauthorized
             case 403:
@@ -387,6 +391,56 @@ actor WorkshopQueryService {
         throw WorkshopQueryError.responseParseFailure
     }
 
+    /// Best-effort: resolve each item's creator SteamID64 to a display name via
+    /// one batched GetPlayerSummaries call. Failures leave the name unset (the
+    /// UI just omits the author line). Runs before the page is cached, so the
+    /// names ride along with the cached page.
+    private func resolveCreatorNames(in page: WorkshopQueryPage, apiKey: String) async -> WorkshopQueryPage {
+        let ids = Array(Set(page.items.compactMap { $0.creatorID })).filter { !$0.isEmpty }
+        guard !ids.isEmpty else { return page }
+        let names = await fetchPersonaNames(ids: ids, apiKey: apiKey)
+        guard !names.isEmpty else { return page }
+        let updated = page.items.map { item -> WorkshopQueryItem in
+            guard let id = item.creatorID, let name = names[id] else { return item }
+            var copy = item
+            copy.creatorPersonaName = name
+            return copy
+        }
+        return WorkshopQueryPage(items: updated, nextCursor: page.nextCursor, totalAvailable: page.totalAvailable)
+    }
+
+    private func fetchPersonaNames(ids: [String], apiKey: String) async -> [String: String] {
+        // GetPlayerSummaries accepts up to 100 SteamID64s per call; one page is
+        // well under that.
+        let batch = Array(ids.prefix(100))
+        var components = URLComponents(string: "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/")!
+        components.queryItems = [
+            URLQueryItem(name: "key", value: apiKey),
+            URLQueryItem(name: "steamids", value: batch.joined(separator: ","))
+        ]
+        guard let url = components.url else { return [:] }
+        do {
+            try Task.checkCancellation()
+            try await acquireToken()
+            var request = URLRequest(url: url)
+            request.httpMethod = "GET"
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.timeoutInterval = 20
+            let (data, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return [:] }
+            let envelope = try JSONDecoder().decode(PlayerSummariesEnvelope.self, from: data)
+            var map: [String: String] = [:]
+            for player in envelope.response.players {
+                if let name = player.personaname?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+                    map[player.steamid] = WorkshopDiagnosticRedactor.redact(name)
+                }
+            }
+            return map
+        } catch {
+            return [:]
+        }
+    }
+
     private func buildQueryURL(for request: WorkshopQueryRequest, apiKey: String) throws -> URL {
         var components = URLComponents(url: Self.queryFilesEndpoint, resolvingAgainstBaseURL: false)!
         var queryItems: [URLQueryItem] = [
@@ -398,7 +452,10 @@ actor WorkshopQueryService {
             URLQueryItem(name: "return_previews", value: Self.steamBool(request.returnPreviews)),
             URLQueryItem(name: "return_tags", value: Self.steamBool(request.returnTags)),
             URLQueryItem(name: "return_metadata", value: Self.steamBool(request.returnMetadata)),
-            URLQueryItem(name: "return_short_description", value: Self.steamBool(request.returnShortDescription))
+            URLQueryItem(name: "return_short_description", value: Self.steamBool(request.returnShortDescription)),
+            // Required for `vote_data.score` — without it the rating is always
+            // absent, so the stars never render.
+            URLQueryItem(name: "return_vote_data", value: "true")
         ]
         if !request.searchText.isEmpty {
             queryItems.append(URLQueryItem(name: "search_text", value: request.searchText))
@@ -513,6 +570,7 @@ actor WorkshopQueryService {
             id: id,
             title: title,
             shortDescription: shortDescription,
+            creatorID: payload.creator?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmptyWorkshopQuery,
             creatorPersonaName: nil,
             previewImageURL: previewURL,
             fileSizeBytes: payload.file_size?.value,
@@ -607,6 +665,7 @@ private struct QueryFilesEnvelope: Decodable {
 
 private struct QueryFilesPayload: Decodable {
     let publishedfileid: LossyStringWQ?
+    let creator: String?
     let title: String?
     let description: String?
     let short_description: String?
@@ -648,6 +707,19 @@ private struct WorkshopTagPayload: Decodable {
     private enum CodingKeys: String, CodingKey {
         case tag
         case display_name
+    }
+}
+
+private struct PlayerSummariesEnvelope: Decodable {
+    let response: ResponseBody
+
+    struct ResponseBody: Decodable {
+        let players: [Player]
+    }
+
+    struct Player: Decodable {
+        let steamid: String
+        let personaname: String?
     }
 }
 

@@ -243,6 +243,7 @@ private struct CachedItemPayload: Codable {
     let id: UInt64
     let title: String
     let shortDescription: String
+    let creatorID: String?
     let creatorPersonaName: String?
     let previewImageURL: String?
     let fileSizeBytes: UInt64?
@@ -258,6 +259,7 @@ private struct CachedItemPayload: Codable {
         self.id = item.id
         self.title = item.title
         self.shortDescription = item.shortDescription
+        self.creatorID = item.creatorID
         self.creatorPersonaName = item.creatorPersonaName
         self.previewImageURL = item.previewImageURL?.absoluteString
         self.fileSizeBytes = item.fileSizeBytes
@@ -277,6 +279,7 @@ private struct CachedItemPayload: Codable {
             id: id,
             title: title,
             shortDescription: shortDescription,
+            creatorID: creatorID,
             creatorPersonaName: creatorPersonaName,
             previewImageURL: previewURL,
             fileSizeBytes: fileSizeBytes,

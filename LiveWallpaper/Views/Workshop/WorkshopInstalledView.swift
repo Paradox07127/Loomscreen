@@ -23,6 +23,9 @@ struct WorkshopInstalledView: View {
     @State private var selectedTypes: Set<WPELibraryTypeKind> = []
     @State private var sortOrder: WPELibrarySortOrder = .recommended
     @State private var errorMessage: String?
+    /// Set when the user asks to delete an entry — drives the confirmation
+    /// dialog before any real file removal.
+    @State private var pendingDelete: WPEHistoryEntry?
     /// Drives the drag-to-apply screen bar — set true when a card drag starts,
     /// cleared on drop / mouse-up / Escape. The bar is NOT shown otherwise.
     @State private var isDraggingEntry = false
@@ -52,6 +55,28 @@ struct WorkshopInstalledView: View {
             .onReceive(NotificationCenter.default.publisher(for: .wpeHistoryDidChange)) { _ in
                 reload()
                 reconcileUpdateFlags()
+            }
+            .confirmationDialog(
+                Text("Delete this wallpaper?"),
+                isPresented: Binding(
+                    get: { pendingDelete != nil },
+                    set: { if !$0 { pendingDelete = nil } }
+                ),
+                presenting: pendingDelete
+            ) { entry in
+                Button(role: .destructive) {
+                    performDelete(entry)
+                    pendingDelete = nil
+                } label: {
+                    Text(deletesFiles(entry) ? "Delete & Move Files to Trash" : "Remove from Library")
+                }
+                Button("Cancel", role: .cancel) { pendingDelete = nil }
+            } message: { entry in
+                if deletesFiles(entry) {
+                    Text("“\(entry.origin.title)” will be removed from your library and its downloaded files moved to the Trash. You can restore them from the Trash if needed.")
+                } else {
+                    Text("“\(entry.origin.title)” will be removed from your library. Its original files (imported from your own folder) are left untouched.")
+                }
             }
     }
 
@@ -121,7 +146,7 @@ struct WorkshopInstalledView: View {
                             screens: screenManager.screens,
                             onApply: { screen in apply(entry, to: screen) },
                             onApplyToAll: { applyToAll(entry) },
-                            onRemove: { remove(entry) },
+                            onRemove: { pendingDelete = entry },
                             isBookmarked: bookmarked,
                             // Only offer "Add" when the item's content can actually
                             // be rebuilt into a bookmark; "Remove" stays available
@@ -288,8 +313,38 @@ struct WorkshopInstalledView: View {
         }
     }
 
-    private func remove(_ entry: WPEHistoryEntry) {
-        screenManager.removeWPEImport(workshopID: entry.id)
+    /// Whether deleting this entry will touch files on disk. Only items we
+    /// downloaded/extracted into our managed cache do — folder imports point at
+    /// the user's own files, which we must never delete.
+    private func deletesFiles(_ entry: WPEHistoryEntry) -> Bool {
+        entry.origin.resourceLocation == .cache
+    }
+
+    /// Real, confirmed deletion. Always removes the library entry + any bookmark.
+    /// For cache-backed items it ALSO moves our managed copy
+    /// (`…/wpe-cache/<id>/`) to the Trash — a recoverable, path-validated delete
+    /// that can never escape the cache root. User-imported source folders are
+    /// never touched.
+    private func performDelete(_ entry: WPEHistoryEntry) {
+        errorMessage = nil
+        let origin = entry.origin
+        let workshopID = origin.workshopID
+
+        if bookmarkStore.containsWPEBookmark(workshopID: workshopID) {
+            bookmarkStore.removeWPEBookmarks(workshopID: workshopID)
+        }
+        screenManager.removeWPEImport(workshopID: workshopID)
+
+        if origin.resourceLocation == .cache, !workshopID.isEmpty {
+            do {
+                try WallpaperEngineCache().moveToTrash(workshopID: workshopID)
+            } catch {
+                errorMessage = String(
+                    localized: "Removed \(origin.title) from the library, but its files couldn't be moved to the Trash.",
+                    comment: "Workshop delete: history removed but cache files couldn't be trashed."
+                )
+            }
+        }
         reload()
     }
 
