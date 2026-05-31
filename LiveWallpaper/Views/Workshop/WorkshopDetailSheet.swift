@@ -61,7 +61,6 @@ struct WorkshopInspectorContent: View {
 
                     authorLine
 
-                    ratingRow
                     metaRow
                     statusBadge
 
@@ -217,14 +216,18 @@ struct WorkshopInspectorContent: View {
             // link, then the tertiary copy actions — top-down by importance.
             downloadControl
 
-            // Secondary actions — compact icon buttons (not full-width), trailing:
-            // open the Steam page and copy the item ID. Labels in tooltips/VoiceOver.
+            // Rating on the left, then compact equal-height icon actions on the
+            // right: open the Steam page and copy the item ID. The fixed 16×16
+            // label box keeps the two icon buttons identical in size regardless
+            // of glyph. Labels live in tooltips + VoiceOver.
             HStack(spacing: DesignTokens.Spacing.sm) {
+                ratingRow
                 Spacer(minLength: 0)
                 Button {
                     openURL(item.steamCommunityURL)
                 } label: {
                     Image(systemName: "arrow.up.forward.app")
+                        .frame(width: 16, height: 16)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -235,6 +238,7 @@ struct WorkshopInspectorContent: View {
                     copy(String(item.id))
                 } label: {
                     Image(systemName: "doc.on.doc")
+                        .frame(width: 16, height: 16)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
