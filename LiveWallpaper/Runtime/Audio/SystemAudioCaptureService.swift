@@ -52,6 +52,10 @@ final class SystemAudioCaptureService: @unchecked Sendable {
         let broker: AudioSpectrumBroker
         var scratchLeft: [Float] = []
         var scratchRight: [Float] = []
+        /// Time-domain peak |sample| of the most recent callback. Diagnostic
+        /// only (written on ioQueue, read on main) — confirms the tap delivers
+        /// normalized [-1, 1] audio rather than non-normalized data.
+        var lastInputPeak: Float = 0
 
         init(processor: AudioSpectrumProcessor, broker: AudioSpectrumBroker) {
             self.processor = processor
@@ -64,6 +68,9 @@ final class SystemAudioCaptureService: @unchecked Sendable {
     let broker = AudioSpectrumBroker()
 
     private(set) var isRunning = false
+
+    /// Diagnostic: peak |sample| of the most recent capture callback.
+    var lastInputPeak: Float { context?.lastInputPeak ?? 0 }
 
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
@@ -283,6 +290,13 @@ final class SystemAudioCaptureService: @unchecked Sendable {
     }
 
     private static func publish(_ context: IOContext, frameCount: Int, timestampNanos: UInt64) {
+        var peak: Float = 0
+        let count = min(frameCount, context.scratchLeft.count)
+        for index in 0..<count {
+            peak = max(peak, abs(context.scratchLeft[index]))
+        }
+        context.lastInputPeak = peak
+
         let frame = context.processor.process(
             left: context.scratchLeft,
             right: context.scratchRight,

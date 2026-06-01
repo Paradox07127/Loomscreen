@@ -64,13 +64,16 @@ enum SystemAudioCaptureProbe {
         let frame = captureService.broker.snapshot()
         let peakLeft = frame.left.max() ?? 0
         let peakRight = frame.right.max() ?? 0
-        let energyLeft = frame.left.reduce(0, +)
-        let energyRight = frame.right.reduce(0, +)
+        let avgLeft = frame.left.isEmpty ? 0 : frame.left.reduce(0, +) / Float(frame.left.count)
+        // How many of the 64 bins are pegged near max — should be small on a
+        // well-ranged spectrum, large when normalization saturates.
+        let saturatedLeft = frame.left.filter { $0 >= 0.99 }.count
+        let inputPeak = captureService.lastInputPeak
 
         Logger.notice(
             String(
-                format: "[AudioCapture] probe t=%ds peakL=%.3f peakR=%.3f sumL=%.2f sumR=%.2f ts=%llu",
-                ticks, peakLeft, peakRight, energyLeft, energyRight, frame.timestampNanos
+                format: "[AudioCapture] probe t=%ds inputPeak=%.3f | peakL=%.3f peakR=%.3f avgL=%.3f satL=%d/64 ts=%llu",
+                ticks, inputPeak, peakLeft, peakRight, avgLeft, saturatedLeft, frame.timestampNanos
             ),
             category: .audioCapture
         )
