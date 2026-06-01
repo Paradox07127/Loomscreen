@@ -847,9 +847,16 @@ final class WPEMetalRenderExecutor {
         var uniforms = genericImageUniforms(for: pass, layer: layer, hasMask: hasMask)
         encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEGenericImageUniforms>.stride, index: 0)
 
-        // Skin from the animation channels (channel == skin-blend index, keyframe 0 == bind).
-        // Reuse the same scene clock that drives WPESceneAnimatedValue / shader g_Time.
-        let animation = selectedPuppetAnimation(for: layer, model: model)
+        // Skin from the animation channels (channel == skin-blend index, keyframe 0 == bind),
+        // reusing the same scene clock that drives WPESceneAnimatedValue / shader g_Time.
+        //
+        // OFF BY DEFAULT: the prominent puppet animation in the corpus is the masked waterwaves
+        // effect (which animates e.g. the hair), while the baked MDLA bone motion is subtle and
+        // was observed to perturb the static torso. Keep the parser/evaluator in place but gate
+        // the GPU skinning behind an opt-in flag until the bind/euler convention is validated:
+        // `defaults write Taijia.LiveWallpaper WPEPuppetEnableSkinning -bool YES`.
+        let skinningAllowed = UserDefaults.standard.bool(forKey: "WPEPuppetEnableSkinning")
+        let animation = skinningAllowed ? selectedPuppetAnimation(for: layer, model: model) : nil
         let sampledFrame = animation.map {
             WPEPuppetAnimationEvaluator.sampledFrameIndex(for: $0, at: runtimeUniforms.time)
         } ?? 0
