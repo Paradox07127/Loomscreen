@@ -1183,10 +1183,20 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
             debugStage("particle", "skip \(object.name) — dynamic source yielded no texture")
             return
         }
-        let spriteSheet = parseParticleSpriteSheet(
+        var spriteSheet = parseParticleSpriteSheet(
             texturePath: texturePath,
             atlasPixelSize: (width: resolved.width, height: resolved.height)
         )
+        // Defensive: an R8 particle texture whose `.tex-json` sidecar is
+        // missing/invalid would otherwise fall through to the non-mask path
+        // and sample `.r8Unorm` alpha as 1 → an opaque quad (the RG88
+        // "red square" failure mode, in single channel). R8 is always a
+        // single-channel alpha mask, so flag it as such.
+        if spriteSheet == nil, resolved.pixelFormat == .r8Unorm {
+            spriteSheet = WPEParticleSpriteSheet(
+                cols: 1, rows: 1, frameCount: 1, baseFrameRate: 0, isAlphaMask: true
+            )
+        }
         guard let system = WPEParticleSystem(
             definition: definition,
             device: executor.textureSourceDevice,
