@@ -25,6 +25,10 @@ struct GeneralSettingsView: View {
     /// `WKWebView.isInspectable` on HTML wallpapers. Hidden in Lite via
     /// `#if !LITE_BUILD` + capability gate so the row never renders.
     @State private var developerModeEnabled: Bool
+
+    /// Pro-only master switch for audio-reactive wallpapers (system-audio
+    /// loopback capture). Default off — privacy-sensitive opt-in.
+    @State private var audioResponseEnabled: Bool
     /// Weather-reactive location source + manual city. Lives on General
     /// (rather than a dedicated tab) because the surface is tiny and
     /// only relevant to users who run weather-reactive particle effects.
@@ -62,6 +66,7 @@ struct GeneralSettingsView: View {
         _showInDock = State(initialValue: settings.showInDock)
         _videoCacheBudgetMB = State(initialValue: Double(settings.videoCacheMaxBytesPerScreen) / Double(1024 * 1024))
         _developerModeEnabled = State(initialValue: settings.developerModeEnabled)
+        _audioResponseEnabled = State(initialValue: settings.audioResponseEnabled)
         _weatherLocation = State(initialValue: settings.weatherLocation)
     }
 
@@ -248,6 +253,7 @@ struct GeneralSettingsView: View {
         pauseInGameMode = settings.pauseInGameMode
         showInDock = settings.showInDock
         developerModeEnabled = settings.developerModeEnabled
+        audioResponseEnabled = settings.audioResponseEnabled
         weatherLocation = settings.weatherLocation
         postSettingsNotificationAsync(.developerModeDidChange)
 
@@ -391,6 +397,8 @@ struct GeneralSettingsView: View {
 
             performanceSection
 
+            audioResponseSection
+
             powerSection
 
             weatherSection
@@ -433,6 +441,36 @@ struct GeneralSettingsView: View {
             } header: {
                 Text("Advanced", comment: "Section header for Developer Mode toggle in General settings.")
             }
+        }
+        #endif
+    }
+
+    /// Pro-only master switch for audio-reactive wallpapers. Flipping it drives
+    /// the shared `SystemAudioCaptureManager` directly so the tap starts/stops
+    /// live, and persists `audioResponseEnabled` for the next launch.
+    @ViewBuilder
+    private var audioResponseSection: some View {
+        #if !LITE_BUILD
+        Section {
+            SettingRow(
+                icon: "waveform",
+                iconColor: .pink,
+                title: "Audio Response",
+                subtitle: "Let audio-reactive wallpapers move with the music and sound playing on your Mac.",
+                info: "Analyzes your Mac's audio output on-device to compute a frequency spectrum for audio-reactive scenes. Nothing is recorded, saved, or sent anywhere. macOS asks for permission the first time you turn this on."
+            ) {
+                Toggle("", isOn: $audioResponseEnabled)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .onChange(of: audioResponseEnabled) { _, newValue in
+                        updateGlobalSettings()
+                        SystemAudioCaptureManager.shared.setEnabled(newValue)
+                    }
+                    .accessibilityLabel(Text("Audio Response"))
+                    .accessibilityHint(Text("Lets wallpapers react to the audio playing on your Mac. Off by default; requires audio-recording permission."))
+            }
+        } header: {
+            Text("Audio", comment: "Section header for the audio-response toggle in General settings.")
         }
         #endif
     }
@@ -953,6 +991,7 @@ struct GeneralSettingsView: View {
         settings.showInDock = showInDock
         settings.videoCacheMaxBytesPerScreen = Int(videoCacheBudgetMB) * 1024 * 1024
         settings.developerModeEnabled = developerModeEnabled
+        settings.audioResponseEnabled = audioResponseEnabled
         SettingsManager.shared.saveGlobalSettings(settings)
         screenManager.handleGlobalSettingsChanged()
         if dockChanged {

@@ -46,6 +46,13 @@ public struct GlobalSettings: Codable, Sendable {
     /// diagnostic surface invisible to ordinary users.
     public var developerModeEnabled: Bool = false
 
+    /// Pro-only master switch for audio-reactive wallpapers. When true, the app
+    /// captures system audio output (Core Audio process tap) so audio-reactive
+    /// scenes/shaders follow whatever is playing. Default `false` — capturing
+    /// system audio is privacy-sensitive and gated behind a TCC grant, so it
+    /// must be an explicit opt-in, never on by default.
+    public var audioResponseEnabled: Bool = false
+
     /// 150 MB default — covers a typical 30s 1080p clip outright and a 30s
     /// low-bitrate 4K with margin, while keeping the visible memory
     /// footprint under ~200 MB per screen so users glancing at Activity
@@ -84,7 +91,8 @@ public struct GlobalSettings: Codable, Sendable {
         globalShortcuts: [GlobalShortcutAction.RawAction: GlobalShortcutBinding?] = [:],
         recentWPEImports: [WPEHistoryEntry] = [],
         videoCacheMaxBytesPerScreen: Int = GlobalSettings.defaultVideoCacheBytes,
-        developerModeEnabled: Bool = false
+        developerModeEnabled: Bool = false,
+        audioResponseEnabled: Bool = false
     ) {
         self.globalPauseOnBattery = globalPauseOnBattery
         self.preservePlaybackOnLock = preservePlaybackOnLock
@@ -99,6 +107,7 @@ public struct GlobalSettings: Codable, Sendable {
         self.recentWPEImports = recentWPEImports
         self.videoCacheMaxBytesPerScreen = Self.clampedVideoCacheBytes(videoCacheMaxBytesPerScreen)
         self.developerModeEnabled = developerModeEnabled
+        self.audioResponseEnabled = audioResponseEnabled
     }
 
     public init(from decoder: Decoder) throws {
@@ -119,5 +128,6 @@ public struct GlobalSettings: Codable, Sendable {
         let storedCache = (try? c.decodeIfPresent(Int.self, forKey: .videoCacheMaxBytesPerScreen)) ?? GlobalSettings.defaultVideoCacheBytes
         videoCacheMaxBytesPerScreen = GlobalSettings.clampedVideoCacheBytes(storedCache)
         developerModeEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .developerModeEnabled)) ?? false
+        audioResponseEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .audioResponseEnabled)) ?? false
     }
 }
