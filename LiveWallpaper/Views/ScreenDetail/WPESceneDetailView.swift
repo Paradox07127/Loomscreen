@@ -169,6 +169,7 @@ struct WPESceneDetailView: View {
                 Image(systemName: severityIcon(for: reason))
                     .font(.title3)
                     .foregroundStyle(severityColor(for: reason))
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     errorTitle(for: reason)
                         .font(.subheadline.weight(.semibold))
@@ -179,6 +180,9 @@ struct WPESceneDetailView: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                // Combine only the text so it reads as one phrase, leaving the
+                // Log button a separate, focusable VoiceOver node.
+                .accessibilityElement(children: .combine)
                 Spacer(minLength: 8)
                 Button {
                     showLogSheet = true
@@ -199,7 +203,6 @@ struct WPESceneDetailView: View {
                     .strokeBorder(severityColor(for: reason).opacity(0.30), lineWidth: 1)
             }
             .transition(.opacity)
-            .accessibilityElement(children: .combine)
         }
     }
 
@@ -534,6 +537,10 @@ private struct DiagnosticLogSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var didCopy = false
+    /// Colourised log, built once when the window appears. Caching avoids
+    /// rebuilding the whole AttributedString on every body refresh (e.g. the
+    /// `didCopy` toggle) — important for long logs.
+    @State private var rendered: AttributedString?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -543,6 +550,7 @@ private struct DiagnosticLogSheet: View {
         }
         .frame(minWidth: 540, idealWidth: 680, minHeight: 380, idealHeight: 540)
         .background(.ultraThinMaterial)
+        .task { if rendered == nil { rendered = Self.colourise(log) } }
     }
 
     private var header: some View {
@@ -578,23 +586,24 @@ private struct DiagnosticLogSheet: View {
 
     private var terminal: some View {
         ScrollView(.vertical) {
-            Text(colouredLog)
+            Text(rendered ?? AttributedString(log))
                 .font(.system(.caption, design: .monospaced))
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(14)
         }
-        .background(Color.black.opacity(0.55))
+        .background(Color.black.opacity(0.8))
     }
 
     /// Builds one selectable `AttributedString` (so copy/selection still spans
-    /// the whole log) with each line tinted by its severity keyword.
-    private var colouredLog: AttributedString {
+    /// the whole log) with each line tinted by its severity keyword. Computed
+    /// once per window via `rendered`.
+    private static func colourise(_ log: String) -> AttributedString {
         let lines = log.components(separatedBy: "\n")
         var result = AttributedString()
         for (index, line) in lines.enumerated() {
             var piece = AttributedString(line)
-            piece.foregroundColor = Self.colour(for: line)
+            piece.foregroundColor = colour(for: line)
             result += piece
             if index < lines.count - 1 {
                 result += AttributedString("\n")
@@ -611,13 +620,14 @@ private struct DiagnosticLogSheet: View {
         if lower.contains("[warn") || lower.contains("warning") || lower.contains("legacy") {
             return Color(red: 1.0, green: 0.72, blue: 0.36)
         }
-        if lower.contains("miss") {
+        // Tight match so "permission"/"dismiss"/"transmission" don't read as misses.
+        if lower.contains("[miss") || lower.contains("miss:") || lower.contains("missing") || lower.contains("missed") {
             return Color(red: 0.98, green: 0.86, blue: 0.45)
         }
         if lower.contains("resolved") || lower.contains("success") || lower.contains("cleanly") {
             return Color(red: 0.56, green: 0.92, blue: 0.64)
         }
-        return Color.white.opacity(0.78)
+        return Color.white.opacity(0.85)
     }
 
     private func copy() {
