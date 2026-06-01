@@ -482,14 +482,14 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
     /// `WPEDumpScenePasses` matches this scene) so we can see exactly which pass
     /// introduces an artifact. PNGs land in App Support/LiveWallpaper/gpu-traces/
     /// as `wpe-<id>-scenepass-NN-<passid>-WxH.png`, ordered by draw sequence.
-    private func dumpScenePassesIfRequested() {
+    private func dumpScenePassesIfRequested(suffix: String = "") {
         let wantedID = UserDefaults.standard.string(forKey: "WPEDumpScenePasses")
         guard let wantedID, !wantedID.isEmpty, wantedID == descriptor.workshopID else {
             return
         }
         let dumps = executor.scenePassDumps
         Logger.notice(
-            "[WPEDumpScenePasses] dumping \(dumps.count) scene-target passes for \(descriptor.workshopID)",
+            "[WPEDumpScenePasses] dumping \(dumps.count) scene-target passes\(suffix.isEmpty ? " (t0)" : " \(suffix)") for \(descriptor.workshopID)",
             category: .wpeRender
         )
         for (index, entry) in dumps.enumerated() {
@@ -497,8 +497,26 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
                 .replacingOccurrences(of: "/", with: "_")
                 .replacingOccurrences(of: ".", with: "_")
             let ordinal = index < 10 ? "0\(index)" : "\(index)"
-            dumpTextureToPNG(entry.texture, basename: "scenepass-\(ordinal)-\(safeLabel)")
+            dumpTextureToPNG(entry.texture, basename: "scenepass\(suffix)-\(ordinal)-\(safeLabel)")
         }
+    }
+
+    /// One-shot per-pass + composite dump once scene time crosses a threshold
+    /// (default 6s, override via env `WPEDumpScenePassesAtTime`). Lets us see
+    /// time-animated artifacts (e.g. a face distorted by an animated effect over
+    /// time) that the first-frame dump at t≈0 misses. Same `WPEDumpScenePasses`
+    /// gate. `composite` is the post-particle/text frame the user actually sees.
+    private var didDumpScenePassesOverTime = false
+    private func maybeDumpScenePassesOverTime(time: Double, composite: MTLTexture) {
+        guard !didDumpScenePassesOverTime else { return }
+        let wantedID = UserDefaults.standard.string(forKey: "WPEDumpScenePasses")
+        guard let wantedID, !wantedID.isEmpty, wantedID == descriptor.workshopID else { return }
+        let threshold = ProcessInfo.processInfo.environment["WPEDumpScenePassesAtTime"].flatMap(Double.init) ?? 6.0
+        guard time >= threshold else { return }
+        didDumpScenePassesOverTime = true
+        let tag = "t\(Int(time.rounded()))s"
+        dumpScenePassesIfRequested(suffix: "-\(tag)")
+        dumpTextureToPNG(composite, basename: "composite-\(tag)")
     }
 
     private func dumpTextureToPNG(_ texture: MTLTexture, basename: String) {
@@ -1046,6 +1064,9 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
                 )
             }
         }
+        #if DEBUG
+        maybeDumpScenePassesOverTime(time: uniforms.time, composite: frame)
+        #endif
         return frame
     }
 
