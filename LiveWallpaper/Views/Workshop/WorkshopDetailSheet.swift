@@ -32,6 +32,8 @@ struct WorkshopInspectorContent: View {
     @AppStorage("loomscreen.workshop.matureContentConfirmed.v1") private var matureConfirmed = false
     @State private var matureRevealed = false
     @State private var showingAgeConfirm = false
+    /// Drives the multi-display target popover under the single Apply button.
+    @State private var showingApplyPopover = false
 
     /// Blur the hero until clicked, mirroring the grid card's spoiler gate so
     /// opening details never auto-plays adult content unprompted.
@@ -280,31 +282,58 @@ struct WorkshopInspectorContent: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
         } else {
-            // Multiple displays: prominent "all" + a per-display menu (the Browse
-            // pane has no screen bar like Installed, so per-display lives here).
-            VStack(spacing: DesignTokens.Spacing.xs) {
-                Button { for screen in screens { apply(entry, to: screen) } } label: {
-                    Label("Apply to All Displays", systemImage: "play.fill")
-                        .frame(maxWidth: .infinity)
-                }
+            // One Apply button; tapping floats a popover to pick a display or all.
+            // (Single-display applies directly above; there's no standalone
+            // "Apply to All" button.)
+            Button { showingApplyPopover = true } label: { applyLabel }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
-
-                Menu {
-                    ForEach(screens, id: \.id) { screen in
-                        Button { apply(entry, to: screen) } label: { Text(verbatim: screen.name) }
-                    }
-                } label: {
-                    Label("Apply to a specific display…", systemImage: "display")
+                .popover(isPresented: $showingApplyPopover, arrowEdge: .bottom) {
+                    applyTargetPicker(for: entry, screens: screens)
                 }
-                .menuStyle(.button)
-                .controlSize(.small)
-            }
         }
     }
 
     private var applyLabel: some View {
         Label("Apply", systemImage: "play.fill").frame(maxWidth: .infinity)
+    }
+
+    /// Target chooser shown under Apply on multi-display setups: each display,
+    /// plus "All Displays". Picking one applies and dismisses.
+    private func applyTargetPicker(for entry: WPEHistoryEntry, screens: [Screen]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Apply to")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.top, 10)
+                .padding(.bottom, 4)
+
+            applyTargetRow(Text("All Displays"), systemImage: "rectangle.on.rectangle") {
+                for screen in screens { apply(entry, to: screen) }
+                showingApplyPopover = false
+            }
+            Divider().padding(.horizontal, 8).padding(.vertical, 2)
+            ForEach(screens, id: \.id) { screen in
+                applyTargetRow(Text(verbatim: screen.name), systemImage: "display") {
+                    apply(entry, to: screen)
+                    showingApplyPopover = false
+                }
+            }
+        }
+        .padding(.bottom, 6)
+        .frame(minWidth: 220)
+    }
+
+    private func applyTargetRow(_ title: Text, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label { title } icon: { Image(systemName: systemImage) }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func apply(_ entry: WPEHistoryEntry, to screen: Screen) {
