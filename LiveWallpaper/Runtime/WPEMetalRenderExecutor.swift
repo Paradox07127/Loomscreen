@@ -1457,7 +1457,8 @@ final class WPEMetalRenderExecutor {
         scale: Float,
         strength: Float,
         exponent: Float,
-        direction: SIMD2<Float>
+        direction: SIMD2<Float>,
+        debugMode: Float
     ) throws {
         let usesObjectQuad = usesObjectQuadGeometry(for: pass, layer: layer)
         encoder.setRenderPipelineState(try renderPipeline(
@@ -1501,7 +1502,8 @@ final class WPEMetalRenderExecutor {
             exponent: exponent,
             directionX: direction.x,
             directionY: direction.y,
-            hasMask: hasMask
+            hasMask: hasMask,
+            debugMode: debugMode
         )
         encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEWaterWavesUniforms>.stride, index: 0)
 

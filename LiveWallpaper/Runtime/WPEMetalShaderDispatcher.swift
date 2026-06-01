@@ -518,7 +518,8 @@ struct WPEMetalShaderDispatcher {
                 scale: WPEMetalShaderInputs.floatScalar(named: ["g_Scale", "scale"], in: pass, default: 200),
                 strength: WPEMetalShaderInputs.floatScalar(named: ["g_Strength", "strength"], in: pass, default: 0.1),
                 exponent: WPEMetalShaderInputs.floatScalar(named: ["g_Exponent", "exponent"], in: pass, default: 1),
-                direction: SIMD2<Float>(-sin(waveAngle), cos(waveAngle))
+                direction: SIMD2<Float>(-sin(waveAngle), cos(waveAngle)),
+                debugMode: WPEWaterWavesDebugMode.current.rawValue
             )
 
         case "effect_spin":

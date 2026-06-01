@@ -695,6 +695,7 @@ struct WPEWaterWavesUniforms {
     float directionX;
     float directionY;
     float hasMask;
+    float debugMode; // 0 normal; 1 mask grayscale; 2 source+red mask overlay; 3 displacement heatmap
 };
 
 // Port of WPE's effects/waterwaves.frag: a sine wave travels along `direction` at
@@ -718,7 +719,28 @@ fragment half4 wpe_effect_waterwaves_fragment(
     float wave = sin(distance);
     float shaped = sign(wave) * pow(abs(wave), max(uniforms.exponent, 0.0001));
 
-    float2 uv = clamp(in.uv + shaped * offset * strength * mask, float2(0.0), float2(1.0));
+    float2 displacement = shaped * offset * strength * mask;
+    float2 uv = clamp(in.uv + displacement, float2(0.0), float2(1.0));
+
+    // Developer Tools "Waterwaves debug" visualizations (0 in production).
+    if (uniforms.debugMode > 0.5) {
+        if (uniforms.debugMode < 1.5) {
+            // Mask as grayscale — shows WHERE the effect is allowed to act (and reveals
+            // any vertical flip vs the character).
+            return half4(half3(mask), 1.0h);
+        } else if (uniforms.debugMode < 2.5) {
+            // Source with the mask region tinted red — confirms the trigger region lands on
+            // the intended part of the character (e.g. the hair).
+            float4 base = float4(texture0.sample(linearSampler, in.uv));
+            float3 tinted = mix(base.rgb, float3(1.0, 0.0, 0.0), mask * 0.6);
+            return half4(half3(tinted), half(base.a));
+        }
+        // Displacement-magnitude heatmap (amplified) — shows whether the wave field is
+        // actually nonzero over the masked region.
+        float mag = clamp(length(displacement) * 120.0, 0.0, 1.0);
+        return half4(half(mag), half(mag * 0.4), 0.0h, 1.0h);
+    }
+
     return texture0.sample(linearSampler, uv);
 }
 

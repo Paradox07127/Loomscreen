@@ -20,6 +20,8 @@ struct DeveloperToolsView: View {
     @State private var runTask: Task<Void, Never>?
     @State private var singleSceneWorkshopID: String = ""
     @State private var singleSceneStatus: String = ""
+    @State private var flagRefresh = 0
+    @State private var waterWavesDebug = WPEWaterWavesDebugMode.current
 
     var body: some View {
         DetailPageScaffold(
@@ -93,6 +95,7 @@ struct DeveloperToolsView: View {
     private var content: some View {
         VStack(alignment: .leading, spacing: 16) {
             configurationSection
+            diagnosticsFlagsSection
             sceneDebugSection
             if let startupError {
                 errorBanner(startupError)
@@ -202,6 +205,121 @@ struct DeveloperToolsView: View {
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }
+    }
+
+    // MARK: - Diagnostic flags
+
+    private struct DiagnosticBoolFlag: Identifiable {
+        let key: String
+        let title: String
+        let help: String
+        var id: String { key }
+    }
+
+    private static let diagnosticBoolFlags: [DiagnosticBoolFlag] = [
+        .init(key: "WPEMetalCaptureScene", title: "Capture scene textures",
+              help: "Dump decoded scene/composite textures (incl. BC/DXT) under scene-debug."),
+        .init(key: "WPEMetalBypassEffects", title: "Bypass effect passes",
+              help: "Draw only base image layers, skipping effects (note: breaks solid-color layers)."),
+        .init(key: "WPEPuppetEnableSkinning", title: "Puppet bone skinning",
+              help: "Apply MDLA bone animation to puppets. Off by default — waterwaves drives the visible hair motion."),
+        .init(key: "WPESceneDebugArtifactsEnabled", title: "Scene debug artifacts",
+              help: "Write per-scene logs, first-frame snapshot, and texture metadata to scene-debug."),
+        .init(key: "WPEAudioCaptureProbe", title: "Audio capture probe",
+              help: "Probe the Core Audio process tap under the sandbox (audio-reactive bring-up)."),
+        .init(key: "WPEAudioDebugLog", title: "Audio debug log",
+              help: "Verbose audio-reactive DSP logging."),
+        .init(key: "WPE_METAL_LEGACY_COMPOSE_LAYER", title: "Legacy compose layer",
+              help: "Roll back to the pre-fix scaled-footprint compose-layer path."),
+    ]
+
+    private static let diagnosticStringKeys: [String] = [
+        WPEWaterWavesDebugMode.defaultsKey,
+        "WPEDumpScenePasses",
+        "WPEDumpScenePassesAtTime",
+        "WPE_METAL_LEGACY_COMPOSE_SCENES",
+    ]
+
+    private var diagnosticsFlagsSection: some View {
+        GroupBox(label:
+            HStack {
+                Text("WPE diagnostics").font(.headline)
+                Spacer()
+                Button {
+                    resetDiagnosticFlags()
+                } label: {
+                    Label("Reset all", systemImage: "arrow.counterclockwise")
+                }
+                .help(Text("Turn every diagnostic flag off so none leak into normal playback or other sessions."))
+            }
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Picker(selection: Binding(
+                        get: { waterWavesDebug },
+                        set: { setWaterWavesDebug($0) }
+                    )) {
+                        ForEach(WPEWaterWavesDebugMode.allCases) { mode in
+                            Text(verbatim: mode.title).tag(mode)
+                        }
+                    } label: {
+                        Text(verbatim: "Waterwaves debug")
+                    }
+                    Text(verbatim: "Visualize where the waterwaves effect triggers: Mask / Overlay show the masked region on the character, Displacement shows the wave field. Applies on the next rendered frame.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Divider()
+
+                ForEach(Self.diagnosticBoolFlags) { flag in
+                    Toggle(isOn: boolBinding(flag.key)) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(verbatim: flag.title)
+                            Text(verbatim: flag.help)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                Text(verbatim: "Flags persist in UserDefaults until toggled off. \"Reset all\" clears every flag here (including scene-dump targets) so a forgotten toggle never affects normal playback.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.vertical, 4)
+            .id(flagRefresh)
+        }
+    }
+
+    private func boolBinding(_ key: String) -> Binding<Bool> {
+        Binding(
+            get: { UserDefaults.standard.bool(forKey: key) },
+            set: { newValue in
+                UserDefaults.standard.set(newValue, forKey: key)
+                flagRefresh += 1
+            }
+        )
+    }
+
+    private func setWaterWavesDebug(_ mode: WPEWaterWavesDebugMode) {
+        waterWavesDebug = mode
+        if mode == .off {
+            UserDefaults.standard.removeObject(forKey: WPEWaterWavesDebugMode.defaultsKey)
+        } else {
+            UserDefaults.standard.set(mode.storageValue, forKey: WPEWaterWavesDebugMode.defaultsKey)
+        }
+    }
+
+    private func resetDiagnosticFlags() {
+        for flag in Self.diagnosticBoolFlags {
+            UserDefaults.standard.removeObject(forKey: flag.key)
+        }
+        for key in Self.diagnosticStringKeys {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+        waterWavesDebug = .off
+        flagRefresh += 1
     }
 
     private func errorBanner(_ message: String) -> some View {

@@ -190,6 +190,54 @@ struct WPEWaterWavesUniforms {
     var directionY: Float
     /// 1 when an opacity mask is bound in texture slot 1, else 0 (effect applies everywhere).
     var hasMask: Float
+    /// Diagnostic visualization: 0 = normal effect, 1 = mask grayscale, 2 = source with the
+    /// mask region tinted red, 3 = displacement-magnitude heatmap. Driven by the Developer
+    /// Tools "Waterwaves debug" picker; 0 in production.
+    var debugMode: Float = 0
+}
+
+/// Developer Tools "Waterwaves debug" visualization mode — single source of truth shared by the
+/// shader dispatcher (`rawValue` → shader uniform) and the Developer Tools picker. Persisted as a
+/// string under `defaultsKey` so it survives relaunch and is resettable from the UI.
+enum WPEWaterWavesDebugMode: Float, CaseIterable, Identifiable {
+    case off = 0
+    case mask = 1
+    case overlay = 2
+    case displacement = 3
+
+    static let defaultsKey = "WPEWaterWavesDebugMode"
+    var id: Float { rawValue }
+
+    var storageValue: String {
+        switch self {
+        case .off: return "off"
+        case .mask: return "mask"
+        case .overlay: return "overlay"
+        case .displacement: return "displacement"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .off: return "Off (normal effect)"
+        case .mask: return "Mask (grayscale)"
+        case .overlay: return "Mask overlay (red on character)"
+        case .displacement: return "Displacement heatmap"
+        }
+    }
+
+    init(storageValue: String?) {
+        switch storageValue {
+        case WPEWaterWavesDebugMode.mask.storageValue: self = .mask
+        case WPEWaterWavesDebugMode.overlay.storageValue: self = .overlay
+        case WPEWaterWavesDebugMode.displacement.storageValue: self = .displacement
+        default: self = .off
+        }
+    }
+
+    static var current: WPEWaterWavesDebugMode {
+        WPEWaterWavesDebugMode(storageValue: UserDefaults.standard.string(forKey: defaultsKey))
+    }
 }
 
 struct WPEShakeUniforms {
