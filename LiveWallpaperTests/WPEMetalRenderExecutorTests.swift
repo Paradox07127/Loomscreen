@@ -2452,6 +2452,7 @@ private extension WPEMetalRenderExecutorTests {
     func composeUtilityClassifierHandlesPathsAndDependencyPrefix() {
         #expect(WPEMetalComposeLayerCompatibility.isSceneCaptureUtilityModelPath("models/util/composelayer.json"))
         #expect(WPEMetalComposeLayerCompatibility.isSceneCaptureUtilityModelPath("models/util/projectlayer.json"))
+        #expect(WPEMetalComposeLayerCompatibility.isSceneCaptureUtilityModelPath("models/util/fullscreenlayer.json"))
         #expect(WPEMetalComposeLayerCompatibility.isSceneCaptureUtilityModelPath("../3479521040/models/util/composelayer.json"))
         #expect(WPEMetalComposeLayerCompatibility.isSceneCaptureUtilityModelPath("models\\util\\composelayer.json"))
         #expect(!WPEMetalComposeLayerCompatibility.isSceneCaptureUtilityModelPath("models/util/solidlayer.json"))

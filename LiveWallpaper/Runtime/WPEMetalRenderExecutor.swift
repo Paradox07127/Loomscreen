@@ -10,9 +10,13 @@ import MetalKit
 /// (instead of three duplicated path checks) and read the rollback settings
 /// once per frame rather than per pass.
 enum WPEMetalComposeLayerCompatibility {
-    /// WPE compose/project utility models (`composelayer.json` / `projectlayer.json`)
-    /// capture the full frame and must render fullscreen with projected sampling.
-    /// Tolerates a leading `../<dependencyID>/` resolver prefix.
+    /// WPE `fullscreen`/`passthrough` utility models — `composelayer.json`,
+    /// `projectlayer.json`, and `fullscreenlayer.json` (the post-process /
+    /// depth-of-field carrier) — all capture the full frame and MUST render
+    /// fullscreen with a scene-sized composite. Drawing them at their authored
+    /// object footprint shrinks the result into a "picture-in-picture" panel
+    /// (e.g. scene 3479521040's DoF layer was a `fullscreenlayer`). Tolerates a
+    /// leading `../<dependencyID>/` resolver prefix.
     static func isSceneCaptureUtilityModelPath(_ path: String) -> Bool {
         let normalized = path.replacingOccurrences(of: "\\", with: "/").lowercased()
         let stripped: String
@@ -24,6 +28,7 @@ enum WPEMetalComposeLayerCompatibility {
         }
         return stripped == "models/util/composelayer.json"
             || stripped == "models/util/projectlayer.json"
+            || stripped == "models/util/fullscreenlayer.json"
     }
 
     /// Per-scene rollback to the legacy region path. `WPE_METAL_LEGACY_COMPOSE_LAYER`
