@@ -140,16 +140,16 @@ struct WorkshopInspectorContent: View {
 
     // MARK: - Author
 
-    /// Author on the left, star rating right-aligned on the same line.
+    /// Star rating on the left, author right-aligned on the same line.
     @ViewBuilder
     private var authorRatingRow: some View {
         let hasAuthor = !(item.creatorPersonaName ?? "").isEmpty
         let hasRating = (item.voteScore ?? 0) > 0
         if hasAuthor || hasRating {
             HStack(spacing: DesignTokens.Spacing.sm) {
-                authorLine
-                Spacer(minLength: 0)
                 ratingRow
+                Spacer(minLength: 0)
+                authorLine
             }
         }
     }
@@ -516,26 +516,16 @@ struct WorkshopInspectorContent: View {
 
     private var descriptionSection: some View {
         let text = item.shortDescription
+        let placeholder = String(localized: "No description provided.", comment: "Placeholder when a Workshop item has no description.")
         return VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
             Divider()
             Text("Description")
                 .font(.headline)
-            Text(text.isEmpty
-                 ? String(localized: "No description provided.", comment: "Placeholder when a Workshop item has no description.")
-                 : text)
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .lineLimit(descriptionExpanded ? nil : 6)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-            if text.count > 280 {
-                Button(descriptionExpanded ? "Show less" : "Show more") {
-                    withAnimation(.easeInOut(duration: 0.15)) { descriptionExpanded.toggle() }
-                }
-                .buttonStyle(.plain)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Color.accentColor)
-            }
+            CollapsibleDescription(
+                text: text.isEmpty ? placeholder : text,
+                isExpandable: text.count > 280,
+                isExpanded: $descriptionExpanded
+            )
         }
     }
 
@@ -620,6 +610,40 @@ struct WorkshopApplyTargetPicker: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Description block shared by the online + Installed inspectors. The entire
+/// block is a single tap target that toggles expand/collapse, with an inline
+/// "Show more / Show less" cue — one interaction, no separate button competing
+/// with text selection.
+struct CollapsibleDescription: View {
+    let text: String
+    let isExpandable: Bool
+    @Binding var isExpanded: Bool
+
+    var body: some View {
+        Button {
+            guard isExpandable else { return }
+            withAnimation(.easeInOut(duration: 0.15)) { isExpanded.toggle() }
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(verbatim: text)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(isExpanded ? nil : 6)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if isExpandable {
+                    Text(isExpanded ? "Show less" : "Show more")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!isExpandable)
     }
 }
 #endif

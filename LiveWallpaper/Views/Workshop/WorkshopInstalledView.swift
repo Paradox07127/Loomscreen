@@ -23,10 +23,10 @@ struct WorkshopInstalledView: View {
     @State private var bookmarkStore = BookmarkStore.shared
     @State private var entries: [WPEHistoryEntry] = []
     @State private var searchText: String = ""
-    /// Multi-select type filter — empty means "all". This is a client-side OR
-    /// (no API), so multi-select is correct here (an item matches if its kind is
-    /// among the selected set), unlike the online Browse type chip.
-    @State private var selectedTypes: Set<WPELibraryTypeKind> = []
+    /// Multi-select type filter (client-side, no API). Mirrors the online ribbon:
+    /// all chips selected by default; deselect to hide a kind, Option-click a
+    /// chip to isolate it. All-or-none selected == no filter.
+    @State private var selectedTypes: Set<WPELibraryTypeKind> = Set(WPELibraryTypeKind.allCases)
     @State private var sortOrder: WPELibrarySortOrder = .recommended
     @State private var errorMessage: String?
     /// Set when the user asks to delete an entry — drives the confirmation
@@ -333,16 +333,14 @@ struct WorkshopInstalledView: View {
 
     private var typeChipRow: some View {
         HStack(spacing: 6) {
-            FilterChip(title: Text("All"), isSelected: selectedTypes.isEmpty) {
-                selectedTypes.removeAll()
-            }
-            .help(Text("Show every installed wallpaper"))
-
             ForEach(WPELibraryTypeKind.allCases) { kind in
-                FilterChip(title: Text(verbatim: kind.title), isSelected: selectedTypes.contains(kind)) {
+                WorkshopFilterChip(
+                    title: Text(verbatim: kind.title),
+                    isSelected: selectedTypes.contains(kind),
+                    onIsolate: { selectedTypes = [kind] }
+                ) {
                     toggleType(kind)
                 }
-                .help(kind.helpText)
             }
         }
     }
@@ -355,8 +353,12 @@ struct WorkshopInstalledView: View {
         }
     }
 
+    /// Default-all-selected model (mirrors online): all (or none) selected means
+    /// no filter; deselecting some hides those kinds.
     private func typeMatches(_ entry: WPEHistoryEntry) -> Bool {
-        guard !selectedTypes.isEmpty else { return true }
+        if selectedTypes.isEmpty || selectedTypes.count == WPELibraryTypeKind.allCases.count {
+            return true
+        }
         return selectedTypes.contains { $0.matches(entry) }
     }
 
@@ -720,7 +722,7 @@ struct WorkshopInstalledView: View {
 // MARK: - Filters
 
 /// Concrete library type kinds for the multi-select chip row (no `.all` case —
-/// an empty selection means "all"). `.unsupported` collects the project types
+/// all or none selected means "all"). `.unsupported` collects the project types
 /// macOS can't run.
 private enum WPELibraryTypeKind: String, CaseIterable, Identifiable {
     case video, web, scene, unsupported
@@ -1101,20 +1103,11 @@ private struct WPEInstalledInspectorContent: View {
     private func descriptionSection(_ text: String) -> some View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
             Text("Description").font(.headline)
-            Text(verbatim: text)
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .lineLimit(descriptionExpanded ? nil : 6)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-            if text.count > 280 {
-                Button(descriptionExpanded ? "Show less" : "Show more") {
-                    withAnimation(.easeInOut(duration: 0.15)) { descriptionExpanded.toggle() }
-                }
-                .buttonStyle(.plain)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Color.accentColor)
-            }
+            CollapsibleDescription(
+                text: text,
+                isExpandable: text.count > 280,
+                isExpanded: $descriptionExpanded
+            )
         }
     }
 

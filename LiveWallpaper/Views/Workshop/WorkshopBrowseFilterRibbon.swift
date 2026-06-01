@@ -414,7 +414,10 @@ struct WorkshopBrowseFilterRibbon: View {
 /// deselected chip reads as "switched off" — dimmed, struck through, faint
 /// border — while a selected chip keeps the solid accent treatment. Scoped to
 /// the Workshop filter panel so it doesn't leak into the shared `FilterChip`.
-private struct WorkshopFilterChip: View {
+/// Shared filter chip — default-selected, deselect-to-hide, Option-click to
+/// isolate. Used by the online ribbon and the Installed type row so both read
+/// identically. Internal (not private) so `WorkshopInstalledView` can reuse it.
+struct WorkshopFilterChip: View {
     let title: Text
     let isSelected: Bool
     /// Option-click handler: collapse the category to just this option. `nil`
