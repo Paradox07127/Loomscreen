@@ -225,12 +225,13 @@ fragment half4 wpe_composelayer_fragment(
     constant WPEComposeLayerUniforms& uniforms [[buffer(0)]]
 ) {
     constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
-    float w = in.screenCoord.z;
-    if (abs(w) < 1e-6) {
-        w = w < 0.0 ? -1e-6 : 1e-6;
-    }
-    float2 uv = in.screenCoord.xy / w * 0.5 + 0.5;
-    float4 color = float4(texture0.sample(linearSampler, uv));
+    // `passthrough:true` compose layers transfer the captured full frame 1:1 at
+    // screen UV, IGNORING the object's authored size/rotation/origin. Sampling
+    // through the layer transform (in.screenCoord) warped oversized/rotated
+    // compose layers (e.g. scene 3479521040's 5000x2300 rotated layer) into a
+    // distorted double-exposure overlay. The layer transform positions the
+    // DOWNSTREAM effect (lens flare / foliage), not the compose capture.
+    float4 color = float4(texture0.sample(linearSampler, in.uv));
     if (uniforms.flags.x > 0.5) {
         color.a = 0.0;
     }
