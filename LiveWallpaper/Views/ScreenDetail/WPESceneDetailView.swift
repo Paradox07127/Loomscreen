@@ -27,6 +27,9 @@ struct WPESceneDetailView: View {
     @State private var showRawLog = false
     /// Transient "copied" affordance on the console's Copy button.
     @State private var didCopyLog = false
+    /// Presents the full diagnostic log in a resizable in-app window so a long
+    /// log never has to grow the inspector card off-screen.
+    @State private var showLogSheet = false
 
     var body: some View {
         VStack(spacing: 16) {
@@ -40,6 +43,9 @@ struct WPESceneDetailView: View {
         .frame(maxWidth: 560)
         .adaptiveGlassSurface(.roundedRectangle(24))
         .shadow(color: .black.opacity(0.18), radius: 8, y: 4)
+        .sheet(isPresented: $showLogSheet) {
+            DiagnosticLogSheet(title: origin.title, log: fullDiagnosticText)
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text("\(origin.title). Scene wallpaper. \(stateAccessibilityText)", comment: "A11y label for a Wallpaper Engine scene detail card. Placeholders are scene title and state."))
         .task(id: descriptor.workshopID) {
@@ -233,26 +239,38 @@ struct WPESceneDetailView: View {
         VStack(alignment: .leading, spacing: 0) {
             Divider().overlay(Color.white.opacity(0.12))
 
-            Button {
-                withAnimation(DesignTokens.motion(reduceMotion, .spring(response: 0.3, dampingFraction: 0.85))) {
-                    showRawLog.toggle()
+            HStack(spacing: 6) {
+                Button {
+                    withAnimation(DesignTokens.motion(reduceMotion, .spring(response: 0.3, dampingFraction: 0.85))) {
+                        showRawLog.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10, weight: .bold))
+                            .rotationEffect(.degrees(showRawLog ? 90 : 0))
+                        Text(showRawLog ? "Hide diagnostic log" : "Show diagnostic log")
+                    }
+                    .contentShape(Rectangle())
                 }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .bold))
-                        .rotationEffect(.degrees(showRawLog ? 90 : 0))
-                    Text(showRawLog ? "Hide diagnostic log" : "Show diagnostic log")
-                        .font(.caption.weight(.semibold))
-                    Spacer(minLength: 0)
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text(showRawLog ? "Hide diagnostic log" : "Show diagnostic log"))
+
+                Spacer(minLength: 0)
+
+                Button {
+                    showLogSheet = true
+                } label: {
+                    Image(systemName: "macwindow")
                 }
-                .foregroundStyle(.white.opacity(0.72))
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .help(Text("Open the full diagnostic log in a resizable window"))
+                .accessibilityLabel(Text("Open full diagnostic log"))
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text(showRawLog ? "Hide diagnostic log" : "Show diagnostic log"))
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.white.opacity(0.72))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
 
             if showRawLog {
                 ScrollView(.vertical) {
@@ -268,6 +286,35 @@ struct WPESceneDetailView: View {
                 .transition(.opacity)
             }
         }
+    }
+
+    /// Aggregated, PII-scrubbed diagnostic text for the resizable log window:
+    /// capability tier + error code (when failed) + the renderer's first-failure
+    /// description + (DEBUG) the resource-resolution summary and misses.
+    private var fullDiagnosticText: String {
+        var lines: [String] = ["Capability: \(descriptor.capabilityTier.localizedLabel)"]
+        if case .error(let reason) = state {
+            lines.append("Error code: \(errorCode(for: reason))")
+        }
+        lines.append("")
+        lines.append(session?.sceneRenderer?.loadDiagnostics?.errorDescription
+            ?? "All declared layers decoded cleanly.")
+        #if DEBUG
+        if let snapshot = session?.sceneRenderer?.resolutionDiagnostics {
+            lines.append("")
+            lines.append("Resource Resolution")
+            lines.append(Self.resolutionSummaryText(snapshot))
+            if snapshot.missedRefs.isEmpty {
+                lines.append("Misses: none")
+            } else {
+                lines.append("Misses:")
+                for event in snapshot.missedRefs.prefix(500) {
+                    lines.append("  \(event.ref): \(event.finalOutcome.debugLabel)")
+                }
+            }
+        }
+        #endif
+        return PIISanitizer.scrub(lines.joined(separator: "\n"))
     }
 
     // MARK: - Severity derivation
@@ -391,8 +438,8 @@ struct WPESceneDetailView: View {
 
     @ViewBuilder
     private var diagnosticsPanel: some View {
-        let diagnosticText = session?.sceneRenderer?.loadDiagnostics?.errorDescription
-            ?? "All declared layers decoded cleanly."
+        let rawDiagnostic = session?.sceneRenderer?.loadDiagnostics?.errorDescription
+        let diagnosticText = rawDiagnostic.map(PIISanitizer.scrub) ?? "All declared layers decoded cleanly."
         #if DEBUG
         let resolutionSnapshot = session?.sceneRenderer?.resolutionDiagnostics
         let resolutionA11y = resolutionSnapshot.map(Self.resolutionSummaryText)
@@ -400,19 +447,40 @@ struct WPESceneDetailView: View {
         #endif
 
         VStack(alignment: .leading, spacing: 6) {
-            Text("Renderer Diagnostics")
-                .font(.caption.bold())
+            HStack(spacing: 6) {
+                Text("Renderer Diagnostics")
+                    .font(.caption.bold())
+                Spacer(minLength: 4)
+                Button {
+                    showLogSheet = true
+                } label: {
+                    Image(systemName: "macwindow")
+                        .font(.caption2.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help(Text("Open the full diagnostic log in a resizable window"))
+                .accessibilityLabel(Text("Open full diagnostic log"))
+            }
             Text("Capability: \(descriptor.capabilityTier.localizedLabel)", comment: "Renderer diagnostics capability row. The placeholder is the capability tier.")
                 .font(.caption.monospaced())
                 .foregroundStyle(.secondary)
-            Text(verbatim: diagnosticText)
-                .font(.caption.monospaced())
-                .foregroundStyle(.secondary)
-                .lineLimit(4)
-                .textSelection(.enabled)
-            #if DEBUG
-            resolutionDiagnosticsSection(snapshot: resolutionSnapshot)
-            #endif
+            // Bounded + scrollable so a long renderer log (or DEBUG resolution
+            // misses) never grows the card off-screen; the window button above
+            // opens the complete log when 160pt isn't enough.
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(verbatim: diagnosticText)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    #if DEBUG
+                    resolutionDiagnosticsSection(snapshot: resolutionSnapshot)
+                    #endif
+                }
+            }
+            .frame(maxHeight: 160)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
@@ -654,6 +722,69 @@ struct WPESceneDetailView: View {
 
     private var previewURL: URL? {
         origin.sourcePreviewURL
+    }
+}
+
+// MARK: - Full diagnostic log window
+
+/// Resizable in-app window (sheet) showing the complete diagnostic log when the
+/// inline 140–160pt panels aren't enough. Monospaced, selectable, copyable.
+@MainActor
+private struct DiagnosticLogSheet: View {
+    let title: String
+    let log: String
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var didCopy = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Diagnostic Log")
+                        .font(.headline)
+                    Text(verbatim: title)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer()
+                Button {
+                    copy()
+                } label: {
+                    Label(didCopy ? "Copied" : "Copy", systemImage: didCopy ? "checkmark" : "doc.on.doc")
+                }
+                .buttonStyle(.bordered)
+                Button("Done") { dismiss() }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(16)
+
+            Divider()
+
+            ScrollView(.vertical) {
+                Text(verbatim: log)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+            }
+            .background(Color(nsColor: .textBackgroundColor))
+        }
+        .frame(minWidth: 520, idealWidth: 660, minHeight: 360, idealHeight: 520)
+    }
+
+    private func copy() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(log, forType: .string)
+        didCopy = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            didCopy = false
+        }
     }
 }
 
