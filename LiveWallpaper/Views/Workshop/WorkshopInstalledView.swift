@@ -708,6 +708,10 @@ struct WorkshopInstalledView: View {
                 .lineLimit(1)
                 .frame(maxWidth: 150)
         }
+        // The glass tile is stroke-only now (no opaque fill), so make the whole
+        // target explicitly hit-testable — otherwise the interior is a drop
+        // "hole" and dropping onto it registers nothing (no copy cursor).
+        .contentShape(Rectangle())
         .onDrop(of: [.plainText], isTargeted: nil) { providers in
             handleScreenDrop(providers, to: screen)
         }
