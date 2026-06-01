@@ -12,6 +12,11 @@ import UniformTypeIdentifiers
 /// per-card Apply control targeting the open displays. Rendered headerless —
 /// `WorkshopPaneView` owns the chrome.
 struct WorkshopInstalledView: View {
+    /// Tapping a tag in the detail inspector bubbles up here so the pane can
+    /// switch to Browse Online and scope the grid to that tag. nil = tags are
+    /// shown but inert (e.g. if ever embedded without a Browse tab).
+    var onBrowseTag: ((String) -> Void)? = nil
+
     @Environment(ScreenManager.self) private var screenManager
     @Environment(SteamCMDDoctorService.self) private var doctor
     @State private var importCoordinator = WorkshopFolderImportCoordinator.shared
@@ -103,6 +108,9 @@ struct WorkshopInstalledView: View {
                             onToggleBookmark: { toggleBookmark(entry) },
                             onShowInFinder: { showInFinder(entry) },
                             onDelete: { pendingDelete = entry },
+                            onSelectTag: onBrowseTag.map { browse in
+                                { tag in selectedEntry = nil; browse(tag) }
+                            },
                             onClose: { selectedEntry = nil }
                         )
                     } else {
@@ -776,6 +784,8 @@ private struct WPEInstalledInspectorContent: View {
     let onToggleBookmark: () -> Void
     let onShowInFinder: () -> Void
     let onDelete: () -> Void
+    /// Wired when tags should be tappable (jump to Browse Online by tag).
+    let onSelectTag: ((String) -> Void)?
     let onClose: () -> Void
 
     @Environment(\.openURL) private var openURL
@@ -816,6 +826,7 @@ private struct WPEInstalledInspectorContent: View {
                             contentRatingPill(rating)
                         }
                     }
+                    metaRow
                     if hasUpdate { updateSection }
                     unsupportedWarning
                     if !activeScreenIDs.isEmpty { inUseRow }
@@ -857,6 +868,35 @@ private struct WPEInstalledInspectorContent: View {
         }
         .padding([.horizontal, .top], DesignTokens.Spacing.lg)
     }
+
+    /// Size on disk · date added — both local (no API). Size appears once the
+    /// off-main folder scan lands; the date is always available.
+    private var metaRow: some View {
+        HStack(spacing: DesignTokens.Spacing.sm) {
+            if let bytes = localInfo?.sizeBytes, bytes > 0 {
+                Label {
+                    Text(verbatim: Self.byteFormatter.string(fromByteCount: bytes))
+                } icon: {
+                    Image(systemName: "internaldrive")
+                }
+            }
+            Label {
+                Text(entry.importedAt, format: .dateTime.year().month().day())
+            } icon: {
+                Image(systemName: "calendar")
+            }
+        }
+        .font(.system(size: 11))
+        .foregroundStyle(.secondary)
+        .labelStyle(.titleAndIcon)
+    }
+
+    private static let byteFormatter: ByteCountFormatter = {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useKB, .useMB, .useGB]
+        formatter.countStyle = .file
+        return formatter
+    }()
 
     private var typePill: some View {
         Text(verbatim: entry.origin.localizedDisplayTypeName.uppercased(with: .current))
@@ -1067,14 +1107,34 @@ private struct WPEInstalledInspectorContent: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 ForEach(tags, id: \.self) { tag in
-                    Text(verbatim: tag)
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Color.primary.opacity(0.06), in: Capsule())
+                    tagChip(tag)
                 }
             }
+        }
+    }
+
+    /// Tappable accent chip when `onSelectTag` is wired (jumps to Browse Online
+    /// scoped to the tag); otherwise a plain, inert secondary pill.
+    @ViewBuilder
+    private func tagChip(_ tag: String) -> some View {
+        if let onSelectTag {
+            Button { onSelectTag(tag) } label: {
+                Text(verbatim: tag)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.accentColor.opacity(0.12), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .help(Text("Browse items tagged \(tag)"))
+        } else {
+            Text(verbatim: tag)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Color.primary.opacity(0.06), in: Capsule())
         }
     }
 
@@ -1113,6 +1173,8 @@ private struct WPELocalProjectInfo: Sendable, Equatable {
     var cleanedDescription: String?
     var tags: [String]
     var contentRating: String?
+    /// On-disk footprint of the item's folder (recursive sum of file sizes).
+    var sizeBytes: Int64?
 
     var hasContent: Bool {
         (cleanedDescription?.isEmpty == false) || !tags.isEmpty
@@ -1143,17 +1205,42 @@ private func loadWPELocalProjectInfo(for entry: WPEHistoryEntry) async -> WPELoc
         let didStart = folder.startAccessingSecurityScopedResource()
         defer { if didStart { folder.stopAccessingSecurityScopedResource() } }
 
+        // Footprint is independent of the manifest, so compute it either way.
+        let size = directorySize(of: folder)
+
         let manifestURL = folder.appendingPathComponent("project.json")
         guard let data = try? Data(contentsOf: manifestURL),
               let manifest = try? JSONDecoder().decode(WPEProjectDisplayManifest.self, from: data)
-        else { return nil }
+        else {
+            return size > 0 ? WPELocalProjectInfo(cleanedDescription: nil, tags: [], contentRating: nil, sizeBytes: size) : nil
+        }
 
         return WPELocalProjectInfo(
             cleanedDescription: manifest.description.flatMap(strippedWPEMarkup),
             tags: manifest.tags ?? [],
-            contentRating: manifest.contentrating?.trimmingCharacters(in: .whitespacesAndNewlines)
+            contentRating: manifest.contentrating?.trimmingCharacters(in: .whitespacesAndNewlines),
+            sizeBytes: size > 0 ? size : nil
         )
     }.value
+}
+
+/// Recursively sum the byte size of every regular file under `folder`. Reads
+/// only file metadata (no content), so it's cheap even for large scenes.
+private func directorySize(of folder: URL) -> Int64 {
+    let keys: Set<URLResourceKey> = [.isRegularFileKey, .totalFileAllocatedSizeKey, .fileSizeKey]
+    guard let enumerator = FileManager.default.enumerator(
+        at: folder,
+        includingPropertiesForKeys: Array(keys),
+        options: [.skipsHiddenFiles]
+    ) else { return 0 }
+
+    var total: Int64 = 0
+    for case let url as URL in enumerator {
+        guard let values = try? url.resourceValues(forKeys: keys),
+              values.isRegularFile == true else { continue }
+        total += Int64(values.totalFileAllocatedSize ?? values.fileSize ?? 0)
+    }
+    return total
 }
 
 /// WPE descriptions carry Steam BBCode (`[h1]…[/h1]`, `[b]`, `[url=…]`, `[list]`

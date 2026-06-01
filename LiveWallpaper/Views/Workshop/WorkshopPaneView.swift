@@ -199,7 +199,7 @@ struct WorkshopPaneView: View {
     private var tabBody: some View {
         switch selectedTab {
         case .installed:
-            WorkshopInstalledView()
+            WorkshopInstalledView(onBrowseTag: browseByTag)
         case .browseOnline:
             browseTab
         }
@@ -216,6 +216,21 @@ struct WorkshopPaneView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .onAppear { browseViewModel = WorkshopBrowseViewModel(services: services) }
         }
+    }
+
+    /// From the Installed inspector: switch to Browse Online and scope the grid
+    /// to the tapped tag. Builds the Browse view-model on demand (the Installed
+    /// tab may have never opened Browse yet).
+    private func browseByTag(_ tag: String) {
+        let viewModel: WorkshopBrowseViewModel
+        if let existing = browseViewModel {
+            viewModel = existing
+        } else {
+            viewModel = WorkshopBrowseViewModel(services: services)
+            browseViewModel = viewModel
+        }
+        selectedTab = .browseOnline
+        Task { await viewModel.browseTag(tag) }
     }
 
     private func presentPasteFlow() {
