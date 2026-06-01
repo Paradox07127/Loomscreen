@@ -172,17 +172,23 @@ public struct WPETexInfo: Sendable, Equatable {
             && width <= 16_384 && height <= 16_384
     }
 
-    /// TEXI flag bit 0x80000 = "alpha channel priority". On an `RG88`
-    /// texture it marks a legacy LUMINANCE_ALPHA glow: R is luminance,
-    /// G is alpha (the shape/falloff). Both the CPU `decodeRG88` path and
-    /// the Metal `.rg8Unorm` upload path key off this to expose the glow
-    /// as (R, R, R, G); without it the glow renders fully opaque (the
-    /// "red square light" artifact). RG88 without the flag is a normal /
-    /// data map and stays (R, G, 0, 1).
+    /// TEXI flag bit 0x80000 = "alpha channel priority" — set on the
+    /// light/beam glows (light_shafts, beam_1). Kept for documentation and
+    /// test fixtures, but it is NOT the discriminator: animated glow sprites
+    /// (fog, smoke, snow, explosion) are also RG88 LUMINANCE_ALPHA yet lack
+    /// the flag, so keying off it left their inter-frame R-full regions
+    /// opaque (red lines/blocks).
     public static let alphaChannelPriorityFlag: UInt32 = 0x0008_0000
 
-    public var isRG88AlphaChannelPriority: Bool {
-        format == .rg88 && (flags & Self.alphaChannelPriorityFlag) != 0
+    /// Whether this texture must be sampled as LUMINANCE_ALPHA → (R, R, R, G):
+    /// R is luminance broadcast to RGB, G is the alpha falloff. In the WPE
+    /// corpus `RG88` is ONLY ever a particle glow/sprite — normal and data
+    /// maps use `rgba8888n`, never RG88 (verified: 0 of 50 RG88 assets are
+    /// normal maps). So every RG88 is luminance+alpha; uploading it raw as
+    /// `.rg8Unorm` samples (R, G, 0, 1) and renders opaque (the "red square
+    /// light" / red-line fog artifacts).
+    public var isRG88LuminanceAlpha: Bool {
+        format == .rg88
     }
 }
 

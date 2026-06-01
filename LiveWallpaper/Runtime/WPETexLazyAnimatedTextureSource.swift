@@ -68,7 +68,7 @@ final class WPETexLazyAnimatedTextureSource: WPEDynamicTextureSource {
         } catch {
             throw Failure.unsupportedFormat(payload.info.textureFormatCode)
         }
-        self.alphaChannelPriorityRG88 = payload.info.isRG88AlphaChannelPriority
+        self.alphaChannelPriorityRG88 = payload.info.isRG88LuminanceAlpha
         self.frames = payload.frames
         self.compressedImages = payload.compressedImages
         self.frameRate = payload.frameRate > 0 ? payload.frameRate : WPETexAnimationTrack.defaultFrameRate

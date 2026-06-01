@@ -70,8 +70,11 @@ struct WPEMetalTextureLoaderTests {
         #expect(texture.swizzle.alpha == .green)
     }
 
-    @Test("RG88 without alpha-priority keeps default (R,G,0,1) sampling")
-    func rg88NormalMapDefaultSwizzle() async throws {
+    @Test("RG88 without the 0x80000 flag (fog/smoke glows) still swizzles to (R,R,R,G)")
+    func rg88WithoutAlphaPriorityFlagAlsoSwizzles() async throws {
+        // fog3/smoke/snow are RG88 luminance+alpha but lack the
+        // alphachannelpriority flag; they must still swizzle, else their
+        // R-full inter-frame regions render as opaque red lines/blocks.
         let device = try #require(MTLCreateSystemDefaultDevice())
         let bytes = Data([200, 50, 10, 255, 0, 128, 64, 32])
         let payload = WPETexTexturePayload(
@@ -89,13 +92,13 @@ struct WPEMetalTextureLoaderTests {
             hasAnimationFrames: false
         )
 
-        let texture = try await WPEMetalTextureLoader(device: device).makeTexture(from: payload, label: "test-rg88-normal")
+        let texture = try await WPEMetalTextureLoader(device: device).makeTexture(from: payload, label: "test-rg88-noflag")
 
         #expect(texture.pixelFormat == .rg8Unorm)
         #expect(texture.swizzle.red == .red)
-        #expect(texture.swizzle.green == .green)
-        #expect(texture.swizzle.blue == .blue)
-        #expect(texture.swizzle.alpha == .alpha)
+        #expect(texture.swizzle.green == .red)
+        #expect(texture.swizzle.blue == .red)
+        #expect(texture.swizzle.alpha == .green)
     }
 
     @Test("Rejects BC payload when current device cannot sample BC")

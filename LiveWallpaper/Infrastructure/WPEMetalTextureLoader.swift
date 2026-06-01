@@ -177,11 +177,11 @@ struct WPEMetalTextureLoader {
         )
         descriptor.usage = [.shaderRead]
         descriptor.storageMode = .shared
-        // RG88 alpha-channel-priority glows upload raw into an `.rg8Unorm`
-        // texture, which samples as (R, G, 0, 1) — opaque, the "red square"
-        // artifact. Swizzle so sampling yields (R, R, R, G): R is luminance,
-        // G is the alpha falloff. Normal-map RG88 (no flag) keeps (R, G, 0, 1).
-        if payload.info.isRG88AlphaChannelPriority {
+        // Every RG88 in the WPE corpus is a LUMINANCE_ALPHA particle glow.
+        // Raw `.rg8Unorm` samples as (R, G, 0, 1) — opaque — giving the "red
+        // square light" / red-line fog artifacts. Swizzle so sampling yields
+        // (R, R, R, G): R luminance broadcast, G as the alpha falloff.
+        if payload.info.isRG88LuminanceAlpha {
             descriptor.swizzle = MTLTextureSwizzleChannels(red: .red, green: .red, blue: .red, alpha: .green)
         }
 
