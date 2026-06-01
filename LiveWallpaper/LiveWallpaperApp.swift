@@ -162,6 +162,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             scheduleSettingsWindowPrewarm()
         }
 
+        #if !LITE_BUILD
+        // Resume system-audio capture if the user left audio response on. The
+        // shared manager owns the single tap; sinks read its broker.
+        if !runtimeOptions.isTesting {
+            let audioResponseEnabled = SettingsManager.shared.loadGlobalSettings().audioResponseEnabled
+            SystemAudioCaptureManager.shared.setEnabled(audioResponseEnabled)
+        }
+
+        // On-device verification hook for the system-audio capture tap. No-op
+        // unless `WPEAudioCaptureProbe` default is set. See SystemAudioCaptureProbe.
+        if #available(macOS 14.2, *), !runtimeOptions.isTesting {
+            SystemAudioCaptureProbe.runIfRequested()
+        }
+        #endif
+
         #if LITE_BUILD
         // Loomscreen Lite ships ad-hoc signed via GitHub Releases, so we
         // hand-roll a single-shot launch-time update check (no background

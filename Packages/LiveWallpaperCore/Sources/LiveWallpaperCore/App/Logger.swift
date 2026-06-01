@@ -18,6 +18,7 @@ public final class Logger {
         case memory = "Memory"
         case wpeResolver = "WPEResolver"
         case wpeRender = "WPERender"
+        case audioCapture = "AudioCapture"
 
         public static let subsystem = "com.livewallpaper"
 

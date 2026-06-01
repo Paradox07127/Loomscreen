@@ -7,6 +7,15 @@
 	<key>com.apple.security.device.power</key>
 	<true/>
 	<!--
+	    Core Audio Process Tap (system-audio "loopback" capture) drives the
+	    audio-reactive wallpaper feature. Under App Sandbox the tap + private
+	    aggregate device read audio input, which requires this entitlement plus
+	    the user granting "System Audio Recording" (TCC). Pro / direct-distribution
+	    only; the Lite (Loomscreen) build excludes the capture code entirely.
+	-->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+	<!--
 	    macOS 13+ AVFoundation tries to connect to `com.apple.audioanalyticsd`
 	    on every AVPlayer init to log playback codec/format usage statistics.
 	    A sandboxed app without this mach-lookup exception trips a runtime

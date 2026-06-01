@@ -36,6 +36,12 @@ final class AudioSpectrumProcessor {
     private var lastHopSize: Int = 0
 
     private var window: [Float]
+    /// `1 / Σ window`. vDSP's real FFT leaves magnitudes unnormalized (they grow
+    /// ~with the transform size and window energy), which made every bin saturate
+    /// to 1.0 on real full-scale audio. Scaling magnitudes by this factor brings
+    /// them back to amplitude-like units so the dB window + `noiseFloor` below are
+    /// calibrated against ~0…1 levels, not raw FFT magnitudes.
+    private let inverseWindowSum: Float
     private var leftInput: [Float]
     private var rightInput: [Float]
     private var windowedInput: [Float]
@@ -68,6 +74,7 @@ final class AudioSpectrumProcessor {
         var hann = [Float](repeating: 0, count: resolved.fftSize)
         vDSP_hann_window(&hann, vDSP_Length(resolved.fftSize), Int32(vDSP_HANN_NORM))
         self.window = hann
+        self.inverseWindowSum = 1 / max(hann.reduce(0, +), 1)
         self.leftInput = [Float](repeating: 0, count: resolved.fftSize)
         self.rightInput = [Float](repeating: 0, count: resolved.fftSize)
         self.windowedInput = [Float](repeating: 0, count: resolved.fftSize)
@@ -181,6 +188,10 @@ final class AudioSpectrumProcessor {
                 }
             }
         }
+
+        // Normalize the raw FFT magnitudes to amplitude-like units before the
+        // dB/noiseFloor mapping (see `inverseWindowSum`).
+        vDSP.multiply(inverseWindowSum, magnitudes, result: &magnitudes)
 
         compressMagnitudesIntoBins()
         normalizeAndSmooth(previous: &previous, output: &output)

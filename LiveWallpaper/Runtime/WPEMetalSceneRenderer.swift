@@ -73,6 +73,11 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
     /// runtime uniform that audio-reactive shaders sample. Optional —
     /// scenes without sound objects skip this entirely.
     private var soundRuntime: WPESoundRuntime?
+    /// `WPEAudioDebugLog -bool YES` → throttled per-second log of what the
+    /// renderer actually sees on the shared audio broker, to diagnose
+    /// audio-reactive scenes that don't move.
+    private let audioDebugLogEnabled = UserDefaults.standard.bool(forKey: "WPEAudioDebugLog")
+    private var audioDiagCounter = 0
     /// Phase 2D-P: per-text-object SceneScript instances. Keyed by
     /// the text object's id so the renderer can look up the latest
     /// scripted value when rasterizing.
@@ -865,13 +870,30 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
             profile: currentProfile,
             pointerPosition: pointerSampler.sample(mtkView)
         )
-        if let soundRuntime {
+        // Audio-reactive uniforms follow the shared system-audio capture (the
+        // loopback of whatever is playing), not the scene's own sounds — those
+        // are already in the system mix the tap captures. `soundRuntime` stays
+        // a pure player. When capture is off the broker is silent (flat bars).
+        if SystemAudioCaptureManager.isCapturing {
+            let audio = SystemAudioCaptureManager.broker.snapshot()
+            if audioDebugLogEnabled {
+                audioDiagCounter += 1
+                if audioDiagCounter % 60 == 1 {
+                    let peakL = audio.left.max() ?? 0
+                    let peakR = audio.right.max() ?? 0
+                    Logger.notice(
+                        "[AudioCapture] renderer: capturing=true peakL=\(String(format: "%.3f", peakL)) peakR=\(String(format: "%.3f", peakR)) → feeding g_AudioSpectrum*",
+                        category: .audioCapture
+                    )
+                }
+            }
             uniforms = WPEMetalRuntimeUniforms(
                 time: uniforms.time,
                 daytime: uniforms.daytime,
                 brightness: uniforms.brightness,
                 pointerPosition: uniforms.pointerPosition,
-                audioSpectrum: soundRuntime.currentSpectrum
+                audioSpectrumLeft: audio.left.map(Double.init),
+                audioSpectrumRight: audio.right.map(Double.init)
             )
         }
         lastRuntimeUniforms = uniforms
