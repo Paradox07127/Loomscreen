@@ -13,13 +13,6 @@ struct WPESceneSection: View {
     @State private var selectedHistoryEntry: WPEHistoryEntry?
     @State private var showWorkshopGallery: Bool = false
     @State private var pendingDestructive: PendingDestructive?
-    /// Parsed custom-property schema for the active scene, loaded off the main
-    /// actor and used to drive the dedicated settings column.
-    @State private var sceneSchema: WallpaperEngineProjectPropertySchema?
-    /// In-progress descriptor edits from the settings column. Held locally so a
-    /// slider drag tracks smoothly before the debounced apply persists to the
-    /// configuration; reset implicitly when the active scene changes.
-    @State private var workingDescriptor: SceneDescriptor?
 
     var body: some View {
         Group {
@@ -35,9 +28,6 @@ struct WPESceneSection: View {
         }
         .animation(reduceMotion ? nil : .default, value: recentImports.isEmpty)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .task(id: sceneSchemaLoadKey) {
-            await loadSceneSchema()
-        }
         .onAppear {
             Task { @MainActor in reloadHistory() }
         }
@@ -194,41 +184,26 @@ struct WPESceneSection: View {
            case .scene(let descriptor) = configuration.activeWallpaper,
            let origin = configuration.wpeOrigin {
             let session = screen.runtimeSession as? SceneWallpaperSession
-            GeometryReader { geo in
-                // Go side-by-side only when there's room for the 560 preview
-                // card + 360 settings column; otherwise stack and scroll so the
-                // layout never cramps on a narrow preview area.
-                let twoColumn = hasInteractiveSettings && geo.size.width >= 1000
-                VStack(spacing: 16) {
-                    sceneToolbar
-                    if twoColumn {
-                        HStack(alignment: .top, spacing: 20) {
-                            Spacer(minLength: 0)
-                            detailCard(origin: origin, descriptor: descriptor, session: session)
-                            settingsColumn(descriptor: descriptor)
-                                .frame(width: 360)
-                            Spacer(minLength: 0)
-                        }
-                    } else {
-                        ScrollView(.vertical) {
-                            VStack(spacing: 16) {
-                                detailCard(origin: origin, descriptor: descriptor, session: session)
-                                if hasInteractiveSettings, let schema = sceneSchema {
-                                    WPESceneCustomSettingsCard(
-                                        screen: screen,
-                                        schema: schema,
-                                        descriptor: sceneDescriptorBinding(fallback: descriptor)
-                                    )
-                                }
-                            }
-                            .frame(maxWidth: 560)
-                            .frame(maxWidth: .infinity)
+            // Single, focused "preview + diagnostics" column. Custom settings
+            // live in the app's right inspector sidebar (alongside HTML's), so
+            // they're always to the side and never stacked under the preview.
+            VStack(spacing: 16) {
+                sceneToolbar
+                WPESceneDetailView(
+                    origin: origin,
+                    descriptor: descriptor,
+                    session: session,
+                    onClearWallpaper: {
+                        pendingDestructive = PendingDestructive(
+                            .clearScene(sceneName: origin.title, displayName: screen.name)
+                        ) {
+                            screenManager.clearWallpaperForScreen(screen)
                         }
                     }
-                }
-                .padding(24)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                )
             }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .top)
         } else {
             EmptyView()
         }
@@ -252,89 +227,6 @@ struct WPESceneSection: View {
             .adaptiveGlassButton(.regular)
             .controlSize(.regular)
         }
-    }
-
-    private func detailCard(
-        origin: WPEOrigin,
-        descriptor: SceneDescriptor,
-        session: SceneWallpaperSession?
-    ) -> some View {
-        WPESceneDetailView(
-            origin: origin,
-            descriptor: descriptor,
-            session: session,
-            onClearWallpaper: {
-                pendingDestructive = PendingDestructive(
-                    .clearScene(sceneName: origin.title, displayName: screen.name)
-                ) {
-                    screenManager.clearWallpaperForScreen(screen)
-                }
-            }
-        )
-    }
-
-    /// Dedicated, independently-scrolling column mirroring Wallpaper Engine's
-    /// right-hand property panel — shown only when the scene exposes changeable
-    /// options (filtered to interactive controls inside the card).
-    @ViewBuilder
-    private func settingsColumn(descriptor: SceneDescriptor) -> some View {
-        if let schema = sceneSchema {
-            ScrollView(.vertical) {
-                WPESceneCustomSettingsCard(
-                    screen: screen,
-                    schema: schema,
-                    descriptor: sceneDescriptorBinding(fallback: descriptor)
-                )
-                .padding(.trailing, 2)
-            }
-            .frame(maxHeight: .infinity, alignment: .top)
-        }
-    }
-
-    /// True when the loaded schema exposes at least one interactive control.
-    private var hasInteractiveSettings: Bool {
-        guard let sceneSchema else { return false }
-        return sceneSchema.properties.contains { WPESceneCustomSettingsCard.isInteractive($0.type) }
-    }
-
-    /// Binding that surfaces in-progress edits (`workingDescriptor`) while the
-    /// settings card persists through `ScreenManager.updateSceneDescriptor`.
-    /// Falls back to the configuration's descriptor — and resets implicitly —
-    /// whenever the active scene (`workshopID`) changes.
-    private func sceneDescriptorBinding(fallback: SceneDescriptor) -> Binding<SceneDescriptor> {
-        Binding(
-            get: {
-                if let working = workingDescriptor, working.workshopID == fallback.workshopID {
-                    return working
-                }
-                return fallback
-            },
-            set: { workingDescriptor = $0 }
-        )
-    }
-
-    private var sceneSchemaLoadKey: String {
-        guard let configuration = screenManager.getConfiguration(for: screen),
-              case .scene(let descriptor) = configuration.activeWallpaper else {
-            return "hidden"
-        }
-        let originFingerprint = configuration.wpeOrigin?.sourceFolderBookmark.count.description ?? "-"
-        return "\(screen.id):scene:\(descriptor.workshopID):\(originFingerprint)"
-    }
-
-    @MainActor
-    private func loadSceneSchema() async {
-        guard let configuration = screenManager.getConfiguration(for: screen),
-              case .scene(let descriptor) = configuration.activeWallpaper else {
-            sceneSchema = nil
-            return
-        }
-        let outcome = await WPESceneProjectSchemaLoader.load(
-            descriptor: descriptor,
-            wpeOrigin: configuration.wpeOrigin
-        )
-        guard !Task.isCancelled else { return }
-        sceneSchema = outcome.schema
     }
 
     // MARK: - Actions

@@ -16,27 +16,17 @@ struct WPESceneDetailView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var state: SceneRenderState = .idle
-    /// Developer disclosure toggled by the info button on the metadata row
-    /// or by right-clicking the row. Surfaces capability tier + first failure
-    /// diagnostic so power users can see *why* a layer was skipped without
-    /// diving into Console.
-    @State private var showDiagnostics = false
-    /// Second-level disclosure inside the error console: expands the raw,
-    /// monospaced renderer log. Collapsed by default so the friendly summary
-    /// leads and the wall of diagnostic text is opt-in.
-    @State private var showRawLog = false
-    /// Transient "copied" affordance on the console's Copy button.
-    @State private var didCopyLog = false
-    /// Presents the full diagnostic log in a resizable in-app window so a long
-    /// log never has to grow the inspector card off-screen.
+    /// Presents the full diagnostic log in a resizable glass terminal window.
+    /// Opened from the metadata info button (any state) or the error banner's
+    /// "Log" button — the verbose renderer log never lives inline on the card,
+    /// so the card stays compact and the layout barely shifts on error.
     @State private var showLogSheet = false
 
     var body: some View {
         VStack(spacing: 16) {
             previewCard
-            errorConsole
+            errorBanner
             metadata
-            if showDiagnostics { diagnosticsPanel }
             actions
         }
         .padding(24)
@@ -44,7 +34,7 @@ struct WPESceneDetailView: View {
         .adaptiveGlassSurface(.roundedRectangle(24))
         .shadow(color: .black.opacity(0.18), radius: 8, y: 4)
         .sheet(isPresented: $showLogSheet) {
-            DiagnosticLogSheet(title: origin.title, log: fullDiagnosticText)
+            DiagnosticLogSheet(title: origin.title, log: fullDiagnosticText, tint: currentSeverityTint)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text("\(origin.title). Scene wallpaper. \(stateAccessibilityText)", comment: "A11y label for a Wallpaper Engine scene detail card. Placeholders are scene title and state."))
@@ -94,7 +84,8 @@ struct WPESceneDetailView: View {
 
     /// Lightweight gradient strip pinned to the bottom of the (now unmasked)
     /// preview GIF. Surfaces a glanceable error code without hiding the artwork
-    /// — the full story lives in `errorConsole` directly below.
+    /// — the friendly summary lives in `errorBanner` below, the full log in the
+    /// diagnostic window.
     private func previewErrorStrip(reason: FallbackReason) -> some View {
         HStack(spacing: 6) {
             Image(systemName: severityIcon(for: reason))
@@ -166,125 +157,49 @@ struct WPESceneDetailView: View {
         }
     }
 
-    // MARK: - Error console
+    // MARK: - Error banner
 
-    /// Terminal-style diagnostic console that appears directly below the preview
-    /// GIF whenever the scene failed. Collapses to zero height (no `spacing`
-    /// cost) when there's no error. Layers a friendly summary over the raw,
-    /// copyable renderer log behind a disclosure.
+    /// Compact, glass-tinted failure summary shown only on `.error`. The verbose
+    /// renderer log stays out of the card (it lives in the log window opened via
+    /// the "Log" button), so failing a scene barely shifts the layout.
     @ViewBuilder
-    private var errorConsole: some View {
+    private var errorBanner: some View {
         if case .error(let reason) = state {
-            VStack(alignment: .leading, spacing: 0) {
-                consoleHeader(reason: reason)
-
-                errorBody(for: reason)
-                    .font(.callout)
-                    .foregroundStyle(.white.opacity(0.82))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, diagnosticLogText == nil ? 14 : 10)
-
-                if let log = diagnosticLogText {
-                    rawLogDisclosure(log: log)
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: severityIcon(for: reason))
+                    .font(.title3)
+                    .foregroundStyle(severityColor(for: reason))
+                VStack(alignment: .leading, spacing: 2) {
+                    errorTitle(for: reason)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    errorBody(for: reason)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-            }
-            .background(Color.black.opacity(0.88))
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(severityColor(for: reason))
-                    .frame(width: 4)
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(severityColor(for: reason).opacity(0.35), lineWidth: 1)
-            }
-            .transition(.move(edge: .top).combined(with: .opacity))
-            .accessibilityElement(children: .contain)
-        }
-    }
-
-    private func consoleHeader(reason: FallbackReason) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: severityIcon(for: reason))
-                .font(.headline)
-                .foregroundStyle(severityColor(for: reason))
-            errorTitle(for: reason)
-                .font(.headline)
-                .foregroundStyle(.white)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 8)
-            Button {
-                copyDiagnostics(reason: reason)
-            } label: {
-                Image(systemName: didCopyLog ? "checkmark" : "doc.on.doc")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(didCopyLog ? Color.green : .white.opacity(0.8))
-                    .frame(width: 22, height: 22)
-                    .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
-            }
-            .buttonStyle(.plain)
-            .help(Text("Copy diagnostic log"))
-            .accessibilityLabel(Text(didCopyLog ? "Diagnostic log copied" : "Copy diagnostic log"))
-        }
-        .padding(.horizontal, 14)
-        .padding(.top, 12)
-        .padding(.bottom, 8)
-    }
-
-    @ViewBuilder
-    private func rawLogDisclosure(log: String) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Divider().overlay(Color.white.opacity(0.12))
-
-            HStack(spacing: 6) {
-                Button {
-                    withAnimation(DesignTokens.motion(reduceMotion, .spring(response: 0.3, dampingFraction: 0.85))) {
-                        showRawLog.toggle()
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 10, weight: .bold))
-                            .rotationEffect(.degrees(showRawLog ? 90 : 0))
-                        Text(showRawLog ? "Hide diagnostic log" : "Show diagnostic log")
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(Text(showRawLog ? "Hide diagnostic log" : "Show diagnostic log"))
-
-                Spacer(minLength: 0)
-
+                Spacer(minLength: 8)
                 Button {
                     showLogSheet = true
                 } label: {
-                    Image(systemName: "macwindow")
+                    Label("Log", systemImage: "terminal")
+                        .font(.caption.weight(.semibold))
                 }
-                .buttonStyle(.plain)
-                .help(Text("Open the full diagnostic log in a resizable window"))
-                .accessibilityLabel(Text("Open full diagnostic log"))
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help(Text("Open the full diagnostic log"))
+                .accessibilityLabel(Text("Open the full diagnostic log"))
             }
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.white.opacity(0.72))
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-
-            if showRawLog {
-                ScrollView(.vertical) {
-                    Text(verbatim: log)
-                        .font(.system(.caption2, design: .monospaced))
-                        .foregroundStyle(Color.green.opacity(0.92))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 14)
-                        .padding(.bottom, 12)
-                }
-                .frame(maxHeight: 140)
-                .transition(.opacity)
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(severityColor(for: reason).opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(severityColor(for: reason).opacity(0.30), lineWidth: 1)
             }
+            .transition(.opacity)
+            .accessibilityElement(children: .combine)
         }
     }
 
@@ -353,29 +268,13 @@ struct WPESceneDetailView: View {
         }
     }
 
-    /// The renderer's first-failure diagnostic — the actual "log" text, scrubbed
-    /// of home paths / `/Users/<name>` / URLs before it reaches the screen or
-    /// the clipboard (the Copy button makes this trivially shareable). `nil`
-    /// when the failure surfaced before any per-layer diagnostic was recorded.
-    private var diagnosticLogText: String? {
-        guard let raw = session?.sceneRenderer?.loadDiagnostics?.errorDescription else { return nil }
-        return PIISanitizer.scrub(raw)
-    }
-
-    private func copyDiagnostics(reason: FallbackReason) {
-        var parts = [errorCode(for: reason)]
-        if let log = diagnosticLogText {
-            parts.append(log)
+    /// Severity tint for the log window's chrome — red/orange on failure, a
+    /// neutral accent otherwise.
+    private var currentSeverityTint: Color {
+        if case .error(let reason) = state {
+            return severityColor(for: reason)
         }
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(parts.joined(separator: "\n\n"), forType: .string)
-
-        didCopyLog = true
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
-            didCopyLog = false
-        }
+        return .accentColor
     }
 
     /// The project's own preview GIF (Workshop scenes always ship one), filling
@@ -408,133 +307,29 @@ struct WPESceneDetailView: View {
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 4)
                 Button {
-                    withAnimation(DesignTokens.motion(reduceMotion, .spring(response: 0.35, dampingFraction: 0.85))) {
-                        showDiagnostics.toggle()
-                    }
+                    showLogSheet = true
                 } label: {
-                    Image(systemName: showDiagnostics ? "info.circle.fill" : "info.circle")
+                    Image(systemName: "info.circle")
                         .font(.caption2)
-                        .foregroundStyle(showDiagnostics ? Color.accentColor : .secondary)
+                        .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-                .help(Text(showDiagnostics
-                    ? "Hide renderer diagnostics"
-                    : "Show renderer diagnostics"))
-                .accessibilityLabel(Text(showDiagnostics ? "Hide renderer diagnostics" : "Show renderer diagnostics"))
+                .help(Text("Open renderer diagnostics"))
+                .accessibilityLabel(Text("Open renderer diagnostics"))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .contextMenu {
             Button {
-                withAnimation(DesignTokens.motion(reduceMotion, .spring(response: 0.35, dampingFraction: 0.85))) {
-                    showDiagnostics.toggle()
-                }
+                showLogSheet = true
             } label: {
-                Label(showDiagnostics ? "Hide Diagnostics" : "Show Diagnostics", systemImage: "info.circle")
+                Label("Renderer Diagnostics", systemImage: "info.circle")
             }
         }
-    }
-
-    @ViewBuilder
-    private var diagnosticsPanel: some View {
-        let rawDiagnostic = session?.sceneRenderer?.loadDiagnostics?.errorDescription
-        let diagnosticText = rawDiagnostic.map(PIISanitizer.scrub) ?? "All declared layers decoded cleanly."
-        #if DEBUG
-        let resolutionSnapshot = session?.sceneRenderer?.resolutionDiagnostics
-        let resolutionA11y = resolutionSnapshot.map(Self.resolutionSummaryText)
-            ?? "No resource resolution events recorded."
-        #endif
-
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Text("Renderer Diagnostics")
-                    .font(.caption.bold())
-                Spacer(minLength: 4)
-                Button {
-                    showLogSheet = true
-                } label: {
-                    Image(systemName: "macwindow")
-                        .font(.caption2.weight(.semibold))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .help(Text("Open the full diagnostic log in a resizable window"))
-                .accessibilityLabel(Text("Open full diagnostic log"))
-            }
-            Text("Capability: \(descriptor.capabilityTier.localizedLabel)", comment: "Renderer diagnostics capability row. The placeholder is the capability tier.")
-                .font(.caption.monospaced())
-                .foregroundStyle(.secondary)
-            // Bounded + scrollable so a long renderer log (or DEBUG resolution
-            // misses) never grows the card off-screen; the window button above
-            // opens the complete log when 160pt isn't enough.
-            ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(verbatim: diagnosticText)
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    #if DEBUG
-                    resolutionDiagnosticsSection(snapshot: resolutionSnapshot)
-                    #endif
-                }
-            }
-            .frame(maxHeight: 160)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(Color.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-        .accessibilityElement(children: .combine)
-        #if DEBUG
-        .accessibilityLabel(Text("Renderer diagnostics: capability \(descriptor.capabilityTier.localizedLabel). \(diagnosticText). \(resolutionA11y)", comment: "A11y label for renderer diagnostics in DEBUG builds. Placeholders are capability tier, diagnostic text, and resolver summary."))
-        #else
-        .accessibilityLabel(Text("Renderer diagnostics: capability \(descriptor.capabilityTier.localizedLabel). \(diagnosticText)", comment: "A11y label for renderer diagnostics. Placeholders are capability tier and diagnostic text."))
-        #endif
     }
 
     #if DEBUG
-    @ViewBuilder
-    private func resolutionDiagnosticsSection(snapshot: WPEResolutionDiagnosticsSnapshot?) -> some View {
-        Divider()
-            .padding(.vertical, 2)
-        Text(verbatim: "Resource Resolution")
-            .font(.caption.bold())
-        if let snapshot {
-            Text(verbatim: Self.resolutionSummaryText(snapshot))
-                .font(.caption.monospaced())
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
-
-            let misses = Array(snapshot.missedRefs.prefix(20))
-            if misses.isEmpty {
-                Text(verbatim: "Misses: none")
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-            } else {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(verbatim: "Misses:")
-                    ForEach(Array(misses.enumerated()), id: \.offset) { pair in
-                        let event = pair.element
-                        Text(verbatim: "\(event.ref): \(event.finalOutcome.debugLabel)")
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                    if snapshot.missedRefs.count > misses.count {
-                        Text(verbatim: "+\(snapshot.missedRefs.count - misses.count) more")
-                    }
-                }
-                .font(.caption.monospaced())
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
-            }
-        } else {
-            Text(verbatim: "No resource resolution events recorded.")
-                .font(.caption.monospaced())
-                .foregroundStyle(.secondary)
-        }
-    }
-
     private static func resolutionSummaryText(_ snapshot: WPEResolutionDiagnosticsSnapshot) -> String {
         let counts = snapshot.resolvedByOrigin
         let dependencyCount = counts.reduce(0) { partial, entry in
@@ -725,55 +520,104 @@ struct WPESceneDetailView: View {
     }
 }
 
-// MARK: - Full diagnostic log window
+// MARK: - Diagnostic log window
 
-/// Resizable in-app window (sheet) showing the complete diagnostic log when the
-/// inline 140–160pt panels aren't enough. Monospaced, selectable, copyable.
+/// Resizable glass-terminal window for the complete diagnostic log. Glass base,
+/// a severity-tinted header, and per-line syntax colouring (errors red, warnings
+/// orange, misses yellow, successes green) over a selectable monospaced body —
+/// matching the app's liquid-glass language without dropping into a plain sheet.
 @MainActor
 private struct DiagnosticLogSheet: View {
     let title: String
     let log: String
+    let tint: Color
 
     @Environment(\.dismiss) private var dismiss
     @State private var didCopy = false
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Diagnostic Log")
-                        .font(.headline)
-                    Text(verbatim: title)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                Spacer()
-                Button {
-                    copy()
-                } label: {
-                    Label(didCopy ? "Copied" : "Copy", systemImage: didCopy ? "checkmark" : "doc.on.doc")
-                }
-                .buttonStyle(.bordered)
-                Button("Done") { dismiss() }
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut(.defaultAction)
-            }
-            .padding(16)
-
+            header
             Divider()
-
-            ScrollView(.vertical) {
-                Text(verbatim: log)
-                    .font(.system(.caption, design: .monospaced))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(16)
-            }
-            .background(Color(nsColor: .textBackgroundColor))
+            terminal
         }
-        .frame(minWidth: 520, idealWidth: 660, minHeight: 360, idealHeight: 520)
+        .frame(minWidth: 540, idealWidth: 680, minHeight: 380, idealHeight: 540)
+        .background(.ultraThinMaterial)
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "terminal")
+                .font(.title3)
+                .foregroundStyle(tint)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Diagnostic Log")
+                    .font(.headline)
+                Text(verbatim: title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer()
+            Button {
+                copy()
+            } label: {
+                Label(didCopy ? "Copied" : "Copy", systemImage: didCopy ? "checkmark" : "doc.on.doc")
+                    .animation(.snappy, value: didCopy)
+            }
+            .buttonStyle(.bordered)
+            .tint(didCopy ? .green : tint)
+            Button("Done") { dismiss() }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+        }
+        .padding(14)
+        .background(tint.opacity(0.08))
+    }
+
+    private var terminal: some View {
+        ScrollView(.vertical) {
+            Text(colouredLog)
+                .font(.system(.caption, design: .monospaced))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+        }
+        .background(Color.black.opacity(0.55))
+    }
+
+    /// Builds one selectable `AttributedString` (so copy/selection still spans
+    /// the whole log) with each line tinted by its severity keyword.
+    private var colouredLog: AttributedString {
+        let lines = log.components(separatedBy: "\n")
+        var result = AttributedString()
+        for (index, line) in lines.enumerated() {
+            var piece = AttributedString(line)
+            piece.foregroundColor = Self.colour(for: line)
+            result += piece
+            if index < lines.count - 1 {
+                result += AttributedString("\n")
+            }
+        }
+        return result
+    }
+
+    private static func colour(for line: String) -> Color {
+        let lower = line.lowercased()
+        if lower.contains("[err") || lower.contains("error") || lower.contains("fail") {
+            return Color(red: 1.0, green: 0.45, blue: 0.42)
+        }
+        if lower.contains("[warn") || lower.contains("warning") || lower.contains("legacy") {
+            return Color(red: 1.0, green: 0.72, blue: 0.36)
+        }
+        if lower.contains("miss") {
+            return Color(red: 0.98, green: 0.86, blue: 0.45)
+        }
+        if lower.contains("resolved") || lower.contains("success") || lower.contains("cleanly") {
+            return Color(red: 0.56, green: 0.92, blue: 0.64)
+        }
+        return Color.white.opacity(0.78)
     }
 
     private func copy() {

@@ -19,6 +19,7 @@ struct ScreenDetailInspectorPanel: View {
     let onResetDisplaySettings: () -> Void
     #if !LITE_BUILD
     @State private var wpeProjectCustomSettingsSchema: WallpaperEngineProjectPropertySchema?
+    @State private var wpeSceneCustomSettingsSchema: WallpaperEngineProjectPropertySchema?
     #endif
 
     var body: some View {
@@ -83,9 +84,23 @@ struct ScreenDetailInspectorPanel: View {
                         videoSettingsContent
                     }
 
-                    // Scene custom settings now live in a dedicated column inside
-                    // the scene preview area (WPESceneSection), not here — keeping
-                    // them out of this narrow inspector avoids a duplicate panel.
+                    #if !LITE_BUILD
+                    // Scene custom settings live in this persistent right sidebar
+                    // (same place as HTML's), so they're always to the side and
+                    // collapse natively with the inspector — never stacked below
+                    // the preview. Shown only when the scene exposes interactive
+                    // controls.
+                    if draft.selectedWallpaperType == .scene,
+                       let schema = wpeSceneCustomSettingsSchema,
+                       schema.properties.contains(where: { WPESceneCustomSettingsCard.isInteractive($0.type) }),
+                       draft.sceneDescriptor != nil {
+                        WPESceneCustomSettingsCard(
+                            screen: screen,
+                            schema: schema,
+                            descriptor: sceneDescriptorBinding
+                        )
+                    }
+                    #endif
                 }
                 .padding(.horizontal, DesignTokens.Inspector.horizontalPadding(for: inspectorPanelWidth))
                 .padding(.vertical, 14)
@@ -100,10 +115,58 @@ struct ScreenDetailInspectorPanel: View {
         .task(id: wpeProjectCustomSettingsLoadKey) {
             await loadWPEProjectCustomSettingsSchema()
         }
+        .task(id: wpeSceneCustomSettingsLoadKey) {
+            await loadWPESceneCustomSettingsSchema()
+        }
         #endif
     }
 
     #if !LITE_BUILD
+    private var sceneDescriptorBinding: Binding<SceneDescriptor> {
+        Binding(
+            get: {
+                draft.sceneDescriptor ?? SceneDescriptor(
+                    workshopID: "",
+                    cacheRelativePath: "",
+                    entryFile: "scene.json",
+                    capabilityTier: .unsupported
+                )
+            },
+            set: { newValue in
+                draft.sceneDescriptor = newValue
+            }
+        )
+    }
+
+    private var wpeSceneCustomSettingsLoadKey: String {
+        guard draft.selectedWallpaperType == .scene,
+              let descriptor = draft.sceneDescriptor else {
+            return "hidden"
+        }
+        let originFingerprint = draft.wpeOrigin?.sourceFolderBookmark.count.description ?? "-"
+        return "\(screen.id):scene:\(descriptor.workshopID):\(originFingerprint)"
+    }
+
+    @MainActor
+    private func loadWPESceneCustomSettingsSchema() async {
+        guard draft.selectedWallpaperType == .scene,
+              let descriptor = draft.sceneDescriptor else {
+            wpeSceneCustomSettingsSchema = nil
+            return
+        }
+        let outcome = await WPESceneProjectSchemaLoader.load(
+            descriptor: descriptor,
+            wpeOrigin: draft.wpeOrigin
+        )
+        guard !Task.isCancelled else { return }
+        if outcome.schema != nil || outcome.isExpectedAbsence {
+            Logger.info("WPESceneCustomSettings: \(outcome.log)", category: .screenManager)
+        } else {
+            Logger.warning("WPESceneCustomSettings: \(outcome.log)", category: .screenManager)
+        }
+        wpeSceneCustomSettingsSchema = outcome.schema
+    }
+
     /// Stable identifier driving WPE project schema reloads. The inspector
     /// panel is always mounted while HTML properties are visible, unlike the
     /// card itself, so the async read cannot deadlock behind an initially empty
