@@ -118,6 +118,21 @@ struct WPEMdlParserTests {
         #expect(animation.channels[1].keyframes[1].euler == SIMD3<Float>(0, 0, 0))
     }
 
+    @Test("Recovers mesh and animations when the skeleton is malformed but MDLA is valid")
+    func recoversAnimationWhenSkeletonMalformed() throws {
+        // Mirrors 3479521040/人物: the MDLS skeleton fails (bones dropped) yet the mesh stays
+        // drawable and the MDLA animation parses independently to drive P2b skinning.
+        let model = try WPEMdlParser.parse(data: makeMDLV23WithCorruptSkeletonAndAnimation())
+
+        #expect(model.bones.isEmpty)
+        #expect(model.meshes.first?.indices == [0, 1, 2])
+        #expect(model.animations.count == 1)
+        #expect(model.animations.first?.channels.count == 2)
+        #expect(
+            model.animations.first?.channels[1].keyframes[1].translation == SIMD3<Float>(10, 11, 12)
+        )
+    }
+
     @Test("Preserves atlas target geometry when MDLE element matrices are present")
     func preservesAtlasTargetGeometryWithElementMatrices() throws {
         let model = try WPEMdlParser.parse(data: makeMDLV23WithElementMetadata())
@@ -243,6 +258,13 @@ struct WPEMdlParserTests {
         data.append(UInt8(0))
         data.append(UInt8(0))
 
+        appendMDLA0006Section(to: &data)
+        return data
+    }
+
+    /// Appends a 1-animation MDLA0006 section: 2 channels, frameCount 1 (2 keyframes each),
+    /// translations 1..12 so callers can assert exact channel/keyframe ordering.
+    private func appendMDLA0006Section(to data: inout Data) {
         func appendKey(_ t: SIMD3<Float>, _ r: SIMD3<Float>, _ s: SIMD3<Float>) {
             for value in [t.x, t.y, t.z, r.x, r.y, r.z, s.x, s.y, s.z] {
                 data.appendLE(value)
@@ -272,7 +294,11 @@ struct WPEMdlParserTests {
         data.appendLE(channelByteCount)
         appendKey(SIMD3<Float>(7, 8, 9), SIMD3<Float>(0, 0, 0), SIMD3<Float>(1, 1, 1))
         appendKey(SIMD3<Float>(10, 11, 12), SIMD3<Float>(0, 0, 0), SIMD3<Float>(1, 1, 1))
+    }
 
+    private func makeMDLV23WithCorruptSkeletonAndAnimation() -> Data {
+        var data = makeMDLV23WithCorruptSkeleton()
+        appendMDLA0006Section(to: &data)
         return data
     }
 

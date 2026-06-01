@@ -74,7 +74,10 @@ struct WPEPuppetAnimation: Equatable, Sendable {
 }
 
 struct WPEPuppetAnimChannel: Equatable, Sendable {
-    /// Index into `WPEPuppetModel.bones` (channels appear in bone order; no explicit id in the file).
+    /// Skin-bone/channel index from MDLA (channels appear in bone order; no explicit id in
+    /// the file). Usually matches MDLS bone order, but `WPEPuppetModel.bones` may be empty or
+    /// malformed while channels stay usable — channels double as the skin skeleton (channel
+    /// index == skin-blend index), with keyframe 0 as the bind pose.
     let boneIndex: Int
     let keyframes: [WPEPuppetAnimKey]
 }
@@ -420,6 +423,9 @@ enum WPEMdlParser {
         let sectionEnd = declaredSectionEnd > reader.currentOffset
             ? min(declaredSectionEnd, reader.dataCount)
             : reader.dataCount
+        guard animationCount <= 1_024 else {
+            throw WPEMdlParserError.invalidAnimationHeader(offset: animationOffset)
+        }
 
         var animations: [WPEPuppetAnimation] = []
         animations.reserveCapacity(Int(animationCount))
@@ -705,6 +711,8 @@ private struct WPEMdlBinaryReader {
     ) -> Bool {
         guard candidateOffset >= 0,
               candidateOffset + 13 <= sectionEnd,
+              let recordFlag = readUInt8(at: candidateOffset + 4),
+              recordFlag == 0,
               let parent = readInt32(at: candidateOffset + 5),
               parent >= -1,
               parent < Int32(boneCount),
@@ -714,6 +722,11 @@ private struct WPEMdlBinaryReader {
             return false
         }
         return candidateOffset + 13 + Int(matrixByteCount) <= sectionEnd
+    }
+
+    private func readUInt8(at absoluteOffset: Int) -> UInt8? {
+        guard absoluteOffset >= 0, absoluteOffset < data.count else { return nil }
+        return data[absoluteOffset]
     }
 
     private func readInt32(at absoluteOffset: Int) -> Int32? {
