@@ -518,7 +518,6 @@ struct WorkshopInspectorContent: View {
         let text = item.shortDescription
         let placeholder = String(localized: "No description provided.", comment: "Placeholder when a Workshop item has no description.")
         return VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
-            Divider()
             Text("Description")
                 .font(.headline)
             CollapsibleDescription(

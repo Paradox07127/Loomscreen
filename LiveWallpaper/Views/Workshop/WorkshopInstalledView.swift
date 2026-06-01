@@ -841,7 +841,6 @@ private struct WPEInstalledInspectorContent: View {
                     unsupportedWarning
                     if !activeScreenIDs.isEmpty { inUseRow }
 
-                    Divider()
                     applySection
 
                     infoSection
@@ -1090,7 +1089,6 @@ private struct WPEInstalledInspectorContent: View {
     @ViewBuilder
     private var infoSection: some View {
         if let info = localInfo, info.hasContent {
-            Divider()
             if let description = info.cleanedDescription, !description.isEmpty {
                 descriptionSection(description)
             }

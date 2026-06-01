@@ -76,7 +76,10 @@ enum SettingsWindowMetrics {
     static let sidebarColumnWidth = DesignTokens.Sidebar.width
     static let sidebarColumnMaxWidth = DesignTokens.Sidebar.maxWidth
     static let defaultContentSize = CGSize(width: 1180, height: 720)
-    static let minimumContentSize = CGSize(width: 1080, height: 540)
+    // Floor must fit sidebar + a compressed library grid + the detail inspector
+    // at its 300pt minimum (it opens trailing inside the detail column). 1080
+    // left the inspector clipping past the window's right edge at min width.
+    static let minimumContentSize = CGSize(width: 1160, height: 540)
 }
 
 /// App delegate owns startup and the hand-managed settings/onboarding windows.
