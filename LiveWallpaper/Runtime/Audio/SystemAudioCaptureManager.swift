@@ -24,6 +24,17 @@ final class SystemAudioCaptureManager {
 
     private(set) var state: State = .idle
 
+    /// App-lifetime shared spectrum sink. Persistent and `Sendable`, so render
+    /// loops / JS pumps on any thread read it via `snapshot()` without hopping
+    /// to the main actor. Capture writes into it while running; it is reset to
+    /// silence on stop, so off == flat bars.
+    nonisolated static let broker = AudioSpectrumBroker()
+
+    /// Cheap nonisolated hint for the render hot path to skip the snapshot when
+    /// capture is off. A one-frame-stale read is harmless.
+    nonisolated(unsafe) private static var captureActive = false
+    nonisolated static var isCapturing: Bool { captureActive }
+
     private var isEnabled = false
     private var consumerCount = 0
     /// Type-erased so the stored property doesn't require macOS 14.2 at the
@@ -31,18 +42,6 @@ final class SystemAudioCaptureManager {
     private var serviceBox: AnyObject?
 
     private init() {}
-
-    /// The shared spectrum sink. `nil` while capture isn't running. Sinks take
-    /// `broker?.snapshot()` each frame/tick.
-    var broker: AudioSpectrumBroker? {
-        guard #available(macOS 14.2, *) else { return nil }
-        return (serviceBox as? SystemAudioCaptureService)?.broker
-    }
-
-    var isCapturing: Bool {
-        if case .capturing = state { return true }
-        return false
-    }
 
     /// Master switch, mirrors `GlobalSettings.audioResponseEnabled`.
     func setEnabled(_ enabled: Bool) {
@@ -87,13 +86,15 @@ final class SystemAudioCaptureManager {
             Logger.warning("[AudioCapture] manager: system audio capture needs macOS 14.2+", category: .audioCapture)
             return
         }
-        let service = SystemAudioCaptureService()
+        let service = SystemAudioCaptureService(broker: Self.broker)
         do {
             try service.start()
             serviceBox = service
+            Self.captureActive = true
             state = .capturing
         } catch {
             serviceBox = nil
+            Self.captureActive = false
             state = .failed("\(error)")
             Logger.warning("[AudioCapture] manager: capture start failed: \(error)", category: .audioCapture)
         }
@@ -104,6 +105,8 @@ final class SystemAudioCaptureManager {
             service.stop()
         }
         serviceBox = nil
+        Self.captureActive = false
+        Self.broker.resetToSilence()
         if state != .unsupported {
             state = .idle
         }

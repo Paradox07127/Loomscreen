@@ -864,13 +864,19 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
             profile: currentProfile,
             pointerPosition: pointerSampler.sample(mtkView)
         )
-        if let soundRuntime {
+        // Audio-reactive uniforms follow the shared system-audio capture (the
+        // loopback of whatever is playing), not the scene's own sounds — those
+        // are already in the system mix the tap captures. `soundRuntime` stays
+        // a pure player. When capture is off the broker is silent (flat bars).
+        if SystemAudioCaptureManager.isCapturing {
+            let audio = SystemAudioCaptureManager.broker.snapshot()
             uniforms = WPEMetalRuntimeUniforms(
                 time: uniforms.time,
                 daytime: uniforms.daytime,
                 brightness: uniforms.brightness,
                 pointerPosition: uniforms.pointerPosition,
-                audioSpectrum: soundRuntime.currentSpectrum
+                audioSpectrumLeft: audio.left.map(Double.init),
+                audioSpectrumRight: audio.right.map(Double.init)
             )
         }
         lastRuntimeUniforms = uniforms

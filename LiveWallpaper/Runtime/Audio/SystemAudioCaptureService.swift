@@ -64,8 +64,13 @@ final class SystemAudioCaptureService: @unchecked Sendable {
     }
 
     /// The shared sink. Readers (renderers / web bridges) take snapshots; the
-    /// IOProc is the sole writer.
-    let broker = AudioSpectrumBroker()
+    /// IOProc is the sole writer. Injected so one app-lifetime broker can be
+    /// shared across capture restarts (see `SystemAudioCaptureManager.broker`).
+    let broker: AudioSpectrumBroker
+
+    init(broker: AudioSpectrumBroker = AudioSpectrumBroker()) {
+        self.broker = broker
+    }
 
     private(set) var isRunning = false
 

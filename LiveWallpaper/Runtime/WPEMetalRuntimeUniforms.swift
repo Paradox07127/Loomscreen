@@ -12,20 +12,22 @@ struct WPEMetalRuntimeUniforms: Equatable, Sendable {
     let daytime: Double
     let brightness: Double
     let pointerPosition: SIMD2<Double>
-    /// Mono spectrum, length 64. Audio-reactive shaders consume 16/32/64
-    /// element slices via the resolution combo. Default zero — when the
-    /// scene's audio runtime feeds real FFT bins, replace it. Each bin
-    /// is a normalized 0…1 magnitude, ordered low frequency → high.
-    let audioSpectrum: [Double]
+    /// Per-channel spectrum, 64 bins each, normalized 0…1, low frequency → high.
+    /// Fed from the shared system-audio broker. Audio-reactive shaders consume
+    /// 16/32/64-element slices per channel via the resolution combo. Mono
+    /// sources duplicate into both channels.
+    let audioSpectrumLeft: [Double]
+    let audioSpectrumRight: [Double]
 
     static let zero = WPEMetalRuntimeUniforms(
         time: 0,
         daytime: 0,
         brightness: 1,
-        pointerPosition: SIMD2<Double>(0.5, 0.5),
-        audioSpectrum: [Double](repeating: 0, count: 64)
+        pointerPosition: SIMD2<Double>(0.5, 0.5)
     )
 
+    /// Mono initializer — duplicates one 64-bin spectrum into both channels.
+    /// Kept for the frame-clock default path and fixtures.
     init(
         time: Double,
         daytime: Double,
@@ -33,39 +35,66 @@ struct WPEMetalRuntimeUniforms: Equatable, Sendable {
         pointerPosition: SIMD2<Double>,
         audioSpectrum: [Double] = [Double](repeating: 0, count: 64)
     ) {
+        let mono = Self.normalized(audioSpectrum)
+        self.init(
+            time: time,
+            daytime: daytime,
+            brightness: brightness,
+            pointerPosition: pointerPosition,
+            audioSpectrumLeft: mono,
+            audioSpectrumRight: mono
+        )
+    }
+
+    /// Stereo initializer — independent left/right 64-bin spectra.
+    init(
+        time: Double,
+        daytime: Double,
+        brightness: Double,
+        pointerPosition: SIMD2<Double>,
+        audioSpectrumLeft: [Double],
+        audioSpectrumRight: [Double]
+    ) {
         self.time = time
         self.daytime = daytime
         self.brightness = brightness
         self.pointerPosition = pointerPosition
-        if audioSpectrum.count >= 64 {
-            self.audioSpectrum = Array(audioSpectrum.prefix(64))
-        } else {
-            var padded = audioSpectrum
-            padded.append(contentsOf: [Double](repeating: 0, count: 64 - audioSpectrum.count))
-            self.audioSpectrum = padded
-        }
+        self.audioSpectrumLeft = Self.normalized(audioSpectrumLeft)
+        self.audioSpectrumRight = Self.normalized(audioSpectrumRight)
+    }
+
+    /// Clamps a spectrum to exactly 64 bins (truncate or zero-pad).
+    private static func normalized(_ bins: [Double]) -> [Double] {
+        if bins.count >= 64 { return Array(bins.prefix(64)) }
+        return bins + [Double](repeating: 0, count: 64 - bins.count)
     }
 
     var uniformValues: [String: WPESceneShaderConstantValue] {
-        let s64 = audioSpectrum
-        let s32 = stride(from: 0, to: 64, by: 2).map { (i: Int) -> Double in
-            (s64[i] + s64[i + 1]) * 0.5
-        }
-        let s16 = stride(from: 0, to: 32, by: 2).map { (i: Int) -> Double in
-            (s32[i] + s32[i + 1]) * 0.5
-        }
+        let s64L = audioSpectrumLeft
+        let s64R = audioSpectrumRight
+        let s32L = Self.halve(s64L)
+        let s32R = Self.halve(s64R)
+        let s16L = Self.halve(s32L)
+        let s16R = Self.halve(s32R)
         return [
             "g_Time": .number(time),
             "g_Daytime": .number(daytime),
             "g_Brightness": .number(brightness),
             "g_PointerPosition": .vector([pointerPosition.x, pointerPosition.y]),
-            "g_AudioSpectrum16Left": .vector(s16),
-            "g_AudioSpectrum16Right": .vector(s16),
-            "g_AudioSpectrum32Left": .vector(s32),
-            "g_AudioSpectrum32Right": .vector(s32),
-            "g_AudioSpectrum64Left": .vector(s64),
-            "g_AudioSpectrum64Right": .vector(s64)
+            "g_AudioSpectrum16Left": .vector(s16L),
+            "g_AudioSpectrum16Right": .vector(s16R),
+            "g_AudioSpectrum32Left": .vector(s32L),
+            "g_AudioSpectrum32Right": .vector(s32R),
+            "g_AudioSpectrum64Left": .vector(s64L),
+            "g_AudioSpectrum64Right": .vector(s64R)
         ]
+    }
+
+    /// Averages adjacent bins to halve resolution (64→32→16).
+    private static func halve(_ bins: [Double]) -> [Double] {
+        stride(from: 0, to: bins.count, by: 2).map { i in
+            (bins[i] + bins[i + 1]) * 0.5
+        }
     }
 }
 
