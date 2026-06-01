@@ -159,8 +159,6 @@ struct WorkshopInstalledView: View {
                     // mirrors the online ribbon. The full-width HStack lets the
                     // inner Spacer push Sort flush right.
                     HStack(spacing: DesignTokens.LibraryFilterBar.contentSpacing) {
-                        typeChipRow
-
                         filtersToggle
 
                         Spacer(minLength: 0)
@@ -407,6 +405,10 @@ struct WorkshopInstalledView: View {
 
     private var installedFilterPanel: some View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
+            filterRow("Type") {
+                typeChipRow
+            }
+
             filterRow("Source") {
                 HStack(spacing: 6) {
                     ForEach(InstalledSource.allCases) { source in
