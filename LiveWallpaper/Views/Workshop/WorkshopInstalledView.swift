@@ -781,6 +781,12 @@ private struct WPEInstalledInspectorContent: View {
     @Environment(\.openURL) private var openURL
     /// Drives the multi-display target popover under the single Apply button.
     @State private var showingApplyPopover = false
+    /// Original WPE metadata read straight from the item's local `project.json`
+    /// (description / tags / content rating) — no Steam API call. nil until the
+    /// off-main read completes; reloaded whenever the inspected entry changes.
+    @State private var localInfo: WPELocalProjectInfo?
+    /// Collapsed vs. expanded state for a long description.
+    @State private var descriptionExpanded = false
 
     /// Shared singleton (also drives the online Browse download UI) — reading it
     /// here makes this view observe the re-download's phase + progress.
@@ -804,7 +810,12 @@ private struct WPEInstalledInspectorContent: View {
                         .font(.title3.weight(.semibold))
                         .fixedSize(horizontal: false, vertical: true)
 
-                    typePill
+                    HStack(spacing: DesignTokens.Spacing.xs) {
+                        typePill
+                        if let rating = localInfo?.contentRating, !rating.isEmpty {
+                            contentRatingPill(rating)
+                        }
+                    }
                     if hasUpdate { updateSection }
                     unsupportedWarning
                     if !activeScreenIDs.isEmpty { inUseRow }
@@ -812,7 +823,7 @@ private struct WPEInstalledInspectorContent: View {
                     Divider()
                     applySection
 
-                    if canBookmark || isBookmarked { bookmarkButton }
+                    infoSection
 
                     Divider()
                     actionsSection
@@ -823,6 +834,10 @@ private struct WPEInstalledInspectorContent: View {
             }
         }
         .background(DesignTokens.Colors.pageBackground)
+        .task(id: entry.id) {
+            descriptionExpanded = false
+            localInfo = await loadWPELocalProjectInfo(for: entry)
+        }
     }
 
     private var hero: some View {
@@ -938,7 +953,6 @@ private struct WPEInstalledInspectorContent: View {
     @ViewBuilder
     private var applySection: some View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
-            Text("Apply to display").font(.headline)
             if screens.isEmpty {
                 Text("Open a display first, then apply.")
                     .font(.caption)
@@ -972,38 +986,115 @@ private struct WPEInstalledInspectorContent: View {
         }
     }
 
-    private var bookmarkButton: some View {
-        Button(action: onToggleBookmark) {
-            Label(isBookmarked ? "Remove Bookmark" : "Add Bookmark",
-                  systemImage: isBookmarked ? "bookmark.fill" : "bookmark")
+    /// Icon-only action row: bookmark (when allowed) · Finder · Steam · Remove.
+    /// Each keeps its title as the VoiceOver label (`.iconOnly` retains it) and
+    /// a hover tooltip, so dropping the visible text costs no clarity.
+    private var actionsSection: some View {
+        HStack(spacing: DesignTokens.Spacing.sm) {
+            if canBookmark || isBookmarked {
+                actionButton(
+                    titleKey: isBookmarked ? "Remove Bookmark" : "Add Bookmark",
+                    systemImage: isBookmarked ? "bookmark.fill" : "bookmark",
+                    tint: isBookmarked ? .yellow : nil,
+                    action: onToggleBookmark
+                )
+            }
+
+            actionButton(titleKey: "Show in Finder", systemImage: "folder", action: onShowInFinder)
+
+            if let url = steamURL {
+                actionButton(titleKey: "Steam", systemImage: "arrow.up.forward.app") { openURL(url) }
+            }
+
+            actionButton(titleKey: "Remove", systemImage: "trash", role: .destructive, action: onDelete)
+        }
+    }
+
+    private func actionButton(
+        titleKey: LocalizedStringKey,
+        systemImage: String,
+        role: ButtonRole? = nil,
+        tint: Color? = nil,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(role: role, action: action) {
+            Label(titleKey, systemImage: systemImage)
+                .labelStyle(.iconOnly)
                 .frame(maxWidth: .infinity)
         }
         .buttonStyle(.bordered)
-        .controlSize(.small)
-        .tint(isBookmarked ? .yellow : nil)
+        .controlSize(.large)
+        .tint(tint)
+        .help(Text(titleKey))
     }
 
-    private var actionsSection: some View {
-        HStack(spacing: DesignTokens.Spacing.sm) {
-            Button { onShowInFinder() } label: {
-                Label("Show in Finder", systemImage: "folder").frame(maxWidth: .infinity)
+    /// Original WPE info pulled from the local `project.json` (no API): the
+    /// description and tags. Hidden entirely until the read lands / when absent.
+    @ViewBuilder
+    private var infoSection: some View {
+        if let info = localInfo, info.hasContent {
+            Divider()
+            if let description = info.cleanedDescription, !description.isEmpty {
+                descriptionSection(description)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
+            if !info.tags.isEmpty {
+                tagsSection(info.tags)
+            }
+        }
+    }
 
-            if let url = steamURL {
-                Button { openURL(url) } label: {
-                    Label("Steam", systemImage: "arrow.up.forward.app").frame(maxWidth: .infinity)
+    private func descriptionSection(_ text: String) -> some View {
+        VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
+            Text("Description").font(.headline)
+            Text(verbatim: text)
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .lineLimit(descriptionExpanded ? nil : 6)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+            if text.count > 280 {
+                Button(descriptionExpanded ? "Show less" : "Show more") {
+                    withAnimation(.easeInOut(duration: 0.15)) { descriptionExpanded.toggle() }
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Color.accentColor)
             }
+        }
+    }
 
-            Button(role: .destructive, action: onDelete) {
-                Label("Remove", systemImage: "trash").frame(maxWidth: .infinity)
+    private func tagsSection(_ tags: [String]) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(tags, id: \.self) { tag in
+                    Text(verbatim: tag)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.primary.opacity(0.06), in: Capsule())
+                }
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
+        }
+    }
+
+    private func contentRatingPill(_ rating: String) -> some View {
+        let tint = contentRatingTint(rating)
+        return Text(verbatim: rating.uppercased(with: .current))
+            .font(.system(size: 9, weight: .bold))
+            .tracking(0.5)
+            .foregroundStyle(tint)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: DesignTokens.Corner.sm, style: .continuous))
+    }
+
+    private func contentRatingTint(_ rating: String) -> Color {
+        switch rating.lowercased() {
+        case "everyone": return .green
+        case "questionable": return .orange
+        case "mature": return .red
+        default: return .gray
         }
     }
 
@@ -1011,6 +1102,69 @@ private struct WPEInstalledInspectorContent: View {
         guard UInt64(entry.origin.workshopID) != nil else { return nil }
         return URL(string: "https://steamcommunity.com/sharedfiles/filedetails/?id=\(entry.origin.workshopID)")
     }
+}
+
+// MARK: - Local project.json metadata (no Steam API)
+
+/// The original Wallpaper Engine fields we surface in the Installed inspector,
+/// read directly from the item's bundled `project.json`. Purely local — opening
+/// a downloaded item never spends a Steam Web API request to show its details.
+private struct WPELocalProjectInfo: Sendable, Equatable {
+    var cleanedDescription: String?
+    var tags: [String]
+    var contentRating: String?
+
+    var hasContent: Bool {
+        (cleanedDescription?.isEmpty == false) || !tags.isEmpty
+    }
+}
+
+/// Only the display fields — `WallpaperEngineProject` deliberately ignores these
+/// (it's the runtime import model); here we just want text to show.
+private struct WPEProjectDisplayManifest: Decodable {
+    let description: String?
+    let tags: [String]?
+    let contentrating: String?
+}
+
+/// Resolve the item's security-scoped folder and decode its `project.json` off
+/// the main actor. Returns nil for items without a manifest (e.g. loose video /
+/// web imports), so the inspector simply omits the info block.
+private func loadWPELocalProjectInfo(for entry: WPEHistoryEntry) async -> WPELocalProjectInfo? {
+    let bookmark = entry.origin.sourceFolderBookmark
+    return await Task.detached(priority: .utility) {
+        var isStale = false
+        guard let folder = try? URL(
+            resolvingBookmarkData: bookmark,
+            options: .withSecurityScope,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        ) else { return nil }
+        let didStart = folder.startAccessingSecurityScopedResource()
+        defer { if didStart { folder.stopAccessingSecurityScopedResource() } }
+
+        let manifestURL = folder.appendingPathComponent("project.json")
+        guard let data = try? Data(contentsOf: manifestURL),
+              let manifest = try? JSONDecoder().decode(WPEProjectDisplayManifest.self, from: data)
+        else { return nil }
+
+        return WPELocalProjectInfo(
+            cleanedDescription: manifest.description.flatMap(strippedWPEMarkup),
+            tags: manifest.tags ?? [],
+            contentRating: manifest.contentrating?.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+    }.value
+}
+
+/// WPE descriptions carry Steam BBCode (`[h1]…[/h1]`, `[b]`, `[url=…]`, `[list]`
+/// …). Strip the tags for a clean, native text block while keeping the words.
+private func strippedWPEMarkup(_ raw: String) -> String? {
+    var text = raw.replacingOccurrences(
+        of: #"\[/?[^\]]*\]"#, with: "", options: .regularExpression)
+    text = text.replacingOccurrences(
+        of: #"[\r\n]{3,}"#, with: "\n\n", options: .regularExpression)
+    text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    return text.isEmpty ? nil : text
 }
 
 #endif
