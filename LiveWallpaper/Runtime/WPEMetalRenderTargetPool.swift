@@ -88,7 +88,8 @@ final class WPEMetalRenderTargetPool {
         for target: WPERenderTarget,
         layer: WPERenderLayer,
         sceneSize: CGSize,
-        avoiding textureToAvoid: MTLTexture?
+        avoiding textureToAvoid: MTLTexture?,
+        legacyComposeLayer: Bool = false
     ) throws -> MTLTexture {
         let spec = targetSpec(for: target, layer: layer)
         let pixelFormat = Self.pixelFormat(forFBOFormat: spec.format)
@@ -97,7 +98,8 @@ final class WPEMetalRenderTargetPool {
             spec: spec,
             layer: layer,
             sceneSize: sceneSize,
-            pixelFormat: pixelFormat
+            pixelFormat: pixelFormat,
+            legacyComposeLayer: legacyComposeLayer
         )
         let slot = slots[key] ?? Slot()
         slots[key] = slot
@@ -142,11 +144,16 @@ final class WPEMetalRenderTargetPool {
         spec: WPERenderFBO,
         layer: WPERenderLayer,
         sceneSize: CGSize,
-        pixelFormat: MTLPixelFormat
+        pixelFormat: MTLPixelFormat,
+        legacyComposeLayer: Bool
     ) -> WPEMetalRenderTargetKey {
         switch target {
         case .layerComposite:
-            let localSize = Self.layerCompositeSize(for: layer, sceneSize: sceneSize)
+            let localSize = Self.layerCompositeSize(
+                for: layer,
+                sceneSize: sceneSize,
+                legacyComposeLayer: legacyComposeLayer
+            )
             return WPEMetalRenderTargetKey(
                 name: spec.name,
                 width: wpeRenderTargetDimension(localSize.width, scale: spec.scale),
@@ -165,21 +172,32 @@ final class WPEMetalRenderTargetPool {
         }
     }
 
-    private static func layerCompositeSize(for layer: WPERenderLayer, sceneSize: CGSize) -> CGSize {
-        guard layer.geometry != .identity,
-              let size = layer.geometry.size else {
-            return sceneSize
-        }
-
+    private static func layerCompositeSize(
+        for layer: WPERenderLayer,
+        sceneSize: CGSize,
+        legacyComposeLayer: Bool
+    ) -> CGSize {
+        // WPE compose/project utility layers capture the full frame, so their
+        // layer-composite target MUST be scene-sized. Sizing it to the object's
+        // scaled footprint was the root of the "picture-in-picture" inset. The
+        // legacy rollback gate restores that old footprint sizing wholesale.
         if isSceneCaptureUtilityLayer(layer) {
-            // composelayer/projectlayer capture a screen-space region that is
-            // later drawn at the object's scaled footprint.
+            guard legacyComposeLayer,
+                  layer.geometry != .identity,
+                  let size = layer.geometry.size else {
+                return sceneSize
+            }
             let scaleX = finiteMagnitude(layer.geometry.scale.x, fallback: 1)
             let scaleY = finiteMagnitude(layer.geometry.scale.y, fallback: 1)
             return CGSize(
                 width: max(size.width * scaleX, 1),
                 height: max(size.height * scaleY, 1)
             )
+        }
+
+        guard layer.geometry != .identity,
+              let size = layer.geometry.size else {
+            return sceneSize
         }
 
         return CGSize(
@@ -189,13 +207,7 @@ final class WPEMetalRenderTargetPool {
     }
 
     private static func isSceneCaptureUtilityLayer(_ layer: WPERenderLayer) -> Bool {
-        let imagePath = normalizedPath(layer.imagePath)
-        return imagePath == "models/util/composelayer.json"
-            || imagePath == "models/util/projectlayer.json"
-    }
-
-    private static func normalizedPath(_ path: String) -> String {
-        path.replacingOccurrences(of: "\\", with: "/").lowercased()
+        WPEMetalComposeLayerCompatibility.isSceneCaptureUtilityModelPath(layer.imagePath)
     }
 
     private static func finiteMagnitude(_ value: Double, fallback: CGFloat) -> CGFloat {

@@ -135,6 +135,12 @@ struct WPEComposeRegionUniforms {
     var texture1UVRect: SIMD4<Float>
 }
 
+/// Layout MUST match `WPEComposeLayerUniforms` in `WPEMetalBuiltins.metal`.
+/// `flags.x` carries the WPE `CLEARALPHA` combo (1 = clear sampled alpha).
+struct WPEComposeLayerUniforms {
+    var flags: SIMD4<Float>
+}
+
 struct WPECopyUniforms {
     var uvOffset: SIMD2<Float>
     var padding: SIMD2<Float> = SIMD2<Float>(0, 0)

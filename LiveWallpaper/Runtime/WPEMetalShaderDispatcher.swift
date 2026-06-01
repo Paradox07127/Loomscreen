@@ -120,49 +120,96 @@ struct WPEMetalShaderDispatcher {
         case "compose":
             let firstReference = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
             let secondReference = pass.textureBindings[1] ?? pass.pass.textures[1] ?? firstReference
-            let usesSceneCaptureRegion = isSceneCaptureUtilityLayer(layer)
+            let isComposeLayerSceneAlias = isSceneCaptureUtilityLayer(layer)
                 && isLayerCompositeTarget(pass.pass.target)
-                && (isSceneAliasReference(firstReference) || isSceneAliasReference(secondReference))
-            encoder.setRenderPipelineState(try executor.renderPipeline(
-                fragmentName: usesSceneCaptureRegion ? "wpe_compose_region_fragment" : "wpe_compose_fragment",
-                blendMode: pass.pass.blending,
-                colorPixelFormat: destination.texture.pixelFormat,
-                depthPixelFormat: depthPixelFormat
-            ))
-            let firstTexture = try WPEMetalShaderInputs.resolve(
-                reference: firstReference,
-                textures: textures,
-                frameState: frameState,
-                currentTargetID: destination.id
-            )
-            let secondTexture = try WPEMetalShaderInputs.resolve(
-                reference: secondReference,
-                textures: textures,
-                frameState: frameState,
-                currentTargetID: destination.id
-            )
-            encoder.setFragmentTexture(firstTexture, index: 0)
-            encoder.setFragmentTexture(secondTexture, index: 1)
-            if usesSceneCaptureRegion {
-                let regionRect = executor.sceneCaptureUVRect(
+                && isSceneAliasReference(firstReference)
+            let usesLegacyRegion = isComposeLayerSceneAlias && frameState.legacyComposeLayer
+            if isComposeLayerSceneAlias && !usesLegacyRegion {
+                // WPE composelayer parity: draw a fullscreen quad and sample the
+                // captured full-frame buffer by the layer-projected screen
+                // coordinate carried in WPEComposeLayerVertexOut.screenCoord.
+                encoder.setRenderPipelineState(try executor.renderPipeline(
+                    vertexName: "wpe_compose_projected_vertex",
+                    fragmentName: "wpe_composelayer_fragment",
+                    blendMode: pass.pass.blending,
+                    colorPixelFormat: destination.texture.pixelFormat,
+                    depthPixelFormat: depthPixelFormat
+                ))
+                let firstTexture = try WPEMetalShaderInputs.resolve(
+                    reference: firstReference,
+                    textures: textures,
+                    frameState: frameState,
+                    currentTargetID: destination.id
+                )
+                encoder.setFragmentTexture(firstTexture, index: 0)
+                var quadUniforms = executor.objectQuadUniforms(
                     for: layer,
                     sceneSize: frameState.sceneSize,
                     sourceTexture: firstTexture
                 )
-                let localRect = SIMD4<Float>(0, 0, 1, 1)
-                var uniforms = WPEComposeRegionUniforms(
-                    color: WPEMetalShaderInputs.colorVector(for: pass),
-                    texture0UVRect: isSceneAliasReference(firstReference) ? regionRect : localRect,
-                    texture1UVRect: isSceneAliasReference(secondReference) ? regionRect : localRect
+                encoder.setVertexBytes(
+                    &quadUniforms,
+                    length: MemoryLayout<WPEObjectQuadUniforms>.stride,
+                    index: 1
+                )
+                var uniforms = WPEComposeLayerUniforms(
+                    flags: SIMD4<Float>(clearAlphaValue(for: pass), 0, 0, 0)
                 )
                 encoder.setFragmentBytes(
                     &uniforms,
-                    length: MemoryLayout<WPEComposeRegionUniforms>.stride,
+                    length: MemoryLayout<WPEComposeLayerUniforms>.stride,
                     index: 0
                 )
             } else {
-                var uniforms = WPESolidUniforms(color: WPEMetalShaderInputs.colorVector(for: pass))
-                encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPESolidUniforms>.stride, index: 0)
+                if usesLegacyRegion {
+                    Logger.warning(
+                        "WPE Metal compose layer fallback: legacy region path for scene=\(frameState.sceneID ?? "unknown") layer=\(layer.objectID)",
+                        category: .wpeRender
+                    )
+                }
+                let usesSceneCaptureRegion = usesLegacyRegion
+                    && (isSceneAliasReference(firstReference) || isSceneAliasReference(secondReference))
+                encoder.setRenderPipelineState(try executor.renderPipeline(
+                    fragmentName: usesSceneCaptureRegion ? "wpe_compose_region_fragment" : "wpe_compose_fragment",
+                    blendMode: pass.pass.blending,
+                    colorPixelFormat: destination.texture.pixelFormat,
+                    depthPixelFormat: depthPixelFormat
+                ))
+                let firstTexture = try WPEMetalShaderInputs.resolve(
+                    reference: firstReference,
+                    textures: textures,
+                    frameState: frameState,
+                    currentTargetID: destination.id
+                )
+                let secondTexture = try WPEMetalShaderInputs.resolve(
+                    reference: secondReference,
+                    textures: textures,
+                    frameState: frameState,
+                    currentTargetID: destination.id
+                )
+                encoder.setFragmentTexture(firstTexture, index: 0)
+                encoder.setFragmentTexture(secondTexture, index: 1)
+                if usesSceneCaptureRegion {
+                    let regionRect = executor.sceneCaptureUVRect(
+                        for: layer,
+                        sceneSize: frameState.sceneSize,
+                        sourceTexture: firstTexture
+                    )
+                    let localRect = SIMD4<Float>(0, 0, 1, 1)
+                    var uniforms = WPEComposeRegionUniforms(
+                        color: WPEMetalShaderInputs.colorVector(for: pass),
+                        texture0UVRect: isSceneAliasReference(firstReference) ? regionRect : localRect,
+                        texture1UVRect: isSceneAliasReference(secondReference) ? regionRect : localRect
+                    )
+                    encoder.setFragmentBytes(
+                        &uniforms,
+                        length: MemoryLayout<WPEComposeRegionUniforms>.stride,
+                        index: 0
+                    )
+                } else {
+                    var uniforms = WPESolidUniforms(color: WPEMetalShaderInputs.colorVector(for: pass))
+                    encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPESolidUniforms>.stride, index: 0)
+                }
             }
 
         case "effect_colorbalance":
@@ -826,9 +873,7 @@ struct WPEMetalShaderDispatcher {
     }
 
     private func isSceneCaptureUtilityLayer(_ layer: WPERenderLayer) -> Bool {
-        let imagePath = normalizedPath(layer.imagePath)
-        return imagePath == "models/util/composelayer.json"
-            || imagePath == "models/util/projectlayer.json"
+        WPEMetalComposeLayerCompatibility.isSceneCaptureUtilityModelPath(layer.imagePath)
     }
 
     private func isLayerCompositeTarget(_ target: WPERenderTarget) -> Bool {
@@ -845,8 +890,23 @@ struct WPEMetalShaderDispatcher {
         return WPEMetalShaderInputs.isSceneAliasName(name)
     }
 
-    private func normalizedPath(_ path: String) -> String {
-        path.replacingOccurrences(of: "\\", with: "/").lowercased()
+    private func clearAlphaValue(for pass: WPEPreparedRenderPass) -> Float {
+        comboValue(named: "CLEARALPHA", in: pass) == 1 ? 1 : 0
     }
+
+    private func comboValue(named name: String, in pass: WPEPreparedRenderPass) -> Int {
+        if let value = pass.comboValues[name] ?? pass.pass.combos[name] {
+            return value
+        }
+        let uppercased = name.uppercased()
+        for (key, value) in pass.comboValues where key.uppercased() == uppercased {
+            return value
+        }
+        for (key, value) in pass.pass.combos where key.uppercased() == uppercased {
+            return value
+        }
+        return 0
+    }
+
 }
 #endif

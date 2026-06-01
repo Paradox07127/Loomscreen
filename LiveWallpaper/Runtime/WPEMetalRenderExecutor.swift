@@ -5,6 +5,52 @@ import LiveWallpaperProWPE
 import Metal
 import MetalKit
 
+/// Shared classifier + rollback gate for WPE compose/project utility layers,
+/// so the dispatcher, target pool, and executor branch on ONE definition
+/// (instead of three duplicated path checks) and read the rollback settings
+/// once per frame rather than per pass.
+enum WPEMetalComposeLayerCompatibility {
+    /// WPE compose/project utility models (`composelayer.json` / `projectlayer.json`)
+    /// capture the full frame and must render fullscreen with projected sampling.
+    /// Tolerates a leading `../<dependencyID>/` resolver prefix.
+    static func isSceneCaptureUtilityModelPath(_ path: String) -> Bool {
+        let normalized = path.replacingOccurrences(of: "\\", with: "/").lowercased()
+        let stripped: String
+        if normalized.hasPrefix("../") {
+            let parts = normalized.split(separator: "/", omittingEmptySubsequences: false)
+            stripped = parts.count >= 3 ? parts.dropFirst(2).joined(separator: "/") : normalized
+        } else {
+            stripped = normalized
+        }
+        return stripped == "models/util/composelayer.json"
+            || stripped == "models/util/projectlayer.json"
+    }
+
+    /// Per-scene rollback to the legacy region path. `WPE_METAL_LEGACY_COMPOSE_LAYER`
+    /// forces every scene; `WPE_METAL_LEGACY_COMPOSE_SCENES` is a comma-separated id list.
+    static func usesLegacyComposeLayer(sceneID: String?) -> Bool {
+        if boolSetting(named: "WPE_METAL_LEGACY_COMPOSE_LAYER") {
+            return true
+        }
+        guard let sceneID, !sceneID.isEmpty else {
+            return false
+        }
+        return sceneIDListSetting(named: "WPE_METAL_LEGACY_COMPOSE_SCENES").contains(sceneID)
+    }
+
+    private static func boolSetting(named key: String) -> Bool {
+        UserDefaults.standard.bool(forKey: key)
+            || ["1", "true", "yes", "on"].contains(ProcessInfo.processInfo.environment[key]?.lowercased() ?? "")
+    }
+
+    private static func sceneIDListSetting(named key: String) -> Set<String> {
+        Set([ProcessInfo.processInfo.environment[key], UserDefaults.standard.string(forKey: key)]
+            .compactMap { $0 }
+            .flatMap { $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) } }
+            .filter { !$0.isEmpty })
+    }
+}
+
 final class WPEMetalRenderExecutor {
     /// Phase 2A H3: every offscreen target and the on-screen swapchain share
     /// a single sRGB pixel format so render pipelines built for the offscreen
@@ -109,13 +155,20 @@ final class WPEMetalRenderExecutor {
         previousFrameHistory = nil
     }
 
+    /// Resolved once per `render()` from the rollback gate so utility-layer
+    /// geometry/sizing can revert without threading the flag through every
+    /// dispatch call site.
+    private var activeLegacyComposeLayer = false
+
     func render(
         pipeline: WPEPreparedRenderPipeline,
         size: CGSize,
         textures: [String: MTLTexture],
         runtimeUniforms: WPEMetalRuntimeUniforms = .zero,
-        cameraUniforms: WPEMetalCameraUniforms = .identity
+        cameraUniforms: WPEMetalCameraUniforms = .identity,
+        sceneID: String? = nil
     ) throws -> MTLTexture {
+        activeLegacyComposeLayer = WPEMetalComposeLayerCompatibility.usesLegacyComposeLayer(sceneID: sceneID)
         let preparedPipeline = pipeline.addingMetalRuntimeUniforms(runtimeUniforms, camera: cameraUniforms)
         let output = try makeOutputTexture(size: size)
         guard let commandBuffer = commandQueue.makeCommandBuffer() else {
@@ -143,6 +196,8 @@ final class WPEMetalRenderExecutor {
         var frameState = WPEMetalFrameState(
             output: output,
             sceneSize: size,
+            sceneID: sceneID,
+            legacyComposeLayer: activeLegacyComposeLayer,
             previousSceneTexture: reusableHistory?.sceneTexture,
             previousNamedTextures: reusableHistory?.namedTextures ?? [:]
         )
@@ -996,6 +1051,13 @@ final class WPEMetalRenderExecutor {
         guard layer.geometry != .identity else { return false }
         switch pass.pass.target {
         case .scene:
+            // WPE compose/project utility layers render fullscreen and sample the
+            // captured frame by projected screen coordinate (wpe_compose_projected_vertex),
+            // never as a shrunken object quad — unless the per-scene legacy rollback
+            // gate restores the old object-quad behavior.
+            if WPEMetalComposeLayerCompatibility.isSceneCaptureUtilityModelPath(layer.imagePath) {
+                return activeLegacyComposeLayer
+            }
             return true
         default:
             return false
@@ -1043,6 +1105,43 @@ final class WPEMetalRenderExecutor {
                 0,
                 0
             )
+        )
+    }
+
+    /// CPU mirror of `wpe_compose_projected_vertex` followed by the composelayer
+    /// fragment's `screenCoord.xy / w * 0.5 + 0.5` sampling. Exposed for
+    /// deterministic unit tests of the projected sample-UV math.
+    static func composeLayerProjectedSampleUV(
+        vertexID: Int,
+        uniforms u: WPEObjectQuadUniforms
+    ) -> SIMD2<Float> {
+        let corners: [SIMD2<Float>] = [
+            SIMD2<Float>(-0.5, -0.5),
+            SIMD2<Float>(0.5, -0.5),
+            SIMD2<Float>(-0.5, 0.5),
+            SIMD2<Float>(0.5, 0.5)
+        ]
+        let index = min(max(vertexID, 0), 3)
+        let sign = SIMD2<Float>(
+            u.uvSignAndPadding.x < 0 ? -1 : 1,
+            u.uvSignAndPadding.y < 0 ? -1 : 1
+        )
+        let local = corners[index] * sign * SIMD2<Float>(u.centerAndSize.z, u.centerAndSize.w)
+        let rotation = u.sceneSizeAndRotation.z
+        let c = cos(rotation)
+        let s = sin(rotation)
+        let rotated = SIMD2<Float>(
+            c * local.x - s * local.y,
+            s * local.x + c * local.y
+        )
+        let halfScene = SIMD2<Float>(
+            max(u.sceneSizeAndRotation.x, 1) * 0.5,
+            max(u.sceneSizeAndRotation.y, 1) * 0.5
+        )
+        let projected = (SIMD2<Float>(u.centerAndSize.x, u.centerAndSize.y) + rotated) / halfScene
+        return SIMD2<Float>(
+            projected.x * 0.5 + 0.5,
+            -projected.y * 0.5 + 0.5
         )
     }
 
@@ -1131,7 +1230,8 @@ final class WPEMetalRenderExecutor {
                 for: target,
                 layer: layer,
                 sceneSize: frameState.sceneSize,
-                avoiding: textureToAvoid
+                avoiding: textureToAvoid,
+                legacyComposeLayer: frameState.legacyComposeLayer
             )
             return (targetID, texture)
         }

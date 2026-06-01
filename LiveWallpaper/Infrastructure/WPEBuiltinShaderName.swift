@@ -12,7 +12,7 @@ enum WPEBuiltinShaderName {
             return "solidlayer"
         case "copy", "commands/copy", "util/copy":
             return "copy"
-        case "compose", "util/compose":
+        case "compose", "util/compose", "composelayer", "util/composelayer":
             return "compose"
         case "genericparticle", "particle/genericparticle":
             return "genericparticle"

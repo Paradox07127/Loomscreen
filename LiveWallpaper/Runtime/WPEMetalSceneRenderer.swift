@@ -807,7 +807,8 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
             size: sceneRenderSize,
             textures: texturesForCurrentFrame(time: uniforms.time),
             runtimeUniforms: uniforms,
-            cameraUniforms: cameraUniforms
+            cameraUniforms: cameraUniforms,
+            sceneID: descriptor.workshopID
         )
     }
 
@@ -880,7 +881,8 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
             size: sceneRenderSize,
             textures: currentTextures,
             runtimeUniforms: uniforms,
-            cameraUniforms: cameraUniforms
+            cameraUniforms: cameraUniforms,
+            sceneID: descriptor.workshopID
         )
         if !particleSystems.isEmpty {
             for system in particleSystems {

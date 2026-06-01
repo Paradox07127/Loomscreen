@@ -1163,8 +1163,8 @@ struct WPEMetalRenderExecutorTests {
         #expect(outsideLayer.b <= 5)
     }
 
-    @Test("Composelayer samples the matching scene region instead of squeezing the full frame")
-    func composelayerSamplesMatchingSceneRegion() throws {
+    @Test("Composelayer fullscreen projection preserves a 1:1 full-frame copy")
+    func composelayerFullscreenProjectionPreservesOneToOneCopy() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let executor = try WPEMetalRenderExecutor(device: device)
         let sceneTexture = try makeRGBAInputTexture(
@@ -1196,7 +1196,7 @@ struct WPEMetalRenderExecutorTests {
         )
         let compositeName = "_rt_imageLayerComposite_region_a"
         let captureRegion = WPERenderPass(
-            id: "region.0",
+            id: "compose.0",
             phase: .material,
             shader: "compose",
             source: .fbo("_rt_FullFrameBuffer"),
@@ -1211,26 +1211,28 @@ struct WPEMetalRenderExecutorTests {
             depthWrite: "disabled"
         )
         let drawRegion = WPERenderPass(
-            id: "region.1",
-            phase: .effect(file: "effects/opacity/effect.json"),
-            shader: "effects/opacity",
+            id: "compose.1",
+            phase: .command(file: "materials/util/copy.json"),
+            shader: "commands/copy",
             source: .fbo(compositeName),
             target: .scene,
             textures: [0: .fbo(compositeName)],
             binds: [:],
-            constants: ["alpha": .number(1)],
+            constants: [:],
             combos: [:],
             blending: "disabled",
             cullMode: "nocull",
             depthTest: "disabled",
             depthWrite: "disabled"
         )
+        // Scene-sized, centered, unrotated composelayer: the identity case that
+        // must reproduce the full frame 1:1 (no inset, no offset).
         let regionGeometry = WPERenderLayerGeometry(
-            origin: SIMD3<Double>(3, 1, 0),
+            origin: SIMD3<Double>(2, 2, 0),
             scale: SIMD3<Double>(1, 1, 1),
             angles: SIMD3<Double>(0, 0, 0),
             alignment: .center,
-            size: CGSize(width: 2, height: 2),
+            size: CGSize(width: 4, height: 4),
             alpha: 1,
             color: SIMD3<Double>(1, 1, 1),
             brightness: 1
@@ -1263,11 +1265,7 @@ struct WPEMetalRenderExecutorTests {
                         captureRegion,
                         bindings: [0: .fbo("_rt_FullFrameBuffer")]
                     ),
-                    preparedBuiltinPass(
-                        drawRegion,
-                        bindings: [0: .fbo(compositeName)],
-                        uniforms: ["alpha": .number(1)]
-                    )
+                    preparedBuiltinPass(drawRegion, bindings: [0: .fbo(compositeName)])
                 ]
             )
         ])
@@ -1277,22 +1275,28 @@ struct WPEMetalRenderExecutorTests {
             size: CGSize(width: 4, height: 4),
             textures: ["materials/quadrants.png": sceneTexture]
         )
-        let coveredPixels = [
-            try readPixel(output, x: 2, y: 2),
-            try readPixel(output, x: 3, y: 2),
-            try readPixel(output, x: 2, y: 3),
-            try readPixel(output, x: 3, y: 3)
-        ]
 
-        for pixel in coveredPixels {
-            #expect(pixel.r >= 240)
-            #expect(pixel.g >= 240)
-            #expect(pixel.b <= 10)
-        }
+        let topLeft = try readPixel(output, x: 0, y: 0)
+        let topRight = try readPixel(output, x: 3, y: 0)
+        let bottomLeft = try readPixel(output, x: 0, y: 3)
+        let bottomRight = try readPixel(output, x: 3, y: 3)
+
+        #expect(topLeft.r >= 240)
+        #expect(topLeft.g <= 10)
+        #expect(topLeft.b <= 10)
+        #expect(topRight.r <= 10)
+        #expect(topRight.g >= 240)
+        #expect(topRight.b <= 10)
+        #expect(bottomLeft.r <= 10)
+        #expect(bottomLeft.g <= 10)
+        #expect(bottomLeft.b >= 240)
+        #expect(bottomRight.r >= 240)
+        #expect(bottomRight.g >= 240)
+        #expect(bottomRight.b <= 10)
     }
 
-    @Test("Composelayer captures its scene-space region instead of the full frame")
-    func composelayerCapturesSceneSpaceRegion() throws {
+    @Test("Composelayer projected sampling covers the whole scene with no inset")
+    func composelayerProjectedSamplingCoversWholeScene() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let executor = try WPEMetalRenderExecutor(device: device)
         var sourceBytes = Data()
@@ -1329,7 +1333,7 @@ struct WPEMetalRenderExecutorTests {
         )
         let compositeName = "_rt_imageLayerComposite_region_capture_a"
         let captureRegion = WPERenderPass(
-            id: "region.0",
+            id: "compose.0",
             phase: .material,
             shader: "compose",
             source: .fbo("_rt_FullFrameBuffer"),
@@ -1344,26 +1348,28 @@ struct WPEMetalRenderExecutorTests {
             depthWrite: "disabled"
         )
         let drawRegion = WPERenderPass(
-            id: "region.1",
-            phase: .effect(file: "effects/opacity/effect.json"),
-            shader: "effects/opacity",
+            id: "compose.1",
+            phase: .command(file: "materials/util/copy.json"),
+            shader: "commands/copy",
             source: .fbo(compositeName),
             target: .scene,
             textures: [0: .fbo(compositeName)],
             binds: [:],
-            constants: ["alpha": .number(1)],
+            constants: [:],
             combos: [:],
             blending: "disabled",
             cullMode: "nocull",
             depthTest: "disabled",
             depthWrite: "disabled"
         )
+        // Scene-sized composelayer: the captured frame must cover the WHOLE
+        // output (no shrunken inset), reproducing the halves split 1:1.
         let regionGeometry = WPERenderLayerGeometry(
-            origin: SIMD3<Double>(14, 2, 0),
+            origin: SIMD3<Double>(8, 2, 0),
             scale: SIMD3<Double>(1, 1, 1),
             angles: SIMD3<Double>(0, 0, 0),
             alignment: .center,
-            size: CGSize(width: 4, height: 4),
+            size: CGSize(width: 16, height: 4),
             alpha: 1,
             color: SIMD3<Double>(1, 1, 1),
             brightness: 1
@@ -1396,11 +1402,7 @@ struct WPEMetalRenderExecutorTests {
                         captureRegion,
                         bindings: [0: .fbo("_rt_FullFrameBuffer")]
                     ),
-                    preparedBuiltinPass(
-                        drawRegion,
-                        bindings: [0: .fbo(compositeName)],
-                        uniforms: ["alpha": .number(1)]
-                    )
+                    preparedBuiltinPass(drawRegion, bindings: [0: .fbo(compositeName)])
                 ]
             )
         ])
@@ -1410,10 +1412,13 @@ struct WPEMetalRenderExecutorTests {
             size: CGSize(width: 16, height: 4),
             textures: ["materials/halves.png": sceneTexture]
         )
-        let leftEdgeOfCapturedRegion = try readPixel(output, x: 12, y: 2)
+        let leftSide = try readPixel(output, x: 2, y: 2)
+        let rightSide = try readPixel(output, x: 14, y: 2)
 
-        #expect(leftEdgeOfCapturedRegion.r <= 5)
-        #expect(leftEdgeOfCapturedRegion.g >= 250)
+        #expect(leftSide.r >= 250)
+        #expect(leftSide.g <= 5)
+        #expect(rightSide.r <= 5)
+        #expect(rightSide.g >= 250)
     }
 
     @Test("Opacity effect uses mask texture to gate alpha")
@@ -2161,6 +2166,11 @@ private func preparedBuiltinPass(
     )
 }
 
+private func expectVector(_ value: SIMD2<Float>, _ expected: SIMD2<Float>, tolerance: Float = 0.0001) {
+    #expect(abs(value.x - expected.x) <= tolerance)
+    #expect(abs(value.y - expected.y) <= tolerance)
+}
+
 private func makeCheckerTexture(device: MTLDevice) throws -> MTLTexture {
     try makeRGBAInputTexture(device: device, width: 2, height: 2, bytes: Data([
         255, 0,   0,   255,
@@ -2366,8 +2376,8 @@ private extension WPEMetalRenderExecutorTests {
         #expect(texture.height == 1)
     }
 
-    @Test("Composelayer composite target uses scaled scene footprint")
-    func composelayerCompositeTargetUsesScaledSceneFootprint() throws {
+    @Test("Composelayer composite target uses full scene size, not the object footprint")
+    func composelayerCompositeTargetUsesFullSceneSize() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let pool = WPEMetalRenderTargetPool(device: device)
         let layer = WPERenderLayer(
@@ -2398,8 +2408,283 @@ private extension WPEMetalRenderExecutorTests {
             avoiding: nil
         )
 
+        #expect(texture.width == 1024)
+        #expect(texture.height == 768)
+    }
+
+    @Test("Projectlayer composite target also uses full scene size")
+    func projectlayerCompositeTargetUsesFullSceneSize() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let pool = WPEMetalRenderTargetPool(device: device)
+        let layer = WPERenderLayer(
+            objectID: "project",
+            objectName: "Project",
+            imagePath: "models/util/projectlayer.json",
+            materialPath: "materials/util/composelayer.json",
+            geometry: WPERenderLayerGeometry(
+                origin: SIMD3<Double>(512, 384, 0),
+                scale: SIMD3<Double>(2, 3, 1),
+                angles: SIMD3<Double>(0, 0, 0),
+                alignment: .center,
+                size: CGSize(width: 128, height: 64),
+                alpha: 1,
+                color: SIMD3<Double>(1, 1, 1),
+                brightness: 1
+            ),
+            compositeA: "_rt_imageLayerComposite_project_a",
+            compositeB: "_rt_imageLayerComposite_project_b",
+            localFBOs: [],
+            passes: []
+        )
+
+        let texture = try pool.texture(
+            for: .layerComposite(name: layer.compositeA),
+            layer: layer,
+            sceneSize: CGSize(width: 1024, height: 768),
+            avoiding: nil
+        )
+
+        #expect(texture.width == 1024)
+        #expect(texture.height == 768)
+    }
+
+    @Test("Scene-capture utility classifier matches compose/project models and tolerates a dependency prefix")
+    func composeUtilityClassifierHandlesPathsAndDependencyPrefix() {
+        #expect(WPEMetalComposeLayerCompatibility.isSceneCaptureUtilityModelPath("models/util/composelayer.json"))
+        #expect(WPEMetalComposeLayerCompatibility.isSceneCaptureUtilityModelPath("models/util/projectlayer.json"))
+        #expect(WPEMetalComposeLayerCompatibility.isSceneCaptureUtilityModelPath("../3479521040/models/util/composelayer.json"))
+        #expect(WPEMetalComposeLayerCompatibility.isSceneCaptureUtilityModelPath("models\\util\\composelayer.json"))
+        #expect(!WPEMetalComposeLayerCompatibility.isSceneCaptureUtilityModelPath("models/util/solidlayer.json"))
+        #expect(!WPEMetalComposeLayerCompatibility.isSceneCaptureUtilityModelPath("materials/quadrants.png"))
+    }
+
+    @Test("Legacy rollback restores the scaled-footprint composite target")
+    func legacyRollbackRestoresScaledFootprintCompositeTarget() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let pool = WPEMetalRenderTargetPool(device: device)
+        let layer = WPERenderLayer(
+            objectID: "compose-legacy",
+            objectName: "ComposeLegacy",
+            imagePath: "models/util/composelayer.json",
+            materialPath: "materials/util/composelayer.json",
+            geometry: WPERenderLayerGeometry(
+                origin: SIMD3<Double>(512, 384, 0),
+                scale: SIMD3<Double>(2, 3, 1),
+                angles: SIMD3<Double>(0, 0, 0),
+                alignment: .center,
+                size: CGSize(width: 128, height: 64),
+                alpha: 1,
+                color: SIMD3<Double>(1, 1, 1),
+                brightness: 1
+            ),
+            compositeA: "_rt_imageLayerComposite_compose_legacy_a",
+            compositeB: "_rt_imageLayerComposite_compose_legacy_b",
+            localFBOs: [],
+            passes: []
+        )
+
+        let texture = try pool.texture(
+            for: .layerComposite(name: layer.compositeA),
+            layer: layer,
+            sceneSize: CGSize(width: 1024, height: 768),
+            avoiding: nil,
+            legacyComposeLayer: true
+        )
+
         #expect(texture.width == 256)
         #expect(texture.height == 192)
+    }
+
+    @Test("Compose projected sample UV identity matches fullscreen copy coordinates")
+    func composeProjectedUVIdentityMatchesFullscreenCopyCoordinates() {
+        let uniforms = WPEObjectQuadUniforms(
+            centerAndSize: SIMD4<Float>(0, 0, 3840, 2160),
+            sceneSizeAndRotation: SIMD4<Float>(3840, 2160, 0, 0),
+            uvSignAndPadding: SIMD4<Float>(1, 1, 0, 0)
+        )
+
+        expectVector(WPEMetalRenderExecutor.composeLayerProjectedSampleUV(vertexID: 0, uniforms: uniforms), SIMD2<Float>(0, 1))
+        expectVector(WPEMetalRenderExecutor.composeLayerProjectedSampleUV(vertexID: 1, uniforms: uniforms), SIMD2<Float>(1, 1))
+        expectVector(WPEMetalRenderExecutor.composeLayerProjectedSampleUV(vertexID: 2, uniforms: uniforms), SIMD2<Float>(0, 0))
+        expectVector(WPEMetalRenderExecutor.composeLayerProjectedSampleUV(vertexID: 3, uniforms: uniforms), SIMD2<Float>(1, 0))
+    }
+
+    @Test("Compose projected sample UV includes rotation")
+    func composeProjectedUVIncludesRotation() {
+        let uniforms = WPEObjectQuadUniforms(
+            centerAndSize: SIMD4<Float>(0, 0, 20, 10),
+            sceneSizeAndRotation: SIMD4<Float>(100, 100, .pi / 2, 0),
+            uvSignAndPadding: SIMD4<Float>(1, 1, 0, 0)
+        )
+
+        let uv = WPEMetalRenderExecutor.composeLayerProjectedSampleUV(vertexID: 1, uniforms: uniforms)
+        expectVector(uv, SIMD2<Float>(0.55, 0.4))
+    }
+
+    @Test("Compose projected sample UV mirrors on negative scale")
+    func composeProjectedUVIncludesNegativeScaleMirroring() {
+        let uniforms = WPEObjectQuadUniforms(
+            centerAndSize: SIMD4<Float>(0, 0, 20, 10),
+            sceneSizeAndRotation: SIMD4<Float>(100, 100, 0, 0),
+            uvSignAndPadding: SIMD4<Float>(-1, 1, 0, 0)
+        )
+
+        let uv = WPEMetalRenderExecutor.composeLayerProjectedSampleUV(vertexID: 1, uniforms: uniforms)
+        expectVector(uv, SIMD2<Float>(0.4, 0.55))
+    }
+
+    @Test("Object quad uniforms preserve fractional origin and alignment offset for compose")
+    func objectQuadUniformsPreserveFractionalOriginAndAlignmentOffsetForCompose() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let source = try makeRGBAInputTexture(device: device, width: 20, height: 10, bytes: Data(repeating: 255, count: 20 * 10 * 4))
+        let layer = WPERenderLayer(
+            objectID: "fractional",
+            objectName: "Fractional",
+            imagePath: "models/util/composelayer.json",
+            materialPath: "materials/util/composelayer.json",
+            geometry: WPERenderLayerGeometry(
+                origin: SIMD3<Double>(0.25, 0.75, 0),
+                scale: SIMD3<Double>(1, 1, 1),
+                angles: SIMD3<Double>(0, 0, 0),
+                alignment: .topLeft,
+                size: CGSize(width: 20, height: 10),
+                alpha: 1,
+                color: SIMD3<Double>(1, 1, 1),
+                brightness: 1
+            ),
+            compositeA: "_rt_imageLayerComposite_fractional_a",
+            compositeB: "_rt_imageLayerComposite_fractional_b",
+            localFBOs: [],
+            passes: []
+        )
+
+        let uniforms = executor.objectQuadUniforms(
+            for: layer,
+            sceneSize: CGSize(width: 200, height: 100),
+            sourceTexture: source
+        )
+
+        expectVector(
+            SIMD2<Float>(uniforms.centerAndSize.x, uniforms.centerAndSize.y),
+            SIMD2<Float>(-40, 20)
+        )
+        expectVector(
+            WPEMetalRenderExecutor.composeLayerProjectedSampleUV(vertexID: 0, uniforms: uniforms),
+            SIMD2<Float>(0.25, 0.35)
+        )
+    }
+
+    @Test("Composelayer CLEARALPHA clears the captured alpha")
+    func composelayerClearAlphaClearsCapturedAlpha() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let executor = try WPEMetalRenderExecutor(device: device)
+        let seedScene = solidPass(
+            id: "background.0",
+            color: [1, 0, 0, 1],
+            target: .scene,
+            blending: "disabled"
+        )
+        let compositeName = "_rt_imageLayerComposite_clearalpha_a"
+        let capture = WPERenderPass(
+            id: "clearalpha.0",
+            phase: .material,
+            shader: "compose",
+            source: .fbo("_rt_FullFrameBuffer"),
+            target: .layerComposite(name: compositeName),
+            textures: [0: .fbo("_rt_FullFrameBuffer")],
+            binds: [:],
+            constants: [:],
+            combos: ["CLEARALPHA": 1],
+            blending: "disabled",
+            cullMode: "nocull",
+            depthTest: "disabled",
+            depthWrite: "disabled"
+        )
+        let copyToScene = copyPass(
+            id: "clearalpha.1",
+            source: .fbo(compositeName),
+            target: .scene,
+            blending: "disabled"
+        )
+        let layer = WPERenderLayer(
+            objectID: "clearalpha",
+            objectName: "ClearAlpha",
+            imagePath: "models/util/composelayer.json",
+            materialPath: "materials/util/composelayer_clearalpha.json",
+            geometry: WPERenderLayerGeometry(
+                origin: SIMD3<Double>(1, 1, 0),
+                scale: SIMD3<Double>(1, 1, 1),
+                angles: SIMD3<Double>(0, 0, 0),
+                alignment: .center,
+                size: CGSize(width: 2, height: 2),
+                alpha: 1,
+                color: SIMD3<Double>(1, 1, 1),
+                brightness: 1
+            ),
+            compositeA: compositeName,
+            compositeB: "_rt_imageLayerComposite_clearalpha_b",
+            localFBOs: [],
+            passes: [capture, copyToScene]
+        )
+        let pipeline = WPEPreparedRenderPipeline(layers: [
+            WPEPreparedRenderLayer(
+                graphLayer: graphLayer(pass: seedScene),
+                passes: [preparedBuiltinPass(seedScene, uniforms: ["g_Color": .vector([1, 0, 0, 1])])]
+            ),
+            WPEPreparedRenderLayer(
+                graphLayer: layer,
+                passes: [
+                    preparedBuiltinPass(capture, bindings: [0: .fbo("_rt_FullFrameBuffer")]),
+                    preparedBuiltinPass(copyToScene, bindings: [0: .fbo(compositeName)])
+                ]
+            )
+        ])
+
+        let output = try executor.render(pipeline: pipeline, size: CGSize(width: 2, height: 2), textures: [:])
+        let pixel = try readPixel(output, x: 1, y: 1)
+
+        #expect(pixel.a <= 5)
+    }
+
+    @Test("Compose projected Metal functions compile")
+    func composeProjectedMetalFunctionsCompile() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let source = """
+        #include <metal_stdlib>
+        using namespace metal;
+        struct WPEObjectQuadUniforms { float4 centerAndSize; float4 sceneSizeAndRotation; float4 uvSignAndPadding; };
+        struct WPEComposeLayerUniforms { float4 flags; };
+        struct WPEComposeLayerVertexOut { float4 position [[position]]; float2 uv; float3 screenCoord; };
+        vertex WPEComposeLayerVertexOut wpe_compose_projected_vertex(uint vertexID [[vertex_id]], constant WPEObjectQuadUniforms& u [[buffer(1)]]) {
+            float2 positions[4] = { float2(-1.0,-1.0), float2(1.0,-1.0), float2(-1.0,1.0), float2(1.0,1.0) };
+            float2 uvs[4] = { float2(0.0,1.0), float2(1.0,1.0), float2(0.0,0.0), float2(1.0,0.0) };
+            float2 corners[4] = { float2(-0.5,-0.5), float2(0.5,-0.5), float2(-0.5,0.5), float2(0.5,0.5) };
+            float2 scaleSign = float2(u.uvSignAndPadding.x < 0.0 ? -1.0 : 1.0, u.uvSignAndPadding.y < 0.0 ? -1.0 : 1.0);
+            float2 localPixels = corners[vertexID] * scaleSign * u.centerAndSize.zw;
+            float c = cos(u.sceneSizeAndRotation.z);
+            float s = sin(u.sceneSizeAndRotation.z);
+            float2 rotatedCorner = float2(c * localPixels.x - s * localPixels.y, s * localPixels.x + c * localPixels.y);
+            float2 projected = (u.centerAndSize.xy + rotatedCorner) / (max(u.sceneSizeAndRotation.xy, float2(1.0)) * 0.5);
+            WPEComposeLayerVertexOut out;
+            out.position = float4(positions[vertexID], 0.0, 1.0);
+            out.uv = uvs[vertexID];
+            out.screenCoord = float3(projected.x, -projected.y, 1.0);
+            return out;
+        }
+        fragment half4 wpe_composelayer_fragment(WPEComposeLayerVertexOut in [[stage_in]], texture2d<half, access::sample> texture0 [[texture(0)]], constant WPEComposeLayerUniforms& uniforms [[buffer(0)]]) {
+            constexpr sampler s(address::clamp_to_edge, filter::linear);
+            float2 uv = in.screenCoord.xy / max(abs(in.screenCoord.z), 1e-6) * 0.5 + 0.5;
+            float4 color = float4(texture0.sample(s, uv));
+            if (uniforms.flags.x > 0.5) { color.a = 0.0; }
+            return half4(color);
+        }
+        """
+
+        let library = try device.makeLibrary(source: source, options: nil)
+
+        #expect(library.makeFunction(name: "wpe_compose_projected_vertex") != nil)
+        #expect(library.makeFunction(name: "wpe_composelayer_fragment") != nil)
     }
 
     @Test("Resolves previous to the most recent write to the same FBO target")

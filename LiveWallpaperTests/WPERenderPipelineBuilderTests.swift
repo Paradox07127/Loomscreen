@@ -10,6 +10,8 @@ struct WPERenderPipelineBuilderTests {
     func normalizesBuiltinShaderAliasesConsistently() {
         #expect(WPEBuiltinShaderName.normalized("materials/util/solidlayer.json") == "solidlayer")
         #expect(WPEBuiltinShaderName.normalized("materials/effects/blur/blur.json") == "effect_blur")
+        #expect(WPEBuiltinShaderName.normalized("composelayer") == "compose")
+        #expect(WPEBuiltinShaderName.normalized("materials/util/composelayer.json") == "compose")
         #expect(WPEBuiltinShaderName.normalized("effects/distort/distort") == "effect_water")
         #expect(WPEBuiltinShaderName.normalized("genericimage2") == "genericimage2")
         #expect(WPEBuiltinShaderName.normalized("genericimage2", genericImageAsCopy: true) == "copy")
