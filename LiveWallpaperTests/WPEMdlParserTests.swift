@@ -95,6 +95,29 @@ struct WPEMdlParserTests {
         #expect(model.bones.isEmpty)
     }
 
+    @Test("Parses MDLA0006 baked TRS animation channels")
+    func parsesMDLA0006Animation() throws {
+        let model = try WPEMdlParser.parse(data: makeMDLV23WithAnimation())
+        let animation = try #require(model.animations.first)
+
+        #expect(model.animations.count == 1)
+        #expect(animation.id == 267)
+        #expect(animation.name == "动画 1")
+        #expect(animation.mode == "loop")
+        #expect(animation.fps == 30)
+        #expect(animation.frameCount == 1)
+        #expect(animation.channels.count == 2)
+        // (frameCount + 1) keyframes are stored per channel (frame 0...frameCount).
+        #expect(animation.channels[0].boneIndex == 0)
+        #expect(animation.channels[0].keyframes.count == 2)
+        #expect(animation.channels[0].keyframes[0].translation == SIMD3<Float>(1, 2, 3))
+        #expect(animation.channels[0].keyframes[0].scale == SIMD3<Float>(1, 1, 1))
+        #expect(animation.channels[0].keyframes[1].translation == SIMD3<Float>(4, 5, 6))
+        #expect(animation.channels[1].boneIndex == 1)
+        #expect(animation.channels[1].keyframes[0].translation == SIMD3<Float>(7, 8, 9))
+        #expect(animation.channels[1].keyframes[1].euler == SIMD3<Float>(0, 0, 0))
+    }
+
     @Test("Preserves atlas target geometry when MDLE element matrices are present")
     func preservesAtlasTargetGeometryWithElementMatrices() throws {
         let model = try WPEMdlParser.parse(data: makeMDLV23WithElementMetadata())
@@ -194,6 +217,61 @@ struct WPEMdlParserTests {
             ]
         )
         data.appendCString("{}")
+
+        return data
+    }
+
+    private func makeMDLV23WithAnimation() -> Data {
+        var data = Data()
+        data.append(contentsOf: Array("MDLV0023".utf8))
+        data.appendLE(UInt32(0x80000900))
+        data.append(UInt8(1))
+        data.appendLE(UInt32(1))
+        data.appendLE(UInt32(1))
+
+        data.appendCString("materials/test.json")
+        data.appendLE(UInt32(0))
+        for _ in 0..<6 { data.appendLE(Float(0)) }
+        data.appendLE(UInt32(0x180000f))
+        let vertexData = Data.puppetVertices([
+            (SIMD3<Float>(10, 20, 0), SIMD2<Float>(0.5, 0.5))
+        ])
+        data.appendLE(UInt32(vertexData.count))
+        data.append(vertexData)
+
+        data.appendLE(UInt32(0))
+        data.append(UInt8(0))
+        data.append(UInt8(0))
+
+        func appendKey(_ t: SIMD3<Float>, _ r: SIMD3<Float>, _ s: SIMD3<Float>) {
+            for value in [t.x, t.y, t.z, r.x, r.y, r.z, s.x, s.y, s.z] {
+                data.appendLE(value)
+            }
+        }
+        let frameCount: UInt32 = 1
+        let channelByteCount = (frameCount + 1) * UInt32(9 * MemoryLayout<Float>.size)
+
+        data.append(contentsOf: Array("MDLA0006".utf8))
+        data.append(UInt8(0))
+        data.appendLE(UInt32.max)        // sectionEnd -> clamps to data count
+        data.appendLE(UInt32(1))         // animationCount
+        data.appendLE(UInt32(267))       // id
+        data.appendLE(UInt32(0))         // reserved
+        data.appendCString("动画 1")
+        data.appendCString("loop")
+        data.appendLE(Float(30))
+        data.appendLE(frameCount)
+        data.appendLE(UInt32(0))
+        data.appendLE(UInt32(2))         // channelCount
+        data.appendLE(UInt32(0))
+        data.appendLE(channelByteCount)
+
+        appendKey(SIMD3<Float>(1, 2, 3), SIMD3<Float>(0, 0, 0), SIMD3<Float>(1, 1, 1))
+        appendKey(SIMD3<Float>(4, 5, 6), SIMD3<Float>(0, 0, 0), SIMD3<Float>(1, 1, 1))
+        data.appendLE(UInt32(0))
+        data.appendLE(channelByteCount)
+        appendKey(SIMD3<Float>(7, 8, 9), SIMD3<Float>(0, 0, 0), SIMD3<Float>(1, 1, 1))
+        appendKey(SIMD3<Float>(10, 11, 12), SIMD3<Float>(0, 0, 0), SIMD3<Float>(1, 1, 1))
 
         return data
     }

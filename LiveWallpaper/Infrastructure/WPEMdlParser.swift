@@ -5,11 +5,18 @@ struct WPEPuppetModel: Equatable, Sendable {
     let version: Int
     let meshes: [WPEPuppetMesh]
     let bones: [WPEPuppetBone]
+    let animations: [WPEPuppetAnimation]
 
-    init(version: Int, meshes: [WPEPuppetMesh], bones: [WPEPuppetBone] = []) {
+    init(
+        version: Int,
+        meshes: [WPEPuppetMesh],
+        bones: [WPEPuppetBone] = [],
+        animations: [WPEPuppetAnimation] = []
+    ) {
         self.version = version
         self.meshes = meshes
         self.bones = bones
+        self.animations = animations
     }
 }
 
@@ -54,6 +61,33 @@ struct WPEPuppetMeshPart: Equatable, Sendable {
     let count: Int
 }
 
+/// Baked skeletal animation from the MDLA section. Channels are stored in MDLS bone
+/// order; each keyframe is a per-frame TRS transform (no curve interpolation in the file).
+struct WPEPuppetAnimation: Equatable, Sendable {
+    let id: Int
+    let name: String
+    /// Playback mode string from the file (e.g. "loop").
+    let mode: String
+    let fps: Float
+    let frameCount: Int
+    let channels: [WPEPuppetAnimChannel]
+}
+
+struct WPEPuppetAnimChannel: Equatable, Sendable {
+    /// Index into `WPEPuppetModel.bones` (channels appear in bone order; no explicit id in the file).
+    let boneIndex: Int
+    let keyframes: [WPEPuppetAnimKey]
+}
+
+struct WPEPuppetAnimKey: Equatable, Sendable {
+    let frame: Int
+    /// Baked transform in the same (absolute/rest) space as the MDLS bone matrices:
+    /// frame 0 matches the bone's raw matrix translation.
+    let translation: SIMD3<Float>
+    let euler: SIMD3<Float>
+    let scale: SIMD3<Float>
+}
+
 enum WPEMdlParser {
     static func parse(data: Data) throws -> WPEPuppetModel {
         var reader = WPEMdlBinaryReader(data: data)
@@ -90,30 +124,43 @@ enum WPEMdlParser {
             ))
         }
 
-        // MDLV positions are already the static target geometry. Keep trailing skeleton
-        // metadata available without applying MDLS/MDLE transforms in the parser.
-        //
-        // The MDLS skeleton is OPTIONAL metadata: the current renderer draws the static
-        // assembled mesh and does not consume bones (they are reserved for future bone
-        // skinning). A malformed or edge-case skeleton section must therefore never
-        // discard the already-parsed, renderable mesh geometry — otherwise the whole
-        // puppet collapses to nil and the object degrades to a flat, scattered atlas
-        // (observed on MDLV0023 scene 3479521040 "人物", which trips the MDLS0004
-        // trailing-marker heuristic at a single record). Recover the meshes and drop
-        // only the bones when the skeleton fails to parse.
+        // MDLV positions are already the static target geometry. The MDLS skeleton and
+        // MDLA animation sections are OPTIONAL metadata the current static draw path does
+        // not consume (reserved for future bone skinning). A malformed or edge-case section
+        // must never discard the already-parsed, renderable mesh geometry — otherwise the
+        // whole puppet collapses to nil and the object degrades to a flat, scattered atlas
+        // (observed on MDLV0023 scene 3479521040 "人物"). Parse each defensively on its own
+        // cursor and recover the meshes, dropping only the failed section's metadata.
+        var metadataReader = reader
         let bones: [WPEPuppetBone]
         do {
-            bones = try parseSkeletonIfPresent(reader: &reader)
+            bones = try parseSkeletonIfPresent(reader: &metadataReader)
         } catch {
-            // Keep the failure visible for future MDLS/skinning work without
-            // letting it discard the renderable meshes.
             Logger.warning(
                 "WPE puppet MDL skeleton parse failed; rendering the static mesh without bones: \(error)",
                 category: .wpeRender
             )
             bones = []
+            metadataReader = reader
         }
-        return WPEPuppetModel(version: version, meshes: meshes, bones: bones)
+
+        let animations: [WPEPuppetAnimation]
+        do {
+            animations = try parseAnimationsIfPresent(reader: &metadataReader)
+        } catch {
+            Logger.warning(
+                "WPE puppet MDL animation parse failed; rendering the static mesh without animations: \(error)",
+                category: .wpeRender
+            )
+            animations = []
+        }
+
+        return WPEPuppetModel(
+            version: version,
+            meshes: meshes,
+            bones: bones,
+            animations: animations
+        )
     }
 
     private static func parseMesh(
@@ -326,7 +373,7 @@ enum WPEMdlParser {
             _ = try reader.readCString()
             if index + 1 < boneCount {
                 try reader.consumeOptionalSkeletonTrailingMarker(
-                    beforeNextBoneIndex: Int(index + 1),
+                    boneCount: Int(boneCount),
                     sectionEnd: skeletonSectionEnd
                 )
             }
@@ -341,6 +388,143 @@ enum WPEMdlParser {
             try reader.seek(to: skeletonSectionEnd)
         }
         return bones
+    }
+
+    /// One keyframe = 9 little-endian f32: [Tx,Ty,Tz, Rx,Ry,Rz, Sx,Sy,Sz].
+    private static let animationKeyByteCount = 9 * MemoryLayout<Float>.size
+
+    /// MDLA0005 (v19) / MDLA0006 (v21/v23) baked skeletal animation. Layout (read-only
+    /// validated against the on-disk corpus: 3479521040/人物 55ch anim 267/777, 3554161528/人物,
+    /// 3351072238/伊蕾娜 MDLS0003, 3704273480/身体拆分 89 bones, 2955378002/rennee MDLA0005):
+    ///
+    /// - Section: tag(8) + flag u8 + sectionEnd u32 + animationCount u32.
+    /// - Per animation: id u32, reserved u32(0), name cstring, mode cstring, fps f32,
+    ///   frameCount u32, reserved u32(0), channelCount u32, reserved u32(0), channelByteCount u32.
+    /// - channelByteCount == (frameCount + 1) * 36. Channel-major; each channel stores frames
+    ///   0...frameCount as `animationKeyByteCount` records, then an 8-byte delimiter
+    ///   (u32 0 + u32 channelByteCount) before the next channel. Channels map to MDLS bone order.
+    /// - A short zero-padding tail separates animations; scan to the next plausible header.
+    private static func parseAnimationsIfPresent(
+        reader: inout WPEMdlBinaryReader
+    ) throws -> [WPEPuppetAnimation] {
+        guard let animationOffset = reader.findTag("MDLA", from: reader.currentOffset) else {
+            return []
+        }
+        try reader.seek(to: animationOffset)
+
+        let animationTag = try reader.readFixedString(byteCount: 8)
+        guard animationTag == "MDLA0005" || animationTag == "MDLA0006" else { return [] }
+        _ = try reader.readUInt8()
+        let declaredSectionEnd = Int(try reader.readUInt32())
+        let animationCount = try reader.readUInt32()
+        let sectionEnd = declaredSectionEnd > reader.currentOffset
+            ? min(declaredSectionEnd, reader.dataCount)
+            : reader.dataCount
+
+        var animations: [WPEPuppetAnimation] = []
+        animations.reserveCapacity(Int(animationCount))
+        for animationIndex in 0..<animationCount {
+            let animationStart = reader.currentOffset
+            let id = try reader.readUInt32()
+            let reservedID = try reader.readUInt32()
+            let name = try reader.readCString()
+            let mode = try reader.readCString()
+            let fps = try reader.readFloat()
+            let frameCount = try reader.readUInt32()
+            let reserved0 = try reader.readUInt32()
+            let channelCount = try reader.readUInt32()
+            let reserved1 = try reader.readUInt32()
+            let channelByteCount = try reader.readUInt32()
+
+            guard reservedID == 0, reserved0 == 0, reserved1 == 0,
+                  fps.isFinite, fps > 0,
+                  frameCount > 0, frameCount < 10_000,
+                  channelCount > 0, channelCount < 10_000 else {
+                throw WPEMdlParserError.invalidAnimationHeader(offset: animationStart)
+            }
+
+            let expectedChannelByteCount = (UInt64(frameCount) + 1) * UInt64(animationKeyByteCount)
+            guard expectedChannelByteCount <= UInt64(UInt32.max),
+                  channelByteCount == UInt32(expectedChannelByteCount) else {
+                throw WPEMdlParserError.invalidAnimationChannelByteCount(
+                    animationID: Int(id),
+                    byteCount: channelByteCount,
+                    expected: expectedChannelByteCount <= UInt64(UInt32.max)
+                        ? UInt32(expectedChannelByteCount) : UInt32.max
+                )
+            }
+
+            let keyframeCount = Int(channelByteCount) / animationKeyByteCount
+            let channelCountInt = Int(channelCount)
+            let minimumDataByteCount = UInt64(channelCount) * UInt64(channelByteCount)
+                + UInt64(max(channelCountInt - 1, 0) * 2 * MemoryLayout<UInt32>.size)
+            guard UInt64(reader.currentOffset) + minimumDataByteCount <= UInt64(sectionEnd) else {
+                throw WPEMdlParserError.invalidAnimationHeader(offset: animationStart)
+            }
+
+            var channels: [WPEPuppetAnimChannel] = []
+            channels.reserveCapacity(channelCountInt)
+            for channelIndex in 0..<channelCountInt {
+                var keyframes: [WPEPuppetAnimKey] = []
+                keyframes.reserveCapacity(keyframeCount)
+                for frame in 0..<keyframeCount {
+                    let translation = SIMD3<Float>(
+                        try reader.readFloat(), try reader.readFloat(), try reader.readFloat()
+                    )
+                    let euler = SIMD3<Float>(
+                        try reader.readFloat(), try reader.readFloat(), try reader.readFloat()
+                    )
+                    let scale = SIMD3<Float>(
+                        try reader.readFloat(), try reader.readFloat(), try reader.readFloat()
+                    )
+                    keyframes.append(WPEPuppetAnimKey(
+                        frame: frame,
+                        translation: translation,
+                        euler: euler,
+                        scale: scale
+                    ))
+                }
+                channels.append(WPEPuppetAnimChannel(boneIndex: channelIndex, keyframes: keyframes))
+
+                if channelIndex + 1 < channelCountInt {
+                    let delimiterMarker = try reader.readUInt32()
+                    let delimiterByteCount = try reader.readUInt32()
+                    guard delimiterMarker == 0, delimiterByteCount == channelByteCount else {
+                        throw WPEMdlParserError.invalidAnimationChannelDelimiter(
+                            animationID: Int(id),
+                            channelIndex: channelIndex,
+                            marker: delimiterMarker,
+                            byteCount: delimiterByteCount,
+                            expected: channelByteCount
+                        )
+                    }
+                }
+            }
+
+            animations.append(WPEPuppetAnimation(
+                id: Int(id),
+                name: name,
+                mode: mode,
+                fps: fps,
+                frameCount: Int(frameCount),
+                channels: channels
+            ))
+
+            if animationIndex + 1 < animationCount {
+                guard let nextOffset = reader.findLikelyAnimationRecord(
+                    from: reader.currentOffset,
+                    sectionEnd: sectionEnd
+                ) else {
+                    throw WPEMdlParserError.invalidAnimationHeader(offset: reader.currentOffset)
+                }
+                try reader.seek(to: nextOffset)
+            }
+        }
+
+        if sectionEnd <= reader.dataCount {
+            try reader.seek(to: sectionEnd)
+        }
+        return animations
     }
 }
 
@@ -365,6 +549,15 @@ enum WPEMdlParserError: Error, Equatable, Sendable {
     case invalidIndexBuffer(UInt32)
     case invalidSkeletonMatrix(UInt32)
     case invalidSkeletonTrailingMarker(offset: Int, value: UInt8)
+    case invalidAnimationHeader(offset: Int)
+    case invalidAnimationChannelByteCount(animationID: Int, byteCount: UInt32, expected: UInt32)
+    case invalidAnimationChannelDelimiter(
+        animationID: Int,
+        channelIndex: Int,
+        marker: UInt32,
+        byteCount: UInt32,
+        expected: UInt32
+    )
 }
 
 private struct WPEMdlBinaryReader {
@@ -456,47 +649,65 @@ private struct WPEMdlBinaryReader {
         offset = newOffset
     }
 
-    /// Some MDLS bone records carry a single trailing marker byte before the
-    /// next record. Consume it only when the bytes at the cursor do not already
-    /// look like the next bone record, and require the byte that follows to look
-    /// like a valid record — otherwise fail loud rather than drift into garbage.
+    /// Some MDLS records carry a short padding run between the bone's trailing JSON
+    /// cstring and the next binary record. In MDLS0004 this is a 1–3 byte UTF-8 label
+    /// (e.g. `主`, `右眼`, `左眼`), so the old single-marker-byte heuristic failed on
+    /// multi-byte CJK labels and dropped the whole skeleton (observed at offset 79286,
+    /// value 0xE4 — a CJK lead byte). Scan a bounded window for the next plausible bone
+    /// record instead, and fail loud only if none is found.
     mutating func consumeOptionalSkeletonTrailingMarker(
-        beforeNextBoneIndex nextBoneIndex: Int,
+        boneCount: Int,
         sectionEnd: Int
     ) throws {
         guard currentOffset < sectionEnd else { return }
-        if isLikelySkeletonBoneRecord(
-            at: currentOffset,
-            nextBoneIndex: nextBoneIndex,
+        if let nextRecordOffset = nextLikelySkeletonBoneRecordOffset(
+            from: currentOffset,
+            boneCount: boneCount,
             sectionEnd: sectionEnd
         ) {
+            try seek(to: nextRecordOffset)
             return
         }
 
-        let markerOffset = currentOffset
-        let marker = try readUInt8()
-        guard isLikelySkeletonBoneRecord(
-            at: currentOffset,
-            nextBoneIndex: nextBoneIndex,
-            sectionEnd: sectionEnd
-        ) else {
-            throw WPEMdlParserError.invalidSkeletonTrailingMarker(
-                offset: markerOffset,
-                value: marker
-            )
-        }
+        throw WPEMdlParserError.invalidSkeletonTrailingMarker(
+            offset: currentOffset,
+            value: data[currentOffset]
+        )
     }
 
+    /// First offset in `[from, from + 64]` whose bytes look like a bone record.
+    /// Returns `from` immediately when the cursor already sits on a record (no padding).
+    private func nextLikelySkeletonBoneRecordOffset(
+        from start: Int,
+        boneCount: Int,
+        sectionEnd: Int
+    ) -> Int? {
+        guard start >= 0, start < sectionEnd else { return nil }
+        let upperBound = min(sectionEnd, start + 64)
+        for candidateOffset in start...upperBound where isLikelySkeletonBoneRecord(
+            at: candidateOffset,
+            boneCount: boneCount,
+            sectionEnd: sectionEnd
+        ) {
+            return candidateOffset
+        }
+        return nil
+    }
+
+    /// A bone record begins with `id u32, u8, parent i32, matrixByteCount u32`. The parent
+    /// may be any valid bone index or -1 — MDLS0004 skeletons contain forward parent
+    /// references (e.g. 人物 bone 24's parent is bone 39), so the upper bound is the total
+    /// bone count, not the next bone index.
     private func isLikelySkeletonBoneRecord(
         at candidateOffset: Int,
-        nextBoneIndex: Int,
+        boneCount: Int,
         sectionEnd: Int
     ) -> Bool {
         guard candidateOffset >= 0,
               candidateOffset + 13 <= sectionEnd,
               let parent = readInt32(at: candidateOffset + 5),
               parent >= -1,
-              parent < Int32(nextBoneIndex),
+              parent < Int32(boneCount),
               let matrixByteCount = readUInt32(at: candidateOffset + 9),
               matrixByteCount >= 16 * UInt32(MemoryLayout<Float>.size),
               matrixByteCount % UInt32(MemoryLayout<Float>.size) == 0 else {
@@ -520,6 +731,62 @@ private struct WPEMdlBinaryReader {
     func findTag(_ tag: String, from start: Int) -> Int? {
         let bytes = Data(tag.utf8)
         return data.range(of: bytes, options: [], in: start..<data.count)?.lowerBound
+    }
+
+    /// First offset at/after `start` that begins a plausible MDLA animation record.
+    /// Used to skip the short zero-padding tail between animations.
+    func findLikelyAnimationRecord(from start: Int, sectionEnd: Int) -> Int? {
+        guard start >= 0, start < sectionEnd else { return nil }
+        for offset in start..<min(sectionEnd, data.count)
+        where isLikelyAnimationRecord(at: offset, sectionEnd: sectionEnd) {
+            return offset
+        }
+        return nil
+    }
+
+    private func isLikelyAnimationRecord(at absoluteOffset: Int, sectionEnd: Int) -> Bool {
+        guard absoluteOffset >= 0,
+              absoluteOffset + 8 < sectionEnd,
+              let id = readUInt32(at: absoluteOffset), id > 0, id < 1_000_000,
+              let reservedID = readUInt32(at: absoluteOffset + 4), reservedID == 0,
+              let name = readCString(at: absoluteOffset + 8, sectionEnd: sectionEnd),
+              !name.value.isEmpty, name.value.utf8.count <= 128,
+              let mode = readCString(at: name.nextOffset, sectionEnd: sectionEnd),
+              !mode.value.isEmpty, mode.value.utf8.count <= 32 else {
+            return false
+        }
+        let headerTail = mode.nextOffset + MemoryLayout<Float>.size + 5 * MemoryLayout<UInt32>.size
+        guard headerTail <= sectionEnd,
+              let fps = readFloat(at: mode.nextOffset), fps.isFinite, fps > 0,
+              let frameCount = readUInt32(at: mode.nextOffset + 4), frameCount > 0, frameCount < 10_000,
+              let reserved0 = readUInt32(at: mode.nextOffset + 8), reserved0 == 0,
+              let channelCount = readUInt32(at: mode.nextOffset + 12), channelCount > 0, channelCount < 10_000,
+              let reserved1 = readUInt32(at: mode.nextOffset + 16), reserved1 == 0,
+              let channelByteCount = readUInt32(at: mode.nextOffset + 20) else {
+            return false
+        }
+        let expected = (UInt64(frameCount) + 1) * UInt64(9 * MemoryLayout<Float>.size)
+        guard expected == UInt64(channelByteCount) else { return false }
+        let minimumDataByteCount = UInt64(channelCount) * UInt64(channelByteCount)
+            + UInt64(max(Int(channelCount) - 1, 0) * 2 * MemoryLayout<UInt32>.size)
+        return UInt64(headerTail) + minimumDataByteCount <= UInt64(sectionEnd)
+    }
+
+    private func readCString(at absoluteOffset: Int, sectionEnd: Int) -> (value: String, nextOffset: Int)? {
+        guard absoluteOffset >= 0, absoluteOffset < sectionEnd, sectionEnd <= data.count else { return nil }
+        var cursor = absoluteOffset
+        while cursor < sectionEnd, data[cursor] != 0 {
+            cursor += 1
+        }
+        guard cursor < sectionEnd,
+              let string = String(bytes: data[absoluteOffset..<cursor], encoding: .utf8) else {
+            return nil
+        }
+        return (string, cursor + 1)
+    }
+
+    private func readFloat(at absoluteOffset: Int) -> Float? {
+        readUInt32(at: absoluteOffset).map(Float.init(bitPattern:))
     }
 
     private func ensureAvailable(byteCount: Int) throws {
