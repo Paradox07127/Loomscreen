@@ -776,6 +776,8 @@ private struct WPEInstalledInspectorContent: View {
     let onClose: () -> Void
 
     @Environment(\.openURL) private var openURL
+    /// Hover state for the floating hero close control (light at rest, solid on hover).
+    @State private var closeHovered = false
 
     /// Shared singleton (also drives the online Browse download UI) — reading it
     /// here makes this view observe the re-download's phase + progress.
@@ -793,7 +795,6 @@ private struct WPEInstalledInspectorContent: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: DesignTokens.Spacing.lg) {
-                closeHeader
                 hero
                 VStack(alignment: .leading, spacing: DesignTokens.Spacing.md) {
                     Text(verbatim: entry.origin.title)
@@ -821,25 +822,27 @@ private struct WPEInstalledInspectorContent: View {
         .background(DesignTokens.Colors.pageBackground)
     }
 
-    private var closeHeader: some View {
-        HStack {
-            // Clear, full-size bordered control on the reading-start edge (the
-            // standard macOS "collapse the trailing inspector" affordance) —
-            // replaces the tiny floating ✕. Esc still closes.
-            Button(action: onClose) {
-                Label("Close", systemImage: "sidebar.trailing")
-                    .font(.system(size: 11, weight: .medium))
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .keyboardShortcut(.cancelAction)
-            .help(Text("Hide details (Esc)"))
-            .accessibilityLabel(Text("Hide details"))
-
-            Spacer(minLength: 0)
+    /// Floating collapse control on the hero's top-leading corner: a sidebar
+    /// glyph that rests light (legible over the preview) and firms up to a solid
+    /// button on hover. No dedicated row — it overlays the artwork. Esc still closes.
+    private var heroCloseButton: some View {
+        Button(action: onClose) {
+            Image(systemName: "sidebar.trailing")
+                .font(.system(size: 12, weight: .semibold))
+                // Per-element opacity (NOT a blanket .opacity on the button): a
+                // whole-button fade multiplies the scrim down to ~0.18 and fails
+                // contrast over bright previews. Light at rest, solid on hover.
+                .foregroundStyle(.white.opacity(closeHovered ? 1 : 0.8))
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(.black.opacity(closeHovered ? 0.6 : 0.4)))
+                .overlay(Circle().strokeBorder(.white.opacity(closeHovered ? 0.35 : 0.2), lineWidth: 0.5))
+                .contentShape(Circle())
         }
-        .padding(.horizontal, DesignTokens.Spacing.lg)
-        .padding(.top, DesignTokens.Spacing.md)
+        .buttonStyle(.plain)
+        .onHover { closeHovered = $0 }
+        .keyboardShortcut(.cancelAction)
+        .help(Text("Hide details (Esc)"))
+        .accessibilityLabel(Text("Hide details"))
     }
 
     private var hero: some View {
@@ -853,6 +856,9 @@ private struct WPEInstalledInspectorContent: View {
         .overlay {
             RoundedRectangle(cornerRadius: DesignTokens.Corner.md, style: .continuous)
                 .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+        }
+        .overlay(alignment: .topLeading) {
+            heroCloseButton.padding(DesignTokens.Spacing.sm)
         }
         .padding([.horizontal, .top], DesignTokens.Spacing.lg)
     }
