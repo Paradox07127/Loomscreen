@@ -223,11 +223,15 @@ struct WorkshopInstalledView: View {
                 )
             }
             .overlay(alignment: .top) {
-                if isDraggingEntry, !screenManager.screens.isEmpty {
+                // The same screen bar serves two triggers: a drag in flight, or a
+                // selected card on a multi-display setup (click a tile to apply).
+                if !screenManager.screens.isEmpty,
+                   isDraggingEntry || (selectedEntry != nil && screenManager.screens.count > 1) {
                     screenDropBar
                 }
             }
             .animation(.easeInOut(duration: 0.2), value: isDraggingEntry)
+            .animation(.easeInOut(duration: 0.2), value: selectedEntry?.id)
         }
     }
 
@@ -499,13 +503,24 @@ struct WorkshopInstalledView: View {
 
     // MARK: - Drag-to-apply screen bar
 
-    /// Floats in only while a card is being dragged (not persistent), listing the
-    /// open displays as drop targets — drop a wallpaper onto one to apply it there.
+    /// The display picker: floats in while a card is dragged OR while a card is
+    /// selected on a multi-display setup. Each tile is both a drag drop-target and
+    /// a click-to-apply button, so applying to a specific display is one click
+    /// (no digging into the inspector).
     private var screenDropBar: some View {
         VStack(spacing: DesignTokens.Spacing.sm) {
-            Text("Drop onto a display to apply")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.secondary)
+            HStack(spacing: DesignTokens.Spacing.sm) {
+                Text(screenBarPrompt)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if !isDraggingEntry, let entry = selectedEntry, screenManager.screens.count > 1 {
+                    Button("Apply to All") { applyToAll(entry) }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                }
+            }
 
             HStack(spacing: DesignTokens.Spacing.lg) {
                 ForEach(screenManager.screens, id: \.id) { screen in
@@ -518,28 +533,48 @@ struct WorkshopInstalledView: View {
         .padding(.vertical, DesignTokens.Spacing.md)
         .background(.regularMaterial)
         .overlay(alignment: .topTrailing) {
-            Button { endEntryDrag() } label: {
+            Button {
+                if isDraggingEntry { endEntryDrag() } else { selectedEntry = nil }
+            } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 16))
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
             .padding(DesignTokens.Spacing.sm)
-            .help(Text("Cancel"))
-            .accessibilityLabel(Text("Cancel"))
+            .help(Text("Dismiss"))
+            .accessibilityLabel(Text("Dismiss"))
         }
         .overlay(alignment: .bottom) { Divider() }
         .transition(.move(edge: .top).combined(with: .opacity))
     }
 
+    /// Context-aware prompt: the dragged-in case keeps the drop wording; the
+    /// click-selected case names the wallpaper so it's clear what will apply.
+    private var screenBarPrompt: String {
+        if isDraggingEntry {
+            return String(localized: "Drop onto a display to apply", comment: "Drag-to-apply screen bar prompt.")
+        }
+        if let title = selectedEntry?.origin.title, !title.isEmpty {
+            return String(localized: "Apply “\(title)” to a display", comment: "Click-to-apply screen bar prompt. Placeholder is the wallpaper title.")
+        }
+        return String(localized: "Click a display to apply", comment: "Click-to-apply screen bar prompt, title unknown.")
+    }
+
     private func screenDropTarget(_ screen: Screen) -> some View {
-        VStack(spacing: 5) {
+        // Highlight the display already running the selected wallpaper, so the
+        // bar doubles as live "where is this applied" feedback.
+        let isActiveTarget = selectedEntry.map { activeScreenIDs(for: $0).contains(screen.id) } ?? false
+        return VStack(spacing: 5) {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(Color.accentColor.opacity(0.6), style: StrokeStyle(lineWidth: 2, dash: [5]))
-                .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .strokeBorder(
+                    Color.accentColor.opacity(isActiveTarget ? 1 : 0.6),
+                    style: StrokeStyle(lineWidth: 2, dash: isActiveTarget ? [] : [5])
+                )
+                .background(Color.accentColor.opacity(isActiveTarget ? 0.18 : 0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .frame(width: 150, height: 90)
                 .overlay {
-                    Image(systemName: "display")
+                    Image(systemName: isActiveTarget ? "checkmark.circle.fill" : "display")
                         .font(.system(size: 30))
                         .foregroundStyle(Color.accentColor)
                 }
@@ -549,9 +584,14 @@ struct WorkshopInstalledView: View {
                 .lineLimit(1)
                 .frame(maxWidth: 150)
         }
+        // Click a tile to apply the selected wallpaper to that display (the
+        // one-click path); the tile is also a drag drop-target (unchanged).
+        .contentShape(Rectangle())
+        .onTapGesture { if let entry = selectedEntry { apply(entry, to: screen) } }
         .onDrop(of: [.plainText], isTargeted: nil) { providers in
             handleScreenDrop(providers, to: screen)
         }
+        .help(Text("Apply to \(screen.name)"))
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Text("Apply to \(screen.name)"))
     }
@@ -948,14 +988,19 @@ private struct WPEInstalledInspectorContent: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
             } else {
-                ScreenTopologyMap(screens: screens, activeScreenIDs: activeScreenIDs, onSelect: onApply)
-                    .frame(maxWidth: .infinity)
+                // Per-display targeting now lives in the screen bar at the top of
+                // the grid (click a display tile). The inspector keeps the
+                // all-displays shortcut + points at the bar for a specific one.
                 Button(action: onApplyToAll) {
                     Label("Apply to All Displays", systemImage: "rectangle.on.rectangle")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
+                Text("Or click a display in the bar above to apply to just that one.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -1001,81 +1046,4 @@ private struct WPEInstalledInspectorContent: View {
     }
 }
 
-/// Miniature, to-scale layout of the connected displays (positions + relative
-/// sizes from each `Screen.frame`, y-flipped to top-down). Each display is a
-/// tappable tile; the one(s) already running this wallpaper are accent-highlighted.
-private struct ScreenTopologyMap: View {
-    let screens: [Screen]
-    let activeScreenIDs: Set<CGDirectDisplayID>
-    let onSelect: (Screen) -> Void
-
-    private let maxCanvas = CGSize(width: 248, height: 132)
-
-    private var bounds: CGRect {
-        screens.reduce(CGRect.null) { $0.union($1.frame) }
-    }
-
-    private var scale: CGFloat {
-        let b = bounds
-        guard b.width > 0, b.height > 0 else { return 1 }
-        return min(maxCanvas.width / b.width, maxCanvas.height / b.height)
-    }
-
-    private var canvasSize: CGSize {
-        let b = bounds
-        return CGSize(width: max(b.width * scale, 1), height: max(b.height * scale, 1))
-    }
-
-    var body: some View {
-        let b = bounds
-        let s = scale
-        let canvas = canvasSize
-        ZStack(alignment: .topLeading) {
-            ForEach(screens) { screen in
-                let f = screen.frame
-                let tileWidth = max(f.width * s - 6, 30)
-                let tileHeight = max(f.height * s - 6, 24)
-                // macOS global frames are y-up; flip to a top-down mini-map.
-                let rawX = (f.midX - b.minX) * s
-                let rawY = canvas.height - (f.midY - b.minY) * s
-                // Clamp the centre so a tile bumped up to its minimum size can't
-                // overflow the canvas edges (many displays / very uneven sizes).
-                let centerX = min(max(tileWidth / 2 + 3, rawX), canvas.width - tileWidth / 2 - 3)
-                let centerY = min(max(tileHeight / 2 + 3, rawY), canvas.height - tileHeight / 2 - 3)
-                tile(screen, width: tileWidth, height: tileHeight)
-                    .position(x: centerX, y: centerY)
-            }
-        }
-        .frame(width: canvas.width, height: canvas.height)
-        .padding(3)
-    }
-
-    private func tile(_ screen: Screen, width: CGFloat, height: CGFloat) -> some View {
-        let isActive = activeScreenIDs.contains(screen.id)
-        return Button { onSelect(screen) } label: {
-            VStack(spacing: 2) {
-                Image(systemName: "desktopcomputer")
-                    .font(.system(size: max(min(width, height) * 0.3, 12)))
-                Text(verbatim: screen.name)
-                    .font(.system(size: 8, weight: .medium))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-            }
-            .frame(width: width, height: height)
-            .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(isActive ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.06))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .strokeBorder(isActive ? Color.accentColor : Color.primary.opacity(0.18), lineWidth: isActive ? 1.5 : 0.5)
-            )
-        }
-        .buttonStyle(.plain)
-        .help(Text("Apply to \(screen.name)"))
-        .accessibilityLabel(Text("Apply to \(screen.name)"))
-        .accessibilityAddTraits(isActive ? .isSelected : [])
-    }
-}
 #endif

@@ -280,15 +280,26 @@ struct WorkshopInspectorContent: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
         } else {
-            // Multiple displays: apply to all from here. A Menu can't render as a
-            // reliable full-width prominent button, and per-display targeting
-            // already lives in the Installed library (topology map + drag).
-            Button { for screen in screens { apply(entry, to: screen) } } label: {
-                Label("Apply to All Displays", systemImage: "play.fill")
-                    .frame(maxWidth: .infinity)
+            // Multiple displays: prominent "all" + a per-display menu (the Browse
+            // pane has no screen bar like Installed, so per-display lives here).
+            VStack(spacing: DesignTokens.Spacing.xs) {
+                Button { for screen in screens { apply(entry, to: screen) } } label: {
+                    Label("Apply to All Displays", systemImage: "play.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.regular)
+
+                Menu {
+                    ForEach(screens, id: \.id) { screen in
+                        Button { apply(entry, to: screen) } label: { Text(verbatim: screen.name) }
+                    }
+                } label: {
+                    Label("Apply to a specific display…", systemImage: "display")
+                }
+                .menuStyle(.button)
+                .controlSize(.small)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.regular)
         }
     }
 
