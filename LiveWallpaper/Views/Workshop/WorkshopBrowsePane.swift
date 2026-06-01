@@ -404,18 +404,22 @@ struct WorkshopBrowsePane: View {
             .controlSize(.small)
             .disabled(viewModel.isLoading || viewModel.isPaging)
 
-            Divider().frame(height: 16)
-
-            Image(systemName: icon)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.tint)
-                .accessibilityHidden(true)
-            label
-                .font(.system(size: 13, weight: .semibold))
-                .lineLimit(1)
-                .truncationMode(.tail)
-
             Spacer(minLength: 0)
+        }
+        // Center the scope label across the full banner, independent of the
+        // leading Back button's width.
+        .overlay {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.tint)
+                    .accessibilityHidden(true)
+                label
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .padding(.horizontal, DesignTokens.Spacing.sm)
         }
         .padding(.horizontal, DesignTokens.Spacing.md)
         .padding(.vertical, DesignTokens.Spacing.sm)
