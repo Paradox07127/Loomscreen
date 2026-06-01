@@ -944,8 +944,10 @@ private struct WPEInstalledInspectorContent: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else if screens.count == 1, let only = screens.first {
+                // Single display: name it in the label ("Apply to Studio Display")
+                // so the one button reads unambiguously.
                 Button { onApply(only) } label: {
-                    Label(activeScreenIDs.contains(only.id) ? "Reapply" : "Apply", systemImage: "play.fill")
+                    Label("Apply to \(only.name)", systemImage: "play.fill")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)

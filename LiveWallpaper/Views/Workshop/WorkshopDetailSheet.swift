@@ -278,9 +278,14 @@ struct WorkshopInspectorContent: View {
                 .disabled(true)
                 .help(Text("Open a display first, then apply"))
         } else if screens.count == 1, let only = screens.first {
-            Button { apply(entry, to: only) } label: { applyLabel }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.regular)
+            // Single display: name it in the label so the action is unambiguous
+            // ("Apply to Studio Display") — no picker needed.
+            Button { apply(entry, to: only) } label: {
+                Label("Apply to \(only.name)", systemImage: "play.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.regular)
         } else {
             // One Apply button; tapping floats a popover to pick a display or all.
             // (Single-display applies directly above; there's no standalone
