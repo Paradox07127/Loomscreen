@@ -327,11 +327,21 @@ struct WorkshopInspectorContent: View {
 
     private func indeterminateDownloadControl(_ title: LocalizedStringKey) -> some View {
         downloadControlChrome {
-            HStack(spacing: 6) {
-                ProgressView().controlSize(.small)
-                Text(title).lineLimit(1)
-                Spacer(minLength: 0)
-                cancelDownloadButton
+            VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
+                HStack(spacing: 6) {
+                    Text(title)
+                        .font(.caption.weight(.medium))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    cancelDownloadButton
+                }
+                // Indeterminate linear bar: steamcmd usually streams no percentage
+                // for workshop items, so this animates to read as "active" and
+                // matches the determinate bar's shape — the control no longer jumps
+                // between a circular spinner and a bar when a percentage does arrive.
+                ProgressView()
+                    .progressViewStyle(.linear)
+                    .accessibilityLabel(Text(title))
             }
         }
     }

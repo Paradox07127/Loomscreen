@@ -114,10 +114,6 @@ enum WorkshopResolutionFilter: String, CaseIterable, Identifiable {
         }
     }
 
-    /// True for the localized `.any` label (rendered as a normal `Text`); the
-    /// rest are verbatim resolution strings.
-    var isLocalizedLabel: Bool { self == .any }
-
     /// Concrete selectable resolutions (excludes `.any`).
     static var selectableCases: [WorkshopResolutionFilter] { allCases.filter { $0 != .any } }
 
