@@ -18,6 +18,9 @@ struct WorkshopBrowsePane: View {
     @State private var pageJumpText: String = "1"
     /// Workshop ids already in the local library, for the "In Library" badge.
     @State private var installedWorkshopIDs: Set<String> = []
+    /// "Hide already-downloaded items" preference — owned by Settings → Steam
+    /// Workshop; mirrored here and pushed into the view-model so the grid reacts.
+    @AppStorage("loomscreen.workshop.hidesDownloaded.v1") private var hidesDownloadedPref = false
 
     private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -35,18 +38,17 @@ struct WorkshopBrowsePane: View {
         VStack(spacing: 0) {
             if let creator = viewModel.creatorFilter {
                 creatorFilterBanner(creator)
-                    .padding(.horizontal, DesignTokens.Settings.formHorizontalMargin)
-                    .padding(.vertical, DesignTokens.Spacing.sm)
+                    .padding(.horizontal, DesignTokens.LibraryFilterBar.horizontalPadding)
+                    .padding(.vertical, DesignTokens.LibraryFilterBar.verticalPadding)
             } else {
+                // Ribbon self-pads to match the Installed tab's LibraryFilterBar;
+                // no divider below it (the scaffold already draws one under the
+                // header), so the bar reads as one row, not a boxed card.
                 WorkshopBrowseFilterRibbon(
                     viewModel: viewModel,
                     hasWebAPIKey: services.hasWebAPIKey
                 )
-                .padding(.horizontal, DesignTokens.Settings.formHorizontalMargin)
-                .padding(.vertical, DesignTokens.Spacing.sm)
             }
-
-            Divider()
 
             content
                 .overlay(alignment: .top) { rateLimitBanner }
@@ -55,12 +57,16 @@ struct WorkshopBrowsePane: View {
         .onAppear {
             rateLimitRemaining = currentRateLimitRemaining
             reloadInstalledIDs()
+            viewModel.hidesDownloadedInBrowse = hidesDownloadedPref
             Task {
                 await services.refreshAPIKeyStatus()
                 // Only hit Steam once a key is present — avoids a phantom
                 // request count + a `missingAPIKey` error on the empty state.
                 if services.hasWebAPIKey { viewModel.onAppear() }
             }
+        }
+        .onChange(of: hidesDownloadedPref) { _, hide in
+            viewModel.hidesDownloadedInBrowse = hide
         }
         .onChange(of: services.hasWebAPIKey) { _, hasKey in
             guard hasKey, viewModel.items.isEmpty, !viewModel.isLoading else { return }
@@ -308,7 +314,7 @@ struct WorkshopBrowsePane: View {
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            Button("Show downloaded items") { viewModel.setHidesDownloaded(false) }
+            Button("Show downloaded items") { hidesDownloadedPref = false }
                 .buttonStyle(.borderless)
                 .controlSize(.small)
         }

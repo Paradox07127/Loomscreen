@@ -168,11 +168,12 @@ struct WorkshopInstalledView: View {
     @ViewBuilder
     private var gallery: some View {
         if visibleEntries.isEmpty {
-            IllustratedEmptyState(
-                symbol: "magnifyingglass",
-                title: "No wallpapers match your filters",
-                message: "Try a different keyword, or clear the search and type filter to see your whole library."
-            )
+            // Filtered to nothing (e.g. the "Unsupported" chip when you have no
+            // such items). Show a plain empty area rather than a full illustrated
+            // page — the filter bar above stays put, so flipping back to "All"
+            // (or clearing the search) is the obvious, in-place way back.
+            Color.clear
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollView {
                 if let errorMessage {

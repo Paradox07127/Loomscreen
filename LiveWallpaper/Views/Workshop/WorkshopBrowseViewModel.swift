@@ -182,10 +182,9 @@ final class WorkshopBrowseViewModel {
     /// `displayedItems` when the library changes underneath it.
     var installedWorkshopIDs: Set<String> = []
     /// When true, Browse hides items already in the local library (the Installed
-    /// tab is where you revisit those). Persisted; surfaced as a toggle in the
-    /// Workshop options menu rather than as a ribbon control.
-    private(set) var hidesDownloadedInBrowse: Bool = false
-    private static let hidesDownloadedKey = "loomscreen.workshop.hidesDownloaded.v1"
+    /// tab is where you revisit those). The preference itself lives in Settings →
+    /// Steam Workshop (`@AppStorage`); the pane pushes the current value in here.
+    var hidesDownloadedInBrowse: Bool = false
     private(set) var currentRequest: WorkshopQueryRequest
     private(set) var items: [WorkshopQueryItem] = []
     private(set) var totalAvailable: Int?
@@ -213,11 +212,6 @@ final class WorkshopBrowseViewModel {
     var displayedItems: [WorkshopQueryItem] {
         guard hidesDownloadedInBrowse else { return items }
         return items.filter { !installedWorkshopIDs.contains(String($0.id)) }
-    }
-
-    func setHidesDownloaded(_ hides: Bool) {
-        hidesDownloadedInBrowse = hides
-        UserDefaults.standard.set(hides, forKey: Self.hidesDownloadedKey)
     }
 
     /// Total pages from Steam's reported result count, when available.
@@ -435,9 +429,6 @@ final class WorkshopBrowseViewModel {
         }
         if let raw = defaults.array(forKey: FilterKey.genres) as? [String] {
             selectedGenres = Set(raw).intersection(Set(WorkshopGenre.allTags))
-        }
-        if defaults.object(forKey: Self.hidesDownloadedKey) != nil {
-            hidesDownloadedInBrowse = defaults.bool(forKey: Self.hidesDownloadedKey)
         }
     }
 

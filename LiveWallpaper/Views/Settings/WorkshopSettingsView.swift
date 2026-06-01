@@ -12,6 +12,7 @@ struct WorkshopSettingsView: View {
 
     @AppStorage("loomscreen.workshop.onboarding.shown.v1") private var onboardingShown: Bool = false
     @AppStorage("loomscreen.workshop.blurMatureThumbnails.v1") private var blurMatureThumbnails = true
+    @AppStorage("loomscreen.workshop.hidesDownloaded.v1") private var hidesDownloadedInBrowse = false
 
     @State private var engineAssets = WPEEngineAssetsLibrary.shared
     @State private var showingDoctor = false
@@ -59,10 +60,12 @@ struct WorkshopSettingsView: View {
             Section {
                 Toggle("Blur mature thumbnails until clicked", isOn: $blurMatureThumbnails)
                     .toggleStyle(.switch)
+                Toggle("Hide items already in my library when browsing", isOn: $hidesDownloadedInBrowse)
+                    .toggleStyle(.switch)
             } header: {
                 Text("Content")
             } footer: {
-                Text("Wallpapers tagged Mature show a blurred cover in the browse grid and details until you click to reveal them. Application wallpapers are always hidden because they can't run here.")
+                Text("Wallpapers tagged Mature show a blurred cover in the browse grid and details until you click to reveal them. Application wallpapers are always hidden because they can't run here. Hiding already-downloaded items keeps Browse Online focused on things you don't have yet — the Installed tab is where you revisit your library.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

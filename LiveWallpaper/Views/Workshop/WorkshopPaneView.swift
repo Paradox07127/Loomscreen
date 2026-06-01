@@ -187,48 +187,10 @@ struct WorkshopPaneView: View {
                 }
                 .adaptiveGlassButton(.regular)
                 .controlSize(.regular)
-                .help(Text("Add from a Steam Workshop URL"))
-                .accessibilityLabel(Text("Add from Workshop URL"))
-
-                overflowMenu
+                .help(Text("Add a Steam Workshop item by URL or ID"))
+                .accessibilityLabel(Text("Add from Workshop URL or ID"))
             }
         }
-    }
-
-    private var overflowMenu: some View {
-        Menu {
-            if selectedTab == .browseOnline, let browseViewModel {
-                Button {
-                    Task { await browseViewModel.reload() }
-                } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
-                }
-                .disabled(browseViewModel.isLoading || browseViewModel.isRateLimited)
-
-                Toggle(isOn: Binding(
-                    get: { browseViewModel.hidesDownloadedInBrowse },
-                    set: { browseViewModel.setHidesDownloaded($0) }
-                )) {
-                    Label("Hide items already in my library", systemImage: "eye.slash")
-                }
-
-                Divider()
-            }
-            Button {
-                isShowingKeyEntry = true
-            } label: {
-                Label("Set Steam Web API Key…", systemImage: "key.fill")
-            }
-        } label: {
-            Image(systemName: "ellipsis")
-        }
-        .menuStyle(.button)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .adaptiveGlassButton(.regular)
-        .controlSize(.regular)
-        .help(Text("More Workshop options"))
-        .accessibilityLabel(Text("More Workshop options"))
     }
 
     // MARK: - Tab body

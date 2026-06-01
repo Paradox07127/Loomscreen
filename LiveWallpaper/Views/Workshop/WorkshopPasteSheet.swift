@@ -46,7 +46,7 @@ struct WorkshopPasteSheet: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Add from Steam Workshop")
                     .font(.system(size: 14, weight: .semibold))
-                Text("Paste one or more Workshop URLs — newline, comma, or space-separated.")
+                Text("Paste Workshop URLs or item IDs — newline, comma, or space-separated.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

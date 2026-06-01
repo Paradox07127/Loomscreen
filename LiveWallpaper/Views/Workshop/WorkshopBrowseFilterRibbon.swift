@@ -59,17 +59,16 @@ struct WorkshopBrowseFilterRibbon: View {
     private static let maxRowsHeight: CGFloat = 240
 
     var body: some View {
-        AdaptiveGlassContainer(spacing: DesignTokens.Spacing.sm) {
-            VStack(spacing: 0) {
-                topRow
-                    .padding(.horizontal, DesignTokens.Spacing.md)
-                    .padding(.vertical, DesignTokens.Spacing.sm)
+        // Plain bar (no glass card / no internal divider) so it reads like the
+        // Installed tab's LibraryFilterBar — same horizontal/vertical padding.
+        VStack(spacing: 0) {
+            topRow
+                .padding(.horizontal, DesignTokens.LibraryFilterBar.horizontalPadding)
+                .padding(.vertical, DesignTokens.LibraryFilterBar.verticalPadding)
 
-                if isFilterPanelExpanded {
-                    Divider()
-                    filterPanel
-                        .disabled(controlsDisabled)
-                }
+            if isFilterPanelExpanded {
+                filterPanel
+                    .disabled(controlsDisabled)
             }
         }
     }
@@ -77,7 +76,7 @@ struct WorkshopBrowseFilterRibbon: View {
     // MARK: - Top row
 
     private var topRow: some View {
-        HStack(spacing: DesignTokens.Spacing.md) {
+        HStack(spacing: DesignTokens.LibraryFilterBar.contentSpacing) {
             searchField
 
             filtersToggle
@@ -227,8 +226,8 @@ struct WorkshopBrowseFilterRibbon: View {
                     .padding(.leading, 74 + DesignTokens.Spacing.sm)
             }
         }
-        .padding(.horizontal, DesignTokens.Spacing.md)
-        .padding(.vertical, DesignTokens.Spacing.sm)
+        .padding(.horizontal, DesignTokens.LibraryFilterBar.horizontalPadding)
+        .padding(.bottom, DesignTokens.Spacing.sm)
         .frame(maxWidth: .infinity, alignment: .leading)
         .transition(.opacity.combined(with: .move(edge: .top)))
     }
@@ -300,7 +299,11 @@ struct WorkshopBrowseFilterRibbon: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .frame(minWidth: 180, idealWidth: 240, maxWidth: 280)
+        .frame(
+            minWidth: DesignTokens.LibraryFilterBar.searchMinWidth,
+            idealWidth: DesignTokens.LibraryFilterBar.searchIdealWidth,
+            maxWidth: DesignTokens.LibraryFilterBar.searchMaxWidth
+        )
         .adaptiveGlassSurface(.capsule, interactive: true)
         // Explicit keyboard-focus ring — the plain field inside the glass
         // capsule has none of its own.
