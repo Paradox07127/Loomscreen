@@ -776,8 +776,6 @@ private struct WPEInstalledInspectorContent: View {
     let onClose: () -> Void
 
     @Environment(\.openURL) private var openURL
-    /// Hover state for the floating hero close control (light at rest, solid on hover).
-    @State private var closeHovered = false
 
     /// Shared singleton (also drives the online Browse download UI) — reading it
     /// here makes this view observe the re-download's phase + progress.
@@ -822,29 +820,6 @@ private struct WPEInstalledInspectorContent: View {
         .background(DesignTokens.Colors.pageBackground)
     }
 
-    /// Floating collapse control on the hero's top-leading corner: a sidebar
-    /// glyph that rests light (legible over the preview) and firms up to a solid
-    /// button on hover. No dedicated row — it overlays the artwork. Esc still closes.
-    private var heroCloseButton: some View {
-        Button(action: onClose) {
-            Image(systemName: "sidebar.trailing")
-                .font(.system(size: 12, weight: .semibold))
-                // Per-element opacity (NOT a blanket .opacity on the button): a
-                // whole-button fade multiplies the scrim down to ~0.18 and fails
-                // contrast over bright previews. Light at rest, solid on hover.
-                .foregroundStyle(.white.opacity(closeHovered ? 1 : 0.8))
-                .frame(width: 28, height: 28)
-                .background(Circle().fill(.black.opacity(closeHovered ? 0.6 : 0.4)))
-                .overlay(Circle().strokeBorder(.white.opacity(closeHovered ? 0.35 : 0.2), lineWidth: 0.5))
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .onHover { closeHovered = $0 }
-        .keyboardShortcut(.cancelAction)
-        .help(Text("Hide details (Esc)"))
-        .accessibilityLabel(Text("Hide details"))
-    }
-
     private var hero: some View {
         WPEPreviewView(
             imageURL: entry.origin.sourcePreviewURL,
@@ -858,7 +833,7 @@ private struct WPEInstalledInspectorContent: View {
                 .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
         }
         .overlay(alignment: .topLeading) {
-            heroCloseButton.padding(DesignTokens.Spacing.sm)
+            HeroCloseButton(action: onClose).padding(DesignTokens.Spacing.sm)
         }
         .padding([.horizontal, .top], DesignTokens.Spacing.lg)
     }
