@@ -503,8 +503,9 @@ struct WPEMetalShaderDispatcher {
             )
 
         case "effect_waterwaves":
-            try executor.dispatchSingleSampleEffect(
-                fragmentName: "wpe_effect_waterwaves_fragment",
+            // WPE's waterwaves.vert sets v_Direction = rotate((0,1), g_Direction[rad]).
+            let waveAngle = WPEMetalShaderInputs.floatScalar(named: ["g_Direction", "direction"], in: pass, default: 0)
+            try executor.dispatchWaterWavesEffect(
                 pass: pass,
                 layer: layer,
                 destination: destination,
@@ -512,12 +513,12 @@ struct WPEMetalShaderDispatcher {
                 frameState: frameState,
                 encoder: encoder,
                 depthPixelFormat: depthPixelFormat,
-                uniforms: WPEWaterUniforms(
-                    amplitude: WPEMetalShaderInputs.floatScalar(named: ["u_Amplitude", "amplitude", "amount", "strength"], in: pass, default: 0.005),
-                    frequency: WPEMetalShaderInputs.floatScalar(named: ["u_Frequency", "frequency", "scale"], in: pass, default: 18),
-                    speed: WPEMetalShaderInputs.floatScalar(named: ["u_Speed", "speed"], in: pass, default: 1),
-                    time: WPEMetalShaderInputs.floatScalar(named: "g_Time", in: pass, default: 0)
-                )
+                time: WPEMetalShaderInputs.floatScalar(named: "g_Time", in: pass, default: 0),
+                speed: WPEMetalShaderInputs.floatScalar(named: ["g_Speed", "speed"], in: pass, default: 5),
+                scale: WPEMetalShaderInputs.floatScalar(named: ["g_Scale", "scale"], in: pass, default: 200),
+                strength: WPEMetalShaderInputs.floatScalar(named: ["g_Strength", "strength"], in: pass, default: 0.1),
+                exponent: WPEMetalShaderInputs.floatScalar(named: ["g_Exponent", "exponent"], in: pass, default: 1),
+                direction: SIMD2<Float>(-sin(waveAngle), cos(waveAngle))
             )
 
         case "effect_spin":

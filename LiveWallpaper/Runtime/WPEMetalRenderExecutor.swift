@@ -1435,6 +1435,83 @@ final class WPEMetalRenderExecutor {
         }
     }
 
+    /// WPE's waterwaves effect: a masked, time-driven UV displacement. The opacity mask in
+    /// texture slot 1 localizes the wave (so it ripples a character's hair, not the whole image).
+    func dispatchWaterWavesEffect(
+        pass: WPEPreparedRenderPass,
+        layer: WPERenderLayer,
+        destination: (id: WPEMetalTargetID, texture: MTLTexture),
+        textures: [String: MTLTexture],
+        frameState: WPEMetalFrameState,
+        encoder: MTLRenderCommandEncoder,
+        depthPixelFormat: MTLPixelFormat,
+        time: Float,
+        speed: Float,
+        scale: Float,
+        strength: Float,
+        exponent: Float,
+        direction: SIMD2<Float>
+    ) throws {
+        let usesObjectQuad = usesObjectQuadGeometry(for: pass, layer: layer)
+        encoder.setRenderPipelineState(try renderPipeline(
+            vertexName: usesObjectQuad ? "wpe_object_quad_vertex" : "wpe_fullscreen_vertex",
+            fragmentName: "wpe_effect_waterwaves_fragment",
+            blendMode: pass.pass.blending,
+            colorPixelFormat: destination.texture.pixelFormat,
+            depthPixelFormat: depthPixelFormat
+        ))
+
+        let sourceReference = pass.textureBindings[0] ?? pass.pass.textures[0] ?? pass.pass.source
+        let sourceTexture = try WPEMetalShaderInputs.resolve(
+            reference: sourceReference,
+            textures: textures,
+            frameState: frameState,
+            currentTargetID: destination.id
+        )
+        let maskReference = pass.textureBindings[1] ?? pass.pass.textures[1]
+        let maskTexture: MTLTexture
+        let hasMask: Float
+        if let maskReference {
+            maskTexture = try WPEMetalShaderInputs.resolve(
+                reference: maskReference,
+                textures: textures,
+                frameState: frameState,
+                currentTargetID: destination.id
+            )
+            hasMask = 1
+        } else {
+            maskTexture = sourceTexture
+            hasMask = 0
+        }
+        encoder.setFragmentTexture(sourceTexture, index: 0)
+        encoder.setFragmentTexture(maskTexture, index: 1)
+
+        var uniforms = WPEWaterWavesUniforms(
+            time: time,
+            speed: speed,
+            scale: scale,
+            strength: strength,
+            exponent: exponent,
+            directionX: direction.x,
+            directionY: direction.y,
+            hasMask: hasMask
+        )
+        encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEWaterWavesUniforms>.stride, index: 0)
+
+        if usesObjectQuad {
+            var quadUniforms = objectQuadUniforms(
+                for: layer,
+                sceneSize: frameState.sceneSize,
+                sourceTexture: sourceTexture
+            )
+            encoder.setVertexBytes(
+                &quadUniforms,
+                length: MemoryLayout<WPEObjectQuadUniforms>.stride,
+                index: 1
+            )
+        }
+    }
+
     /// WPE's opacity effect optionally carries an opacity mask in texture slot 1.
     func dispatchOpacityEffect(
         pass: WPEPreparedRenderPass,

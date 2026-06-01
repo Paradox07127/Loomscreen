@@ -687,25 +687,38 @@ fragment half4 wpe_effect_iris_fragment(
 }
 
 struct WPEWaterWavesUniforms {
-    float amplitude;
-    float frequency;
-    float speed;
     float time;
+    float speed;
+    float scale;
+    float strength;
+    float exponent;
+    float directionX;
+    float directionY;
+    float hasMask;
 };
 
+// Port of WPE's effects/waterwaves.frag: a sine wave travels along `direction` at
+// `speed`/`scale`, and displaces the sample UV perpendicular to that direction by
+// strength² (an opacity mask localizes it, e.g. to a character's hair).
 fragment half4 wpe_effect_waterwaves_fragment(
     WPEVertexOut in [[stage_in]],
     texture2d<half, access::sample> texture0 [[texture(0)]],
+    texture2d<half, access::sample> texture1 [[texture(1)]],
     constant WPEWaterWavesUniforms& uniforms [[buffer(0)]]
 ) {
     constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
-    float phase = uniforms.time * uniforms.speed;
-    float frequency = max(uniforms.frequency, 0.0);
-    float2 wave = float2(
-        sin((in.uv.y + phase) * frequency * 1.3),
-        cos((in.uv.x + phase) * frequency * 1.7)
-    ) * uniforms.amplitude;
-    float2 uv = clamp(in.uv + wave, float2(0.0), float2(1.0));
+    float2 direction = float2(uniforms.directionX, uniforms.directionY);
+    float mask = (uniforms.hasMask > 0.5)
+        ? float(texture1.sample(linearSampler, in.uv).r)
+        : 1.0;
+
+    float distance = uniforms.time * uniforms.speed + dot(in.uv, direction) * uniforms.scale;
+    float strength = uniforms.strength * uniforms.strength;
+    float2 offset = float2(direction.y, -direction.x);
+    float wave = sin(distance);
+    float shaped = sign(wave) * pow(abs(wave), max(uniforms.exponent, 0.0001));
+
+    float2 uv = clamp(in.uv + shaped * offset * strength * mask, float2(0.0), float2(1.0));
     return texture0.sample(linearSampler, uv);
 }
 

@@ -177,6 +177,21 @@ struct WPEWaterUniforms {
     var time: Float
 }
 
+/// Matches WPE's `effects/waterwaves` shader: a time-driven sine wave displaces the sample
+/// UV perpendicular to `direction`, scaled by `strength`² and localized by an opacity mask.
+struct WPEWaterWavesUniforms {
+    var time: Float
+    var speed: Float
+    var scale: Float
+    var strength: Float
+    var exponent: Float
+    /// Unit wave direction = rotate (0,1) by the `direction` angle (radians).
+    var directionX: Float
+    var directionY: Float
+    /// 1 when an opacity mask is bound in texture slot 1, else 0 (effect applies everywhere).
+    var hasMask: Float
+}
+
 struct WPEShakeUniforms {
     var magnitude: Float
     var time: Float
@@ -254,9 +269,6 @@ struct WPEIrisUniforms {
     var padding0: Float = 0
     var padding1: Float = 0
 }
-
-// WaterWaves shares the WPEWaterUniforms layout — declared above near the
-// Water effect — to keep MSL/Swift struct alignments in lockstep.
 
 struct WPESpinUniforms {
     var angularSpeed: Float
