@@ -1080,6 +1080,58 @@ private struct WPEInstalledInspectorContent: View {
             if !info.tags.isEmpty {
                 tagsSection(info.tags)
             }
+            if !info.properties.isEmpty {
+                customizationSection(info.properties)
+            }
+        }
+    }
+
+    /// Read-only list of the author-defined adjustable settings (colors /
+    /// sliders / dropdowns …). The live editor is per-display, in each screen's
+    /// settings — surfacing the list here just sets expectations.
+    private func customizationSection(_ properties: [WPEPropertySummary]) -> some View {
+        let shown = properties.prefix(8)
+        let remaining = properties.count - shown.count
+        return VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
+            HStack(spacing: 6) {
+                Text("Customizable").font(.headline)
+                Text(verbatim: "\(properties.count)")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(Color.primary.opacity(0.06), in: Capsule())
+            }
+            ForEach(shown) { property in
+                HStack(spacing: 6) {
+                    Image(systemName: property.kind.systemImage)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tint)
+                        .frame(width: 14)
+                        .accessibilityHidden(true)
+                    Text(verbatim: property.label)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            }
+            if remaining > 0 {
+                HStack(spacing: 6) {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 14)
+                        .accessibilityHidden(true)
+                    Text(verbatim: "+\(remaining)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            Text("Adjust these from a display’s settings after applying.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -1175,9 +1227,47 @@ private struct WPELocalProjectInfo: Sendable, Equatable {
     var contentRating: String?
     /// On-disk footprint of the item's folder (recursive sum of file sizes).
     var sizeBytes: Int64?
+    /// Author-defined adjustable properties (colors / sliders / dropdowns …)
+    /// parsed from the local project.json schema — shown read-only here.
+    var properties: [WPEPropertySummary]
 
     var hasContent: Bool {
-        (cleanedDescription?.isEmpty == false) || !tags.isEmpty
+        (cleanedDescription?.isEmpty == false) || !tags.isEmpty || !properties.isEmpty
+    }
+}
+
+/// A single author-defined adjustable property, summarized for read-only
+/// display (the live editor lives per-display in the screen's settings).
+private struct WPEPropertySummary: Sendable, Equatable, Identifiable {
+    let id: String
+    let label: String
+    let kind: Kind
+
+    enum Kind: Sendable {
+        case color, slider, dropdown, toggle, text, file
+
+        init?(_ type: WallpaperEngineProjectPropertySchema.PropertyType) {
+            switch type {
+            case .color: self = .color
+            case .slider: self = .slider
+            case .combo: self = .dropdown
+            case .bool: self = .toggle
+            case .textinput: self = .text
+            case .file, .directory: self = .file
+            case .text, .group, .unsupported: return nil
+            }
+        }
+
+        var systemImage: String {
+            switch self {
+            case .color: return "paintpalette"
+            case .slider: return "slider.horizontal.3"
+            case .dropdown: return "chevron.up.chevron.down"
+            case .toggle: return "switch.2"
+            case .text: return "textformat"
+            case .file: return "doc"
+            }
+        }
     }
 }
 
@@ -1205,23 +1295,41 @@ private func loadWPELocalProjectInfo(for entry: WPEHistoryEntry) async -> WPELoc
         let didStart = folder.startAccessingSecurityScopedResource()
         defer { if didStart { folder.stopAccessingSecurityScopedResource() } }
 
-        // Footprint is independent of the manifest, so compute it either way.
+        // Footprint + adjustable-property schema are independent of the manifest
+        // text fields, so compute them either way.
         let size = directorySize(of: folder)
+        let properties = loadEditableProperties(folder: folder)
 
         let manifestURL = folder.appendingPathComponent("project.json")
         guard let data = try? Data(contentsOf: manifestURL),
               let manifest = try? JSONDecoder().decode(WPEProjectDisplayManifest.self, from: data)
         else {
-            return size > 0 ? WPELocalProjectInfo(cleanedDescription: nil, tags: [], contentRating: nil, sizeBytes: size) : nil
+            return (size > 0 || !properties.isEmpty)
+                ? WPELocalProjectInfo(cleanedDescription: nil, tags: [], contentRating: nil, sizeBytes: size > 0 ? size : nil, properties: properties)
+                : nil
         }
 
         return WPELocalProjectInfo(
             cleanedDescription: manifest.description.flatMap(strippedWPEMarkup),
             tags: manifest.tags ?? [],
             contentRating: manifest.contentrating?.trimmingCharacters(in: .whitespacesAndNewlines),
-            sizeBytes: size > 0 ? size : nil
+            sizeBytes: size > 0 ? size : nil,
+            properties: properties
         )
     }.value
+}
+
+/// Parse the local project.json property schema and reduce it to the editable
+/// controls we surface (purely local — no Steam API, no renderer).
+private func loadEditableProperties(folder: URL) -> [WPEPropertySummary] {
+    guard let schema = try? WallpaperEngineProjectPropertySchema.read(from: folder, includeSchemeColor: true) else {
+        return []
+    }
+    return schema.properties.compactMap { property in
+        guard let kind = WPEPropertySummary.Kind(property.type) else { return nil }
+        let trimmed = property.displayText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return WPEPropertySummary(id: property.key, label: trimmed.isEmpty ? property.key : trimmed, kind: kind)
+    }
 }
 
 /// Recursively sum the byte size of every regular file under `folder`. Reads
