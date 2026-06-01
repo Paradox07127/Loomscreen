@@ -23,6 +23,11 @@ struct WallpaperEnginePackage: Sendable, Equatable {
     /// component over 255 UTF-8 bytes, so over-long components are shortened on
     /// extraction (see `filesystemSafeEntryName`).
     static let maxComponentBytes = 250
+    /// Upper bound on the entry count — rejects a corrupt/misaligned header
+    /// claiming an absurd count. Generous enough for any real package (even
+    /// large frame-sequence scenes); `reserveCapacity` is clamped separately so
+    /// a bogus count can't pre-allocate wildly.
+    static let maxEntryCount: UInt32 = 262_144
 
     static func parseIndex(of data: Data) throws -> Self {
         var cursor = 0
@@ -37,12 +42,12 @@ struct WallpaperEnginePackage: Sendable, Equatable {
         }
 
         let entryCount = try data.wpeReadU32(cursor: &cursor)
-        guard entryCount <= 65_535 else {
+        guard entryCount <= Self.maxEntryCount else {
             throw WPEPackageError.invalidMagic("entryCount:\(entryCount)")
         }
 
         var entries: [Entry] = []
-        entries.reserveCapacity(Int(entryCount))
+        entries.reserveCapacity(min(Int(entryCount), 65_536))
         var seenNames = Set<String>()
 
         for index in 0..<Int(entryCount) {
@@ -100,12 +105,12 @@ struct WallpaperEnginePackage: Sendable, Equatable {
 
         try Self.streamAppend(into: &headerData, from: handle, count: 4)
         let entryCount = try headerData.wpeReadU32(cursor: &cursor)
-        guard entryCount <= 65_535 else {
+        guard entryCount <= Self.maxEntryCount else {
             throw WPEPackageError.invalidMagic("entryCount:\(entryCount)")
         }
 
         var entries: [Entry] = []
-        entries.reserveCapacity(Int(entryCount))
+        entries.reserveCapacity(min(Int(entryCount), 65_536))
         var seenNames = Set<String>()
 
         for index in 0..<Int(entryCount) {
@@ -377,7 +382,11 @@ struct WallpaperEnginePackage: Sendable, Equatable {
             if component.isEmpty || component == "." {
                 continue
             }
-            guard !component.contains("..") else {
+            // Only a component that *is* ".." navigates up (the traversal vector);
+            // a name that merely contains ".." (e.g. "image..png", "走过..mp3") is
+            // a valid filename. `contains("..")` wrongly rejected such packages.
+            // Extraction still re-checks the resolved path stays inside the root.
+            guard component != ".." else {
                 throw WPEPackageError.pathTraversal(name: name)
             }
             canonical.append(String(component))
