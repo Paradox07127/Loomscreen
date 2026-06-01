@@ -368,42 +368,35 @@ struct WorkshopBrowsePane: View {
     }
 
     /// Replaces the filter ribbon while the grid is scoped to one creator —
-    /// a "Back" affordance plus the creator's name. Filters don't apply here.
+    /// the creator's name plus a one-tap exit. Filters don't apply here.
     private func creatorFilterBanner(_ creator: WorkshopBrowseViewModel.CreatorFilter) -> some View {
-        HStack(spacing: DesignTokens.Spacing.sm) {
-            Button {
-                Task { await viewModel.clearCreatorFilter() }
-            } label: {
-                Label("Back to Browse", systemImage: "chevron.left")
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .disabled(viewModel.isLoading || viewModel.isPaging)
-
-            Spacer(minLength: 0)
-
-            HStack(spacing: 6) {
-                Image(systemName: "person.crop.circle")
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-                Text(creator.name.map { String(localized: "Works by \($0)", comment: "Workshop creator-scoped browse header. Placeholder is the creator's name.") }
-                     ?? String(localized: "Works by this creator", comment: "Workshop creator-scoped browse header when the name is unknown."))
-                    .font(.system(size: 13, weight: .semibold))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-
-            Spacer(minLength: 0)
-        }
-        .accessibilityElement(children: .contain)
+        scopeBanner(
+            icon: "person.crop.circle",
+            label: Text(creator.name.map { String(localized: "Works by \($0)", comment: "Workshop creator-scoped browse header. Placeholder is the creator's name.") }
+                        ?? String(localized: "Works by this creator", comment: "Workshop creator-scoped browse header when the name is unknown.")),
+            clear: { await viewModel.clearCreatorFilter() }
+        )
     }
 
-    /// Replaces the filter ribbon while the grid is scoped to one tag — a "Back"
-    /// affordance plus the tag name. Reached by clicking a tag in the inspector.
+    /// Replaces the filter ribbon while the grid is scoped to one tag — the tag
+    /// name plus a one-tap exit. Reached by clicking a tag in the inspector.
     private func tagFilterBanner(_ tag: String) -> some View {
+        scopeBanner(
+            icon: "tag",
+            label: Text(String(localized: "Tagged “\(tag)”", comment: "Workshop tag-scoped browse header. Placeholder is the tag.")),
+            clear: { await viewModel.clearPinnedTag() }
+        )
+    }
+
+    /// Compact tinted strip shown in place of the filter ribbon while the grid
+    /// is scoped to one creator or tag. Reads as a distinct "you are here"
+    /// banner — accent tint, scope icon + label, and a leading "Back" exit.
+    /// Filters are intentionally absent (the scoped Steam query can't honor
+    /// them), so the banner is the whole top row.
+    private func scopeBanner(icon: String, label: Text, clear: @escaping () async -> Void) -> some View {
         HStack(spacing: DesignTokens.Spacing.sm) {
             Button {
-                Task { await viewModel.clearPinnedTag() }
+                Task { await clear() }
             } label: {
                 Label("Back to Browse", systemImage: "chevron.left")
             }
@@ -411,20 +404,29 @@ struct WorkshopBrowsePane: View {
             .controlSize(.small)
             .disabled(viewModel.isLoading || viewModel.isPaging)
 
-            Spacer(minLength: 0)
+            Divider().frame(height: 16)
 
-            HStack(spacing: 6) {
-                Image(systemName: "tag")
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-                Text(String(localized: "Tagged “\(tag)”", comment: "Workshop tag-scoped browse header. Placeholder is the tag."))
-                    .font(.system(size: 13, weight: .semibold))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.tint)
+                .accessibilityHidden(true)
+            label
+                .font(.system(size: 13, weight: .semibold))
+                .lineLimit(1)
+                .truncationMode(.tail)
 
             Spacer(minLength: 0)
         }
+        .padding(.horizontal, DesignTokens.Spacing.md)
+        .padding(.vertical, DesignTokens.Spacing.sm)
+        .background(
+            Color.accentColor.opacity(0.10),
+            in: RoundedRectangle(cornerRadius: DesignTokens.Corner.md, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: DesignTokens.Corner.md, style: .continuous)
+                .strokeBorder(Color.accentColor.opacity(0.22), lineWidth: 0.5)
+        )
         .accessibilityElement(children: .contain)
     }
 
