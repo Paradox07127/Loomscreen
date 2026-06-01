@@ -404,13 +404,10 @@ struct WorkshopInstalledView: View {
     }
 
     private var installedFilterPanel: some View {
-        // Glass container: adjacent selected (glass) chips in a row fuse into
-        // connected liquid-glass shapes — the macOS 26 "glass union" effect.
-        AdaptiveGlassContainer(spacing: 6) {
-            VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
-                filterRow("Type") {
-                    typeChipRow
-                }
+        VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
+            filterRow("Type") {
+                typeChipRow
+            }
 
             filterRow("Source") {
                 HStack(spacing: 6) {
@@ -440,12 +437,11 @@ struct WorkshopInstalledView: View {
                 }
             }
 
-                if activeFilterCount > 0 {
-                    Button("Clear filters") { resetFilters() }
-                        .buttonStyle(.borderless)
-                        .controlSize(.small)
-                        .padding(.leading, 74 + DesignTokens.Spacing.sm)
-                }
+            if activeFilterCount > 0 {
+                Button("Clear filters") { resetFilters() }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .padding(.leading, 74 + DesignTokens.Spacing.sm)
             }
         }
         .padding(.horizontal, DesignTokens.LibraryFilterBar.horizontalPadding)
