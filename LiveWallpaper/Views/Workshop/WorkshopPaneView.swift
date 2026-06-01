@@ -27,8 +27,11 @@ struct WorkshopPaneView: View {
             content: { tabBody }
         )
         .overlay(alignment: .bottomTrailing) {
-            WorkshopDownloadToastHost()
-                .padding(DesignTokens.Spacing.lg)
+            VStack(alignment: .trailing, spacing: 8) {
+                WorkshopDownloadProgressHost()
+                WorkshopDownloadToastHost()
+            }
+            .padding(DesignTokens.Spacing.lg)
         }
         // On open: re-confirm SteamCMD readiness so the Download button isn't
         // greyed out just because this launch hasn't re-run the probes, then
