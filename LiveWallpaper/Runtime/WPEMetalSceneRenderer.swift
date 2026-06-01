@@ -447,6 +447,9 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
                 WPESceneDebugArtifacts.shared.recordFirstFrameStats(stats)
             }
             dumpOutputTextureIfRequested(outputTexture)
+            #if DEBUG
+            dumpScenePassesIfRequested()
+            #endif
         }
         hasPresentedFrame = true
         didLoad = true
@@ -475,6 +478,29 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
     }
 
     #if DEBUG
+    /// Dump one PNG per scene-target pass (collected by the executor when
+    /// `WPEDumpScenePasses` matches this scene) so we can see exactly which pass
+    /// introduces an artifact. PNGs land in App Support/LiveWallpaper/gpu-traces/
+    /// as `wpe-<id>-scenepass-NN-<passid>-WxH.png`, ordered by draw sequence.
+    private func dumpScenePassesIfRequested() {
+        let wantedID = UserDefaults.standard.string(forKey: "WPEDumpScenePasses")
+        guard let wantedID, !wantedID.isEmpty, wantedID == descriptor.workshopID else {
+            return
+        }
+        let dumps = executor.scenePassDumps
+        Logger.notice(
+            "[WPEDumpScenePasses] dumping \(dumps.count) scene-target passes for \(descriptor.workshopID)",
+            category: .wpeRender
+        )
+        for (index, entry) in dumps.enumerated() {
+            let safeLabel = entry.label
+                .replacingOccurrences(of: "/", with: "_")
+                .replacingOccurrences(of: ".", with: "_")
+            let ordinal = index < 10 ? "0\(index)" : "\(index)"
+            dumpTextureToPNG(entry.texture, basename: "scenepass-\(ordinal)-\(safeLabel)")
+        }
+    }
+
     private func dumpTextureToPNG(_ texture: MTLTexture, basename: String) {
         guard texture.pixelFormat == .rgba8Unorm || texture.pixelFormat == .rgba8Unorm_srgb else {
             Logger.warning(

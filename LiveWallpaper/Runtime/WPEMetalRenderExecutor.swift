@@ -160,6 +160,14 @@ final class WPEMetalRenderExecutor {
     /// dispatch call site.
     private var activeLegacyComposeLayer = false
 
+    #if DEBUG
+    /// Diagnostic: when `WPEDumpScenePasses` (UserDefault) equals the sceneID,
+    /// holds one snapshot of the scene output after EACH scene-target pass so
+    /// `WPEMetalSceneRenderer` can PNG-dump them and localize which pass draws
+    /// a given artifact. Memory-bounded — cleared at the start of every render().
+    private(set) var scenePassDumps: [(label: String, texture: MTLTexture)] = []
+    #endif
+
     func render(
         pipeline: WPEPreparedRenderPipeline,
         size: CGSize,
@@ -169,6 +177,10 @@ final class WPEMetalRenderExecutor {
         sceneID: String? = nil
     ) throws -> MTLTexture {
         activeLegacyComposeLayer = WPEMetalComposeLayerCompatibility.usesLegacyComposeLayer(sceneID: sceneID)
+        #if DEBUG
+        scenePassDumps.removeAll()
+        let dumpScenePasses = sceneID.map { !$0.isEmpty && UserDefaults.standard.string(forKey: "WPEDumpScenePasses") == $0 } ?? false
+        #endif
         let preparedPipeline = pipeline.addingMetalRuntimeUniforms(runtimeUniforms, camera: cameraUniforms)
         let output = try makeOutputTexture(size: size)
         guard let commandBuffer = commandQueue.makeCommandBuffer() else {
@@ -223,6 +235,9 @@ final class WPEMetalRenderExecutor {
                     frameState: &frameState
                 )
                 didEncode = true
+                #if DEBUG
+                captureScenePassIfDumping(dumpScenePasses, label: "\(layer.graphLayer.objectID).image", output: output, commandBuffer: commandBuffer)
+                #endif
                 continue
             }
             if bypassEffects, let firstSource = Self.bypassSourceReference(for: layer) {
@@ -270,6 +285,11 @@ final class WPEMetalRenderExecutor {
                     frameState: &frameState
                 )
                 didEncode = true
+                #if DEBUG
+                if case .scene = pass.pass.target {
+                    captureScenePassIfDumping(dumpScenePasses, label: pass.pass.id, output: output, commandBuffer: commandBuffer)
+                }
+                #endif
             }
         }
 
@@ -1197,6 +1217,37 @@ final class WPEMetalRenderExecutor {
             return SIMD2<Float>(-width * 0.5, 0)
         }
     }
+
+    #if DEBUG
+    /// Blit a copy of the current scene output into a fresh texture and stash it
+    /// for `WPEDumpScenePasses` PNG dumping. The blit is encoded inline so it
+    /// captures the output exactly as of this pass in the command stream.
+    private func captureScenePassIfDumping(
+        _ enabled: Bool,
+        label: String,
+        output: MTLTexture,
+        commandBuffer: MTLCommandBuffer
+    ) {
+        guard enabled,
+              let snapshot = try? makeOutputTexture(size: CGSize(width: output.width, height: output.height)),
+              let blit = commandBuffer.makeBlitCommandEncoder() else {
+            return
+        }
+        blit.copy(
+            from: output,
+            sourceSlice: 0,
+            sourceLevel: 0,
+            sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+            sourceSize: MTLSize(width: output.width, height: output.height, depth: 1),
+            to: snapshot,
+            destinationSlice: 0,
+            destinationLevel: 0,
+            destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0)
+        )
+        blit.endEncoding()
+        scenePassDumps.append((label: label, texture: snapshot))
+    }
+    #endif
 
     private func makeOutputTexture(size: CGSize) throws -> MTLTexture {
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
