@@ -124,7 +124,7 @@ struct AnimatedGIFThumbnail: View {
         .foregroundStyle(.white)
         .padding(.horizontal, 7)
         .padding(.vertical, 3)
-        .background(.black.opacity(0.7), in: Capsule())
+        .thumbnailBadgeGlass(tint: .black, opacity: 0.7)
         .accessibilityHidden(true)
     }
 

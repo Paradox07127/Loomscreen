@@ -131,7 +131,7 @@ struct WorkshopBrowseCard: View {
             .foregroundStyle(.white)
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
-            .background { glassBadgeBackground() }
+            .thumbnailBadgeGlass()
             .accessibilityHidden(true)
     }
 
@@ -145,7 +145,7 @@ struct WorkshopBrowseCard: View {
         .foregroundStyle(.white)
         .padding(.horizontal, 6)
         .padding(.vertical, 3)
-        .background { glassBadgeBackground(Self.inLibraryGreen, opacity: 0.85) }
+        .thumbnailBadgeGlass(tint: Self.inLibraryGreen, opacity: 0.85)
         .accessibilityHidden(true)
     }
 
@@ -159,7 +159,7 @@ struct WorkshopBrowseCard: View {
         .foregroundStyle(.white)
         .padding(.horizontal, 6)
         .padding(.vertical, 3)
-        .background { glassBadgeBackground() }
+        .thumbnailBadgeGlass()
         .accessibilityHidden(true)
     }
 
@@ -167,26 +167,6 @@ struct WorkshopBrowseCard: View {
     /// glyphs clear WCAG AA contrast even over bright previews (system green is
     /// too light). Explicit RGB so it stays constant across light/dark mode.
     private static let inLibraryGreen = Color(red: 0.08, green: 0.35, blue: 0.15)
-
-    /// Liquid-glass scrim for thumbnail overlay badges. The fill stays a
-    /// mode-independent dark (or branded) tint so the white glyphs read over any
-    /// preview — including bright ones, where a translucent material would wash
-    /// out — and a thin top-edge specular highlight supplies the glass feel.
-    /// Under Reduce Transparency the fill goes fully opaque for max legibility.
-    private func glassBadgeBackground(_ tint: Color = .black, opacity: Double = 0.6) -> some View {
-        Capsule()
-            .fill(tint.opacity(reduceTransparency ? 1 : opacity))
-            .overlay(
-                Capsule().strokeBorder(
-                    LinearGradient(
-                        colors: [.white.opacity(0.35), .white.opacity(0.05)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    ),
-                    lineWidth: 0.5
-                )
-            )
-    }
 
     // MARK: - Footer
 

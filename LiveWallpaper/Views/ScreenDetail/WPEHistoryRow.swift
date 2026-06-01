@@ -112,8 +112,8 @@ struct WPEHistoryRow: View {
                             .font(.system(size: 9, weight: .semibold))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(badge.tint.opacity(0.85), in: Capsule())
                             .foregroundStyle(.white)
+                            .thumbnailBadgeGlass(tint: badge.tint, opacity: 0.85)
                             .padding(DesignTokens.Spacing.sm)
                             .accessibilityLabel(badge.accessibility)
                     }
@@ -213,7 +213,7 @@ struct WPEHistoryRow: View {
         .foregroundStyle(.white)
         .padding(.horizontal, 6)
         .padding(.vertical, 3)
-        .background(Color.orange.opacity(0.9), in: Capsule())
+        .thumbnailBadgeGlass(tint: .orange, opacity: 0.9)
         .padding(DesignTokens.Spacing.sm)
         .accessibilityLabel(Text("Update available"))
     }

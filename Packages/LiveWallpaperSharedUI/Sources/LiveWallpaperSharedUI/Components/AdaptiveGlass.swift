@@ -43,6 +43,50 @@ public extension View {
     func adaptiveGlassButton(_ prominence: AdaptiveGlassProminence = .regular) -> some View {
         modifier(AdaptiveGlassButtonModifier(prominence: prominence))
     }
+
+    /// Liquid-glass chrome for a small badge floating over a thumbnail/preview
+    /// (Playing, Experimental, Update, resolution, In Library …). macOS 26 uses
+    /// native `glassEffect` with a legibility-preserving tint so white/coloured
+    /// glyphs survive bright previews; older systems fall back to a tinted scrim
+    /// with a specular top edge. Reduce Transparency forces an opaque fill.
+    ///
+    /// Capsule-shaped and zero-padding-adding, so it never changes a badge's
+    /// footprint — only its backing.
+    func thumbnailBadgeGlass(tint: Color = .black, opacity: Double = 0.6) -> some View {
+        modifier(ThumbnailBadgeGlassModifier(tint: tint, opacity: opacity))
+    }
+}
+
+private struct ThumbnailBadgeGlassModifier: ViewModifier {
+    let tint: Color
+    let opacity: Double
+
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    func body(content: Content) -> some View {
+        if reduceTransparency {
+            content.background(Capsule().fill(tint.opacity(1)))
+        } else if #available(macOS 26.0, *) {
+            // Native glass already blurs + refracts; a lighter tint than the
+            // fallback keeps the badge legible without going muddy.
+            content.glassEffect(.regular.tint(tint.opacity(opacity * 0.6)), in: .capsule)
+        } else {
+            content.background {
+                Capsule()
+                    .fill(tint.opacity(opacity))
+                    .overlay(
+                        Capsule().strokeBorder(
+                            LinearGradient(
+                                colors: [.white.opacity(0.35), .white.opacity(0.05)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 0.5
+                        )
+                    )
+            }
+        }
+    }
 }
 
 private struct AdaptiveGlassSurfaceModifier: ViewModifier {
