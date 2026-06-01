@@ -59,6 +59,17 @@ actor WallpaperEngineCache {
         } catch let error as WPECacheError {
             Logger.error("WPE extraction failed: \(error.localizedDescription)", category: .screenManager)
             throw error
+        } catch let error as WPEPackageError {
+            // A bad/absent PKGV header almost always means the SteamCMD download
+            // landed a truncated or placeholder `scene.pkg` (partial download,
+            // entitlement/region issue) rather than a real package.
+            Logger.error("WPE extraction failed: \(error)", category: .screenManager)
+            switch error {
+            case .invalidMagic, .truncatedHeader:
+                throw WPECacheError.extractionFailed(String(localized: "The downloaded file isn't a valid Wallpaper Engine package — the SteamCMD download was likely incomplete. Try downloading it again.", comment: "WPE extraction failed: scene.pkg has no valid PKGV header, usually a partial download."))
+            default:
+                throw WPECacheError.extractionFailed(String(describing: error))
+            }
         } catch {
             Logger.error("WPE extraction failed: \(error.localizedDescription)", category: .screenManager)
             throw WPECacheError.extractionFailed(String(describing: error))
