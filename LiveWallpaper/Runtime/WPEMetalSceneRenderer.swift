@@ -78,6 +78,12 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
     /// audio-reactive scenes that don't move.
     private let audioDebugLogEnabled = UserDefaults.standard.bool(forKey: "WPEAudioDebugLog")
     private var audioDiagCounter = 0
+    /// Last throttle state we logged, so a focus/unfocus transition (which
+    /// flips the scene between 60 FPS and `throttledPreferredFPS` = 1) emits a
+    /// line immediately instead of waiting out the per-60-frame cadence. This
+    /// is the key signal for "the bars look frozen": when the app's own
+    /// console window is key, the scene on that screen drops to 1 FPS.
+    private var audioDiagLastThrottled: Bool?
     /// Phase 2D-P: per-text-object SceneScript instances. Keyed by
     /// the text object's id so the renderer can look up the latest
     /// scripted value when rasterizing.
@@ -935,11 +941,16 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
             let audio = SystemAudioCaptureManager.broker.snapshot()
             if audioDebugLogEnabled {
                 audioDiagCounter += 1
-                if audioDiagCounter % 60 == 1 {
+                // Log every ~60 frames, OR immediately when the throttle flips
+                // (focus/unfocus of the app's console window). The latter makes
+                // the "frozen bars" cause visible: throttled=true ⇒ fps=1.
+                let throttledNow = isThrottled
+                if audioDiagCounter % 60 == 1 || audioDiagLastThrottled != throttledNow {
+                    audioDiagLastThrottled = throttledNow
                     let peakL = audio.left.max() ?? 0
                     let peakR = audio.right.max() ?? 0
                     Logger.notice(
-                        "[AudioCapture] renderer: capturing=true peakL=\(String(format: "%.3f", peakL)) peakR=\(String(format: "%.3f", peakR)) → feeding g_AudioSpectrum*",
+                        "[AudioCapture] renderer: capturing=true peakL=\(String(format: "%.3f", peakL)) peakR=\(String(format: "%.3f", peakR)) throttled=\(throttledNow) fps=\(mtkView.preferredFramesPerSecond) → feeding g_AudioSpectrum*",
                         category: .audioCapture
                     )
                 }
