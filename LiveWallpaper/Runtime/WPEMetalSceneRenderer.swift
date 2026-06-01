@@ -117,6 +117,12 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
     private(set) var loadDiagnostics: SceneLoadDiagnostic?
     private(set) var renderGraph: WPERenderGraph?
     private(set) var renderPipeline: WPEPreparedRenderPipeline?
+    /// True when the pipeline has effect / custom-shader passes (scroll,
+    /// waterwaves, pulse, audio bars, …). These animate every frame via
+    /// `g_Time` / `g_AudioSpectrum*`, so the view must run continuously even
+    /// when there are no dynamic textures or particles — otherwise the scene
+    /// renders one frame and freezes. Computed once per load.
+    private var hasAnimatedShaderPasses = false
     private(set) var lastRuntimeUniforms: WPEMetalRuntimeUniforms?
     /// Property-key → render-target bindings for the loaded scene, used by the
     /// incremental settings-apply path. Empty until `load()` completes.
@@ -394,6 +400,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
 
         renderGraph = graph
         renderPipeline = pipeline
+        hasAnimatedShaderPasses = Self.pipelineHasAnimatedPasses(pipeline)
         // Seed incremental-apply state. The graph builder already baked each
         // layer's authored `visible` into the pipeline, so these baselines
         // simply mirror it for later diffing in `applyScenePropertyPatch`.
@@ -1443,7 +1450,23 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
     /// the first frame (the operator and turbulence updates would never
     /// run again).
     private var needsContinuousFrames: Bool {
-        !dynamicTextureSources.isEmpty || !particleSystems.isEmpty
+        hasAnimatedShaderPasses
+            || !dynamicTextureSources.isEmpty
+            || !particleSystems.isEmpty
+    }
+
+    /// A pass animates per-frame when its shader samples `g_Time` /
+    /// `g_AudioSpectrum*` — i.e. WPE local effects (`effects/…`) and workshop
+    /// custom shaders (`workshop/…`). The static base shaders (`solidcolor`,
+    /// `genericimage2/4`, `compose`, `copy`) do not, so a scene built only on
+    /// those is genuinely static and may stay on the paused/on-demand path.
+    private static func pipelineHasAnimatedPasses(_ pipeline: WPEPreparedRenderPipeline) -> Bool {
+        pipeline.layers.contains { layer in
+            layer.passes.contains { prepared in
+                let shader = prepared.pass.shader.lowercased()
+                return shader.contains("effects/") || shader.contains("workshop/")
+            }
+        }
     }
 
     func applyPerformanceProfile(_ profile: WallpaperPerformanceProfile) {
