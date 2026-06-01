@@ -1468,7 +1468,7 @@ final class WPEMetalRenderExecutor {
             frameState: frameState,
             currentTargetID: destination.id
         )
-        let maskReference = pass.textureBindings[1] ?? pass.pass.textures[1]
+        let maskReference = pass.textureBindings[1] ?? pass.pass.textures[1] ?? pass.pass.binds[1]
         let maskTexture: MTLTexture
         let hasMask: Float
         if let maskReference {
