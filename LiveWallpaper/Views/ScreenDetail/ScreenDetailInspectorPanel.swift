@@ -19,7 +19,6 @@ struct ScreenDetailInspectorPanel: View {
     let onResetDisplaySettings: () -> Void
     #if !LITE_BUILD
     @State private var wpeProjectCustomSettingsSchema: WallpaperEngineProjectPropertySchema?
-    @State private var wpeSceneCustomSettingsSchema: WallpaperEngineProjectPropertySchema?
     #endif
 
     var body: some View {
@@ -84,18 +83,9 @@ struct ScreenDetailInspectorPanel: View {
                         videoSettingsContent
                     }
 
-                    #if !LITE_BUILD
-                    if draft.selectedWallpaperType == .scene,
-                       let schema = wpeSceneCustomSettingsSchema,
-                       schema.hasMeaningfulSettings,
-                       let _ = draft.sceneDescriptor {
-                        WPESceneCustomSettingsCard(
-                            screen: screen,
-                            schema: schema,
-                            descriptor: sceneDescriptorBinding
-                        )
-                    }
-                    #endif
+                    // Scene custom settings now live in a dedicated column inside
+                    // the scene preview area (WPESceneSection), not here — keeping
+                    // them out of this narrow inspector avoids a duplicate panel.
                 }
                 .padding(.horizontal, DesignTokens.Inspector.horizontalPadding(for: inspectorPanelWidth))
                 .padding(.vertical, 14)
@@ -110,61 +100,8 @@ struct ScreenDetailInspectorPanel: View {
         .task(id: wpeProjectCustomSettingsLoadKey) {
             await loadWPEProjectCustomSettingsSchema()
         }
-        .task(id: wpeSceneCustomSettingsLoadKey) {
-            await loadWPESceneCustomSettingsSchema()
-        }
         #endif
     }
-
-    #if !LITE_BUILD
-    private var sceneDescriptorBinding: Binding<SceneDescriptor> {
-        Binding(
-            get: {
-                draft.sceneDescriptor ?? SceneDescriptor(
-                    workshopID: "",
-                    cacheRelativePath: "",
-                    entryFile: "scene.json",
-                    capabilityTier: .unsupported
-                )
-            },
-            set: { newValue in
-                draft.sceneDescriptor = newValue
-            }
-        )
-    }
-
-    private var wpeSceneCustomSettingsLoadKey: String {
-        guard draft.selectedWallpaperType == .scene,
-              let descriptor = draft.sceneDescriptor else {
-            return "hidden"
-        }
-        // `wpeOrigin` flips when re-imported under a fresh bookmark; reloading
-        // then is required because the cache may still be stale.
-        let originFingerprint = draft.wpeOrigin?.sourceFolderBookmark.count.description ?? "-"
-        return "\(screen.id):scene:\(descriptor.workshopID):\(originFingerprint)"
-    }
-
-    @MainActor
-    private func loadWPESceneCustomSettingsSchema() async {
-        guard draft.selectedWallpaperType == .scene,
-              let descriptor = draft.sceneDescriptor else {
-            wpeSceneCustomSettingsSchema = nil
-            return
-        }
-
-        let outcome = await WPESceneProjectSchemaLoader.load(
-            descriptor: descriptor,
-            wpeOrigin: draft.wpeOrigin
-        )
-        guard !Task.isCancelled else { return }
-        if outcome.schema != nil || outcome.isExpectedAbsence {
-            Logger.info("WPESceneCustomSettings: \(outcome.log)", category: .screenManager)
-        } else {
-            Logger.warning("WPESceneCustomSettings: \(outcome.log)", category: .screenManager)
-        }
-        wpeSceneCustomSettingsSchema = outcome.schema
-    }
-    #endif
 
     #if !LITE_BUILD
     /// Stable identifier driving WPE project schema reloads. The inspector

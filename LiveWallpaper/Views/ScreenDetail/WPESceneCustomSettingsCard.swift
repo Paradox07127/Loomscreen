@@ -77,15 +77,27 @@ struct WPESceneCustomSettingsCard: View {
 
     private var propertyList: some View {
         let values = schema.effectiveValues(overrides: descriptor.propertyOverrides)
-        let visibleProperties = schema.visibleProperties(values: values)
+        // Only genuinely interactive controls. Real WPE projects pad
+        // `properties` with HTML promo/donation blocks (`text`), decorative
+        // section headers (`group`), and macOS-unsupported file/directory
+        // pickers — none of which the user can act on. Drop them so the column
+        // is a clean list of changeable options.
+        let interactive = schema.visibleProperties(values: values).filter { Self.isInteractive($0.type) }
 
         return VStack(spacing: 8) {
-            ForEach(visibleProperties) { property in
+            ForEach(interactive) { property in
                 propertyView(for: property, values: values)
-                if property.id != visibleProperties.last?.id {
+                if property.id != interactive.last?.id {
                     Divider()
                 }
             }
+        }
+    }
+
+    static func isInteractive(_ type: WallpaperEngineProjectPropertySchema.PropertyType) -> Bool {
+        switch type {
+        case .bool, .slider, .combo, .color, .textinput: return true
+        case .file, .directory, .group, .text, .unsupported: return false
         }
     }
 
