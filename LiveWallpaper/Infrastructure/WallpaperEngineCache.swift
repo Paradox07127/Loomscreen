@@ -62,8 +62,11 @@ actor WallpaperEngineCache {
         } catch let error as WPEPackageError {
             // A bad/absent PKGV header almost always means the SteamCMD download
             // landed a truncated or placeholder `scene.pkg` (partial download,
-            // entitlement/region issue) rather than a real package.
-            Logger.error("WPE extraction failed: \(error)", category: .screenManager)
+            // entitlement/region issue) rather than a real package. Dump the real
+            // head bytes + size so a recurrence is unambiguous (truncated PKGV vs
+            // an HTML error page vs a genuinely new magic) — a valid scene.pkg
+            // begins with U32 length 8 + "PKGV00NN".
+            Logger.error("WPE extraction failed: \(error) — \(Self.headDescription(of: sourcePkgURL))", category: .screenManager)
             switch error {
             case .invalidMagic, .truncatedHeader:
                 throw WPECacheError.extractionFailed(String(localized: "The downloaded file isn't a valid Wallpaper Engine package — the SteamCMD download was likely incomplete. Try downloading it again.", comment: "WPE extraction failed: scene.pkg has no valid PKGV header, usually a partial download."))
@@ -74,6 +77,21 @@ actor WallpaperEngineCache {
             Logger.error("WPE extraction failed: \(error.localizedDescription)", category: .screenManager)
             throw WPECacheError.extractionFailed(String(describing: error))
         }
+    }
+
+    /// First 16 bytes (hex + printable ASCII) and size of a candidate package,
+    /// for diagnosing a parse failure: a real `scene.pkg` starts `08 00 00 00
+    /// "PKGV00NN"`; a partial download is short, an HTML error page starts `3c`
+    /// (`<`). Best-effort; never throws.
+    private static func headDescription(of url: URL) -> String {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return "head: <unreadable>" }
+        defer { try? handle.close() }
+        let size = (try? handle.seekToEnd()) ?? 0
+        try? handle.seek(toOffset: 0)
+        let head = (try? handle.read(upToCount: 16)) ?? Data()
+        let hex = head.map { String(format: "%02x", $0) }.joined(separator: " ")
+        let ascii = String(head.map { (32...126).contains($0) ? Character(UnicodeScalar($0)) : "." })
+        return "size: \(size)B, head: [\(hex)] \"\(ascii)\""
     }
 
     func ensureMirroredDirectory(workshopID: String, sourceFolderURL: URL) async throws -> URL {
