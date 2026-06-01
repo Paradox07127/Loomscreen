@@ -20,12 +20,6 @@ struct WPEComposeLayerUniforms {
     float4 flags; // x = CLEARALPHA
 };
 
-struct WPEComposeLayerVertexOut {
-    float4 position [[position]];
-    float2 uv;
-    float3 screenCoord;
-};
-
 struct WPECopyUniforms {
     float2 uvOffset;
     float2 padding;
@@ -96,62 +90,6 @@ vertex WPEVertexOut wpe_object_quad_vertex(
     return out;
 }
 
-// WPE `composelayer.vert` parity: the compose layer is ALWAYS drawn as a
-// fullscreen quad, and the full-frame buffer is sampled by the layer's
-// model-projected screen coordinate (composelayer.frag:
-// texCoord = v_ScreenCoord.xy / w * 0.5 + 0.5). This warps the captured
-// scene by the layer transform while still covering the whole output, so
-// lens-flare / depth-of-field / region-opacity overlays composite seamlessly
-// instead of collapsing into the old shrunken object-quad inset.
-vertex WPEComposeLayerVertexOut wpe_compose_projected_vertex(
-    uint vertexID [[vertex_id]],
-    constant WPEObjectQuadUniforms& u [[buffer(1)]]
-) {
-    float2 positions[4] = {
-        float2(-1.0, -1.0),
-        float2( 1.0, -1.0),
-        float2(-1.0,  1.0),
-        float2( 1.0,  1.0)
-    };
-    float2 uvs[4] = {
-        float2(0.0, 1.0),
-        float2(1.0, 1.0),
-        float2(0.0, 0.0),
-        float2(1.0, 0.0)
-    };
-    float2 corners[4] = {
-        float2(-0.5, -0.5),
-        float2( 0.5, -0.5),
-        float2(-0.5,  0.5),
-        float2( 0.5,  0.5)
-    };
-
-    float2 scaleSign = float2(
-        u.uvSignAndPadding.x < 0.0 ? -1.0 : 1.0,
-        u.uvSignAndPadding.y < 0.0 ? -1.0 : 1.0
-    );
-    float2 localPixels = corners[vertexID] * scaleSign * u.centerAndSize.zw;
-    float rot = u.sceneSizeAndRotation.z;
-    float c = cos(rot);
-    float s = sin(rot);
-    float2 rotatedCorner = float2(
-        c * localPixels.x - s * localPixels.y,
-        s * localPixels.x + c * localPixels.y
-    );
-    float2 halfScene = max(u.sceneSizeAndRotation.xy, float2(1.0)) * 0.5;
-    float2 projected = (u.centerAndSize.xy + rotatedCorner) / halfScene;
-
-    WPEComposeLayerVertexOut out;
-    out.position = float4(positions[vertexID], 0.0, 1.0);
-    out.uv = uvs[vertexID];
-    // Identity proof: a centered, scene-sized, unrotated layer projects its
-    // corners to (-1,-1),(1,-1),(-1,1),(1,1); after the WPE/HLSL Y flip and
-    // *0.5+0.5 the sample UVs become (0,1),(1,1),(0,0),(1,0) — exactly the
-    // wpe_fullscreen_vertex UVs, i.e. a 1:1 full-frame copy.
-    out.screenCoord = float3(projected.x, -projected.y, 1.0);
-    return out;
-}
-
 struct WPEPuppetVertex {
     float4 position;
     float4 uv;
@@ -214,23 +152,20 @@ fragment half4 wpe_util_copy_fragment(
     return texture0.sample(linearSampler, in.uv);
 }
 
-// WPE `composelayer.frag` parity: sample the full-frame buffer (texture0)
-// at the projected screen coordinate carried from wpe_compose_projected_vertex,
-// then honor the CLEARALPHA combo. Single-texture by design — WPE composelayer
-// samples only g_Texture0; the two-texture mix lives in wpe_compose_fragment
-// for the legacy fallback path.
+// WPE `composelayer.frag` parity: `passthrough:true` compose/project/fullscreen
+// utility layers transfer the captured full-frame buffer 1:1 at screen UV via a
+// plain fullscreen quad (wpe_fullscreen_vertex), IGNORING the object's authored
+// size/rotation/origin — sampling through the layer transform warped oversized/
+// rotated layers into a distorted inset. The layer transform positions the
+// DOWNSTREAM effect (lens flare / DoF / foliage), not the compose capture.
+// Single-texture by design (WPE composelayer samples only g_Texture0); the
+// two-texture mix lives in wpe_compose_fragment for the legacy fallback path.
 fragment half4 wpe_composelayer_fragment(
-    WPEComposeLayerVertexOut in [[stage_in]],
+    WPEVertexOut in [[stage_in]],
     texture2d<half, access::sample> texture0 [[texture(0)]],
     constant WPEComposeLayerUniforms& uniforms [[buffer(0)]]
 ) {
     constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
-    // `passthrough:true` compose layers transfer the captured full frame 1:1 at
-    // screen UV, IGNORING the object's authored size/rotation/origin. Sampling
-    // through the layer transform (in.screenCoord) warped oversized/rotated
-    // compose layers (e.g. scene 3479521040's 5000x2300 rotated layer) into a
-    // distorted double-exposure overlay. The layer transform positions the
-    // DOWNSTREAM effect (lens flare / foliage), not the compose capture.
     float4 color = float4(texture0.sample(linearSampler, in.uv));
     if (uniforms.flags.x > 0.5) {
         color.a = 0.0;

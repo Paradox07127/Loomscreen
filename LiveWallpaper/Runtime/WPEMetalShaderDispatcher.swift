@@ -125,11 +125,10 @@ struct WPEMetalShaderDispatcher {
                 && isSceneAliasReference(firstReference)
             let usesLegacyRegion = isComposeLayerSceneAlias && frameState.legacyComposeLayer
             if isComposeLayerSceneAlias && !usesLegacyRegion {
-                // WPE composelayer parity: draw a fullscreen quad and sample the
-                // captured full-frame buffer by the layer-projected screen
-                // coordinate carried in WPEComposeLayerVertexOut.screenCoord.
+                // WPE passthrough utility parity: draw a fullscreen quad and copy
+                // the captured full-frame buffer 1:1 at screen UV (+ CLEARALPHA),
+                // ignoring the layer transform (which positions downstream effects).
                 encoder.setRenderPipelineState(try executor.renderPipeline(
-                    vertexName: "wpe_compose_projected_vertex",
                     fragmentName: "wpe_composelayer_fragment",
                     blendMode: pass.pass.blending,
                     colorPixelFormat: destination.texture.pixelFormat,
@@ -142,16 +141,6 @@ struct WPEMetalShaderDispatcher {
                     currentTargetID: destination.id
                 )
                 encoder.setFragmentTexture(firstTexture, index: 0)
-                var quadUniforms = executor.objectQuadUniforms(
-                    for: layer,
-                    sceneSize: frameState.sceneSize,
-                    sourceTexture: firstTexture
-                )
-                encoder.setVertexBytes(
-                    &quadUniforms,
-                    length: MemoryLayout<WPEObjectQuadUniforms>.stride,
-                    index: 1
-                )
                 var uniforms = WPEComposeLayerUniforms(
                     flags: SIMD4<Float>(clearAlphaValue(for: pass), 0, 0, 0)
                 )

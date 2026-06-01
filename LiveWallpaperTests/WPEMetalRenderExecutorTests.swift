@@ -2166,11 +2166,6 @@ private func preparedBuiltinPass(
     )
 }
 
-private func expectVector(_ value: SIMD2<Float>, _ expected: SIMD2<Float>, tolerance: Float = 0.0001) {
-    #expect(abs(value.x - expected.x) <= tolerance)
-    #expect(abs(value.y - expected.y) <= tolerance)
-}
-
 private func makeCheckerTexture(device: MTLDevice) throws -> MTLTexture {
     try makeRGBAInputTexture(device: device, width: 2, height: 2, bytes: Data([
         255, 0,   0,   255,
@@ -2496,86 +2491,6 @@ private extension WPEMetalRenderExecutorTests {
         #expect(texture.height == 192)
     }
 
-    @Test("Compose projected sample UV identity matches fullscreen copy coordinates")
-    func composeProjectedUVIdentityMatchesFullscreenCopyCoordinates() {
-        let uniforms = WPEObjectQuadUniforms(
-            centerAndSize: SIMD4<Float>(0, 0, 3840, 2160),
-            sceneSizeAndRotation: SIMD4<Float>(3840, 2160, 0, 0),
-            uvSignAndPadding: SIMD4<Float>(1, 1, 0, 0)
-        )
-
-        expectVector(WPEMetalRenderExecutor.composeLayerProjectedSampleUV(vertexID: 0, uniforms: uniforms), SIMD2<Float>(0, 1))
-        expectVector(WPEMetalRenderExecutor.composeLayerProjectedSampleUV(vertexID: 1, uniforms: uniforms), SIMD2<Float>(1, 1))
-        expectVector(WPEMetalRenderExecutor.composeLayerProjectedSampleUV(vertexID: 2, uniforms: uniforms), SIMD2<Float>(0, 0))
-        expectVector(WPEMetalRenderExecutor.composeLayerProjectedSampleUV(vertexID: 3, uniforms: uniforms), SIMD2<Float>(1, 0))
-    }
-
-    @Test("Compose projected sample UV includes rotation")
-    func composeProjectedUVIncludesRotation() {
-        let uniforms = WPEObjectQuadUniforms(
-            centerAndSize: SIMD4<Float>(0, 0, 20, 10),
-            sceneSizeAndRotation: SIMD4<Float>(100, 100, .pi / 2, 0),
-            uvSignAndPadding: SIMD4<Float>(1, 1, 0, 0)
-        )
-
-        let uv = WPEMetalRenderExecutor.composeLayerProjectedSampleUV(vertexID: 1, uniforms: uniforms)
-        expectVector(uv, SIMD2<Float>(0.55, 0.4))
-    }
-
-    @Test("Compose projected sample UV mirrors on negative scale")
-    func composeProjectedUVIncludesNegativeScaleMirroring() {
-        let uniforms = WPEObjectQuadUniforms(
-            centerAndSize: SIMD4<Float>(0, 0, 20, 10),
-            sceneSizeAndRotation: SIMD4<Float>(100, 100, 0, 0),
-            uvSignAndPadding: SIMD4<Float>(-1, 1, 0, 0)
-        )
-
-        let uv = WPEMetalRenderExecutor.composeLayerProjectedSampleUV(vertexID: 1, uniforms: uniforms)
-        expectVector(uv, SIMD2<Float>(0.4, 0.55))
-    }
-
-    @Test("Object quad uniforms preserve fractional origin and alignment offset for compose")
-    func objectQuadUniformsPreserveFractionalOriginAndAlignmentOffsetForCompose() throws {
-        let device = try #require(MTLCreateSystemDefaultDevice())
-        let executor = try WPEMetalRenderExecutor(device: device)
-        let source = try makeRGBAInputTexture(device: device, width: 20, height: 10, bytes: Data(repeating: 255, count: 20 * 10 * 4))
-        let layer = WPERenderLayer(
-            objectID: "fractional",
-            objectName: "Fractional",
-            imagePath: "models/util/composelayer.json",
-            materialPath: "materials/util/composelayer.json",
-            geometry: WPERenderLayerGeometry(
-                origin: SIMD3<Double>(0.25, 0.75, 0),
-                scale: SIMD3<Double>(1, 1, 1),
-                angles: SIMD3<Double>(0, 0, 0),
-                alignment: .topLeft,
-                size: CGSize(width: 20, height: 10),
-                alpha: 1,
-                color: SIMD3<Double>(1, 1, 1),
-                brightness: 1
-            ),
-            compositeA: "_rt_imageLayerComposite_fractional_a",
-            compositeB: "_rt_imageLayerComposite_fractional_b",
-            localFBOs: [],
-            passes: []
-        )
-
-        let uniforms = executor.objectQuadUniforms(
-            for: layer,
-            sceneSize: CGSize(width: 200, height: 100),
-            sourceTexture: source
-        )
-
-        expectVector(
-            SIMD2<Float>(uniforms.centerAndSize.x, uniforms.centerAndSize.y),
-            SIMD2<Float>(-40, 20)
-        )
-        expectVector(
-            WPEMetalRenderExecutor.composeLayerProjectedSampleUV(vertexID: 0, uniforms: uniforms),
-            SIMD2<Float>(0.25, 0.35)
-        )
-    }
-
     @Test("Composelayer CLEARALPHA clears the captured alpha")
     func composelayerClearAlphaClearsCapturedAlpha() throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
@@ -2646,46 +2561,6 @@ private extension WPEMetalRenderExecutorTests {
         let pixel = try readPixel(output, x: 1, y: 1)
 
         #expect(pixel.a <= 5)
-    }
-
-    @Test("Compose projected Metal functions compile")
-    func composeProjectedMetalFunctionsCompile() throws {
-        let device = try #require(MTLCreateSystemDefaultDevice())
-        let source = """
-        #include <metal_stdlib>
-        using namespace metal;
-        struct WPEObjectQuadUniforms { float4 centerAndSize; float4 sceneSizeAndRotation; float4 uvSignAndPadding; };
-        struct WPEComposeLayerUniforms { float4 flags; };
-        struct WPEComposeLayerVertexOut { float4 position [[position]]; float2 uv; float3 screenCoord; };
-        vertex WPEComposeLayerVertexOut wpe_compose_projected_vertex(uint vertexID [[vertex_id]], constant WPEObjectQuadUniforms& u [[buffer(1)]]) {
-            float2 positions[4] = { float2(-1.0,-1.0), float2(1.0,-1.0), float2(-1.0,1.0), float2(1.0,1.0) };
-            float2 uvs[4] = { float2(0.0,1.0), float2(1.0,1.0), float2(0.0,0.0), float2(1.0,0.0) };
-            float2 corners[4] = { float2(-0.5,-0.5), float2(0.5,-0.5), float2(-0.5,0.5), float2(0.5,0.5) };
-            float2 scaleSign = float2(u.uvSignAndPadding.x < 0.0 ? -1.0 : 1.0, u.uvSignAndPadding.y < 0.0 ? -1.0 : 1.0);
-            float2 localPixels = corners[vertexID] * scaleSign * u.centerAndSize.zw;
-            float c = cos(u.sceneSizeAndRotation.z);
-            float s = sin(u.sceneSizeAndRotation.z);
-            float2 rotatedCorner = float2(c * localPixels.x - s * localPixels.y, s * localPixels.x + c * localPixels.y);
-            float2 projected = (u.centerAndSize.xy + rotatedCorner) / (max(u.sceneSizeAndRotation.xy, float2(1.0)) * 0.5);
-            WPEComposeLayerVertexOut out;
-            out.position = float4(positions[vertexID], 0.0, 1.0);
-            out.uv = uvs[vertexID];
-            out.screenCoord = float3(projected.x, -projected.y, 1.0);
-            return out;
-        }
-        fragment half4 wpe_composelayer_fragment(WPEComposeLayerVertexOut in [[stage_in]], texture2d<half, access::sample> texture0 [[texture(0)]], constant WPEComposeLayerUniforms& uniforms [[buffer(0)]]) {
-            constexpr sampler s(address::clamp_to_edge, filter::linear);
-            float2 uv = in.screenCoord.xy / max(abs(in.screenCoord.z), 1e-6) * 0.5 + 0.5;
-            float4 color = float4(texture0.sample(s, uv));
-            if (uniforms.flags.x > 0.5) { color.a = 0.0; }
-            return half4(color);
-        }
-        """
-
-        let library = try device.makeLibrary(source: source, options: nil)
-
-        #expect(library.makeFunction(name: "wpe_compose_projected_vertex") != nil)
-        #expect(library.makeFunction(name: "wpe_composelayer_fragment") != nil)
     }
 
     @Test("Resolves previous to the most recent write to the same FBO target")

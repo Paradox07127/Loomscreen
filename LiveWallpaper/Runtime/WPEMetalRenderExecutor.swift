@@ -1076,10 +1076,10 @@ final class WPEMetalRenderExecutor {
         guard layer.geometry != .identity else { return false }
         switch pass.pass.target {
         case .scene:
-            // WPE compose/project utility layers render fullscreen and sample the
-            // captured frame by projected screen coordinate (wpe_compose_projected_vertex),
-            // never as a shrunken object quad — unless the per-scene legacy rollback
-            // gate restores the old object-quad behavior.
+            // WPE fullscreen/passthrough utility layers (compose/project/fullscreen)
+            // render fullscreen and copy the captured frame 1:1, never as a shrunken
+            // object quad — unless the per-scene legacy rollback gate restores the
+            // old object-quad behavior.
             if WPEMetalComposeLayerCompatibility.isSceneCaptureUtilityModelPath(layer.imagePath) {
                 return activeLegacyComposeLayer
             }
@@ -1130,43 +1130,6 @@ final class WPEMetalRenderExecutor {
                 0,
                 0
             )
-        )
-    }
-
-    /// CPU mirror of `wpe_compose_projected_vertex` followed by the composelayer
-    /// fragment's `screenCoord.xy / w * 0.5 + 0.5` sampling. Exposed for
-    /// deterministic unit tests of the projected sample-UV math.
-    static func composeLayerProjectedSampleUV(
-        vertexID: Int,
-        uniforms u: WPEObjectQuadUniforms
-    ) -> SIMD2<Float> {
-        let corners: [SIMD2<Float>] = [
-            SIMD2<Float>(-0.5, -0.5),
-            SIMD2<Float>(0.5, -0.5),
-            SIMD2<Float>(-0.5, 0.5),
-            SIMD2<Float>(0.5, 0.5)
-        ]
-        let index = min(max(vertexID, 0), 3)
-        let sign = SIMD2<Float>(
-            u.uvSignAndPadding.x < 0 ? -1 : 1,
-            u.uvSignAndPadding.y < 0 ? -1 : 1
-        )
-        let local = corners[index] * sign * SIMD2<Float>(u.centerAndSize.z, u.centerAndSize.w)
-        let rotation = u.sceneSizeAndRotation.z
-        let c = cos(rotation)
-        let s = sin(rotation)
-        let rotated = SIMD2<Float>(
-            c * local.x - s * local.y,
-            s * local.x + c * local.y
-        )
-        let halfScene = SIMD2<Float>(
-            max(u.sceneSizeAndRotation.x, 1) * 0.5,
-            max(u.sceneSizeAndRotation.y, 1) * 0.5
-        )
-        let projected = (SIMD2<Float>(u.centerAndSize.x, u.centerAndSize.y) + rotated) / halfScene
-        return SIMD2<Float>(
-            projected.x * 0.5 + 0.5,
-            -projected.y * 0.5 + 0.5
         )
     }
 
