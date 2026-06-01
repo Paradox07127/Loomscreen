@@ -17,6 +17,11 @@ struct WPEPreviewView: View {
     let imageURL: URL?
     let securityScopedBookmarkData: Data?
     let playbackMode: WPEPreviewPlaybackMode
+    /// Aspect ratio the tile is constrained to. `1` (the default) yields the
+    /// square gallery / history tile every existing call site expects; pass
+    /// `nil` to let the preview fill the parent's bounds (used by the 16:9
+    /// inspector preview cards) and crop with aspect-fill.
+    let aspectRatio: CGFloat?
 
     @State private var loadAttempt: Int = 0
     @State private var loadFailed: Bool = false
@@ -26,11 +31,13 @@ struct WPEPreviewView: View {
     init(
         imageURL: URL?,
         securityScopedBookmarkData: Data? = nil,
-        playbackMode: WPEPreviewPlaybackMode = .autoPlay
+        playbackMode: WPEPreviewPlaybackMode = .autoPlay,
+        aspectRatio: CGFloat? = 1
     ) {
         self.imageURL = imageURL
         self.securityScopedBookmarkData = securityScopedBookmarkData
         self.playbackMode = playbackMode
+        self.aspectRatio = aspectRatio
     }
 
     /// In `.autoPlay` the animation always runs; in `.hoverToPlay` it runs only
@@ -63,7 +70,7 @@ struct WPEPreviewView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .aspectRatio(1, contentMode: .fit)
+        .modifier(OptionalAspectRatio(aspectRatio))
         .clipped()
         .onHover { hovering in
             if playbackMode == .hoverToPlay { isHovering = hovering }
@@ -119,6 +126,27 @@ struct WPEPreviewView: View {
     private func retryLoad() {
         loadFailed = false
         loadAttempt &+= 1
+    }
+}
+
+/// Applies a fixed aspect ratio when one is provided, otherwise leaves the
+/// content free to fill its parent. The ratio is constant per call site, so
+/// the `if`/`else` branch never flips at runtime and the CALayer-backed image
+/// view keeps a stable identity. (Passing `nil` straight to
+/// `.aspectRatio(_:contentMode:)` would instead fall back to the view's
+/// intrinsic ratio — which this preview deliberately doesn't define.)
+private struct OptionalAspectRatio: ViewModifier {
+    let ratio: CGFloat?
+
+    init(_ ratio: CGFloat?) { self.ratio = ratio }
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if let ratio {
+            content.aspectRatio(ratio, contentMode: .fit)
+        } else {
+            content
+        }
     }
 }
 

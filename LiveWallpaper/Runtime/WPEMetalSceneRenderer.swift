@@ -125,10 +125,11 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
     private var lastHeartbeatTime: TimeInterval = -1
 
     var renderedTexture: MTLTexture? { outputTexture }
-    /// CGImage readback of the most recent rendered frame; populated at the
-    /// end of `performLoad()` so `WPESceneDetailView` can show a thumbnail
-    /// instead of falling into `.previewUnavailable`. Refreshed by `reload()`
-    /// and cleared by `cleanup()`.
+    /// CGImage read-back of the most recent rendered frame. Captured at the end
+    /// of `performLoad()` **only when scene-debug artifacts are enabled** — the
+    /// inspector now shows the project's preview GIF, so production skips the
+    /// synchronous GPU read-back. Refreshed by `reload()`, cleared by
+    /// `cleanup()`, and otherwise `nil`.
     var previewSnapshot: NSImage? { cachedSnapshot }
     var onProgress: (@MainActor (String) -> Void)?
     var resolutionDiagnostics: WPEResolutionDiagnosticsSnapshot {
@@ -442,9 +443,15 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
         capture?.stop()
 
         if let outputTexture {
-            cachedSnapshot = snapshotter.snapshot(from: outputTexture)
-            if let stats = WPEMetalTextureVisualStats.analyze(texture: outputTexture) {
-                WPESceneDebugArtifacts.shared.recordFirstFrameStats(stats)
+            // The snapshot + visual-stats read-backs exist only to feed the
+            // scene-debug artifacts (first-frame PNG + stats). The inspector
+            // now shows the project's preview GIF, so skip the synchronous GPU
+            // read-back entirely unless artifacts are actually being captured.
+            if WPESceneDebugArtifacts.shared.isEnabled {
+                cachedSnapshot = snapshotter.snapshot(from: outputTexture)
+                if let stats = WPEMetalTextureVisualStats.analyze(texture: outputTexture) {
+                    WPESceneDebugArtifacts.shared.recordFirstFrameStats(stats)
+                }
             }
             dumpOutputTextureIfRequested(outputTexture)
             #if DEBUG

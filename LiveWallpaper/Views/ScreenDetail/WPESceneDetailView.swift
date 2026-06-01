@@ -61,16 +61,11 @@ struct WPESceneDetailView: View {
             case .loading(let progress):
                 fallbackBackground
                 LiquidGlassSpinner(progressText: progress)
-            case .playingSnapshot(let image):
-                MetalSnapshotPreview(image: image)
+            case .ready:
+                fallbackBackground
             case .paused(let reason):
-                if let image = session?.sceneRenderer?.previewSnapshot {
-                    MetalSnapshotPreview(image: image)
-                        .overlay(pausedOverlay(reason: reason))
-                } else {
-                    fallbackBackground
-                        .overlay(pausedOverlay(reason: reason))
-                }
+                fallbackBackground
+                    .overlay(pausedOverlay(reason: reason))
             case .error(let fallbackReason):
                 fallbackBackground
                     .overlay(errorOverlay(reason: fallbackReason))
@@ -163,10 +158,16 @@ struct WPESceneDetailView: View {
         }
     }
 
+    /// The project's own preview GIF (Workshop scenes always ship one), filling
+    /// the card with aspect-fill crop. This replaces the former first-frame
+    /// Metal snapshot — the live `MTKView` already drives the desktop wallpaper,
+    /// so the inspector no longer pays for a synchronous GPU read-back just to
+    /// show a thumbnail.
     private var fallbackBackground: some View {
         WPEPreviewView(
             imageURL: previewURL,
-            securityScopedBookmarkData: origin.sourceFolderBookmark
+            securityScopedBookmarkData: origin.sourceFolderBookmark,
+            aspectRatio: nil
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .blur(radius: state.isLoading ? 6 : 0)
@@ -380,11 +381,7 @@ struct WPESceneDetailView: View {
             state = .paused(reason: reduceMotion ? .reduceMotion : .throttled)
             return
         }
-        if let snapshot = renderer.previewSnapshot {
-            state = .playingSnapshot(snapshot)
-            return
-        }
-        state = .paused(reason: .previewUnavailable)
+        state = .ready
     }
 
     private func mapToFallbackReason(_ error: SceneRenderingError) -> FallbackReason {
@@ -433,11 +430,11 @@ struct WPESceneDetailView: View {
 
     private var stateKey: Int {
         switch state {
-        case .idle:            return 0
-        case .loading:         return 1
-        case .playingSnapshot: return 2
-        case .paused:          return 3
-        case .error:           return 4
+        case .idle:    return 0
+        case .loading: return 1
+        case .ready:   return 2
+        case .paused:  return 3
+        case .error:   return 4
         }
     }
 
@@ -447,8 +444,8 @@ struct WPESceneDetailView: View {
             return String(localized: "Idle", defaultValue: "Idle", comment: "Scene renderer state.")
         case .loading:
             return String(localized: "Loading", defaultValue: "Loading", comment: "Scene renderer state.")
-        case .playingSnapshot:
-            return String(localized: "Static Preview", defaultValue: "Static Preview", comment: "Scene renderer state.")
+        case .ready:
+            return String(localized: "Playing", defaultValue: "Playing", comment: "Scene renderer state.")
         case .paused:
             return String(localized: "Paused", defaultValue: "Paused", comment: "Scene renderer state.")
         case .error:
@@ -462,8 +459,8 @@ struct WPESceneDetailView: View {
             return String(localized: "Idle", defaultValue: "Idle", comment: "Scene renderer accessibility state.")
         case .loading:
             return String(localized: "Loading scene assets", defaultValue: "Loading scene assets", comment: "Scene renderer accessibility state.")
-        case .playingSnapshot:
-            return String(localized: "Scene preview, static", defaultValue: "Scene preview, static", comment: "Scene renderer accessibility state.")
+        case .ready:
+            return String(localized: "Scene preview", defaultValue: "Scene preview", comment: "Scene renderer accessibility state.")
         case .paused(let reason):
             return String(localized: "Paused, \(reason.localizedLabel)", comment: "Scene renderer accessibility state. The placeholder is the pause reason.")
         case .error:
@@ -473,11 +470,11 @@ struct WPESceneDetailView: View {
 
     private var statusColor: Color {
         switch state {
-        case .playingSnapshot: return .blue
-        case .loading:         return .yellow
-        case .paused:          return .orange
-        case .error:           return .red
-        case .idle:            return .secondary
+        case .ready:   return .blue
+        case .loading: return .yellow
+        case .paused:  return .orange
+        case .error:   return .red
+        case .idle:    return .secondary
         }
     }
 
@@ -491,12 +488,10 @@ struct WPESceneDetailView: View {
 enum SceneRenderState: Equatable {
     case idle
     case loading(progress: String?)
-    /// Metal-backed scene with a CGImage readback. The renderer produces a
-    /// static thumbnail once load completes (the live `MTKView` continues
-    /// rendering into the wallpaper window itself); this case lets the
-    /// detail card show that thumbnail instead of falling through to
-    /// `.previewUnavailable`.
-    case playingSnapshot(NSImage)
+    /// Scene loaded and presenting. The live `MTKView` drives the desktop
+    /// wallpaper itself; the detail card shows the project's preview GIF so it
+    /// never has to read back a frame off the GPU.
+    case ready
     case paused(reason: PausedReason)
     case error(FallbackReason)
 
@@ -514,7 +509,7 @@ enum SceneRenderState: Equatable {
         switch (lhs, rhs) {
         case (.idle, .idle): return true
         case (.loading(let l), .loading(let r)): return l == r
-        case (.playingSnapshot(let l), .playingSnapshot(let r)): return l === r
+        case (.ready, .ready): return true
         case (.paused(let l), .paused(let r)): return l == r
         case (.error(let l), .error(let r)): return l == r
         default: return false
@@ -560,24 +555,4 @@ enum PausedReason: Equatable, Sendable {
     }
 }
 
-// MARK: - Metal snapshot preview
-
-/// Static thumbnail for the Metal scene backend. Honours the rendered
-/// texture's intrinsic aspect ratio (orthogonal projections are often
-/// square or portrait) and letterboxes inside the controlBackground fill
-/// so the card chrome stays consistent across all detail states.
-@MainActor
-private struct MetalSnapshotPreview: View {
-    let image: NSImage
-
-    var body: some View {
-        Image(nsImage: image)
-            .resizable()
-            .interpolation(.medium)
-            .aspectRatio(contentMode: .fit)
-            .background(Color(nsColor: .controlBackgroundColor))
-            .accessibilityLabel(Text("Scene preview snapshot"))
-            .transition(.opacity)
-    }
-}
 #endif

@@ -9,13 +9,38 @@ import SwiftUI
 ///
 /// Snapshots come from `WallpaperThumbnailService` so the inspector and
 /// the bookmark grid share the same render pass + NSCache entry per source.
+///
+/// Wallpaper Engine *web* projects are different: they ship a `preview.gif`
+/// (or jpg/png) alongside `project.json`, so when `wpePreviewURL` is set we
+/// render that asset directly and skip the expensive WKWebView snapshot pass
+/// entirely. Plain HTML wallpapers (no WPE origin) still capture a first frame.
 struct HTMLPreviewSection: View {
     let source: HTMLSource?
     let config: HTMLConfig
+    /// Non-nil only for Wallpaper Engine web projects that ship a preview
+    /// asset. Always `nil` in Lite builds (WPE is Pro-only).
+    let wpePreviewURL: URL?
+    let wpePreviewBookmark: Data?
 
     @State private var snapshot: NSImage?
     @State private var isLoading = false
     @State private var loadFailed = false
+
+    init(
+        source: HTMLSource?,
+        config: HTMLConfig,
+        wpePreviewURL: URL? = nil,
+        wpePreviewBookmark: Data? = nil
+    ) {
+        self.source = source
+        self.config = config
+        self.wpePreviewURL = wpePreviewURL
+        self.wpePreviewBookmark = wpePreviewBookmark
+    }
+
+    /// Whether the card shows the WPE preview asset instead of a WKWebView
+    /// snapshot. When true, the snapshot pipeline and refresh button stand down.
+    private var showsWPEPreview: Bool { wpePreviewURL != nil }
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -32,8 +57,10 @@ struct HTMLPreviewSection: View {
             .padding(14)
             .allowsHitTesting(false)
 
-            refreshButton
-                .padding(10)
+            if !showsWPEPreview {
+                refreshButton
+                    .padding(10)
+            }
         }
         .aspectRatio(16/9, contentMode: .fit)
         .frame(maxWidth: .infinity)
@@ -47,6 +74,31 @@ struct HTMLPreviewSection: View {
 
     @ViewBuilder
     private var cardBody: some View {
+        if let wpePreviewURL {
+            wpePreviewCard(url: wpePreviewURL)
+        } else {
+            snapshotCard
+        }
+    }
+
+    /// WPE web project: render the shipped preview GIF/jpg/png, aspect-filling
+    /// the 16:9 card. Guarded for Lite since `WPEPreviewView` is Pro-only — but
+    /// `wpePreviewURL` is always `nil` there anyway, so this branch never runs.
+    @ViewBuilder
+    private func wpePreviewCard(url: URL) -> some View {
+        #if !LITE_BUILD
+        WPEPreviewView(
+            imageURL: url,
+            securityScopedBookmarkData: wpePreviewBookmark,
+            aspectRatio: nil
+        )
+        #else
+        snapshotCard
+        #endif
+    }
+
+    @ViewBuilder
+    private var snapshotCard: some View {
         if let snapshot {
             Image(nsImage: snapshot)
                 .resizable()
@@ -106,6 +158,9 @@ struct HTMLPreviewSection: View {
     }
 
     private func startLoadIfNeeded(force: Bool = false) {
+        // WPE web projects render their shipped preview asset — no WKWebView
+        // snapshot needed, which is the whole point of this path.
+        guard !showsWPEPreview else { return }
         guard let source, let key = cacheKey else { return }
         if !force, let cached = WallpaperThumbnailService.shared.cachedThumbnail(forKey: key) {
             snapshot = cached

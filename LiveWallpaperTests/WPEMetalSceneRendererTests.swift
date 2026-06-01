@@ -192,6 +192,15 @@ struct WPEMetalSceneRendererTests {
         let fixture = try MetalSceneFixture.solidColorScene()
         defer { fixture.cleanup() }
 
+        // The first-frame snapshot is now a scene-debug artifact: the renderer
+        // only pays for the GPU read-back when artifacts are enabled (the
+        // inspector otherwise shows the project's preview GIF). Force it on so
+        // this test exercises the snapshot path deterministically.
+        let key = WPESceneDebugArtifacts.defaultsKey
+        let previous = UserDefaults.standard.object(forKey: key)
+        UserDefaults.standard.set(true, forKey: key)
+        defer { UserDefaults.standard.set(previous, forKey: key) }
+
         let renderer = try WPEMetalSceneRenderer(
             descriptor: fixture.descriptor,
             cacheRootURL: fixture.root,

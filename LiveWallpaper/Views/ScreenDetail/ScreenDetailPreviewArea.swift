@@ -99,7 +99,12 @@ struct ScreenDetailPreviewArea: View {
     private var htmlContent: some View {
         VStack(spacing: 16) {
             if featureCatalog.isEnabled(.inspectorPreview), draft.htmlSource != nil {
-                HTMLPreviewSection(source: draft.htmlSource, config: draft.htmlConfig)
+                HTMLPreviewSection(
+                    source: draft.htmlSource,
+                    config: draft.htmlConfig,
+                    wpePreviewURL: wpeWebPreviewURL,
+                    wpePreviewBookmark: draft.wpeOrigin?.sourceFolderBookmark
+                )
             }
             HTMLSourceSection(
                 screen: screen,
@@ -108,6 +113,17 @@ struct ScreenDetailPreviewArea: View {
             )
         }
         .padding(24)
+    }
+
+    /// A Wallpaper Engine web project's shipped preview asset, when the selected
+    /// HTML wallpaper came from one. `nil` for plain HTML and in Lite builds
+    /// (WPE is Pro-only), so those keep capturing a first-frame snapshot.
+    private var wpeWebPreviewURL: URL? {
+        #if !LITE_BUILD
+        return draft.wpeOrigin?.sourcePreviewURL
+        #else
+        return nil
+        #endif
     }
 
     private var videoCommandBar: some View {
