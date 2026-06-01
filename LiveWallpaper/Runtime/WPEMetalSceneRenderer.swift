@@ -519,10 +519,16 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
         dumpTextureToPNG(composite, basename: "composite-\(tag)")
     }
 
-    private func dumpTextureToPNG(_ texture: MTLTexture, basename: String) {
-        guard texture.pixelFormat == .rgba8Unorm || texture.pixelFormat == .rgba8Unorm_srgb else {
+    private func dumpTextureToPNG(_ rawTexture: MTLTexture, basename: String) {
+        let texture: MTLTexture
+        if rawTexture.pixelFormat == .rgba8Unorm || rawTexture.pixelFormat == .rgba8Unorm_srgb {
+            texture = rawTexture
+        } else if let decoded = executor.debugDecodeToRGBA(rawTexture) {
+            // BC/DXT/RG88/R8 etc. — decode by sampling into rgba8 so we can view it.
+            texture = decoded
+        } else {
             Logger.warning(
-                "[WPEMetalCaptureScene] texture dump: unsupported pixel format \(texture.pixelFormat.rawValue) for \(basename)",
+                "[WPEMetalCaptureScene] texture dump: unsupported pixel format \(rawTexture.pixelFormat.rawValue) for \(basename)",
                 category: .wpeRender
             )
             return

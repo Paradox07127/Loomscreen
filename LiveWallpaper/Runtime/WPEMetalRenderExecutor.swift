@@ -1254,6 +1254,39 @@ final class WPEMetalRenderExecutor {
     }
     #endif
 
+    #if DEBUG
+    /// Decode any sampleable texture (incl. BC/DXT, RG88, R8) into rgba8 by
+    /// sampling it through a fullscreen copy, so the PNG dumper can visualize
+    /// compressed character/scene textures that the raw byte dumper skips.
+    func debugDecodeToRGBA(_ source: MTLTexture) -> MTLTexture? {
+        guard let output = try? makeOutputTexture(size: CGSize(width: source.width, height: source.height)),
+              let commandBuffer = commandQueue.makeCommandBuffer() else {
+            return nil
+        }
+        let descriptor = MTLRenderPassDescriptor()
+        descriptor.colorAttachments[0].texture = output
+        descriptor.colorAttachments[0].loadAction = .clear
+        descriptor.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0)
+        descriptor.colorAttachments[0].storeAction = .store
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor),
+              let pipeline = try? renderPipeline(
+                  vertexName: "wpe_fullscreen_vertex",
+                  fragmentName: "wpe_util_copy_fragment",
+                  blendMode: "disabled",
+                  colorPixelFormat: output.pixelFormat
+              ) else {
+            return nil
+        }
+        encoder.setRenderPipelineState(pipeline)
+        encoder.setFragmentTexture(source, index: 0)
+        encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
+        encoder.endEncoding()
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()
+        return output
+    }
+    #endif
+
     private func makeOutputTexture(size: CGSize) throws -> MTLTexture {
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: Self.outputPixelFormat,
