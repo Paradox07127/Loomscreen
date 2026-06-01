@@ -68,28 +68,12 @@ struct WPESceneSectionStateTests {
         #expect(!FallbackReason.texUnsupportedFormat(code: 8).isActionable)
     }
 
-    @Test("paused state preserves the reason")
-    func pausedKeepsReason() {
-        let reduceMotion = SceneRenderState.paused(reason: .reduceMotion)
-        let throttled = SceneRenderState.paused(reason: .throttled)
-        #expect(reduceMotion != throttled)
-        #expect(reduceMotion == SceneRenderState.paused(reason: .reduceMotion))
-    }
-
     @Test("error state carries the FallbackReason")
     func errorKeepsFallbackReason() {
         let parse = SceneRenderState.error(.sceneParseFailed("boom"))
         let resource = SceneRenderState.error(.sceneResourceMissing)
         #expect(parse != resource)
         #expect(parse == SceneRenderState.error(.sceneParseFailed("boom")))
-    }
-
-    @Test("PausedReason labels expose user-visible text")
-    func pausedReasonLabels() {
-        #expect(PausedReason.reduceMotion.label == "Reduce Motion")
-        #expect(PausedReason.throttled.label == "Throttled")
-        #expect(PausedReason.suspended.label == "Suspended")
-        #expect(PausedReason.previewUnavailable.label == "Preview Unavailable")
     }
 
     @MainActor

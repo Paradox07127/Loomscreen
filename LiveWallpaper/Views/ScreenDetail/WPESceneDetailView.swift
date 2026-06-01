@@ -63,9 +63,6 @@ struct WPESceneDetailView: View {
                 LiquidGlassSpinner(progressText: progress)
             case .ready:
                 fallbackBackground
-            case .paused(let reason):
-                fallbackBackground
-                    .overlay(pausedOverlay(reason: reason))
             case .error(let fallbackReason):
                 fallbackBackground
                     .overlay(errorOverlay(reason: fallbackReason))
@@ -76,21 +73,6 @@ struct WPESceneDetailView: View {
         .frame(maxWidth: .infinity)
         .frame(minHeight: 260)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-
-    private func pausedOverlay(reason: PausedReason) -> some View {
-        ZStack {
-            Color.black.opacity(0.35)
-            VStack(spacing: 8) {
-                Image(systemName: "pause.circle.fill")
-                    .font(.largeTitle)
-                    .foregroundStyle(.white.opacity(0.85))
-                Text(reason.labelKey)
-                    .font(.headline)
-                    .foregroundStyle(.white)
-            }
-        }
-        .allowsHitTesting(false)
     }
 
     private func errorOverlay(reason: FallbackReason) -> some View {
@@ -376,11 +358,10 @@ struct WPESceneDetailView: View {
             state = .loading(progress: session.loadProgress)
             return
         }
+        // Still suspend the *live* renderer under Reduce Motion; the inspector
+        // itself just shows the project's preview GIF (which holds a static
+        // poster under Reduce Motion), so there's no separate paused state.
         renderer.applyPerformanceProfile(reduceMotion ? .suspended : .quality)
-        if reduceMotion || session.isThrottled {
-            state = .paused(reason: reduceMotion ? .reduceMotion : .throttled)
-            return
-        }
         state = .ready
     }
 
@@ -433,8 +414,7 @@ struct WPESceneDetailView: View {
         case .idle:    return 0
         case .loading: return 1
         case .ready:   return 2
-        case .paused:  return 3
-        case .error:   return 4
+        case .error:   return 3
         }
     }
 
@@ -446,8 +426,6 @@ struct WPESceneDetailView: View {
             return String(localized: "Loading", defaultValue: "Loading", comment: "Scene renderer state.")
         case .ready:
             return String(localized: "Playing", defaultValue: "Playing", comment: "Scene renderer state.")
-        case .paused:
-            return String(localized: "Paused", defaultValue: "Paused", comment: "Scene renderer state.")
         case .error:
             return String(localized: "Error", defaultValue: "Error", comment: "Scene renderer state.")
         }
@@ -461,8 +439,6 @@ struct WPESceneDetailView: View {
             return String(localized: "Loading scene assets", defaultValue: "Loading scene assets", comment: "Scene renderer accessibility state.")
         case .ready:
             return String(localized: "Scene preview", defaultValue: "Scene preview", comment: "Scene renderer accessibility state.")
-        case .paused(let reason):
-            return String(localized: "Paused, \(reason.localizedLabel)", comment: "Scene renderer accessibility state. The placeholder is the pause reason.")
         case .error:
             return String(localized: "Scene cannot be played", defaultValue: "Scene cannot be played", comment: "Scene renderer accessibility state.")
         }
@@ -472,7 +448,6 @@ struct WPESceneDetailView: View {
         switch state {
         case .ready:   return .blue
         case .loading: return .yellow
-        case .paused:  return .orange
         case .error:   return .red
         case .idle:    return .secondary
         }
@@ -492,7 +467,6 @@ enum SceneRenderState: Equatable {
     /// wallpaper itself; the detail card shows the project's preview GIF so it
     /// never has to read back a frame off the GPU.
     case ready
-    case paused(reason: PausedReason)
     case error(FallbackReason)
 
     /// Convenience for "loading without specific progress text" — keeps
@@ -510,47 +484,8 @@ enum SceneRenderState: Equatable {
         case (.idle, .idle): return true
         case (.loading(let l), .loading(let r)): return l == r
         case (.ready, .ready): return true
-        case (.paused(let l), .paused(let r)): return l == r
         case (.error(let l), .error(let r)): return l == r
         default: return false
-        }
-    }
-}
-
-enum PausedReason: Equatable, Sendable {
-    case reduceMotion
-    case throttled
-    case suspended
-    case previewUnavailable
-
-    var label: String {
-        switch self {
-        case .reduceMotion: return "Reduce Motion"
-        case .throttled:    return "Throttled"
-        case .suspended:    return "Suspended"
-        case .previewUnavailable: return "Preview Unavailable"
-        }
-    }
-
-    var labelKey: LocalizedStringKey {
-        switch self {
-        case .reduceMotion: return "Reduce Motion"
-        case .throttled:    return "Throttled"
-        case .suspended:    return "Suspended"
-        case .previewUnavailable: return "Preview Unavailable"
-        }
-    }
-
-    var localizedLabel: String {
-        switch self {
-        case .reduceMotion:
-            return String(localized: "Reduce Motion", defaultValue: "Reduce Motion", comment: "Scene pause reason.")
-        case .throttled:
-            return String(localized: "Throttled", defaultValue: "Throttled", comment: "Scene pause reason.")
-        case .suspended:
-            return String(localized: "Suspended", defaultValue: "Suspended", comment: "Scene pause reason.")
-        case .previewUnavailable:
-            return String(localized: "Preview Unavailable", defaultValue: "Preview Unavailable", comment: "Scene pause reason.")
         }
     }
 }
