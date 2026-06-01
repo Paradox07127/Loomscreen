@@ -204,6 +204,7 @@ enum WPEWaterWavesDebugMode: Float, CaseIterable, Identifiable {
     case mask = 1
     case overlay = 2
     case displacement = 3
+    case solid = 4
 
     static let defaultsKey = "WPEWaterWavesDebugMode"
     var id: Float { rawValue }
@@ -214,6 +215,7 @@ enum WPEWaterWavesDebugMode: Float, CaseIterable, Identifiable {
         case .mask: return "mask"
         case .overlay: return "overlay"
         case .displacement: return "displacement"
+        case .solid: return "solid"
         }
     }
 
@@ -223,6 +225,7 @@ enum WPEWaterWavesDebugMode: Float, CaseIterable, Identifiable {
         case .mask: return "Mask (grayscale)"
         case .overlay: return "Mask overlay (red on character)"
         case .displacement: return "Displacement heatmap"
+        case .solid: return "Pass test (solid magenta)"
         }
     }
 
@@ -231,6 +234,7 @@ enum WPEWaterWavesDebugMode: Float, CaseIterable, Identifiable {
         case WPEWaterWavesDebugMode.mask.storageValue: self = .mask
         case WPEWaterWavesDebugMode.overlay.storageValue: self = .overlay
         case WPEWaterWavesDebugMode.displacement.storageValue: self = .displacement
+        case WPEWaterWavesDebugMode.solid.storageValue: self = .solid
         default: self = .off
         }
     }

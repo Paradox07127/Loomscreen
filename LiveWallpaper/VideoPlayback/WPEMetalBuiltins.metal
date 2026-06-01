@@ -724,6 +724,12 @@ fragment half4 wpe_effect_waterwaves_fragment(
 
     // Developer Tools "Waterwaves debug" visualizations (0 in production).
     if (uniforms.debugMode > 0.5) {
+        if (uniforms.debugMode > 3.5) {
+            // Plumbing test: paint the whole pass solid magenta, ignoring mask/source.
+            // If this shows on the character, the waterwaves pass runs live and the flag
+            // reaches the renderer (so any "no motion" is mask alignment, not plumbing).
+            return half4(1.0h, 0.0h, 1.0h, 1.0h);
+        }
         if (uniforms.debugMode < 1.5) {
             // Mask as grayscale — shows WHERE the effect is allowed to act (and reveals
             // any vertical flip vs the character).
