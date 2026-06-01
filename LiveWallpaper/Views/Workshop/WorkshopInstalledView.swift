@@ -150,18 +150,26 @@ struct WorkshopInstalledView: View {
                     resultCount: visibleEntries.count,
                     totalCount: entries.count
                 ) {
-                    typeChipRow
+                    // Type chips on the left; Sort pinned to the right edge —
+                    // mirrors the online ribbon. The full-width HStack lets the
+                    // inner Spacer push Sort flush right.
+                    HStack(spacing: DesignTokens.LibraryFilterBar.contentSpacing) {
+                        typeChipRow
 
-                    Picker("Sort", selection: $sortOrder) {
-                        ForEach(WPELibrarySortOrder.allCases) { order in
-                            Text(verbatim: order.title).tag(order)
+                        Spacer(minLength: 0)
+
+                        Picker("Sort", selection: $sortOrder) {
+                            ForEach(WPELibrarySortOrder.allCases) { order in
+                                Text(verbatim: order.title).tag(order)
+                            }
                         }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .controlSize(.small)
+                        .fixedSize()
+                        .help(Text("Sort the library"))
                     }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .controlSize(.small)
-                    .frame(width: 132)
-                    .help(Text("Sort the library"))
+                    .frame(maxWidth: .infinity)
                 }
 
                 if importCoordinator.isImporting {
@@ -835,9 +843,6 @@ private struct WPEInstalledInspectorContent: View {
                     applySection
 
                     infoSection
-
-                    Divider()
-                    actionsSection
                 }
                 .padding(.horizontal, DesignTokens.Spacing.lg)
                 .padding(.bottom, DesignTokens.Spacing.lg)
@@ -869,26 +874,66 @@ private struct WPEInstalledInspectorContent: View {
         .padding([.horizontal, .top], DesignTokens.Spacing.lg)
     }
 
-    /// Size on disk · date added — both local (no API). Size appears once the
+    /// Size on disk · date added on the left; bookmark + open-on-Steam as
+    /// borderless icons on the right. All local (no API). Size appears once the
     /// off-main folder scan lands; the date is always available.
     private var metaRow: some View {
         HStack(spacing: DesignTokens.Spacing.sm) {
-            if let bytes = localInfo?.sizeBytes, bytes > 0 {
+            Group {
+                if let bytes = localInfo?.sizeBytes, bytes > 0 {
+                    Label {
+                        Text(verbatim: Self.byteFormatter.string(fromByteCount: bytes))
+                    } icon: {
+                        Image(systemName: "internaldrive")
+                    }
+                }
                 Label {
-                    Text(verbatim: Self.byteFormatter.string(fromByteCount: bytes))
+                    Text(entry.importedAt, format: .dateTime.year().month().day())
                 } icon: {
-                    Image(systemName: "internaldrive")
+                    Image(systemName: "calendar")
                 }
             }
-            Label {
-                Text(entry.importedAt, format: .dateTime.year().month().day())
-            } icon: {
-                Image(systemName: "calendar")
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .labelStyle(.titleAndIcon)
+
+            Spacer(minLength: DesignTokens.Spacing.sm)
+
+            if canBookmark || isBookmarked {
+                plainIconButton(
+                    isBookmarked ? "Remove Bookmark" : "Add Bookmark",
+                    systemImage: isBookmarked ? "bookmark.fill" : "bookmark",
+                    tint: isBookmarked ? AnyShapeStyle(.yellow) : AnyShapeStyle(.secondary),
+                    action: onToggleBookmark
+                )
+            }
+            if let url = steamURL {
+                plainIconButton("Steam", systemImage: "arrow.up.forward.app", tint: AnyShapeStyle(.secondary)) {
+                    openURL(url)
+                }
             }
         }
-        .font(.system(size: 11))
-        .foregroundStyle(.secondary)
-        .labelStyle(.titleAndIcon)
+    }
+
+    /// Borderless icon button — no background frame, generous hit area, keeps
+    /// the title as tooltip + VoiceOver label.
+    private func plainIconButton(
+        _ titleKey: LocalizedStringKey,
+        systemImage: String,
+        tint: AnyShapeStyle,
+        size: CGFloat = 13,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: size))
+                .foregroundStyle(tint)
+                .frame(minWidth: 22, minHeight: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(Text(titleKey))
+        .accessibilityLabel(Text(titleKey))
     }
 
     private static let byteFormatter: ByteCountFormatter = {
@@ -990,82 +1035,52 @@ private struct WPEInstalledInspectorContent: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
-    @ViewBuilder
+    /// Apply (fills) on the left; Show in Finder + Remove as borderless icons
+    /// right-aligned on the same row. The trash is red to flag the destructive
+    /// action.
     private var applySection: some View {
-        VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
-            if screens.isEmpty {
-                Text("Open a display first, then apply.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else if screens.count == 1, let only = screens.first {
-                // Single display: name it in the label ("Apply to Studio Display")
-                // so the one button reads unambiguously.
-                Button { onApply(only) } label: {
-                    Label("Apply to \(only.name)", systemImage: "play.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.regular)
-            } else {
-                // One Apply button → a popover to pick a display or all (same
-                // pattern as the online inspector). Drag-to-apply is still there.
-                Button { showingApplyPopover = true } label: {
-                    Label("Apply", systemImage: "play.fill").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.regular)
-                .popover(isPresented: $showingApplyPopover, arrowEdge: .bottom) {
-                    WorkshopApplyTargetPicker(
-                        screens: screens,
-                        activeScreenIDs: activeScreenIDs,
-                        onPick: { onApply($0); showingApplyPopover = false },
-                        onAll: { onApplyToAll(); showingApplyPopover = false }
-                    )
-                }
-            }
+        HStack(spacing: DesignTokens.Spacing.sm) {
+            applyControl
+            plainIconButton("Show in Finder", systemImage: "folder", tint: AnyShapeStyle(.secondary), size: 15, action: onShowInFinder)
+            plainIconButton("Remove", systemImage: "trash", tint: AnyShapeStyle(.red), size: 15, action: onDelete)
         }
     }
 
-    /// Icon-only action row: bookmark (when allowed) · Finder · Steam · Remove.
-    /// Each keeps its title as the VoiceOver label (`.iconOnly` retains it) and
-    /// a hover tooltip, so dropping the visible text costs no clarity.
-    private var actionsSection: some View {
-        HStack(spacing: DesignTokens.Spacing.sm) {
-            if canBookmark || isBookmarked {
-                actionButton(
-                    titleKey: isBookmarked ? "Remove Bookmark" : "Add Bookmark",
-                    systemImage: isBookmarked ? "bookmark.fill" : "bookmark",
-                    tint: isBookmarked ? .yellow : nil,
-                    action: onToggleBookmark
+    @ViewBuilder
+    private var applyControl: some View {
+        if screens.isEmpty {
+            Button {} label: {
+                Label("Apply", systemImage: "play.fill").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.regular)
+            .disabled(true)
+            .help(Text("Open a display first, then apply"))
+        } else if screens.count == 1, let only = screens.first {
+            // Single display: name it in the label ("Apply to Studio Display").
+            Button { onApply(only) } label: {
+                Label("Apply to \(only.name)", systemImage: "play.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.regular)
+        } else {
+            // One Apply button → a popover to pick a display or all (same
+            // pattern as the online inspector). Drag-to-apply is still there.
+            Button { showingApplyPopover = true } label: {
+                Label("Apply", systemImage: "play.fill").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.regular)
+            .popover(isPresented: $showingApplyPopover, arrowEdge: .bottom) {
+                WorkshopApplyTargetPicker(
+                    screens: screens,
+                    activeScreenIDs: activeScreenIDs,
+                    onPick: { onApply($0); showingApplyPopover = false },
+                    onAll: { onApplyToAll(); showingApplyPopover = false }
                 )
             }
-
-            actionButton(titleKey: "Show in Finder", systemImage: "folder", action: onShowInFinder)
-
-            if let url = steamURL {
-                actionButton(titleKey: "Steam", systemImage: "arrow.up.forward.app") { openURL(url) }
-            }
-
-            actionButton(titleKey: "Remove", systemImage: "trash", role: .destructive, action: onDelete)
         }
-    }
-
-    private func actionButton(
-        titleKey: LocalizedStringKey,
-        systemImage: String,
-        role: ButtonRole? = nil,
-        tint: Color? = nil,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(role: role, action: action) {
-            Label(titleKey, systemImage: systemImage)
-                .labelStyle(.iconOnly)
-                .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.large)
-        .tint(tint)
-        .help(Text(titleKey))
     }
 
     /// Original WPE info pulled from the local `project.json` (no API): the
@@ -1080,58 +1095,6 @@ private struct WPEInstalledInspectorContent: View {
             if !info.tags.isEmpty {
                 tagsSection(info.tags)
             }
-            if !info.properties.isEmpty {
-                customizationSection(info.properties)
-            }
-        }
-    }
-
-    /// Read-only list of the author-defined adjustable settings (colors /
-    /// sliders / dropdowns …). The live editor is per-display, in each screen's
-    /// settings — surfacing the list here just sets expectations.
-    private func customizationSection(_ properties: [WPEPropertySummary]) -> some View {
-        let shown = properties.prefix(8)
-        let remaining = properties.count - shown.count
-        return VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
-            HStack(spacing: 6) {
-                Text("Customizable").font(.headline)
-                Text(verbatim: "\(properties.count)")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 1)
-                    .background(Color.primary.opacity(0.06), in: Capsule())
-            }
-            ForEach(shown) { property in
-                HStack(spacing: 6) {
-                    Image(systemName: property.kind.systemImage)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tint)
-                        .frame(width: 14)
-                        .accessibilityHidden(true)
-                    Text(verbatim: property.label)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-            }
-            if remaining > 0 {
-                HStack(spacing: 6) {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.tertiary)
-                        .frame(width: 14)
-                        .accessibilityHidden(true)
-                    Text(verbatim: "+\(remaining)")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            Text("Adjust these from a display’s settings after applying.")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -1227,47 +1190,9 @@ private struct WPELocalProjectInfo: Sendable, Equatable {
     var contentRating: String?
     /// On-disk footprint of the item's folder (recursive sum of file sizes).
     var sizeBytes: Int64?
-    /// Author-defined adjustable properties (colors / sliders / dropdowns …)
-    /// parsed from the local project.json schema — shown read-only here.
-    var properties: [WPEPropertySummary]
 
     var hasContent: Bool {
-        (cleanedDescription?.isEmpty == false) || !tags.isEmpty || !properties.isEmpty
-    }
-}
-
-/// A single author-defined adjustable property, summarized for read-only
-/// display (the live editor lives per-display in the screen's settings).
-private struct WPEPropertySummary: Sendable, Equatable, Identifiable {
-    let id: String
-    let label: String
-    let kind: Kind
-
-    enum Kind: Sendable {
-        case color, slider, dropdown, toggle, text, file
-
-        init?(_ type: WallpaperEngineProjectPropertySchema.PropertyType) {
-            switch type {
-            case .color: self = .color
-            case .slider: self = .slider
-            case .combo: self = .dropdown
-            case .bool: self = .toggle
-            case .textinput: self = .text
-            case .file, .directory: self = .file
-            case .text, .group, .unsupported: return nil
-            }
-        }
-
-        var systemImage: String {
-            switch self {
-            case .color: return "paintpalette"
-            case .slider: return "slider.horizontal.3"
-            case .dropdown: return "chevron.up.chevron.down"
-            case .toggle: return "switch.2"
-            case .text: return "textformat"
-            case .file: return "doc"
-            }
-        }
+        (cleanedDescription?.isEmpty == false) || !tags.isEmpty
     }
 }
 
@@ -1295,17 +1220,16 @@ private func loadWPELocalProjectInfo(for entry: WPEHistoryEntry) async -> WPELoc
         let didStart = folder.startAccessingSecurityScopedResource()
         defer { if didStart { folder.stopAccessingSecurityScopedResource() } }
 
-        // Footprint + adjustable-property schema are independent of the manifest
-        // text fields, so compute them either way.
+        // Footprint is independent of the manifest text fields, so compute it
+        // either way.
         let size = directorySize(of: folder)
-        let properties = loadEditableProperties(folder: folder)
 
         let manifestURL = folder.appendingPathComponent("project.json")
         guard let data = try? Data(contentsOf: manifestURL),
               let manifest = try? JSONDecoder().decode(WPEProjectDisplayManifest.self, from: data)
         else {
-            return (size > 0 || !properties.isEmpty)
-                ? WPELocalProjectInfo(cleanedDescription: nil, tags: [], contentRating: nil, sizeBytes: size > 0 ? size : nil, properties: properties)
+            return size > 0
+                ? WPELocalProjectInfo(cleanedDescription: nil, tags: [], contentRating: nil, sizeBytes: size)
                 : nil
         }
 
@@ -1313,23 +1237,9 @@ private func loadWPELocalProjectInfo(for entry: WPEHistoryEntry) async -> WPELoc
             cleanedDescription: manifest.description.flatMap(strippedWPEMarkup),
             tags: manifest.tags ?? [],
             contentRating: manifest.contentrating?.trimmingCharacters(in: .whitespacesAndNewlines),
-            sizeBytes: size > 0 ? size : nil,
-            properties: properties
+            sizeBytes: size > 0 ? size : nil
         )
     }.value
-}
-
-/// Parse the local project.json property schema and reduce it to the editable
-/// controls we surface (purely local — no Steam API, no renderer).
-private func loadEditableProperties(folder: URL) -> [WPEPropertySummary] {
-    guard let schema = try? WallpaperEngineProjectPropertySchema.read(from: folder, includeSchemeColor: true) else {
-        return []
-    }
-    return schema.properties.compactMap { property in
-        guard let kind = WPEPropertySummary.Kind(property.type) else { return nil }
-        let trimmed = property.displayText.trimmingCharacters(in: .whitespacesAndNewlines)
-        return WPEPropertySummary(id: property.key, label: trimmed.isEmpty ? property.key : trimmed, kind: kind)
-    }
 }
 
 /// Recursively sum the byte size of every regular file under `folder`. Reads

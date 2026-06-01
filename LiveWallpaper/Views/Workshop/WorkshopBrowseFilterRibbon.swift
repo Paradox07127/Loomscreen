@@ -104,6 +104,7 @@ struct WorkshopBrowseFilterRibbon: View {
                 Text(option.title).tag(option)
             }
         }
+        .labelsHidden()
         .pickerStyle(.menu)
         .controlSize(.small)
         .fixedSize()
