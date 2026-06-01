@@ -14,6 +14,16 @@ struct WallpaperEnginePackage: Sendable, Equatable {
     let entries: [Entry]
     let dataStart: UInt64
 
+    /// Max bytes for an entry name (a full relative path in UTF-8). The old cap
+    /// of 255 wrongly rejected legitimate packages: a path with multi-byte CJK
+    /// components easily exceeds 255 *bytes* (e.g. a `sounds/<long Chinese name>`
+    /// path). Allow a generous bound while still rejecting wildly misaligned reads.
+    static let maxEntryNameBytes: UInt32 = 1024
+    /// Per-component cap when writing to disk. APFS rejects a single path
+    /// component over 255 UTF-8 bytes, so over-long components are shortened on
+    /// extraction (see `filesystemSafeEntryName`).
+    static let maxComponentBytes = 250
+
     static func parseIndex(of data: Data) throws -> Self {
         var cursor = 0
         let magicLength = try data.wpeReadU32(cursor: &cursor)
@@ -37,7 +47,7 @@ struct WallpaperEnginePackage: Sendable, Equatable {
 
         for index in 0..<Int(entryCount) {
             let nameLength = try data.wpeReadU32(cursor: &cursor)
-            guard nameLength >= 1 && nameLength <= 255 else {
+            guard nameLength >= 1 && nameLength <= Self.maxEntryNameBytes else {
                 throw WPEPackageError.invalidEntryName(index: index)
             }
 
@@ -101,7 +111,7 @@ struct WallpaperEnginePackage: Sendable, Equatable {
         for index in 0..<Int(entryCount) {
             try Self.streamAppend(into: &headerData, from: handle, count: 4)
             let nameLength = try headerData.wpeReadU32(cursor: &cursor)
-            guard nameLength >= 1 && nameLength <= 255 else {
+            guard nameLength >= 1 && nameLength <= Self.maxEntryNameBytes else {
                 throw WPEPackageError.invalidEntryName(index: index)
             }
 
@@ -166,7 +176,7 @@ struct WallpaperEnginePackage: Sendable, Equatable {
         do {
             let chunkSize = 1 << 20
             for entry in entries {
-                let targetURL = inflightURL.appendingPathComponent(entry.name)
+                let targetURL = inflightURL.appendingPathComponent(Self.filesystemSafeEntryName(entry.name))
                 let standardizedTarget = targetURL.standardizedFileURL
                 guard standardizedTarget.path.hasPrefix(inflightPath + "/") else {
                     throw WPEPackageError.pathTraversal(name: entry.name)
@@ -253,7 +263,7 @@ struct WallpaperEnginePackage: Sendable, Equatable {
         do {
             for entry in entries {
                 let range = try dataRange(for: entry, dataCount: data.count)
-                let targetURL = inflightURL.appendingPathComponent(entry.name)
+                let targetURL = inflightURL.appendingPathComponent(Self.filesystemSafeEntryName(entry.name))
                 let standardizedTarget = targetURL.standardizedFileURL
                 guard standardizedTarget.path.hasPrefix(inflightPath + "/") else {
                     throw WPEPackageError.pathTraversal(name: entry.name)
@@ -319,6 +329,40 @@ struct WallpaperEnginePackage: Sendable, Equatable {
             throw WPEPackageError.entryOutOfBounds(name: entry.name)
         }
         return start..<end
+    }
+
+    /// Shortens any path component that exceeds the APFS 255-byte limit so the
+    /// file extracts instead of failing the whole package. Truncation is
+    /// deterministic (char-boundary base + a stable FNV-1a suffix + original
+    /// extension), so re-extraction is idempotent. A renamed asset won't match
+    /// the scene's reference (e.g. an over-long sound path goes silent), but the
+    /// wallpaper still extracts and renders. Components within the limit pass
+    /// through untouched.
+    static func filesystemSafeEntryName(_ name: String) -> String {
+        name.split(separator: "/", omittingEmptySubsequences: false).map { raw -> String in
+            let component = String(raw)
+            guard component.utf8.count > maxComponentBytes else { return component }
+
+            let nsName = component as NSString
+            let ext = nsName.pathExtension
+            let tail = ext.isEmpty ? "" : "." + ext
+
+            var hash: UInt32 = 2166136261
+            for byte in component.utf8 { hash = (hash ^ UInt32(byte)) &* 16777619 }
+            let suffix = "~" + String(format: "%08x", hash)
+
+            let budget = maxComponentBytes - suffix.utf8.count - tail.utf8.count
+            var base = ""
+            var used = 0
+            for character in nsName.deletingPathExtension {
+                let bytes = String(character).utf8.count
+                if used + bytes > budget { break }
+                base.append(character)
+                used += bytes
+            }
+            return base + suffix + tail
+        }
+        .joined(separator: "/")
     }
 
     private static func canonicalEntryName(_ name: String, index: Int) throws -> String {
