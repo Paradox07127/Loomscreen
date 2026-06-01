@@ -93,23 +93,59 @@ vertex WPEVertexOut wpe_object_quad_vertex(
 struct WPEPuppetVertex {
     float4 position;
     float4 uv;
+    uint4 skinBlendIndices;
+    float4 skinBlendWeights;
 };
 
 struct WPEPuppetMeshUniforms {
-    float4 localSizeAndMode; // x,y local render target size; z=0 local composite
+    float4 localSizeAndMode; // x,y local render target size; z=bone palette count; w=skinning enabled
     float4 meshCenterAndPadding; // x,y raw MDLV mesh center; z,w reserved
 };
+
+static inline float4 wpe_skin_puppet_position(
+    WPEPuppetVertex v,
+    constant float4x4* bonePalette,
+    uint paletteCount
+) {
+    float4 sourcePosition = float4(v.position.xyz, 1.0);
+    float4 weights = max(v.skinBlendWeights, float4(0.0));
+    float weightSum = weights.x + weights.y + weights.z + weights.w;
+    if (weightSum <= 0.00001) {
+        return sourcePosition;
+    }
+
+    float4 skinned = float4(0.0);
+    uint4 indices = v.skinBlendIndices;
+    if (weights.x > 0.0) {
+        skinned += weights.x * (indices.x < paletteCount ? bonePalette[indices.x] * sourcePosition : sourcePosition);
+    }
+    if (weights.y > 0.0) {
+        skinned += weights.y * (indices.y < paletteCount ? bonePalette[indices.y] * sourcePosition : sourcePosition);
+    }
+    if (weights.z > 0.0) {
+        skinned += weights.z * (indices.z < paletteCount ? bonePalette[indices.z] * sourcePosition : sourcePosition);
+    }
+    if (weights.w > 0.0) {
+        skinned += weights.w * (indices.w < paletteCount ? bonePalette[indices.w] * sourcePosition : sourcePosition);
+    }
+    return skinned / weightSum;
+}
 
 vertex WPEVertexOut wpe_puppet_mesh_vertex(
     uint vertexID [[vertex_id]],
     constant WPEPuppetVertex* vertices [[buffer(0)]],
-    constant WPEPuppetMeshUniforms& u [[buffer(1)]]
+    constant WPEPuppetMeshUniforms& u [[buffer(1)]],
+    constant float4x4* bonePalette [[buffer(2)]]
 ) {
     WPEPuppetVertex v = vertices[vertexID];
+    uint paletteCount = uint(max(u.localSizeAndMode.z, 0.0));
+    float4 position = (u.localSizeAndMode.w > 0.5 && paletteCount > 0)
+        ? wpe_skin_puppet_position(v, bonePalette, paletteCount)
+        : v.position;
     float2 halfSize = max(u.localSizeAndMode.xy * 0.5, float2(0.5));
 
     WPEVertexOut out;
-    out.position = float4((v.position.xy - u.meshCenterAndPadding.xy) / halfSize, 0.0, 1.0);
+    out.position = float4((position.xy - u.meshCenterAndPadding.xy) / halfSize, 0.0, 1.0);
     out.uv = v.uv.xy;
     return out;
 }

@@ -283,6 +283,7 @@ struct WPERenderGraphBuilder: Sendable {
             imagePath: object.imageRelativePath,
             materialPath: materialPath,
             puppetPath: model.puppetPath,
+            animationLayers: object.animationLayers,
             geometry: WPERenderLayerGeometry(
                 origin: puppetPlacement?.origin ?? object.origin,
                 scale: object.scale,

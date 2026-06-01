@@ -208,10 +208,12 @@ struct WPEObjectQuadUniforms {
 struct WPEMetalPuppetVertex {
     var position: SIMD4<Float>
     var uv: SIMD4<Float>
+    var skinBlendIndices: SIMD4<UInt32>
+    var skinBlendWeights: SIMD4<Float>
 }
 
 struct WPEPuppetMeshUniforms {
-    /// x/y = local layer-composite target size, z/w reserved.
+    /// x/y = local layer-composite target size, z = bone palette count, w = skinning enabled (1/0).
     var localSizeAndMode: SIMD4<Float>
     /// x/y = raw MDLV mesh center in puppet model coordinates, z/w reserved.
     var meshCenterAndPadding: SIMD4<Float>

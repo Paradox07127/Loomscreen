@@ -285,6 +285,7 @@ final class WPEMetalRenderExecutor {
                     pass: pass,
                     layer: layer.graphLayer,
                     puppetModel: layer.puppetModel,
+                    runtimeUniforms: runtimeUniforms,
                     textures: textures,
                     commandBuffer: commandBuffer,
                     frameState: &frameState
@@ -653,6 +654,7 @@ final class WPEMetalRenderExecutor {
         pass: WPEPreparedRenderPass,
         layer: WPERenderLayer,
         puppetModel: WPEPuppetModel?,
+        runtimeUniforms: WPEMetalRuntimeUniforms,
         textures: [String: MTLTexture],
         commandBuffer: MTLCommandBuffer,
         frameState: inout WPEMetalFrameState
@@ -740,6 +742,7 @@ final class WPEMetalRenderExecutor {
             pass: pass,
             layer: layer,
             puppetModel: puppetModel,
+            runtimeUniforms: runtimeUniforms,
             destination: destination,
             textures: textures,
             frameState: frameState,
@@ -763,10 +766,25 @@ final class WPEMetalRenderExecutor {
         frameState.registerWrite(texture: destination.texture, targetID: destination.id)
     }
 
+    /// Picks the puppet animation to play: the first visible scene animationlayer's MDLA id,
+    /// else the puppet's first animation. P2c plays a single layer; multi-layer additive
+    /// blending (rate/blend) is a follow-up.
+    private func selectedPuppetAnimation(
+        for layer: WPERenderLayer,
+        model: WPEPuppetModel
+    ) -> WPEPuppetAnimation? {
+        guard !layer.animationLayers.isEmpty else { return model.animations.first }
+        guard let animationID = layer.animationLayers.first(where: { $0.visible })?.animation else {
+            return nil
+        }
+        return model.animations.first { $0.id == animationID }
+    }
+
     private func encodePuppetMaterialPassIfNeeded(
         pass: WPEPreparedRenderPass,
         layer: WPERenderLayer,
         puppetModel: WPEPuppetModel?,
+        runtimeUniforms: WPEMetalRuntimeUniforms,
         destination: (id: WPEMetalTargetID, texture: MTLTexture),
         textures: [String: MTLTexture],
         frameState: WPEMetalFrameState,
@@ -775,12 +793,11 @@ final class WPEMetalRenderExecutor {
     ) throws -> Bool {
         guard case .material = pass.pass.phase,
               case .layerComposite = pass.pass.target,
-              let meshes = puppetModel?.meshes.filter({
-                  !$0.vertices.isEmpty && !$0.indices.isEmpty
-              }),
-              !meshes.isEmpty else {
+              let model = puppetModel else {
             return false
         }
+        let meshes = model.meshes.filter { !$0.vertices.isEmpty && !$0.indices.isEmpty }
+        guard !meshes.isEmpty else { return false }
 
         let normalizedShader = WPEMetalShaderInputs.normalizedBuiltinShaderName(pass.pass.shader)
         guard normalizedShader == "genericimage2" || normalizedShader == "genericimage4" else {
@@ -830,12 +847,20 @@ final class WPEMetalRenderExecutor {
         var uniforms = genericImageUniforms(for: pass, layer: layer, hasMask: hasMask)
         encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEGenericImageUniforms>.stride, index: 0)
 
+        // Skin from the animation channels (channel == skin-blend index, keyframe 0 == bind).
+        // Reuse the same scene clock that drives WPESceneAnimatedValue / shader g_Time.
+        let animation = selectedPuppetAnimation(for: layer, model: model)
+        let bonePalette = animation
+            .map { WPEPuppetAnimationEvaluator.palette(for: $0, at: runtimeUniforms.time) }
+            .flatMap { $0.isEmpty ? nil : $0 }
+            ?? WPEPuppetAnimationEvaluator.identityPalette(count: 1)
+
         var meshUniforms = WPEPuppetMeshUniforms(
             localSizeAndMode: SIMD4<Float>(
                 Float(max(destination.texture.width, 1)),
                 Float(max(destination.texture.height, 1)),
-                0,
-                0
+                Float(bonePalette.count),
+                animation != nil ? 1 : 0
             ),
             meshCenterAndPadding: SIMD4<Float>(
                 Float(layer.geometry.puppetMeshCenter.x),
@@ -844,6 +869,14 @@ final class WPEMetalRenderExecutor {
                 0
             )
         )
+
+        let bonePaletteBuffer = bonePalette.withUnsafeBytes { rawBuffer in
+            device.makeBuffer(bytes: rawBuffer.baseAddress!, length: rawBuffer.count, options: [])
+        }
+        guard let bonePaletteBuffer else {
+            throw WPEMetalTextureLoaderError.textureAllocationFailed
+        }
+        encoder.setVertexBuffer(bonePaletteBuffer, offset: 0, index: 2)
         encoder.setVertexBytes(
             &meshUniforms,
             length: MemoryLayout<WPEPuppetMeshUniforms>.stride,
@@ -854,7 +887,19 @@ final class WPEMetalRenderExecutor {
             let vertices = mesh.vertices.map { vertex in
                 WPEMetalPuppetVertex(
                     position: SIMD4<Float>(vertex.position.x, vertex.position.y, vertex.position.z, 0),
-                    uv: SIMD4<Float>(vertex.uv.x, vertex.uv.y, 0, 0)
+                    uv: SIMD4<Float>(vertex.uv.x, vertex.uv.y, 0, 0),
+                    skinBlendIndices: SIMD4<UInt32>(
+                        UInt32(max(vertex.skinBlendIndices.x, 0)),
+                        UInt32(max(vertex.skinBlendIndices.y, 0)),
+                        UInt32(max(vertex.skinBlendIndices.z, 0)),
+                        UInt32(max(vertex.skinBlendIndices.w, 0))
+                    ),
+                    skinBlendWeights: SIMD4<Float>(
+                        vertex.skinBlendWeights.x,
+                        vertex.skinBlendWeights.y,
+                        vertex.skinBlendWeights.z,
+                        vertex.skinBlendWeights.w
+                    )
                 )
             }
             let vertexBuffer = vertices.withUnsafeBytes { rawBuffer in

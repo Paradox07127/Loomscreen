@@ -1,5 +1,6 @@
 #if !LITE_BUILD
 import Foundation
+import simd
 
 struct WPEPuppetModel: Equatable, Sendable {
     let version: Int
@@ -89,6 +90,102 @@ struct WPEPuppetAnimKey: Equatable, Sendable {
     let translation: SIMD3<Float>
     let euler: SIMD3<Float>
     let scale: SIMD3<Float>
+}
+
+/// Evaluates a baked puppet animation into a per-bone skinning palette. The animation
+/// channels double as the skeleton (channel index == skin-blend index) and keyframe 0 is
+/// the bind pose, so `palette[i] = M_i(frame) · M_i(0)⁻¹` — at frame 0 this is the identity,
+/// leaving the assembled rest pose untouched (the regression guard against P0's static draw).
+enum WPEPuppetAnimationEvaluator {
+    static func palette(for animation: WPEPuppetAnimation, at time: Double) -> [simd_float4x4] {
+        let frame = sampledFrameIndex(for: animation, at: time)
+        if frame == 0 {
+            return identityPalette(count: animation.channels.count)
+        }
+        return animation.channels.map { channel in
+            guard let bindKey = channel.keyframes.first else { return matrix_identity_float4x4 }
+            let currentKey = channel.keyframes[min(frame, channel.keyframes.count - 1)]
+            let bind = matrix(for: bindKey)
+            let determinant = simd_determinant(bind)
+            guard determinant.isFinite, abs(determinant) > 1e-6 else { return matrix_identity_float4x4 }
+            return matrix(for: currentKey) * simd_inverse(bind)
+        }
+    }
+
+    static func identityPalette(count: Int) -> [simd_float4x4] {
+        Array(repeating: matrix_identity_float4x4, count: max(count, 1))
+    }
+
+    static func sampledFrameIndex(for animation: WPEPuppetAnimation, at time: Double) -> Int {
+        let fps = Double(animation.fps)
+        guard fps.isFinite, fps > 0 else { return 0 }
+        let playableFrameCount = max(animation.frameCount, 1)
+        let frameValue = floor(max(time, 0) * fps)
+        guard frameValue.isFinite, frameValue < Double(Int.max) else { return 0 }
+        let rawFrame = max(Int(frameValue), 0)
+        let mode = animation.mode.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return mode == "loop" ? rawFrame % playableFrameCount : min(rawFrame, playableFrameCount - 1)
+    }
+
+    private static func matrix(for key: WPEPuppetAnimKey) -> simd_float4x4 {
+        translationMatrix(key.translation) * rotationMatrix(euler: key.euler) * scaleMatrix(key.scale)
+    }
+
+    /// ON-DEVICE VALIDATION POINT: MDLA Euler components are assumed to be radians in
+    /// intrinsic XYZ order. With column-vector matrices the transform composes as
+    /// `T * Rz * Ry * Rx * S`. Frame 0 is always identity regardless, so only the
+    /// inter-frame rotation direction depends on this assumption.
+    private static func rotationMatrix(euler: SIMD3<Float>) -> simd_float4x4 {
+        rotationZ(euler.z) * rotationY(euler.y) * rotationX(euler.x)
+    }
+
+    private static func translationMatrix(_ t: SIMD3<Float>) -> simd_float4x4 {
+        simd_float4x4(
+            SIMD4<Float>(1, 0, 0, 0),
+            SIMD4<Float>(0, 1, 0, 0),
+            SIMD4<Float>(0, 0, 1, 0),
+            SIMD4<Float>(t.x, t.y, t.z, 1)
+        )
+    }
+
+    private static func scaleMatrix(_ s: SIMD3<Float>) -> simd_float4x4 {
+        simd_float4x4(
+            SIMD4<Float>(s.x, 0, 0, 0),
+            SIMD4<Float>(0, s.y, 0, 0),
+            SIMD4<Float>(0, 0, s.z, 0),
+            SIMD4<Float>(0, 0, 0, 1)
+        )
+    }
+
+    private static func rotationX(_ angle: Float) -> simd_float4x4 {
+        let c = cos(angle), s = sin(angle)
+        return simd_float4x4(
+            SIMD4<Float>(1, 0, 0, 0),
+            SIMD4<Float>(0, c, s, 0),
+            SIMD4<Float>(0, -s, c, 0),
+            SIMD4<Float>(0, 0, 0, 1)
+        )
+    }
+
+    private static func rotationY(_ angle: Float) -> simd_float4x4 {
+        let c = cos(angle), s = sin(angle)
+        return simd_float4x4(
+            SIMD4<Float>(c, 0, -s, 0),
+            SIMD4<Float>(0, 1, 0, 0),
+            SIMD4<Float>(s, 0, c, 0),
+            SIMD4<Float>(0, 0, 0, 1)
+        )
+    }
+
+    private static func rotationZ(_ angle: Float) -> simd_float4x4 {
+        let c = cos(angle), s = sin(angle)
+        return simd_float4x4(
+            SIMD4<Float>(c, s, 0, 0),
+            SIMD4<Float>(-s, c, 0, 0),
+            SIMD4<Float>(0, 0, 1, 0),
+            SIMD4<Float>(0, 0, 0, 1)
+        )
+    }
 }
 
 enum WPEMdlParser {

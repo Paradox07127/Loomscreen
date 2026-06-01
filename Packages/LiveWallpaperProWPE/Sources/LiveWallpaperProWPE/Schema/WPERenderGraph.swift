@@ -28,6 +28,8 @@ public struct WPERenderLayer: Equatable, Sendable, Identifiable {
     public let imagePath: String
     public let materialPath: String?
     public let puppetPath: String?
+    /// Scene `animationlayers` for this object, selecting which puppet MDLA animation(s) play.
+    public let animationLayers: [WPESceneAnimationLayer]
     public let geometry: WPERenderLayerGeometry
     public let compositeA: String
     public let compositeB: String
@@ -42,6 +44,7 @@ public struct WPERenderLayer: Equatable, Sendable, Identifiable {
         imagePath: String,
         materialPath: String?,
         puppetPath: String? = nil,
+        animationLayers: [WPESceneAnimationLayer] = [],
         geometry: WPERenderLayerGeometry,
         compositeA: String,
         compositeB: String,
@@ -55,6 +58,7 @@ public struct WPERenderLayer: Equatable, Sendable, Identifiable {
         self.imagePath = imagePath
         self.materialPath = materialPath
         self.puppetPath = puppetPath
+        self.animationLayers = animationLayers
         self.geometry = geometry
         self.compositeA = compositeA
         self.compositeB = compositeB

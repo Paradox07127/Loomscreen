@@ -1,6 +1,65 @@
 import Foundation
 import Testing
+import simd
 @testable import LiveWallpaper
+
+@Suite("WPE puppet animation evaluator")
+struct WPEPuppetAnimationEvaluatorTests {
+    private func animation(
+        frameCount: Int,
+        mode: String,
+        channels: [WPEPuppetAnimChannel]
+    ) -> WPEPuppetAnimation {
+        WPEPuppetAnimation(id: 1, name: "a", mode: mode, fps: 30, frameCount: frameCount, channels: channels)
+    }
+
+    private func channel(_ keys: [(SIMD3<Float>, SIMD3<Float>, SIMD3<Float>)]) -> WPEPuppetAnimChannel {
+        WPEPuppetAnimChannel(
+            boneIndex: 0,
+            keyframes: keys.enumerated().map { index, k in
+                WPEPuppetAnimKey(frame: index, translation: k.0, euler: k.1, scale: k.2)
+            }
+        )
+    }
+
+    @Test("Frame 0 yields an identity palette (the bind pose, so the rest mesh is unchanged)")
+    func frameZeroIsIdentity() {
+        let anim = animation(frameCount: 2, mode: "loop", channels: [
+            channel([
+                (SIMD3(0, 0, 0), SIMD3(0, 0, 0), SIMD3(1, 1, 1)),
+                (SIMD3(10, 0, 0), SIMD3(0, 0, 0), SIMD3(1, 1, 1)),
+                (SIMD3(20, 0, 0), SIMD3(0, 0, 0), SIMD3(1, 1, 1))
+            ])
+        ])
+        let palette = WPEPuppetAnimationEvaluator.palette(for: anim, at: 0)
+        #expect(palette.count == 1)
+        #expect(palette.allSatisfy { simd_equal($0, matrix_identity_float4x4) })
+    }
+
+    @Test("Loop mode wraps the sampled frame index")
+    func loopModeWraps() {
+        let anim = animation(frameCount: 2, mode: "loop", channels: [channel([
+            (.zero, .zero, SIMD3(1, 1, 1))
+        ])])
+        #expect(WPEPuppetAnimationEvaluator.sampledFrameIndex(for: anim, at: 0) == 0)
+        #expect(WPEPuppetAnimationEvaluator.sampledFrameIndex(for: anim, at: 1.0 / 30.0) == 1)
+        #expect(WPEPuppetAnimationEvaluator.sampledFrameIndex(for: anim, at: 2.0 / 30.0) == 0)
+    }
+
+    @Test("Pure-translation channel skins by the per-frame delta from the bind pose")
+    func translationDeltaMatrix() {
+        let anim = animation(frameCount: 2, mode: "loop", channels: [
+            channel([
+                (SIMD3(0, 0, 0), SIMD3(0, 0, 0), SIMD3(1, 1, 1)),
+                (SIMD3(10, 0, 0), SIMD3(0, 0, 0), SIMD3(1, 1, 1)),
+                (SIMD3(20, 0, 0), SIMD3(0, 0, 0), SIMD3(1, 1, 1))
+            ])
+        ])
+        let palette = WPEPuppetAnimationEvaluator.palette(for: anim, at: 1.0 / 30.0)
+        let skinned = palette[0] * SIMD4<Float>(1, 2, 0, 1)
+        #expect(skinned == SIMD4<Float>(11, 2, 0, 1))
+    }
+}
 
 @Suite("WPE MDL parser")
 struct WPEMdlParserTests {
