@@ -850,17 +850,24 @@ final class WPEMetalRenderExecutor {
         // Skin from the animation channels (channel == skin-blend index, keyframe 0 == bind).
         // Reuse the same scene clock that drives WPESceneAnimatedValue / shader g_Time.
         let animation = selectedPuppetAnimation(for: layer, model: model)
+        let sampledFrame = animation.map {
+            WPEPuppetAnimationEvaluator.sampledFrameIndex(for: $0, at: runtimeUniforms.time)
+        } ?? 0
         let bonePalette = animation
             .map { WPEPuppetAnimationEvaluator.palette(for: $0, at: runtimeUniforms.time) }
             .flatMap { $0.isEmpty ? nil : $0 }
             ?? WPEPuppetAnimationEvaluator.identityPalette(count: 1)
+        // Skin only past the bind pose: at frame 0 the palette is identity, so leaving
+        // skinning off keeps the rest mesh byte-identical to the static path (no FP drift
+        // from the weighted blend) — the no-regression guard for the assembled rest pose.
+        let skinningEnabled: Float = (animation?.channels.isEmpty == false && sampledFrame != 0) ? 1 : 0
 
         var meshUniforms = WPEPuppetMeshUniforms(
             localSizeAndMode: SIMD4<Float>(
                 Float(max(destination.texture.width, 1)),
                 Float(max(destination.texture.height, 1)),
                 Float(bonePalette.count),
-                animation != nil ? 1 : 0
+                skinningEnabled
             ),
             meshCenterAndPadding: SIMD4<Float>(
                 Float(layer.geometry.puppetMeshCenter.x),
