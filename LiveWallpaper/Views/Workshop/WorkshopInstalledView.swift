@@ -223,15 +223,11 @@ struct WorkshopInstalledView: View {
                 )
             }
             .overlay(alignment: .top) {
-                // The same screen bar serves two triggers: a drag in flight, or a
-                // selected card on a multi-display setup (click a tile to apply).
-                if !screenManager.screens.isEmpty,
-                   isDraggingEntry || (selectedEntry != nil && screenManager.screens.count > 1) {
+                if isDraggingEntry, !screenManager.screens.isEmpty {
                     screenDropBar
                 }
             }
             .animation(.easeInOut(duration: 0.2), value: isDraggingEntry)
-            .animation(.easeInOut(duration: 0.2), value: selectedEntry?.id)
         }
     }
 
@@ -503,24 +499,14 @@ struct WorkshopInstalledView: View {
 
     // MARK: - Drag-to-apply screen bar
 
-    /// The display picker: floats in while a card is dragged OR while a card is
-    /// selected on a multi-display setup. Each tile is both a drag drop-target and
-    /// a click-to-apply button, so applying to a specific display is one click
-    /// (no digging into the inspector).
+    /// Floats in only while a card is being dragged (not persistent), listing the
+    /// open displays as drop targets — drop a wallpaper onto one to apply it there.
+    /// (Click-to-apply per display lives in the inspector's Apply popover.)
     private var screenDropBar: some View {
         VStack(spacing: DesignTokens.Spacing.sm) {
-            HStack(spacing: DesignTokens.Spacing.sm) {
-                Text(screenBarPrompt)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                if !isDraggingEntry, let entry = selectedEntry, screenManager.screens.count > 1 {
-                    Button("Apply to All") { applyToAll(entry) }
-                        .buttonStyle(.borderless)
-                        .controlSize(.small)
-                }
-            }
+            Text("Drop onto a display to apply")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
 
             HStack(spacing: DesignTokens.Spacing.lg) {
                 ForEach(screenManager.screens, id: \.id) { screen in
@@ -533,48 +519,28 @@ struct WorkshopInstalledView: View {
         .padding(.vertical, DesignTokens.Spacing.md)
         .background(.regularMaterial)
         .overlay(alignment: .topTrailing) {
-            Button {
-                if isDraggingEntry { endEntryDrag() } else { selectedEntry = nil }
-            } label: {
+            Button { endEntryDrag() } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 16))
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
             .padding(DesignTokens.Spacing.sm)
-            .help(Text("Dismiss"))
-            .accessibilityLabel(Text("Dismiss"))
+            .help(Text("Cancel"))
+            .accessibilityLabel(Text("Cancel"))
         }
         .overlay(alignment: .bottom) { Divider() }
         .transition(.move(edge: .top).combined(with: .opacity))
     }
 
-    /// Context-aware prompt: the dragged-in case keeps the drop wording; the
-    /// click-selected case names the wallpaper so it's clear what will apply.
-    private var screenBarPrompt: String {
-        if isDraggingEntry {
-            return String(localized: "Drop onto a display to apply", comment: "Drag-to-apply screen bar prompt.")
-        }
-        if let title = selectedEntry?.origin.title, !title.isEmpty {
-            return String(localized: "Apply “\(title)” to a display", comment: "Click-to-apply screen bar prompt. Placeholder is the wallpaper title.")
-        }
-        return String(localized: "Click a display to apply", comment: "Click-to-apply screen bar prompt, title unknown.")
-    }
-
     private func screenDropTarget(_ screen: Screen) -> some View {
-        // Highlight the display already running the selected wallpaper, so the
-        // bar doubles as live "where is this applied" feedback.
-        let isActiveTarget = selectedEntry.map { activeScreenIDs(for: $0).contains(screen.id) } ?? false
-        return VStack(spacing: 5) {
+        VStack(spacing: 5) {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(
-                    Color.accentColor.opacity(isActiveTarget ? 1 : 0.6),
-                    style: StrokeStyle(lineWidth: 2, dash: isActiveTarget ? [] : [5])
-                )
-                .background(Color.accentColor.opacity(isActiveTarget ? 0.18 : 0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .strokeBorder(Color.accentColor.opacity(0.6), style: StrokeStyle(lineWidth: 2, dash: [5]))
+                .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .frame(width: 150, height: 90)
                 .overlay {
-                    Image(systemName: isActiveTarget ? "checkmark.circle.fill" : "display")
+                    Image(systemName: "display")
                         .font(.system(size: 30))
                         .foregroundStyle(Color.accentColor)
                 }
@@ -584,14 +550,9 @@ struct WorkshopInstalledView: View {
                 .lineLimit(1)
                 .frame(maxWidth: 150)
         }
-        // Click a tile to apply the selected wallpaper to that display (the
-        // one-click path); the tile is also a drag drop-target (unchanged).
-        .contentShape(Rectangle())
-        .onTapGesture { if let entry = selectedEntry { apply(entry, to: screen) } }
         .onDrop(of: [.plainText], isTargeted: nil) { providers in
             handleScreenDrop(providers, to: screen)
         }
-        .help(Text("Apply to \(screen.name)"))
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Text("Apply to \(screen.name)"))
     }
@@ -818,6 +779,8 @@ private struct WPEInstalledInspectorContent: View {
     let onClose: () -> Void
 
     @Environment(\.openURL) private var openURL
+    /// Drives the multi-display target popover under the single Apply button.
+    @State private var showingApplyPopover = false
 
     /// Shared singleton (also drives the online Browse download UI) — reading it
     /// here makes this view observe the re-download's phase + progress.
@@ -988,19 +951,21 @@ private struct WPEInstalledInspectorContent: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
             } else {
-                // Per-display targeting now lives in the screen bar at the top of
-                // the grid (click a display tile). The inspector keeps the
-                // all-displays shortcut + points at the bar for a specific one.
-                Button(action: onApplyToAll) {
-                    Label("Apply to All Displays", systemImage: "rectangle.on.rectangle")
-                        .frame(maxWidth: .infinity)
+                // One Apply button → a popover to pick a display or all (same
+                // pattern as the online inspector). Drag-to-apply is still there.
+                Button { showingApplyPopover = true } label: {
+                    Label("Apply", systemImage: "play.fill").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
-                Text("Or click a display in the bar above to apply to just that one.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                .popover(isPresented: $showingApplyPopover, arrowEdge: .bottom) {
+                    WorkshopApplyTargetPicker(
+                        screens: screens,
+                        activeScreenIDs: activeScreenIDs,
+                        onPick: { onApply($0); showingApplyPopover = false },
+                        onAll: { onApplyToAll(); showingApplyPopover = false }
+                    )
+                }
             }
         }
     }

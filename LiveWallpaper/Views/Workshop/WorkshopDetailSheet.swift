@@ -289,7 +289,12 @@ struct WorkshopInspectorContent: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.regular)
                 .popover(isPresented: $showingApplyPopover, arrowEdge: .bottom) {
-                    applyTargetPicker(for: entry, screens: screens)
+                    WorkshopApplyTargetPicker(
+                        screens: screens,
+                        activeScreenIDs: activeScreenIDs,
+                        onPick: { apply(entry, to: $0); showingApplyPopover = false },
+                        onAll: { for screen in screens { apply(entry, to: screen) }; showingApplyPopover = false }
+                    )
                 }
         }
     }
@@ -298,42 +303,12 @@ struct WorkshopInspectorContent: View {
         Label("Apply", systemImage: "play.fill").frame(maxWidth: .infinity)
     }
 
-    /// Target chooser shown under Apply on multi-display setups: each display,
-    /// plus "All Displays". Picking one applies and dismisses.
-    private func applyTargetPicker(for entry: WPEHistoryEntry, screens: [Screen]) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("Apply to")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 12)
-                .padding(.top, 10)
-                .padding(.bottom, 4)
-
-            applyTargetRow(Text("All Displays"), systemImage: "rectangle.on.rectangle") {
-                for screen in screens { apply(entry, to: screen) }
-                showingApplyPopover = false
-            }
-            Divider().padding(.horizontal, 8).padding(.vertical, 2)
-            ForEach(screens, id: \.id) { screen in
-                applyTargetRow(Text(verbatim: screen.name), systemImage: "display") {
-                    apply(entry, to: screen)
-                    showingApplyPopover = false
-                }
-            }
-        }
-        .padding(.bottom, 6)
-        .frame(minWidth: 220)
-    }
-
-    private func applyTargetRow(_ title: Text, systemImage: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Label { title } icon: { Image(systemName: systemImage) }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+    /// Displays currently running this item — drives the active checkmark in the
+    /// Apply popover.
+    private var activeScreenIDs: Set<CGDirectDisplayID> {
+        Set(screenManager.screens
+            .filter { screenManager.getConfiguration(for: $0)?.wpeOrigin?.workshopID == String(item.id) }
+            .map(\.id))
     }
 
     private func apply(_ entry: WPEHistoryEntry, to screen: Screen) {
@@ -575,5 +550,49 @@ struct WorkshopInspectorContent: View {
         formatter.countStyle = .file
         return formatter
     }()
+}
+
+/// Shared display-target chooser for the Apply popover (online + installed
+/// inspectors): "All Displays" plus one row per display, the active one(s)
+/// checkmarked. Picking a row fires the matching callback; the caller dismisses
+/// the popover.
+struct WorkshopApplyTargetPicker: View {
+    let screens: [Screen]
+    let activeScreenIDs: Set<CGDirectDisplayID>
+    let onPick: (Screen) -> Void
+    let onAll: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Apply to")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.top, 10)
+                .padding(.bottom, 4)
+
+            row(Text("All Displays"), systemImage: "rectangle.on.rectangle", action: onAll)
+            Divider().padding(.horizontal, 8).padding(.vertical, 2)
+            ForEach(screens, id: \.id) { screen in
+                row(Text(verbatim: screen.name),
+                    systemImage: activeScreenIDs.contains(screen.id) ? "checkmark.circle.fill" : "display") {
+                    onPick(screen)
+                }
+            }
+        }
+        .padding(.bottom, 6)
+        .frame(minWidth: 220)
+    }
+
+    private func row(_ title: Text, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label { title } icon: { Image(systemName: systemImage) }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
 }
 #endif
