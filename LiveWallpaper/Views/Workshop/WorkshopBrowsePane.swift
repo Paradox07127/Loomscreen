@@ -455,10 +455,9 @@ struct WorkshopBrowsePane: View {
             }
             .padding(.horizontal, DesignTokens.Spacing.md)
             .padding(.vertical, DesignTokens.Spacing.sm)
-            // Opaque material backing keeps the copy legible over the grid;
-            // the orange tint + stroke read as a warning without bleed-through.
-            .background(.regularMaterial, in: Capsule())
-            .background(Color.orange.opacity(0.14), in: Capsule())
+            // Native Liquid Glass (orange-tinted) over the grid; the orange
+            // stroke still reads as a warning. Material fallback pre-26.
+            .adaptiveGlassSurface(.capsule, tint: .orange)
             .overlay(Capsule().strokeBorder(Color.orange.opacity(0.35), lineWidth: 0.5))
             .padding(DesignTokens.Spacing.md)
             .transition(.move(edge: .top).combined(with: .opacity))

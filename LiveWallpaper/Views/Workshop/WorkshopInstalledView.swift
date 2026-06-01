@@ -675,7 +675,7 @@ struct WorkshopInstalledView: View {
         .frame(maxWidth: .infinity)
         .padding(.horizontal, DesignTokens.Spacing.lg)
         .padding(.vertical, DesignTokens.Spacing.md)
-        .background(.regularMaterial)
+        .adaptiveGlassSurface(.roundedRectangle(0))
         .overlay(alignment: .topTrailing) {
             Button { endEntryDrag() } label: {
                 Image(systemName: "xmark.circle.fill")
@@ -695,8 +695,8 @@ struct WorkshopInstalledView: View {
         VStack(spacing: 5) {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .strokeBorder(Color.accentColor.opacity(0.6), style: StrokeStyle(lineWidth: 2, dash: [5]))
-                .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .frame(width: 150, height: 90)
+                .adaptiveGlassSurface(.roundedRectangle(10), tint: .accentColor)
                 .overlay {
                     Image(systemName: "display")
                         .font(.system(size: 30))
