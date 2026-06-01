@@ -27,6 +27,11 @@ struct WorkshopInstalledView: View {
     /// all chips selected by default; deselect to hide a kind, Option-click a
     /// chip to isolate it. All-or-none selected == no filter.
     @State private var selectedTypes: Set<WPELibraryTypeKind> = Set(WPELibraryTypeKind.allCases)
+    /// Origin + storage filters live in the downward-expanding Filters panel
+    /// (same pattern as the online ribbon). All-or-none selected == no filter.
+    @State private var selectedSources: Set<InstalledSource> = Set(InstalledSource.allCases)
+    @State private var selectedStorage: Set<InstalledStorageKind> = Set(InstalledStorageKind.allCases)
+    @State private var showFilters = false
     @State private var sortOrder: WPELibrarySortOrder = .recommended
     @State private var errorMessage: String?
     /// Set when the user asks to delete an entry — drives the confirmation
@@ -156,6 +161,8 @@ struct WorkshopInstalledView: View {
                     HStack(spacing: DesignTokens.LibraryFilterBar.contentSpacing) {
                         typeChipRow
 
+                        filtersToggle
+
                         Spacer(minLength: 0)
 
                         Picker("Sort", selection: $sortOrder) {
@@ -170,6 +177,10 @@ struct WorkshopInstalledView: View {
                         .help(Text("Sort the library"))
                     }
                     .frame(maxWidth: .infinity)
+                }
+
+                if showFilters {
+                    installedFilterPanel
                 }
 
                 if importCoordinator.isImporting {
@@ -289,7 +300,10 @@ struct WorkshopInstalledView: View {
     private var visibleEntries: [WPEHistoryEntry] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let filtered = entries.filter { entry in
-            typeMatches(entry) && matchesSearch(entry, query: query)
+            typeMatches(entry)
+                && sourceMatches(entry)
+                && storageMatches(entry)
+                && matchesSearch(entry, query: query)
         }
         switch sortOrder {
         case .recommended:
@@ -360,6 +374,130 @@ struct WorkshopInstalledView: View {
             return true
         }
         return selectedTypes.contains { $0.matches(entry) }
+    }
+
+    // MARK: - Filters panel (origin + storage)
+
+    private var filtersToggle: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) { showFilters.toggle() }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "line.3.horizontal.decrease")
+                Text("Filters")
+                if activeFilterCount > 0 {
+                    Text(verbatim: "\(activeFilterCount)")
+                        .font(.system(size: 9.5, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color.accentColor, in: Capsule())
+                }
+                Image(systemName: showFilters ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.secondary)
+            }
+            .font(.system(size: 11, weight: .medium))
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .help(Text("Filter options"))
+        .accessibilityLabel(Text("Filters"))
+    }
+
+    private var installedFilterPanel: some View {
+        VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
+            filterRow("Source") {
+                HStack(spacing: 6) {
+                    ForEach(InstalledSource.allCases) { source in
+                        WorkshopFilterChip(
+                            title: Text(verbatim: source.title),
+                            isSelected: selectedSources.contains(source),
+                            onIsolate: { selectedSources = [source] }
+                        ) {
+                            toggle(source, in: &selectedSources)
+                        }
+                    }
+                }
+            }
+
+            filterRow("Storage") {
+                HStack(spacing: 6) {
+                    ForEach(InstalledStorageKind.allCases) { storage in
+                        WorkshopFilterChip(
+                            title: Text(verbatim: storage.title),
+                            isSelected: selectedStorage.contains(storage),
+                            onIsolate: { selectedStorage = [storage] }
+                        ) {
+                            toggle(storage, in: &selectedStorage)
+                        }
+                    }
+                }
+            }
+
+            if activeFilterCount > 0 {
+                Button("Clear filters") { resetFilters() }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .padding(.leading, 74 + DesignTokens.Spacing.sm)
+            }
+        }
+        .padding(.horizontal, DesignTokens.LibraryFilterBar.horizontalPadding)
+        .padding(.bottom, DesignTokens.Spacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .transition(.opacity.combined(with: .move(edge: .top)))
+    }
+
+    private func filterRow<Content: View>(
+        _ title: LocalizedStringKey,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        HStack(alignment: .top, spacing: DesignTokens.Spacing.sm) {
+            Text(title)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+                .frame(width: 74, alignment: .leading)
+                .padding(.top, 4)
+            content()
+        }
+    }
+
+    private func toggle<T: Hashable>(_ value: T, in set: inout Set<T>) {
+        if set.contains(value) { set.remove(value) } else { set.insert(value) }
+    }
+
+    private var activeFilterCount: Int {
+        var count = 0
+        if isNarrowed(selectedTypes, total: WPELibraryTypeKind.allCases.count) { count += 1 }
+        if isNarrowed(selectedSources, total: InstalledSource.allCases.count) { count += 1 }
+        if isNarrowed(selectedStorage, total: InstalledStorageKind.allCases.count) { count += 1 }
+        return count
+    }
+
+    private func isNarrowed<T>(_ set: Set<T>, total: Int) -> Bool {
+        !set.isEmpty && set.count < total
+    }
+
+    private func resetFilters() {
+        selectedTypes = Set(WPELibraryTypeKind.allCases)
+        selectedSources = Set(InstalledSource.allCases)
+        selectedStorage = Set(InstalledStorageKind.allCases)
+    }
+
+    /// All-or-none selected == no filter (mirrors the type chips).
+    private func sourceMatches(_ entry: WPEHistoryEntry) -> Bool {
+        if selectedSources.isEmpty || selectedSources.count == InstalledSource.allCases.count {
+            return true
+        }
+        return selectedSources.contains { $0.matches(entry) }
+    }
+
+    private func storageMatches(_ entry: WPEHistoryEntry) -> Bool {
+        if selectedStorage.isEmpty || selectedStorage.count == InstalledStorageKind.allCases.count {
+            return true
+        }
+        return selectedStorage.contains { $0.matches(entry) }
     }
 
     // MARK: - Actions
@@ -759,6 +897,48 @@ private enum WPELibraryTypeKind: String, CaseIterable, Identifiable {
     }
 }
 
+/// Origin filter: does the item carry a real Steam Workshop ID, or was it
+/// imported from a local folder? (We can't reliably tell "SteamCMD download vs
+/// manual import" — that isn't recorded — so this keys off the workshop ID.)
+private enum InstalledSource: String, CaseIterable, Identifiable {
+    case steamWorkshop, local
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .steamWorkshop: return String(localized: "Steam Workshop", comment: "Installed library origin filter: items with a real Steam Workshop ID.")
+        case .local: return String(localized: "Local", comment: "Installed library origin filter: imported, no Steam Workshop ID.")
+        }
+    }
+
+    func matches(_ entry: WPEHistoryEntry) -> Bool {
+        let isSteam = UInt64(entry.origin.workshopID) != nil
+        return self == .steamWorkshop ? isSteam : !isSteam
+    }
+}
+
+/// Storage filter: is the item an app-managed copy (extracted into our cache —
+/// the usual shape for SteamCMD-downloaded scenes) or a link to the user's own
+/// folder (manual imports + unpackaged downloads)?
+private enum InstalledStorageKind: String, CaseIterable, Identifiable {
+    case managed, linked
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .managed: return String(localized: "App copy", comment: "Installed library storage filter: extracted into the app's managed cache.")
+        case .linked: return String(localized: "Linked folder", comment: "Installed library storage filter: links to the user's own folder.")
+        }
+    }
+
+    func matches(_ entry: WPEHistoryEntry) -> Bool {
+        let managed = entry.origin.resourceLocation == .cache
+        return self == .managed ? managed : !managed
+    }
+}
+
 private enum WPELibrarySortOrder: String, CaseIterable, Identifiable {
     case recommended, name, type
 
@@ -1103,7 +1283,6 @@ private struct WPEInstalledInspectorContent: View {
             Text("Description").font(.headline)
             CollapsibleDescription(
                 text: text,
-                isExpandable: text.count > 280,
                 isExpanded: $descriptionExpanded
             )
         }

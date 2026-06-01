@@ -522,7 +522,6 @@ struct WorkshopInspectorContent: View {
                 .font(.headline)
             CollapsibleDescription(
                 text: text.isEmpty ? placeholder : text,
-                isExpandable: text.count > 280,
                 isExpanded: $descriptionExpanded
             )
         }
@@ -612,37 +611,72 @@ struct WorkshopApplyTargetPicker: View {
     }
 }
 
-/// Description block shared by the online + Installed inspectors. The entire
-/// block is a single tap target that toggles expand/collapse, with an inline
-/// "Show more / Show less" cue — one interaction, no separate button competing
-/// with text selection.
+/// Description block shared by the online + Installed inspectors. One tap target
+/// (the whole block) toggles expand/collapse. Collapsing animates a real height
+/// change with a bottom fade-out — the text is laid out full-size and cropped,
+/// so the height interpolates smoothly instead of snapping at a line boundary.
 struct CollapsibleDescription: View {
     let text: String
-    let isExpandable: Bool
     @Binding var isExpanded: Bool
 
+    /// ~6 lines of body copy before we crop + fade.
+    private let collapsedHeight: CGFloat = 116
+
+    /// Full intrinsic height of the text, measured live. `max()` keeps it stable
+    /// even while the visible frame is cropped (the crop never shrinks it).
+    @State private var fullHeight: CGFloat = 0
+
+    private var isExpandable: Bool { fullHeight > collapsedHeight + 1 }
+
     var body: some View {
-        Button {
-            guard isExpandable else { return }
-            withAnimation(.easeInOut(duration: 0.15)) { isExpanded.toggle() }
-        } label: {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(verbatim: text)
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(isExpanded ? nil : 6)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                if isExpandable {
-                    Text(isExpanded ? "Show less" : "Show more")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Color.accentColor)
-                }
+        let collapsed = isExpandable && !isExpanded
+        VStack(alignment: .leading, spacing: 4) {
+            Text(verbatim: text)
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    GeometryReader { geo in
+                        Color.clear
+                            .onAppear { fullHeight = max(fullHeight, geo.size.height) }
+                            .onChange(of: geo.size.height) { _, height in
+                                fullHeight = max(fullHeight, height)
+                            }
+                    }
+                )
+                .frame(height: fullHeight == 0 ? nil : (collapsed ? collapsedHeight : fullHeight),
+                       alignment: .top)
+                .clipped()
+                .mask(collapsed ? AnyView(fadeMask) : AnyView(Rectangle()))
+
+            if isExpandable {
+                Text(isExpanded ? "Show less" : "Show more")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Color.accentColor)
             }
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .disabled(!isExpandable)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard isExpandable else { return }
+            withAnimation(.easeInOut(duration: 0.28)) { isExpanded.toggle() }
+        }
+        .onChange(of: text) { _, _ in
+            fullHeight = 0
+            isExpanded = false
+        }
+    }
+
+    private var fadeMask: some View {
+        LinearGradient(
+            stops: [
+                .init(color: .black, location: 0),
+                .init(color: .black, location: 0.72),
+                .init(color: .clear, location: 1)
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
     }
 }
 #endif
