@@ -22,6 +22,19 @@ struct DeveloperToolsView: View {
     @State private var singleSceneStatus: String = ""
     @State private var flagRefresh = 0
     @State private var waterWavesDebug = WPEWaterWavesDebugMode.current
+    @State private var selectedTab: DevToolsTab = .corpusTest
+
+    private enum DevToolsTab: String, CaseIterable, Identifiable {
+        case corpusTest
+        case diagnostics
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .corpusTest: return "Corpus Test"
+            case .diagnostics: return "Diagnostics"
+            }
+        }
+    }
 
     var body: some View {
         DetailPageScaffold(
@@ -46,7 +59,10 @@ struct DeveloperToolsView: View {
 
     @ViewBuilder
     private var metadata: some View {
-        if isRunning {
+        if selectedTab == .diagnostics {
+            Text("Diagnostic flags — persist until toggled off or reset.", comment: "Developer Tools header subtitle on the diagnostics tab.")
+                .foregroundStyle(.secondary)
+        } else if isRunning {
             HStack(spacing: 6) {
                 ProgressView()
                     .controlSize(.small)
@@ -65,8 +81,9 @@ struct DeveloperToolsView: View {
 
     @ViewBuilder
     private var actions: some View {
-        HStack(spacing: 8) {
-            if isRunning {
+        if selectedTab == .corpusTest {
+            HStack(spacing: 8) {
+                if isRunning {
                 Button(role: .destructive) {
                     cancelRequested = true
                     runTask?.cancel()
@@ -87,6 +104,7 @@ struct DeveloperToolsView: View {
                     Label("Export JSON", systemImage: "square.and.arrow.up")
                 }
                 .disabled(lastReport == nil)
+                }
             }
         }
     }
@@ -94,19 +112,38 @@ struct DeveloperToolsView: View {
     @ViewBuilder
     private var content: some View {
         VStack(alignment: .leading, spacing: 16) {
-            configurationSection
-            diagnosticsFlagsSection
-            sceneDebugSection
-            if let startupError {
-                errorBanner(startupError)
+            Picker(selection: $selectedTab) {
+                ForEach(DevToolsTab.allCases) { tab in
+                    Text(verbatim: tab.title).tag(tab)
+                }
+            } label: {
+                Text(verbatim: "Developer Tools section")
             }
-            if isRunning {
-                ProgressView(value: progressFraction)
-                    .progressViewStyle(.linear)
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            switch selectedTab {
+            case .corpusTest:
+                corpusTestContent
+            case .diagnostics:
+                diagnosticsFlagsSection
             }
-            resultsTable
         }
         .padding(16)
+    }
+
+    @ViewBuilder
+    private var corpusTestContent: some View {
+        configurationSection
+        sceneDebugSection
+        if let startupError {
+            errorBanner(startupError)
+        }
+        if isRunning {
+            ProgressView(value: progressFraction)
+                .progressViewStyle(.linear)
+        }
+        resultsTable
     }
 
     /// Per-scene debug iteration loop. Runs `WPECorpusPlaybackHarness` with
