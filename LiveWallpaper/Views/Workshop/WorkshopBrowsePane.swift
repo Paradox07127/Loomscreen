@@ -125,41 +125,46 @@ struct WorkshopBrowsePane: View {
     private var populatedGrid: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                // Top anchor so a page step returns the user to item 1.
-                Color.clear.frame(height: 0).id(Self.gridTopAnchor)
+                VStack(spacing: 0) {
+                    // Top anchor so a page step returns the user to item 1.
+                    Color.clear.frame(height: 0).id(Self.gridTopAnchor)
 
-                if viewModel.displayedItems.isEmpty {
-                    // The page loaded, but the All / New / Installed scope hid
-                    // every item on it — explain rather than show a blank grid.
-                    scopeEmptyNote
-                } else {
-                    LazyVGrid(columns: gridColumns, spacing: DesignTokens.Spacing.lg) {
-                        ForEach(viewModel.displayedItems) { item in
-                            WorkshopBrowseCard(
-                                item: item,
-                                isInLibrary: installedWorkshopIDs.contains(String(item.id)),
-                                isSelected: selectedItem?.id == item.id
-                            ) {
-                                // Toggle: clicking the open card again closes the inspector.
-                                selectedItem = selectedItem?.id == item.id ? nil : item
+                    if viewModel.displayedItems.isEmpty {
+                        // The page loaded, but the All / New / Installed scope hid
+                        // every item on it — explain rather than show a blank grid.
+                        scopeEmptyNote
+                    } else {
+                        LazyVGrid(columns: gridColumns, spacing: DesignTokens.Spacing.lg) {
+                            ForEach(viewModel.displayedItems) { item in
+                                WorkshopBrowseCard(
+                                    item: item,
+                                    isInLibrary: installedWorkshopIDs.contains(String(item.id)),
+                                    isSelected: selectedItem?.id == item.id
+                                ) {
+                                    // Toggle: clicking the open card again closes the inspector.
+                                    selectedItem = selectedItem?.id == item.id ? nil : item
+                                }
+                                .id(item.id)
                             }
-                            .id(item.id)
                         }
+                        .padding(.horizontal, DesignTokens.Settings.formHorizontalMargin)
+                        .padding(.vertical, DesignTokens.Settings.formVerticalMargin)
                     }
-                    .padding(.horizontal, DesignTokens.Settings.formHorizontalMargin)
-                    .padding(.vertical, DesignTokens.Settings.formVerticalMargin)
-                }
 
-                paginationBar
+                    paginationBar
+                }
+                .frame(maxWidth: .infinity)
+                // Tap any empty area — the gaps between cards, the side margins,
+                // below the grid — to close the inspector. This sits BEHIND the
+                // cards (Buttons intercept their own taps) and fills the content,
+                // so in-grid gaps land here too (a ScrollView-level background
+                // missed them). Clicking another card still switches via toggle.
+                .background(
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture { selectedItem = nil }
+                )
             }
-            // Click any empty area of the grid to close the inspector (macOS
-            // gallery idiom). Cards are Buttons and intercept their own taps, so
-            // only the bare background reaches this gesture.
-            .background(
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture { selectedItem = nil }
-            )
             // Opening the inspector narrows the grid and reflows the rows, which
             // can push the selected tile off-screen — re-center it so it stays
             // visible next to the detail panel. The brief delay lets the

@@ -212,14 +212,16 @@ struct WorkshopInstalledView: View {
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 14)
+                // Tap the gaps between cards / the side margins to close the
+                // inspector — placed at content level so in-grid gaps land here
+                // (a ScrollView-level background missed them). Behind the cards
+                // (Buttons keep their taps); clicking another card still switches.
+                .background(
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture { selectedEntry = nil }
+                )
             }
-            // Click empty grid space to close the detail inspector (macOS gallery
-            // idiom); cards are Buttons, so only the bare background taps here.
-            .background(
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture { selectedEntry = nil }
-            )
             .overlay(alignment: .top) {
                 if isDraggingEntry, !screenManager.screens.isEmpty {
                     screenDropBar
