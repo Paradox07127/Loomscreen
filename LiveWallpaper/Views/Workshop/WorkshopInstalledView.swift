@@ -675,7 +675,9 @@ struct WorkshopInstalledView: View {
         .frame(maxWidth: .infinity)
         .padding(.horizontal, DesignTokens.Spacing.lg)
         .padding(.vertical, DesignTokens.Spacing.md)
-        .adaptiveGlassSurface(.roundedRectangle(0))
+        // NB: a glassEffect backing here absorbed the children's drop
+        // hit-testing, so the drop targets stopped registering. Keep material.
+        .background(.regularMaterial)
         .overlay(alignment: .topTrailing) {
             Button { endEntryDrag() } label: {
                 Image(systemName: "xmark.circle.fill")
@@ -695,8 +697,10 @@ struct WorkshopInstalledView: View {
         VStack(spacing: 5) {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .strokeBorder(Color.accentColor.opacity(0.6), style: StrokeStyle(lineWidth: 2, dash: [5]))
+                // Opaque fill keeps the tile interior hit-testable for the drop
+                // (a glass backing left it a non-hit-testable "hole").
+                .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .frame(width: 150, height: 90)
-                .adaptiveGlassSurface(.roundedRectangle(10), tint: .accentColor)
                 .overlay {
                     Image(systemName: "display")
                         .font(.system(size: 30))
@@ -708,9 +712,7 @@ struct WorkshopInstalledView: View {
                 .lineLimit(1)
                 .frame(maxWidth: 150)
         }
-        // The glass tile is stroke-only now (no opaque fill), so make the whole
-        // target explicitly hit-testable — otherwise the interior is a drop
-        // "hole" and dropping onto it registers nothing (no copy cursor).
+        // Make the whole target (tile + name + gaps) a forgiving drop region.
         .contentShape(Rectangle())
         .onDrop(of: [.plainText], isTargeted: nil) { providers in
             handleScreenDrop(providers, to: screen)
