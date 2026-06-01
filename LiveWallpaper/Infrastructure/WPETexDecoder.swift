@@ -662,11 +662,15 @@ struct WPETexDecoder: Sendable {
                 mipmap: mip.index
             )
         case .rg88:
+            // TEXI flag 0x80000 = alpha-channel-priority: the RG88 is a
+            // LUMINANCE_ALPHA glow (R=luminance, G=alpha), not a normal map.
+            let alphaChannelPriority = (parsed.info.flags & 0x0008_0000) != 0
             decoded = try WPETexPixelDecoder.decodeRG88(
                 pixelBytes,
                 width: mip.width,
                 height: mip.height,
-                mipmap: mip.index
+                mipmap: mip.index,
+                alphaChannelPriority: alphaChannelPriority
             )
         case .dxt1, .dxt3, .dxt5, .bc7:
             decoded = try WPETexMetalTranscoder.transcode(
