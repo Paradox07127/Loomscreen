@@ -177,6 +177,10 @@ final class WorkshopBrowseViewModel {
     /// GetUserFiles) and the normal filter ribbon is replaced by a "Works by …"
     /// banner. Cleared to return to the normal filtered browse.
     private(set) var creatorFilter: CreatorFilter?
+    /// When set, the grid is scoped to items carrying this exact Workshop tag —
+    /// the detail-inspector "click a tag" path. Mutually exclusive with
+    /// `creatorFilter`; cleared to return to the normal filtered browse.
+    private(set) var pinnedTag: String?
     /// Workshop ids already in the local library, pushed in by the pane so the
     /// grid can scope by install state. Observed → the grid re-derives
     /// `displayedItems` when the library changes underneath it.
@@ -311,6 +315,7 @@ final class WorkshopBrowseViewModel {
         guard !isRateLimited else { return }
         let trimmed = steamID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        pinnedTag = nil
         creatorFilter = CreatorFilter(steamID: trimmed, name: name)
         await reload()
     }
@@ -319,6 +324,24 @@ final class WorkshopBrowseViewModel {
     func clearCreatorFilter() async {
         guard creatorFilter != nil else { return }
         creatorFilter = nil
+        await reload()
+    }
+
+    /// Scope the grid to items carrying one Workshop tag (the detail-inspector
+    /// tag-click path). Leaves the user's normal filter selection untouched.
+    func browseTag(_ tag: String) async {
+        guard !isRateLimited else { return }
+        let trimmed = tag.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        creatorFilter = nil
+        pinnedTag = trimmed
+        await reload()
+    }
+
+    /// Return to the normal filtered browse from a tag-scoped view.
+    func clearPinnedTag() async {
+        guard pinnedTag != nil else { return }
+        pinnedTag = nil
         await reload()
     }
 
@@ -497,6 +520,20 @@ final class WorkshopBrowseViewModel {
                 page: page,
                 numPerPage: Self.perPage,
                 creatorSteamID: creatorFilter.steamID
+            )
+        }
+
+        // Tag-scoped browse: items REQUIRED to carry the clicked tag (sort still
+        // applies); the deselect filters / search are ignored while scoped.
+        if let pinnedTag {
+            return WorkshopQueryRequest(
+                sort: preferredSort,
+                searchText: "",
+                page: page,
+                numPerPage: Self.perPage,
+                days: preferredSort == .trending ? trendingDays : nil,
+                requiredTags: [pinnedTag],
+                excludedTags: Self.alwaysExcludedTags
             )
         }
 

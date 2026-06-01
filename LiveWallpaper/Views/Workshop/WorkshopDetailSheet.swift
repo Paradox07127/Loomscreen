@@ -15,6 +15,8 @@ struct WorkshopInspectorContent: View {
     /// Scope the Browse grid to this item's creator (SteamID64 + persona name) —
     /// the author-link path. nil disables the link (plain author text).
     var onBrowseCreator: ((String, String?) -> Void)? = nil
+    /// Scope the Browse grid to a clicked tag. nil → tags render as plain labels.
+    var onSelectTag: ((String) -> Void)? = nil
     /// Dismisses the inspector. The native `.inspector` only auto-shows a toggle
     /// when a toolbar hosts one, so we surface an explicit close control here.
     var onClose: () -> Void = {}
@@ -440,14 +442,34 @@ struct WorkshopInspectorContent: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 ForEach(item.tags, id: \.self) { tag in
-                    Text(tag)
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Color.primary.opacity(0.06), in: Capsule())
+                    tagChip(tag)
                 }
             }
+        }
+    }
+
+    /// A tag pill. Tappable (accent-tinted) when `onSelectTag` is wired — clicking
+    /// scopes the grid to that tag; otherwise a plain secondary label.
+    @ViewBuilder
+    private func tagChip(_ tag: String) -> some View {
+        if let onSelectTag {
+            Button { onSelectTag(tag) } label: {
+                Text(tag)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.accentColor.opacity(0.12), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .help(Text("Browse items tagged \(tag)"))
+        } else {
+            Text(tag)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Color.primary.opacity(0.06), in: Capsule())
         }
     }
 

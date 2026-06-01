@@ -40,6 +40,10 @@ struct WorkshopBrowsePane: View {
                 creatorFilterBanner(creator)
                     .padding(.horizontal, DesignTokens.LibraryFilterBar.horizontalPadding)
                     .padding(.vertical, DesignTokens.LibraryFilterBar.verticalPadding)
+            } else if let tag = viewModel.pinnedTag {
+                tagFilterBanner(tag)
+                    .padding(.horizontal, DesignTokens.LibraryFilterBar.horizontalPadding)
+                    .padding(.vertical, DesignTokens.LibraryFilterBar.verticalPadding)
             } else {
                 // Ribbon self-pads to match the Installed tab's LibraryFilterBar;
                 // no divider below it (the scaffold already draws one under the
@@ -96,6 +100,10 @@ struct WorkshopBrowsePane: View {
                         onBrowseCreator: { steamID, name in
                             self.selectedItem = nil
                             Task { await viewModel.browseCreator(steamID: steamID, name: name) }
+                        },
+                        onSelectTag: { tag in
+                            self.selectedItem = nil
+                            Task { await viewModel.browseTag(tag) }
                         },
                         onClose: { self.selectedItem = nil }
                     )
@@ -390,6 +398,36 @@ struct WorkshopBrowsePane: View {
         .accessibilityElement(children: .contain)
     }
 
+    /// Replaces the filter ribbon while the grid is scoped to one tag — a "Back"
+    /// affordance plus the tag name. Reached by clicking a tag in the inspector.
+    private func tagFilterBanner(_ tag: String) -> some View {
+        HStack(spacing: DesignTokens.Spacing.sm) {
+            Button {
+                Task { await viewModel.clearPinnedTag() }
+            } label: {
+                Label("Back to Browse", systemImage: "chevron.left")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(viewModel.isLoading || viewModel.isPaging)
+
+            Spacer(minLength: 0)
+
+            HStack(spacing: 6) {
+                Image(systemName: "tag")
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                Text(String(localized: "Tagged “\(tag)”", comment: "Workshop tag-scoped browse header. Placeholder is the tag."))
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .contain)
+    }
+
     @ViewBuilder
     private var rateLimitBanner: some View {
         if viewModel.isRateLimited {
@@ -424,8 +462,9 @@ struct WorkshopBrowsePane: View {
     // MARK: - Helpers
 
     private var hasActiveFilters: Bool {
-        // Filters don't apply in creator-scoped mode, so never offer "Clear filters".
-        guard viewModel.creatorFilter == nil else { return false }
+        // Filters don't apply in creator- or tag-scoped mode, so never offer
+        // "Clear filters" there.
+        guard viewModel.creatorFilter == nil, viewModel.pinnedTag == nil else { return false }
         return !viewModel.searchInput.isEmpty
             || isNarrowing(viewModel.selectedTypes, total: WorkshopContentTypeFilter.selectableCases.count)
             || isNarrowing(viewModel.selectedAgeRatings, total: WorkshopAgeRatingFilter.allCases.count)
@@ -447,6 +486,9 @@ struct WorkshopBrowsePane: View {
                 return String(localized: "\(name) hasn't published any wallpapers here.", comment: "Empty creator-scoped Workshop browse. Placeholder is the creator's name.")
             }
             return String(localized: "This creator hasn't published any wallpapers here.", comment: "Empty creator-scoped Workshop browse, name unknown.")
+        }
+        if let tag = viewModel.pinnedTag {
+            return String(localized: "No results tagged “\(tag)”.", comment: "Empty tag-scoped Workshop browse. Placeholder is the tag.")
         }
         if !viewModel.searchInput.isEmpty {
             return String(localized: "No results for \"\(viewModel.searchInput)\".", comment: "Empty Workshop search result. Placeholder is the query.")
