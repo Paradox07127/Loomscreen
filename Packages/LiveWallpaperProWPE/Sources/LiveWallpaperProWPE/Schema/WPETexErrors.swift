@@ -171,6 +171,19 @@ public struct WPETexInfo: Sendable, Equatable {
         width > 0 && height > 0
             && width <= 16_384 && height <= 16_384
     }
+
+    /// TEXI flag bit 0x80000 = "alpha channel priority". On an `RG88`
+    /// texture it marks a legacy LUMINANCE_ALPHA glow: R is luminance,
+    /// G is alpha (the shape/falloff). Both the CPU `decodeRG88` path and
+    /// the Metal `.rg8Unorm` upload path key off this to expose the glow
+    /// as (R, R, R, G); without it the glow renders fully opaque (the
+    /// "red square light" artifact). RG88 without the flag is a normal /
+    /// data map and stays (R, G, 0, 1).
+    public static let alphaChannelPriorityFlag: UInt32 = 0x0008_0000
+
+    public var isRG88AlphaChannelPriority: Bool {
+        format == .rg88 && (flags & Self.alphaChannelPriorityFlag) != 0
+    }
 }
 
 /// TEXB v4 carries four extra fields per mipmap that the runtime doesn't

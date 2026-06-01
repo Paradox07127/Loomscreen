@@ -38,6 +38,66 @@ struct WPEMetalTextureLoaderTests {
         #expect(texture.pixelFormat == .rgba8Unorm_srgb)
     }
 
+    @Test("RG88 alpha-channel-priority uploads .rg8Unorm with (R,R,R,G) swizzle")
+    func rg88AlphaPrioritySwizzle() async throws {
+        // This is the REAL on-device particle path (payload → .rg8Unorm),
+        // the one that produced the "red square": .rg8Unorm samples as
+        // (R,G,0,1) — opaque. The swizzle must remap it to (R,R,R,G) so the
+        // glow keeps its G-channel alpha falloff.
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let bytes = Data([200, 50, 10, 255, 0, 128, 64, 32]) // 2x2 RG88 = 8 bytes
+        let payload = WPETexTexturePayload(
+            info: WPETexInfo(
+                containerVersion: 5,
+                infoVersion: 1,
+                width: 2,
+                height: 2,
+                textureFormatCode: WPETexFormat.rg88.rawValue,
+                format: .rg88,
+                mipmapCount: 1,
+                flags: WPETexInfo.alphaChannelPriorityFlag
+            ),
+            mipmaps: [WPETexTextureMipmap(index: 0, width: 2, height: 2, bytes: bytes)],
+            hasAnimationFrames: false
+        )
+
+        let texture = try await WPEMetalTextureLoader(device: device).makeTexture(from: payload, label: "test-rg88-glow")
+
+        #expect(texture.pixelFormat == .rg8Unorm)
+        #expect(texture.swizzle.red == .red)
+        #expect(texture.swizzle.green == .red)
+        #expect(texture.swizzle.blue == .red)
+        #expect(texture.swizzle.alpha == .green)
+    }
+
+    @Test("RG88 without alpha-priority keeps default (R,G,0,1) sampling")
+    func rg88NormalMapDefaultSwizzle() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let bytes = Data([200, 50, 10, 255, 0, 128, 64, 32])
+        let payload = WPETexTexturePayload(
+            info: WPETexInfo(
+                containerVersion: 5,
+                infoVersion: 1,
+                width: 2,
+                height: 2,
+                textureFormatCode: WPETexFormat.rg88.rawValue,
+                format: .rg88,
+                mipmapCount: 1,
+                flags: 0
+            ),
+            mipmaps: [WPETexTextureMipmap(index: 0, width: 2, height: 2, bytes: bytes)],
+            hasAnimationFrames: false
+        )
+
+        let texture = try await WPEMetalTextureLoader(device: device).makeTexture(from: payload, label: "test-rg88-normal")
+
+        #expect(texture.pixelFormat == .rg8Unorm)
+        #expect(texture.swizzle.red == .red)
+        #expect(texture.swizzle.green == .green)
+        #expect(texture.swizzle.blue == .blue)
+        #expect(texture.swizzle.alpha == .alpha)
+    }
+
     @Test("Rejects BC payload when current device cannot sample BC")
     func rejectsBCWithoutDeviceSupport() async throws {
         let device = try #require(MTLCreateSystemDefaultDevice())

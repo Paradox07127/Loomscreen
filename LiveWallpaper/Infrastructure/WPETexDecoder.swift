@@ -662,9 +662,10 @@ struct WPETexDecoder: Sendable {
                 mipmap: mip.index
             )
         case .rg88:
-            // TEXI flag 0x80000 = alpha-channel-priority: the RG88 is a
-            // LUMINANCE_ALPHA glow (R=luminance, G=alpha), not a normal map.
-            let alphaChannelPriority = (parsed.info.flags & 0x0008_0000) != 0
+            // alpha-channel-priority RG88 is a LUMINANCE_ALPHA glow
+            // (R=luminance, G=alpha), not a normal map. Same key as the
+            // Metal `.rg8Unorm` swizzle path so the two stay consistent.
+            let alphaChannelPriority = parsed.info.isRG88AlphaChannelPriority
             decoded = try WPETexPixelDecoder.decodeRG88(
                 pixelBytes,
                 width: mip.width,

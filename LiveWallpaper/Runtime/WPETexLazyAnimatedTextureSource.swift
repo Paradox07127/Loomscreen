@@ -33,6 +33,7 @@ final class WPETexLazyAnimatedTextureSource: WPEDynamicTextureSource {
     private let device: MTLDevice
     private let label: String
     private let mapping: WPEMetalTextureFormatMapping
+    private let alphaChannelPriorityRG88: Bool
     private let maximumTextureDimension2D: Int
     private let frameStartTimes: [TimeInterval]
     private let totalDuration: TimeInterval
@@ -67,6 +68,7 @@ final class WPETexLazyAnimatedTextureSource: WPEDynamicTextureSource {
         } catch {
             throw Failure.unsupportedFormat(payload.info.textureFormatCode)
         }
+        self.alphaChannelPriorityRG88 = payload.info.isRG88AlphaChannelPriority
         self.frames = payload.frames
         self.compressedImages = payload.compressedImages
         self.frameRate = payload.frameRate > 0 ? payload.frameRate : WPETexAnimationTrack.defaultFrameRate
@@ -350,6 +352,11 @@ final class WPETexLazyAnimatedTextureSource: WPEDynamicTextureSource {
         )
         descriptor.storageMode = .shared
         descriptor.usage = [.shaderRead]
+        // Match the eager loader: RG88 alpha-channel-priority glows sample
+        // as (R, R, R, G) so the alpha falloff survives the `.rg8Unorm` upload.
+        if alphaChannelPriorityRG88 {
+            descriptor.swizzle = MTLTextureSwizzleChannels(red: .red, green: .red, blue: .red, alpha: .green)
+        }
         guard let texture = device.makeTexture(descriptor: descriptor) else {
             throw Failure.textureAllocationFailed
         }
