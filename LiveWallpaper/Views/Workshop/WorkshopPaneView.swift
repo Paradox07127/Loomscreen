@@ -204,6 +204,14 @@ struct WorkshopPaneView: View {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
                 .disabled(browseViewModel.isLoading || browseViewModel.isRateLimited)
+
+                Toggle(isOn: Binding(
+                    get: { browseViewModel.hidesDownloadedInBrowse },
+                    set: { browseViewModel.setHidesDownloaded($0) }
+                )) {
+                    Label("Hide items already in my library", systemImage: "eye.slash")
+                }
+
                 Divider()
             }
             Button {

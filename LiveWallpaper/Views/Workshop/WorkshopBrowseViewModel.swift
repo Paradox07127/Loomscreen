@@ -136,34 +136,6 @@ enum WorkshopResolutionFilter: String, CaseIterable, Identifiable {
     }
 }
 
-/// View-level scope over the already-loaded page: every result, only items not
-/// yet in the local library (discover-new), or only installed ones (revisit).
-/// This is a CLIENT-SIDE filter over `items` — it never alters the Steam query,
-/// so it can't change pagination or the reported result count.
-enum WorkshopInstalledScope: String, CaseIterable, Identifiable {
-    case all
-    case new
-    case installed
-
-    var id: String { rawValue }
-
-    var displayName: String {
-        switch self {
-        case .all: return String(localized: "All", comment: "Workshop library-scope filter: show every result.")
-        case .new: return String(localized: "New", comment: "Workshop library-scope filter: hide items already installed.")
-        case .installed: return String(localized: "Installed", comment: "Workshop library-scope filter: only items already installed.")
-        }
-    }
-
-    var symbol: String {
-        switch self {
-        case .all: return "square.grid.2x2"
-        case .new: return "sparkles"
-        case .installed: return "checkmark.circle"
-        }
-    }
-}
-
 /// Drives `WorkshopBrowseView`. Holds the request shape, accumulates pages
 /// across the cursor pagination, debounces search input, and surfaces
 /// network / API errors for inline rendering. The view-model owns no
@@ -209,9 +181,11 @@ final class WorkshopBrowseViewModel {
     /// grid can scope by install state. Observed → the grid re-derives
     /// `displayedItems` when the library changes underneath it.
     var installedWorkshopIDs: Set<String> = []
-    /// Client-side scope over the loaded page (all / new / installed). Persisted.
-    private(set) var installedScope: WorkshopInstalledScope = .all
-    private static let installedScopeKey = "loomscreen.workshop.installedScope.v1"
+    /// When true, Browse hides items already in the local library (the Installed
+    /// tab is where you revisit those). Persisted; surfaced as a toggle in the
+    /// Workshop options menu rather than as a ribbon control.
+    private(set) var hidesDownloadedInBrowse: Bool = false
+    private static let hidesDownloadedKey = "loomscreen.workshop.hidesDownloaded.v1"
     private(set) var currentRequest: WorkshopQueryRequest
     private(set) var items: [WorkshopQueryItem] = []
     private(set) var totalAvailable: Int?
@@ -233,22 +207,17 @@ final class WorkshopBrowseViewModel {
         (rateLimitUntil ?? .distantPast) > Date()
     }
 
-    /// The loaded page's items after applying the installed scope. The grid
-    /// renders these; `items` stays the raw page so pagination/counts are intact.
+    /// The loaded page's items after optionally hiding already-downloaded ones.
+    /// The grid renders these; `items` stays the raw page so pagination/counts
+    /// are intact.
     var displayedItems: [WorkshopQueryItem] {
-        switch installedScope {
-        case .all:
-            return items
-        case .new:
-            return items.filter { !installedWorkshopIDs.contains(String($0.id)) }
-        case .installed:
-            return items.filter { installedWorkshopIDs.contains(String($0.id)) }
-        }
+        guard hidesDownloadedInBrowse else { return items }
+        return items.filter { !installedWorkshopIDs.contains(String($0.id)) }
     }
 
-    func setInstalledScope(_ scope: WorkshopInstalledScope) {
-        installedScope = scope
-        UserDefaults.standard.set(scope.rawValue, forKey: Self.installedScopeKey)
+    func setHidesDownloaded(_ hides: Bool) {
+        hidesDownloadedInBrowse = hides
+        UserDefaults.standard.set(hides, forKey: Self.hidesDownloadedKey)
     }
 
     /// Total pages from Steam's reported result count, when available.
@@ -467,9 +436,8 @@ final class WorkshopBrowseViewModel {
         if let raw = defaults.array(forKey: FilterKey.genres) as? [String] {
             selectedGenres = Set(raw).intersection(Set(WorkshopGenre.allTags))
         }
-        if let raw = defaults.string(forKey: Self.installedScopeKey),
-           let scope = WorkshopInstalledScope(rawValue: raw) {
-            installedScope = scope
+        if defaults.object(forKey: Self.hidesDownloadedKey) != nil {
+            hidesDownloadedInBrowse = defaults.bool(forKey: Self.hidesDownloadedKey)
         }
     }
 

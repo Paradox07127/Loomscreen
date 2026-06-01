@@ -297,34 +297,23 @@ struct WorkshopBrowsePane: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// Shown inside the grid when the active library scope (New / Installed)
-    /// excludes every item on the loaded page.
+    /// Shown inside the grid when "Hide items already in my library" excludes
+    /// every item on the loaded page.
     private var scopeEmptyNote: some View {
         VStack(spacing: DesignTokens.Spacing.sm) {
-            Image(systemName: viewModel.installedScope == .installed ? "tray" : "sparkles")
+            Image(systemName: "sparkles")
                 .font(.system(size: 30))
                 .foregroundStyle(.tertiary)
-            Text(scopeEmptyMessage)
+            Text("Every item on this page is already in your library.")
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            Button("Show all") { viewModel.setInstalledScope(.all) }
+            Button("Show downloaded items") { viewModel.setHidesDownloaded(false) }
                 .buttonStyle(.borderless)
                 .controlSize(.small)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, DesignTokens.Spacing.xl)
-    }
-
-    private var scopeEmptyMessage: String {
-        switch viewModel.installedScope {
-        case .installed:
-            return String(localized: "None of these results are in your library yet.", comment: "Workshop browse: the Installed scope hid every item on the page.")
-        case .new:
-            return String(localized: "Every result on this page is already in your library.", comment: "Workshop browse: the New scope hid every item on the page.")
-        case .all:
-            return ""
-        }
     }
 
     private func errorState(_ error: WorkshopQueryError) -> some View {

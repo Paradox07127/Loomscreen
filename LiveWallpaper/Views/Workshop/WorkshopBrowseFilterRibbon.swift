@@ -82,12 +82,6 @@ struct WorkshopBrowseFilterRibbon: View {
 
             filtersToggle
 
-            // Show the All / New / Installed scope only once the user actually has
-            // a library to scope against (progressive disclosure).
-            if !viewModel.installedWorkshopIDs.isEmpty {
-                installedScopeMenu
-            }
-
             if viewModel.hasPendingChanges {
                 searchButton
             }
@@ -98,23 +92,6 @@ struct WorkshopBrowseFilterRibbon: View {
             // today's request count now live in the pane hero, not in this row.
             sortMenu
         }
-    }
-
-    /// All / New (hide installed) / Installed scope over the loaded page.
-    private var installedScopeMenu: some View {
-        Picker("Library scope", selection: Binding(
-            get: { viewModel.installedScope },
-            set: { viewModel.setInstalledScope($0) }
-        )) {
-            ForEach(WorkshopInstalledScope.allCases) { scope in
-                Label(scope.displayName, systemImage: scope.symbol).tag(scope)
-            }
-        }
-        .pickerStyle(.menu)
-        .controlSize(.small)
-        .fixedSize()
-        .disabled(controlsDisabled)
-        .help(Text("Show all results, only new ones, or only items already in your library"))
     }
 
     /// Sort menu with the Trending window folded in as discrete entries, so
