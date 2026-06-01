@@ -162,6 +162,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             scheduleSettingsWindowPrewarm()
         }
 
+        #if !LITE_BUILD
+        // On-device verification hook for the system-audio capture tap. No-op
+        // unless `WPEAudioCaptureProbe` default is set. See SystemAudioCaptureProbe.
+        if #available(macOS 14.2, *), !runtimeOptions.isTesting {
+            SystemAudioCaptureProbe.runIfRequested()
+        }
+        #endif
+
         #if LITE_BUILD
         // Loomscreen Lite ships ad-hoc signed via GitHub Releases, so we
         // hand-roll a single-shot launch-time update check (no background
