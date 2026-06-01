@@ -7,6 +7,7 @@ enum WallpaperPolicyEngine {
         globalSettings: GlobalSettings,
         powerSource: PowerMonitor.PowerSource,
         isHiddenByFullScreen: Bool,
+        isWindowOccluding: Bool,
         thermalState: ProcessInfo.ThermalState,
         isGameModeActive: Bool
     ) -> WallpaperPerformanceProfile {
@@ -16,6 +17,10 @@ enum WallpaperPolicyEngine {
             shouldApplyFullScreenPolicy(
                 globalSettings: globalSettings,
                 isHiddenByFullScreen: isHiddenByFullScreen
+            ) ||
+            shouldApplyWindowOcclusionPolicy(
+                globalSettings: globalSettings,
+                isWindowOccluding: isWindowOccluding
             )
 
         return shouldSuspend ? .suspended : .quality
@@ -89,10 +94,19 @@ enum WallpaperPolicyEngine {
         globalSettings.pauseOnFullScreen && isHiddenByFullScreen
     }
 
+    static func shouldApplyWindowOcclusionPolicy(
+        globalSettings: GlobalSettings,
+        isWindowOccluding: Bool
+    ) -> Bool {
+        globalSettings.pauseOnWindowOcclusion && isWindowOccluding
+    }
+
     static func shouldEnableFullScreenFallbackPolling(
         globalSettings: GlobalSettings,
         hasConfiguredWallpaperSessions: Bool
     ) -> Bool {
-        globalSettings.pauseOnFullScreen && hasConfiguredWallpaperSessions
+        // Either window-coverage rule needs the detector polling as a fallback.
+        (globalSettings.pauseOnFullScreen || globalSettings.pauseOnWindowOcclusion)
+            && hasConfiguredWallpaperSessions
     }
 }

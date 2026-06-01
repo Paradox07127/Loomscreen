@@ -28,6 +28,7 @@ struct WallpaperPolicyEngineThermalTests {
                         globalSettings: settings,
                         powerSource: powerSource,
                         isHiddenByFullScreen: isHiddenByFullScreen,
+                        isWindowOccluding: false,
                         thermalState: thermalExpectation.state,
                         isGameModeActive: false
                     )
@@ -61,6 +62,7 @@ struct WallpaperPolicyEngineThermalTests {
                         globalSettings: settings,
                         powerSource: powerSource,
                         isHiddenByFullScreen: isHiddenByFullScreen,
+                        isWindowOccluding: false,
                         thermalState: thermalState,
                         isGameModeActive: true
                     )
@@ -88,6 +90,7 @@ struct WallpaperPolicyEngineThermalTests {
             globalSettings: settings,
             powerSource: .external,
             isHiddenByFullScreen: false,
+            isWindowOccluding: false,
             thermalState: .nominal,
             isGameModeActive: false   // caller already AND'd with the setting
         )

@@ -15,6 +15,7 @@ struct GeneralSettingsView: View {
     @State private var useBatteryThreshold: Bool
     @State private var pauseOnFullScreen: Bool
     @State private var pauseInGameMode: Bool
+    @State private var pauseOnWindowOcclusion: Bool
     @State private var showInDock: Bool
     /// Slider value held in MB for UI ergonomics — converted to bytes when
     /// persisted to `GlobalSettings.videoCacheMaxBytesPerScreen`. `Double`
@@ -63,6 +64,7 @@ struct GeneralSettingsView: View {
         _useBatteryThreshold = State(initialValue: settings.minimumBatteryLevel != nil)
         _pauseOnFullScreen = State(initialValue: settings.pauseOnFullScreen)
         _pauseInGameMode = State(initialValue: settings.pauseInGameMode)
+        _pauseOnWindowOcclusion = State(initialValue: settings.pauseOnWindowOcclusion)
         _showInDock = State(initialValue: settings.showInDock)
         _videoCacheBudgetMB = State(initialValue: Double(settings.videoCacheMaxBytesPerScreen) / Double(1024 * 1024))
         _developerModeEnabled = State(initialValue: settings.developerModeEnabled)
@@ -251,6 +253,7 @@ struct GeneralSettingsView: View {
         useBatteryThreshold = settings.minimumBatteryLevel != nil
         pauseOnFullScreen = settings.pauseOnFullScreen
         pauseInGameMode = settings.pauseInGameMode
+        pauseOnWindowOcclusion = settings.pauseOnWindowOcclusion
         showInDock = settings.showInDock
         developerModeEnabled = settings.developerModeEnabled
         audioResponseEnabled = settings.audioResponseEnabled
@@ -373,13 +376,22 @@ struct GeneralSettingsView: View {
                         .accessibilityHint(Text("Automatically pause wallpapers when a full-screen app is active"))
                 }
 
-                SettingRow(icon: "gamecontroller", iconColor: .green, title: "Pause when a game is active", subtitle: "Yield the GPU when a known game launcher is frontmost or macOS enters Low Power Mode") {
+                SettingRow(icon: "rectangle.on.rectangle", iconColor: .purple, title: "Pause when windows cover the desktop", subtitle: "Also pause when other apps' windows blanket at least 85% of a display, even if none is full-screen") {
+                    Toggle("", isOn: $pauseOnWindowOcclusion)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .onChange(of: pauseOnWindowOcclusion) { _, _ in updateGlobalSettings() }
+                        .accessibilityLabel(Text("Pause when windows cover the desktop"))
+                        .accessibilityHint(Text("Pause when other apps' windows cover at least 85 percent of a display"))
+                }
+
+                SettingRow(icon: "gamecontroller", iconColor: .green, title: "Pause when a game is active", subtitle: "Yield the GPU when the frontmost app is a game, or macOS enters Low Power Mode") {
                     Toggle("", isOn: $pauseInGameMode)
                         .labelsHidden()
                         .toggleStyle(.switch)
                         .onChange(of: pauseInGameMode) { _, _ in updateGlobalSettings() }
                         .accessibilityLabel(Text("Pause when a game is active"))
-                        .accessibilityHint(Text("Yield the GPU when a known game launcher is frontmost or macOS enters Low Power Mode"))
+                        .accessibilityHint(Text("Yield the GPU when the frontmost app is a game, or macOS enters Low Power Mode"))
                 }
 
                 SettingRow(icon: "dock.rectangle", iconColor: .indigo, title: "Show in Dock", subtitle: "Make the app visible in the Dock and Cmd-Tab switcher") {
@@ -988,6 +1000,7 @@ struct GeneralSettingsView: View {
         settings.minimumBatteryLevel = useBatteryThreshold ? minimumBatteryLevel : nil
         settings.pauseOnFullScreen = pauseOnFullScreen
         settings.pauseInGameMode = pauseInGameMode
+        settings.pauseOnWindowOcclusion = pauseOnWindowOcclusion
         settings.showInDock = showInDock
         settings.videoCacheMaxBytesPerScreen = Int(videoCacheBudgetMB) * 1024 * 1024
         settings.developerModeEnabled = developerModeEnabled
@@ -1020,6 +1033,7 @@ struct GeneralSettingsView: View {
         useBatteryThreshold = false
         pauseOnFullScreen = true
         pauseInGameMode = true
+        pauseOnWindowOcclusion = false
         showInDock = false
         developerModeEnabled = false
         weatherLocation = .default

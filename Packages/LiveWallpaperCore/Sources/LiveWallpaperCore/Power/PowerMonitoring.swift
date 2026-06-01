@@ -16,7 +16,9 @@ extension PowerMonitor: PowerMonitoring {}
 @MainActor
 public protocol FullScreenDetecting: AnyObject {
     var hiddenScreens: [CGDirectDisplayID: Bool] { get }
+    var occludedScreens: [CGDirectDisplayID: Bool] { get }
     func isDesktopHidden(for screenID: CGDirectDisplayID) -> Bool
+    func isDesktopOccluded(for screenID: CGDirectDisplayID) -> Bool
     func checkNow()
     func setFallbackPollingEnabled(_ enabled: Bool)
 }

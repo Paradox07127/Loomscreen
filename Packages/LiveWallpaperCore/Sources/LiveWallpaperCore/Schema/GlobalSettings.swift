@@ -12,6 +12,13 @@ public struct GlobalSettings: Codable, Sendable {
     /// wallpaper. Default `true` is the common case; users with multi-monitor
     /// setups where the game runs on a secondary display can opt out.
     public var pauseInGameMode: Bool
+    /// Auto-pause when other apps' windows blanket the desktop. Unlike
+    /// `pauseOnFullScreen` (which needs a single ≥95% window), this sums the
+    /// *union* area of every non-system window on a display and pauses when it
+    /// covers ≥ 85% — so a desktop tiled/overlapped by ordinary windows still
+    /// yields the GPU. Off by default; it's a more aggressive sibling of the
+    /// full-screen rule.
+    public var pauseOnWindowOcclusion: Bool
     /// When true, the app activation policy is `.regular` so the app shows
     /// in the Dock and Cmd+Tab list. When false (default), the app remains
     /// `.accessory` (menu-bar only). Toggled live; no relaunch required.
@@ -85,6 +92,7 @@ public struct GlobalSettings: Codable, Sendable {
         minimumBatteryLevel: Double? = nil,
         pauseOnFullScreen: Bool = true,
         pauseInGameMode: Bool = true,
+        pauseOnWindowOcclusion: Bool = false,
         showInDock: Bool = false,
         weatherLocation: WeatherLocationPreference = .default,
         globalShortcutsEnabled: Bool = true,
@@ -100,6 +108,7 @@ public struct GlobalSettings: Codable, Sendable {
         self.minimumBatteryLevel = minimumBatteryLevel
         self.pauseOnFullScreen = pauseOnFullScreen
         self.pauseInGameMode = pauseInGameMode
+        self.pauseOnWindowOcclusion = pauseOnWindowOcclusion
         self.showInDock = showInDock
         self.weatherLocation = weatherLocation
         self.globalShortcutsEnabled = globalShortcutsEnabled
@@ -120,6 +129,7 @@ public struct GlobalSettings: Codable, Sendable {
         // Existing installs never saw this key — default to true so the
         // behavior matches the original hardcoded GameMode pause.
         pauseInGameMode = (try? c.decodeIfPresent(Bool.self, forKey: .pauseInGameMode)) ?? true
+        pauseOnWindowOcclusion = (try? c.decodeIfPresent(Bool.self, forKey: .pauseOnWindowOcclusion)) ?? false
         showInDock = try c.decodeIfPresent(Bool.self, forKey: .showInDock) ?? false
         weatherLocation = (try? c.decodeIfPresent(WeatherLocationPreference.self, forKey: .weatherLocation)) ?? .default
         globalShortcutsEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .globalShortcutsEnabled)) ?? true

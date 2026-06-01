@@ -603,10 +603,13 @@ final class PlaybackCoordinator {
         let globalSettings = SettingsManager.shared.loadGlobalSettings()
         let isHiddenByFullScreen = globalSettings.pauseOnFullScreen &&
             fullScreenDetector.isDesktopHidden(for: screen.id)
+        let isWindowOccluding = globalSettings.pauseOnWindowOcclusion &&
+            fullScreenDetector.isDesktopOccluded(for: screen.id)
         let profile = WallpaperPolicyEngine.performanceProfile(
             globalSettings: globalSettings,
             powerSource: powerMonitor.currentPowerSource,
             isHiddenByFullScreen: isHiddenByFullScreen,
+            isWindowOccluding: isWindowOccluding,
             thermalState: ProcessInfo.processInfo.thermalState,
             isGameModeActive: globalSettings.pauseInGameMode && GameModeDetector.isActive
         )

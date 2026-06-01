@@ -582,6 +582,7 @@ final class ScreenManager {
         let generation = fullScreenTrackingGeneration
         withObservationTracking {
             _ = fullScreenDetector.hiddenScreens
+            _ = fullScreenDetector.occludedScreens
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self,
@@ -604,8 +605,15 @@ final class ScreenManager {
                 globalSettings: globalSettings,
                 isHiddenByFullScreen: isHidden
             )
+            let shouldApplyOcclusionPolicy = WallpaperPolicyEngine.shouldApplyWindowOcclusionPolicy(
+                globalSettings: globalSettings,
+                isWindowOccluding: fullScreenDetector.isDesktopOccluded(for: screen.id)
+            )
+            // Either window-coverage rule pauses video the same way (and reuses
+            // the same paused-by-full-screen bookkeeping for resume).
+            let shouldPauseForWindows = shouldApplyFullScreenPolicy || shouldApplyOcclusionPolicy
 
-            if shouldApplyFullScreenPolicy {
+            if shouldPauseForWindows {
                 if let playback = screen.playbackController, playback.isPlaying {
                     playback.pause()
                     powerPolicy.markPausedByFullScreen(screen.id)
@@ -629,6 +637,7 @@ final class ScreenManager {
                 globalSettings: globalSettings,
                 powerSource: powerSource,
                 isHiddenByFullScreen: shouldApplyFullScreenPolicy,
+                isWindowOccluding: shouldApplyOcclusionPolicy,
                 thermalState: thermalState,
                 isGameModeActive: isGameModeActive
             )
@@ -1038,12 +1047,15 @@ final class ScreenManager {
         for screen in screens {
             let isHiddenByFullScreen = globalSettings.pauseOnFullScreen &&
                 fullScreenDetector.isDesktopHidden(for: screen.id)
+            let isWindowOccluding = globalSettings.pauseOnWindowOcclusion &&
+                fullScreenDetector.isDesktopOccluded(for: screen.id)
 
             let profile = applyPerformancePolicy(
                 to: screen,
                 globalSettings: globalSettings,
                 powerSource: powerSource,
                 isHiddenByFullScreen: isHiddenByFullScreen,
+                isWindowOccluding: isWindowOccluding,
                 thermalState: thermalState,
                 isGameModeActive: isGameModeActive
             )
@@ -1103,6 +1115,7 @@ final class ScreenManager {
         globalSettings: GlobalSettings,
         powerSource: PowerMonitor.PowerSource,
         isHiddenByFullScreen: Bool,
+        isWindowOccluding: Bool,
         thermalState: ProcessInfo.ThermalState,
         isGameModeActive: Bool
     ) -> WallpaperPerformanceProfile {
@@ -1110,6 +1123,7 @@ final class ScreenManager {
             globalSettings: globalSettings,
             powerSource: powerSource,
             isHiddenByFullScreen: isHiddenByFullScreen,
+            isWindowOccluding: isWindowOccluding,
             thermalState: thermalState,
             isGameModeActive: isGameModeActive
         )
@@ -1126,12 +1140,15 @@ final class ScreenManager {
         for screen in screens {
             let isHiddenByFullScreen = globalSettings.pauseOnFullScreen &&
                 fullScreenDetector.isDesktopHidden(for: screen.id)
+            let isWindowOccluding = globalSettings.pauseOnWindowOcclusion &&
+                fullScreenDetector.isDesktopOccluded(for: screen.id)
 
             applyPerformancePolicy(
                 to: screen,
                 globalSettings: globalSettings,
                 powerSource: powerSource,
                 isHiddenByFullScreen: isHiddenByFullScreen,
+                isWindowOccluding: isWindowOccluding,
                 thermalState: thermalState,
                 isGameModeActive: isGameModeActive
             )
@@ -1598,6 +1615,8 @@ final class ScreenManager {
                 powerSource: powerMonitor.currentPowerSource,
                 isHiddenByFullScreen: globalSettings.pauseOnFullScreen &&
                     fullScreenDetector.isDesktopHidden(for: screen.id),
+                isWindowOccluding: globalSettings.pauseOnWindowOcclusion &&
+                    fullScreenDetector.isDesktopOccluded(for: screen.id),
                 thermalState: ProcessInfo.processInfo.thermalState,
                 isGameModeActive: globalSettings.pauseInGameMode && GameModeDetector.isActive
             )
@@ -1620,6 +1639,8 @@ final class ScreenManager {
             powerSource: powerMonitor.currentPowerSource,
             isHiddenByFullScreen: globalSettings.pauseOnFullScreen &&
                 fullScreenDetector.isDesktopHidden(for: screen.id),
+            isWindowOccluding: globalSettings.pauseOnWindowOcclusion &&
+                fullScreenDetector.isDesktopOccluded(for: screen.id),
             thermalState: ProcessInfo.processInfo.thermalState,
             isGameModeActive: globalSettings.pauseInGameMode && GameModeDetector.isActive
         )
