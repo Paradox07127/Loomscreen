@@ -21,10 +21,17 @@ struct WPESceneDetailView: View {
     /// diagnostic so power users can see *why* a layer was skipped without
     /// diving into Console.
     @State private var showDiagnostics = false
+    /// Second-level disclosure inside the error console: expands the raw,
+    /// monospaced renderer log. Collapsed by default so the friendly summary
+    /// leads and the wall of diagnostic text is opt-in.
+    @State private var showRawLog = false
+    /// Transient "copied" affordance on the console's Copy button.
+    @State private var didCopyLog = false
 
     var body: some View {
         VStack(spacing: 16) {
             previewCard
+            errorConsole
             metadata
             if showDiagnostics { diagnosticsPanel }
             actions
@@ -65,7 +72,11 @@ struct WPESceneDetailView: View {
                 fallbackBackground
             case .error(let fallbackReason):
                 fallbackBackground
-                    .overlay(errorOverlay(reason: fallbackReason))
+                    .overlay(alignment: .bottom) { previewErrorStrip(reason: fallbackReason) }
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(severityColor(for: fallbackReason).opacity(0.45), lineWidth: 1.5)
+                    }
             }
         }
         .transition(.opacity)
@@ -75,23 +86,32 @@ struct WPESceneDetailView: View {
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
-    private func errorOverlay(reason: FallbackReason) -> some View {
-        ZStack {
-            Color.black.opacity(0.45)
-            VStack(spacing: 8) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.largeTitle)
-                    .foregroundStyle(.yellow)
-                errorTitle(for: reason)
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                errorBody(for: reason)
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.85))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 24)
-            }
+    /// Lightweight gradient strip pinned to the bottom of the (now unmasked)
+    /// preview GIF. Surfaces a glanceable error code without hiding the artwork
+    /// — the full story lives in `errorConsole` directly below.
+    private func previewErrorStrip(reason: FallbackReason) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: severityIcon(for: reason))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(severityColor(for: reason))
+            Text(verbatim: errorCode(for: reason))
+                .font(.system(.caption2, design: .monospaced).weight(.bold))
+                .foregroundStyle(.white)
+            Spacer(minLength: 0)
         }
+        .padding(.horizontal, 14)
+        .padding(.top, 24)
+        .padding(.bottom, 10)
+        .frame(maxWidth: .infinity)
+        .background(
+            LinearGradient(
+                colors: [.black.opacity(0), .black.opacity(0.78)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     /// Inline copy that avoids nesting a full `WPEFallbackCard` (with its own glass background) inside this card.
@@ -118,7 +138,7 @@ struct WPESceneDetailView: View {
         case .unsupportedType:
             return Text("We can't render this scene's feature set yet.")
         case .sceneParseFailed(let detail):
-            return Text(verbatim: detail)
+            return Text(verbatim: PIISanitizer.scrub(detail))
         case .sceneShaderUnsupported:
             return Text("A custom shader couldn't be translated. Try re-downloading the project.")
         case .sceneResourceMissing:
@@ -136,7 +156,178 @@ struct WPESceneDetailView: View {
         case .texUnsupportedFormat(let code):
             return Text("Format \(code) — not yet decoded.", comment: "Texture error detail. The placeholder is a texture format code.")
         case .texDecodeFailed(let detail):
-            return Text(verbatim: detail)
+            return Text(verbatim: PIISanitizer.scrub(detail))
+        }
+    }
+
+    // MARK: - Error console
+
+    /// Terminal-style diagnostic console that appears directly below the preview
+    /// GIF whenever the scene failed. Collapses to zero height (no `spacing`
+    /// cost) when there's no error. Layers a friendly summary over the raw,
+    /// copyable renderer log behind a disclosure.
+    @ViewBuilder
+    private var errorConsole: some View {
+        if case .error(let reason) = state {
+            VStack(alignment: .leading, spacing: 0) {
+                consoleHeader(reason: reason)
+
+                errorBody(for: reason)
+                    .font(.callout)
+                    .foregroundStyle(.white.opacity(0.82))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, diagnosticLogText == nil ? 14 : 10)
+
+                if let log = diagnosticLogText {
+                    rawLogDisclosure(log: log)
+                }
+            }
+            .background(Color.black.opacity(0.88))
+            .overlay(alignment: .leading) {
+                Rectangle()
+                    .fill(severityColor(for: reason))
+                    .frame(width: 4)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(severityColor(for: reason).opacity(0.35), lineWidth: 1)
+            }
+            .transition(.move(edge: .top).combined(with: .opacity))
+            .accessibilityElement(children: .contain)
+        }
+    }
+
+    private func consoleHeader(reason: FallbackReason) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: severityIcon(for: reason))
+                .font(.headline)
+                .foregroundStyle(severityColor(for: reason))
+            errorTitle(for: reason)
+                .font(.headline)
+                .foregroundStyle(.white)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Button {
+                copyDiagnostics(reason: reason)
+            } label: {
+                Image(systemName: didCopyLog ? "checkmark" : "doc.on.doc")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(didCopyLog ? Color.green : .white.opacity(0.8))
+                    .frame(width: 22, height: 22)
+                    .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+            .help(Text("Copy diagnostic log"))
+            .accessibilityLabel(Text(didCopyLog ? "Diagnostic log copied" : "Copy diagnostic log"))
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
+    }
+
+    @ViewBuilder
+    private func rawLogDisclosure(log: String) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Divider().overlay(Color.white.opacity(0.12))
+
+            Button {
+                withAnimation(DesignTokens.motion(reduceMotion, .spring(response: 0.3, dampingFraction: 0.85))) {
+                    showRawLog.toggle()
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .bold))
+                        .rotationEffect(.degrees(showRawLog ? 90 : 0))
+                    Text(showRawLog ? "Hide diagnostic log" : "Show diagnostic log")
+                        .font(.caption.weight(.semibold))
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(.white.opacity(0.72))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(showRawLog ? "Hide diagnostic log" : "Show diagnostic log"))
+
+            if showRawLog {
+                ScrollView(.vertical) {
+                    Text(verbatim: log)
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(Color.green.opacity(0.92))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14)
+                        .padding(.bottom, 12)
+                }
+                .frame(maxHeight: 140)
+                .transition(.opacity)
+            }
+        }
+    }
+
+    // MARK: - Severity derivation
+
+    /// Maps a fallback reason to a severity tint. User-recoverable problems
+    /// (missing Steam dependency, Windows-only plugin) read as warnings;
+    /// everything else is a hard render failure.
+    private func severityColor(for reason: FallbackReason) -> Color {
+        switch reason {
+        case .missingDependency, .requiresWindowsPlugin: return .orange
+        default:                                         return .red
+        }
+    }
+
+    private func severityIcon(for reason: FallbackReason) -> String {
+        switch reason {
+        case .missingDependency:     return "exclamationmark.triangle.fill"
+        case .requiresWindowsPlugin: return "puzzlepiece.extension.fill"
+        default:                     return "exclamationmark.octagon.fill"
+        }
+    }
+
+    /// Short, glanceable machine code shown on the preview strip and copied
+    /// alongside the raw log.
+    private func errorCode(for reason: FallbackReason) -> String {
+        switch reason {
+        case .unsupportedType:         return "WPE_UNSUPPORTED_TYPE"
+        case .sceneParseFailed:        return "WPE_SCENE_PARSE"
+        case .sceneShaderUnsupported:  return "WPE_SHADER_UNSUPPORTED"
+        case .sceneResourceMissing:    return "WPE_RESOURCE_MISS"
+        case .missingDependency:       return "WPE_MISSING_DEPENDENCY"
+        case .requiresWindowsPlugin:   return "WPE_WINDOWS_PLUGIN"
+        case .texContainerUnsupported: return "WPE_TEX_CONTAINER"
+        case .texUnsupportedFormat:    return "WPE_TEX_FORMAT"
+        case .texDecodeFailed:         return "WPE_TEX_DECODE"
+        }
+    }
+
+    /// The renderer's first-failure diagnostic — the actual "log" text, scrubbed
+    /// of home paths / `/Users/<name>` / URLs before it reaches the screen or
+    /// the clipboard (the Copy button makes this trivially shareable). `nil`
+    /// when the failure surfaced before any per-layer diagnostic was recorded.
+    private var diagnosticLogText: String? {
+        guard let raw = session?.sceneRenderer?.loadDiagnostics?.errorDescription else { return nil }
+        return PIISanitizer.scrub(raw)
+    }
+
+    private func copyDiagnostics(reason: FallbackReason) {
+        var parts = [errorCode(for: reason)]
+        if let log = diagnosticLogText {
+            parts.append(log)
+        }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(parts.joined(separator: "\n\n"), forType: .string)
+
+        didCopyLog = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            didCopyLog = false
         }
     }
 
@@ -325,7 +516,9 @@ struct WPESceneDetailView: View {
             if case .error(let reason) = state, reason.isActionable {
                 Button {
                     Task { @MainActor in
-                        state = .loading
+                        withAnimation(DesignTokens.motion(reduceMotion, .spring(response: 0.35, dampingFraction: 0.85))) {
+                            state = .loading
+                        }
                         await session?.reload()
                         await refreshState()
                     }
@@ -342,27 +535,33 @@ struct WPESceneDetailView: View {
     // MARK: - State derivation
 
     private func refreshState() async {
-        guard let session else {
-            state = .error(.unsupportedType)
-            return
+        let next = derivedState()
+        guard next != state else { return }
+        // Drive the assignment through an animation so the error console's
+        // insertion/removal slides instead of snapping the layout — the 0.4s
+        // poll only re-animates when the state actually changes (guard above).
+        withAnimation(DesignTokens.motion(reduceMotion, .spring(response: 0.35, dampingFraction: 0.85))) {
+            state = next
         }
+    }
+
+    /// Pure state derivation (plus the live renderer's Reduce-Motion side
+    /// effect). Returns the state the card *should* be in for the current
+    /// session, leaving the animated assignment to `refreshState()`.
+    private func derivedState() -> SceneRenderState {
+        guard let session else { return .error(.unsupportedType) }
         if let error = session.loadError {
-            state = .error(mapToFallbackReason(error))
-            return
+            return .error(mapToFallbackReason(error))
         }
-        guard let renderer = session.sceneRenderer else {
-            state = .idle
-            return
-        }
+        guard let renderer = session.sceneRenderer else { return .idle }
         if !renderer.hasPresentedFrame {
-            state = .loading(progress: session.loadProgress)
-            return
+            return .loading(progress: session.loadProgress)
         }
         // Still suspend the *live* renderer under Reduce Motion; the inspector
         // itself just shows the project's preview GIF (which holds a static
         // poster under Reduce Motion), so there's no separate paused state.
         renderer.applyPerformanceProfile(reduceMotion ? .suspended : .quality)
-        state = .ready
+        return .ready
     }
 
     private func mapToFallbackReason(_ error: SceneRenderingError) -> FallbackReason {
