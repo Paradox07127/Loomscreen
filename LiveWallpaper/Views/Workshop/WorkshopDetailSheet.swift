@@ -269,7 +269,7 @@ struct WorkshopInspectorContent: View {
             Label(downloadButtonTitle, systemImage: "arrow.down.circle")
                 .frame(maxWidth: .infinity)
         }
-        .buttonStyle(.borderedProminent)
+        .adaptiveGlassButton(.prominent)
         .controlSize(.regular)
         .disabled(!doctor.isDownloadReady || item.isBanned)
         .help(Text(doctor.isDownloadReady
@@ -295,14 +295,14 @@ struct WorkshopInspectorContent: View {
                 Label("Apply to \(only.name)", systemImage: "play.fill")
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
+            .adaptiveGlassButton(.prominent)
             .controlSize(.regular)
         } else {
             // One Apply button; tapping floats a popover to pick a display or all.
             // (Single-display applies directly above; there's no standalone
             // "Apply to All" button.)
             Button { showingApplyPopover = true } label: { applyLabel }
-                .buttonStyle(.borderedProminent)
+                .adaptiveGlassButton(.prominent)
                 .controlSize(.regular)
                 .popover(isPresented: $showingApplyPopover, arrowEdge: .bottom) {
                     WorkshopApplyTargetPicker(

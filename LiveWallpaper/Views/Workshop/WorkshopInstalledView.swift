@@ -1245,7 +1245,7 @@ private struct WPEInstalledInspectorContent: View {
                 Label("Apply to \(only.name)", systemImage: "play.fill")
                     .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
+            .adaptiveGlassButton(.prominent)
             .controlSize(.regular)
         } else {
             // One Apply button → a popover to pick a display or all (same
@@ -1253,7 +1253,7 @@ private struct WPEInstalledInspectorContent: View {
             Button { showingApplyPopover = true } label: {
                 Label("Apply", systemImage: "play.fill").frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
+            .adaptiveGlassButton(.prominent)
             .controlSize(.regular)
             .popover(isPresented: $showingApplyPopover, arrowEdge: .bottom) {
                 WorkshopApplyTargetPicker(
