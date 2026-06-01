@@ -24,24 +24,12 @@ final class WorkshopDownloadCoordinator {
         let total: UInt64?
     }
 
-    /// Snapshot of one in-flight download for the bottom-trailing progress host.
-    struct ActiveDownload: Identifiable, Equatable {
-        let id: UInt64
-        let title: String
-        let isImporting: Bool
-        /// 0...1 download fraction, or nil when indeterminate / importing.
-        let fraction: Double?
-    }
-
     static let shared = WorkshopDownloadCoordinator()
 
     private(set) var phases: [UInt64: DownloadPhase] = [:]
     /// Per-item download fraction (0...1); absent = indeterminate.
     private(set) var progress: [UInt64: Double] = [:]
     private(set) var progressBytes: [UInt64: DownloadProgressBytes] = [:]
-    /// Title per in-flight item, so the progress host can label downloads after
-    /// the detail inspector that started them is gone.
-    private(set) var titles: [UInt64: String] = [:]
 
     @ObservationIgnored private let importService: WallpaperEngineImportService
     @ObservationIgnored private var tasks: [UInt64: Task<Void, Never>] = [:]
@@ -56,21 +44,6 @@ final class WorkshopDownloadCoordinator {
     }
 
     func phase(for itemID: UInt64) -> DownloadPhase { phases[itemID] ?? .idle }
-
-    /// In-flight downloads (downloading or importing), for the progress host.
-    var activeDownloads: [ActiveDownload] {
-        phases.compactMap { id, phase -> ActiveDownload? in
-            switch phase {
-            case .downloading:
-                return ActiveDownload(id: id, title: titles[id] ?? "", isImporting: false, fraction: progress[id])
-            case .importing:
-                return ActiveDownload(id: id, title: titles[id] ?? "", isImporting: true, fraction: nil)
-            default:
-                return nil
-            }
-        }
-        .sorted { $0.id < $1.id }
-    }
 
     func isBusy(_ itemID: UInt64) -> Bool {
         switch phases[itemID] {
@@ -93,7 +66,6 @@ final class WorkshopDownloadCoordinator {
         let attemptID = UUID()
         attempts[itemID] = attemptID
         clearProgress(itemID)
-        titles[itemID] = title
         phases[itemID] = .downloading
         tasks[itemID] = Task { [weak self] in
             await self?.run(itemID: itemID, title: title, doctor: doctor, attemptID: attemptID)
@@ -106,7 +78,6 @@ final class WorkshopDownloadCoordinator {
         attempts[itemID] = nil
         phases[itemID] = .idle
         clearProgress(itemID)
-        titles[itemID] = nil
     }
 
     private func run(itemID: UInt64, title: String, doctor: SteamCMDDoctorService, attemptID: UUID) async {
@@ -206,7 +177,6 @@ final class WorkshopDownloadCoordinator {
     private func finish(itemID: UInt64, title: String, phase: DownloadPhase) {
         attempts[itemID] = nil
         clearProgress(itemID)
-        titles[itemID] = nil
         phases[itemID] = phase
         switch phase {
         case .succeeded:
