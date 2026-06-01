@@ -141,7 +141,7 @@ struct WorkshopPaneView: View {
             if !services.hasWebAPIKey {
                 return String(localized: "API key required", comment: "Workshop header stat when no Steam Web API key is set.")
             }
-            return String(localized: "\(WorkshopRequestCounter.countForToday()) requests today", comment: "Workshop header stat: Steam Web API requests issued today.")
+            return String(localized: "\(WorkshopRequestCounter.countForToday()) API requests today", comment: "Workshop header stat: Steam Web API requests issued today.")
         }
     }
 

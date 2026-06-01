@@ -48,6 +48,15 @@ struct WorkshopBrowseFilterRibbon: View {
 
     @State private var isFilterPanelExpanded = false
     @FocusState private var isSearchFocused: Bool
+    /// Measured natural height of the four chip rows, used to size the panel's
+    /// internal scroll exactly to its content up to `maxRowsHeight`.
+    @State private var filterRowsHeight: CGFloat = 240
+
+    /// Cap on the chip area. Beyond it the rows scroll internally instead of
+    /// growing the ribbon unbounded — at narrow widths Genre wraps onto many
+    /// rows, which would otherwise overrun the layout. Below it the panel sizes
+    /// to content (no wasted empty scroll area).
+    private static let maxRowsHeight: CGFloat = 240
 
     var body: some View {
         AdaptiveGlassContainer(spacing: DesignTokens.Spacing.sm) {
@@ -161,65 +170,79 @@ struct WorkshopBrowseFilterRibbon: View {
 
     private var filterPanel: some View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
-            filterRow("Type") {
-                HStack(spacing: 6) {
-                    ForEach(WorkshopContentTypeFilter.selectableCases) { type in
-                        WorkshopFilterChip(
-                            title: Text(type.displayName),
-                            isSelected: viewModel.selectedTypes.contains(type),
-                            onIsolate: { viewModel.isolateType(type) }
-                        ) {
-                            viewModel.toggleType(type)
+            // The chip rows scroll inside a height-capped box so the ribbon never
+            // grows tall enough to overrun the layout above it.
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
+                    filterRow("Type") {
+                        HStack(spacing: 6) {
+                            ForEach(WorkshopContentTypeFilter.selectableCases) { type in
+                                WorkshopFilterChip(
+                                    title: Text(type.displayName),
+                                    isSelected: viewModel.selectedTypes.contains(type),
+                                    onIsolate: { viewModel.isolateType(type) }
+                                ) {
+                                    viewModel.toggleType(type)
+                                }
+                            }
                         }
                     }
-                }
-            }
 
-            filterRow("Maturity") {
-                HStack(spacing: 6) {
-                    ForEach(WorkshopAgeRatingFilter.allCases) { rating in
-                        WorkshopFilterChip(
-                            title: Text(verbatim: rating.displayName),
-                            isSelected: viewModel.selectedAgeRatings.contains(rating),
-                            onIsolate: { viewModel.isolateAgeRating(rating) }
-                        ) {
-                            viewModel.toggleAgeRating(rating)
+                    filterRow("Maturity") {
+                        HStack(spacing: 6) {
+                            ForEach(WorkshopAgeRatingFilter.allCases) { rating in
+                                WorkshopFilterChip(
+                                    title: Text(verbatim: rating.displayName),
+                                    isSelected: viewModel.selectedAgeRatings.contains(rating),
+                                    onIsolate: { viewModel.isolateAgeRating(rating) }
+                                ) {
+                                    viewModel.toggleAgeRating(rating)
+                                }
+                            }
                         }
                     }
-                }
-            }
 
-            filterRow("Resolution") {
-                chipFlow {
-                    ForEach(WorkshopResolutionFilter.selectableCases) { resolution in
-                        WorkshopFilterChip(
-                            title: Text(verbatim: resolution.displayName),
-                            isSelected: viewModel.selectedResolutions.contains(resolution),
-                            onIsolate: { viewModel.isolateResolution(resolution) }
-                        ) {
-                            viewModel.toggleResolution(resolution)
+                    filterRow("Resolution") {
+                        chipFlow {
+                            ForEach(WorkshopResolutionFilter.selectableCases) { resolution in
+                                WorkshopFilterChip(
+                                    title: Text(verbatim: resolution.displayName),
+                                    isSelected: viewModel.selectedResolutions.contains(resolution),
+                                    onIsolate: { viewModel.isolateResolution(resolution) }
+                                ) {
+                                    viewModel.toggleResolution(resolution)
+                                }
+                            }
                         }
                     }
-                }
-            }
 
-            filterRow("Genre") {
-                chipFlow {
-                    ForEach(WorkshopGenre.allTags, id: \.self) { tag in
-                        WorkshopFilterChip(
-                            title: Text(verbatim: tag),
-                            isSelected: viewModel.selectedGenres.contains(tag),
-                            onIsolate: { viewModel.isolateGenre(tag) }
-                        ) {
-                            viewModel.toggleGenre(tag)
+                    filterRow("Genre") {
+                        chipFlow {
+                            ForEach(WorkshopGenre.allTags, id: \.self) { tag in
+                                WorkshopFilterChip(
+                                    title: Text(verbatim: tag),
+                                    isSelected: viewModel.selectedGenres.contains(tag),
+                                    onIsolate: { viewModel.isolateGenre(tag) }
+                                ) {
+                                    viewModel.toggleGenre(tag)
+                                }
+                            }
                         }
                     }
                 }
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.preference(key: FilterRowsHeightKey.self, value: geo.size.height)
+                    }
+                )
             }
+            .frame(height: min(filterRowsHeight, Self.maxRowsHeight))
+            .onPreferenceChange(FilterRowsHeightKey.self) { filterRowsHeight = $0 }
 
             // Apply lives in the top row's single "Search" button (issue: two
             // Search controls appeared once the panel was open). Here we keep
-            // only the panel-scoped reset.
+            // only the panel-scoped reset, pinned below the scroll so it's always
+            // reachable.
             if activeFilterCount > 0 {
                 Button("Clear filters") { viewModel.resetFilters() }
                     .buttonStyle(.borderless)
@@ -450,6 +473,15 @@ private struct WorkshopFilterChip: View {
             : Text(""))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityValue(isSelected ? Text("Shown") : Text("Hidden"))
+    }
+}
+
+/// Carries the chip rows' natural height up so the panel can size its internal
+/// scroll to content (capped at `maxRowsHeight`).
+private struct FilterRowsHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat { 0 }
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
