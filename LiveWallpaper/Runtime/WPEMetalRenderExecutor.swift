@@ -164,6 +164,9 @@ final class WPEMetalRenderExecutor {
     /// geometry/sizing can revert without threading the flag through every
     /// dispatch call site.
     private var activeLegacyComposeLayer = false
+    /// One-shot guard so the waterwaves dispatch logs its first live execution per renderer
+    /// (confirms the builtin effect_waterwaves path actually runs + the debug flag value reaching it).
+    private var loggedWaterWavesDispatch = false
 
     #if DEBUG
     /// Diagnostic: when `WPEDumpScenePasses` (UserDefault) equals the sceneID,
@@ -1493,6 +1496,14 @@ final class WPEMetalRenderExecutor {
         }
         encoder.setFragmentTexture(sourceTexture, index: 0)
         encoder.setFragmentTexture(maskTexture, index: 1)
+
+        if !loggedWaterWavesDispatch {
+            loggedWaterWavesDispatch = true
+            Logger.warning(
+                "WPE waterwaves dispatch ran (builtin effect_waterwaves): debugMode=\(debugMode) hasMask=\(hasMask) mask=\(maskTexture.width)x\(maskTexture.height) dest=\(destination.texture.width)x\(destination.texture.height) speed=\(speed) scale=\(scale) strength=\(strength)",
+                category: .wpeRender
+            )
+        }
 
         var uniforms = WPEWaterWavesUniforms(
             time: time,
