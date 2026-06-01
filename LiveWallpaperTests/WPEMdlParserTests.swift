@@ -87,8 +87,11 @@ struct WPEMdlParserTests {
         let model = try WPEMdlParser.parse(data: makeMDLV23WithCorruptSkeleton())
         let mesh = try #require(model.meshes.first)
 
-        #expect(mesh.vertices.count == 1)
+        // Recover indexed geometry, not just vertices: encodePuppetMaterialPassIfNeeded
+        // filters out meshes with empty indices, so the recovered mesh must be drawable.
+        #expect(mesh.vertices.count == 3)
         #expect(mesh.vertices[0].position == SIMD3<Float>(10, 20, 0))
+        #expect(mesh.indices == [0, 1, 2])
         #expect(model.bones.isEmpty)
     }
 
@@ -208,12 +211,17 @@ struct WPEMdlParserTests {
         for _ in 0..<6 { data.appendLE(Float(0)) }
         data.appendLE(UInt32(0x180000f))
         let vertexData = Data.puppetVertices([
-            (SIMD3<Float>(10, 20, 0), SIMD2<Float>(0.5, 0.5))
+            (SIMD3<Float>(10, 20, 0), SIMD2<Float>(0.5, 0.5)),
+            (SIMD3<Float>(20, 20, 0), SIMD2<Float>(1, 0.5)),
+            (SIMD3<Float>(10, 30, 0), SIMD2<Float>(0.5, 1))
         ])
         data.appendLE(UInt32(vertexData.count))
         data.append(vertexData)
 
-        data.appendLE(UInt32(0))
+        data.appendLE(UInt32(3 * MemoryLayout<UInt16>.size))
+        data.appendLE(UInt16(0))
+        data.appendLE(UInt16(1))
+        data.appendLE(UInt16(2))
         data.append(UInt8(0))
         data.append(UInt8(0))
 

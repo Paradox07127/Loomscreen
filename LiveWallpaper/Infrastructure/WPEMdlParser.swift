@@ -101,7 +101,18 @@ enum WPEMdlParser {
         // (observed on MDLV0023 scene 3479521040 "人物", which trips the MDLS0004
         // trailing-marker heuristic at a single record). Recover the meshes and drop
         // only the bones when the skeleton fails to parse.
-        let bones = (try? parseSkeletonIfPresent(reader: &reader)) ?? []
+        let bones: [WPEPuppetBone]
+        do {
+            bones = try parseSkeletonIfPresent(reader: &reader)
+        } catch {
+            // Keep the failure visible for future MDLS/skinning work without
+            // letting it discard the renderable meshes.
+            Logger.warning(
+                "WPE puppet MDL skeleton parse failed; rendering the static mesh without bones: \(error)",
+                category: .wpeRender
+            )
+            bones = []
+        }
         return WPEPuppetModel(version: version, meshes: meshes, bones: bones)
     }
 
