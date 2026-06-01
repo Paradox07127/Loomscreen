@@ -14,6 +14,8 @@ struct WorkshopBrowseCard: View {
     /// True when this online item's workshop id is already in the local library
     /// (downloaded/imported) — surfaced as an "In Library" badge.
     var isInLibrary: Bool = false
+    /// True when this card's detail inspector is currently open (accent ring).
+    var isSelected: Bool = false
     /// Invoked when the card is activated — opens the detail sheet.
     var onSelect: () -> Void = {}
 
@@ -51,7 +53,8 @@ struct WorkshopBrowseCard: View {
             .background(Color(nsColor: .controlBackgroundColor))
         }
         .buttonStyle(.plain)
-        .galleryTileChrome(isHovering: isHovered, cornerRadius: DesignTokens.Corner.lg, reduceMotion: reduceMotion)
+        .galleryTileChrome(isHovering: isHovered, isSelected: isSelected, cornerRadius: DesignTokens.Corner.lg, reduceMotion: reduceMotion)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
         .onHover { isHovered = $0 }
         .help(item.title)
         .contextMenu { contextMenuItems }

@@ -103,7 +103,7 @@ struct WorkshopBrowsePane: View {
                     inspectorPlaceholder
                 }
             }
-            .inspectorColumnWidth(min: 280, ideal: 320, max: 420)
+            .inspectorColumnWidth(min: 300, ideal: 340, max: 440)
         }
     }
 
@@ -137,8 +137,12 @@ struct WorkshopBrowsePane: View {
                         ForEach(viewModel.displayedItems) { item in
                             WorkshopBrowseCard(
                                 item: item,
-                                isInLibrary: installedWorkshopIDs.contains(String(item.id))
-                            ) { selectedItem = item }
+                                isInLibrary: installedWorkshopIDs.contains(String(item.id)),
+                                isSelected: selectedItem?.id == item.id
+                            ) {
+                                // Toggle: clicking the open card again closes the inspector.
+                                selectedItem = selectedItem?.id == item.id ? nil : item
+                            }
                             .id(item.id)
                         }
                     }
@@ -148,6 +152,14 @@ struct WorkshopBrowsePane: View {
 
                 paginationBar
             }
+            // Click any empty area of the grid to close the inspector (macOS
+            // gallery idiom). Cards are Buttons and intercept their own taps, so
+            // only the bare background reaches this gesture.
+            .background(
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { selectedItem = nil }
+            )
             // Opening the inspector narrows the grid and reflows the rows, which
             // can push the selected tile off-screen — re-center it so it stays
             // visible next to the detail panel. The brief delay lets the

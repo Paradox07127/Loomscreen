@@ -19,6 +19,9 @@ struct WPEHistoryRow: View {
     /// `galleryTileChrome`, uppercase type pill — so the Installed library matches
     /// the redesigned online Browse cards. Default keeps the Scene-tab glass card.
     var galleryStyle: Bool = false
+    /// True when this row's detail inspector is open (gallery style only) —
+    /// draws the accent selection ring via `galleryTileChrome`.
+    var isSelected: Bool = false
     var screens: [Screen] = []
     var onApply: (Screen) -> Void = { _ in }
     var onApplyToAll: () -> Void = {}
@@ -88,7 +91,8 @@ struct WPEHistoryRow: View {
         if galleryStyle {
             cardContainer
                 .background(Color(nsColor: .controlBackgroundColor))
-                .galleryTileChrome(isHovering: isHovering, reduceMotion: reduceMotion)
+                .galleryTileChrome(isHovering: isHovering, isSelected: isSelected, reduceMotion: reduceMotion)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
         } else {
             cardContainer
                 .wpeProjectCardChrome(isHovering: isHovering, reduceMotion: reduceMotion)

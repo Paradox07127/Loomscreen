@@ -11,15 +11,20 @@ import SwiftUI
 /// scale so the call site only contributes the artwork.
 public struct GalleryTileChrome: ViewModifier {
     public let isHovering: Bool
+    /// When the tile is the one whose detail inspector is open — draws an accent
+    /// ring + soft accent glow so the grid↔inspector link is unmistakable.
+    public let isSelected: Bool
     public let cornerRadius: CGFloat
     public let reduceMotion: Bool
 
     public init(
         isHovering: Bool,
+        isSelected: Bool = false,
         cornerRadius: CGFloat = DesignTokens.Corner.lg,
         reduceMotion: Bool = false
     ) {
         self.isHovering = isHovering
+        self.isSelected = isSelected
         self.cornerRadius = cornerRadius
         self.reduceMotion = reduceMotion
     }
@@ -30,15 +35,17 @@ public struct GalleryTileChrome: ViewModifier {
             .overlay {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .strokeBorder(
-                        Color.primary.opacity(DesignTokens.Card.strokeOpacity),
-                        lineWidth: DesignTokens.Card.strokeWidth
+                        isSelected ? Color.accentColor : Color.primary.opacity(DesignTokens.Card.strokeOpacity),
+                        lineWidth: isSelected ? 2.5 : DesignTokens.Card.strokeWidth
                     )
             }
             .shadow(
-                color: .black.opacity(isHovering
-                                      ? DesignTokens.Card.shadowOpacity
-                                      : DesignTokens.Card.restShadowOpacity),
-                radius: isHovering
+                color: isSelected
+                    ? Color.accentColor.opacity(0.22)
+                    : .black.opacity(isHovering
+                                     ? DesignTokens.Card.shadowOpacity
+                                     : DesignTokens.Card.restShadowOpacity),
+                radius: isHovering || isSelected
                     ? DesignTokens.Card.shadowRadius
                     : DesignTokens.Card.restShadowRadius,
                 x: 0,
@@ -51,19 +58,26 @@ public struct GalleryTileChrome: ViewModifier {
                 DesignTokens.motion(reduceMotion, .spring(response: 0.28, dampingFraction: 0.85)),
                 value: isHovering
             )
+            .animation(
+                DesignTokens.motion(reduceMotion, .spring(response: 0.28, dampingFraction: 0.85)),
+                value: isSelected
+            )
     }
 }
 
 extension View {
     /// Apply the shared gallery-tile chrome (corner clip + static stroke +
-    /// resting/hover shadow + 1.02× lift) to a thumbnail tile container.
+    /// resting/hover shadow + 1.02× lift). Pass `isSelected` to mark the tile
+    /// whose detail inspector is open (accent ring + glow).
     public func galleryTileChrome(
         isHovering: Bool,
+        isSelected: Bool = false,
         cornerRadius: CGFloat = DesignTokens.Corner.lg,
         reduceMotion: Bool = false
     ) -> some View {
         modifier(GalleryTileChrome(
             isHovering: isHovering,
+            isSelected: isSelected,
             cornerRadius: cornerRadius,
             reduceMotion: reduceMotion
         ))

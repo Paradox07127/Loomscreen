@@ -192,10 +192,12 @@ struct WorkshopInstalledView: View {
                             isActive: isActive(entry),
                             allowsInlineApply: true,
                             galleryStyle: true,
+                            isSelected: selectedEntry?.id == entry.id,
                             screens: screenManager.screens,
                             onApply: { screen in apply(entry, to: screen) },
                             onApplyToAll: { applyToAll(entry) },
-                            onTap: { selectedEntry = entry },
+                            // Toggle: clicking the open card again closes the inspector.
+                            onTap: { selectedEntry = selectedEntry?.id == entry.id ? nil : entry },
                             onRemove: { pendingDelete = entry },
                             isBookmarked: bookmarked,
                             // Only offer "Add" when the item's content can actually
@@ -211,6 +213,13 @@ struct WorkshopInstalledView: View {
                 .padding(.horizontal, 20)
                 .padding(.vertical, 14)
             }
+            // Click empty grid space to close the detail inspector (macOS gallery
+            // idiom); cards are Buttons, so only the bare background taps here.
+            .background(
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { selectedEntry = nil }
+            )
             .overlay(alignment: .top) {
                 if isDraggingEntry, !screenManager.screens.isEmpty {
                     screenDropBar
@@ -814,17 +823,20 @@ private struct WPEInstalledInspectorContent: View {
 
     private var closeHeader: some View {
         HStack {
-            Spacer(minLength: 0)
+            // Clear, full-size bordered control on the reading-start edge (the
+            // standard macOS "collapse the trailing inspector" affordance) —
+            // replaces the tiny floating ✕. Esc still closes.
             Button(action: onClose) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 16))
-                    .foregroundStyle(.secondary)
-                    .symbolRenderingMode(.hierarchical)
+                Label("Close", systemImage: "sidebar.trailing")
+                    .font(.system(size: 11, weight: .medium))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.bordered)
+            .controlSize(.small)
             .keyboardShortcut(.cancelAction)
-            .help(Text("Close"))
-            .accessibilityLabel(Text("Close details"))
+            .help(Text("Hide details (Esc)"))
+            .accessibilityLabel(Text("Hide details"))
+
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, DesignTokens.Spacing.lg)
         .padding(.top, DesignTokens.Spacing.md)

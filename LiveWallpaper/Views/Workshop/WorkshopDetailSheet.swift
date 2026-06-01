@@ -96,17 +96,20 @@ struct WorkshopInspectorContent: View {
 
     private var closeHeader: some View {
         HStack {
-            Spacer(minLength: 0)
+            // A clear, full-size bordered control on the reading-start edge (the
+            // standard macOS "collapse the trailing inspector" affordance) —
+            // replaces the tiny floating ✕. Esc still closes.
             Button(action: onClose) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 16))
-                    .foregroundStyle(.secondary)
-                    .symbolRenderingMode(.hierarchical)
+                Label("Close", systemImage: "sidebar.trailing")
+                    .font(.system(size: 11, weight: .medium))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.bordered)
+            .controlSize(.small)
             .keyboardShortcut(.cancelAction)
-            .help(Text("Close"))
-            .accessibilityLabel(Text("Close details"))
+            .help(Text("Hide details (Esc)"))
+            .accessibilityLabel(Text("Hide details"))
+
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, DesignTokens.Spacing.lg)
         .padding(.top, DesignTokens.Spacing.md)
