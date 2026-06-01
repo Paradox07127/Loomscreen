@@ -75,11 +75,12 @@ public enum DesignTokens {
         public static let horizontalPadding: CGFloat = Spacing.xl
         public static let verticalPadding: CGFloat = 10
         public static let contentSpacing: CGFloat = 10
-        // Search-field widths, ~25% shorter than the original 220 / 280 / 360 so
-        // the bar leaves more room for chips / pickers on the same row.
-        public static let searchMinWidth: CGFloat = 165
-        public static let searchIdealWidth: CGFloat = 210
-        public static let searchMaxWidth: CGFloat = 270
+        // Search-field widths, trimmed twice from the original 220 / 280 / 360
+        // (−25% then a further −20%) so the bar — and the narrow detail
+        // inspector that reuses these tokens — stays legible at minimum width.
+        public static let searchMinWidth: CGFloat = 132
+        public static let searchIdealWidth: CGFloat = 168
+        public static let searchMaxWidth: CGFloat = 216
         public static let controlHeight: CGFloat = 28
     }
 

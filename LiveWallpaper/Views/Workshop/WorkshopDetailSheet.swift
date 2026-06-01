@@ -34,6 +34,8 @@ struct WorkshopInspectorContent: View {
     @State private var showingAgeConfirm = false
     /// Drives the multi-display target popover under the single Apply button.
     @State private var showingApplyPopover = false
+    /// Collapsed vs. expanded state for a long description.
+    @State private var descriptionExpanded = false
 
     /// Blur the hero until clicked, mirroring the grid card's spoiler gate so
     /// opening details never auto-plays adult content unprompted.
@@ -62,7 +64,7 @@ struct WorkshopInspectorContent: View {
                         .font(.title3.weight(.semibold))
                         .fixedSize(horizontal: false, vertical: true)
 
-                    authorLine
+                    authorRatingRow
 
                     metaRow
                     statusBadge
@@ -83,7 +85,10 @@ struct WorkshopInspectorContent: View {
         }
         .background(DesignTokens.Colors.pageBackground)
         .onAppear { refreshInstalledEntry() }
-        .onChange(of: item.id) { _, _ in refreshInstalledEntry() }
+        .onChange(of: item.id) { _, _ in
+            refreshInstalledEntry()
+            descriptionExpanded = false
+        }
         .onReceive(NotificationCenter.default.publisher(for: .wpeHistoryDidChange)) { _ in
             refreshInstalledEntry()
         }
@@ -134,6 +139,20 @@ struct WorkshopInspectorContent: View {
     }
 
     // MARK: - Author
+
+    /// Author on the left, star rating right-aligned on the same line.
+    @ViewBuilder
+    private var authorRatingRow: some View {
+        let hasAuthor = !(item.creatorPersonaName ?? "").isEmpty
+        let hasRating = (item.voteScore ?? 0) > 0
+        if hasAuthor || hasRating {
+            HStack(spacing: DesignTokens.Spacing.sm) {
+                authorLine
+                Spacer(minLength: 0)
+                ratingRow
+            }
+        }
+    }
 
     @ViewBuilder
     private var authorLine: some View {
@@ -195,42 +214,34 @@ struct WorkshopInspectorContent: View {
 
     // MARK: - Actions
 
+    /// Primary control (Download → progress → Apply) fills the row; Copy ID and
+    /// Open-in-Steam sit as borderless icons right-aligned on the same line —
+    /// mirrors the Installed inspector's Apply row.
     private var actionsColumn: some View {
-        VStack(spacing: DesignTokens.Spacing.sm) {
-            // Primary CTA first (Download → Apply), then the secondary external
-            // link, then the tertiary copy actions — top-down by importance.
+        HStack(spacing: DesignTokens.Spacing.sm) {
             downloadControl
-
-            // Rating on the left, then compact equal-height icon actions on the
-            // right: open the Steam page and copy the item ID. The fixed 16×16
-            // label box keeps the two icon buttons identical in size regardless
-            // of glyph. Labels live in tooltips + VoiceOver.
-            HStack(spacing: DesignTokens.Spacing.sm) {
-                ratingRow
-                Spacer(minLength: 0)
-                Button {
-                    openURL(item.steamCommunityURL)
-                } label: {
-                    Image(systemName: "safari")
-                        .frame(width: 16, height: 16)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .help(Text("Open this item on the Steam Community website"))
-                .accessibilityLabel(Text("Open in Steam"))
-
-                Button {
-                    copy(String(item.id))
-                } label: {
-                    Image(systemName: "doc.on.doc")
-                        .frame(width: 16, height: 16)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .help(Text("Copy the Workshop item ID"))
-                .accessibilityLabel(Text("Copy ID"))
-            }
+            secondaryActionButton("Copy ID", systemImage: "doc.on.doc") { copy(String(item.id)) }
+            secondaryActionButton("Open in Steam", systemImage: "safari") { openURL(item.steamCommunityURL) }
         }
+    }
+
+    /// Borderless icon button (no background frame, generous hit area) — keeps
+    /// the title as tooltip + VoiceOver label.
+    private func secondaryActionButton(
+        _ titleKey: LocalizedStringKey,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 15))
+                .foregroundStyle(.secondary)
+                .frame(minWidth: 22, minHeight: 22)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(Text(titleKey))
+        .accessibilityLabel(Text(titleKey))
     }
 
     @ViewBuilder
@@ -504,16 +515,27 @@ struct WorkshopInspectorContent: View {
     }
 
     private var descriptionSection: some View {
-        VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
+        let text = item.shortDescription
+        return VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
             Divider()
             Text("Description")
                 .font(.headline)
-            Text(item.shortDescription.isEmpty
+            Text(text.isEmpty
                  ? String(localized: "No description provided.", comment: "Placeholder when a Workshop item has no description.")
-                 : item.shortDescription)
+                 : text)
                 .font(.body)
                 .foregroundStyle(.secondary)
+                .lineLimit(descriptionExpanded ? nil : 6)
                 .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+            if text.count > 280 {
+                Button(descriptionExpanded ? "Show less" : "Show more") {
+                    withAnimation(.easeInOut(duration: 0.15)) { descriptionExpanded.toggle() }
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Color.accentColor)
+            }
         }
     }
 
