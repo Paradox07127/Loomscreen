@@ -243,12 +243,18 @@ struct WPEMetalCameraUniforms: Equatable, Sendable {
 }
 
 extension WallpaperPerformanceProfile {
+    /// `g_Brightness` fed to image shaders, which compute
+    /// `rgb = sampled.rgb * color.rgb * g_Brightness`. This MUST stay 1 in
+    /// both states: returning 0 for `.suspended` rendered every `genericimage*`
+    /// layer as a pure-black silhouette (alpha is a separate term, so the shape
+    /// survived) whenever a frame was produced while suspended — most visibly
+    /// the first frame during load and any not-fully-occluded paused wallpaper.
+    /// Suspension saves power via `mtkView.isPaused`, not by dimming content to
+    /// black; a paused wallpaper should show its scene frozen, not blanked.
     var metalBrightnessUniformValue: Double {
         switch self {
-        case .quality:
+        case .quality, .suspended:
             return 1
-        case .suspended:
-            return 0
         }
     }
 }

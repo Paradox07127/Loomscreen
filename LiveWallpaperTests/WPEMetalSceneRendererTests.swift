@@ -182,7 +182,10 @@ struct WPEMetalSceneRendererTests {
         let uniforms = try #require(renderer.lastRuntimeUniforms)
         #expect(abs(uniforms.time - 1.25) < 0.0001)
         #expect(abs(uniforms.daytime - 0.5) < 0.0001)
-        #expect(uniforms.brightness == 0)
+        // Suspended renders at full brightness: g_Brightness multiplies image
+        // albedo, so 0 here would render every genericimage layer as a black
+        // silhouette. Suspension pauses via isPaused, not by dimming to black.
+        #expect(uniforms.brightness == 1)
         #expect(uniforms.pointerPosition == SIMD2<Double>(0.25, 0.75))
     }
 
