@@ -1603,21 +1603,33 @@ final class WPEMetalRenderExecutor {
     }
 
     /// Phase 2D-D: pack scene uniforms for the genericimage* built-ins.
+    private static let imageUniformDebugEnabled = UserDefaults.standard.bool(forKey: "WPEAudioDebugLog")
+    nonisolated(unsafe) private static var loggedImageUniformNames = Set<String>()
+
     func genericImageUniforms(
         for pass: WPEPreparedRenderPass,
         layer: WPERenderLayer,
         hasMask: Bool
     ) -> WPEGenericImageUniforms {
-        WPEGenericImageUniforms(
-            color: WPEMetalShaderInputs.colorVector(for: pass),
-            alphaMaskUV: SIMD4<Float>(
-                WPEMetalShaderInputs.floatScalar(named: ["g_Alpha", "u_Alpha", "alpha"], in: pass, default: 1)
-                    * Float(layer.geometry.alpha),
-                WPEMetalShaderInputs.floatScalar(named: ["g_Brightness", "u_Brightness", "brightness"], in: pass, default: 1)
-                    * Float(layer.geometry.brightness),
-                hasMask ? 1 : 0,
-                0
+        let color = WPEMetalShaderInputs.colorVector(for: pass)
+        let gAlpha = WPEMetalShaderInputs.floatScalar(named: ["g_Alpha", "u_Alpha", "alpha"], in: pass, default: 1)
+        let gBrightness = WPEMetalShaderInputs.floatScalar(named: ["g_Brightness", "u_Brightness", "brightness"], in: pass, default: 1)
+        let alpha = gAlpha * Float(layer.geometry.alpha)
+        let brightness = gBrightness * Float(layer.geometry.brightness)
+        // Diagnostic for the "black silhouette" bug: genericimage shaders do
+        // `rgb = sampled.rgb * color.rgb * brightness`, so brightness==0 OR
+        // color==0 blacks out the layer while alpha (a separate term) survives.
+        // One line per object so the log isn't spammed.
+        if Self.imageUniformDebugEnabled,
+           Self.loggedImageUniformNames.insert(layer.objectName).inserted {
+            Logger.notice(
+                "[ImgUniform] \(layer.objectName) shader=\(pass.pass.shader) g_Brightness=\(gBrightness) layerBright=\(layer.geometry.brightness) → brightness=\(brightness) color=(\(color.x),\(color.y),\(color.z)) alpha=\(alpha)",
+                category: .wpeRender
             )
+        }
+        return WPEGenericImageUniforms(
+            color: color,
+            alphaMaskUV: SIMD4<Float>(alpha, brightness, hasMask ? 1 : 0, 0)
         )
     }
 
