@@ -77,6 +77,21 @@ struct WPEMdlParserTests {
         #expect(model.bones[1].rawMatrix[13] == -34)
     }
 
+    @Test("Recovers mesh geometry when the MDLS skeleton section is malformed")
+    func recoversMeshGeometryWhenSkeletonSectionMalformed() throws {
+        // A corrupt or edge-case skeleton must not discard the already-parsed meshes:
+        // the renderer draws the static assembled mesh and treats bones as optional
+        // metadata. Regression for MDLV0023 scene 3479521040 "人物", whose MDLS0004
+        // skeleton trips the trailing-marker heuristic and previously collapsed the
+        // whole puppet to nil -> a flat, scattered atlas.
+        let model = try WPEMdlParser.parse(data: makeMDLV23WithCorruptSkeleton())
+        let mesh = try #require(model.meshes.first)
+
+        #expect(mesh.vertices.count == 1)
+        #expect(mesh.vertices[0].position == SIMD3<Float>(10, 20, 0))
+        #expect(model.bones.isEmpty)
+    }
+
     @Test("Preserves atlas target geometry when MDLE element matrices are present")
     func preservesAtlasTargetGeometryWithElementMatrices() throws {
         let model = try WPEMdlParser.parse(data: makeMDLV23WithElementMetadata())
@@ -177,6 +192,42 @@ struct WPEMdlParserTests {
         )
         data.appendCString("{}")
 
+        return data
+    }
+
+    private func makeMDLV23WithCorruptSkeleton() -> Data {
+        var data = Data()
+        data.append(contentsOf: Array("MDLV0023".utf8))
+        data.appendLE(UInt32(0x80000900))
+        data.append(UInt8(1))
+        data.appendLE(UInt32(1))
+        data.appendLE(UInt32(1))
+
+        data.appendCString("materials/test.json")
+        data.appendLE(UInt32(0))
+        for _ in 0..<6 { data.appendLE(Float(0)) }
+        data.appendLE(UInt32(0x180000f))
+        let vertexData = Data.puppetVertices([
+            (SIMD3<Float>(10, 20, 0), SIMD2<Float>(0.5, 0.5))
+        ])
+        data.appendLE(UInt32(vertexData.count))
+        data.append(vertexData)
+
+        data.appendLE(UInt32(0))
+        data.append(UInt8(0))
+        data.append(UInt8(0))
+
+        // Malformed skeleton: declares one bone but with an invalid matrix byte
+        // count (< 64 and not a multiple of 4) so parseSkeletonIfPresent throws.
+        data.append(contentsOf: Array("MDLS0004".utf8))
+        data.append(UInt8(0))
+        data.appendLE(UInt32(0))
+        data.appendLE(UInt32(1))
+        data.appendLE(UInt32(0))
+        data.append(UInt8(0))
+        data.appendLE(UInt32.max)
+        data.appendLE(UInt32(10))
+        data.append(contentsOf: [UInt8](repeating: 0, count: 10))
         return data
     }
 

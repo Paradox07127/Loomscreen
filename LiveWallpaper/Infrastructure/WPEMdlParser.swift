@@ -92,7 +92,16 @@ enum WPEMdlParser {
 
         // MDLV positions are already the static target geometry. Keep trailing skeleton
         // metadata available without applying MDLS/MDLE transforms in the parser.
-        let bones = try parseSkeletonIfPresent(reader: &reader)
+        //
+        // The MDLS skeleton is OPTIONAL metadata: the current renderer draws the static
+        // assembled mesh and does not consume bones (they are reserved for future bone
+        // skinning). A malformed or edge-case skeleton section must therefore never
+        // discard the already-parsed, renderable mesh geometry — otherwise the whole
+        // puppet collapses to nil and the object degrades to a flat, scattered atlas
+        // (observed on MDLV0023 scene 3479521040 "人物", which trips the MDLS0004
+        // trailing-marker heuristic at a single record). Recover the meshes and drop
+        // only the bones when the skeleton fails to parse.
+        let bones = (try? parseSkeletonIfPresent(reader: &reader)) ?? []
         return WPEPuppetModel(version: version, meshes: meshes, bones: bones)
     }
 
