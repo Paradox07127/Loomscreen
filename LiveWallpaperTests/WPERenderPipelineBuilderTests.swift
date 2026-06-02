@@ -467,6 +467,62 @@ struct WPERenderPipelineBuilderTests {
         #expect(fragmentSource.contains("#include") == false)
     }
 
+    @Test("Expands common_fragment.h ConvertSampleR8 used by WPE 2.8 font.frag")
+    func expandsCommonFragmentConvertSampleR8() throws {
+        let fixture = try makeFixture(files: [
+            "shaders/effects/font_like.vert": """
+            void main() { gl_Position = vec4(0.0); }
+            """,
+            "shaders/effects/font_like.frag": """
+            #include "common_fragment.h"
+            uniform sampler2D g_Texture0;
+            uniform vec4 g_Color4;
+            void main() {
+                float a = ConvertSampleR8(texSample2D(g_Texture0, vec2(0.5)));
+                gl_FragColor = vec4(g_Color4.rgb, a * g_Color4.a);
+            }
+            """
+        ])
+        defer { fixture.cleanup() }
+
+        let graph = WPERenderGraph(layers: [
+            WPERenderLayer(
+                objectID: "1",
+                objectName: "Layer",
+                imagePath: "materials/base.png",
+                materialPath: nil,
+                geometry: .identity,
+                compositeA: "a",
+                compositeB: "b",
+                localFBOs: [],
+                passes: [
+                    WPERenderPass(
+                        id: "1.0",
+                        phase: .effect(file: "effects/font/effect.json"),
+                        shader: "effects/font_like",
+                        source: .image("materials/base.png"),
+                        target: .scene,
+                        textures: [:],
+                        binds: [:],
+                        constants: [:],
+                        combos: [:],
+                        blending: "normal",
+                        cullMode: "nocull",
+                        depthTest: "disabled",
+                        depthWrite: "disabled"
+                    )
+                ]
+            )
+        ])
+
+        let pipeline = try WPERenderPipelineBuilder(cacheRootURL: fixture.root).build(graph: graph)
+        let fragmentSource = try #require(pipeline.layers.first?.passes.first?.shader?.fragmentSource)
+
+        #expect(fragmentSource.contains("wpe_common_fragment_included"))
+        #expect(fragmentSource.contains("float ConvertSampleR8"))
+        #expect(fragmentSource.contains("#include") == false)
+    }
+
     @Test("Treats generic image shader variants as builtins")
     func treatsGenericImageShaderVariantsAsBuiltins() throws {
         let fixture = try makeFixture(files: [:])

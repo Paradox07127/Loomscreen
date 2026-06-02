@@ -1031,10 +1031,19 @@ private struct WPEShaderSourceLoader: Sendable {
             #endif
             """
         case "common_fragment.h":
+            // WPE 2.8 `font.frag` (and several workshop text/format shaders)
+            // call `ConvertSampleR8` from this header to read R8/alpha glyph
+            // coverage. Our prior stub only emitted include guards, so the
+            // 2.8 font shader failed to translate. Mirror WPE's GLSL path
+            // (`HLSL_SM30` is never set in our pipeline → `.r`).
             return """
             #ifndef LIVEWALLPAPER_WPE_COMMON_FRAGMENT_H
             #define LIVEWALLPAPER_WPE_COMMON_FRAGMENT_H
             #define wpe_common_fragment_included 1
+
+            float ConvertSampleR8(vec4 _sample) {
+                return _sample.r;
+            }
             #endif
             """
         case "common_blending.h":

@@ -57,6 +57,27 @@ struct WPEMetalRuntimeUniformsTests {
         #expect(uniforms.uniformValues["g_Brightness"]?.numberValue == 0)
     }
 
+    @Test("WPE 2.8 neutral frame defaults disable optional effects and pass through SDR")
+    func provides28NeutralFrameDefaults() {
+        let uniforms = WPEMetalRuntimeUniforms(
+            time: 0,
+            daytime: 0,
+            brightness: 1,
+            pointerPosition: SIMD2<Double>(0.5, 0.5)
+        )
+        let values = uniforms.uniformValues
+
+        // g_RenderVar0…3 zero ⇒ every optional font effect (outline/blur/shadow)
+        // stays disabled until the MSDF text path overrides them per-draw.
+        for name in ["g_RenderVar0", "g_RenderVar1", "g_RenderVar2", "g_RenderVar3"] {
+            #expect(values[name]?.vectorValue == [0, 0, 0, 0])
+        }
+
+        // g_HDRParams.y = 0.5 ⇒ combine_video_hdr maxHDR = 1.0 ⇒ exact SDR
+        // pass-through. (y = 0 would divide by zero → NaN/black.)
+        #expect(values["g_HDRParams"]?.vectorValue == [1, 0.5])
+    }
+
     @Test("Pointer sampler normalizes global mouse position to top-left scene UV")
     func pointerSamplerNormalizesGlobalMousePosition() throws {
         let window = NSWindow(
