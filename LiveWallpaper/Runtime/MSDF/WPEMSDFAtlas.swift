@@ -164,7 +164,7 @@ final class WPEMSDFAtlas {
             return cached
         }
 
-        guard let generated = generator.generate(glyph: key.glyph, font: font) else { return nil }
+        guard let generated = generator.generate(glyph: key.glyph, font: font, maxCellSide: pageSize) else { return nil }
         let bitmap = generated.bitmap
         guard bitmap.width <= pageSize, bitmap.height <= pageSize else { return nil }
         guard let allocation = allocate(width: bitmap.width, height: bitmap.height) else { return nil }

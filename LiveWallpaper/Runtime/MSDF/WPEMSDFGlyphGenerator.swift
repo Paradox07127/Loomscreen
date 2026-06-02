@@ -12,10 +12,14 @@ final class WPEMSDFGlyphGenerator {
         self.parameters = parameters
     }
 
-    func generate(glyph: CGGlyph, font: CTFont) -> (bitmap: WPEMSDFBitmap, metrics: WPEMSDFGlyphMetrics)? {
-        let padding = max(parameters.padding, 0)
-        let pointSize = max(Int(ceil(CTFontGetSize(font))), 1)
-        let cellSide = max(pointSize + padding * 2, 1)
+    func generate(
+        glyph: CGGlyph,
+        font: CTFont,
+        maxCellSide: Int? = nil
+    ) -> (bitmap: WPEMSDFBitmap, metrics: WPEMSDFGlyphMetrics)? {
+        guard let sizing = cellSizing(font: font, maxCellSide: maxCellSide) else { return nil }
+        let padding = sizing.padding
+        let cellSide = sizing.cellSide
         let advance = advanceForGlyph(glyph, font: font)
         let pathUnitsToEm = pathUnitsToEmUnits(font: font)
 
@@ -88,6 +92,23 @@ final class WPEMSDFGlyphGenerator {
             emUnitsPerPixel: pathUnitsToEm / scale
         )
         return (bitmap: bitmap, metrics: metrics)
+    }
+
+    /// Resolves the square cell size, rejecting non-finite or overflowing font
+    /// sizes (so `Int(ceil(...))` never traps) and any cell larger than the
+    /// atlas page can hold.
+    private func cellSizing(font: CTFont, maxCellSide: Int?) -> (padding: Int, cellSide: Int)? {
+        let padding = max(parameters.padding, 0)
+        let limit = max(maxCellSide ?? Int.max, 1)
+        let rawSize = CTFontGetSize(font)
+        guard rawSize.isFinite, rawSize > 0 else { return nil }
+        let roundedSize = ceil(rawSize)
+        guard roundedSize <= CGFloat(Int.max) else { return nil }
+        let pointSize = max(Int(roundedSize), 1)
+        guard padding <= (Int.max - pointSize) / 2 else { return nil }
+        let cellSide = pointSize + padding * 2
+        guard cellSide <= limit else { return nil }
+        return (padding, cellSide)
     }
 
     private func neutralResult(
