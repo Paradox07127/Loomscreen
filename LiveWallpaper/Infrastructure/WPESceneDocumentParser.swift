@@ -864,7 +864,8 @@ enum WPESceneDocumentParser {
                 rate: parseDouble(dict["rate"]) ?? 0,
                 visible: parseBool(dict["visible"]) ?? true,
                 blend: parseDouble(dict["blend"]) ?? 1,
-                animation: animation
+                animation: animation,
+                additive: parseBool(dict["additive"]) ?? false
             ))
         }
         return layers

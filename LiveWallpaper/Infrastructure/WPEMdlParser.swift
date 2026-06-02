@@ -92,34 +92,107 @@ struct WPEPuppetAnimKey: Equatable, Sendable {
     let scale: SIMD3<Float>
 }
 
-/// Evaluates a baked puppet animation into a per-bone skinning palette indexed by skin-blend
-/// (bone) index. MDLA channels store parent-LOCAL transforms, so world matrices are composed
-/// down the skeleton hierarchy and `palette[boneIndex] = worldCurrent · worldBind⁻¹`. Keyframe 0
-/// is the bind pose, so at frame 0 the palette is identity (the regression guard against P0's
-/// static draw).
+/// One resolved puppet animation layer: an animation plus its playback `rate`, `blend` weight,
+/// and whether it composes additively over the base layer (e.g. a blink/face layer over idle sway).
+struct WPEPuppetAnimationLayer {
+    let animation: WPEPuppetAnimation
+    let rate: Double
+    let additive: Bool
+    let blend: Float
+}
+
+/// Evaluates puppet animation layers into a per-bone skinning palette indexed by skin-blend (bone)
+/// index. MDLA channels store parent-LOCAL transforms, so world matrices are composed down the
+/// skeleton hierarchy and `palette[boneIndex] = worldCurrent · worldBind⁻¹`. The first non-additive
+/// layer is the base pose; additive layers add their per-bone delta-from-bind on top in TRS space
+/// (translation/euler added, scale multiplied), weighted by `blend`. Frame 0 of every layer is the
+/// bind pose, so the palette is identity there (the regression guard against P0's static draw).
 enum WPEPuppetAnimationEvaluator {
-    /// Builds the per-bone skinning palette `worldCurrent · worldBind⁻¹`.
-    ///
-    /// MDLA channels store each bone's transform in its PARENT-LOCAL frame, so the world
-    /// transform must be composed down the skeleton hierarchy (`world = worldParent · local`).
-    /// `bones` supplies that hierarchy (parentIndex per bone, matched to channels by bone index).
-    /// When it is empty or doesn't cover the channels (unit tests / bone-less models) we fall back
-    /// to treating each channel as an independent local transform. Frame 0 is always the bind pose,
-    /// so the palette is identity there regardless of path (no-regression guard).
+    /// Single-animation convenience: one non-additive layer at full rate/blend.
     static func palette(
         for animation: WPEPuppetAnimation,
         bones: [WPEPuppetBone] = [],
         at time: Double
     ) -> [simd_float4x4] {
-        let channels = animation.channels
-        let frame = sampledFrameIndex(for: animation, at: time)
-        if frame == 0 {
-            return identityPalette(count: paletteCount(for: channels))
+        palette(
+            layers: [WPEPuppetAnimationLayer(animation: animation, rate: 1, additive: false, blend: 1)],
+            bones: bones,
+            at: time
+        )
+    }
+
+    static func palette(
+        layers: [WPEPuppetAnimationLayer],
+        bones: [WPEPuppetBone],
+        at time: Double
+    ) -> [simd_float4x4] {
+        guard let base = layers.first(where: { !$0.additive }) ?? layers.first else { return [] }
+        let baseChannels = base.animation.channels
+        guard !baseChannels.isEmpty else { return [] }
+
+        let baseFrame = sampledFrameIndex(for: base.animation, at: time * base.rate)
+        let additiveLayers: [(frame: Int, channelForBone: [Int: Int], channels: [WPEPuppetAnimChannel], weight: Float)] =
+            layers.filter { $0.additive && !$0.animation.channels.isEmpty }.map { layer in
+                var channelForBone: [Int: Int] = [:]
+                for (position, channel) in layer.animation.channels.enumerated() {
+                    channelForBone[channel.boneIndex] = position
+                }
+                return (
+                    sampledFrameIndex(for: layer.animation, at: time * layer.rate),
+                    channelForBone,
+                    layer.animation.channels,
+                    max(0, min(Float(layer.blend), 1))
+                )
+            }
+
+        // Every layer at its bind frame → identity palette (exact, no FP drift through the inverse).
+        if baseFrame == 0, additiveLayers.allSatisfy({ $0.frame == 0 }) {
+            return identityPalette(count: paletteCount(for: baseChannels))
         }
-        if let parentChannel = parentChannelMap(channels: channels, bones: bones) {
-            return hierarchyPalette(channels: channels, parentChannel: parentChannel, frame: frame)
+
+        // Combined parent-LOCAL transform for a base channel: the base pose, plus each additive
+        // layer's delta-from-its-own-bind applied in TRS space. `bind == true` yields the rest pose.
+        func localMatrix(_ channelPosition: Int, bind: Bool) -> simd_float4x4 {
+            let channel = baseChannels[channelPosition]
+            guard let bindKey = channel.keyframes.first else { return matrix_identity_float4x4 }
+            let baseKey = bind ? bindKey : channel.keyframes[min(baseFrame, channel.keyframes.count - 1)]
+            var translation = baseKey.translation
+            var euler = baseKey.euler
+            var scale = baseKey.scale
+            if !bind {
+                for additive in additiveLayers {
+                    guard let position = additive.channelForBone[channel.boneIndex],
+                          let additiveBind = additive.channels[position].keyframes.first else { continue }
+                    let keyframes = additive.channels[position].keyframes
+                    let additiveCurrent = keyframes[min(additive.frame, keyframes.count - 1)]
+                    translation += (additiveCurrent.translation - additiveBind.translation) * additive.weight
+                    euler += (additiveCurrent.euler - additiveBind.euler) * additive.weight
+                    scale *= additiveScaleRatio(
+                        current: additiveCurrent.scale,
+                        bind: additiveBind.scale,
+                        weight: additive.weight
+                    )
+                }
+            }
+            return matrix(translation: translation, euler: euler, scale: scale)
         }
-        return independentPalette(channels: channels, frame: frame)
+
+        if let parentChannel = parentChannelMap(channels: baseChannels, bones: bones) {
+            return hierarchyPalette(channels: baseChannels, parentChannel: parentChannel, localMatrix: localMatrix)
+        }
+        return independentPalette(channels: baseChannels, localMatrix: localMatrix)
+    }
+
+    private static func additiveScaleRatio(
+        current: SIMD3<Float>,
+        bind: SIMD3<Float>,
+        weight: Float
+    ) -> SIMD3<Float> {
+        func axis(_ current: Float, _ bind: Float) -> Float {
+            guard abs(bind) > 1e-6 else { return 1 }
+            return 1 + (current / bind - 1) * weight
+        }
+        return SIMD3<Float>(axis(current.x, bind.x), axis(current.y, bind.y), axis(current.z, bind.z))
     }
 
     static func identityPalette(count: Int) -> [simd_float4x4] {
@@ -145,17 +218,15 @@ enum WPEPuppetAnimationEvaluator {
     /// treat each channel as an independent transform. Indexed by bone index, like the hierarchy path.
     private static func independentPalette(
         channels: [WPEPuppetAnimChannel],
-        frame: Int
+        localMatrix: (Int, Bool) -> simd_float4x4
     ) -> [simd_float4x4] {
         var palette = identityPalette(count: paletteCount(for: channels))
-        for channel in channels {
-            guard channel.boneIndex >= 0, channel.boneIndex < palette.count,
-                  let bindKey = channel.keyframes.first else { continue }
-            let currentKey = channel.keyframes[min(frame, channel.keyframes.count - 1)]
-            let bind = matrix(for: bindKey)
+        for (position, channel) in channels.enumerated() {
+            guard channel.boneIndex >= 0, channel.boneIndex < palette.count else { continue }
+            let bind = localMatrix(position, true)
             let determinant = simd_determinant(bind)
             guard determinant.isFinite, abs(determinant) > 1e-6 else { continue }
-            let result = matrix(for: currentKey) * simd_inverse(bind)
+            let result = localMatrix(position, false) * simd_inverse(bind)
             guard matrixIsFinite(result) else { continue }
             palette[channel.boneIndex] = result
         }
@@ -200,19 +271,16 @@ enum WPEPuppetAnimationEvaluator {
     private static func hierarchyPalette(
         channels: [WPEPuppetAnimChannel],
         parentChannel: [Int?],
-        frame: Int
+        localMatrix: (Int, Bool) -> simd_float4x4
     ) -> [simd_float4x4] {
-        func worldMatrices(at sampleFrame: Int) -> [simd_float4x4] {
+        func worldMatrices(bind: Bool) -> [simd_float4x4] {
             var cache = [simd_float4x4?](repeating: nil, count: channels.count)
             var visiting = [Bool](repeating: false, count: channels.count)
             func world(_ index: Int) -> simd_float4x4 {
                 if let cached = cache[index] { return cached }
                 if visiting[index] { return matrix_identity_float4x4 }
                 visiting[index] = true
-                let keyframes = channels[index].keyframes
-                let local = keyframes.isEmpty
-                    ? matrix_identity_float4x4
-                    : matrix(for: keyframes[min(sampleFrame, keyframes.count - 1)])
+                let local = localMatrix(index, bind)
                 let composed: simd_float4x4
                 if let parent = parentChannel[index] {
                     composed = world(parent) * local
@@ -226,8 +294,8 @@ enum WPEPuppetAnimationEvaluator {
             return (0..<channels.count).map { world($0) }
         }
 
-        let bindWorld = worldMatrices(at: 0)
-        let currentWorld = worldMatrices(at: frame)
+        let bindWorld = worldMatrices(bind: true)
+        let currentWorld = worldMatrices(bind: false)
         // Output is indexed by skin-blend (bone) index — the shader samples bonePalette[skinIndex],
         // which only equals the channel position under the parser's boneIndex==channelIndex invariant.
         var palette = identityPalette(count: paletteCount(for: channels))
@@ -255,8 +323,12 @@ enum WPEPuppetAnimationEvaluator {
         return mode == "loop" ? rawFrame % playableFrameCount : min(rawFrame, playableFrameCount - 1)
     }
 
-    private static func matrix(for key: WPEPuppetAnimKey) -> simd_float4x4 {
-        translationMatrix(key.translation) * rotationMatrix(euler: key.euler) * scaleMatrix(key.scale)
+    private static func matrix(
+        translation: SIMD3<Float>,
+        euler: SIMD3<Float>,
+        scale: SIMD3<Float>
+    ) -> simd_float4x4 {
+        translationMatrix(translation) * rotationMatrix(euler: euler) * scaleMatrix(scale)
     }
 
     /// ON-DEVICE VALIDATION POINT: MDLA Euler components are assumed to be radians in

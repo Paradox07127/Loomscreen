@@ -928,15 +928,30 @@ final class WPEMetalRenderExecutor {
     /// Picks the puppet animation to play: the first visible scene animationlayer's MDLA id,
     /// else the puppet's first animation. P2c plays a single layer; multi-layer additive
     /// blending (rate/blend) is a follow-up.
-    private func selectedPuppetAnimation(
+    /// Resolves the object's visible animation layers into evaluator layers. The scene can stack
+    /// several (e.g. a base idle-sway layer + an ADDITIVE blink/face layer); we play them all so
+    /// blinks/mouth motion compose on top of the body sway, instead of only the first layer.
+    private func puppetAnimationLayers(
         for layer: WPERenderLayer,
         model: WPEPuppetModel
-    ) -> WPEPuppetAnimation? {
-        guard !layer.animationLayers.isEmpty else { return model.animations.first }
-        guard let animationID = layer.animationLayers.first(where: { $0.visible })?.animation else {
-            return nil
+    ) -> [WPEPuppetAnimationLayer] {
+        guard !layer.animationLayers.isEmpty else {
+            return model.animations.first.map {
+                [WPEPuppetAnimationLayer(animation: $0, rate: 1, additive: false, blend: 1)]
+            } ?? []
         }
-        return model.animations.first { $0.id == animationID }
+        return layer.animationLayers.compactMap { sceneLayer in
+            guard sceneLayer.visible,
+                  let animation = model.animations.first(where: { $0.id == sceneLayer.animation }) else {
+                return nil
+            }
+            return WPEPuppetAnimationLayer(
+                animation: animation,
+                rate: sceneLayer.rate > 0 ? sceneLayer.rate : 1,
+                additive: sceneLayer.additive,
+                blend: Float(sceneLayer.blend)
+            )
+        }
     }
 
     private func encodePuppetMaterialPassIfNeeded(
@@ -1016,18 +1031,16 @@ final class WPEMetalRenderExecutor {
         // composes the skeleton hierarchy (passing `model.bones`). Still gated for on-device review:
         // `defaults write Taijia.LiveWallpaper WPEPuppetEnableSkinning -bool YES`.
         let skinningAllowed = UserDefaults.standard.bool(forKey: "WPEPuppetEnableSkinning")
-        let animation = skinningAllowed ? selectedPuppetAnimation(for: layer, model: model) : nil
-        let sampledFrame = animation.map {
-            WPEPuppetAnimationEvaluator.sampledFrameIndex(for: $0, at: runtimeUniforms.time)
-        } ?? 0
-        let bonePalette = animation
-            .map { WPEPuppetAnimationEvaluator.palette(for: $0, bones: model.bones, at: runtimeUniforms.time) }
-            .flatMap { $0.isEmpty ? nil : $0 }
-            ?? WPEPuppetAnimationEvaluator.identityPalette(count: 1)
-        // Skin only past the bind pose: at frame 0 the palette is identity, so leaving
-        // skinning off keeps the rest mesh byte-identical to the static path (no FP drift
-        // from the weighted blend) — the no-regression guard for the assembled rest pose.
-        let skinningEnabled: Float = (animation?.channels.isEmpty == false && sampledFrame != 0) ? 1 : 0
+        let animationLayers = skinningAllowed ? puppetAnimationLayers(for: layer, model: model) : []
+        let resolvedPalette = animationLayers.isEmpty
+            ? []
+            : WPEPuppetAnimationEvaluator.palette(layers: animationLayers, bones: model.bones, at: runtimeUniforms.time)
+        let bonePalette = resolvedPalette.isEmpty
+            ? WPEPuppetAnimationEvaluator.identityPalette(count: 1)
+            : resolvedPalette
+        // Enable GPU skinning whenever animation layers resolved. At the bind pose the palette is
+        // identity, so the weighted blend reproduces the assembled rest mesh (no-regression guard).
+        let skinningEnabled: Float = resolvedPalette.isEmpty ? 0 : 1
 
         var meshUniforms = WPEPuppetMeshUniforms(
             localSizeAndMode: SIMD4<Float>(

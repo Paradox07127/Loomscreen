@@ -692,13 +692,17 @@ public struct WPESceneAnimationLayer: Equatable, Sendable, Identifiable {
     public let visible: Bool
     public let blend: Double
     public let animation: Int
+    /// When true this layer is composed ADDITIVELY on top of the base (non-additive) layer —
+    /// e.g. a blink/face layer over an idle-sway base. Drives multi-layer palette blending.
+    public let additive: Bool
 
-    public init(id: Int, rate: Double, visible: Bool, blend: Double, animation: Int) {
+    public init(id: Int, rate: Double, visible: Bool, blend: Double, animation: Int, additive: Bool = false) {
         self.id = id
         self.rate = rate
         self.visible = visible
         self.blend = blend
         self.animation = animation
+        self.additive = additive
     }
 }
 
