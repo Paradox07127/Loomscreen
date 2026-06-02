@@ -53,13 +53,11 @@ final class WPEMSDFTextRenderer {
         let font = resolveFont(for: object)
         let material = WPEMSDFFontMaterial.make(object: object, parameters: parameters)
         guard let request = try? shaderRequest(comboValues: material.combos) else { return nil }
-        let fontID = fontIdentifier(font)
         guard let mesh = layout.layout(
             object: object,
             font: font,
             atlas: atlas,
-            generator: generator,
-            fontID: fontID
+            generator: generator
         ) else { return nil }
 
         let transformed = transform(mesh: mesh, object: object, parallaxOffset: parallaxOffset)
@@ -137,7 +135,13 @@ final class WPEMSDFTextRenderer {
     }
 
     private func resolveFont(for object: WPESceneTextObject) -> CTFont {
-        let size = effectiveFontSize(for: object)
+        font(for: object, size: effectiveFontSize(for: object))
+    }
+
+    /// The scene's font (custom file or HelveticaNeue fallback) at an explicit
+    /// size. Used both for the final glyph font and for box measurement, so
+    /// box-fit is computed with the SAME typeface that will be rendered.
+    private func font(for object: WPESceneTextObject, size: CGFloat) -> CTFont {
         if let path = object.fontRelativePath {
             registerFontIfNeeded(path)
             if let url = try? resolver.resolveExistingFileURL(relativePath: path),
@@ -161,7 +165,7 @@ final class WPEMSDFTextRenderer {
     private func effectiveFontSize(for object: WPESceneTextObject) -> CGFloat {
         let base = CGFloat(max(object.pointSize, 1))
         guard let box = object.boxSize, box.x > 0, box.y > 0 else { return base }
-        let font = CTFontCreateWithName("HelveticaNeue" as CFString, base, nil)
+        let font = font(for: object, size: base)
         let attributed = CFAttributedStringCreate(nil, object.text as CFString, [kCTFontAttributeName: font] as CFDictionary)!
         let line = CTLineCreateWithAttributedString(attributed)
         var ascent: CGFloat = 0
@@ -174,11 +178,6 @@ final class WPEMSDFTextRenderer {
         let fit = min(innerW / width, innerH / height)
         guard fit.isFinite, fit > 0 else { return base }
         return base * fit
-    }
-
-    private func fontIdentifier(_ font: CTFont) -> String {
-        let name = CTFontCopyPostScriptName(font) as String
-        return "\(name)@\(Int(ceil(CTFontGetSize(font))))"
     }
 
     private static func readInclude(path: String, resolver: WPEMultiRootResourceResolver) -> String? {

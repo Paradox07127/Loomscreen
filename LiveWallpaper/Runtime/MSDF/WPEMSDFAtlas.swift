@@ -53,9 +53,12 @@ final class WPEMSDFAtlas {
         }
 
         func reset() {
+            // Keep the MTLTexture across eviction: only the packing state is
+            // reset. New glyphs overwrite their own sub-rects; stale pixels are
+            // never sampled (their entries are removed and glyphs carry padding).
+            // Avoids reallocating + re-registering a 1024² texture under LRU churn.
             skyline = [SkylineNode(x: 0, y: 0, width: size)]
             keys.removeAll(keepingCapacity: true)
-            texture = nil
             lastUsed = 0
         }
 
@@ -156,12 +159,31 @@ final class WPEMSDFAtlas {
         let maxCellSide: Int
     }
 
+    /// Outcome of a non-blocking glyph request.
+    enum GlyphRequest {
+        /// Glyph is ready in the atlas — draw a quad.
+        case ready(WPEMSDFAtlasEntry)
+        /// Generation is in flight — caller should fall back this frame and retry.
+        case pending
+        /// Glyph has no drawable outline (whitespace) or permanently failed —
+        /// advance past it but draw nothing, and never schedule it again.
+        case skip
+    }
+
     private let device: MTLDevice
     private let pageSize: Int
     private let maxPages: Int
     private var pages: [Page] = []
     private var entries: [WPEMSDFGlyphKey: WPEMSDFAtlasEntry] = [:]
     private var pending: Set<WPEMSDFGlyphKey> = []
+    /// Glyphs with no outline (whitespace / unsupported) or that exhausted their
+    /// store retries. Returned as `.skip` so they are never re-scheduled (fixes
+    /// per-frame background-task churn) and never drawn as a bogus 0.5 quad.
+    private var skipped: Set<WPEMSDFGlyphKey> = []
+    /// Transient store-failure (e.g. texture allocation) retry counts; a glyph is
+    /// only moved to `skipped` after exhausting these, so a temporary failure can
+    /// recover instead of being permanently dropped.
+    private var storeFailures: [WPEMSDFGlyphKey: Int] = [:]
     private var clock: UInt64 = 0
 
     init(device: MTLDevice, pageSize: Int = 1024, maxPages: Int = 4) {
@@ -194,18 +216,21 @@ final class WPEMSDFAtlas {
         return nil
     }
 
-    /// Non-blocking entry: returns the cached entry if present, otherwise kicks
-    /// off background glyph generation (deduplicated) and returns nil so the
-    /// caller falls back (CoreText) for this frame. A later frame finds it cached.
+    /// Non-blocking request: returns `.ready` if cached, `.skip` for known
+    /// no-outline/failed glyphs, otherwise schedules deduplicated background
+    /// generation and returns `.pending` so the caller falls back this frame.
     func requestEntry(
         for key: WPEMSDFGlyphKey,
         generator: WPEMSDFGlyphGenerator,
         font: CTFont
-    ) -> WPEMSDFAtlasEntry? {
+    ) -> GlyphRequest {
         if let cached = cachedEntry(for: key) {
-            return cached
+            return .ready(cached)
         }
-        guard !pending.contains(key) else { return nil }
+        if skipped.contains(key) {
+            return .skip
+        }
+        guard !pending.contains(key) else { return .pending }
         pending.insert(key)
         let request = GlyphGenerationRequest(
             key: key,
@@ -223,13 +248,31 @@ final class WPEMSDFAtlas {
                 self?.completeGeneration(generated, for: request.key)
             }
         }
-        return nil
+        return .pending
     }
 
     private func completeGeneration(_ generated: GeneratedGlyph?, for key: WPEMSDFGlyphKey) {
         defer { pending.remove(key) }
-        guard entries[key] == nil, let generated else { return }
-        _ = store(generated: generated, for: key)
+        guard entries[key] == nil else { return }
+        // No outline (whitespace / unsupported glyph) is a PERMANENT skip — never
+        // re-schedule it and never draw it as a 0.5 box.
+        guard let generated else {
+            skipped.insert(key)
+            return
+        }
+        if store(generated: generated, for: key) != nil {
+            storeFailures[key] = nil
+            return
+        }
+        // Store failed (transient, e.g. texture allocation under pressure): retry
+        // a bounded number of times, then give up so we don't regenerate forever.
+        let failures = (storeFailures[key] ?? 0) + 1
+        if failures >= 3 {
+            storeFailures[key] = nil
+            skipped.insert(key)
+        } else {
+            storeFailures[key] = failures
+        }
     }
 
     @discardableResult
