@@ -172,6 +172,15 @@ public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
     public let boxSize: SIMD2<Double>?
     /// Transparent margin (scene pixels) inside `boxSize` around the text.
     public let padding: Double
+    /// WPE 2.8 MSDF text effects (all default to disabled / neutral so 2.7
+    /// scenes and the CoreText fallback are unaffected).
+    public let outlineSize: Double
+    public let outlineColor: SIMD3<Double>
+    public let blurSize: Double
+    public let shadowSize: Double
+    public let shadowColor: SIMD3<Double>
+    public let shadowOffset: SIMD2<Double>
+    public let letterSpacing: Double
 
     public init(
         id: String,
@@ -191,7 +200,14 @@ public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
         maxWidth: Double?,
         parallaxDepth: Double,
         boxSize: SIMD2<Double>? = nil,
-        padding: Double = 0
+        padding: Double = 0,
+        outlineSize: Double = 0,
+        outlineColor: SIMD3<Double> = SIMD3<Double>(0, 0, 0),
+        blurSize: Double = 0,
+        shadowSize: Double = 0,
+        shadowColor: SIMD3<Double> = SIMD3<Double>(0, 0, 0),
+        shadowOffset: SIMD2<Double> = SIMD2<Double>(0, 0),
+        letterSpacing: Double = 0
     ) {
         self.id = id
         self.name = name
@@ -211,6 +227,13 @@ public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
         self.parallaxDepth = parallaxDepth
         self.boxSize = boxSize
         self.padding = padding
+        self.outlineSize = outlineSize
+        self.outlineColor = outlineColor
+        self.blurSize = blurSize
+        self.shadowSize = shadowSize
+        self.shadowColor = shadowColor
+        self.shadowOffset = shadowOffset
+        self.letterSpacing = letterSpacing
     }
 
     public func resolvedAlpha(at time: Double) -> Double {
@@ -239,7 +262,14 @@ public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
             maxWidth: maxWidth,
             parallaxDepth: parallaxDepth,
             boxSize: boxSize,
-            padding: padding
+            padding: padding,
+            outlineSize: outlineSize,
+            outlineColor: outlineColor,
+            blurSize: blurSize,
+            shadowSize: shadowSize,
+            shadowColor: shadowColor,
+            shadowOffset: shadowOffset,
+            letterSpacing: letterSpacing
         )
     }
 }

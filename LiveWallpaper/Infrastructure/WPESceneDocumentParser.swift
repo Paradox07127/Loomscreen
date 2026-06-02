@@ -401,6 +401,16 @@ enum WPESceneDocumentParser {
         // raw rasterized bounds at pointsize, which are far smaller.
         let boxSize = parseVector3(dict["size"]).map { SIMD2<Double>($0.x, $0.y) }
         let padding = parseDouble(dict["padding"]) ?? 0
+        // WPE 2.8 MSDF text effects. Keys are case-insensitive in the corpus, so
+        // accept both spaced and lowercased variants; all default to disabled.
+        let outlineSize = unwrapDouble(dict["outlinesize"]) ?? unwrapDouble(dict["outlineSize"]) ?? 0
+        let outlineColor = unwrapVector3(dict["outlinecolor"]) ?? SIMD3<Double>(0, 0, 0)
+        let blurSize = unwrapDouble(dict["blursize"]) ?? unwrapDouble(dict["blurSize"]) ?? 0
+        let shadowSize = unwrapDouble(dict["shadowsize"]) ?? unwrapDouble(dict["shadowSize"]) ?? 0
+        let shadowColor = unwrapVector3(dict["shadowcolor"]) ?? SIMD3<Double>(0, 0, 0)
+        let shadowOffsetVec = parseVector3(dict["shadowoffset"]).map { SIMD2<Double>($0.x, $0.y) }
+        let shadowOffset = shadowOffsetVec ?? SIMD2<Double>(0, 0)
+        let letterSpacing = unwrapDouble(dict["letterspacing"]) ?? unwrapDouble(dict["spacing"]) ?? 0
 
         return WPESceneTextObject(
             id: id,
@@ -420,7 +430,14 @@ enum WPESceneDocumentParser {
             maxWidth: maxWidth.map { max(1, $0) },
             parallaxDepth: parallaxDepth,
             boxSize: (boxSize.map { $0.x > 0 && $0.y > 0 } ?? false) ? boxSize : nil,
-            padding: max(0, padding)
+            padding: max(0, padding),
+            outlineSize: max(0, outlineSize),
+            outlineColor: outlineColor,
+            blurSize: max(0, blurSize),
+            shadowSize: max(0, shadowSize),
+            shadowColor: shadowColor,
+            shadowOffset: shadowOffset,
+            letterSpacing: letterSpacing
         )
     }
 
