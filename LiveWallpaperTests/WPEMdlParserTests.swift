@@ -59,6 +59,34 @@ struct WPEPuppetAnimationEvaluatorTests {
         let skinned = palette[0] * SIMD4<Float>(1, 2, 0, 1)
         #expect(skinned == SIMD4<Float>(11, 2, 0, 1))
     }
+
+    @Test("Additive layer composes its delta on top of the base (blink-style Y-scale)")
+    func additiveLayerComposesOnBase() {
+        // Base layer: bone 0 static at the bind pose.
+        let base = animation(frameCount: 2, mode: "loop", channels: [channel([
+            (SIMD3(0, 0, 0), SIMD3(0, 0, 0), SIMD3(1, 1, 1)),
+            (SIMD3(0, 0, 0), SIMD3(0, 0, 0), SIMD3(1, 1, 1)),
+            (SIMD3(0, 0, 0), SIMD3(0, 0, 0), SIMD3(1, 1, 1))
+        ])])
+        // Additive "blink" layer: bone 0 squashes vertically (Sy 1 → 0.5) at frame 1.
+        let blink = animation(frameCount: 2, mode: "loop", channels: [channel([
+            (SIMD3(0, 0, 0), SIMD3(0, 0, 0), SIMD3(1, 1, 1)),
+            (SIMD3(0, 0, 0), SIMD3(0, 0, 0), SIMD3(1, 0.5, 1)),
+            (SIMD3(0, 0, 0), SIMD3(0, 0, 0), SIMD3(1, 1, 1))
+        ])])
+        let layers = [
+            WPEPuppetAnimationLayer(animation: base, rate: 1, additive: false, blend: 1),
+            WPEPuppetAnimationLayer(animation: blink, rate: 1, additive: true, blend: 1)
+        ]
+        // Frame 0: both layers at bind → identity (no-regression guard).
+        let atBind = WPEPuppetAnimationEvaluator.palette(layers: layers, bones: [], at: 0)
+        #expect(atBind.allSatisfy { simd_equal($0, matrix_identity_float4x4) })
+        // Frame 1: base unchanged + additive Sy 0.5 → a vertex at y=2 skins to y=1.
+        let blended = WPEPuppetAnimationEvaluator.palette(layers: layers, bones: [], at: 1.0 / 30.0)
+        let skinned = blended[0] * SIMD4<Float>(0, 2, 0, 1)
+        #expect(abs(skinned.y - 1.0) < 1e-5)
+        #expect(abs(skinned.x) < 1e-5)
+    }
 }
 
 @Suite("WPE MDL parser")
