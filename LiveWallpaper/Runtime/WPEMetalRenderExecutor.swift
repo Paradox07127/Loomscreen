@@ -1653,6 +1653,8 @@ final class WPEMetalRenderExecutor {
             )
         }
 
+        WPESceneDebugArtifacts.shared.setWaterWavesPath("Builtin")
+        let maskResolution = WPEMetalTextureMetadataRegistry.shared.resolution(for: maskTexture)
         var uniforms = WPEWaterWavesUniforms(
             time: time,
             speed: speed,
@@ -1662,7 +1664,13 @@ final class WPEMetalRenderExecutor {
             directionX: direction.x,
             directionY: direction.y,
             hasMask: hasMask,
-            debugMode: debugMode
+            debugMode: debugMode,
+            texture1Resolution: SIMD4<Float>(
+                Float(maskResolution.textureWidth),
+                Float(maskResolution.textureHeight),
+                Float(maskResolution.imageWidth),
+                Float(maskResolution.imageHeight)
+            )
         )
         encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPEWaterWavesUniforms>.stride, index: 0)
 

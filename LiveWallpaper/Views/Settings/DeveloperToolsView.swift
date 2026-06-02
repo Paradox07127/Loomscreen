@@ -23,6 +23,7 @@ struct DeveloperToolsView: View {
     @State private var flagRefresh = 0
     @State private var waterWavesDebug = WPEWaterWavesDebugMode.current
     @State private var selectedTab: DevToolsTab = .corpusTest
+    @State private var activeWaterWavesPath = WPESceneDebugArtifacts.shared.waterWavesPath
 
     private enum DevToolsTab: String, CaseIterable, Identifiable {
         case corpusTest
@@ -270,6 +271,30 @@ struct DeveloperToolsView: View {
                     Text(verbatim: "Visualize where the waterwaves effect triggers: Mask / Overlay show the masked region on the character, Displacement shows the wave field. Applies on the next rendered frame.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+
+                    HStack(spacing: 4) {
+                        Text(verbatim: "Active waterwaves path:")
+                            .font(.caption)
+                        Text(verbatim: activeWaterWavesPath)
+                            .font(.caption.bold())
+                            .foregroundStyle(waterWavesPathColor)
+                    }
+                    .accessibilityElement(children: .combine)
+
+                    if waterWavesDebug != .off && activeWaterWavesPath == "Inactive" {
+                        Text(verbatim: "⚠️ Waterwaves debug is on but no waterwaves effect is rendering in the current scene.")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                }
+
+                Toggle(isOn: boolBinding("WPEWaterWavesTrace")) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(verbatim: "Waterwaves uniform trace")
+                        Text(verbatim: "Log packed waterwaves uniforms per pass + dump the translated MSL to scene-debug. Needs scene debug artifacts on.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Divider()
@@ -291,6 +316,12 @@ struct DeveloperToolsView: View {
             }
             .padding(.vertical, 4)
             .id(flagRefresh)
+            .task {
+                while !Task.isCancelled {
+                    activeWaterWavesPath = WPESceneDebugArtifacts.shared.waterWavesPath
+                    try? await Task.sleep(nanoseconds: 700_000_000)
+                }
+            }
         }
     }
 
@@ -313,6 +344,14 @@ struct DeveloperToolsView: View {
         }
     }
 
+    private var waterWavesPathColor: Color {
+        switch activeWaterWavesPath {
+        case "Builtin": return .green
+        case "Transpiled": return .orange
+        default: return .secondary
+        }
+    }
+
     private func resetDiagnosticFlags() {
         for flag in Self.diagnosticBoolFlags {
             UserDefaults.standard.removeObject(forKey: flag.key)
@@ -320,6 +359,7 @@ struct DeveloperToolsView: View {
         for key in Self.diagnosticStringKeys {
             UserDefaults.standard.removeObject(forKey: key)
         }
+        UserDefaults.standard.removeObject(forKey: WPEWaterWavesTrace.defaultsKey)
         waterWavesDebug = .off
         flagRefresh += 1
     }
