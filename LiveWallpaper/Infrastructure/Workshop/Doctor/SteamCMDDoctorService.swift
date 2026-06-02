@@ -784,29 +784,67 @@ final class SteamCMDDoctorService {
     /// (a manual `steamcmd` run, a prior launch, a download whose import didn't
     /// record). No-op when no workdir is bound.
     func enumerateDownloadedItemFolders(_ body: @MainActor (URL) async -> Void) async {
-        guard let workdir = try? resolveWorkdirURL() else { return }
-        let scope = workdir.startAccessingSecurityScopedResource()
-        defer { if scope { workdir.stopAccessingSecurityScopedResource() } }
+        var seen = Set<String>()
 
-        let contentRoot = workdir
-            .appendingPathComponent("steamapps", isDirectory: true)
+        // 1. The sandbox-redirected Steam data dir. A steamcmd spawned by this
+        //    sandboxed app writes workshop content to its own STEAMROOT
+        //    (`~/Library/Application Support/Steam`), which the sandbox redirects
+        //    INTO the container — NOT the `workingDirectory` we set. This is the
+        //    location app-button downloads actually land. In-container: full
+        //    access, no security-scoped bookmark.
+        if let appSupport = try? fileManager.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: false
+        ) {
+            let steamContent = workshopContentRoot(under: appSupport.appendingPathComponent("Steam", isDirectory: true))
+            seen.formUnion(await enumerateProjectFolders(in: steamContent, skipping: seen, body))
+        }
+
+        // 2. The bound workdir's content tree — covers users who pointed the
+        //    workdir at a real Steam library or a custom steamcmd dir. Hold its
+        //    security scope across the body calls (it may be outside the container).
+        if let workdir = try? resolveWorkdirURL() {
+            let scope = workdir.startAccessingSecurityScopedResource()
+            defer { if scope { workdir.stopAccessingSecurityScopedResource() } }
+            seen.formUnion(await enumerateProjectFolders(in: workshopContentRoot(under: workdir), skipping: seen, body))
+        }
+    }
+
+    private func workshopContentRoot(under base: URL) -> URL {
+        base.appendingPathComponent("steamapps", isDirectory: true)
             .appendingPathComponent("workshop", isDirectory: true)
             .appendingPathComponent("content", isDirectory: true)
             .appendingPathComponent(String(Self.wallpaperEngineAppID), isDirectory: true)
+    }
 
+    /// Calls `body` for each immediate `project.json`-bearing subfolder of
+    /// `contentRoot` whose id isn't already in `seen`. Returns the ids it visited
+    /// so the caller can fold them into its dedup set.
+    private func enumerateProjectFolders(
+        in contentRoot: URL,
+        skipping seen: Set<String>,
+        _ body: @MainActor (URL) async -> Void
+    ) async -> [String] {
         guard let children = try? fileManager.contentsOfDirectory(
             at: contentRoot,
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles, .skipsPackageDescendants]
-        ) else { return }
+        ) else { return [] }
 
+        var visited: [String] = []
         for child in children {
+            let id = child.lastPathComponent
+            guard !seen.contains(id), !visited.contains(id) else { continue }
             let isDir = (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
             guard isDir,
                   fileManager.fileExists(atPath: child.appendingPathComponent("project.json").path(percentEncoded: false))
             else { continue }
+            visited.append(id)
             await body(child)
         }
+        return visited
     }
 
     /// Extracts the quoted destination from SteamCMD's
