@@ -120,9 +120,9 @@ enum WPEMSDFSegment {
                 ? WPEMSDFGeometryMath.clamp(WPEMSDFGeometryMath.dot(p - p0, edge) / denom, 0, 1)
                 : 0
         case .quadratic:
-            t = nearestParameter(to: p, samples: 32, refinementSteps: 6)
+            t = nearestParameter(to: p, samples: 16, refinementSteps: 4)
         case .cubic:
-            t = nearestParameter(to: p, samples: 64, refinementSteps: 8)
+            t = nearestParameter(to: p, samples: 24, refinementSteps: 6)
         }
         return distance(at: t, to: p)
     }
@@ -288,6 +288,19 @@ struct WPEMSDFShape {
         return sign * abs(closest.distance)
     }
 
+    /// Per-channel signed distances for one pixel, computing the inside/outside
+    /// sign (the expensive winding test) ONCE and sharing it across R/G/B —
+    /// identical output to three `signedDistance(at:channel:)` calls but ~⅓ the
+    /// winding cost. Used by the glyph generator's hot per-pixel loop.
+    func signedDistances(at point: WPEMSDFPoint) -> (r: Double, g: Double, b: Double) {
+        let sign = windingNumber(at: point) == 0 ? -1.0 : 1.0
+        func magnitude(_ channel: WPEMSDFEdgeColor) -> Double {
+            let closest = closestDistance(at: point, channel: channel) ?? closestDistance(at: point, channel: nil)
+            return sign * abs(closest?.distance ?? 0)
+        }
+        return (magnitude(.red), magnitude(.green), magnitude(.blue))
+    }
+
     private func closestDistance(
         at point: WPEMSDFPoint,
         channel: WPEMSDFEdgeColor?
@@ -342,9 +355,9 @@ struct WPEMSDFShape {
         case .linear:
             return 1
         case .quadratic:
-            return 24
+            return 12
         case .cubic:
-            return 48
+            return 24
         }
     }
 

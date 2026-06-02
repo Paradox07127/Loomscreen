@@ -7,6 +7,11 @@ struct WPEMSDFParameters {
     var pixelRange: Double = 4
     var padding: Int = 4
     var angleThreshold: Double = 3.0
+    /// Max atlas cell side (pixels). MSDF is resolution-independent, so glyphs
+    /// are rasterized at this fixed modest size and scaled up by the shader —
+    /// generating at the on-screen point size (e.g. 200px) would cost ~18× more
+    /// pixels and stall the main thread.
+    var generationCellCap: Int = 64
 }
 
 typealias WPEMSDFPoint = SIMD2<Double>

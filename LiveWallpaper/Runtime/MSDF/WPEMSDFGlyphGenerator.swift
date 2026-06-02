@@ -73,10 +73,11 @@ final class WPEMSDFGlyphGenerator {
         for y in 0..<bitmap.height {
             for x in 0..<bitmap.width {
                 let point = WPEMSDFPoint(Double(x) + 0.5, Double(y) + 0.5)
+                let d = shape.signedDistances(at: point)
                 bitmap[x, y] = SIMD4<Float>(
-                    encodedDistance(shape.signedDistance(at: point, channel: .red), pixelRange: pixelRange),
-                    encodedDistance(shape.signedDistance(at: point, channel: .green), pixelRange: pixelRange),
-                    encodedDistance(shape.signedDistance(at: point, channel: .blue), pixelRange: pixelRange),
+                    encodedDistance(d.r, pixelRange: pixelRange),
+                    encodedDistance(d.g, pixelRange: pixelRange),
+                    encodedDistance(d.b, pixelRange: pixelRange),
                     1
                 )
             }
@@ -106,8 +107,12 @@ final class WPEMSDFGlyphGenerator {
         guard roundedSize <= CGFloat(Int.max) else { return nil }
         let pointSize = max(Int(roundedSize), 1)
         guard padding <= (Int.max - pointSize) / 2 else { return nil }
-        let cellSide = pointSize + padding * 2
-        guard cellSide <= limit else { return nil }
+        let naturalCell = pointSize + padding * 2
+        // Clamp to a fixed generation resolution (resolution-independence): a
+        // 200px on-screen glyph still rasterizes into ~64px and is scaled up by
+        // the shader, instead of a 200² per-pixel signed-distance sweep.
+        let cap = max(parameters.generationCellCap, padding * 2 + 1)
+        let cellSide = min(naturalCell, min(cap, limit))
         return (padding, cellSide)
     }
 

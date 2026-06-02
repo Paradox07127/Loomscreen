@@ -35,6 +35,19 @@ struct WPEMSDFGlyphGeneratorTests {
         #expect(bitmap.pixels.allSatisfy { $0.w == 1 && $0.x.isFinite && $0.y.isFinite && $0.z.isFinite })
     }
 
+    @Test("Large on-screen font still rasterizes into the capped atlas cell (resolution independence)")
+    func largeFontClampsToCellCap() throws {
+        // A 256pt glyph would otherwise rasterize into a ~264px cell — a ~70k-pixel
+        // signed-distance sweep that stalls the main thread. MSDF is resolution-
+        // independent, so the cap keeps the atlas glyph tiny and the shader scales it.
+        let font = CTFontCreateWithName("Helvetica" as CFString, 256, nil)
+        let generator = WPEMSDFGlyphGenerator()
+        let result = try #require(generator.generate(glyph: glyph("B", font: font), font: font))
+        #expect(result.bitmap.width <= WPEMSDFParameters().generationCellCap)
+        #expect(result.bitmap.width == result.bitmap.height)
+        #expect(result.bitmap.pixels.contains { median($0) > 0.5 })
+    }
+
     @Test("Glyph generation is deterministic")
     func generationIsDeterministic() throws {
         let font = CTFontCreateWithName("Helvetica" as CFString, 24, nil)
