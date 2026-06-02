@@ -1009,10 +1009,11 @@ final class WPEMetalRenderExecutor {
         // Skin from the animation channels (channel == skin-blend index, keyframe 0 == bind),
         // reusing the same scene clock that drives WPESceneAnimatedValue / shader g_Time.
         //
-        // OFF BY DEFAULT: the prominent puppet animation in the corpus is the masked waterwaves
-        // effect (which animates e.g. the hair), while the baked MDLA bone motion is subtle and
-        // was observed to perturb the static torso. Keep the parser/evaluator in place but gate
-        // the GPU skinning behind an opt-in flag until the bind/euler convention is validated:
+        // OFF BY DEFAULT: the baked MDLA bone motion is subtle (verified ≤~11px at the hair) and the
+        // prominent puppet animation is the masked waterwaves effect. The earlier "torso perturbed"
+        // artifact was a skinning bug — MDLA channels are parent-LOCAL, but the palette composed them
+        // as world transforms, binding vertices to the wrong bones. `WPEPuppetAnimationEvaluator` now
+        // composes the skeleton hierarchy (passing `model.bones`). Still gated for on-device review:
         // `defaults write Taijia.LiveWallpaper WPEPuppetEnableSkinning -bool YES`.
         let skinningAllowed = UserDefaults.standard.bool(forKey: "WPEPuppetEnableSkinning")
         let animation = skinningAllowed ? selectedPuppetAnimation(for: layer, model: model) : nil
@@ -1020,7 +1021,7 @@ final class WPEMetalRenderExecutor {
             WPEPuppetAnimationEvaluator.sampledFrameIndex(for: $0, at: runtimeUniforms.time)
         } ?? 0
         let bonePalette = animation
-            .map { WPEPuppetAnimationEvaluator.palette(for: $0, at: runtimeUniforms.time) }
+            .map { WPEPuppetAnimationEvaluator.palette(for: $0, bones: model.bones, at: runtimeUniforms.time) }
             .flatMap { $0.isEmpty ? nil : $0 }
             ?? WPEPuppetAnimationEvaluator.identityPalette(count: 1)
         // Skin only past the bind pose: at frame 0 the palette is identity, so leaving

@@ -97,12 +97,28 @@ struct WPEPuppetAnimKey: Equatable, Sendable {
 /// the bind pose, so `palette[i] = M_i(frame) · M_i(0)⁻¹` — at frame 0 this is the identity,
 /// leaving the assembled rest pose untouched (the regression guard against P0's static draw).
 enum WPEPuppetAnimationEvaluator {
-    static func palette(for animation: WPEPuppetAnimation, at time: Double) -> [simd_float4x4] {
+    /// Builds the per-bone skinning palette `worldCurrent · worldBind⁻¹`.
+    ///
+    /// MDLA channels store each bone's transform in its PARENT-LOCAL frame, so the world
+    /// transform must be composed down the skeleton hierarchy (`world = worldParent · local`).
+    /// `bones` supplies that hierarchy (parentIndex per bone, matched to channels by bone index).
+    /// When it is empty or doesn't cover the channels (unit tests / bone-less models) we fall back
+    /// to treating each channel as an independent local transform. Frame 0 is always the bind pose,
+    /// so the palette is identity there regardless of path (no-regression guard).
+    static func palette(
+        for animation: WPEPuppetAnimation,
+        bones: [WPEPuppetBone] = [],
+        at time: Double
+    ) -> [simd_float4x4] {
+        let channels = animation.channels
         let frame = sampledFrameIndex(for: animation, at: time)
         if frame == 0 {
-            return identityPalette(count: animation.channels.count)
+            return identityPalette(count: channels.count)
         }
-        return animation.channels.map { channel in
+        if let parentChannel = parentChannelMap(channels: channels, bones: bones) {
+            return hierarchyPalette(channels: channels, parentChannel: parentChannel, frame: frame)
+        }
+        return channels.map { channel in
             guard let bindKey = channel.keyframes.first else { return matrix_identity_float4x4 }
             let currentKey = channel.keyframes[min(frame, channel.keyframes.count - 1)]
             let bind = matrix(for: bindKey)
@@ -114,6 +130,75 @@ enum WPEPuppetAnimationEvaluator {
 
     static func identityPalette(count: Int) -> [simd_float4x4] {
         Array(repeating: matrix_identity_float4x4, count: max(count, 1))
+    }
+
+    /// Maps each channel to its parent channel index (or `nil` for a root). Returns `nil` when the
+    /// supplied skeleton doesn't cover every channel's bone, so the caller falls back to the
+    /// no-hierarchy path instead of mis-skinning against a partial skeleton.
+    private static func parentChannelMap(
+        channels: [WPEPuppetAnimChannel],
+        bones: [WPEPuppetBone]
+    ) -> [Int?]? {
+        guard !bones.isEmpty, !channels.isEmpty else { return nil }
+        var channelForBone: [Int: Int] = [:]
+        for (position, channel) in channels.enumerated() {
+            channelForBone[channel.boneIndex] = position
+        }
+        var parentByBone: [Int: Int?] = [:]
+        for bone in bones {
+            parentByBone[bone.index] = bone.parentIndex
+        }
+        var parentChannel = [Int?](repeating: nil, count: channels.count)
+        for (position, channel) in channels.enumerated() {
+            guard let parentOptional = parentByBone[channel.boneIndex] else {
+                return nil
+            }
+            if let parentBone = parentOptional,
+               let parentPosition = channelForBone[parentBone],
+               parentPosition != position {
+                parentChannel[position] = parentPosition
+            }
+        }
+        return parentChannel
+    }
+
+    private static func hierarchyPalette(
+        channels: [WPEPuppetAnimChannel],
+        parentChannel: [Int?],
+        frame: Int
+    ) -> [simd_float4x4] {
+        func worldMatrices(at sampleFrame: Int) -> [simd_float4x4] {
+            var cache = [simd_float4x4?](repeating: nil, count: channels.count)
+            var visiting = [Bool](repeating: false, count: channels.count)
+            func world(_ index: Int) -> simd_float4x4 {
+                if let cached = cache[index] { return cached }
+                if visiting[index] { return matrix_identity_float4x4 }
+                visiting[index] = true
+                let keyframes = channels[index].keyframes
+                let local = keyframes.isEmpty
+                    ? matrix_identity_float4x4
+                    : matrix(for: keyframes[min(sampleFrame, keyframes.count - 1)])
+                let composed: simd_float4x4
+                if let parent = parentChannel[index] {
+                    composed = world(parent) * local
+                } else {
+                    composed = local
+                }
+                visiting[index] = false
+                cache[index] = composed
+                return composed
+            }
+            return (0..<channels.count).map { world($0) }
+        }
+
+        let bindWorld = worldMatrices(at: 0)
+        let currentWorld = worldMatrices(at: frame)
+        return (0..<channels.count).map { index in
+            let bind = bindWorld[index]
+            let determinant = simd_determinant(bind)
+            guard determinant.isFinite, abs(determinant) > 1e-6 else { return matrix_identity_float4x4 }
+            return currentWorld[index] * simd_inverse(bind)
+        }
     }
 
     static func sampledFrameIndex(for animation: WPEPuppetAnimation, at time: Double) -> Int {
