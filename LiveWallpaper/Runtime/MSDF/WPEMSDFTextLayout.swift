@@ -21,8 +21,7 @@ struct WPEMSDFTextLayout {
         object: WPESceneTextObject,
         font: CTFont,
         atlas: WPEMSDFAtlas,
-        generator: WPEMSDFGlyphGenerator,
-        fontID: String
+        generator: WPEMSDFGlyphGenerator
     ) -> WPEMSDFTextMesh? {
         guard !object.text.isEmpty else { return nil }
         // The MSDF path lays out a SINGLE line. Hard line breaks or text that
@@ -63,8 +62,7 @@ struct WPEMSDFTextLayout {
             naturalHeight: naturalHeight,
             innerHeight: innerHeight
         )
-        let pathUnitsToEm = Self.pathUnitsToEmUnits(font: font)
-        let pixelSize = max(Int(ceil(CTFontGetSize(font))), 1)
+        let utf16 = Array(object.text.utf16)
         let runs = CTLineGetGlyphRuns(line) as! [CTRun]
         var perPage: [Int: [WPEMSDFTextVertex]] = [:]
         var isComplete = true
@@ -75,24 +73,38 @@ struct WPEMSDFTextLayout {
             let range = CFRange(location: 0, length: glyphCount)
             var glyphs = [CGGlyph](repeating: 0, count: glyphCount)
             var positions = [CGPoint](repeating: .zero, count: glyphCount)
+            var stringIndices = [CFIndex](repeating: 0, count: glyphCount)
             CTRunGetGlyphs(run, range, &glyphs)
             CTRunGetPositions(run, range, &positions)
+            CTRunGetStringIndices(run, range, &stringIndices)
+
+            // Use the run's ACTUAL font: CoreText substitutes a fallback font for
+            // glyphs the scene font lacks, and glyph IDs are relative to that font.
+            let runFont = Self.runFont(run) ?? font
+            let runFontID = Self.fontIdentifier(runFont)
+            let runPixelSize = max(Int(ceil(CTFontGetSize(runFont))), 1)
+            let runPathUnitsToEm = Self.pathUnitsToEmUnits(font: runFont)
 
             for index in 0..<glyphCount {
                 let glyph = glyphs[index]
-                let key = WPEMSDFGlyphKey(fontID: fontID, glyph: glyph, pixelSize: pixelSize)
+                let key = WPEMSDFGlyphKey(fontID: runFontID, glyph: glyph, pixelSize: runPixelSize)
                 let entry: WPEMSDFAtlasEntry
-                switch atlas.requestEntry(for: key, generator: generator, font: font) {
+                switch atlas.requestEntry(for: key, generator: generator, font: runFont) {
                 case .ready(let ready):
                     entry = ready
-                case .skip:
-                    continue // whitespace / no-outline glyph: advance, draw nothing
                 case .pending:
                     isComplete = false
                     continue
+                case .skip:
+                    // Whitespace has no outline by design → advance, draw nothing.
+                    // A NON-whitespace glyph with no MSDF outline (emoji / color /
+                    // unsupported) must NOT be silently dropped — fall the whole
+                    // object back to CoreText so it renders correctly.
+                    if Self.isWhitespace(stringIndices[index], in: utf16) { continue }
+                    return nil
                 }
                 let position = positions[index]
-                let bearing = entry.metrics.bearing / pathUnitsToEm
+                let bearing = entry.metrics.bearing / runPathUnitsToEm
                 let glyphWidth = Double(entry.metrics.cellSize.width) / entry.metrics.scale
                 let glyphHeight = Double(entry.metrics.cellSize.height) / entry.metrics.scale
                 let x = Double(xOffset) + Double(position.x) + bearing.x
@@ -174,6 +186,27 @@ struct WPEMSDFTextLayout {
         let unitsPerEm = max(Double(CTFontGetUnitsPerEm(font)), 1)
         let fontSize = max(Double(CTFontGetSize(font)), 1.0e-6)
         return unitsPerEm / fontSize
+    }
+
+    /// The font CoreText actually used for this run (may be a substituted
+    /// fallback font when the scene font lacks a glyph).
+    private static func runFont(_ run: CTRun) -> CTFont? {
+        let attributes = CTRunGetAttributes(run) as NSDictionary
+        guard let value = attributes[kCTFontAttributeName as String] else { return nil }
+        return (value as! CTFont)
+    }
+
+    private static func fontIdentifier(_ font: CTFont) -> String {
+        let name = CTFontCopyPostScriptName(font) as String
+        return "\(name)@\(Int(ceil(CTFontGetSize(font))))"
+    }
+
+    /// Whether the source character at `utf16Index` is whitespace (so a missing
+    /// outline is expected and the glyph can be safely advanced past).
+    private static func isWhitespace(_ utf16Index: CFIndex, in utf16: [UInt16]) -> Bool {
+        guard utf16Index >= 0, utf16Index < utf16.count,
+              let scalar = Unicode.Scalar(UInt32(utf16[utf16Index])) else { return false }
+        return scalar.properties.isWhitespace
     }
 }
 #endif

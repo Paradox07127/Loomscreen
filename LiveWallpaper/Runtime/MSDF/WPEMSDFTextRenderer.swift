@@ -53,13 +53,11 @@ final class WPEMSDFTextRenderer {
         let font = resolveFont(for: object)
         let material = WPEMSDFFontMaterial.make(object: object, parameters: parameters)
         guard let request = try? shaderRequest(comboValues: material.combos) else { return nil }
-        let fontID = fontIdentifier(font)
         guard let mesh = layout.layout(
             object: object,
             font: font,
             atlas: atlas,
-            generator: generator,
-            fontID: fontID
+            generator: generator
         ) else { return nil }
 
         let transformed = transform(mesh: mesh, object: object, parallaxOffset: parallaxOffset)
@@ -180,11 +178,6 @@ final class WPEMSDFTextRenderer {
         let fit = min(innerW / width, innerH / height)
         guard fit.isFinite, fit > 0 else { return base }
         return base * fit
-    }
-
-    private func fontIdentifier(_ font: CTFont) -> String {
-        let name = CTFontCopyPostScriptName(font) as String
-        return "\(name)@\(Int(ceil(CTFontGetSize(font))))"
     }
 
     private static func readInclude(path: String, resolver: WPEMultiRootResourceResolver) -> String? {

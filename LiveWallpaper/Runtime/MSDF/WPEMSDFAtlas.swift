@@ -176,10 +176,14 @@ final class WPEMSDFAtlas {
     private var pages: [Page] = []
     private var entries: [WPEMSDFGlyphKey: WPEMSDFAtlasEntry] = [:]
     private var pending: Set<WPEMSDFGlyphKey> = []
-    /// Glyphs with no outline (whitespace) or that permanently failed to
-    /// generate/store. Returned as `.skip` so they are never re-scheduled (fixes
+    /// Glyphs with no outline (whitespace / unsupported) or that exhausted their
+    /// store retries. Returned as `.skip` so they are never re-scheduled (fixes
     /// per-frame background-task churn) and never drawn as a bogus 0.5 quad.
     private var skipped: Set<WPEMSDFGlyphKey> = []
+    /// Transient store-failure (e.g. texture allocation) retry counts; a glyph is
+    /// only moved to `skipped` after exhausting these, so a temporary failure can
+    /// recover instead of being permanently dropped.
+    private var storeFailures: [WPEMSDFGlyphKey: Int] = [:]
     private var clock: UInt64 = 0
 
     init(device: MTLDevice, pageSize: Int = 1024, maxPages: Int = 4) {
@@ -250,11 +254,24 @@ final class WPEMSDFAtlas {
     private func completeGeneration(_ generated: GeneratedGlyph?, for key: WPEMSDFGlyphKey) {
         defer { pending.remove(key) }
         guard entries[key] == nil else { return }
-        // No outline (whitespace) or generation failed → mark permanently skipped
-        // so it is never re-scheduled every frame and never drawn as a 0.5 box.
-        guard let generated, store(generated: generated, for: key) != nil else {
+        // No outline (whitespace / unsupported glyph) is a PERMANENT skip — never
+        // re-schedule it and never draw it as a 0.5 box.
+        guard let generated else {
             skipped.insert(key)
             return
+        }
+        if store(generated: generated, for: key) != nil {
+            storeFailures[key] = nil
+            return
+        }
+        // Store failed (transient, e.g. texture allocation under pressure): retry
+        // a bounded number of times, then give up so we don't regenerate forever.
+        let failures = (storeFailures[key] ?? 0) + 1
+        if failures >= 3 {
+            storeFailures[key] = nil
+            skipped.insert(key)
+        } else {
+            storeFailures[key] = failures
         }
     }
 
