@@ -925,9 +925,6 @@ final class WPEMetalRenderExecutor {
         frameState.registerWrite(texture: destination.texture, targetID: destination.id)
     }
 
-    /// Picks the puppet animation to play: the first visible scene animationlayer's MDLA id,
-    /// else the puppet's first animation. P2c plays a single layer; multi-layer additive
-    /// blending (rate/blend) is a follow-up.
     /// Resolves the object's visible animation layers into evaluator layers. The scene can stack
     /// several (e.g. a base idle-sway layer + an ADDITIVE blink/face layer); we play them all so
     /// blinks/mouth motion compose on top of the body sway, instead of only the first layer.

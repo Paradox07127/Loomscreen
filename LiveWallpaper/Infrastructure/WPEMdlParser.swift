@@ -94,7 +94,7 @@ struct WPEPuppetAnimKey: Equatable, Sendable {
 
 /// One resolved puppet animation layer: an animation plus its playback `rate`, `blend` weight,
 /// and whether it composes additively over the base layer (e.g. a blink/face layer over idle sway).
-struct WPEPuppetAnimationLayer {
+struct WPEPuppetAnimationLayer: Equatable, Sendable {
     let animation: WPEPuppetAnimation
     let rate: Double
     let additive: Bool
@@ -126,13 +126,20 @@ enum WPEPuppetAnimationEvaluator {
         bones: [WPEPuppetBone],
         at time: Double
     ) -> [simd_float4x4] {
-        guard let base = layers.first(where: { !$0.additive }) ?? layers.first else { return [] }
+        guard let baseIndex = layers.indices.first(where: { !layers[$0].additive }) ?? layers.indices.first else {
+            return []
+        }
+        let base = layers[baseIndex]
         let baseChannels = base.animation.channels
         guard !baseChannels.isEmpty else { return [] }
 
         let baseFrame = sampledFrameIndex(for: base.animation, at: time * base.rate)
+        // Exclude the base layer by index (not by predicate): an all-additive stack must not
+        // re-apply its own base layer's animation as an additive delta on top of itself.
         let additiveLayers: [(frame: Int, channelForBone: [Int: Int], channels: [WPEPuppetAnimChannel], weight: Float)] =
-            layers.filter { $0.additive && !$0.animation.channels.isEmpty }.map { layer in
+            layers.indices.compactMap { index in
+                let layer = layers[index]
+                guard index != baseIndex, layer.additive, !layer.animation.channels.isEmpty else { return nil }
                 var channelForBone: [Int: Int] = [:]
                 for (position, channel) in layer.animation.channels.enumerated() {
                     channelForBone[channel.boneIndex] = position

@@ -461,6 +461,7 @@ struct WPESceneDocumentParserTests {
                     "rate": 24,
                     "visible": true,
                     "blend": 0.5,
+                    "additive": true,
                     "animation": 9
                 ]]
             ]]
@@ -492,6 +493,7 @@ struct WPESceneDocumentParserTests {
         #expect(animation.rate == 24)
         #expect(animation.visible == true)
         #expect(animation.blend == 0.5)
+        #expect(animation.additive == true)
         #expect(animation.animation == 9)
     }
 
