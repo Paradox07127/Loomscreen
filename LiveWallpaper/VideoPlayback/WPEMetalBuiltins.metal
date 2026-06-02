@@ -571,7 +571,13 @@ vertex WPETextOverlayVertexOut wpe_text_overlay_vertex(
         u.centerAndSize.w / halfHeight
     );
     WPETextOverlayVertexOut out;
-    out.position = float4(centerNDC + cornerNDC, 0.0, 1.0);
+    // WPE authors text in a top-left-origin space (y grows downward) and image
+    // layers map that to NDC via the camera's top-left ortho matrix. This
+    // overlay pass has no such matrix, so negate Y here — otherwise the text is
+    // placed in the wrong vertical half AND rendered upside-down (both halves of
+    // the same missing flip).
+    float2 ndc = centerNDC + cornerNDC;
+    out.position = float4(ndc.x, -ndc.y, 0.0, 1.0);
     out.uv = uv;
     return out;
 }
