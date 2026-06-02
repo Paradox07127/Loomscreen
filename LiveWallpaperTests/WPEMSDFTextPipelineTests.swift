@@ -92,4 +92,52 @@ struct WPEMSDFTextPipelineTests {
         #expect(totalVertices == 12)
         #expect(totalVertices % 6 == 0)
     }
+
+    /// Polls the async layout until it produces a mesh (or a bounded timeout).
+    private func awaitMesh(
+        _ object: WPESceneTextObject,
+        font: CTFont,
+        atlas: WPEMSDFAtlas,
+        generator: WPEMSDFGlyphGenerator,
+        layout: WPEMSDFTextLayout,
+        attempts: Int = 200
+    ) async -> WPEMSDFTextMesh? {
+        for _ in 0..<attempts {
+            if let mesh = layout.layout(object: object, font: font, atlas: atlas, generator: generator) {
+                return mesh
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        return nil
+    }
+
+    @Test("Whitespace is advanced past, not drawn (A B → two quads, space skipped)")
+    func whitespaceIsSkippedNotDrawn() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let atlas = WPEMSDFAtlas(device: device)
+        let generator = WPEMSDFGlyphGenerator()
+        let layout = WPEMSDFTextLayout()
+        let font = CTFontCreateWithName("Helvetica" as CFString, 32, nil)
+
+        let mesh = await awaitMesh(makeTextObject(text: "A B"), font: font, atlas: atlas, generator: generator, layout: layout)
+        let resolved = try #require(mesh)
+        let totalVertices = resolved.perPage.values.reduce(0) { $0 + $1.count }
+        // "A" + "B" drawn (2 quads × 6), the space contributes no quad.
+        #expect(totalVertices == 12)
+    }
+
+    @Test("Emoji (no MSDF outline) makes the whole object fall back to CoreText")
+    func emojiObjectFallsBackToCoreText() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let atlas = WPEMSDFAtlas(device: device)
+        let generator = WPEMSDFGlyphGenerator()
+        let layout = WPEMSDFTextLayout()
+        let font = CTFontCreateWithName("Helvetica" as CFString, 32, nil)
+
+        // A color emoji has no monochrome outline → generation yields nil → the
+        // glyph is .skip and, being non-whitespace, the layout must keep returning
+        // nil (object renders via CoreText) rather than dropping the emoji.
+        let mesh = await awaitMesh(makeTextObject(text: "😀"), font: font, atlas: atlas, generator: generator, layout: layout, attempts: 40)
+        #expect(mesh == nil)
+    }
 }
