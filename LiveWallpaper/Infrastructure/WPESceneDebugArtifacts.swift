@@ -25,6 +25,30 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
         let folderURL: URL
         let logURL: URL
         var passCounter: Int
+        var noteNames: Set<String>
+    }
+
+    private let waterWavesPathLock = NSLock()
+    private var waterWavesPathValue = "Inactive"
+    private var waterWavesPathStamp: TimeInterval = 0
+
+    /// Live indicator of which code path the waterwaves effect is currently taking
+    /// ("Builtin" / "Transpiled" / "Inactive"). Goes stale to "Inactive" ~1s after the
+    /// last waterwaves dispatch so it reflects the *current* scene. Read by Developer Tools.
+    var waterWavesPath: String {
+        waterWavesPathLock.lock()
+        defer { waterWavesPathLock.unlock() }
+        if ProcessInfo.processInfo.systemUptime - waterWavesPathStamp > 1.0 {
+            return "Inactive"
+        }
+        return waterWavesPathValue
+    }
+
+    func setWaterWavesPath(_ path: String) {
+        waterWavesPathLock.lock()
+        waterWavesPathValue = path
+        waterWavesPathStamp = ProcessInfo.processInfo.systemUptime
+        waterWavesPathLock.unlock()
     }
 
     private var session: ActiveSession?
@@ -100,7 +124,8 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
             workshopID: workshopID,
             folderURL: folder,
             logURL: logURL,
-            passCounter: 0
+            passCounter: 0,
+            noteNames: []
         )
         sessionLock.unlock()
 
@@ -372,6 +397,26 @@ final class WPESceneDebugArtifacts: @unchecked Sendable {
         sessionLock.unlock()
         guard let folderURL else { return }
         write(contents, to: folderURL.appendingPathComponent(safeFileName(name)))
+    }
+
+    /// Drop a text payload once per active debug session — for successful shader dumps
+    /// that would otherwise be rewritten every rendered frame.
+    func recordNoteOnce(name: String, contents: String) {
+        guard isEnabled else { return }
+        let safeName = safeFileName(name)
+        sessionLock.lock()
+        guard var current = session else {
+            sessionLock.unlock()
+            return
+        }
+        guard current.noteNames.insert(safeName).inserted else {
+            sessionLock.unlock()
+            return
+        }
+        let folderURL = current.folderURL
+        session = current
+        sessionLock.unlock()
+        write(contents, to: folderURL.appendingPathComponent(safeName))
     }
 
     /// P3 dump for raw `.tex` metadata: TEXI image-dimension + unkInt0 and
