@@ -129,7 +129,7 @@ enum WPESceneDocumentParser {
 
         for key in generalDict.keys {
             let lowered = key.lowercased()
-            if lowered.hasPrefix("bloom") || lowered.hasPrefix("cameraparallax") || lowered.hasPrefix("camerashake") {
+            if lowered.hasPrefix("bloom") || lowered.hasPrefix("camerashake") {
                 diagnostics.append(.init(severity: .info, message: "general.\(key) is unsupported in Phase 2.0"))
             }
         }
@@ -667,7 +667,18 @@ enum WPESceneDocumentParser {
             ))
             projection = WPESceneGeneral.defaultGeneral.orthogonalProjection
         }
-        return WPESceneGeneral(clearColor: clearColor, orthogonalProjection: projection)
+        let parallaxDefaults = WPESceneCameraParallaxSettings.disabled
+        let cameraParallax = WPESceneCameraParallaxSettings(
+            enabled: parseBool(dict["cameraparallax"]) ?? parallaxDefaults.enabled,
+            amount: parseDouble(dict["cameraparallaxamount"]) ?? parallaxDefaults.amount,
+            delay: parseDouble(dict["cameraparallaxdelay"]) ?? parallaxDefaults.delay,
+            mouseInfluence: parseDouble(dict["cameraparallaxmouseinfluence"]) ?? parallaxDefaults.mouseInfluence
+        )
+        return WPESceneGeneral(
+            clearColor: clearColor,
+            orthogonalProjection: projection,
+            cameraParallax: cameraParallax
+        )
     }
 
     // MARK: - Image objects

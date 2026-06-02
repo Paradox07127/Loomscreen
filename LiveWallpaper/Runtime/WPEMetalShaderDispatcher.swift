@@ -47,6 +47,7 @@ struct WPEMetalShaderDispatcher {
                 var quadUniforms = executor.objectQuadUniforms(
                     for: layer,
                     sceneSize: frameState.sceneSize,
+                    cameraParallax: frameState.cameraParallax,
                     sourceTexture: destination.texture
                 )
                 encoder.setVertexBytes(
@@ -71,6 +72,7 @@ struct WPEMetalShaderDispatcher {
                 var quadUniforms = executor.objectQuadUniforms(
                     for: layer,
                     sceneSize: frameState.sceneSize,
+                    cameraParallax: frameState.cameraParallax,
                     sourceTexture: destination.texture
                 )
                 encoder.setVertexBytes(
@@ -108,6 +110,7 @@ struct WPEMetalShaderDispatcher {
                 var quadUniforms = executor.objectQuadUniforms(
                     for: layer,
                     sceneSize: frameState.sceneSize,
+                    cameraParallax: frameState.cameraParallax,
                     sourceTexture: texture
                 )
                 encoder.setVertexBytes(
@@ -359,6 +362,7 @@ struct WPEMetalShaderDispatcher {
                 var quadUniforms = executor.objectQuadUniforms(
                     for: layer,
                     sceneSize: frameState.sceneSize,
+                    cameraParallax: frameState.cameraParallax,
                     sourceTexture: texture
                 )
                 encoder.setVertexBytes(
@@ -429,6 +433,7 @@ struct WPEMetalShaderDispatcher {
                 var quadUniforms = executor.objectQuadUniforms(
                     for: layer,
                     sceneSize: frameState.sceneSize,
+                    cameraParallax: frameState.cameraParallax,
                     sourceTexture: primary
                 )
                 encoder.setVertexBytes(
@@ -726,6 +731,7 @@ struct WPEMetalShaderDispatcher {
                 var quadUniforms = executor.objectQuadUniforms(
                     for: layer,
                     sceneSize: frameState.sceneSize,
+                    cameraParallax: frameState.cameraParallax,
                     sourceTexture: texture
                 )
                 encoder.setVertexBytes(
@@ -853,6 +859,7 @@ struct WPEMetalShaderDispatcher {
             var quadUniforms = executor.objectQuadUniforms(
                 for: layer,
                 sceneSize: frameState.sceneSize,
+                cameraParallax: frameState.cameraParallax,
                 sourceTexture: primary ?? destination.texture
             )
             encoder.setVertexBytes(

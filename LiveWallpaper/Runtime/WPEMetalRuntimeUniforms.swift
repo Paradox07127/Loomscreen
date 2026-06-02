@@ -7,11 +7,86 @@ import QuartzCore
 /// into prepared pass uniforms before the Metal executor runs. Built-in
 /// shaders ignore the entries they do not bind, so this layer can ship before
 /// the Phase 2D custom-shader translator consumes them.
+/// Per-frame, smoothed camera-parallax state. `smoothed` is the cursor offset
+/// from screen center (−0.5…0.5 per axis) after exponential smoothing and the
+/// scene's amount/mouse-influence calibration. `pixelOffset` turns it into a
+/// per-layer scene-pixel translation scaled by that layer's `parallaxDepth`.
+struct WPECameraParallaxFrame: Equatable, Sendable {
+    var smoothed: SIMD2<Float>
+
+    static let neutral = WPECameraParallaxFrame(smoothed: SIMD2<Float>(0, 0))
+
+    /// Scene-pixel translation for a layer at `depth`. Mirrors the historical
+    /// UV-parallax magnitude (`× depth × 0.1`, clamped ±0.05) but expressed as a
+    /// geometry shift. X is negated and Y kept so the layer moves with the
+    /// cursor in the renderer's top-left scene space.
+    func pixelOffset(depth: Double, sceneSize: CGSize) -> SIMD2<Float> {
+        guard depth != 0, smoothed != SIMD2<Float>(0, 0) else { return SIMD2<Float>(0, 0) }
+        let d = Float(depth) * 0.1
+        let ux = min(max(smoothed.x * d, -0.05), 0.05)
+        let uy = min(max(smoothed.y * d, -0.05), 0.05)
+        return SIMD2<Float>(-ux * Float(sceneSize.width), uy * Float(sceneSize.height))
+    }
+}
+
+/// Frame-rate-independent exponential smoother for camera parallax. Holds the
+/// smoothed cursor offset across frames; `frame(...)` advances it toward the
+/// (calibrated) cursor target each frame. Neutral when the scene disables
+/// parallax or zeroes amount / mouse-influence. Kept as a value type so it can
+/// be unit-tested independently of the renderer.
+struct WPECameraParallaxSmoother: Equatable, Sendable {
+    private(set) var smoothed = SIMD2<Float>(0, 0)
+    private var lastTime: Double?
+
+    mutating func reset() {
+        smoothed = SIMD2<Float>(0, 0)
+        lastTime = nil
+    }
+
+    /// `time` is monotonic scene-elapsed seconds. WPE defaults (amount 0.5,
+    /// mouseInfluence 0.5) → `effectiveGlobal == 1`, preserving the historical
+    /// per-layer depth magnitude. `dt` is clamped so a long suspend doesn't
+    /// snap on resume; the first frame snaps directly to the cursor.
+    mutating func frame(
+        settings: WPESceneCameraParallaxSettings,
+        pointerPosition: SIMD2<Double>,
+        time: Double
+    ) -> WPECameraParallaxFrame {
+        let amount = max(settings.amount, 0)
+        let influence = max(settings.mouseInfluence, 0)
+        guard settings.enabled, amount > 0, influence > 0 else {
+            smoothed = SIMD2<Float>(0, 0)
+            lastTime = time
+            return .neutral
+        }
+        let effectiveGlobal = Float((amount / 0.5) * (influence / 0.5))
+        let pointer = pointerPosition.clampedToUnitSquare
+        let target = SIMD2<Float>(
+            Float(pointer.x - 0.5) * effectiveGlobal,
+            Float(pointer.y - 0.5) * effectiveGlobal
+        )
+        guard let last = lastTime else {
+            smoothed = target
+            lastTime = time
+            return WPECameraParallaxFrame(smoothed: smoothed)
+        }
+        let dt = min(max(time - last, 0), 1.0 / 30.0)
+        lastTime = time
+        let alpha: Float = settings.delay <= 0
+            ? 1
+            : Float(1 - exp(-dt / max(settings.delay, 1.0 / 240.0)))
+        smoothed += (target - smoothed) * alpha
+        return WPECameraParallaxFrame(smoothed: smoothed)
+    }
+}
+
 struct WPEMetalRuntimeUniforms: Equatable, Sendable {
     let time: Double
     let daytime: Double
     let brightness: Double
     let pointerPosition: SIMD2<Double>
+    /// Scene-level camera parallax for this frame (neutral when disabled).
+    var cameraParallax: WPECameraParallaxFrame = .neutral
     /// Per-channel spectrum, 64 bins each, normalized 0…1, low frequency → high.
     /// Fed from the shared system-audio broker. Audio-reactive shaders consume
     /// 16/32/64-element slices per channel via the resolution combo. Mono

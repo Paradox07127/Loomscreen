@@ -102,6 +102,11 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
     private var cachedSnapshot: NSImage?
     private var didLoad = false
     private var isThrottled = false
+    /// Scene-level camera parallax: the parsed settings plus the per-frame
+    /// exponential smoother that drives every layer's depth shift. Neutral when
+    /// the scene disables parallax.
+    private var cameraParallaxSettings: WPESceneCameraParallaxSettings = .disabled
+    private var cameraParallaxSmoother = WPECameraParallaxSmoother()
     private var currentProfile: WallpaperPerformanceProfile = .quality
     /// User-selected frame rate ceiling, applied to `mtkView.preferredFramesPerSecond`
     /// whenever the renderer is not throttled / suspended. Defaults to the
@@ -417,6 +422,8 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
             orthogonalProjection: document.general.orthogonalProjection,
             sceneCamera: document.camera
         )
+        cameraParallaxSettings = document.general.cameraParallax
+        cameraParallaxSmoother.reset()
         sceneRenderSize = cameraUniforms.renderSize
         debugStage("camera", "renderSize=\(Int(sceneRenderSize.width))x\(Int(sceneRenderSize.height))")
 
@@ -936,9 +943,17 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
         guard let pipeline = renderPipeline else {
             throw WPEMetalRenderExecutorError.noRenderablePasses
         }
+        let pointer = pointerSampler.sample(mtkView)
         var uniforms = frameClock.runtimeUniforms(
             profile: currentProfile,
-            pointerPosition: pointerSampler.sample(mtkView)
+            pointerPosition: pointer
+        )
+        // Compute once per frame (advances smoothing state); assigned below
+        // after the audio path may have rebuilt `uniforms`.
+        let parallaxFrame = cameraParallaxSmoother.frame(
+            settings: cameraParallaxSettings,
+            pointerPosition: pointer,
+            time: uniforms.time
         )
         // Audio-reactive uniforms follow the shared system-audio capture (the
         // loopback of whatever is playing), not the scene's own sounds — those
@@ -971,6 +986,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
                 audioSpectrumRight: audio.right.map(Double.init)
             )
         }
+        uniforms.cameraParallax = parallaxFrame
         lastRuntimeUniforms = uniforms
         let currentTextures = texturesForCurrentFrame(time: uniforms.time)
         let frame = try executor.render(
@@ -1003,9 +1019,13 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
                 guard let entry = textRenderer.rasterize(liveObject) else { continue }
                 let halfWidth = Double(sceneRenderSize.width) * 0.5
                 let halfHeight = Double(sceneRenderSize.height) * 0.5
+                let textParallax = parallaxFrame.pixelOffset(
+                    depth: liveObject.parallaxDepth,
+                    sceneSize: sceneRenderSize
+                )
                 let center = SIMD2<Float>(
-                    Float(liveObject.origin.x - halfWidth),
-                    Float(liveObject.origin.y - halfHeight)
+                    Float(liveObject.origin.x - halfWidth) + textParallax.x,
+                    Float(liveObject.origin.y - halfHeight) + textParallax.y
                 )
                 let scale = SIMD2<Float>(
                     Float(max(liveObject.scale.x, 0.0001)),

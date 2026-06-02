@@ -221,6 +221,7 @@ final class WPEMetalRenderExecutor {
             previousSceneTexture: reusableHistory?.sceneTexture,
             previousNamedTextures: reusableHistory?.namedTextures ?? [:]
         )
+        frameState.cameraParallax = runtimeUniforms.cameraParallax
         var didEncode = false
         let bypassEffects = Self.bypassEffectsForDebug
 
@@ -1154,6 +1155,7 @@ final class WPEMetalRenderExecutor {
     func objectQuadUniforms(
         for layer: WPERenderLayer,
         sceneSize: CGSize,
+        cameraParallax: WPECameraParallaxFrame = .neutral,
         sourceTexture: MTLTexture
     ) -> WPEObjectQuadUniforms {
         let geometry = layer.geometry
@@ -1177,7 +1179,7 @@ final class WPEMetalRenderExecutor {
             alignment: geometry.alignment,
             width: width,
             height: height
-        )
+        ) + cameraParallax.pixelOffset(depth: layer.parallaxDepth, sceneSize: sceneSize)
         return WPEObjectQuadUniforms(
             centerAndSize: SIMD4<Float>(center.x, center.y, width, height),
             sceneSizeAndRotation: SIMD4<Float>(
@@ -1435,6 +1437,7 @@ final class WPEMetalRenderExecutor {
             var quadUniforms = objectQuadUniforms(
                 for: layer,
                 sceneSize: frameState.sceneSize,
+                cameraParallax: frameState.cameraParallax,
                 sourceTexture: texture
             )
             encoder.setVertexBytes(
@@ -1592,6 +1595,7 @@ final class WPEMetalRenderExecutor {
             var quadUniforms = objectQuadUniforms(
                 for: layer,
                 sceneSize: frameState.sceneSize,
+                cameraParallax: frameState.cameraParallax,
                 sourceTexture: sourceTexture
             )
             encoder.setVertexBytes(

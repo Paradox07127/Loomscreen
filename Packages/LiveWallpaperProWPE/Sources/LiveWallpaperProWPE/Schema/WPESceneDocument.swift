@@ -337,15 +337,43 @@ public struct WPESceneCamera: Equatable, Sendable {
 public struct WPESceneGeneral: Equatable, Sendable {
     public let clearColor: SIMD3<Double>
     public let orthogonalProjection: WPESceneOrthogonalProjection
+    public let cameraParallax: WPESceneCameraParallaxSettings
 
-    public init(clearColor: SIMD3<Double>, orthogonalProjection: WPESceneOrthogonalProjection) {
+    public init(
+        clearColor: SIMD3<Double>,
+        orthogonalProjection: WPESceneOrthogonalProjection,
+        cameraParallax: WPESceneCameraParallaxSettings = .disabled
+    ) {
         self.clearColor = clearColor
         self.orthogonalProjection = orthogonalProjection
+        self.cameraParallax = cameraParallax
     }
 
     public static let defaultGeneral = WPESceneGeneral(
         clearColor: SIMD3<Double>(0, 0, 0),
         orthogonalProjection: WPESceneOrthogonalProjection(width: 1920, height: 1080, auto: true)
+    )
+}
+
+/// WPE scene-level camera parallax: the whole scene follows the cursor, each
+/// layer shifting by its `parallaxDepth`. `amount`/`delay`/`mouseInfluence`
+/// mirror the WPE general settings; defaults match WPE so an enabled scene that
+/// omits them behaves like Wallpaper Engine. Disabled by default (no-op).
+public struct WPESceneCameraParallaxSettings: Equatable, Sendable {
+    public let enabled: Bool
+    public let amount: Double
+    public let delay: Double
+    public let mouseInfluence: Double
+
+    public init(enabled: Bool, amount: Double, delay: Double, mouseInfluence: Double) {
+        self.enabled = enabled
+        self.amount = amount
+        self.delay = delay
+        self.mouseInfluence = mouseInfluence
+    }
+
+    public static let disabled = WPESceneCameraParallaxSettings(
+        enabled: false, amount: 0.5, delay: 0.1, mouseInfluence: 0.5
     )
 }
 
