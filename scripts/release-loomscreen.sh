@@ -170,8 +170,7 @@ echo "== Re-signing outer .app with entitlements =="
 # need to re-sign the outer .app wrapper here to attach our explicit
 # entitlements file. Walking nested directories with codesign blindly
 # fails on resource-only directories that carry a .bundle suffix but
-# are not real NSBundles (e.g. wpe-webgl-runtime.bundle, which is a
-# raw JS asset folder).
+# are not real NSBundles (raw asset folders).
 codesign --force --sign - --options runtime --timestamp=none \
   --entitlements "$ENTITLEMENTS" "$APP_PATH"
 

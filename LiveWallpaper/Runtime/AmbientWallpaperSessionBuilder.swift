@@ -145,160 +145,34 @@ final class AmbientWallpaperSessionBuilder {
         }
 
         let rendererFrame = CGRect(origin: .zero, size: frame.size)
-        let routing = resolveRouting(
-            descriptor: descriptor,
-            entryURL: cacheURL.appendingPathComponent(descriptor.entryFile),
-            cacheURL: cacheURL,
-            dependencyMounts: dependencyMounts,
-            engineAssetsRootURL: engineAssetsRootURL
-        )
-        Logger.info(
-            "WPE scene renderer routed to \(routing.backend.rawValue) (\(routing.routedBy.rawValue)): \(routing.reason)",
-            category: .screenManager
-        )
-
-        let renderer: WPESceneRenderer
-        switch routing.backend {
-        case .webGL:
-            do {
-                renderer = try WPEWebGLSceneRenderer(
-                    descriptor: descriptor,
-                    cacheRootURL: cacheURL,
-                    dependencyMounts: dependencyMounts,
-                    engineAssetsRootURL: engineAssetsRootURL,
-                    frame: rendererFrame
-                )
-            } catch {
-                Logger.warning("WebGL scene renderer could not be created: \(error.localizedDescription)", category: .screenManager)
-                return nil
-            }
-        case .metal:
-            guard let device = MTLCreateSystemDefaultDevice() else {
-                Logger.warning("Metal scene renderer requested but Metal is unavailable", category: .screenManager)
-                return nil
-            }
-            do {
-                renderer = try WPEMetalSceneRenderer(
-                    descriptor: descriptor,
-                    cacheRootURL: cacheURL,
-                    dependencyMounts: dependencyMounts,
-                    engineAssetsRootURL: engineAssetsRootURL,
-                    frame: rendererFrame,
-                    device: device
-                )
-            } catch {
-                Logger.warning("Metal scene renderer could not be created: \(error.localizedDescription)", category: .screenManager)
-                return nil
-            }
+        // Metal is the only scene renderer. A Metal failure surfaces as the
+        // session's loadError — there is no WebGL fallback.
+        guard let device = MTLCreateSystemDefaultDevice() else {
+            Logger.warning("Metal scene renderer unavailable on this Mac", category: .screenManager)
+            return nil
+        }
+        let renderer: WPEMetalSceneRenderer
+        do {
+            renderer = try WPEMetalSceneRenderer(
+                descriptor: descriptor,
+                cacheRootURL: cacheURL,
+                dependencyMounts: dependencyMounts,
+                engineAssetsRootURL: engineAssetsRootURL,
+                frame: rendererFrame,
+                device: device
+            )
+        } catch {
+            Logger.warning("Metal scene renderer could not be created: \(error.localizedDescription)", category: .screenManager)
+            return nil
         }
 
         let window = VideoWallpaperWindow(frame: frame)
         window.contentView = renderer.nsView
         window.orderBack(nil)
 
-        // Automatic Metal routing gets one WebGL fallback so "auto" can
-        // prioritize successful playback. User-pinned Metal/WebGL stays on
-        // the selected backend and surfaces that backend's errors directly.
-        let fallbackFactory: SceneWallpaperSession.FallbackRendererFactory?
-        if routing.backend == .metal && routing.routedBy == .automatic {
-            fallbackFactory = { @MainActor in
-                Self.buildWebGLFallback(
-                    descriptor: descriptor,
-                    cacheURL: cacheURL,
-                    dependencyMounts: dependencyMounts,
-                    engineAssetsRootURL: engineAssetsRootURL,
-                    frame: rendererFrame
-                )
-            }
-        } else {
-            fallbackFactory = nil
-        }
-
-        let session = SceneWallpaperSession(
-            window: window,
-            renderer: renderer,
-            fallbackFactory: fallbackFactory
-        )
+        let session = SceneWallpaperSession(window: window, renderer: renderer)
         session.startLoadIfNeeded()
         return session
-    }
-
-    private static func buildWebGLFallback(
-        descriptor: SceneDescriptor,
-        cacheURL: URL,
-        dependencyMounts: [WPEAssetMount],
-        engineAssetsRootURL: URL?,
-        frame: CGRect
-    ) -> WPESceneRenderer? {
-        do {
-            return try WPEWebGLSceneRenderer(
-                descriptor: descriptor,
-                cacheRootURL: cacheURL,
-                dependencyMounts: dependencyMounts,
-                engineAssetsRootURL: engineAssetsRootURL,
-                frame: frame
-            )
-        } catch {
-            Logger.warning(
-                "WebGL fallback renderer could not be created: \(error.localizedDescription)",
-                category: .screenManager
-            )
-            return nil
-        }
-    }
-
-    /// Picks the scene renderer backend. `.metal` / `.webGL` selections
-    /// pass straight through; `.automatic` parses `scene.json` once and
-    /// delegates to `WPESceneBackendRouter`. Parse failures fall back to
-    /// the user's selection (or Metal in `.automatic`) so a malformed
-    /// scene still tries to render — the renderer will surface its own
-    /// diagnostic.
-    private func resolveRouting(
-        descriptor: SceneDescriptor,
-        entryURL: URL,
-        cacheURL: URL,
-        dependencyMounts: [WPEAssetMount],
-        engineAssetsRootURL: URL?
-    ) -> WPESceneBackendRouter.Routing {
-        let userSelection = WPERuntimeSelection.current
-        guard userSelection == .automatic else {
-            return WPESceneBackendRouter.Routing(
-                backend: userSelection == .webGL ? .webGL : .metal,
-                routedBy: .user,
-                reason: "user selection \(userSelection.rawValue)"
-            )
-        }
-        guard let document = parseSceneDocument(
-            at: entryURL,
-            descriptor: descriptor,
-            cacheRootURL: cacheURL
-        ) else {
-            return WPESceneBackendRouter.Routing(
-                backend: .metal,
-                routedBy: .automatic,
-                reason: "scene.json parse failed — defaulting to Metal"
-            )
-        }
-        return WPESceneBackendRouter.resolve(
-            userSelection: .automatic,
-            document: document,
-            cacheURL: cacheURL,
-            dependencyMounts: dependencyMounts,
-            engineAssetsRootURL: engineAssetsRootURL
-        )
-    }
-
-    private func parseSceneDocument(
-        at url: URL,
-        descriptor: SceneDescriptor,
-        cacheRootURL: URL
-    ) -> WPESceneDocument? {
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        let userValues = WallpaperEngineProjectPropertySchema.effectiveSceneValues(
-            descriptor: descriptor,
-            cacheRootURL: cacheRootURL
-        )
-        return try? WPESceneDocumentParser.parse(data: data, userValues: userValues)
     }
     #endif
 

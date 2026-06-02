@@ -7,43 +7,23 @@ import LiveWallpaperVideoWeb
 /// the rest of the runtime stack does not need a scene-specific code path.
 @MainActor
 final class SceneWallpaperSession: WallpaperRuntimeSession {
-    /// Builds a replacement renderer when this session is allowed to recover
-    /// from `SceneRenderingError.metalRendererUnsupported`. Returning `nil`
-    /// surfaces the original error.
-    typealias FallbackRendererFactory = @MainActor () -> WPESceneRenderer?
-
     let wallpaperType: WallpaperType = .scene
 
     private var window: NSWindow?
     private var renderer: WPESceneRenderer?
     private var currentProfile: WallpaperPerformanceProfile = .quality
-    /// Persisted per-screen "Mouse Interaction" state, re-applied to the renderer
-    /// on every (re)build and on the WebGL fallback swap so a saved-off scene
-    /// stays cursor-frozen across reloads.
-    private var mouseInteractionEnabled = true
-    /// Persisted per-screen "Interactive" (click capture) state. Re-applied to
-    /// the renderer + window on (re)build and on the WebGL fallback swap.
-    private var clickCaptureEnabled = false
     private var isVisible = true
     private var didStartLoad = false
     private var loadTask: Task<Void, Never>?
-    private let fallbackFactory: FallbackRendererFactory?
-    private var didUseFallback = false
-    private(set) var isThrottled = false
     private(set) var loadError: SceneRenderingError?
     /// Latest per-layer progress message reported by the renderer.
     /// Phase 2.1 surfaces this via `WPESceneDetailView` so the user sees
     /// "Decoding 7/12 textures…" instead of an opaque spinner.
     private(set) var loadProgress: String?
 
-    init(
-        window: NSWindow,
-        renderer: WPESceneRenderer,
-        fallbackFactory: FallbackRendererFactory? = nil
-    ) {
+    init(window: NSWindow, renderer: WPESceneRenderer) {
         self.window = window
         self.renderer = renderer
-        self.fallbackFactory = fallbackFactory
     }
 
     var summary: WallpaperSessionSummary {
@@ -87,8 +67,6 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
 
     /// Returns the renderer when it owns its own frame-rate clock and
     /// can re-target it from the inspector's frame-rate picker.
-    /// Currently the Metal renderer; the WebGL fallback uses
-    /// `requestAnimationFrame` inside the WKWebView and doesn't conform.
     var frameRateController: (any WallpaperFrameRateConfigurable)? {
         renderer as? any WallpaperFrameRateConfigurable
     }
@@ -124,22 +102,17 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
 
     /// Exclusive-rendering coordinator entry point.
     func setThrottled(_ throttled: Bool) {
-        isThrottled = throttled
         renderer?.setThrottled(throttled)
     }
 
-    /// Per-screen cursor-reactivity toggle. Stored so the WebGL fallback swap
-    /// can re-apply it; pushed straight to the live renderer.
+    /// Per-screen cursor-reactivity toggle (camera parallax + pointer shaders).
     func setMouseInteractionEnabled(_ enabled: Bool) {
-        mouseInteractionEnabled = enabled
         renderer?.setMouseInteractionEnabled(enabled)
     }
 
     /// Per-screen "Interactive" toggle: makes the wallpaper window capture real
     /// clicks (steals desktop clicks while on) and routes them to the renderer.
-    /// Stored for the fallback swap; flips both the window and the renderer.
     func setClickCaptureEnabled(_ enabled: Bool) {
-        clickCaptureEnabled = enabled
         (window as? VideoWallpaperWindow)?.setWallpaperMouseInteractionEnabled(enabled)
         renderer?.setClickCaptureEnabled(enabled)
     }
@@ -159,7 +132,7 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
         didStartLoad = true
         installProgressHandler(on: renderer)
         loadTask = Task { @MainActor [weak self] in
-            await self?.runLoadWithFallback(initial: renderer)
+            await self?.runLoad(renderer)
             self?.loadTask = nil
         }
     }
@@ -200,83 +173,36 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
         }
     }
 
-    /// Runs `load()` on `initial`. When a fallback factory is present,
-    /// `SceneRenderingError.metalRendererUnsupported` swaps in that renderer
-    /// and retries once. Any other failure updates `loadError` and returns.
-    private func runLoadWithFallback(initial: WPESceneRenderer) async {
-        var active = initial
-        while true {
-            do {
-                try await active.load()
-                guard !Task.isCancelled else { return }
-                loadError = nil
-                loadProgress = nil
-                return
-            } catch is CancellationError {
-                return
-            } catch let SceneRenderingError.metalRendererUnsupported(reason) {
-                guard !Task.isCancelled else { return }
-                if let next = await swapInFallback(reason: reason) {
-                    active = next
-                    continue
-                }
-                Logger.warning(
-                    "Metal scene load failed (\(reason)); no WebGL fallback available",
-                    category: .screenManager
-                )
-                loadError = .metalRendererUnsupported(reason: reason)
-                return
-            } catch let error as SceneRenderingError {
-                guard !Task.isCancelled else { return }
-                Logger.warning(
-                    "Scene wallpaper load failed: \(error.errorDescription ?? "(no description)")",
-                    category: .screenManager
-                )
-                loadError = error
-                return
-            } catch {
-                guard !Task.isCancelled else { return }
-                Logger.warning(
-                    "Scene wallpaper load failed: \(error.localizedDescription)",
-                    category: .screenManager
-                )
-                if let diagnostic = active.loadDiagnostics {
-                    loadError = .resourceFailed(diagnostic)
-                } else {
-                    loadError = .parseFailed(error.localizedDescription)
-                }
-                return
+    /// Runs the Metal renderer's `load()` and records the outcome. Metal is the
+    /// only scene backend — any failure (including
+    /// `SceneRenderingError.metalRendererUnsupported`) surfaces as `loadError`.
+    private func runLoad(_ renderer: WPESceneRenderer) async {
+        do {
+            try await renderer.load()
+            guard !Task.isCancelled else { return }
+            loadError = nil
+            loadProgress = nil
+        } catch is CancellationError {
+            return
+        } catch let error as SceneRenderingError {
+            guard !Task.isCancelled else { return }
+            Logger.warning(
+                "Scene wallpaper load failed: \(error.errorDescription ?? "(no description)")",
+                category: .screenManager
+            )
+            loadError = error
+        } catch {
+            guard !Task.isCancelled else { return }
+            Logger.warning(
+                "Scene wallpaper load failed: \(error.localizedDescription)",
+                category: .screenManager
+            )
+            if let diagnostic = renderer.loadDiagnostics {
+                loadError = .resourceFailed(diagnostic)
+            } else {
+                loadError = .parseFailed(error.localizedDescription)
             }
         }
-    }
-
-    private func swapInFallback(reason: String) async -> WPESceneRenderer? {
-        guard !didUseFallback, let factory = fallbackFactory else { return nil }
-        didUseFallback = true
-        Logger.warning(
-            "Metal scene load failed (\(reason)); retrying with WebGL fallback",
-            category: .screenManager
-        )
-        WPESceneDebugArtifacts.shared.appendLog(
-            "[fallback] Metal → WebGL: \(reason)",
-            level: .warning
-        )
-        renderer?.cleanup()
-        renderer = nil
-        guard let next = factory() else { return nil }
-        renderer = next
-        if let window {
-            window.contentView = next.nsView
-            next.nsView.frame = window.contentView?.bounds ?? next.nsView.frame
-        }
-        installProgressHandler(on: next)
-        next.applyPerformanceProfile(isVisible ? currentProfile : .suspended)
-        next.setMouseInteractionEnabled(mouseInteractionEnabled)
-        next.setClickCaptureEnabled(clickCaptureEnabled)
-        if isThrottled {
-            next.setThrottled(true)
-        }
-        return next
     }
 }
 #endif

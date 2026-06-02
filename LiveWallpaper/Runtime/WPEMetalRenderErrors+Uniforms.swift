@@ -11,14 +11,13 @@ enum WPEMetalRenderExecutorError: Error, Equatable, LocalizedError, Sendable {
     case unsupportedShader(String)
     /// Custom shader could not be translated or compiled by the Metal
     /// path. Carries the underlying compiler reason so the diagnostic
-    /// surfaced to the UI is precise instead of just "unsupported"; the
-    /// scene then falls back to the WebGL runtime.
+    /// surfaced to the UI is precise instead of just "unsupported".
     case shaderTranslatorUnavailable(name: String, reason: String)
     /// Metal refused to build a render pipeline state, most commonly because
     /// the vertex stage's struct doesn't line up with the fragment's
     /// `[[stage_in]]` (the "stage_in mismatch" cluster). Carries the raw
     /// underlying error description so logs name the actual missing field
-    /// instead of just the shader name. Eligible for automatic WebGL fallback.
+    /// instead of just the shader name.
     case pipelineStateBuildFailed(name: String, detail: String)
     case unsupportedTarget(WPERenderTarget)
     case missingTexture(WPETextureReference)

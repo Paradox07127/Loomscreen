@@ -143,8 +143,7 @@ final class WPEMetalRenderExecutor {
     private static func preferredCompiler(device: MTLDevice) -> any WPEShaderCompiling {
         // The Swift transpiler is the only Metal-side translator we ship.
         // Shaders it can't handle bubble up as
-        // `WPEMetalRenderExecutorError.shaderTranslatorUnavailable`, which
-        // automatic scene sessions may use as the WebGL fallback signal.
+        // `WPEMetalRenderExecutorError.shaderTranslatorUnavailable`.
         WPESwiftShaderCompiler(device: device)
     }
 

@@ -256,25 +256,22 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
             if let snapshot = cachedSnapshot {
                 WPESceneDebugArtifacts.shared.recordFirstFrame(image: snapshot)
             }
-            // Keep session open if the scene swaps to WebGL; the WebGL
-            // session will overwrite scene-info but its dumps land in a
-            // sibling folder so the Metal artifacts stay intact.
             WPESceneDebugArtifacts.shared.endSession()
-            if let reason = Self.metalFallbackReason(for: error) {
+            if let reason = Self.metalUnsupportedReason(for: error) {
                 throw SceneRenderingError.metalRendererUnsupported(reason: reason)
             }
             throw error
         }
     }
 
-    /// Classifies a `performLoad()` failure as Metal-specific versus generic
-    /// (where both backends would hit the same problem). Returning a non-nil
-    /// reason promotes the error to `SceneRenderingError.metalRendererUnsupported`;
-    /// only automatic sessions use that as a WebGL fallback trigger.
-    private static func metalFallbackReason(for error: Error) -> String? {
+    /// Classifies a `performLoad()` failure that is specific to the Metal
+    /// renderer. Returning a non-nil reason promotes the error to
+    /// `SceneRenderingError.metalRendererUnsupported`, which surfaces to the
+    /// user as the scene's load error (Metal is the only scene backend).
+    private static func metalUnsupportedReason(for error: Error) -> String? {
         switch error {
         case let context as WPEMetalTextureLoadContextError:
-            return metalFallbackReason(for: context.underlying)
+            return metalUnsupportedReason(for: context.underlying)
         case let executorError as WPEMetalRenderExecutorError:
             switch executorError {
             case .shaderTranslatorUnavailable(let name, let reason):

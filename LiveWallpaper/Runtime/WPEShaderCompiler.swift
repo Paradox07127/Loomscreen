@@ -7,8 +7,7 @@ import Metal
 /// `WPESwiftShaderCompiler` is the only shipping implementation; it wraps
 /// the pure-Swift `WPEShaderTranspiler`. Shaders the transpiler can't
 /// handle throw `.translationFailed`, which surfaces as
-/// `SceneRenderingError.metalRendererUnsupported`; automatic sessions use
-/// that as the WebGL fallback signal.
+/// `SceneRenderingError.metalRendererUnsupported` (the scene's load error).
 protocol WPEShaderCompiling: Sendable {
     func compile(_ request: WPEShaderCompileRequest) throws -> WPEShaderCompileResult
 }

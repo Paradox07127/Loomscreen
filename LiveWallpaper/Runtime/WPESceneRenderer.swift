@@ -26,19 +26,12 @@ protocol WPESceneRenderer: AnyObject, WallpaperPerformanceConfigurable {
     func reload() async throws
     func setThrottled(_ throttled: Bool)
     /// Enables or disables cursor reactivity (camera parallax + pointer-driven
-    /// shaders). Default no-op so renderers that don't sample the pointer (the
-    /// WebGL fallback) don't have to implement it.
+    /// shaders).
     func setMouseInteractionEnabled(_ enabled: Bool)
     /// Enables real mouse-click capture (the renderer consumes mouseDown/up/drag
-    /// and feeds click uniforms). Default no-op — only the Metal renderer
-    /// implements it; the WebGL fallback isn't wired for scene clicks.
+    /// and feeds click uniforms).
     func setClickCaptureEnabled(_ enabled: Bool)
     func cleanup()
-}
-
-extension WPESceneRenderer {
-    func setMouseInteractionEnabled(_ enabled: Bool) {}
-    func setClickCaptureEnabled(_ enabled: Bool) {}
 }
 
 /// Optional capability a scene renderer can adopt to apply project-property

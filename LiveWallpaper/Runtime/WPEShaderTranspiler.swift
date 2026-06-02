@@ -26,8 +26,8 @@ import LiveWallpaperProWPE
 ///   - `discard` / `gl_FragData[*]` MRT
 ///   - sampler arrays, texture arrays, cube maps, 3D textures
 ///
-/// Unsupported shaders surface as `metalRendererUnsupported`; automatic
-/// sessions fall back to WebGL, user-pinned Metal surfaces the error.
+/// Unsupported shaders surface as `metalRendererUnsupported` (the scene's
+/// load error).
 struct WPEShaderTranspiler {
 
     /// Each uniform occupies one or more float4 slots. Packing rule
