@@ -371,33 +371,6 @@ struct GeneralSettingsView: View {
                         .accessibilityHint(Text("When your Mac locks, capture the current frame for screens with Desktop Picture enabled"))
                 }
 
-                SettingRow(icon: "macwindow.badge.plus", iconColor: .purple, title: "Pause on full-screen apps", subtitle: "Automatically pause wallpapers when a full-screen app is active") {
-                    Toggle("", isOn: $pauseOnFullScreen)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .onChange(of: pauseOnFullScreen) { _, _ in updateGlobalSettings() }
-                        .accessibilityLabel(Text("Pause on full-screen apps"))
-                        .accessibilityHint(Text("Automatically pause wallpapers when a full-screen app is active"))
-                }
-
-                SettingRow(icon: "rectangle.on.rectangle", iconColor: .purple, title: "Pause when windows cover the desktop", subtitle: "Also pause when other apps' windows blanket at least 85% of a display, even if none is full-screen") {
-                    Toggle("", isOn: $pauseOnWindowOcclusion)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .onChange(of: pauseOnWindowOcclusion) { _, _ in updateGlobalSettings() }
-                        .accessibilityLabel(Text("Pause when windows cover the desktop"))
-                        .accessibilityHint(Text("Pause when other apps' windows cover at least 85 percent of a display"))
-                }
-
-                SettingRow(icon: "gamecontroller", iconColor: .green, title: "Pause when a game is active", subtitle: "Yield the GPU when the frontmost app is a game, or macOS enters Low Power Mode") {
-                    Toggle("", isOn: $pauseInGameMode)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .onChange(of: pauseInGameMode) { _, _ in updateGlobalSettings() }
-                        .accessibilityLabel(Text("Pause when a game is active"))
-                        .accessibilityHint(Text("Yield the GPU when the frontmost app is a game, or macOS enters Low Power Mode"))
-                }
-
                 SettingRow(icon: "dock.rectangle", iconColor: .indigo, title: "Show in Dock", subtitle: "Make the app visible in the Dock and Cmd-Tab switcher") {
                     Toggle("", isOn: $showInDock)
                         .labelsHidden()
@@ -428,6 +401,13 @@ struct GeneralSettingsView: View {
             resetDefaultsRow
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
+        }
+        // Presented from the Performance → App Exceptions row. Attached to the
+        // Form (not the Section) because `.sheet` on a `Section` inside a Form
+        // doesn't reliably present on macOS — that's why "Edit…" appeared to do
+        // nothing before.
+        .sheet(isPresented: $showAppExceptions) {
+            AppExceptionsSheet(rules: $applicationRules, onChange: updateGlobalSettings)
         }
     }
 
@@ -519,6 +499,47 @@ struct GeneralSettingsView: View {
     @ViewBuilder
     private var performanceSection: some View {
         Section {
+            SettingRow(icon: "macwindow.badge.plus", iconColor: .purple, title: "Pause on full-screen apps", subtitle: "Automatically pause wallpapers when a full-screen app is active") {
+                Toggle("", isOn: $pauseOnFullScreen)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .onChange(of: pauseOnFullScreen) { _, _ in updateGlobalSettings() }
+                    .accessibilityLabel(Text("Pause on full-screen apps"))
+                    .accessibilityHint(Text("Automatically pause wallpapers when a full-screen app is active"))
+            }
+
+            SettingRow(icon: "rectangle.on.rectangle", iconColor: .purple, title: "Pause when windows cover the desktop", subtitle: "Also pause when other apps' windows blanket at least 85% of a display, even if none is full-screen") {
+                Toggle("", isOn: $pauseOnWindowOcclusion)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .onChange(of: pauseOnWindowOcclusion) { _, _ in updateGlobalSettings() }
+                    .accessibilityLabel(Text("Pause when windows cover the desktop"))
+                    .accessibilityHint(Text("Pause when other apps' windows cover at least 85 percent of a display"))
+            }
+
+            SettingRow(icon: "gamecontroller", iconColor: .green, title: "Pause when a game is active", subtitle: "Yield the GPU when the frontmost app is a game, or macOS enters Low Power Mode") {
+                Toggle("", isOn: $pauseInGameMode)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .onChange(of: pauseInGameMode) { _, _ in updateGlobalSettings() }
+                    .accessibilityLabel(Text("Pause when a game is active"))
+                    .accessibilityHint(Text("Yield the GPU when the frontmost app is a game, or macOS enters Low Power Mode"))
+            }
+
+            SettingRow(
+                icon: "hand.raised",
+                iconColor: .blue,
+                title: "App Exceptions",
+                subtitle: applicationRules.isEmpty
+                    ? "Pause wallpapers while chosen apps are in use"
+                    : "Active for \(applicationRules.count) app\(applicationRules.count == 1 ? "" : "s")"
+            ) {
+                Button("Edit…") { showAppExceptions = true }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .accessibilityLabel(Text("Edit application exceptions"))
+            }
+
             SettingRow(
                 icon: "memorychip",
                 iconColor: .pink,
@@ -566,25 +587,8 @@ struct GeneralSettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-
-            SettingRow(
-                icon: "hand.raised",
-                iconColor: .blue,
-                title: "App Exceptions",
-                subtitle: applicationRules.isEmpty
-                    ? "Pause wallpapers while chosen apps are in use"
-                    : "Active for \(applicationRules.count) app\(applicationRules.count == 1 ? "" : "s")"
-            ) {
-                Button("Edit…") { showAppExceptions = true }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .accessibilityLabel(Text("Edit application exceptions"))
-            }
         } header: {
             Text("Performance")
-        }
-        .sheet(isPresented: $showAppExceptions) {
-            AppExceptionsSheet(rules: $applicationRules, onChange: updateGlobalSettings)
         }
     }
 

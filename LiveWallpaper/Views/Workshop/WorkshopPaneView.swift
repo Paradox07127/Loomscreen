@@ -40,9 +40,18 @@ struct WorkshopPaneView: View {
             await doctor.autoConfirmDownloadReadinessIfNeeded()
             await folderImport.ingestSteamCMDDownloads(using: doctor)
         }
-        .onAppear { refreshInstalledCount() }
+        .onAppear {
+            refreshInstalledCount()
+            consumePendingDeepLink()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .wpeHistoryDidChange)) { _ in
             refreshInstalledCount()
+        }
+        // Fired when the pane is already mounted and a deep link arrives (e.g.
+        // the user is sitting on Workshop and clicks "Find in Workshop" on a
+        // scene). On a cold switch the `.onAppear` above handles it instead.
+        .onReceive(NotificationCenter.default.publisher(for: .openWorkshopPane)) { _ in
+            consumePendingDeepLink()
         }
         .sheet(isPresented: $isShowingOnboarding) {
             WorkshopOnboardingSheet { isShowingPasteSheet = true }
@@ -233,6 +242,26 @@ struct WorkshopPaneView: View {
         Task { await viewModel.browseTag(tag) }
     }
 
+    /// Consumes a one-shot deep link (set by the scene detail's "Find in
+    /// Workshop" link): switch to Browse Online and run a search for the target.
+    /// Steam's catalog search can't match a raw numeric Workshop ID, so the
+    /// caller seeds the item's title as the query — that's what surfaces it.
+    private func consumePendingDeepLink() {
+        guard let query = WorkshopDeepLink.takePendingSearch() else { return }
+        let viewModel: WorkshopBrowseViewModel
+        if let existing = browseViewModel {
+            viewModel = existing
+        } else {
+            viewModel = WorkshopBrowseViewModel(services: services)
+            browseViewModel = viewModel
+        }
+        selectedTab = .browseOnline
+        Task {
+            viewModel.searchInput = query
+            await viewModel.submitSearch()
+        }
+    }
+
     private func presentPasteFlow() {
         if onboardingShown {
             isShowingPasteSheet = true
@@ -255,6 +284,28 @@ enum WorkshopPaneTab: String, CaseIterable, Identifiable {
         case .browseOnline:
             return String(localized: "Workshop", comment: "Workshop pane tab for the online Steam Workshop catalog (zh: 创意工坊).")
         }
+    }
+}
+
+/// One-shot hand-off for "open Workshop scoped to this item" deep links. The
+/// scene detail card lives in the detail column and can't reach the (possibly
+/// not-yet-mounted) Workshop pane directly, so it parks a search query here and
+/// posts `.openWorkshopPane`; the pane drains it on appear / receipt. Kept tiny
+/// and MainActor-isolated — it's a navigation baton, not shared state.
+@MainActor
+enum WorkshopDeepLink {
+    private static var pendingSearch: String?
+
+    /// Park a search target (typically the Workshop item's title).
+    static func requestSearch(_ query: String) {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        pendingSearch = trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Read-and-clear the pending target (nil if none).
+    static func takePendingSearch() -> String? {
+        defer { pendingSearch = nil }
+        return pendingSearch
     }
 }
 #endif
