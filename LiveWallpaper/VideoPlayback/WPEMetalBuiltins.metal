@@ -6,6 +6,27 @@ struct WPEVertexOut {
     float2 uv;
 };
 
+struct WPEMSDFTextVertex {
+    float2 position;
+    float2 uv;
+};
+
+// GPU MSDF text vertex stage. Reads per-glyph quad vertices (scene pixels +
+// atlas UV) and converts to NDC; outputs the same WPEVertexOut layout the
+// translated font.frag consumes via [[stage_in]] (position + uv).
+vertex WPEVertexOut wpe_msdf_text_vertex(
+    uint vid [[vertex_id]],
+    constant WPEMSDFTextVertex* verts [[buffer(0)]],
+    constant float2& sceneSize [[buffer(1)]]
+) {
+    WPEMSDFTextVertex v = verts[vid];
+    float2 halfSize = max(sceneSize * 0.5, float2(0.5));
+    WPEVertexOut out;
+    out.position = float4(v.position.x / halfSize.x - 1.0, 1.0 - v.position.y / halfSize.y, 0.0, 1.0);
+    out.uv = v.uv;
+    return out;
+}
+
 struct WPESolidUniforms {
     float4 color;
 };

@@ -68,6 +68,9 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
     /// frame re-rasterizes via the cached WPETextRenderer (cache hits
     /// the common case) and draws atop the scene output.
     private var textRenderer: WPETextRenderer?
+    /// GPU MSDF text renderer (Milestone D). Built only when the engine's
+    /// `font.frag` resolves; nil → text falls back to the CoreText overlay.
+    private var msdfTextRenderer: WPEMSDFTextRenderer?
     private var textObjects: [WPESceneTextObject] = []
     /// Phase 2D-O: audio runtime publishing live FFT bins into the
     /// runtime uniform that audio-reactive shaders sample. Optional —
@@ -1037,7 +1040,12 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
             )
         }
         if let textRenderer, !textObjects.isEmpty {
+            // CoreText draws for objects that don't take the MSDF path this frame.
             var draws: [WPETextOverlayDraw] = []
+            // Every visible object's CoreText draw, used as the all-or-nothing
+            // fallback if the GPU MSDF pass throws.
+            var allFallbackDraws: [WPETextOverlayDraw] = []
+            var msdfPayloads: [WPEMSDFTextDrawPayload] = []
             draws.reserveCapacity(textObjects.count)
             for object in textObjects where liveTextVisibility[object.id] ?? object.visible {
                 let resolvedAlpha = object.resolvedAlpha(at: uniforms.time)
@@ -1063,7 +1071,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
                     width: entry.size.width * CGFloat(scale.x),
                     height: entry.size.height * CGFloat(scale.y)
                 )
-                draws.append(WPETextOverlayDraw(
+                let fallbackDraw = WPETextOverlayDraw(
                     texture: entry.texture,
                     centerInScenePixels: center,
                     sizeInScenePixels: scaledSize,
@@ -1073,7 +1081,37 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
                         Float(liveObject.color.z)
                     ),
                     alpha: Float(liveObject.alpha)
-                ))
+                )
+                allFallbackDraws.append(fallbackDraw)
+                // Prefer the GPU MSDF path; if it can't build a payload for this
+                // object, render it via the CoreText overlay this frame.
+                if let payload = msdfTextRenderer?.drawPayload(
+                    for: liveObject,
+                    sceneSize: sceneRenderSize,
+                    parallaxOffset: SIMD2<Float>(textParallax.x, textParallax.y)
+                ) {
+                    msdfPayloads.append(payload)
+                } else {
+                    draws.append(fallbackDraw)
+                }
+            }
+            var msdfSucceeded = false
+            if !msdfPayloads.isEmpty {
+                do {
+                    try executor.drawMSDFText(
+                        payloads: msdfPayloads,
+                        sceneSize: sceneRenderSize,
+                        output: frame
+                    )
+                    msdfSucceeded = true
+                } catch {
+                    msdfSucceeded = false
+                }
+            }
+            // If the MSDF pass failed, fall back to CoreText for everything so no
+            // text silently disappears.
+            if !msdfSucceeded, !msdfPayloads.isEmpty {
+                draws = allFallbackDraws
             }
             if !draws.isEmpty {
                 try executor.drawTextOverlays(
@@ -1111,6 +1149,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
         textObjects = document.textObjects
         guard !textObjects.isEmpty else {
             textRenderer = nil
+            msdfTextRenderer = nil
             textScriptInstances.removeAll(keepingCapacity: false)
             return
         }
@@ -1118,6 +1157,15 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
             device: executor.textureSourceDevice,
             resolver: resourceResolver
         )
+        if let fontFragmentSource = resolveMSDFFontFragmentSource() {
+            msdfTextRenderer = WPEMSDFTextRenderer(
+                device: executor.textureSourceDevice,
+                resolver: resourceResolver,
+                fontFragmentSource: fontFragmentSource
+            )
+        } else {
+            msdfTextRenderer = nil
+        }
         textScriptInstances.removeAll(keepingCapacity: false)
         for object in textObjects {
             guard let script = object.textScript else { continue }
@@ -1125,6 +1173,21 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
                 textScriptInstances[object.id] = instance
             }
         }
+    }
+
+    /// Loads the engine's MSDF `font.frag` from the authorized 2.8 install so the
+    /// GPU text path can compile it. Returns nil when unavailable → CoreText only.
+    private func resolveMSDFFontFragmentSource() -> String? {
+        let candidates = ["shaders/font.frag", "shaders/effects/font.frag"]
+        for path in candidates {
+            guard let url = try? resourceResolver.resolveExistingFileURL(relativePath: path),
+                  let data = try? Data(contentsOf: url),
+                  let source = String(data: data, encoding: .utf8) else {
+                continue
+            }
+            return source
+        }
+        return nil
     }
 
     /// Material descriptor extracted from `passes[0]`. Only the fields the
@@ -1333,6 +1396,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
         textObjects.removeAll(keepingCapacity: false)
         textRenderer?.releaseAll()
         textRenderer = nil
+        msdfTextRenderer = nil
         textScriptInstances.removeAll(keepingCapacity: false)
         soundRuntime?.stop()
         soundRuntime = nil
@@ -1520,6 +1584,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
         textObjects.removeAll(keepingCapacity: false)
         textRenderer?.releaseAll()
         textRenderer = nil
+        msdfTextRenderer = nil
         textScriptInstances.removeAll(keepingCapacity: false)
         soundRuntime?.stop()
         soundRuntime = nil
