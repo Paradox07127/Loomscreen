@@ -221,6 +221,7 @@ final class WPEMetalRenderExecutor {
             previousSceneTexture: reusableHistory?.sceneTexture,
             previousNamedTextures: reusableHistory?.namedTextures ?? [:]
         )
+        frameState.cameraParallax = runtimeUniforms.cameraParallax
         var didEncode = false
         let bypassEffects = Self.bypassEffectsForDebug
 
@@ -341,7 +342,8 @@ final class WPEMetalRenderExecutor {
         systems: [WPEParticleSystem],
         texturesByMaterial: [ObjectIdentifier: MTLTexture],
         sceneSize: CGSize,
-        output: MTLTexture
+        output: MTLTexture,
+        cameraParallax: WPECameraParallaxFrame = .neutral
     ) throws {
         let alive = systems.filter { $0.liveInstanceCount > 0 }
         guard !alive.isEmpty else { return }
@@ -377,6 +379,11 @@ final class WPEMetalRenderExecutor {
                 blendMode: system.blendMode
             )
             encoder.setRenderPipelineState(pipelineState)
+            // Translate the whole system by its camera-parallax depth (pixels),
+            // carried in `padding.xy` and added to each particle's screen
+            // position in the vertex shader.
+            let parallax = cameraParallax.pixelOffset(depth: system.parallaxDepth, sceneSize: sceneSize)
+            projection.padding = SIMD4<Float>(parallax.x, parallax.y, 0, 0)
             encoder.setVertexBuffer(system.instanceBuffer, offset: 0, index: 1)
             encoder.setVertexBytes(&projection, length: MemoryLayout<WPEParticleProjection>.stride, index: 2)
             var sprite = WPEParticleSpriteParams(grid: SIMD4<Float>(
@@ -1106,12 +1113,11 @@ final class WPEMetalRenderExecutor {
             ),
             index: 0
         )
-        var uniforms = WPECopyUniforms(
-            uvOffset: WPEMetalShaderInputs.parallaxUVOffset(
-                pointerPosition: runtimeUniforms.pointerPosition,
-                parallaxDepth: layer.parallaxDepth
-            )
-        )
+        // Parallax is a geometry translation applied in object-quad scene
+        // passes; the legacy raw-pointer UV shift is removed here too. (Plain
+        // full-frame layers routed through this fullscreen copy don't parallax —
+        // see the camera-parallax limitations note.)
+        var uniforms = WPECopyUniforms(uvOffset: SIMD2<Float>(0, 0))
         encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPECopyUniforms>.stride, index: 0)
         encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
         frameState.registerWrite(texture: destination.texture, targetID: destination.id)
@@ -1134,31 +1140,50 @@ final class WPEMetalRenderExecutor {
         )
     }
 
-    func usesObjectQuadGeometry(for pass: WPEPreparedRenderPass, layer: WPERenderLayer) -> Bool {
-        guard layer.geometry != .identity else { return false }
-        switch pass.pass.target {
-        case .scene:
-            // WPE fullscreen/passthrough utility layers (compose/project/fullscreen)
-            // render fullscreen and copy the captured frame 1:1, never as a shrunken
-            // object quad — unless the per-scene legacy rollback gate restores the
-            // old object-quad behavior.
-            if WPEMetalComposeLayerCompatibility.isSceneCaptureUtilityModelPath(layer.imagePath) {
-                return activeLegacyComposeLayer
-            }
-            return true
-        default:
-            return false
+    func usesObjectQuadGeometry(
+        for pass: WPEPreparedRenderPass,
+        layer: WPERenderLayer,
+        cameraParallax: WPECameraParallaxFrame = .neutral
+    ) -> Bool {
+        guard case .scene = pass.pass.target else { return false }
+        if layer.geometry == .identity {
+            // Identity full-frame layers normally take the fullscreen copy path.
+            // Route them through the object quad (an identical full-scene quad)
+            // only when there's an actual parallax shift to apply, leaving the
+            // common no-parallax path byte-for-byte unchanged.
+            return layer.parallaxDepth != 0 && cameraParallax.smoothed != SIMD2<Float>(0, 0)
         }
+        // WPE fullscreen/passthrough utility layers (compose/project/fullscreen)
+        // render fullscreen and copy the captured frame 1:1, never as a shrunken
+        // object quad — unless the per-scene legacy rollback gate restores the
+        // old object-quad behavior.
+        if WPEMetalComposeLayerCompatibility.isSceneCaptureUtilityModelPath(layer.imagePath) {
+            return activeLegacyComposeLayer
+        }
+        return true
     }
 
     func objectQuadUniforms(
         for layer: WPERenderLayer,
         sceneSize: CGSize,
+        cameraParallax: WPECameraParallaxFrame = .neutral,
         sourceTexture: MTLTexture
     ) -> WPEObjectQuadUniforms {
         let geometry = layer.geometry
         let sceneWidth = Float(max(sceneSize.width, 1))
         let sceneHeight = Float(max(sceneSize.height, 1))
+        // Identity (full-frame) layers map to a scene-sized quad centered at the
+        // origin — identical coverage + UV to `wpe_fullscreen_vertex` — plus the
+        // camera-parallax shift. (Only reached when parallax is active; see
+        // `usesObjectQuadGeometry`.)
+        if geometry == .identity {
+            let parallax = cameraParallax.pixelOffset(depth: layer.parallaxDepth, sceneSize: sceneSize)
+            return WPEObjectQuadUniforms(
+                centerAndSize: SIMD4<Float>(parallax.x, parallax.y, sceneWidth, sceneHeight),
+                sceneSizeAndRotation: SIMD4<Float>(sceneWidth, sceneHeight, 0, 0),
+                uvSignAndPadding: SIMD4<Float>(1, 1, 0, 0)
+            )
+        }
         let baseWidth = Float(geometry.size?.width ?? CGFloat(sourceTexture.width))
         let baseHeight = Float(geometry.size?.height ?? CGFloat(sourceTexture.height))
         let scaleX = Float(geometry.scale.x)
@@ -1177,7 +1202,7 @@ final class WPEMetalRenderExecutor {
             alignment: geometry.alignment,
             width: width,
             height: height
-        )
+        ) + cameraParallax.pixelOffset(depth: layer.parallaxDepth, sceneSize: sceneSize)
         return WPEObjectQuadUniforms(
             centerAndSize: SIMD4<Float>(center.x, center.y, width, height),
             sceneSizeAndRotation: SIMD4<Float>(
@@ -1413,7 +1438,7 @@ final class WPEMetalRenderExecutor {
         depthPixelFormat: MTLPixelFormat,
         uniforms: U
     ) throws {
-        let usesObjectQuad = usesObjectQuadGeometry(for: pass, layer: layer)
+        let usesObjectQuad = usesObjectQuadGeometry(for: pass, layer: layer, cameraParallax: frameState.cameraParallax)
         encoder.setRenderPipelineState(try renderPipeline(
             vertexName: usesObjectQuad ? "wpe_object_quad_vertex" : "wpe_fullscreen_vertex",
             fragmentName: fragmentName,
@@ -1435,6 +1460,7 @@ final class WPEMetalRenderExecutor {
             var quadUniforms = objectQuadUniforms(
                 for: layer,
                 sceneSize: frameState.sceneSize,
+                cameraParallax: frameState.cameraParallax,
                 sourceTexture: texture
             )
             encoder.setVertexBytes(
@@ -1542,7 +1568,7 @@ final class WPEMetalRenderExecutor {
         encoder: MTLRenderCommandEncoder,
         depthPixelFormat: MTLPixelFormat
     ) throws {
-        let usesObjectQuad = usesObjectQuadGeometry(for: pass, layer: layer)
+        let usesObjectQuad = usesObjectQuadGeometry(for: pass, layer: layer, cameraParallax: frameState.cameraParallax)
         encoder.setRenderPipelineState(try renderPipeline(
             vertexName: usesObjectQuad ? "wpe_object_quad_vertex" : "wpe_fullscreen_vertex",
             fragmentName: "wpe_effect_opacity_fragment",
@@ -1592,6 +1618,7 @@ final class WPEMetalRenderExecutor {
             var quadUniforms = objectQuadUniforms(
                 for: layer,
                 sceneSize: frameState.sceneSize,
+                cameraParallax: frameState.cameraParallax,
                 sourceTexture: sourceTexture
             )
             encoder.setVertexBytes(
@@ -1603,21 +1630,33 @@ final class WPEMetalRenderExecutor {
     }
 
     /// Phase 2D-D: pack scene uniforms for the genericimage* built-ins.
+    private static let imageUniformDebugEnabled = UserDefaults.standard.bool(forKey: "WPEAudioDebugLog")
+    nonisolated(unsafe) private static var loggedImageUniformNames = Set<String>()
+
     func genericImageUniforms(
         for pass: WPEPreparedRenderPass,
         layer: WPERenderLayer,
         hasMask: Bool
     ) -> WPEGenericImageUniforms {
-        WPEGenericImageUniforms(
-            color: WPEMetalShaderInputs.colorVector(for: pass),
-            alphaMaskUV: SIMD4<Float>(
-                WPEMetalShaderInputs.floatScalar(named: ["g_Alpha", "u_Alpha", "alpha"], in: pass, default: 1)
-                    * Float(layer.geometry.alpha),
-                WPEMetalShaderInputs.floatScalar(named: ["g_Brightness", "u_Brightness", "brightness"], in: pass, default: 1)
-                    * Float(layer.geometry.brightness),
-                hasMask ? 1 : 0,
-                0
+        let color = WPEMetalShaderInputs.colorVector(for: pass)
+        let gAlpha = WPEMetalShaderInputs.floatScalar(named: ["g_Alpha", "u_Alpha", "alpha"], in: pass, default: 1)
+        let gBrightness = WPEMetalShaderInputs.floatScalar(named: ["g_Brightness", "u_Brightness", "brightness"], in: pass, default: 1)
+        let alpha = gAlpha * Float(layer.geometry.alpha)
+        let brightness = gBrightness * Float(layer.geometry.brightness)
+        // Diagnostic for the "black silhouette" bug: genericimage shaders do
+        // `rgb = sampled.rgb * color.rgb * brightness`, so brightness==0 OR
+        // color==0 blacks out the layer while alpha (a separate term) survives.
+        // One line per object so the log isn't spammed.
+        if Self.imageUniformDebugEnabled,
+           Self.loggedImageUniformNames.insert(layer.objectName).inserted {
+            Logger.notice(
+                "[ImgUniform] \(layer.objectName) shader=\(pass.pass.shader) g_Brightness=\(gBrightness) layerBright=\(layer.geometry.brightness) → brightness=\(brightness) color=(\(color.x),\(color.y),\(color.z)) alpha=\(alpha)",
+                category: .wpeRender
             )
+        }
+        return WPEGenericImageUniforms(
+            color: color,
+            alphaMaskUV: SIMD4<Float>(alpha, brightness, hasMask ? 1 : 0, 0)
         )
     }
 

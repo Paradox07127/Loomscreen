@@ -152,6 +152,9 @@ final class WPEParticleSystem {
     /// frame static texture, the executor binds a full-UV pass-through
     /// sprite-sheet uniform (cols=rows=frames=1, mask=0).
     let spriteSheet: WPEParticleSpriteSheet?
+    /// Camera-parallax depth of the owning particle object; drives the
+    /// per-frame parallax translation applied to the whole system at draw time.
+    var parallaxDepth: Double = 0
 
     private var aliveCount: Int = 0
     private var particles: [Particle]

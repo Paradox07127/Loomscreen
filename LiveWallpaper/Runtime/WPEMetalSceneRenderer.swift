@@ -78,6 +78,12 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
     /// audio-reactive scenes that don't move.
     private let audioDebugLogEnabled = UserDefaults.standard.bool(forKey: "WPEAudioDebugLog")
     private var audioDiagCounter = 0
+    /// Last throttle state we logged, so a focus/unfocus transition (which
+    /// flips the scene between 60 FPS and `throttledPreferredFPS` = 1) emits a
+    /// line immediately instead of waiting out the per-60-frame cadence. This
+    /// is the key signal for "the bars look frozen": when the app's own
+    /// console window is key, the scene on that screen drops to 1 FPS.
+    private var audioDiagLastThrottled: Bool?
     /// Phase 2D-P: per-text-object SceneScript instances. Keyed by
     /// the text object's id so the renderer can look up the latest
     /// scripted value when rasterizing.
@@ -96,6 +102,11 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
     private var cachedSnapshot: NSImage?
     private var didLoad = false
     private var isThrottled = false
+    /// Scene-level camera parallax: the parsed settings plus the per-frame
+    /// exponential smoother that drives every layer's depth shift. Neutral when
+    /// the scene disables parallax.
+    private var cameraParallaxSettings: WPESceneCameraParallaxSettings = .disabled
+    private var cameraParallaxSmoother = WPECameraParallaxSmoother()
     private var currentProfile: WallpaperPerformanceProfile = .quality
     /// User-selected frame rate ceiling, applied to `mtkView.preferredFramesPerSecond`
     /// whenever the renderer is not throttled / suspended. Defaults to the
@@ -111,6 +122,12 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
     private(set) var loadDiagnostics: SceneLoadDiagnostic?
     private(set) var renderGraph: WPERenderGraph?
     private(set) var renderPipeline: WPEPreparedRenderPipeline?
+    /// True when the pipeline has effect / custom-shader passes (scroll,
+    /// waterwaves, pulse, audio bars, …). These animate every frame via
+    /// `g_Time` / `g_AudioSpectrum*`, so the view must run continuously even
+    /// when there are no dynamic textures or particles — otherwise the scene
+    /// renders one frame and freezes. Computed once per load.
+    private var hasAnimatedShaderPasses = false
     private(set) var lastRuntimeUniforms: WPEMetalRuntimeUniforms?
     /// Property-key → render-target bindings for the loaded scene, used by the
     /// incremental settings-apply path. Empty until `load()` completes.
@@ -388,6 +405,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
 
         renderGraph = graph
         renderPipeline = pipeline
+        hasAnimatedShaderPasses = Self.pipelineHasAnimatedPasses(pipeline)
         // Seed incremental-apply state. The graph builder already baked each
         // layer's authored `visible` into the pipeline, so these baselines
         // simply mirror it for later diffing in `applyScenePropertyPatch`.
@@ -404,6 +422,8 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
             orthogonalProjection: document.general.orthogonalProjection,
             sceneCamera: document.camera
         )
+        cameraParallaxSettings = document.general.cameraParallax
+        cameraParallaxSmoother.reset()
         sceneRenderSize = cameraUniforms.renderSize
         debugStage("camera", "renderSize=\(Int(sceneRenderSize.width))x\(Int(sceneRenderSize.height))")
 
@@ -923,9 +943,17 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
         guard let pipeline = renderPipeline else {
             throw WPEMetalRenderExecutorError.noRenderablePasses
         }
+        let pointer = pointerSampler.sample(mtkView)
         var uniforms = frameClock.runtimeUniforms(
             profile: currentProfile,
-            pointerPosition: pointerSampler.sample(mtkView)
+            pointerPosition: pointer
+        )
+        // Compute once per frame (advances smoothing state); assigned below
+        // after the audio path may have rebuilt `uniforms`.
+        let parallaxFrame = cameraParallaxSmoother.frame(
+            settings: cameraParallaxSettings,
+            pointerPosition: pointer,
+            time: uniforms.time
         )
         // Audio-reactive uniforms follow the shared system-audio capture (the
         // loopback of whatever is playing), not the scene's own sounds — those
@@ -935,11 +963,16 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
             let audio = SystemAudioCaptureManager.broker.snapshot()
             if audioDebugLogEnabled {
                 audioDiagCounter += 1
-                if audioDiagCounter % 60 == 1 {
+                // Log every ~60 frames, OR immediately when the throttle flips
+                // (focus/unfocus of the app's console window). The latter makes
+                // the "frozen bars" cause visible: throttled=true ⇒ fps=1.
+                let throttledNow = isThrottled
+                if audioDiagCounter % 60 == 1 || audioDiagLastThrottled != throttledNow {
+                    audioDiagLastThrottled = throttledNow
                     let peakL = audio.left.max() ?? 0
                     let peakR = audio.right.max() ?? 0
                     Logger.notice(
-                        "[AudioCapture] renderer: capturing=true peakL=\(String(format: "%.3f", peakL)) peakR=\(String(format: "%.3f", peakR)) → feeding g_AudioSpectrum*",
+                        "[AudioCapture] renderer: capturing=true peakL=\(String(format: "%.3f", peakL)) peakR=\(String(format: "%.3f", peakR)) throttled=\(throttledNow) fps=\(mtkView.preferredFramesPerSecond) → feeding g_AudioSpectrum*",
                         category: .audioCapture
                     )
                 }
@@ -953,6 +986,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
                 audioSpectrumRight: audio.right.map(Double.init)
             )
         }
+        uniforms.cameraParallax = parallaxFrame
         lastRuntimeUniforms = uniforms
         let currentTextures = texturesForCurrentFrame(time: uniforms.time)
         let frame = try executor.render(
@@ -971,7 +1005,8 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
                 systems: particleSystems,
                 texturesByMaterial: particleTextures,
                 sceneSize: sceneRenderSize,
-                output: frame
+                output: frame,
+                cameraParallax: parallaxFrame
             )
         }
         if let textRenderer, !textObjects.isEmpty {
@@ -980,74 +1015,18 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
             for object in textObjects where liveTextVisibility[object.id] ?? object.visible {
                 let resolvedAlpha = object.resolvedAlpha(at: uniforms.time)
                 guard resolvedAlpha > 0 else { continue }
-                let liveObject: WPESceneTextObject
-                if let instance = textScriptInstances[object.id] {
-                    let updated = instance.tickString()
-                    if updated != object.text {
-                        liveObject = WPESceneTextObject(
-                            id: object.id,
-                            name: object.name,
-                            text: updated,
-                            textScript: object.textScript,
-                            fontRelativePath: object.fontRelativePath,
-                            pointSize: object.pointSize,
-                            color: object.color,
-                            alpha: resolvedAlpha,
-                            alphaAnimation: object.alphaAnimation,
-                            origin: object.origin,
-                            scale: object.scale,
-                            visible: object.visible,
-                            horizontalAlignment: object.horizontalAlignment,
-                            verticalAlignment: object.verticalAlignment,
-                            maxWidth: object.maxWidth,
-                            parallaxDepth: object.parallaxDepth
-                        )
-                    } else {
-                        liveObject = WPESceneTextObject(
-                            id: object.id,
-                            name: object.name,
-                            text: object.text,
-                            textScript: object.textScript,
-                            fontRelativePath: object.fontRelativePath,
-                            pointSize: object.pointSize,
-                            color: object.color,
-                            alpha: resolvedAlpha,
-                            alphaAnimation: object.alphaAnimation,
-                            origin: object.origin,
-                            scale: object.scale,
-                            visible: object.visible,
-                            horizontalAlignment: object.horizontalAlignment,
-                            verticalAlignment: object.verticalAlignment,
-                            maxWidth: object.maxWidth,
-                            parallaxDepth: object.parallaxDepth
-                        )
-                    }
-                } else {
-                    liveObject = WPESceneTextObject(
-                        id: object.id,
-                        name: object.name,
-                        text: object.text,
-                        textScript: object.textScript,
-                        fontRelativePath: object.fontRelativePath,
-                        pointSize: object.pointSize,
-                        color: object.color,
-                        alpha: resolvedAlpha,
-                        alphaAnimation: object.alphaAnimation,
-                        origin: object.origin,
-                        scale: object.scale,
-                        visible: object.visible,
-                        horizontalAlignment: object.horizontalAlignment,
-                        verticalAlignment: object.verticalAlignment,
-                        maxWidth: object.maxWidth,
-                        parallaxDepth: object.parallaxDepth
-                    )
-                }
+                let liveText = textScriptInstances[object.id]?.tickString() ?? object.text
+                let liveObject = object.withLiveText(liveText, alpha: resolvedAlpha)
                 guard let entry = textRenderer.rasterize(liveObject) else { continue }
                 let halfWidth = Double(sceneRenderSize.width) * 0.5
                 let halfHeight = Double(sceneRenderSize.height) * 0.5
+                let textParallax = parallaxFrame.pixelOffset(
+                    depth: liveObject.parallaxDepth,
+                    sceneSize: sceneRenderSize
+                )
                 let center = SIMD2<Float>(
-                    Float(liveObject.origin.x - halfWidth),
-                    Float(liveObject.origin.y - halfHeight)
+                    Float(liveObject.origin.x - halfWidth) + textParallax.x,
+                    Float(liveObject.origin.y - halfHeight) + textParallax.y
                 )
                 let scale = SIMD2<Float>(
                     Float(max(liveObject.scale.x, 0.0001)),
@@ -1288,6 +1267,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
             sceneTransform: sceneTransform,
             spriteSheet: spriteSheet
         ) else { return }
+        system.parallaxDepth = object.parallaxDepth
         // Spread `startDelay + 2s` worth of spawn/integration across
         // the first frame so the user doesn't see a one-particle-
         // per-frame cold start — matches WPE's behaviour where the
@@ -1432,7 +1412,23 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
     /// the first frame (the operator and turbulence updates would never
     /// run again).
     private var needsContinuousFrames: Bool {
-        !dynamicTextureSources.isEmpty || !particleSystems.isEmpty
+        hasAnimatedShaderPasses
+            || !dynamicTextureSources.isEmpty
+            || !particleSystems.isEmpty
+    }
+
+    /// A pass animates per-frame when its shader samples `g_Time` /
+    /// `g_AudioSpectrum*` — i.e. WPE local effects (`effects/…`) and workshop
+    /// custom shaders (`workshop/…`). The static base shaders (`solidcolor`,
+    /// `genericimage2/4`, `compose`, `copy`) do not, so a scene built only on
+    /// those is genuinely static and may stay on the paused/on-demand path.
+    private static func pipelineHasAnimatedPasses(_ pipeline: WPEPreparedRenderPipeline) -> Bool {
+        pipeline.layers.contains { layer in
+            layer.passes.contains { prepared in
+                let shader = prepared.pass.shader.lowercased()
+                return shader.contains("effects/") || shader.contains("workshop/")
+            }
+        }
     }
 
     func applyPerformanceProfile(_ profile: WallpaperPerformanceProfile) {
@@ -1466,6 +1462,8 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
         textScriptInstances.removeAll(keepingCapacity: false)
         soundRuntime?.stop()
         soundRuntime = nil
+        cameraParallaxSettings = .disabled
+        cameraParallaxSmoother.reset()
         lastRuntimeUniforms = nil
         cachedSnapshot = nil
         resolutionTracer.reset()
@@ -1830,9 +1828,23 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
     /// Visible to `@testable` test suites that probe the candidate generator without spinning up a full renderer fixture.
     func textureCandidates(for path: String) -> [String] {
         let extensionName = (path as NSString).pathExtension.lowercased()
-        if !extensionName.isEmpty,
-           Self.knownRawImageExtensions.contains(extensionName) || extensionName == "tex" || extensionName == "json" {
+        if extensionName == "tex" || extensionName == "json" {
             return [path]
+        }
+        if !extensionName.isEmpty, Self.knownRawImageExtensions.contains(extensionName) {
+            // WPE converts source images to `<name>.<ext>.tex` (e.g. a particle
+            // sprite `workshop/…/雪花.jpg` is stored as
+            // `materials/workshop/…/雪花.jpg.tex`). Try the literal image, then
+            // the converted `.tex`, including under the `materials/` root —
+            // otherwise extension-bearing refs never find their `.tex`.
+            var candidates = [path, "\(path).tex"]
+            let anchored = ["materials/", "models/", "shaders/", "fonts/",
+                            "scripts/", "particles/", "sounds/", "scenes/", "../", "_"]
+            if !anchored.contains(where: path.hasPrefix) {
+                candidates.append("materials/\(path)")
+                candidates.append("materials/\(path).tex")
+            }
+            return candidates
         }
 
         if let dependency = dependencyReference(path) {

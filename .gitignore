@@ -123,3 +123,4 @@ docs/
 .claude/
 
 .vm-bridge/
+cache/

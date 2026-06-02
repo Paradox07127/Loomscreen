@@ -469,9 +469,11 @@ vertex WPEParticleVertexOut wpe_particle_vertex(
                                   s * corner.x + c * corner.y);
     float halfWidth = max(projection.sceneSize.x, 1.0) * 0.5;
     float halfHeight = max(projection.sceneSize.y, 1.0) * 0.5;
+    // padding.xy = camera-parallax pixel offset for this system's depth.
+    float2 parallaxPixels = projection.padding.xy;
     float2 centerNDC = float2(
-        instance.positionAndSize.x / halfWidth,
-        instance.positionAndSize.y / halfHeight
+        (instance.positionAndSize.x + parallaxPixels.x) / halfWidth,
+        (instance.positionAndSize.y + parallaxPixels.y) / halfHeight
     );
     float2 cornerNDC = rotatedCorner * (instance.positionAndSize.w * 2.0)
         / float2(halfWidth * 2.0, halfHeight * 2.0);
@@ -571,7 +573,16 @@ vertex WPETextOverlayVertexOut wpe_text_overlay_vertex(
         u.centerAndSize.w / halfHeight
     );
     WPETextOverlayVertexOut out;
-    out.position = float4(centerNDC + cornerNDC, 0.0, 1.0);
+    // The vertical POSITION (centerNDC.y) is already correct in WPE's text
+    // space — the clock sits next to Miku's face — so it must NOT be flipped.
+    // Only the glyph's own vertical extent (cornerNDC.y) was inverted, which
+    // rendered the text upside-down; negate just that so the text reads upright
+    // while staying in the right place. X is untouched.
+    out.position = float4(
+        centerNDC.x + cornerNDC.x,
+        centerNDC.y - cornerNDC.y,
+        0.0, 1.0
+    );
     out.uv = uv;
     return out;
 }

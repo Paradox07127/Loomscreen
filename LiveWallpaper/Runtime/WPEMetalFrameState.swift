@@ -46,6 +46,9 @@ struct WPEMetalFrameState {
     /// blends, culls, or rejects fragments via depth.
     var initializedTextures: Set<ObjectIdentifier> = []
     var depthTextures: [WPEMetalDepthTextureKey: MTLTexture] = [:]
+    /// Scene-level camera parallax for this frame; object-quad (scene-targeted)
+    /// draws translate each layer by `cameraParallax.pixelOffset(depth:…)`.
+    var cameraParallax: WPECameraParallaxFrame = .neutral
 
     init(
         output: MTLTexture,

@@ -165,6 +165,13 @@ public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
     public let verticalAlignment: String
     public let maxWidth: Double?
     public let parallaxDepth: Double
+    /// WPE's authored text-box size in scene pixels (`size`). A WPE text object
+    /// is an image layer whose texture is sized to this box; the text fills the
+    /// box minus `padding`, then the layer is placed at `origin × scale`. When
+    /// nil the renderer falls back to the rasterized text bounds.
+    public let boxSize: SIMD2<Double>?
+    /// Transparent margin (scene pixels) inside `boxSize` around the text.
+    public let padding: Double
 
     public init(
         id: String,
@@ -182,7 +189,9 @@ public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
         horizontalAlignment: String,
         verticalAlignment: String,
         maxWidth: Double?,
-        parallaxDepth: Double
+        parallaxDepth: Double,
+        boxSize: SIMD2<Double>? = nil,
+        padding: Double = 0
     ) {
         self.id = id
         self.name = name
@@ -200,10 +209,38 @@ public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
         self.verticalAlignment = verticalAlignment
         self.maxWidth = maxWidth
         self.parallaxDepth = parallaxDepth
+        self.boxSize = boxSize
+        self.padding = padding
     }
 
     public func resolvedAlpha(at time: Double) -> Double {
         alphaAnimation?.scalar(at: time) ?? alpha
+    }
+
+    /// Returns a copy carrying the live (scripted) text + resolved alpha while
+    /// preserving every other field — so the renderer's per-frame copy never
+    /// drops geometry like `boxSize`/`padding`.
+    public func withLiveText(_ liveText: String, alpha liveAlpha: Double) -> WPESceneTextObject {
+        WPESceneTextObject(
+            id: id,
+            name: name,
+            text: liveText,
+            textScript: textScript,
+            fontRelativePath: fontRelativePath,
+            pointSize: pointSize,
+            color: color,
+            alpha: liveAlpha,
+            alphaAnimation: alphaAnimation,
+            origin: origin,
+            scale: scale,
+            visible: visible,
+            horizontalAlignment: horizontalAlignment,
+            verticalAlignment: verticalAlignment,
+            maxWidth: maxWidth,
+            parallaxDepth: parallaxDepth,
+            boxSize: boxSize,
+            padding: padding
+        )
     }
 }
 
@@ -300,15 +337,48 @@ public struct WPESceneCamera: Equatable, Sendable {
 public struct WPESceneGeneral: Equatable, Sendable {
     public let clearColor: SIMD3<Double>
     public let orthogonalProjection: WPESceneOrthogonalProjection
+    public let cameraParallax: WPESceneCameraParallaxSettings
 
-    public init(clearColor: SIMD3<Double>, orthogonalProjection: WPESceneOrthogonalProjection) {
+    public init(
+        clearColor: SIMD3<Double>,
+        orthogonalProjection: WPESceneOrthogonalProjection,
+        cameraParallax: WPESceneCameraParallaxSettings = .disabled
+    ) {
         self.clearColor = clearColor
         self.orthogonalProjection = orthogonalProjection
+        self.cameraParallax = cameraParallax
     }
 
     public static let defaultGeneral = WPESceneGeneral(
         clearColor: SIMD3<Double>(0, 0, 0),
         orthogonalProjection: WPESceneOrthogonalProjection(width: 1920, height: 1080, auto: true)
+    )
+}
+
+/// WPE scene-level camera parallax: the whole scene follows the cursor, each
+/// layer shifting by its `parallaxDepth`. `amount`/`delay`/`mouseInfluence`
+/// mirror the WPE general settings; defaults match WPE so an enabled scene that
+/// omits them behaves like Wallpaper Engine. Disabled by default (no-op).
+public struct WPESceneCameraParallaxSettings: Equatable, Sendable {
+    public let enabled: Bool
+    public let amount: Double
+    public let delay: Double
+    public let mouseInfluence: Double
+
+    public init(
+        enabled: Bool = false,
+        amount: Double = 0.5,
+        delay: Double = 0.1,
+        mouseInfluence: Double = 0.5
+    ) {
+        self.enabled = enabled
+        self.amount = amount
+        self.delay = delay
+        self.mouseInfluence = mouseInfluence
+    }
+
+    public static let disabled = WPESceneCameraParallaxSettings(
+        enabled: false, amount: 0.5, delay: 0.1, mouseInfluence: 0.5
     )
 }
 
