@@ -204,20 +204,20 @@ enum WPESceneScriptBaseclasses {
         inverse() {
             var m = this.m;
             var b01 = m[8] * m[4] - m[5] * m[7];
-            var b11 = -m[8] * m[1] + m[2] * m[7];
-            var b21 = m[5] * m[1] - m[2] * m[4];
-            var det = m[0] * b01 + m[3] * b11 + m[6] * b21;
+            var b11 = -m[8] * m[3] + m[5] * m[6];
+            var b21 = m[7] * m[3] - m[4] * m[6];
+            var det = m[0] * b01 + m[1] * b11 + m[2] * b21;
             if (Math.abs(det) <= EPSILON) { return Mat3.identity(); }
             det = 1 / det;
             return new Mat3([
                 b01 * det,
-                (-m[8] * m[3] + m[5] * m[6]) * det,
-                (m[7] * m[3] - m[4] * m[6]) * det,
+                (-m[8] * m[1] + m[2] * m[7]) * det,
+                (m[5] * m[1] - m[2] * m[4]) * det,
                 b11 * det,
                 (m[8] * m[0] - m[2] * m[6]) * det,
-                (-m[7] * m[0] + m[1] * m[6]) * det,
-                b21 * det,
                 (-m[5] * m[0] + m[2] * m[3]) * det,
+                b21 * det,
+                (-m[7] * m[0] + m[1] * m[6]) * det,
                 (m[4] * m[0] - m[1] * m[3]) * det
             ]);
         }

@@ -132,6 +132,27 @@ struct WPESceneScriptRuntimeTests {
         #expect(instance.tickString() == "1,0,0,0,1,0,0,0,1")
     }
 
+    @Test("Mat3.inverse() is the true inverse, not its transpose")
+    func mat3InverseIsTrueInverse() throws {
+        // Regression: inverse() used to return the cofactor matrix (the
+        // transpose of the inverse) for non-symmetric M. M·M⁻¹ must be the
+        // identity 3×3; a transposed inverse fails this. M below has det = 1.
+        let script = """
+        export function update(value) {
+            var m = new Mat3([1, 2, 3, 0, 1, 4, 5, 6, 0]);
+            var p = m.multiply(m.inverse()).m;
+            var ok = true;
+            var id = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+            for (var i = 0; i < 9; i += 1) {
+                if (Math.abs(p[i] - id[i]) > 1e-9) { ok = false; }
+            }
+            return ok ? 'identity' : p.join(',');
+        }
+        """
+        let instance = try WPESceneScriptInstance(script: script, initialValue: "init")
+        #expect(instance.tickString() == "identity")
+    }
+
     @Test("Tolerant globals make scene/thisLayer/timers/model references harmless")
     func tolerantGlobalsNeverThrow() throws {
         // These are the exact 2.8 failure shapes from the WPE install log:
