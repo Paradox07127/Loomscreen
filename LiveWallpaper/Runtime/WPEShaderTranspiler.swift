@@ -727,6 +727,8 @@ struct WPEShaderTranspiler {
             preserveTexCoordZW: preserveTexCoordZW
         )
         s = rewriteGLSLArrayConstructors(s)
+        s = rewriteArrayCopyInitialization(s)
+        s = rewriteFloatArraySubscripts(s)
 
         s = rewriteReferenceParameters(s)
 
@@ -1176,6 +1178,52 @@ struct WPEShaderTranspiler {
             cursor = source.index(after: cursor)
         }
         return depth == 0
+    }
+
+    /// GLSL allows initializing a local array by copying another array
+    /// (`float left[N] = g_AudioSpectrum32Left;`), but MSL requires an initializer list.
+    /// Bind a reference instead (`thread float (&left)[N] = g_AudioSpectrum32Left;`) — the local
+    /// is read-only here, so an alias is equivalent and avoids the (illegal) copy.
+    private static func rewriteArrayCopyInitialization(_ source: String) -> String {
+        let typePattern = #"(?:float|int|uint|bool)(?:[234])?"#
+        let pattern = #"(?m)^([ \t]*)("# + typePattern + #")\s+([A-Za-z_]\w*)\s*\[\s*([A-Za-z_0-9]+)\s*\]\s*=\s*([A-Za-z_]\w*)\s*;"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return source }
+        let range = NSRange(source.startIndex..., in: source)
+        return regex.stringByReplacingMatches(
+            in: source,
+            range: range,
+            withTemplate: "$1thread $2 (&$3)[$4] = $5;"
+        )
+    }
+
+    /// MSL array subscripts must be integers, but WPE shaders routinely index with a `float`
+    /// loop/bin variable (`float i = floor(...); left[i]`). Wrap subscripts that use a
+    /// float-declared scalar in `int(...)`. Only bare-identifier subscripts of known float locals
+    /// are touched, so integer indices and expression subscripts are left unchanged.
+    private static func rewriteFloatArraySubscripts(_ source: String) -> String {
+        let declPattern = #"\bfloat\s+([A-Za-z_]\w*)\s*="#
+        guard let declRegex = try? NSRegularExpression(pattern: declPattern) else { return source }
+        let range = NSRange(source.startIndex..., in: source)
+        var floatVars: Set<String> = []
+        for match in declRegex.matches(in: source, range: range) {
+            if let nameRange = Range(match.range(at: 1), in: source) {
+                floatVars.insert(String(source[nameRange]))
+            }
+        }
+        guard !floatVars.isEmpty else { return source }
+
+        var result = source
+        for name in floatVars {
+            let subscriptPattern = #"\[\s*"# + NSRegularExpression.escapedPattern(for: name) + #"\s*\]"#
+            guard let regex = try? NSRegularExpression(pattern: subscriptPattern) else { continue }
+            let fullRange = NSRange(result.startIndex..., in: result)
+            result = regex.stringByReplacingMatches(
+                in: result,
+                range: fullRange,
+                withTemplate: "[int(\(name))]"
+            )
+        }
+        return result
     }
 
     /// Rewrite GLSL `inout T name` / `out T name` parameter qualifiers to Metal's `thread T& name`.
