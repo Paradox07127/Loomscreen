@@ -32,13 +32,13 @@ struct WorkshopPaneView: View {
         }
         // On open: re-confirm SteamCMD readiness so the Download button isn't
         // greyed out just because this launch hasn't re-run the probes, then
-        // reconcile the library with SteamCMD's on-disk downloads so they show
-        // in Installed by default (covers items downloaded manually or before
-        // the in-app button recorded them). Readiness runs first — it binds the
-        // workdir the ingest scan needs.
+        // reconcile the library with what's on disk — both the app-managed
+        // SteamCMD download tree and the user-configured Workshop library folder
+        // — so existing downloads show in Installed by default. Readiness runs
+        // first; it binds the workdir the SteamCMD scan needs.
         .task {
             await doctor.autoConfirmDownloadReadinessIfNeeded()
-            await folderImport.ingestSteamCMDDownloads(using: doctor)
+            await folderImport.ingestExistingDownloads(using: doctor)
         }
         .onAppear {
             refreshInstalledCount()

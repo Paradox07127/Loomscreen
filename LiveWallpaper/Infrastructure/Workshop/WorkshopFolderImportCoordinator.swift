@@ -76,22 +76,36 @@ final class WorkshopFolderImportCoordinator {
         emitSummary(folder: folder, imported: imported, skipped: projectFolders.count - imported)
     }
 
-    /// Reconciles the managed library with what SteamCMD has on disk: imports
-    /// every downloaded project that isn't already recorded, so the Installed
-    /// tab reflects the SteamCMD download folder by default — including items
-    /// downloaded manually or before this ran. Silent unless it actually adds
-    /// something; re-runs are cheap (a directory scan + a set check).
-    func ingestSteamCMDDownloads(using doctor: SteamCMDDoctorService) async {
+    /// Reconciles the managed library with what is already on disk: imports
+    /// every project that isn't already recorded, from BOTH the app-managed
+    /// SteamCMD download tree AND the user-configured "Workshop library folder"
+    /// — so the Installed tab reflects existing downloads by default, including
+    /// items the user downloaded with their own SteamCMD / the Steam client to a
+    /// folder they granted access to. Silent unless it actually adds something;
+    /// re-runs are cheap (a directory scan + a set check).
+    func ingestExistingDownloads(using doctor: SteamCMDDoctorService) async {
         guard !isIngesting, !isImporting else { return }
         isIngesting = true
         defer { isIngesting = false }
 
-        let known = Set(SettingsManager.shared.loadGlobalSettings().recentWPEImports.map(\.origin.workshopID))
+        var known = Set(SettingsManager.shared.loadGlobalSettings().recentWPEImports.map(\.origin.workshopID))
         var added = 0
+
+        // 1. App-managed SteamCMD download tree (container-local).
         await doctor.enumerateDownloadedItemFolders { [weak self] folder in
             guard let self else { return }
             guard !known.contains(folder.lastPathComponent) else { return }
-            if await self.importOne(folder) { added += 1 }
+            if await self.importOne(folder) {
+                added += 1
+                known.insert(folder.lastPathComponent)
+            }
+        }
+
+        // 2. The user-configured "Workshop library folder" — reuses the bookmark
+        //    that setting persists. Previously only a debug harness read it, so
+        //    pointing it at a real download folder did nothing for Installed.
+        if let libraryRoot = SettingsManager.shared.loadWorkshopLibraryRootBookmark() {
+            added += await importNewProjects(fromWorkshopLibrary: libraryRoot, known: known)
         }
 
         guard added > 0 else { return }
@@ -101,6 +115,39 @@ final class WorkshopFolderImportCoordinator {
             message: String(localized: "Added \(added) downloaded wallpaper(s) to your library.", comment: "Sync summary. Placeholder is the number of newly imported downloads."),
             isSuccess: true
         )
+    }
+
+    /// Imports every not-yet-recorded WPE project discovered under the user's
+    /// configured Workshop library folder. Returns the number newly added.
+    private func importNewProjects(fromWorkshopLibrary rootBookmark: Data, known: Set<String>) async -> Int {
+        let discovered: [WallpaperEngineLibraryScanner.DiscoveredProject]
+        do {
+            discovered = try await WallpaperEngineLibraryScanner().scan(
+                rootBookmarkData: rootBookmark,
+                alreadyImportedWorkshopIDs: known
+            )
+        } catch {
+            logger.info("Workshop library scan failed: \(error.localizedDescription, privacy: .public)")
+            return 0
+        }
+
+        let fresh = discovered.filter { !$0.importedAlready }
+        guard !fresh.isEmpty else { return 0 }
+
+        // `scan()` releases its own security scope when it returns; re-acquire it
+        // on the root so the per-project import reads (and source bookmarks) work.
+        guard case .success(let resolved) = SecurityScopedBookmarkResolver.shared.resolve(
+            rootBookmark,
+            target: .workshopLibraryRoot
+        ) else { return 0 }
+        let didStart = resolved.url.startAccessingSecurityScopedResource()
+        defer { if didStart { resolved.url.stopAccessingSecurityScopedResource() } }
+
+        var added = 0
+        for project in fresh where await importOne(project.folderURL) {
+            added += 1
+        }
+        return added
     }
 
     /// Imports one project folder into the managed library and records it.
