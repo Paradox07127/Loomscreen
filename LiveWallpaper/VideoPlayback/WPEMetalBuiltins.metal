@@ -761,7 +761,12 @@ fragment half4 wpe_effect_waterwaves_fragment(
         return half4(half(mag), half(mag * 0.4), 0.0h, 1.0h);
     }
 
-    return texture0.sample(linearSampler, uv);
+    // Keep alpha from the UNDISPLACED UV so the wave ripples color within the silhouette
+    // instead of punching animated transparent holes where the displaced UV hits alpha-cut margins.
+    half4 base = texture0.sample(linearSampler, in.uv);
+    half4 displaced = texture0.sample(linearSampler, uv);
+    displaced.a = base.a;
+    return displaced;
 }
 
 // Phase 2D-F: more single-pass effect approximations that show up across
