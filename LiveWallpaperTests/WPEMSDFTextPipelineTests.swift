@@ -80,8 +80,7 @@ struct WPEMSDFTextPipelineTests {
                 object: object,
                 font: font,
                 atlas: atlas,
-                generator: generator,
-                fontID: "Helvetica@32"
+                generator: generator
             )
             if mesh == nil { try await Task.sleep(nanoseconds: 10_000_000) }
         }
