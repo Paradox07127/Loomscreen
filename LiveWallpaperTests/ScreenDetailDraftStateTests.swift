@@ -28,6 +28,7 @@ struct ScreenDetailDraftStateTests {
             videoColorSpace: .auto,
             particleDensity: 1.0,
             selectedFrameRateLimit: .fps60,
+            sceneMouseInteractionEnabled: true,
             hasPreviewSource: false
         )
 

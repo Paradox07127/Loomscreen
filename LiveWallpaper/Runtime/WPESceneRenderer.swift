@@ -25,7 +25,15 @@ protocol WPESceneRenderer: AnyObject, WallpaperPerformanceConfigurable {
     func load() async throws
     func reload() async throws
     func setThrottled(_ throttled: Bool)
+    /// Enables or disables cursor reactivity (camera parallax + pointer-driven
+    /// shaders). Default no-op so renderers that don't sample the pointer (the
+    /// WebGL fallback) don't have to implement it.
+    func setMouseInteractionEnabled(_ enabled: Bool)
     func cleanup()
+}
+
+extension WPESceneRenderer {
+    func setMouseInteractionEnabled(_ enabled: Bool) {}
 }
 
 /// Optional capability a scene renderer can adopt to apply project-property

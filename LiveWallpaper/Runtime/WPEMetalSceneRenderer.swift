@@ -108,6 +108,11 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
     private var cameraParallaxSettings: WPESceneCameraParallaxSettings = .disabled
     private var cameraParallaxSmoother = WPECameraParallaxSmoother()
     private var currentProfile: WallpaperPerformanceProfile = .quality
+    /// When false, the per-frame pointer is pinned to the screen center so the
+    /// scene stops reacting to the cursor (camera parallax freezes, pointer
+    /// shaders see a constant). Driven by the per-screen "Mouse Interaction"
+    /// playback toggle; default on preserves the historical behavior.
+    private var mouseInteractionEnabled = true
     /// User-selected frame rate ceiling, applied to `mtkView.preferredFramesPerSecond`
     /// whenever the renderer is not throttled / suspended. Defaults to the
     /// WPE-compatible 30 FPS until `setFrameRateLimit(_:)` overrides it.
@@ -943,7 +948,12 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
         guard let pipeline = renderPipeline else {
             throw WPEMetalRenderExecutorError.noRenderablePasses
         }
-        let pointer = pointerSampler.sample(mtkView)
+        // Pin to center when mouse interaction is off so cursor-driven parallax
+        // and pointer shaders go neutral (and stay there — center maps to a zero
+        // parallax target).
+        let pointer = mouseInteractionEnabled
+            ? pointerSampler.sample(mtkView)
+            : SIMD2<Double>(0.5, 0.5)
         var uniforms = frameClock.runtimeUniforms(
             profile: currentProfile,
             pointerPosition: pointer
@@ -1367,6 +1377,10 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
         isThrottled = throttled
         guard currentProfile != .suspended else { return }
         mtkView.preferredFramesPerSecond = effectivePreferredFramesPerSecond
+    }
+
+    func setMouseInteractionEnabled(_ enabled: Bool) {
+        mouseInteractionEnabled = enabled
     }
 
     /// Applies the user-selected frame rate ceiling. `.unlimited` falls

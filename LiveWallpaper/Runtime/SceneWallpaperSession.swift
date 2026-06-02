@@ -16,6 +16,10 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
     private var window: NSWindow?
     private var renderer: WPESceneRenderer?
     private var currentProfile: WallpaperPerformanceProfile = .quality
+    /// Persisted per-screen "Mouse Interaction" state, re-applied to the renderer
+    /// on every (re)build and on the WebGL fallback swap so a saved-off scene
+    /// stays cursor-frozen across reloads.
+    private var mouseInteractionEnabled = true
     private var isVisible = true
     private var didStartLoad = false
     private var loadTask: Task<Void, Never>?
@@ -118,6 +122,13 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
     func setThrottled(_ throttled: Bool) {
         isThrottled = throttled
         renderer?.setThrottled(throttled)
+    }
+
+    /// Per-screen cursor-reactivity toggle. Stored so the WebGL fallback swap
+    /// can re-apply it; pushed straight to the live renderer.
+    func setMouseInteractionEnabled(_ enabled: Bool) {
+        mouseInteractionEnabled = enabled
+        renderer?.setMouseInteractionEnabled(enabled)
     }
 
     func cleanup() {
@@ -247,6 +258,7 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
         }
         installProgressHandler(on: next)
         next.applyPerformanceProfile(isVisible ? currentProfile : .suspended)
+        next.setMouseInteractionEnabled(mouseInteractionEnabled)
         if isThrottled {
             next.setThrottled(true)
         }

@@ -127,6 +127,18 @@ final class PlaybackCoordinator {
         #endif
     }
 
+    /// Scene-only "Mouse Interaction" toggle: persists the per-screen preference
+    /// and pushes it to the live scene session so the change takes effect now.
+    func updateSceneMouseInteraction(_ enabled: Bool, for screen: Screen) {
+        guard var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
+              enabled != configuration.sceneMouseInteractionEnabled else { return }
+        configuration.sceneMouseInteractionEnabled = enabled
+        save(configuration)
+        #if !LITE_BUILD
+        (screen.runtimeSession as? SceneWallpaperSession)?.setMouseInteractionEnabled(enabled)
+        #endif
+    }
+
     func updateVideoColorSpace(_ colorSpace: VideoColorSpace, for screen: Screen) {
         guard var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               configuration.videoColorSpace != colorSpace else { return }

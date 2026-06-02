@@ -1320,6 +1320,10 @@ final class ScreenManager {
         playbackCoordinator.updateVideoColorSpace(colorSpace, for: screen)
     }
 
+    func updateSceneMouseInteraction(_ enabled: Bool, for screen: Screen) {
+        playbackCoordinator.updateSceneMouseInteraction(enabled, for: screen)
+    }
+
     func updateVideoDisplayMode(_ mode: VideoDisplayMode, for screen: Screen) {
         guard var sourceConfiguration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               sourceConfiguration.wallpaperType == .video,
@@ -1419,6 +1423,7 @@ final class ScreenManager {
         config.wallpaperMode = .playlist
         config.muted = true
         config.videoVolume = 1.0
+        config.sceneMouseInteractionEnabled = true
         config.savedHTMLConfig = .default
         if case .html(let source, _) = config.activeWallpaper {
             config.activeWallpaper = .html(source: source, config: .default)
@@ -1635,6 +1640,7 @@ final class ScreenManager {
             // this is also why those controls used to be dead UI for
             // `.scene` — there was nothing to push them through.)
             sceneSession.frameRateController?.setFrameRateLimit(configuration.frameRateLimit)
+            sceneSession.setMouseInteractionEnabled(configuration.sceneMouseInteractionEnabled)
             if let audio = sceneSession.audioController {
                 audio.setAudioMuted(configuration.muted)
                 audio.setAudioVolume(configuration.videoVolume)

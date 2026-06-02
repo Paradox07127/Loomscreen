@@ -27,6 +27,9 @@ struct CommonPlaybackInspector: View {
     @Binding var videoDisplayMode: VideoDisplayMode
     @Binding var frameRateLimit: FrameRateLimit
     @Binding var syncToLockScreen: Bool
+    /// Scene-only cursor-reactivity toggle. Bound from the draft; only the
+    /// scene row reads it.
+    @Binding var sceneMouseInteractionEnabled: Bool
     /// Optional binding present only when `wallpaperType == .html`. Drives
     /// the audio path so HTML's `WKWebView` actually mutes its media
     /// elements — `AVPlayer.muted` is a no-op for HTML wallpapers.
@@ -61,6 +64,10 @@ struct CommonPlaybackInspector: View {
                         Divider()
                         videoDisplayModeRow
                     }
+                    if showsMouseInteractionRow {
+                        Divider()
+                        mouseInteractionRow
+                    }
                     if showsSyncToLockScreenRow {
                         Divider()
                         syncToLockScreenRow
@@ -89,6 +96,12 @@ struct CommonPlaybackInspector: View {
 
     private var hasMultipleDisplays: Bool {
         screenManager.screens.count > 1
+    }
+
+    /// Cursor-reactivity is a scene-only concept (camera parallax / pointer
+    /// shaders) — video / HTML / shader wallpapers don't sample the pointer here.
+    private var showsMouseInteractionRow: Bool {
+        wallpaperType == .scene
     }
 
     private var showsSyncToLockScreenRow: Bool {
@@ -197,6 +210,33 @@ struct CommonPlaybackInspector: View {
                 guard videoDisplayMode != target else { return }
                 videoDisplayMode = target
                 screenManager.updateVideoDisplayMode(target, for: screen)
+            }
+        )
+    }
+
+    private var mouseInteractionRow: some View {
+        SettingRow(
+            icon: "cursorarrow.rays",
+            iconColor: sceneMouseInteractionEnabled ? .blue : .secondary,
+            title: "Mouse Interaction",
+            info: "When on, the scene reacts to your cursor — camera parallax follows the pointer and pointer-driven effects respond. Turn off to keep the scene perfectly still regardless of where the cursor is."
+        ) {
+            Toggle("", isOn: mouseInteractionBinding)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .accessibilityLabel(Text("Mouse interaction"))
+                .accessibilityHint(Text("When off, the scene stops following the cursor"))
+        }
+    }
+
+    private var mouseInteractionBinding: Binding<Bool> {
+        Binding(
+            get: { sceneMouseInteractionEnabled },
+            set: { newValue in
+                guard sceneMouseInteractionEnabled != newValue else { return }
+                sceneMouseInteractionEnabled = newValue
+                screenManager.updateSceneMouseInteraction(newValue, for: screen)
             }
         )
     }

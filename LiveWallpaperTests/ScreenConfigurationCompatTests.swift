@@ -33,6 +33,28 @@ struct ScreenConfigurationCompatTests {
         #expect(config.fitMode == .aspectFit)
     }
 
+    @Test("sceneMouseInteractionEnabled round-trips and defaults to true on legacy blobs")
+    func sceneMouseInteractionRoundTripAndLegacyDefault() throws {
+        var config = ScreenConfiguration(
+            screenID: 12_345,
+            wallpaper: .video(bookmarkData: Data([0xAA, 0xBB])),
+            savedVideoBookmarkData: Data([0xAA, 0xBB])
+        )
+        config.sceneMouseInteractionEnabled = false
+
+        // Round-trip preserves the explicit value.
+        let encoded = try JSONEncoder().encode(config)
+        let decoded = try JSONDecoder().decode(ScreenConfiguration.self, from: encoded)
+        #expect(decoded.sceneMouseInteractionEnabled == false)
+
+        // A legacy blob with no such key defaults to true (cursor-reactive).
+        var dict = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        dict.removeValue(forKey: "sceneMouseInteractionEnabled")
+        let stripped = try JSONSerialization.data(withJSONObject: dict, options: .sortedKeys)
+        let legacy = try JSONDecoder().decode(ScreenConfiguration.self, from: stripped)
+        #expect(legacy.sceneMouseInteractionEnabled == true)
+    }
+
     @Test("Decoding a legacy ScreenConfiguration without videoVolume defaults to full volume")
     func decodeLegacyConfigurationWithoutVideoVolume() throws {
         let baselineConfig = ScreenConfiguration(
