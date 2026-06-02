@@ -28,10 +28,20 @@ enum WPEMSDFGeometryMath {
         min(max(value, lower), upper)
     }
 
+    static func nonZeroSign(_ value: Double) -> Double {
+        value > 0 ? 1.0 : -1.0
+    }
+
+    static func median(_ a: Double, _ b: Double, _ c: Double) -> Double {
+        max(min(a, b), min(max(a, b), c))
+    }
+
     static func lerp(_ a: WPEMSDFPoint, _ b: WPEMSDFPoint, _ t: Double) -> WPEMSDFPoint {
         a + (b - a) * t
     }
 }
+
+typealias WPEMSDFSignedDistance = (distance: Double, dot: Double)
 
 enum WPEMSDFSegment {
     case linear(p0: WPEMSDFPoint, p1: WPEMSDFPoint, color: WPEMSDFEdgeColor)
@@ -110,21 +120,53 @@ enum WPEMSDFSegment {
         return WPEMSDFGeometryMath.normalized(endPoint - startPoint)
     }
 
-    func signedDistance(to p: WPEMSDFPoint) -> (distance: Double, orthogonality: Double) {
-        let t: Double
+    func signedDistance(to p: WPEMSDFPoint) -> (distance: WPEMSDFSignedDistance, t: Double) {
+        let distanceT: Double
+        let pseudoT: Double
         switch self {
         case let .linear(p0, p1, _):
             let edge = p1 - p0
             let denom = WPEMSDFGeometryMath.dot(edge, edge)
-            t = denom > WPEMSDFGeometryMath.epsilon
-                ? WPEMSDFGeometryMath.clamp(WPEMSDFGeometryMath.dot(p - p0, edge) / denom, 0, 1)
+            let t = denom > WPEMSDFGeometryMath.epsilon
+                ? WPEMSDFGeometryMath.dot(p - p0, edge) / denom
                 : 0
+            distanceT = WPEMSDFGeometryMath.clamp(t, 0, 1)
+            pseudoT = t
         case .quadratic:
-            t = nearestParameter(to: p, samples: 16, refinementSteps: 4)
+            let t = nearestParameter(to: p, samples: 16, refinementSteps: 4)
+            distanceT = t
+            pseudoT = pseudoDistanceParameter(nearest: t, origin: p)
         case .cubic:
-            t = nearestParameter(to: p, samples: 24, refinementSteps: 6)
+            let t = nearestParameter(to: p, samples: 24, refinementSteps: 6)
+            distanceT = t
+            pseudoT = pseudoDistanceParameter(nearest: t, origin: p)
         }
-        return distance(at: t, to: p)
+        return (signedDistance(at: distanceT, to: p), pseudoT)
+    }
+
+    func distanceToPseudoDistance(_ sd: WPEMSDFSignedDistance, origin p: WPEMSDFPoint, t: Double) -> Double {
+        let endpoint: WPEMSDFPoint
+        let tangent: WPEMSDFPoint
+        let isBeyondEndpoint: (Double) -> Bool
+
+        if t < 0 {
+            endpoint = point(at: 0)
+            tangent = direction(at: 0)
+            isBeyondEndpoint = { $0 < 0 }
+        } else if t > 1 {
+            endpoint = point(at: 1)
+            tangent = direction(at: 1)
+            isBeyondEndpoint = { $0 > 0 }
+        } else {
+            return sd.distance
+        }
+
+        let delta = p - endpoint
+        let projection = WPEMSDFGeometryMath.dot(delta, tangent)
+        guard isBeyondEndpoint(projection) else { return sd.distance }
+
+        let pseudoDistance = WPEMSDFGeometryMath.cross(tangent, delta)
+        return abs(pseudoDistance) <= abs(sd.distance) ? pseudoDistance : sd.distance
     }
 
     func split(at t: Double) -> (WPEMSDFSegment, WPEMSDFSegment) {
@@ -222,16 +264,27 @@ enum WPEMSDFSegment {
         return t
     }
 
-    private func distance(at t: Double, to p: WPEMSDFPoint) -> (distance: Double, orthogonality: Double) {
+    private func pseudoDistanceParameter(nearest t: Double, origin p: WPEMSDFPoint) -> Double {
+        if t <= WPEMSDFGeometryMath.epsilon {
+            let projection = WPEMSDFGeometryMath.dot(p - point(at: 0), direction(at: 0))
+            if projection < 0 { return -1 }
+        } else if t >= 1 - WPEMSDFGeometryMath.epsilon {
+            let projection = WPEMSDFGeometryMath.dot(p - point(at: 1), direction(at: 1))
+            if projection > 0 { return 2 }
+        }
+        return t
+    }
+
+    private func signedDistance(at t: Double, to p: WPEMSDFPoint) -> WPEMSDFSignedDistance {
         let q = point(at: t)
         let delta = p - q
         let magnitude = WPEMSDFGeometryMath.length(delta)
         let tangent = direction(at: t)
-        let sign = WPEMSDFGeometryMath.cross(tangent, delta) >= 0 ? 1.0 : -1.0
-        let orthogonality = magnitude > WPEMSDFGeometryMath.epsilon
+        let sign = WPEMSDFGeometryMath.nonZeroSign(WPEMSDFGeometryMath.cross(tangent, delta))
+        let dot = magnitude > WPEMSDFGeometryMath.epsilon
             ? abs(WPEMSDFGeometryMath.dot(delta / magnitude, tangent))
             : 0
-        return (distance: sign * magnitude, orthogonality: orthogonality)
+        return (distance: sign * magnitude, dot: dot)
     }
 }
 
@@ -241,6 +294,11 @@ struct WPEMSDFContour {
 
 struct WPEMSDFShape {
     var contours: [WPEMSDFContour]
+
+    private struct EdgeDistance {
+        let signedDistance: WPEMSDFSignedDistance
+        let pseudoDistance: Double
+    }
 
     func bounds() -> CGRect {
         var hasPoint = false
@@ -282,47 +340,75 @@ struct WPEMSDFShape {
     }
 
     func signedDistance(at point: WPEMSDFPoint, channel: WPEMSDFEdgeColor) -> Double {
-        let closest = closestDistance(at: point, channel: channel) ?? closestDistance(at: point, channel: nil)
-        guard let closest else { return 0 }
-        let sign = windingNumber(at: point) == 0 ? -1.0 : 1.0
-        return sign * abs(closest.distance)
-    }
-
-    /// Per-channel signed distances for one pixel, computing the inside/outside
-    /// sign (the expensive winding test) ONCE and sharing it across R/G/B —
-    /// identical output to three `signedDistance(at:channel:)` calls but ~⅓ the
-    /// winding cost. Used by the glyph generator's hot per-pixel loop.
-    func signedDistances(at point: WPEMSDFPoint) -> (r: Double, g: Double, b: Double) {
-        let sign = windingNumber(at: point) == 0 ? -1.0 : 1.0
-        func magnitude(_ channel: WPEMSDFEdgeColor) -> Double {
-            let closest = closestDistance(at: point, channel: channel) ?? closestDistance(at: point, channel: nil)
-            return sign * abs(closest?.distance ?? 0)
+        let distances = signedDistances(at: point)
+        switch channel {
+        case .red:
+            return distances.r
+        case .green:
+            return distances.g
+        case .blue:
+            return distances.b
+        default:
+            return WPEMSDFGeometryMath.median(distances.r, distances.g, distances.b)
         }
-        return (magnitude(.red), magnitude(.green), magnitude(.blue))
     }
 
-    private func closestDistance(
-        at point: WPEMSDFPoint,
-        channel: WPEMSDFEdgeColor?
-    ) -> (distance: Double, orthogonality: Double)? {
-        var best: (distance: Double, orthogonality: Double)?
-        for contour in contours {
-            for segment in contour.segments {
-                if let channel, !segment.color.contains(channel) {
-                    continue
-                }
-                let candidate = segment.signedDistance(to: point)
-                if isBetter(candidate, than: best) {
-                    best = candidate
-                }
+    /// Per-channel signed pseudo-distances for one pixel (msdfgen semantics):
+    /// pick each channel's nearest same-color edge, take that edge's signed
+    /// pseudo-distance, then correct the overall sign against the winding number
+    /// so glyph fill can never invert regardless of contour orientation.
+    func signedDistances(at point: WPEMSDFPoint) -> (r: Double, g: Double, b: Double) {
+        let distances = closestDistances(at: point)
+        func value(_ candidate: EdgeDistance?) -> Double {
+            (candidate ?? distances.any)?.pseudoDistance ?? 0
+        }
+
+        var r = value(distances.red)
+        var g = value(distances.green)
+        var b = value(distances.blue)
+        let insideSign = windingNumber(at: point) == 0 ? -1.0 : 1.0
+        let median = WPEMSDFGeometryMath.median(r, g, b)
+        if WPEMSDFGeometryMath.nonZeroSign(median) != insideSign {
+            r = -r
+            g = -g
+            b = -b
+        }
+        return (r, g, b)
+    }
+
+    private func closestDistances(
+        at point: WPEMSDFPoint
+    ) -> (red: EdgeDistance?, green: EdgeDistance?, blue: EdgeDistance?, any: EdgeDistance?) {
+        var red: EdgeDistance?
+        var green: EdgeDistance?
+        var blue: EdgeDistance?
+        var any: EdgeDistance?
+
+        func update(_ current: inout EdgeDistance?, with candidate: EdgeDistance) {
+            if isBetter(candidate.signedDistance, than: current?.signedDistance) {
+                current = candidate
             }
         }
-        return best
+
+        for contour in contours {
+            for segment in contour.segments {
+                let distance = segment.signedDistance(to: point)
+                let candidate = EdgeDistance(
+                    signedDistance: distance.distance,
+                    pseudoDistance: segment.distanceToPseudoDistance(distance.distance, origin: point, t: distance.t)
+                )
+                update(&any, with: candidate)
+                if segment.color.contains(.red) { update(&red, with: candidate) }
+                if segment.color.contains(.green) { update(&green, with: candidate) }
+                if segment.color.contains(.blue) { update(&blue, with: candidate) }
+            }
+        }
+        return (red, green, blue, any)
     }
 
     private func isBetter(
-        _ candidate: (distance: Double, orthogonality: Double),
-        than current: (distance: Double, orthogonality: Double)?
+        _ candidate: WPEMSDFSignedDistance,
+        than current: WPEMSDFSignedDistance?
     ) -> Bool {
         guard let current else { return true }
         let candidateDistance = abs(candidate.distance)
@@ -330,7 +416,7 @@ struct WPEMSDFShape {
         if abs(candidateDistance - currentDistance) > 1.0e-7 {
             return candidateDistance < currentDistance
         }
-        return candidate.orthogonality < current.orthogonality
+        return candidate.dot < current.dot
     }
 
     private func windingNumber(at point: WPEMSDFPoint) -> Int {
