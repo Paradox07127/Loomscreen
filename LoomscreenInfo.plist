@@ -32,6 +32,8 @@
 	<true/>
 	<key>NSAccentColorName</key>
 	<string>AccentColor</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Audio response analyzes the audio currently playing on your Mac, on-device, to make wallpapers move with the music. No audio is recorded, saved, or sent anywhere.</string>
 	<key>NSDesktopFolderUsageDescription</key>
 	<string>Access to Desktop is needed to play wallpaper files stored there.</string>
 	<key>NSDocumentsFolderUsageDescription</key>
