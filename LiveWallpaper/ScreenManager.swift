@@ -127,6 +127,17 @@ final class ScreenManager {
     @ObservationIgnored private var transientRuntimeErrors: [CGDirectDisplayID: WallpaperRuntimeError] = [:]
     @ObservationIgnored private let exclusiveRenderingCoordinator = ExclusiveRenderingCoordinator()
     @ObservationIgnored private var exclusiveRenderingObservation: NSObjectProtocol?
+    private enum UserAbsenceReason: Hashable {
+        case screenLocked
+        case displaySleep
+        case systemSleep
+    }
+    /// Reasons the user is not watching the desktop. Folded into the effective
+    /// performance profile (`isUserAbsent`) so lock / display-sleep / system
+    /// sleep suspend through the single policy path instead of a parallel
+    /// pause/resume overlay.
+    @ObservationIgnored private var userAbsenceReasons: Set<UserAbsenceReason> = []
+    private var isUserAbsent: Bool { !userAbsenceReasons.isEmpty }
     /// Coordinates per-screen playback configuration mutations + transition
     /// tokens. Lazy because it captures `self` for the effect-application and
     /// refresh-rate-lookup callbacks; the stored properties used by those
@@ -159,7 +170,13 @@ final class ScreenManager {
         reportRuntimeError: { [weak self] screenID, error in
             self?.setTransientRuntimeError(error, for: screenID)
         },
-        originReconciler: originReconciler
+        originReconciler: originReconciler,
+        isGloballyEnabled: { [weak self] in
+            self?.wallpapersGloballyEnabled ?? true
+        },
+        isUserAbsent: { [weak self] in
+            self?.isUserAbsent ?? false
+        }
     )
     /// Lazy because the `saveConfiguration` / `restoreWallpaperSession`
     /// callbacks capture `self` (matches `playbackCoordinator`'s pattern).
@@ -448,51 +465,34 @@ final class ScreenManager {
 
     private func handleScreenLocked() {
         Logger.info("Screen locked — suspending wallpaper sessions", category: .lifecycle)
-        suspendAllForUserAbsence()
+        setUserAbsence(.screenLocked, present: true)
     }
 
     private func handleDisplaySleep() {
         Logger.info("Display asleep — suspending wallpaper sessions", category: .lifecycle)
-        suspendAllForUserAbsence()
-    }
-
-    /// Lock screen 和 display sleep 都属于「用户不在看屏幕」语义，复用 PowerPolicy
-    /// 的 lockScreen 集合：渲染都停下，等下一次恢复信号（unlock / wake）再放回。
-    private func suspendAllForUserAbsence() {
-        for screen in screens {
-            if let playback = screen.playbackController, playback.isPlaying {
-                playback.pause()
-                powerPolicy.markPausedByLockScreen(screen.id)
-            }
-            if let session = screen.runtimeSession, screen.playbackController == nil {
-                session.applyPerformanceProfile(.suspended)
-                powerPolicy.markPausedByLockScreen(screen.id)
-            }
-        }
-        markWallpaperSessionStateChanged()
+        setUserAbsence(.displaySleep, present: true)
     }
 
     private func handleDisplayWake() {
         Logger.info("Display awake — restoring wallpaper sessions", category: .lifecycle)
-        resumeAllAfterUserAbsence()
+        setUserAbsence(.displaySleep, present: false)
     }
 
     private func handleScreenUnlocked() {
         Logger.info("Screen unlocked — restoring wallpaper sessions", category: .lifecycle)
-        resumeAllAfterUserAbsence()
+        setUserAbsence(.screenLocked, present: false)
     }
 
-    private func resumeAllAfterUserAbsence() {
-        for screen in screens where powerPolicy.wasPausedByLockScreen(screen.id) {
-            powerPolicy.markResumedFromLockScreen(screen.id)
-            if let playback = screen.playbackController {
-                playback.play()
-            } else if let session = screen.runtimeSession {
-                session.applyPerformanceProfile(.quality)
-            }
-        }
-        // Re-apply power + full-screen policies — state may have changed during absence.
-        handlePowerStateChange(powerMonitor.currentPowerSource)
+    /// Lock screen and display sleep both mean "user is not watching". They
+    /// fold into the effective performance profile via `isUserAbsent`, so a
+    /// single policy refresh suspends or restores every session (respecting
+    /// each video's `userIntendsToPlay`) — no separate pause/resume overlay.
+    private func setUserAbsence(_ reason: UserAbsenceReason, present: Bool) {
+        let changed = present
+            ? userAbsenceReasons.insert(reason).inserted
+            : (userAbsenceReasons.remove(reason) != nil)
+        guard changed else { return }
+        refreshPerformancePolicyForAllScreens()
         markWallpaperSessionStateChanged()
     }
 
@@ -612,57 +612,12 @@ final class ScreenManager {
         }
     }
 
+    /// Full-screen / window-occlusion changes fold into the effective profile
+    /// like every other condition; a single policy refresh applies the unified
+    /// play/pause decision. The `hiddenScreens` snapshot is now informational —
+    /// the policy reads the detector live.
     private func handleFullScreenChange(_ hiddenScreens: [CGDirectDisplayID: Bool]) {
-        let globalSettings = SettingsManager.shared.loadGlobalSettings()
-        let powerSource = powerMonitor.currentPowerSource
-        let thermalState = ProcessInfo.processInfo.thermalState
-        let isGameModeActive = globalSettings.pauseInGameMode && GameModeDetector.isActive
-        let isApplicationRuleActive = currentApplicationRuleActive(globalSettings)
-
-        for screen in screens {
-            let isHidden = hiddenScreens[screen.id] ?? false
-            let shouldApplyFullScreenPolicy = WallpaperPolicyEngine.shouldApplyFullScreenPolicy(
-                globalSettings: globalSettings,
-                isHiddenByFullScreen: isHidden
-            )
-            let shouldApplyOcclusionPolicy = WallpaperPolicyEngine.shouldApplyWindowOcclusionPolicy(
-                globalSettings: globalSettings,
-                isWindowOccluding: fullScreenDetector.isDesktopOccluded(for: screen.id)
-            )
-            // Either window-coverage rule pauses video the same way (and reuses
-            // the same paused-by-full-screen bookkeeping for resume).
-            let shouldPauseForWindows = shouldApplyFullScreenPolicy || shouldApplyOcclusionPolicy
-
-            if shouldPauseForWindows {
-                if let playback = screen.playbackController, playback.isPlaying {
-                    playback.pause()
-                    powerPolicy.markPausedByFullScreen(screen.id)
-                }
-            } else {
-                if let playback = screen.playbackController,
-                   powerPolicy.wasPausedByFullScreen(screen.id) {
-                    if WallpaperPolicyEngine.shouldResumeFromFullScreen(
-                        globalSettings: globalSettings,
-                        powerSource: powerSource,
-                        wasPausedByFullScreen: true
-                    ) {
-                        playback.play()
-                    }
-                    powerPolicy.markResumedFromFullScreen(screen.id)
-                }
-            }
-
-            applyPerformancePolicy(
-                to: screen,
-                globalSettings: globalSettings,
-                powerSource: powerSource,
-                isHiddenByFullScreen: shouldApplyFullScreenPolicy,
-                isWindowOccluding: shouldApplyOcclusionPolicy,
-                isApplicationRuleActive: isApplicationRuleActive,
-                thermalState: thermalState,
-                isGameModeActive: isGameModeActive
-            )
-        }
+        refreshPerformancePolicyForAllScreens()
         updatePlaybackState()
     }
 
@@ -714,9 +669,10 @@ final class ScreenManager {
         updatePlaybackState()
         updateFullScreenFallbackPolling()
 
-        // Enforce a persisted "off" master gate on freshly-restored sessions.
-        // Only when disabled — when enabled we leave visibility to the normal
-        // power / full-screen policies rather than force-showing here.
+        // Enforce a persisted "off" master gate. With the build gate in
+        // `restoreWallpaperSession`, disabled screens never build a session
+        // above; this is the safety net that also tears down any session
+        // adopted/preserved across a screen refresh so nothing stays resident.
         if !wallpapersGloballyEnabled {
             applyGlobalRenderGate()
         }
@@ -829,6 +785,22 @@ final class ScreenManager {
         configuration: ScreenConfiguration,
         preservingState: Bool
     ) {
+        // Master gate: when wallpapers are globally disabled we keep the
+        // configuration persisted but do NOT build a live session. This avoids
+        // allocating the renderer / scene runtime / decoded assets only to
+        // suspend them — the session is (re)built by `applyGlobalRenderGate()`
+        // when the master switch is turned back on.
+        guard wallpapersGloballyEnabled else {
+            if screen.runtimeSession != nil { releaseRuntimeSession(screen) }
+            // No live session is built, but the caller has just persisted this
+            // configuration. Refresh the derived session state so a wallpaper
+            // assigned while the gate is off is reflected as configured-but-
+            // `.off` (keeping the master switch enabled) — mirrors the video
+            // path's refresh in `PlaybackCoordinator.setupVideoPlayback`.
+            notifyWallpaperSessionChanged()
+            return
+        }
+
         guard let definition = WallpaperSessionDefinition(configuration: configuration) else {
             Logger.warning("Skipping malformed wallpaper configuration for screen \(screen.id)", category: .screenManager)
             releaseRuntimeSession(screen)
@@ -894,7 +866,38 @@ final class ScreenManager {
     }
 
     func wallpaperSummary(for screen: Screen) -> WallpaperSessionSummary {
-        wallpaperSessionSummaryCache.summary(for: screen.id, fallback: screen.wallpaperSessionSummary)
+        wallpaperSessionSummaryCache.summary(for: screen.id, fallback: effectiveSummary(for: screen))
+    }
+
+    /// Per-screen summary that accounts for the master render gate. With a live
+    /// session we use its own summary. Without one we still report
+    /// configured-but-`.off` when the master switch is off and a wallpaper is
+    /// persisted — so the overview stays `.off` (and the menu-bar master switch
+    /// stays enabled to turn rendering back on) instead of collapsing to
+    /// `.notConfigured` now that the gate tears sessions down to free memory.
+    private func effectiveSummary(for screen: Screen) -> WallpaperSessionSummary {
+        if screen.runtimeSession != nil {
+            return screen.wallpaperSessionSummary
+        }
+        if !wallpapersGloballyEnabled, let type = persistedWallpaperType(for: screen) {
+            return WallpaperSessionSummary(
+                wallpaperType: type,
+                activity: .off,
+                supportsPlaybackControl: false,
+                subtitle: nil
+            )
+        }
+        return screen.wallpaperSessionSummary
+    }
+
+    /// The wallpaper type a screen would render from its persisted
+    /// configuration, or `nil` when nothing valid is assigned. Uses the same
+    /// validity gate as `restoreWallpaperSession` so an empty/malformed config
+    /// reads as "not configured".
+    private func persistedWallpaperType(for screen: Screen) -> WallpaperType? {
+        guard let config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
+              WallpaperSessionDefinition(configuration: config) != nil else { return nil }
+        return config.activeWallpaper.wallpaperType
     }
 
     /// Currently surfaced error for a screen's runtime session (or `nil`).
@@ -971,7 +974,7 @@ final class ScreenManager {
     private func commitWallpaperSessionState(includePollingRefresh: Bool = false) {
         var next = wallpaperSessionState
         next.summaryCache = WallpaperSessionSummaryCache(
-            entries: screens.map { ($0.id, $0.wallpaperSessionSummary) }
+            entries: screens.map { ($0.id, effectiveSummary(for: $0)) }
         )
         next.isAnyPlaying = screens.contains { $0.playbackController?.isPlaying ?? false }
 
@@ -1009,15 +1012,16 @@ final class ScreenManager {
     func togglePlayback() {
         guard hasControllableWallpaperSessions else { return }
 
-        let isAnyPlaying = screens.contains { $0.playbackController?.isPlaying ?? false }
+        // Decide from user INTENT, not actual playback: a policy-suspended
+        // video reads `isPlaying == false` but the user still "intends" to
+        // play, so toggling must flip intent, not chase the suppressed state.
+        let anyIntendsToPlay = screens.contains { $0.playbackController?.userIntendsToPlay ?? false }
 
-        Logger.info("Toggling global playback: \(isAnyPlaying ? "pausing" : "playing") all videos", category: .videoPlayer)
+        Logger.info("Toggling global playback: \(anyIntendsToPlay ? "pausing" : "playing") all videos", category: .videoPlayer)
 
         for screen in screens {
             guard let playback = screen.playbackController else { continue }
-
-            if isAnyPlaying {
-                powerPolicy.markResumedFromPower(screen.id)
+            if anyIntendsToPlay {
                 playback.pause()
             } else {
                 playback.play()
@@ -1027,11 +1031,14 @@ final class ScreenManager {
         updatePlaybackState()
     }
 
-    /// Master render gate. Toggles whether wallpaper pipelines render at all by
-    /// showing/suspending every session — deliberately WITHOUT touching
-    /// per-screen playback (`play()`/`pause()`), so flipping this neither reads
-    /// nor mutates whether an individual screen is paused. The flag is persisted
-    /// and is the single source of truth for the menu-bar master switch.
+    /// Master render gate. Toggles whether wallpaper pipelines exist at all:
+    /// disabling tears every session down to free its memory, enabling rebuilds
+    /// them from persisted configuration (see `applyGlobalRenderGate`). The flag
+    /// is persisted and is the single source of truth for the menu-bar master
+    /// switch. Note: because sessions are destroyed rather than suspended,
+    /// transient per-screen playback state (a manual pause is not persisted
+    /// anywhere) is not carried across an off→on cycle — rebuilt screens follow
+    /// the normal startup playback policy, exactly as on app relaunch.
     func setWallpapersEnabled(_ enabled: Bool) {
         wallpapersGloballyEnabled = enabled
         UserDefaults.standard.set(enabled, forKey: Self.globallyEnabledDefaultsKey)
@@ -1041,95 +1048,52 @@ final class ScreenManager {
         markWallpaperSessionStateChanged()
     }
 
-    /// Apply the master gate to every live session (show+resume when enabled,
-    /// suspend+hide when disabled). Idempotent; safe to call after sessions are
-    /// (re)built so the gate also holds across launches and new wallpapers.
+    /// Apply the master gate to every screen. When enabled, builds any session
+    /// that is missing (from its persisted configuration) and makes any
+    /// already-live one visible, then re-runs the performance policy so the
+    /// gate never decides quality/suspended itself. When disabled, fully tears
+    /// each session down so its GPU textures, scene runtime, and decoded assets
+    /// are released — rather than leaving a suspended-but-resident renderer
+    /// holding memory. Idempotent and safe to call across launches and after
+    /// new wallpapers are assigned.
     func applyGlobalRenderGate() {
         for screen in screens {
-            guard let session = screen.runtimeSession else { continue }
             if wallpapersGloballyEnabled {
-                session.show()
-                session.resume()
-            } else {
-                session.suspend()
-                session.hide()
+                if screen.runtimeSession == nil {
+                    // Rendering is permitted again — rebuild from the persisted
+                    // configuration. No-op for screens without a saved wallpaper.
+                    // The build path applies the current performance policy itself.
+                    loadConfigurationForScreen(screen)
+                } else {
+                    // Already-live session (idempotent re-enable): only ensure
+                    // the window is visible. Whether it runs or stays suspended
+                    // is decided by the performance policy below — never a blind
+                    // resume() that would override power / thermal / full-screen
+                    // / app-rule state.
+                    screen.runtimeSession?.show()
+                }
+            } else if screen.runtimeSession != nil {
+                releaseRuntimeSession(screen)
             }
+        }
+
+        // Single source of truth for "how hard a live session works". Re-running
+        // the policy after enabling keeps the master gate (a lifecycle axis)
+        // from bypassing the performance-profile axis. Skipped while disabled —
+        // there are no live sessions to target.
+        if wallpapersGloballyEnabled {
+            refreshPerformancePolicyForAllScreens()
         }
     }
     
     // MARK: - Power Management
+    /// Power changes no longer carry their own play/pause logic — they fold
+    /// into the effective performance profile like every other condition, so a
+    /// single refresh applies the unified decision (`userIntendsToPlay` for
+    /// video, profile for ambient) across all screens.
     private func handlePowerStateChange(_ powerSource: PowerMonitor.PowerSource) {
-        let globalSettings = SettingsManager.shared.loadGlobalSettings()
-        let thermalState = ProcessInfo.processInfo.thermalState
-        let isGameModeActive = globalSettings.pauseInGameMode && GameModeDetector.isActive
-        let isApplicationRuleActive = currentApplicationRuleActive(globalSettings)
-
-        var updatedScreens = false
-
-        for screen in screens {
-            let isHiddenByFullScreen = globalSettings.pauseOnFullScreen &&
-                fullScreenDetector.isDesktopHidden(for: screen.id)
-            let isWindowOccluding = globalSettings.pauseOnWindowOcclusion &&
-                fullScreenDetector.isDesktopOccluded(for: screen.id)
-
-            let profile = applyPerformancePolicy(
-                to: screen,
-                globalSettings: globalSettings,
-                powerSource: powerSource,
-                isHiddenByFullScreen: isHiddenByFullScreen,
-                isWindowOccluding: isWindowOccluding,
-                isApplicationRuleActive: isApplicationRuleActive,
-                thermalState: thermalState,
-                isGameModeActive: isGameModeActive
-            )
-
-            let shouldPauseForPower = WallpaperPolicyEngine.shouldPauseForPower(
-                globalSettings: globalSettings,
-                powerSource: powerSource
-            )
-            let shouldResumeForPower = WallpaperPolicyEngine.shouldResumeFromPower(
-                powerSource: powerSource,
-                wasPausedByPower: powerPolicy.wasPausedByPower(screen.id)
-            )
-
-            if let playback = screen.playbackController {
-                if shouldPauseForPower && playback.isPlaying {
-                    Logger.debug("Pausing screen \(screen.id) due to power policy", category: .powerMonitor)
-                    playback.pause()
-                    powerPolicy.markPausedByPower(screen.id)
-                    updatedScreens = true
-                } else if shouldResumeForPower, !playback.isPlaying, profile != .suspended {
-                    // Resume is only safe if the wider policy lets the
-                    // wallpaper run. Game Mode, critical thermal, or a
-                    // fullscreen takeover all keep `profile == .suspended`,
-                    // and racing the resume in those windows would undo the
-                    // performance policy decision we just applied.
-                    Logger.debug("Resuming screen \(screen.id) due to external power (was paused by power management)", category: .powerMonitor)
-                    playback.play()
-                    powerPolicy.markResumedFromPower(screen.id)
-                    updatedScreens = true
-                }
-            } else if let runtimeSession = screen.runtimeSession {
-                if shouldPauseForPower, !powerPolicy.wasPausedByPower(screen.id) {
-                    Logger.debug("Suspending ambient session for screen \(screen.id) due to power policy", category: .powerMonitor)
-                    runtimeSession.applyPerformanceProfile(.suspended)
-                    powerPolicy.markPausedByPower(screen.id)
-                } else if shouldResumeForPower, profile != .suspended {
-                    Logger.debug("Resuming ambient session for screen \(screen.id) due to external power", category: .powerMonitor)
-                    runtimeSession.applyPerformanceProfile(profile)
-                    powerPolicy.markResumedFromPower(screen.id)
-                }
-            }
-        }
-
-        if !powerSource.isOnBattery {
-            let currentScreenIDs = Set(screens.map(\.id))
-            powerPolicy.cleanUpStaleEntries(currentScreenIDs: currentScreenIDs)
-        }
-
-        if updatedScreens {
-            updatePlaybackState()
-        }
+        refreshPerformancePolicyForAllScreens()
+        updatePlaybackState()
     }
 
     @discardableResult
@@ -1150,7 +1114,8 @@ final class ScreenManager {
             isWindowOccluding: isWindowOccluding,
             isApplicationRuleActive: isApplicationRuleActive,
             thermalState: thermalState,
-            isGameModeActive: isGameModeActive
+            isGameModeActive: isGameModeActive,
+            isUserAbsent: isUserAbsent
         )
         screen.runtimeSession?.applyPerformanceProfile(profile)
         return profile
@@ -1208,35 +1173,34 @@ final class ScreenManager {
         Logger.warning("Low memory condition detected, optimizing resource usage", category: .memory)
 
         for screen in screens {
-            if let player = screen.videoPlayer, player.isPlaying {
-                let isActive = NSScreen.screens.contains { $0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID == screen.id }
+            guard let playback = screen.playbackController, playback.isPlaying else { continue }
+            let isActive = NSScreen.screens.contains { $0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID == screen.id }
 
-                if !isActive {
-                    Logger.debug("Pausing background video on screen \(screen.id) to conserve memory", category: .memory)
-                    player.pause()
-                }
+            if !isActive {
+                // Route through the session so intent is cleared: low-memory
+                // pause is deliberate and must not auto-resume on the next
+                // policy refresh (matches the prior direct-pause behavior).
+                Logger.debug("Pausing background video on screen \(screen.id) to conserve memory", category: .memory)
+                playback.pause()
             }
         }
-
     }
     
     // MARK: - System Events
     private func handleSystemSleep() {
         Logger.info("System sleep detected", category: .lifecycle)
-        for screen in screens {
-            screen.runtimeSession?.suspend()
-        }
+        userAbsenceReasons.insert(.systemSleep)
+        refreshPerformancePolicyForAllScreens()
         markWallpaperSessionStateChanged()
     }
 
     private func handleSystemWake() {
         Logger.info("System wake detected", category: .lifecycle)
-        for screen in screens {
-            screen.runtimeSession?.resume()
-        }
         refreshScreens()
         powerMonitor.refreshPowerStatus()
-        handlePowerStateChange(powerMonitor.currentPowerSource)
+        userAbsenceReasons.remove(.systemSleep)
+        refreshPerformancePolicyForAllScreens()
+        markWallpaperSessionStateChanged()
     }
 
     private func captureDesktopSnapshotsForLockIfNeeded() {

@@ -10,9 +10,11 @@ enum WallpaperPolicyEngine {
         isWindowOccluding: Bool,
         isApplicationRuleActive: Bool,
         thermalState: ProcessInfo.ThermalState,
-        isGameModeActive: Bool
+        isGameModeActive: Bool,
+        isUserAbsent: Bool = false
     ) -> WallpaperPerformanceProfile {
-        let shouldSuspend = isGameModeActive ||
+        let shouldSuspend = isUserAbsent ||
+            isGameModeActive ||
             isApplicationRuleActive ||
             shouldPauseForPower(globalSettings: globalSettings, powerSource: powerSource) ||
             shouldSuspendForThermal(thermalState) ||

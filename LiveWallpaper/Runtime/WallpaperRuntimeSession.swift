@@ -88,6 +88,11 @@ protocol HTMLWallpaperConfigApplying: AnyObject {
 @MainActor
 protocol WallpaperPlaybackControllable: WallpaperRuntimeSession {
     var isPlaying: Bool { get }
+    /// The user's transient intent to play, independent of whether a
+    /// performance policy is currently suppressing playback. Manual controls
+    /// read this (not `isPlaying`) so a policy-suspended video still toggles
+    /// from the user's point of view.
+    var userIntendsToPlay: Bool { get }
 
     func play()
     func pause()
@@ -96,7 +101,16 @@ protocol WallpaperPlaybackControllable: WallpaperRuntimeSession {
 @MainActor
 final class VideoWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackControllable {
     private var player: WallpaperVideoPlayer?
-    private var wasPlayingBeforeSuspend: Bool?
+    /// Durable-for-the-session user intent. Set by manual play/pause; never
+    /// touched by a performance-policy suspend. Combined with the current
+    /// profile, this is the single authority for whether the video plays:
+    /// `play = userIntendsToPlay && currentProfile == .quality`.
+    private(set) var userIntendsToPlay = true
+    /// Last profile applied by the policy layer. Remembered so a manual
+    /// play/pause can re-derive the effective state without re-querying the
+    /// policy — e.g. tapping play while on battery records intent but stays
+    /// paused until the profile returns to `.quality`.
+    private var currentProfile: WallpaperPerformanceProfile = .quality
     /// Mirrors `player.setWindowVisible(_:)`. When `false` the wallpaper
     /// window is `orderOut`-ed (master switch off), so the desktop shows
     /// nothing behind it — distinct from `.paused`, where the last frame
@@ -157,11 +171,13 @@ final class VideoWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackCon
     }
 
     func play() {
-        player?.play()
+        userIntendsToPlay = true
+        applyPerformanceProfile(currentProfile)
     }
 
     func pause() {
-        player?.pause()
+        userIntendsToPlay = false
+        applyPerformanceProfile(currentProfile)
     }
 
     func show() {
@@ -175,33 +191,25 @@ final class VideoWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackCon
     }
 
     func applyPerformanceProfile(_ profile: WallpaperPerformanceProfile) {
+        currentProfile = profile
         switch profile {
         case .quality:
-            if let wasPlayingBeforeSuspend {
-                self.wasPlayingBeforeSuspend = nil
-                if wasPlayingBeforeSuspend {
-                    player?.play()
-                }
+            if userIntendsToPlay {
+                player?.play()
+            } else {
+                player?.pause()
             }
         case .suspended:
-            if wasPlayingBeforeSuspend == nil {
-                wasPlayingBeforeSuspend = player?.isPlaying ?? false
-            }
             player?.pause()
         }
     }
 
     func suspend() {
-        guard wasPlayingBeforeSuspend == nil else { return }
-        wasPlayingBeforeSuspend = player?.isPlaying ?? false
-        player?.suspend()
+        applyPerformanceProfile(.suspended)
     }
 
     func resume() {
-        guard let wasPlayingBeforeSuspend else { return }
-        self.wasPlayingBeforeSuspend = nil
-        guard wasPlayingBeforeSuspend else { return }
-        player?.resume()
+        applyPerformanceProfile(.quality)
     }
 
     func retry() async {
@@ -212,7 +220,11 @@ final class VideoWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackCon
         let volume = oldPlayer.audioVolume
         let speed = Double(oldPlayer.player?.defaultRate ?? 1)
         let frameRateLimit = oldPlayer.requestedFrameRateLimit
-        let shouldAutoplay = oldPlayer.isPlaying || oldPlayer.shouldAutoplayWhenReady
+        // Carry the user's intent + current policy profile across the rebuild
+        // rather than reading the old player's autoplay flag, which a policy
+        // suspend may have cleared.
+        let intent = userIntendsToPlay
+        let profile = currentProfile
 
         oldPlayer.cleanup()
 
@@ -224,11 +236,10 @@ final class VideoWallpaperSession: WallpaperRuntimeSession, WallpaperPlaybackCon
         if frameRateLimit > 0 {
             replacement.setFrameRateLimit(frameRateLimit)
         }
-        if !shouldAutoplay {
-            replacement.pause()
-        }
         player = replacement
         runtimeError = replacement.runtimeError
+        userIntendsToPlay = intent
+        applyPerformanceProfile(profile)
     }
 
     func cleanup() {
