@@ -901,23 +901,21 @@ struct GlobalSettingsDecoderTests {
         #expect(decoded.globalPauseOnBattery == false)
         #expect(decoded.preservePlaybackOnLock == false)
         #expect(decoded.startOnLogin == false)
-        #expect(decoded.minimumBatteryLevel == nil)
         #expect(decoded.pauseOnFullScreen == true)
     }
 
-    @Test("Partial JSON keeps unspecified fields at default")
-    func partialJsonRetainsDefaults() throws {
-        let partialJSON = """
+    @Test("Legacy JSON carrying the removed `minimumBatteryLevel` key still decodes")
+    func legacyMinimumBatteryLevelIgnored() throws {
+        let legacyJSON = """
         {
-            "globalPauseOnBattery": false,
+            "globalPauseOnBattery": true,
             "minimumBatteryLevel": 0.2
         }
         """.data(using: .utf8)!
 
-        let decoded = try JSONDecoder().decode(GlobalSettings.self, from: partialJSON)
+        let decoded = try JSONDecoder().decode(GlobalSettings.self, from: legacyJSON)
 
-        #expect(decoded.globalPauseOnBattery == false)
-        #expect(decoded.minimumBatteryLevel == 0.2)
+        #expect(decoded.globalPauseOnBattery == true)
         #expect(decoded.pauseOnFullScreen == true)
     }
 
@@ -940,7 +938,6 @@ struct GlobalSettingsDecoderTests {
             globalPauseOnBattery: false,
             preservePlaybackOnLock: true,
             startOnLogin: true,
-            minimumBatteryLevel: 0.15,
             pauseOnFullScreen: false
         )
 
@@ -950,7 +947,6 @@ struct GlobalSettingsDecoderTests {
         #expect(decoded.globalPauseOnBattery == false)
         #expect(decoded.preservePlaybackOnLock == true)
         #expect(decoded.startOnLogin == true)
-        #expect(decoded.minimumBatteryLevel == 0.15)
         #expect(decoded.pauseOnFullScreen == false)
     }
 

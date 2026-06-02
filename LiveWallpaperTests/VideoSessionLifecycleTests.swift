@@ -16,7 +16,7 @@ struct VideoSessionLifecycleTests {
 
     @Test("External power never pauses, regardless of settings")
     func externalPowerNeverPauses() {
-        let aggressiveSettings = GlobalSettings(globalPauseOnBattery: true, minimumBatteryLevel: 0.95)
+        let aggressiveSettings = GlobalSettings(globalPauseOnBattery: true)
         let decision = WallpaperPolicyEngine.shouldPauseForPower(
             globalSettings: aggressiveSettings,
             powerSource: .external
@@ -24,34 +24,15 @@ struct VideoSessionLifecycleTests {
         #expect(decision == false)
     }
 
-    @Test("Global pause-on-battery wins over level threshold when battery is in use")
-    func globalPauseWinsOverLevel() {
-        let settings = GlobalSettings(globalPauseOnBattery: true, minimumBatteryLevel: 0.05)
-        let decision = WallpaperPolicyEngine.shouldPauseForPower(
-            globalSettings: settings,
-            powerSource: .battery(level: 0.95)
-        )
-        #expect(decision == true)
-    }
+    @Test("Pause-on-battery pauses whenever unplugged; off keeps playing")
+    func pauseOnBatteryDecision() {
+        let on = GlobalSettings(globalPauseOnBattery: true)
+        let off = GlobalSettings(globalPauseOnBattery: false)
 
-    @Test("Level threshold pauses below the configured floor")
-    func levelThresholdPausesBelowFloor() {
-        let settings = GlobalSettings(globalPauseOnBattery: false, minimumBatteryLevel: 0.30)
-        let belowFloor = WallpaperPolicyEngine.shouldPauseForPower(
-            globalSettings: settings,
-            powerSource: .battery(level: 0.20)
-        )
-        let atFloor = WallpaperPolicyEngine.shouldPauseForPower(
-            globalSettings: settings,
-            powerSource: .battery(level: 0.30)
-        )
-        let aboveFloor = WallpaperPolicyEngine.shouldPauseForPower(
-            globalSettings: settings,
-            powerSource: .battery(level: 0.50)
-        )
-        #expect(belowFloor == true)
-        #expect(atFloor == false, "Threshold is exclusive — playing at exactly the floor")
-        #expect(aboveFloor == false)
+        #expect(WallpaperPolicyEngine.shouldPauseForPower(globalSettings: on, powerSource: .battery(level: 0.95)))
+        #expect(WallpaperPolicyEngine.shouldPauseForPower(globalSettings: on, powerSource: .battery(level: 0.05)))
+        #expect(!WallpaperPolicyEngine.shouldPauseForPower(globalSettings: off, powerSource: .battery(level: 0.05)))
+        #expect(!WallpaperPolicyEngine.shouldPauseForPower(globalSettings: on, powerSource: .external))
     }
 
     @Test("Full-screen policy is gated by the user setting")
