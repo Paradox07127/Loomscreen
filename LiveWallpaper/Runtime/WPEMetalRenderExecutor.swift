@@ -1107,12 +1107,11 @@ final class WPEMetalRenderExecutor {
             ),
             index: 0
         )
-        var uniforms = WPECopyUniforms(
-            uvOffset: WPEMetalShaderInputs.parallaxUVOffset(
-                pointerPosition: runtimeUniforms.pointerPosition,
-                parallaxDepth: layer.parallaxDepth
-            )
-        )
+        // Parallax is a geometry translation applied in object-quad scene
+        // passes; the legacy raw-pointer UV shift is removed here too. (Plain
+        // full-frame layers routed through this fullscreen copy don't parallax —
+        // see the camera-parallax limitations note.)
+        var uniforms = WPECopyUniforms(uvOffset: SIMD2<Float>(0, 0))
         encoder.setFragmentBytes(&uniforms, length: MemoryLayout<WPECopyUniforms>.stride, index: 0)
         encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
         frameState.registerWrite(texture: destination.texture, targetID: destination.id)

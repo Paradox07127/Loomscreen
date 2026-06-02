@@ -365,7 +365,12 @@ public struct WPESceneCameraParallaxSettings: Equatable, Sendable {
     public let delay: Double
     public let mouseInfluence: Double
 
-    public init(enabled: Bool, amount: Double, delay: Double, mouseInfluence: Double) {
+    public init(
+        enabled: Bool = false,
+        amount: Double = 0.5,
+        delay: Double = 0.1,
+        mouseInfluence: Double = 0.5
+    ) {
         self.enabled = enabled
         self.amount = amount
         self.delay = delay

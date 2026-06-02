@@ -152,17 +152,12 @@ enum WPEMetalShaderInputs {
     }
 
     static func copyUniforms(for pass: WPEPreparedRenderPass, layer: WPERenderLayer) -> WPECopyUniforms {
-        let vector = pass.uniformValues["g_PointerPosition"]?.vectorValue ?? [0.5, 0.5]
-        let pointer = SIMD2<Double>(
-            vector[safe: 0] ?? 0.5,
-            vector[safe: 1] ?? 0.5
-        )
-        return WPECopyUniforms(
-            uvOffset: parallaxUVOffset(
-                pointerPosition: pointer,
-                parallaxDepth: layer.parallaxDepth
-            )
-        )
+        // Parallax is applied as a geometry translation in `objectQuadUniforms`
+        // (scene-targeted passes only), gated by the scene's camera-parallax
+        // settings. The legacy raw-pointer UV shift here is intentionally
+        // removed so it can't double-shift non-identity copy passes or move
+        // layers when camera parallax is disabled.
+        WPECopyUniforms(uvOffset: SIMD2<Float>(0, 0))
     }
 
     static func parallaxUVOffset(

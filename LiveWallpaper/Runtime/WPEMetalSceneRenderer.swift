@@ -1460,6 +1460,8 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
         textScriptInstances.removeAll(keepingCapacity: false)
         soundRuntime?.stop()
         soundRuntime = nil
+        cameraParallaxSettings = .disabled
+        cameraParallaxSmoother.reset()
         lastRuntimeUniforms = nil
         cachedSnapshot = nil
         resolutionTracer.reset()

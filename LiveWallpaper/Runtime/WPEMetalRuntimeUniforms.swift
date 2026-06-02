@@ -21,11 +21,17 @@ struct WPECameraParallaxFrame: Equatable, Sendable {
     /// geometry shift. X is negated and Y kept so the layer moves with the
     /// cursor in the renderer's top-left scene space.
     func pixelOffset(depth: Double, sceneSize: CGSize) -> SIMD2<Float> {
-        guard depth != 0, smoothed != SIMD2<Float>(0, 0) else { return SIMD2<Float>(0, 0) }
-        let d = Float(depth) * 0.1
-        let ux = min(max(smoothed.x * d, -0.05), 0.05)
-        let uy = min(max(smoothed.y * d, -0.05), 0.05)
-        return SIMD2<Float>(-ux * Float(sceneSize.width), uy * Float(sceneSize.height))
+        let d = Float(depth)
+        let width = Float(sceneSize.width)
+        let height = Float(sceneSize.height)
+        guard d.isFinite, width.isFinite, height.isFinite,
+              d != 0, smoothed != SIMD2<Float>(0, 0) else {
+            return SIMD2<Float>(0, 0)
+        }
+        let scaledDepth = d * 0.1
+        let ux = min(max(smoothed.x * scaledDepth, -0.05), 0.05)
+        let uy = min(max(smoothed.y * scaledDepth, -0.05), 0.05)
+        return SIMD2<Float>(-ux * max(width, 1), uy * max(height, 1))
     }
 }
 
@@ -65,13 +71,17 @@ struct WPECameraParallaxSmoother: Equatable, Sendable {
             Float(pointer.x - 0.5) * effectiveGlobal,
             Float(pointer.y - 0.5) * effectiveGlobal
         )
-        guard let last = lastTime else {
+        let rawDt = lastTime.map { max(time - $0, 0) }
+        lastTime = time
+        // First frame, or a long gap (resume from suspend / idle), snaps to the
+        // cursor instead of a slow catch-up. Otherwise clamp `dt` to a 10 FPS
+        // floor so a single heavy frame can't over-step yet low frame rates stay
+        // frame-rate independent.
+        guard let rawDt, rawDt <= 0.5 else {
             smoothed = target
-            lastTime = time
             return WPECameraParallaxFrame(smoothed: smoothed)
         }
-        let dt = min(max(time - last, 0), 1.0 / 30.0)
-        lastTime = time
+        let dt = min(rawDt, 1.0 / 10.0)
         let alpha: Float = settings.delay <= 0
             ? 1
             : Float(1 - exp(-dt / max(settings.delay, 1.0 / 240.0)))
