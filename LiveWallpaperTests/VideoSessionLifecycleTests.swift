@@ -194,4 +194,44 @@ struct VideoSessionLifecycleTests {
 
         #expect(powerMonitor.currentPowerSourceReadCount >= baselineReadCount)
     }
+
+    // MARK: - VideoWallpaperSession intent state machine (single authority)
+
+    /// Asserts the core safety invariant: a performance-policy profile NEVER
+    /// mutates `userIntendsToPlay`; only manual play/pause do. Uses a player
+    /// built with `loadImmediately: false` so no AVPlayer/window is created —
+    /// the intent flag is synchronous and independent of real playback.
+    @Test("Policy profiles never mutate intent; manual play/pause own it")
+    func videoIntentStateMachine() {
+        let player = WallpaperVideoPlayer(
+            url: URL(fileURLWithPath: "/tmp/master-gate-intent-\(UUID().uuidString).mov"),
+            frame: CGRect(x: 0, y: 0, width: 100, height: 100),
+            loadImmediately: false
+        )
+        let session = VideoWallpaperSession(player: player)
+        defer { session.cleanup() }
+
+        // Fresh session intends to play.
+        #expect(session.userIntendsToPlay)
+
+        // Policy suspend/restore must not touch intent.
+        session.applyPerformanceProfile(.suspended)
+        #expect(session.userIntendsToPlay)
+        session.applyPerformanceProfile(.quality)
+        #expect(session.userIntendsToPlay)
+
+        // Manual pause clears intent.
+        session.pause()
+        #expect(!session.userIntendsToPlay)
+
+        // A policy `.quality` must NOT resume a manually-paused video.
+        session.applyPerformanceProfile(.suspended)
+        #expect(!session.userIntendsToPlay)
+        session.applyPerformanceProfile(.quality)
+        #expect(!session.userIntendsToPlay)
+
+        // Manual play restores intent.
+        session.play()
+        #expect(session.userIntendsToPlay)
+    }
 }
