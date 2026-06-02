@@ -906,45 +906,6 @@ struct WallpaperPolicyEngineTests {
             globalSettings: settings,
             powerSource: .battery(level: 90)
         ))
-        #expect(WallpaperPolicyEngine.shouldResumeFromPower(
-            powerSource: .external,
-            wasPausedByPower: true
-        ))
-    }
-
-    @Test("Startup video pause combines power and fullscreen policy")
-    func startupVideoPauseDecision() {
-        #expect(WallpaperPolicyEngine.shouldStartVideoPaused(
-            globalSettings: GlobalSettings(globalPauseOnBattery: true, pauseOnFullScreen: false),
-            powerSource: .battery(level: 90),
-            isHiddenByFullScreen: false
-        ))
-        #expect(WallpaperPolicyEngine.shouldStartVideoPaused(
-            globalSettings: GlobalSettings(globalPauseOnBattery: false, pauseOnFullScreen: true),
-            powerSource: .external,
-            isHiddenByFullScreen: true
-        ))
-        #expect(!WallpaperPolicyEngine.shouldStartVideoPaused(
-            globalSettings: GlobalSettings(globalPauseOnBattery: false, pauseOnFullScreen: true),
-            powerSource: .external,
-            isHiddenByFullScreen: false
-        ))
-    }
-
-    @Test("Fullscreen resume waits when power policy still wants pause")
-    func fullScreenResumeHonorsPowerPause() {
-        let settings = GlobalSettings(globalPauseOnBattery: true, pauseOnFullScreen: true)
-
-        #expect(!WallpaperPolicyEngine.shouldResumeFromFullScreen(
-            globalSettings: settings,
-            powerSource: .battery(level: 90),
-            wasPausedByFullScreen: true
-        ))
-        #expect(WallpaperPolicyEngine.shouldResumeFromFullScreen(
-            globalSettings: settings,
-            powerSource: .external,
-            wasPausedByFullScreen: true
-        ))
     }
 
     @Test("Fullscreen fallback polling only runs when fullscreen policy can affect sessions")

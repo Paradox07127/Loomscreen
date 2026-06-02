@@ -117,7 +117,6 @@ final class ScreenManager {
     @ObservationIgnored private let configurationStore = WallpaperConfigurationStore()
     @ObservationIgnored private let ambientSessionBuilder = AmbientWallpaperSessionBuilder()
     @ObservationIgnored private let automationCoordinator = WallpaperAutomationCoordinator()
-    @ObservationIgnored private let powerPolicy = PowerPolicyController()
     @ObservationIgnored private let powerMonitor: any PowerMonitoring
     @ObservationIgnored private let playbackStateSubject = CurrentValueSubject<Bool, Never>(false)
     @ObservationIgnored private let fullScreenDetector: any FullScreenDetecting
@@ -147,7 +146,6 @@ final class ScreenManager {
         configurationStore: configurationStore,
         powerMonitor: powerMonitor,
         fullScreenDetector: fullScreenDetector,
-        powerPolicy: powerPolicy,
         playableVideoLoader: playableVideoLoader,
         applyVideoEffects: { [weak self] screen, config in
             self?.effectsCoordinator.applyVideoEffects(for: screen, config: config)
@@ -738,7 +736,6 @@ final class ScreenManager {
         setTransientRuntimeError(nil, for: screen.id)
         screen.resetRuntimeSession()
         playbackCoordinator.refreshVideoAudioLeadership()
-        powerPolicy.clearTracking(for: screen.id)
     }
 
     func resetAllWallpaperSessions() {

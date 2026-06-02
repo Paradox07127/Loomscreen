@@ -17,7 +17,6 @@ final class PlaybackCoordinator {
     private let configurationStore: WallpaperConfigurationStore
     private let powerMonitor: any PowerMonitoring
     private let fullScreenDetector: any FullScreenDetecting
-    private let powerPolicy: PowerPolicyController
     private let playableVideoLoader: any PlayableVideoLoading
     /// Hook into ScreenManager-owned effect application — kept as a callback
     /// because `applyVideoEffects` reaches into Combine lifetimes that aren't
@@ -63,7 +62,6 @@ final class PlaybackCoordinator {
         configurationStore: WallpaperConfigurationStore,
         powerMonitor: any PowerMonitoring,
         fullScreenDetector: any FullScreenDetecting,
-        powerPolicy: PowerPolicyController,
         playableVideoLoader: any PlayableVideoLoading,
         applyVideoEffects: @MainActor @escaping (Screen, ScreenConfiguration) -> Void,
         refreshRateLookup: @MainActor @escaping (CGDirectDisplayID) -> Int,
@@ -79,7 +77,6 @@ final class PlaybackCoordinator {
         self.configurationStore = configurationStore
         self.powerMonitor = powerMonitor
         self.fullScreenDetector = fullScreenDetector
-        self.powerPolicy = powerPolicy
         self.playableVideoLoader = playableVideoLoader
         self.applyVideoEffects = applyVideoEffects
         self.refreshRateLookup = refreshRateLookup
