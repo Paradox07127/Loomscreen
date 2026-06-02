@@ -48,6 +48,12 @@ final class PlaybackCoordinator {
     /// Strategy for keeping `ScreenConfiguration.wpeOrigin` consistent with
     /// the active wallpaper. Injected so Lite can swap in a no-op variant.
     private let originReconciler: any OriginReconciler
+    /// Master render gate. When this returns `false`, video session
+    /// construction is skipped (configuration stays persisted by the caller)
+    /// so the player/decoder is never allocated while wallpapers are globally
+    /// disabled — mirrors the gate `ScreenManager.restoreWallpaperSession`
+    /// applies to scene/HTML sessions.
+    private let isGloballyEnabled: @MainActor () -> Bool
 
     init(
         configurationStore: WallpaperConfigurationStore,
@@ -62,7 +68,8 @@ final class PlaybackCoordinator {
         releaseRuntimeSession: @MainActor @escaping (Screen) -> Void,
         notifyWallpaperSessionChanged: @MainActor @escaping () -> Void,
         reportRuntimeError: @MainActor @escaping (CGDirectDisplayID, WallpaperRuntimeError?) -> Void = { _, _ in },
-        originReconciler: any OriginReconciler
+        originReconciler: any OriginReconciler,
+        isGloballyEnabled: @MainActor @escaping () -> Bool = { true }
     ) {
         self.configurationStore = configurationStore
         self.powerMonitor = powerMonitor
@@ -77,6 +84,7 @@ final class PlaybackCoordinator {
         self.notifyWallpaperSessionChanged = notifyWallpaperSessionChanged
         self.reportRuntimeError = reportRuntimeError
         self.originReconciler = originReconciler
+        self.isGloballyEnabled = isGloballyEnabled
     }
 
     // MARK: - Configuration setters
@@ -573,6 +581,15 @@ final class PlaybackCoordinator {
 
     func setupVideoPlayback(url: URL, screen: Screen) {
         releaseRuntimeSession(screen)
+
+        // Master gate: callers (setVideo / playlist / schedule) persist the
+        // configuration before reaching here, so when wallpapers are globally
+        // disabled we simply skip building the player — it is rebuilt from the
+        // saved configuration when the master switch is turned back on.
+        guard isGloballyEnabled() else {
+            notifyWallpaperSessionChanged()
+            return
+        }
 
         let configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint)
         let player = WallpaperVideoPlayer(

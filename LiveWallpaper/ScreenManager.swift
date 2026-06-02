@@ -159,7 +159,10 @@ final class ScreenManager {
         reportRuntimeError: { [weak self] screenID, error in
             self?.setTransientRuntimeError(error, for: screenID)
         },
-        originReconciler: originReconciler
+        originReconciler: originReconciler,
+        isGloballyEnabled: { [weak self] in
+            self?.wallpapersGloballyEnabled ?? true
+        }
     )
     /// Lazy because the `saveConfiguration` / `restoreWallpaperSession`
     /// callbacks capture `self` (matches `playbackCoordinator`'s pattern).
@@ -714,9 +717,10 @@ final class ScreenManager {
         updatePlaybackState()
         updateFullScreenFallbackPolling()
 
-        // Enforce a persisted "off" master gate on freshly-restored sessions.
-        // Only when disabled — when enabled we leave visibility to the normal
-        // power / full-screen policies rather than force-showing here.
+        // Enforce a persisted "off" master gate. With the build gate in
+        // `restoreWallpaperSession`, disabled screens never build a session
+        // above; this is the safety net that also tears down any session
+        // adopted/preserved across a screen refresh so nothing stays resident.
         if !wallpapersGloballyEnabled {
             applyGlobalRenderGate()
         }
@@ -829,6 +833,22 @@ final class ScreenManager {
         configuration: ScreenConfiguration,
         preservingState: Bool
     ) {
+        // Master gate: when wallpapers are globally disabled we keep the
+        // configuration persisted but do NOT build a live session. This avoids
+        // allocating the renderer / scene runtime / decoded assets only to
+        // suspend them — the session is (re)built by `applyGlobalRenderGate()`
+        // when the master switch is turned back on.
+        guard wallpapersGloballyEnabled else {
+            if screen.runtimeSession != nil { releaseRuntimeSession(screen) }
+            // No live session is built, but the caller has just persisted this
+            // configuration. Refresh the derived session state so a wallpaper
+            // assigned while the gate is off is reflected as configured-but-
+            // `.off` (keeping the master switch enabled) — mirrors the video
+            // path's refresh in `PlaybackCoordinator.setupVideoPlayback`.
+            notifyWallpaperSessionChanged()
+            return
+        }
+
         guard let definition = WallpaperSessionDefinition(configuration: configuration) else {
             Logger.warning("Skipping malformed wallpaper configuration for screen \(screen.id)", category: .screenManager)
             releaseRuntimeSession(screen)
@@ -894,7 +914,38 @@ final class ScreenManager {
     }
 
     func wallpaperSummary(for screen: Screen) -> WallpaperSessionSummary {
-        wallpaperSessionSummaryCache.summary(for: screen.id, fallback: screen.wallpaperSessionSummary)
+        wallpaperSessionSummaryCache.summary(for: screen.id, fallback: effectiveSummary(for: screen))
+    }
+
+    /// Per-screen summary that accounts for the master render gate. With a live
+    /// session we use its own summary. Without one we still report
+    /// configured-but-`.off` when the master switch is off and a wallpaper is
+    /// persisted — so the overview stays `.off` (and the menu-bar master switch
+    /// stays enabled to turn rendering back on) instead of collapsing to
+    /// `.notConfigured` now that the gate tears sessions down to free memory.
+    private func effectiveSummary(for screen: Screen) -> WallpaperSessionSummary {
+        if screen.runtimeSession != nil {
+            return screen.wallpaperSessionSummary
+        }
+        if !wallpapersGloballyEnabled, let type = persistedWallpaperType(for: screen) {
+            return WallpaperSessionSummary(
+                wallpaperType: type,
+                activity: .off,
+                supportsPlaybackControl: false,
+                subtitle: nil
+            )
+        }
+        return screen.wallpaperSessionSummary
+    }
+
+    /// The wallpaper type a screen would render from its persisted
+    /// configuration, or `nil` when nothing valid is assigned. Uses the same
+    /// validity gate as `restoreWallpaperSession` so an empty/malformed config
+    /// reads as "not configured".
+    private func persistedWallpaperType(for screen: Screen) -> WallpaperType? {
+        guard let config = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
+              WallpaperSessionDefinition(configuration: config) != nil else { return nil }
+        return config.activeWallpaper.wallpaperType
     }
 
     /// Currently surfaced error for a screen's runtime session (or `nil`).
@@ -971,7 +1022,7 @@ final class ScreenManager {
     private func commitWallpaperSessionState(includePollingRefresh: Bool = false) {
         var next = wallpaperSessionState
         next.summaryCache = WallpaperSessionSummaryCache(
-            entries: screens.map { ($0.id, $0.wallpaperSessionSummary) }
+            entries: screens.map { ($0.id, effectiveSummary(for: $0)) }
         )
         next.isAnyPlaying = screens.contains { $0.playbackController?.isPlaying ?? false }
 
@@ -1027,11 +1078,14 @@ final class ScreenManager {
         updatePlaybackState()
     }
 
-    /// Master render gate. Toggles whether wallpaper pipelines render at all by
-    /// showing/suspending every session — deliberately WITHOUT touching
-    /// per-screen playback (`play()`/`pause()`), so flipping this neither reads
-    /// nor mutates whether an individual screen is paused. The flag is persisted
-    /// and is the single source of truth for the menu-bar master switch.
+    /// Master render gate. Toggles whether wallpaper pipelines exist at all:
+    /// disabling tears every session down to free its memory, enabling rebuilds
+    /// them from persisted configuration (see `applyGlobalRenderGate`). The flag
+    /// is persisted and is the single source of truth for the menu-bar master
+    /// switch. Note: because sessions are destroyed rather than suspended,
+    /// transient per-screen playback state (a manual pause is not persisted
+    /// anywhere) is not carried across an off→on cycle — rebuilt screens follow
+    /// the normal startup playback policy, exactly as on app relaunch.
     func setWallpapersEnabled(_ enabled: Bool) {
         wallpapersGloballyEnabled = enabled
         UserDefaults.standard.set(enabled, forKey: Self.globallyEnabledDefaultsKey)
@@ -1041,18 +1095,25 @@ final class ScreenManager {
         markWallpaperSessionStateChanged()
     }
 
-    /// Apply the master gate to every live session (show+resume when enabled,
-    /// suspend+hide when disabled). Idempotent; safe to call after sessions are
-    /// (re)built so the gate also holds across launches and new wallpapers.
+    /// Apply the master gate to every screen. When enabled, builds any session
+    /// that is missing (from its persisted configuration) and shows/resumes the
+    /// ones already live. When disabled, fully tears each session down so its
+    /// GPU textures, scene runtime, and decoded assets are released — rather
+    /// than leaving a suspended-but-resident renderer holding memory. Idempotent
+    /// and safe to call across launches and after new wallpapers are assigned.
     func applyGlobalRenderGate() {
         for screen in screens {
-            guard let session = screen.runtimeSession else { continue }
             if wallpapersGloballyEnabled {
-                session.show()
-                session.resume()
-            } else {
-                session.suspend()
-                session.hide()
+                if screen.runtimeSession == nil {
+                    // Rendering is permitted again — rebuild from the persisted
+                    // configuration. No-op for screens without a saved wallpaper.
+                    loadConfigurationForScreen(screen)
+                } else {
+                    screen.runtimeSession?.show()
+                    screen.runtimeSession?.resume()
+                }
+            } else if screen.runtimeSession != nil {
+                releaseRuntimeSession(screen)
             }
         }
     }
