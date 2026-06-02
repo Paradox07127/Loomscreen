@@ -61,6 +61,7 @@ struct WPEMSDFTextLayout {
         let pixelSize = max(Int(ceil(CTFontGetSize(font))), 1)
         let runs = CTLineGetGlyphRuns(line) as! [CTRun]
         var perPage: [Int: [WPEMSDFTextVertex]] = [:]
+        var isComplete = true
 
         for run in runs {
             let glyphCount = CTRunGetGlyphCount(run)
@@ -76,7 +77,10 @@ struct WPEMSDFTextLayout {
             for index in 0..<glyphCount {
                 let glyph = glyphs[index]
                 let key = WPEMSDFGlyphKey(fontID: fontID, glyph: glyph, pixelSize: pixelSize)
-                guard let entry = atlas.entry(for: key, generator: generator, font: font) else { return nil }
+                guard let entry = atlas.requestEntry(for: key, generator: generator, font: font) else {
+                    isComplete = false
+                    continue
+                }
                 let position = positions[index]
                 let bearing = entry.metrics.bearing / pathUnitsToEm
                 let glyphWidth = Double(entry.metrics.cellSize.width) / entry.metrics.scale
@@ -93,7 +97,7 @@ struct WPEMSDFTextLayout {
             }
         }
 
-        guard !perPage.isEmpty else { return nil }
+        guard isComplete, !perPage.isEmpty else { return nil }
         return WPEMSDFTextMesh(perPage: perPage, size: boxSize)
     }
 

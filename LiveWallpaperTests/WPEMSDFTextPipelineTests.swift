@@ -64,7 +64,7 @@ struct WPEMSDFTextPipelineTests {
     }
 
     @Test("Layout produces one six-vertex quad per glyph grouped by atlas page")
-    func layoutProducesQuadsPerGlyph() throws {
+    func layoutProducesQuadsPerGlyph() async throws {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let atlas = WPEMSDFAtlas(device: device)
         let generator = WPEMSDFGlyphGenerator()
@@ -72,16 +72,23 @@ struct WPEMSDFTextPipelineTests {
         let font = CTFontCreateWithName("Helvetica" as CFString, 32, nil)
         let object = makeTextObject(text: "Hi")
 
-        let mesh = try #require(layout.layout(
-            object: object,
-            font: font,
-            atlas: atlas,
-            generator: generator,
-            fontID: "Helvetica@32"
-        ))
+        // Glyph generation is now async (off-main): the first layout returns nil
+        // while glyphs are scheduled; poll until the background fill completes.
+        var mesh: WPEMSDFTextMesh?
+        for _ in 0..<200 where mesh == nil {
+            mesh = layout.layout(
+                object: object,
+                font: font,
+                atlas: atlas,
+                generator: generator,
+                fontID: "Helvetica@32"
+            )
+            if mesh == nil { try await Task.sleep(nanoseconds: 10_000_000) }
+        }
+        let resolved = try #require(mesh)
 
-        #expect(!mesh.perPage.isEmpty)
-        let totalVertices = mesh.perPage.values.reduce(0) { $0 + $1.count }
+        #expect(!resolved.perPage.isEmpty)
+        let totalVertices = resolved.perPage.values.reduce(0) { $0 + $1.count }
         // Two glyphs ("Hi") × 6 vertices per quad.
         #expect(totalVertices == 12)
         #expect(totalVertices % 6 == 0)
