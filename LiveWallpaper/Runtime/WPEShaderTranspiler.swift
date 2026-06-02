@@ -361,7 +361,23 @@ struct WPEShaderTranspiler {
         values: [String: Int],
         definedMacros: Set<String>
     ) -> Int {
-        parsePreprocessorExpression(expression, values: values, definedMacros: definedMacros) ?? 0
+        let sanitized = sanitizeConditionalExpression(expression)
+        return parsePreprocessorExpression(sanitized, values: values, definedMacros: definedMacros) ?? 0
+    }
+
+    /// WPE's preprocessor tolerates trailing junk in `#if` / `#elif` conditions — workshop shaders
+    /// ship lines like `#elif AUDIOSAMPLES == 32;` (stray `;`) or `#if COND // note`. A `;`, `//`,
+    /// or `/*` can never appear inside a valid conditional expression, so truncate at the first one;
+    /// otherwise the strict tokenizer rejects the whole condition and the (often default) branch is
+    /// silently dropped, leaving its declarations undefined in the emitted MSL.
+    private static func sanitizeConditionalExpression(_ expression: String) -> String {
+        var cutoff = expression.endIndex
+        for marker in ["//", "/*", ";"] {
+            if let range = expression.range(of: marker), range.lowerBound < cutoff {
+                cutoff = range.lowerBound
+            }
+        }
+        return String(expression[..<cutoff]).trimmingCharacters(in: .whitespaces)
     }
 
     private static func parsePreprocessorExpression(
