@@ -95,6 +95,14 @@ struct WPEMetalRuntimeUniforms: Equatable, Sendable {
     let daytime: Double
     let brightness: Double
     let pointerPosition: SIMD2<Double>
+    /// Previous frame's pointer position (WPE's official `g_PointerPositionLast`,
+    /// for motion-aware pointer shaders). Defaults to the current position so a
+    /// fresh frame reports zero motion. Tracked by the renderer across frames —
+    /// works with cursor-follow alone, no click capture needed.
+    var pointerPositionLast: SIMD2<Double>
+    /// Click state from the interactive view, meaningful only while the scene's
+    /// per-screen "Interactive" (click capture) toggle is on; neutral otherwise.
+    var pointerClick: WPEPointerFrame = .neutral
     /// Scene-level camera parallax for this frame (neutral when disabled).
     var cameraParallax: WPECameraParallaxFrame = .neutral
     /// Per-channel spectrum, 64 bins each, normalized 0…1, low frequency → high.
@@ -144,6 +152,9 @@ struct WPEMetalRuntimeUniforms: Equatable, Sendable {
         self.daytime = daytime
         self.brightness = brightness
         self.pointerPosition = pointerPosition
+        // Default "no motion" — the renderer overwrites this with the actual
+        // previous-frame pointer each frame.
+        self.pointerPositionLast = pointerPosition
         self.audioSpectrumLeft = Self.normalized(audioSpectrumLeft)
         self.audioSpectrumRight = Self.normalized(audioSpectrumRight)
     }
@@ -166,6 +177,13 @@ struct WPEMetalRuntimeUniforms: Equatable, Sendable {
             "g_Daytime": .number(daytime),
             "g_Brightness": .number(brightness),
             "g_PointerPosition": .vector([pointerPosition.x, pointerPosition.y]),
+            // Official WPE motion uniform + our internal click aliases (non-
+            // official; documented in WPEInteractiveMTKView). Shaders that don't
+            // declare these ignore them, so they're zero-cost.
+            "g_PointerPositionLast": .vector([pointerPositionLast.x, pointerPositionLast.y]),
+            "g_PointerClickPosition": .vector([pointerClick.clickPosition.x, pointerClick.clickPosition.y]),
+            "g_PointerDown": .number(pointerClick.isDown ? 1 : 0),
+            "g_PointerRightDown": .number(pointerClick.isRightDown ? 1 : 0),
             "g_AudioSpectrum16Left": .vector(s16L),
             "g_AudioSpectrum16Right": .vector(s16R),
             "g_AudioSpectrum32Left": .vector(s32L),

@@ -1,5 +1,6 @@
 #if !LITE_BUILD
 import AppKit
+import LiveWallpaperVideoWeb
 
 /// Adapter that exposes a WPE scene renderer to
 /// `ScreenManager` through the shared `WallpaperRuntimeSession` protocol so
@@ -20,6 +21,9 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
     /// on every (re)build and on the WebGL fallback swap so a saved-off scene
     /// stays cursor-frozen across reloads.
     private var mouseInteractionEnabled = true
+    /// Persisted per-screen "Interactive" (click capture) state. Re-applied to
+    /// the renderer + window on (re)build and on the WebGL fallback swap.
+    private var clickCaptureEnabled = false
     private var isVisible = true
     private var didStartLoad = false
     private var loadTask: Task<Void, Never>?
@@ -129,6 +133,15 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
     func setMouseInteractionEnabled(_ enabled: Bool) {
         mouseInteractionEnabled = enabled
         renderer?.setMouseInteractionEnabled(enabled)
+    }
+
+    /// Per-screen "Interactive" toggle: makes the wallpaper window capture real
+    /// clicks (steals desktop clicks while on) and routes them to the renderer.
+    /// Stored for the fallback swap; flips both the window and the renderer.
+    func setClickCaptureEnabled(_ enabled: Bool) {
+        clickCaptureEnabled = enabled
+        (window as? VideoWallpaperWindow)?.setWallpaperMouseInteractionEnabled(enabled)
+        renderer?.setClickCaptureEnabled(enabled)
     }
 
     func cleanup() {
@@ -259,6 +272,7 @@ final class SceneWallpaperSession: WallpaperRuntimeSession {
         installProgressHandler(on: next)
         next.applyPerformanceProfile(isVisible ? currentProfile : .suspended)
         next.setMouseInteractionEnabled(mouseInteractionEnabled)
+        next.setClickCaptureEnabled(clickCaptureEnabled)
         if isThrottled {
             next.setThrottled(true)
         }

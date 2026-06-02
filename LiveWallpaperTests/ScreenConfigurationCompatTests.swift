@@ -55,6 +55,27 @@ struct ScreenConfigurationCompatTests {
         #expect(legacy.sceneMouseInteractionEnabled == true)
     }
 
+    @Test("sceneClickCaptureEnabled round-trips and defaults to false on legacy blobs")
+    func sceneClickCaptureRoundTripAndLegacyDefault() throws {
+        var config = ScreenConfiguration(
+            screenID: 12_345,
+            wallpaper: .video(bookmarkData: Data([0xAA, 0xBB])),
+            savedVideoBookmarkData: Data([0xAA, 0xBB])
+        )
+        config.sceneClickCaptureEnabled = true
+
+        let encoded = try JSONEncoder().encode(config)
+        let decoded = try JSONDecoder().decode(ScreenConfiguration.self, from: encoded)
+        #expect(decoded.sceneClickCaptureEnabled == true)
+
+        // A legacy blob with no such key defaults to false (no click capture).
+        var dict = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        dict.removeValue(forKey: "sceneClickCaptureEnabled")
+        let stripped = try JSONSerialization.data(withJSONObject: dict, options: .sortedKeys)
+        let legacy = try JSONDecoder().decode(ScreenConfiguration.self, from: stripped)
+        #expect(legacy.sceneClickCaptureEnabled == false)
+    }
+
     @Test("Decoding a legacy ScreenConfiguration without videoVolume defaults to full volume")
     func decodeLegacyConfigurationWithoutVideoVolume() throws {
         let baselineConfig = ScreenConfiguration(

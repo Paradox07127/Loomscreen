@@ -55,7 +55,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
     private let entryResolver: SceneResourceResolver
     private let resourceResolver: WPEMultiRootResourceResolver
     private let resolutionTracer: WPEResolutionTracer
-    private let mtkView: MTKView
+    private let mtkView: WPEInteractiveMTKView
     private let executor: WPEMetalRenderExecutor
     private let textureLoader: WPEMetalTextureLoader
     private var outputTexture: MTLTexture?
@@ -113,6 +113,8 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
     /// shaders see a constant). Driven by the per-screen "Mouse Interaction"
     /// playback toggle; default on preserves the historical behavior.
     private var mouseInteractionEnabled = true
+    /// Previous frame's pointer UV, fed as the official `g_PointerPositionLast`.
+    private var previousPointer = SIMD2<Double>(0.5, 0.5)
     /// User-selected frame rate ceiling, applied to `mtkView.preferredFramesPerSecond`
     /// whenever the renderer is not throttled / suspended. Defaults to the
     /// WPE-compatible 30 FPS until `setFrameRateLimit(_:)` overrides it.
@@ -192,7 +194,7 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
         self.resolutionTracer = resolutionTracer
         self.executor = executor
         self.textureLoader = WPEMetalTextureLoader(device: device)
-        self.mtkView = MTKView(frame: frame, device: device)
+        self.mtkView = WPEInteractiveMTKView(frame: frame, device: device)
         self.frameClock = frameClock
         self.pointerSampler = pointerSampler
         self.snapshotter = snapshotter
@@ -997,6 +999,13 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
             )
         }
         uniforms.cameraParallax = parallaxFrame
+        // Re-apply pointer fields here: the audio path above may have rebuilt
+        // `uniforms` via the stereo initializer, which would otherwise reset
+        // them. `g_PointerPositionLast` tracks motion regardless of click
+        // capture; click state is neutral unless the Interactive toggle is on.
+        uniforms.pointerPositionLast = previousPointer
+        uniforms.pointerClick = mtkView.clickCaptureEnabled ? mtkView.pointerFrame : .neutral
+        previousPointer = pointer
         lastRuntimeUniforms = uniforms
         let currentTextures = texturesForCurrentFrame(time: uniforms.time)
         let frame = try executor.render(
@@ -1392,6 +1401,10 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
 
     func setMouseInteractionEnabled(_ enabled: Bool) {
         mouseInteractionEnabled = enabled
+    }
+
+    func setClickCaptureEnabled(_ enabled: Bool) {
+        mtkView.clickCaptureEnabled = enabled
     }
 
     /// Applies the user-selected frame rate ceiling. `.unlimited` falls

@@ -139,6 +139,18 @@ final class PlaybackCoordinator {
         #endif
     }
 
+    /// Scene-only "Interactive" (click capture) toggle: persists + pushes live.
+    /// Enabling makes the scene window capture clicks (steals desktop clicks).
+    func updateSceneClickCapture(_ enabled: Bool, for screen: Screen) {
+        guard var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
+              enabled != configuration.sceneClickCaptureEnabled else { return }
+        configuration.sceneClickCaptureEnabled = enabled
+        save(configuration)
+        #if !LITE_BUILD
+        (screen.runtimeSession as? SceneWallpaperSession)?.setClickCaptureEnabled(enabled)
+        #endif
+    }
+
     func updateVideoColorSpace(_ colorSpace: VideoColorSpace, for screen: Screen) {
         guard var configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint),
               configuration.videoColorSpace != colorSpace else { return }

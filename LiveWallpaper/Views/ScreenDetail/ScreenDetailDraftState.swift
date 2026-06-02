@@ -31,6 +31,9 @@ struct ScreenDetailDraftState: Sendable, Equatable {
     /// Scene-only "Mouse Interaction" toggle (cursor-driven parallax / pointer
     /// shaders). Mirrors `ScreenConfiguration.sceneMouseInteractionEnabled`.
     var sceneMouseInteractionEnabled: Bool
+    /// Scene-only "Interactive" toggle (real click capture). Mirrors
+    /// `ScreenConfiguration.sceneClickCaptureEnabled`.
+    var sceneClickCaptureEnabled: Bool
     var hasPreviewSource: Bool
     /// Mirror of `WallpaperContent.scene(descriptor)` so the right-hand
     /// inspector can bind property overrides without round-tripping
@@ -61,6 +64,7 @@ struct ScreenDetailDraftState: Sendable, Equatable {
         particleDensity: 1.0,
         selectedFrameRateLimit: .fps60,
         sceneMouseInteractionEnabled: true,
+        sceneClickCaptureEnabled: false,
         hasPreviewSource: false,
         sceneDescriptor: nil
     )
@@ -103,6 +107,7 @@ struct ScreenDetailDraftState: Sendable, Equatable {
             particleDensity: config.effectConfig.particleDensity,
             selectedFrameRateLimit: config.frameRateLimit,
             sceneMouseInteractionEnabled: config.sceneMouseInteractionEnabled,
+            sceneClickCaptureEnabled: config.sceneClickCaptureEnabled,
             hasPreviewSource: config.wallpaperType == .video && config.hasConfiguredVideoSource,
             sceneDescriptor: config.activeWallpaper.sceneDescriptor
         )

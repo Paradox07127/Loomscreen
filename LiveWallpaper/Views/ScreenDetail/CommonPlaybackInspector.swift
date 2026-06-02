@@ -30,6 +30,14 @@ struct CommonPlaybackInspector: View {
     /// Scene-only cursor-reactivity toggle. Bound from the draft; only the
     /// scene row reads it.
     @Binding var sceneMouseInteractionEnabled: Bool
+    /// Scene-only click-capture toggle (real mouse interaction; steals desktop
+    /// clicks while on).
+    @Binding var sceneClickCaptureEnabled: Bool
+
+    /// One-shot "you understand this steals desktop clicks" acknowledgement so
+    /// the first enable shows a confirmation; later toggles are silent.
+    @AppStorage("Scene.ClickCapture.Acknowledged") private var clickCaptureAcknowledged = false
+    @State private var showClickCaptureConfirm = false
     /// Optional binding present only when `wallpaperType == .html`. Drives
     /// the audio path so HTML's `WKWebView` actually mutes its media
     /// elements — `AVPlayer.muted` is a no-op for HTML wallpapers.
@@ -67,6 +75,8 @@ struct CommonPlaybackInspector: View {
                     if showsMouseInteractionRow {
                         Divider()
                         mouseInteractionRow
+                        Divider()
+                        clickInteractionRow
                     }
                     if showsSyncToLockScreenRow {
                         Divider()
@@ -76,6 +86,15 @@ struct CommonPlaybackInspector: View {
             }
         }
         .groupBoxStyle(ContainerGroupBoxStyle())
+        .alert("Enable Wallpaper Interaction?", isPresented: $showClickCaptureConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Enable") {
+                clickCaptureAcknowledged = true
+                setClickCapture(true)
+            }
+        } message: {
+            Text("This lets you click elements inside the scene, but while it's on you can't click desktop icons or right-click the desktop on this display. Turn it off here to restore desktop clicks.")
+        }
     }
 
     // MARK: - Row availability
@@ -218,14 +237,14 @@ struct CommonPlaybackInspector: View {
         SettingRow(
             icon: "cursorarrow.rays",
             iconColor: sceneMouseInteractionEnabled ? .blue : .secondary,
-            title: "Mouse Interaction",
-            info: "When on, the scene reacts to your cursor — camera parallax follows the pointer and pointer-driven effects respond. Turn off to keep the scene perfectly still regardless of where the cursor is."
+            title: "Follow Cursor",
+            info: "Camera parallax and pointer-driven effects follow your cursor. Passive — safe for desktop icon clicks. Turn off to keep the scene perfectly still regardless of where the cursor is."
         ) {
             Toggle("", isOn: mouseInteractionBinding)
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .controlSize(.small)
-                .accessibilityLabel(Text("Mouse interaction"))
+                .accessibilityLabel(Text("Follow cursor"))
                 .accessibilityHint(Text("When off, the scene stops following the cursor"))
         }
     }
@@ -239,6 +258,46 @@ struct CommonPlaybackInspector: View {
                 screenManager.updateSceneMouseInteraction(newValue, for: screen)
             }
         )
+    }
+
+    /// Real click capture. Enabling raises the wallpaper above desktop icons and
+    /// intercepts clicks (steals desktop clicks) so an interactive scene can
+    /// respond — gated behind a one-time confirmation.
+    private var clickInteractionRow: some View {
+        SettingRow(
+            icon: "cursorarrow.click",
+            iconColor: sceneClickCaptureEnabled ? .blue : .secondary,
+            title: "Interactive",
+            info: "Lets the scene receive real clicks and drags (for interactive scenes). While on, clicks go to the wallpaper instead of the desktop on this display — you won't be able to click desktop icons until you turn it back off."
+        ) {
+            Toggle("", isOn: clickInteractionBinding)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .accessibilityLabel(Text("Interactive"))
+                .accessibilityHint(Text("When on, the scene captures mouse clicks and the desktop can't be clicked on this display"))
+        }
+    }
+
+    private var clickInteractionBinding: Binding<Bool> {
+        Binding(
+            get: { sceneClickCaptureEnabled },
+            set: { newValue in
+                guard sceneClickCaptureEnabled != newValue else { return }
+                if newValue, !clickCaptureAcknowledged {
+                    // First enable: confirm the desktop-click tradeoff before applying.
+                    showClickCaptureConfirm = true
+                    return
+                }
+                setClickCapture(newValue)
+            }
+        )
+    }
+
+    private func setClickCapture(_ enabled: Bool) {
+        guard sceneClickCaptureEnabled != enabled else { return }
+        sceneClickCaptureEnabled = enabled
+        screenManager.updateSceneClickCapture(enabled, for: screen)
     }
 
     private var syncToLockScreenRow: some View {

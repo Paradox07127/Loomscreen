@@ -45,6 +45,12 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
     /// cursor-driven parallax / pointer effects freeze. No effect on non-scene
     /// wallpaper types.
     public var sceneMouseInteractionEnabled: Bool = true
+    /// Scene-only: whether the wallpaper window captures real mouse clicks so an
+    /// interactive scene can respond to them. Default `false` — enabling it makes
+    /// the window sit above desktop icons and intercept clicks (steals desktop
+    /// clicks), mirroring the web wallpaper's `allowMouseInteraction`. Orthogonal
+    /// to `sceneMouseInteractionEnabled` (cursor-follow needs no capture).
+    public var sceneClickCaptureEnabled: Bool = false
     /// Wallpaper Engine workshop origin metadata, set when the active wallpaper
     /// was imported from a `~/Documents/Live Wallpapers/<appid>/<wid>/` project.
     /// Cleared automatically when the user replaces the wallpaper with non-WPE
@@ -78,6 +84,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         case videoVolume
         case videoColorSpace
         case sceneMouseInteractionEnabled
+        case sceneClickCaptureEnabled
         case wpeOrigin
         case displayFingerprint
 
@@ -322,6 +329,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         )
         videoColorSpace = (try? c.decodeIfPresent(VideoColorSpace.self, forKey: .videoColorSpace)) ?? .auto
         sceneMouseInteractionEnabled = try c.decodeIfPresent(Bool.self, forKey: .sceneMouseInteractionEnabled) ?? true
+        sceneClickCaptureEnabled = try c.decodeIfPresent(Bool.self, forKey: .sceneClickCaptureEnabled) ?? false
 
         if let storedMode = try c.decodeIfPresent(WallpaperMode.self, forKey: .wallpaperMode) {
             wallpaperMode = storedMode
@@ -443,6 +451,7 @@ public struct ScreenConfiguration: Codable, Equatable, Sendable {
         try c.encode(videoVolume, forKey: .videoVolume)
         try c.encode(videoColorSpace, forKey: .videoColorSpace)
         try c.encode(sceneMouseInteractionEnabled, forKey: .sceneMouseInteractionEnabled)
+        try c.encode(sceneClickCaptureEnabled, forKey: .sceneClickCaptureEnabled)
         try c.encodeIfPresent(wpeOrigin, forKey: .wpeOrigin)
         try c.encodeIfPresent(displayFingerprint, forKey: .displayFingerprint)
     }
