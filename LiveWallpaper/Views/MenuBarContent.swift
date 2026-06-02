@@ -513,7 +513,10 @@ private enum DisplayVisualState: Equatable {
 @MainActor
 enum PlaybackToggle {
     static func toggle(_ playback: any WallpaperPlaybackControllable) {
-        if playback.isPlaying {
+        // Toggle the user's intent, not the actual playing state: a
+        // policy-suspended video reads `isPlaying == false` even though the
+        // user still intends to play it.
+        if playback.userIntendsToPlay {
             playback.pause()
         } else {
             playback.play()

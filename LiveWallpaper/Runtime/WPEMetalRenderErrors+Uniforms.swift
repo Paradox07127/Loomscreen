@@ -187,6 +187,19 @@ struct WPEWaterWavesUniforms {
     /// mask region tinted red, 3 = displacement-magnitude heatmap. Driven by the Developer
     /// Tools "Waterwaves debug" picker; 0 in production.
     var debugMode: Float = 0
+    /// WPE packs texture resolution as (textureWidth, textureHeight, imageWidth, imageHeight).
+    /// The debug overlay uses this to mirror `waterwaves.vert`'s mask-UV padding correction.
+    var texture1Resolution: SIMD4<Float> = SIMD4<Float>(1, 1, 1, 1)
+}
+
+/// Developer Tools "Waterwaves uniform trace" flag — when on, the live custom (transpiler) path
+/// logs the packed waterwaves uniforms per pass and dumps the translated MSL once. Off in production.
+enum WPEWaterWavesTrace {
+    static let defaultsKey = "WPEWaterWavesTrace"
+
+    static var isEnabled: Bool {
+        UserDefaults.standard.bool(forKey: defaultsKey)
+    }
 }
 
 /// Developer Tools "Waterwaves debug" visualization mode — single source of truth shared by the

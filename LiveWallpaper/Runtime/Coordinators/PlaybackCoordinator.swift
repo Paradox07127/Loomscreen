@@ -48,6 +48,16 @@ final class PlaybackCoordinator {
     /// Strategy for keeping `ScreenConfiguration.wpeOrigin` consistent with
     /// the active wallpaper. Injected so Lite can swap in a no-op variant.
     private let originReconciler: any OriginReconciler
+    /// Master render gate. When this returns `false`, video session
+    /// construction is skipped (configuration stays persisted by the caller)
+    /// so the player/decoder is never allocated while wallpapers are globally
+    /// disabled — mirrors the gate `ScreenManager.restoreWallpaperSession`
+    /// applies to scene/HTML sessions.
+    private let isGloballyEnabled: @MainActor () -> Bool
+    /// Whether the user is away (lock screen / display sleep / system sleep).
+    /// Folded into the effective performance profile so a freshly-built video
+    /// honours user-absence on its very first frame.
+    private let isUserAbsent: @MainActor () -> Bool
 
     init(
         configurationStore: WallpaperConfigurationStore,
@@ -62,7 +72,9 @@ final class PlaybackCoordinator {
         releaseRuntimeSession: @MainActor @escaping (Screen) -> Void,
         notifyWallpaperSessionChanged: @MainActor @escaping () -> Void,
         reportRuntimeError: @MainActor @escaping (CGDirectDisplayID, WallpaperRuntimeError?) -> Void = { _, _ in },
-        originReconciler: any OriginReconciler
+        originReconciler: any OriginReconciler,
+        isGloballyEnabled: @MainActor @escaping () -> Bool = { true },
+        isUserAbsent: @MainActor @escaping () -> Bool = { false }
     ) {
         self.configurationStore = configurationStore
         self.powerMonitor = powerMonitor
@@ -77,6 +89,8 @@ final class PlaybackCoordinator {
         self.notifyWallpaperSessionChanged = notifyWallpaperSessionChanged
         self.reportRuntimeError = reportRuntimeError
         self.originReconciler = originReconciler
+        self.isGloballyEnabled = isGloballyEnabled
+        self.isUserAbsent = isUserAbsent
     }
 
     // MARK: - Configuration setters
@@ -304,66 +318,6 @@ final class PlaybackCoordinator {
         }
     }
 
-    private func applyStartupPlaybackPolicy(to player: WallpaperVideoPlayer, for screen: Screen) {
-        let globalSettings = SettingsManager.shared.loadGlobalSettings()
-        let powerSource = powerMonitor.currentPowerSource
-        let isHiddenByFullScreen = fullScreenDetector.isDesktopHidden(for: screen.id)
-
-        let pauseForPower = WallpaperPolicyEngine.shouldPauseForPower(
-            globalSettings: globalSettings,
-            powerSource: powerSource
-        )
-        let pauseForFullScreen = WallpaperPolicyEngine.shouldApplyFullScreenPolicy(
-            globalSettings: globalSettings,
-            isHiddenByFullScreen: isHiddenByFullScreen
-        )
-
-        if pauseForPower {
-            powerPolicy.markPausedByPower(screen.id)
-        }
-        if pauseForFullScreen {
-            powerPolicy.markPausedByFullScreen(screen.id)
-        }
-
-        if WallpaperPolicyEngine.shouldStartVideoPaused(
-            globalSettings: globalSettings,
-            powerSource: powerSource,
-            isHiddenByFullScreen: isHiddenByFullScreen
-        ) {
-            player.pause()
-            return
-        }
-
-        schedulePolicyAwarePlaybackStart(to: player, screenID: screen.id)
-    }
-
-    private func schedulePolicyAwarePlaybackStart(to player: WallpaperVideoPlayer, screenID: CGDirectDisplayID) {
-        Task { @MainActor [weak self, weak player] in
-            do {
-                try await Task.sleep(for: .milliseconds(200))
-            } catch {
-                return
-            }
-
-            guard let self, let player else { return }
-
-            let globalSettings = SettingsManager.shared.loadGlobalSettings()
-            let shouldPause = WallpaperPolicyEngine.shouldStartVideoPaused(
-                globalSettings: globalSettings,
-                powerSource: self.powerMonitor.currentPowerSource,
-                isHiddenByFullScreen: self.fullScreenDetector.isDesktopHidden(for: screenID)
-            )
-
-            guard !shouldPause else {
-                player.pause()
-                return
-            }
-
-            player.play()
-            self.markSessionStateChanged()
-        }
-    }
-
     // MARK: - Video session lifecycle
 
     func setVideo(url: URL, bookmarkData: Data, for screen: Screen) {
@@ -510,7 +464,6 @@ final class PlaybackCoordinator {
 
         if !needsNewPlayer, let player = existingPlayer {
             let currentTime = preservingState ? player.player?.currentTime() : .zero
-            let wasPlaying = player.isPlaying
 
             player.setVideoFitMode(configuration.fitMode)
 
@@ -530,19 +483,9 @@ final class PlaybackCoordinator {
             if let currentTime {
                 player.player?.seek(to: currentTime)
             }
-
-            let globalSettings = SettingsManager.shared.loadGlobalSettings()
-            let shouldPause = WallpaperPolicyEngine.shouldStartVideoPaused(
-                globalSettings: globalSettings,
-                powerSource: powerMonitor.currentPowerSource,
-                isHiddenByFullScreen: fullScreenDetector.isDesktopHidden(for: screen.id)
-            )
-
-            if shouldPause {
-                player.pause()
-            } else if !wasPlaying {
-                schedulePolicyAwarePlaybackStart(to: player, screenID: screen.id)
-            }
+            // Play/pause is left to the trailing applyPerformancePolicy: it
+            // honours the session's existing intent + current profile, so a
+            // config re-apply never resumes a video the user paused.
         } else {
             if existingPlayer != nil {
                 releaseRuntimeSession(screen)
@@ -562,17 +505,27 @@ final class PlaybackCoordinator {
             player.setVideoColorSpace(configuration.videoColorSpace)
             player.setPlaybackSpeed(configuration.playbackSpeed)
             applyConfigurationWhenAssetReady(player: player, screen: screen, configuration: configuration)
-            applyStartupPlaybackPolicy(to: player, for: screen)
         }
 
         reportRuntimeError(screen.id, nil)
         syncVideoAudioLeadership()
         applyVideoSpanLayout()
+        // Single authority: a fresh session defaults to intent=true; the profile
+        // decides whether it actually plays now.
         applyPerformancePolicy(to: screen)
     }
 
     func setupVideoPlayback(url: URL, screen: Screen) {
         releaseRuntimeSession(screen)
+
+        // Master gate: callers (setVideo / playlist / schedule) persist the
+        // configuration before reaching here, so when wallpapers are globally
+        // disabled we simply skip building the player — it is rebuilt from the
+        // saved configuration when the master switch is turned back on.
+        guard isGloballyEnabled() else {
+            notifyWallpaperSessionChanged()
+            return
+        }
 
         let configuration = configurationStore.get(for: screen.id, fingerprint: screen.displayFingerprint)
         let player = WallpaperVideoPlayer(
@@ -604,7 +557,6 @@ final class PlaybackCoordinator {
 
         syncVideoAudioLeadership()
         applyVideoSpanLayout()
-        applyStartupPlaybackPolicy(to: player, for: liveScreen)
         Logger.info("Video player initialized for screen \(screen.id) — async asset load in progress", category: .screenManager)
         notifyWallpaperSessionChanged()
     }
@@ -636,7 +588,8 @@ final class PlaybackCoordinator {
             isWindowOccluding: isWindowOccluding,
             isApplicationRuleActive: ApplicationPerformanceRuleEngine.isActive(for: globalSettings),
             thermalState: ProcessInfo.processInfo.thermalState,
-            isGameModeActive: globalSettings.pauseInGameMode && GameModeDetector.isActive
+            isGameModeActive: globalSettings.pauseInGameMode && GameModeDetector.isActive,
+            isUserAbsent: isUserAbsent()
         )
         screen.runtimeSession?.applyPerformanceProfile(profile)
     }

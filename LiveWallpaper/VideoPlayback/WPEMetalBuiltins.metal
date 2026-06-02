@@ -698,7 +698,8 @@ struct WPEWaterWavesUniforms {
     float directionX;
     float directionY;
     float hasMask;
-    float debugMode; // 0 normal; 1 mask grayscale; 2 source+red mask overlay; 3 displacement heatmap
+    float debugMode; // 0 normal; 1 mask grayscale; 2 source+red mask overlay; 3 displacement heatmap; 4 solid magenta
+    float4 texture1Resolution; // (textureWidth, textureHeight, imageWidth, imageHeight)
 };
 
 // Port of WPE's effects/waterwaves.frag: a sine wave travels along `direction` at
@@ -712,8 +713,18 @@ fragment half4 wpe_effect_waterwaves_fragment(
 ) {
     constexpr sampler linearSampler(address::clamp_to_edge, filter::linear);
     float2 direction = float2(uniforms.directionX, uniforms.directionY);
+    // Mirror waterwaves.vert's mask-UV padding correction (v_TexCoord.zw *= res.zw/res.xy)
+    // for the debug overlay so the mask visualization lands where the real effect samples.
+    float2 maskUV = in.uv;
+    if (uniforms.debugMode > 0.5) {
+        float2 maskScale = float2(
+            abs(uniforms.texture1Resolution.x) > 0.000001 ? uniforms.texture1Resolution.z / uniforms.texture1Resolution.x : 1.0,
+            abs(uniforms.texture1Resolution.y) > 0.000001 ? uniforms.texture1Resolution.w / uniforms.texture1Resolution.y : 1.0
+        );
+        maskUV *= maskScale;
+    }
     float mask = (uniforms.hasMask > 0.5)
-        ? float(texture1.sample(linearSampler, in.uv).r)
+        ? float(texture1.sample(linearSampler, maskUV).r)
         : 1.0;
 
     float distance = uniforms.time * uniforms.speed + dot(in.uv, direction) * uniforms.scale;

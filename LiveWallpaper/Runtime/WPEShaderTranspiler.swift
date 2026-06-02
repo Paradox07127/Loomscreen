@@ -131,8 +131,21 @@ struct WPEShaderTranspiler {
         let mainBody = String(body[mainRange])
         let postMain = String(body[mainRange.upperBound...])
 
-        let translatedHelpers = applySubstitutions(preMain + "\n" + postMain)
-        let translatedMain = translateMain(mainBody)
+        let varyingTypesByName = Dictionary(
+            varyings.map { ($0.name, $0.metalType) },
+            uniquingKeysWith: { _, last in last }
+        )
+        let preserveTexCoordZW = shouldPreserveTexCoordZW(shaderName: shaderName)
+        let translatedHelpers = applySubstitutions(
+            preMain + "\n" + postMain,
+            varyingTypesByName: varyingTypesByName,
+            preserveTexCoordZW: preserveTexCoordZW
+        )
+        let translatedMain = translateMain(
+            mainBody,
+            varyingTypesByName: varyingTypesByName,
+            preserveTexCoordZW: preserveTexCoordZW
+        )
         let helperResources = rewriteHelperResourceAccess(
             helpers: translatedHelpers,
             mainBody: translatedMain,
@@ -610,11 +623,20 @@ struct WPEShaderTranspiler {
     }
 
     /// Strip the `void main() { ... }` wrapper and rebuild it as Metal-friendly statements.
-    private static func translateMain(_ source: String) -> String {
+    private static func translateMain(
+        _ source: String,
+        varyingTypesByName: [String: String] = [:],
+        preserveTexCoordZW: Bool = false
+    ) -> String {
         guard let openBrace = source.range(of: "{") else { return "" }
         guard let closeBrace = source.range(of: "}", options: .backwards) else { return "" }
         var inner = String(source[openBrace.upperBound..<closeBrace.lowerBound])
-        inner = applySubstitutions(inner, rewriteProgramScopeConsts: false)
+        inner = applySubstitutions(
+            inner,
+            rewriteProgramScopeConsts: false,
+            varyingTypesByName: varyingTypesByName,
+            preserveTexCoordZW: preserveTexCoordZW
+        )
 
         let usesGLOut = inner.contains("gl_FragColor")
         let usesWPEOut = inner.contains("wpe_fragColor")
@@ -641,7 +663,12 @@ struct WPEShaderTranspiler {
     // MARK: - Type / intrinsic substitutions
 
     /// Apply token-level substitutions for the GLSL→MSL gap.
-    private static func applySubstitutions(_ source: String, rewriteProgramScopeConsts: Bool = true) -> String {
+    private static func applySubstitutions(
+        _ source: String,
+        rewriteProgramScopeConsts: Bool = true,
+        varyingTypesByName: [String: String] = [:],
+        preserveTexCoordZW: Bool = false
+    ) -> String {
         var s = source
 
         for (glsl, msl) in [
@@ -678,7 +705,11 @@ struct WPEShaderTranspiler {
         s = rewriteTextureResolutionVector2Assignments(s)
         s = rewriteVectorConstructorNarrowing(s)
         s = rewriteTexCoordVector2Arithmetic(s)
-        s = rewriteTexCoordMaskUVFallback(s)
+        s = rewriteTexCoordMaskUVFallback(
+            s,
+            varyingTypesByName: varyingTypesByName,
+            preserveTexCoordZW: preserveTexCoordZW
+        )
         s = rewriteGLSLArrayConstructors(s)
 
         s = rewriteReferenceParameters(s)
@@ -1034,11 +1065,34 @@ struct WPEShaderTranspiler {
         )
     }
 
-    /// Some WPE effects compute secondary mask UVs into `v_TexCoord.zw` in the
-    /// vertex shader, but this fullscreen Metal path only exposes base UVs.
-    /// Falling back to `.xy` preserves compilation and the common mask behavior.
-    private static func rewriteTexCoordMaskUVFallback(_ source: String) -> String {
-        source.replacingOccurrences(of: "v_TexCoord.zw", with: "v_TexCoord.xy")
+    /// waterwaves computes a resolution-scaled mask UV into `v_TexCoord.zw`, which the
+    /// fragment-only path faithfully synthesizes (`wpe_texcoord_with_resolution`). For that
+    /// shader we keep the `.zw` sample so the mask padding correction survives. For every
+    /// other shader the synthesized `.zw` is NOT guaranteed to match the source `.vert`
+    /// (e.g. blur step, clipping-mask transforms), so we keep the historical `.xy` fallback
+    /// to avoid changing their flags-off output.
+    private static func rewriteTexCoordMaskUVFallback(
+        _ source: String,
+        varyingTypesByName: [String: String],
+        preserveTexCoordZW: Bool
+    ) -> String {
+        guard preserveTexCoordZW, varyingTypesByName["v_TexCoord"] == "float4" else {
+            return source.replacingOccurrences(of: "v_TexCoord.zw", with: "v_TexCoord.xy")
+        }
+        return source
+    }
+
+    /// Only `effects/waterwaves` has a transpiler-synthesized `v_TexCoord.zw` that matches its
+    /// source `.vert` (the mask-UV resolution scaling). Restrict `.zw` preservation to it so
+    /// other float4-`v_TexCoord` effects keep their historical behavior.
+    private static func shouldPreserveTexCoordZW(shaderName: String) -> Bool {
+        let normalized = shaderName
+            .lowercased()
+            .replacingOccurrences(of: ".frag", with: "")
+            .replacingOccurrences(of: ".vert", with: "")
+        return normalized == "effect_waterwaves"
+            || normalized == "effects/waterwaves"
+            || normalized.hasSuffix("/effects/waterwaves")
     }
 
     /// Metal accepts aggregate array initializers, not GLSL constructor syntax

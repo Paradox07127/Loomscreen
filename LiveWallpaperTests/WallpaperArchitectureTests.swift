@@ -266,6 +266,20 @@ struct MenuBarPlaybackControlTests {
         #expect(playback.playCount == 1)
         #expect(playback.pauseCount == 0)
     }
+
+    @Test("Toggle reads intent, not playback: a policy-suspended (intends-to-play) wallpaper pauses")
+    func toggleReadsIntentNotPlaybackState() {
+        // Suppressed by a performance policy: not actually playing, but the
+        // user still intends to play. Toggling must pause (flip intent off),
+        // not "resume" by chasing the suppressed isPlaying state.
+        let playback = FakePlaybackController(isPlaying: false, userIntendsToPlay: true)
+
+        PlaybackToggle.toggle(playback)
+
+        #expect(!playback.userIntendsToPlay)
+        #expect(playback.pauseCount == 1)
+        #expect(playback.playCount == 0)
+    }
 }
 
 @Suite("PlaylistEntry identity")
@@ -711,11 +725,13 @@ struct WallpaperRuntimeReadinessTests {
 @MainActor
 private final class FakePlaybackController: WallpaperPlaybackControllable {
     var isPlaying: Bool
+    private(set) var userIntendsToPlay: Bool
     var playCount = 0
     var pauseCount = 0
 
-    init(isPlaying: Bool) {
+    init(isPlaying: Bool, userIntendsToPlay: Bool? = nil) {
         self.isPlaying = isPlaying
+        self.userIntendsToPlay = userIntendsToPlay ?? isPlaying
     }
 
     var wallpaperType: WallpaperType { .video }
@@ -731,11 +747,13 @@ private final class FakePlaybackController: WallpaperPlaybackControllable {
 
     func play() {
         playCount += 1
+        userIntendsToPlay = true
         isPlaying = true
     }
 
     func pause() {
         pauseCount += 1
+        userIntendsToPlay = false
         isPlaying = false
     }
 }
@@ -808,6 +826,76 @@ struct WallpaperPolicyEngineTests {
             globalSettings: settings,
             isHiddenByFullScreen: true
         ))
+    }
+
+    @Test("User absence (lock / display-sleep / system-sleep) maps to suspended profile")
+    func userAbsentSuspendedProfile() {
+        let settings = GlobalSettings()
+
+        let active = WallpaperPolicyEngine.performanceProfile(
+            globalSettings: settings,
+            powerSource: .external,
+            isHiddenByFullScreen: false,
+            isWindowOccluding: false,
+            isApplicationRuleActive: false,
+            thermalState: .nominal,
+            isGameModeActive: false,
+            isUserAbsent: false
+        )
+        let absent = WallpaperPolicyEngine.performanceProfile(
+            globalSettings: settings,
+            powerSource: .external,
+            isHiddenByFullScreen: false,
+            isWindowOccluding: false,
+            isApplicationRuleActive: false,
+            thermalState: .nominal,
+            isGameModeActive: false,
+            isUserAbsent: true
+        )
+
+        #expect(active == .quality)
+        #expect(absent == .suspended)
+    }
+
+    @Test("Every suspend condition independently maps to suspended; all-benign stays quality")
+    func unifiedSuspendConditionMatrix() {
+        // Each row toggles exactly one condition true on an otherwise-benign
+        // baseline (external power, nominal thermal, nothing hidden).
+        func profile(
+            hidden: Bool = false,
+            occluding: Bool = false,
+            appRule: Bool = false,
+            game: Bool = false,
+            thermal: ProcessInfo.ThermalState = .nominal,
+            powerSource: PowerMonitor.PowerSource = .external,
+            userAbsent: Bool = false
+        ) -> WallpaperPerformanceProfile {
+            WallpaperPolicyEngine.performanceProfile(
+                globalSettings: GlobalSettings(
+                    globalPauseOnBattery: true,
+                    pauseOnFullScreen: true,
+                    pauseInGameMode: true,
+                    pauseOnWindowOcclusion: true
+                ),
+                powerSource: powerSource,
+                isHiddenByFullScreen: hidden,
+                isWindowOccluding: occluding,
+                isApplicationRuleActive: appRule,
+                thermalState: thermal,
+                isGameModeActive: game,
+                isUserAbsent: userAbsent
+            )
+        }
+
+        #expect(profile() == .quality)
+        #expect(profile(hidden: true) == .suspended)
+        #expect(profile(occluding: true) == .suspended)
+        #expect(profile(appRule: true) == .suspended)
+        #expect(profile(game: true) == .suspended)
+        #expect(profile(thermal: .serious) == .suspended)
+        #expect(profile(thermal: .critical) == .suspended)
+        #expect(profile(powerSource: .battery(level: 50)) == .suspended)
+        #expect(profile(userAbsent: true) == .suspended)
     }
 
     @Test("Global pause on battery pauses video playback")
