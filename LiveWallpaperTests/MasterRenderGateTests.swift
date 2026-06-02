@@ -143,4 +143,83 @@ struct MasterRenderGateTests {
             #expect(manager.wallpaperOverviewStatus == .off)
         }
     }
+
+    @Test("Enabling the gate rebuilds the session from persisted config and makes it live")
+    func enablingGateRebuildsAndRunsPolicy() throws {
+        guard let screen = NSScreen.screens.first.map(Screen.init(nsScreen:)) else {
+            Issue.record("No NSScreen available")
+            return
+        }
+        let originalConfigurations = SettingsManager.shared.loadConfigurations()
+        defer { SettingsManager.shared.replaceAllConfigurations(originalConfigurations) }
+
+        SettingsManager.shared.replaceAllConfigurations([
+            ScreenConfiguration(screenID: screen.id, wallpaper: .metalShader(.waves))
+        ])
+
+        try Self.withGate(false) {
+            let manager = Self.makeManager(screen: screen)
+            defer { screen.resetRuntimeSession() }
+
+            guard let liveScreen = manager.screens.first(where: { $0.id == screen.id }) else {
+                Issue.record("Injected display registry did not produce a screen")
+                return
+            }
+
+            #expect(liveScreen.runtimeSession == nil, "Gate off must not build a session")
+
+            // Enable: the lifecycle axis rebuilds the missing session from
+            // persisted config; the performance policy (not a blind resume)
+            // then drives it live, so the overview leaves the `.off` state.
+            manager.setWallpapersEnabled(true)
+
+            #expect(manager.wallpapersGloballyEnabled)
+            #expect(liveScreen.runtimeSession != nil, "Enabling must rebuild the session")
+            #expect(manager.wallpaperOverviewStatus != .off)
+            #expect(manager.wallpaperOverviewStatus != .notConfigured)
+
+            // Round-trip back off must tear the rebuilt session down again.
+            manager.setWallpapersEnabled(false)
+            #expect(liveScreen.runtimeSession == nil, "Disabling must release the rebuilt session")
+        }
+    }
+
+    @Test("Re-applying the gate while already enabled keeps the same live session (show-only branch)")
+    func reapplyingGateKeepsLiveSession() throws {
+        guard let screen = NSScreen.screens.first.map(Screen.init(nsScreen:)) else {
+            Issue.record("No NSScreen available")
+            return
+        }
+        let originalConfigurations = SettingsManager.shared.loadConfigurations()
+        defer { SettingsManager.shared.replaceAllConfigurations(originalConfigurations) }
+
+        SettingsManager.shared.replaceAllConfigurations([
+            ScreenConfiguration(screenID: screen.id, wallpaper: .metalShader(.waves))
+        ])
+
+        try Self.withGate(true) {
+            let manager = Self.makeManager(screen: screen)
+            defer { screen.resetRuntimeSession() }
+
+            guard let liveScreen = manager.screens.first(where: { $0.id == screen.id }) else {
+                Issue.record("Injected display registry did not produce a screen")
+                return
+            }
+
+            // Gate on + restore-on-refresh builds the session at launch.
+            #expect(liveScreen.runtimeSession != nil, "Gate on must build the session")
+            let builtIdentity = liveScreen.runtimeSession.map { ObjectIdentifier($0 as AnyObject) }
+
+            // Idempotent re-apply exercises the already-live `show()`-only
+            // branch: the session must be preserved (not rebuilt, not resumed
+            // blindly) and the performance policy left in charge.
+            manager.applyGlobalRenderGate()
+
+            #expect(liveScreen.runtimeSession != nil, "Re-enabling must not tear a live session down")
+            #expect(liveScreen.runtimeSession.map { ObjectIdentifier($0 as AnyObject) } == builtIdentity,
+                    "An already-live session must be reused, not rebuilt")
+            #expect(manager.wallpaperOverviewStatus != .off)
+            #expect(manager.wallpaperOverviewStatus != .notConfigured)
+        }
+    }
 }

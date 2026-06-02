@@ -1096,25 +1096,40 @@ final class ScreenManager {
     }
 
     /// Apply the master gate to every screen. When enabled, builds any session
-    /// that is missing (from its persisted configuration) and shows/resumes the
-    /// ones already live. When disabled, fully tears each session down so its
-    /// GPU textures, scene runtime, and decoded assets are released — rather
-    /// than leaving a suspended-but-resident renderer holding memory. Idempotent
-    /// and safe to call across launches and after new wallpapers are assigned.
+    /// that is missing (from its persisted configuration) and makes any
+    /// already-live one visible, then re-runs the performance policy so the
+    /// gate never decides quality/suspended itself. When disabled, fully tears
+    /// each session down so its GPU textures, scene runtime, and decoded assets
+    /// are released — rather than leaving a suspended-but-resident renderer
+    /// holding memory. Idempotent and safe to call across launches and after
+    /// new wallpapers are assigned.
     func applyGlobalRenderGate() {
         for screen in screens {
             if wallpapersGloballyEnabled {
                 if screen.runtimeSession == nil {
                     // Rendering is permitted again — rebuild from the persisted
                     // configuration. No-op for screens without a saved wallpaper.
+                    // The build path applies the current performance policy itself.
                     loadConfigurationForScreen(screen)
                 } else {
+                    // Already-live session (idempotent re-enable): only ensure
+                    // the window is visible. Whether it runs or stays suspended
+                    // is decided by the performance policy below — never a blind
+                    // resume() that would override power / thermal / full-screen
+                    // / app-rule state.
                     screen.runtimeSession?.show()
-                    screen.runtimeSession?.resume()
                 }
             } else if screen.runtimeSession != nil {
                 releaseRuntimeSession(screen)
             }
+        }
+
+        // Single source of truth for "how hard a live session works". Re-running
+        // the policy after enabling keeps the master gate (a lifecycle axis)
+        // from bypassing the performance-profile axis. Skipped while disabled —
+        // there are no live sessions to target.
+        if wallpapersGloballyEnabled {
+            refreshPerformancePolicyForAllScreens()
         }
     }
     
