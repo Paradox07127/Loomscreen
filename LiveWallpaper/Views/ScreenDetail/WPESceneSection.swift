@@ -11,7 +11,6 @@ struct WPESceneSection: View {
 
     @State private var recentImports: [WPEHistoryEntry] = []
     @State private var selectedHistoryEntry: WPEHistoryEntry?
-    @State private var showWorkshopGallery: Bool = false
     @State private var pendingDestructive: PendingDestructive?
 
     var body: some View {
@@ -39,10 +38,6 @@ struct WPESceneSection: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .wpeHistoryDidChange)) { _ in
             Task { @MainActor in reloadHistory() }
-        }
-        .sheet(isPresented: $showWorkshopGallery) {
-            WorkshopGalleryView(screen: screen)
-                .environment(screenManager)
         }
         .confirmDestructive($pendingDestructive)
         .errorAlert(
@@ -80,14 +75,10 @@ struct WPESceneSection: View {
                 .controlSize(.large)
                 .accessibilityHint(Text("Opens a folder chooser to apply a copied local project"))
 
-                Button {
-                    showWorkshopGallery = true
-                } label: {
-                    Label("Browse Workshop Library…", systemImage: "books.vertical")
-                }
-                .adaptiveGlassButton(.regular)
-                .controlSize(.regular)
-                .accessibilityHint(Text("Browse copied local projects"))
+                Text("Browse and manage your whole library in the Steam Workshop tab.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
             }
             .padding(.top, 4)
 
@@ -106,15 +97,6 @@ struct WPESceneSection: View {
                     Text("Recent Imported Projects")
                         .font(.headline)
                     Spacer()
-                    Button {
-                        showWorkshopGallery = true
-                    } label: {
-                        Label("Browse Library…", systemImage: "books.vertical")
-                    }
-                    .adaptiveGlassButton(.regular)
-                    .controlSize(.regular)
-                    .accessibilityHint(Text("Browse copied local projects"))
-
                     Button {
                         presentFolderPicker()
                     } label: {
@@ -184,48 +166,25 @@ struct WPESceneSection: View {
            case .scene(let descriptor) = configuration.activeWallpaper,
            let origin = configuration.wpeOrigin {
             let session = screen.runtimeSession as? SceneWallpaperSession
-            // Single, focused "preview + diagnostics" column. Custom settings
-            // live in the app's right inspector sidebar (alongside HTML's), so
-            // they're always to the side and never stacked under the preview.
-            VStack(spacing: 16) {
-                sceneToolbar
-                WPESceneDetailView(
-                    origin: origin,
-                    descriptor: descriptor,
-                    session: session,
-                    onClearWallpaper: {
-                        pendingDestructive = PendingDestructive(
-                            .clearScene(sceneName: origin.title, displayName: screen.name)
-                        ) {
-                            screenManager.clearWallpaperForScreen(screen)
-                        }
+            // Focused preview + diagnostics. Custom settings live in the app's
+            // right inspector sidebar; Apply / Workshop live in the screen header
+            // and the sidebar, so the card itself stays chrome-free.
+            WPESceneDetailView(
+                origin: origin,
+                descriptor: descriptor,
+                session: session,
+                onClearWallpaper: {
+                    pendingDestructive = PendingDestructive(
+                        .clearScene(sceneName: origin.title, displayName: screen.name)
+                    ) {
+                        screenManager.clearWallpaperForScreen(screen)
                     }
-                )
-            }
+                }
+            )
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .top)
         } else {
             EmptyView()
-        }
-    }
-
-    private var sceneToolbar: some View {
-        HStack {
-            Button {
-                showWorkshopGallery = true
-            } label: {
-                Label("Browse Library…", systemImage: "books.vertical")
-            }
-            .adaptiveGlassButton(.regular)
-            .controlSize(.regular)
-            Spacer()
-            Button {
-                presentFolderPicker()
-            } label: {
-                Label("Apply Project…", systemImage: "plus")
-            }
-            .adaptiveGlassButton(.regular)
-            .controlSize(.regular)
         }
     }
 

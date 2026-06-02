@@ -73,7 +73,6 @@ struct LocalizationCoverageTests {
             "LiveWallpaper/Views/GeneralSettingsView.swift",
             "LiveWallpaper/Views/WPECacheManagementView.swift",
             "LiveWallpaper/Views/ScreenDetail/WPESceneSection.swift",
-            "LiveWallpaper/Views/ScreenDetail/WorkshopGalleryView.swift",
             "LiveWallpaper/Views/ScreenDetail/EmptyStateGuideView.swift",
             "LiveWallpaper/Views/ScreenDetail/WPEFallbackCard.swift",
             "LiveWallpaper/Views/ScreenDetail/WPEHistoryRow.swift",

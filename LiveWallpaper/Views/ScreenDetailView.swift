@@ -279,8 +279,24 @@ struct ScreenDetailView: View {
             onReload: { screenManager.reloadWallpaperForScreen(screen) },
             onApplyToAll: requestApplyToAll,
             onSelectVideo: showFilePicker,
-            onClearWallpaper: clearCurrentWallpaper
+            onClearWallpaper: clearCurrentWallpaper,
+            onApplyScene: applySceneAction
         )
+    }
+
+    /// Scene-only header action: choose a Wallpaper Engine project folder and
+    /// apply it. `nil` in Lite (no scene support / no folder picker).
+    private var applySceneAction: (() -> Void)? {
+        #if !LITE_BUILD
+        return {
+            guard let url = WPEFolderPicker.chooseImportFolder() else { return }
+            Task { @MainActor in
+                await screenManager.importWallpaperEngineProject(at: url, for: screen)
+            }
+        }
+        #else
+        return nil
+        #endif
     }
 
     @ViewBuilder

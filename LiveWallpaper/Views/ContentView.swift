@@ -360,28 +360,16 @@ struct Sidebar: View {
                 NavigationLink(value: Navigation.appleAerials) {
                     Label("Apple Aerials", systemImage: "sparkles.tv")
                 }
+                // The Workshop pane (Installed + Browse Online) manages every
+                // imported project and is the single Workshop surface. It only
+                // exists in the direct-distribution Pro build.
                 #if !LITE_BUILD && DIRECT_DISTRIBUTION
-                // Direct-distribution Pro: one row landing in the tabbed pane
-                // (Installed default + Browse Online). Paste-by-URL moves to a
-                // "+" action inside the pane.
-                if featureCatalog.isEnabled(.workshopOnline) {
+                if featureCatalog.isEnabled(.wpeImport) {
                     NavigationLink(value: Navigation.workshop) {
                         Label("Steam Workshop", systemImage: "cube.transparent.fill")
                     }
                     .accessibilityLabel(Text("Steam Workshop"))
                     .accessibilityHint(Text("Browse installed and online Workshop wallpapers"))
-                } else if featureCatalog.isEnabled(.wpeImport) {
-                    NavigationLink(value: Navigation.workshop) {
-                        Label("Workshop Library", systemImage: "cube.transparent")
-                    }
-                    .accessibilityHint(Text("Browse copied local projects in the Workshop Library"))
-                }
-                #else
-                if featureCatalog.isEnabled(.wpeImport) {
-                    NavigationLink(value: Navigation.workshop) {
-                        Label("Workshop Library", systemImage: "cube.transparent")
-                    }
-                    .accessibilityHint(Text("Browse copied local projects in the Workshop Library"))
                 }
                 #endif
 
@@ -582,13 +570,7 @@ struct DetailContent: View {
 
             case .workshop:
                 #if !LITE_BUILD && DIRECT_DISTRIBUTION
-                if featureCatalog.isEnabled(.workshopOnline) {
-                    WorkshopPaneView()
-                } else {
-                    WorkshopGalleryView(allowsTargetSelection: true)
-                }
-                #elseif !LITE_BUILD
-                WorkshopGalleryView(allowsTargetSelection: true)
+                WorkshopPaneView()
                 #else
                 EmptyView()
                 #endif

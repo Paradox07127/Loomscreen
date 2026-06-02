@@ -14,6 +14,9 @@ struct ScreenDetailHeader: View {
     let onApplyToAll: () -> Void
     let onSelectVideo: () -> Void
     let onClearWallpaper: () -> Void
+    /// Scene-only: pick a Wallpaper Engine project folder and apply it. `nil`
+    /// where scenes aren't available (Lite), which also hides the button.
+    var onApplyScene: (() -> Void)? = nil
 
     var body: some View {
         DetailHeaderBar(
@@ -85,6 +88,17 @@ struct ScreenDetailHeader: View {
                             .help(Text("Select Video — choose a video file for this display"))
                             .accessibilityLabel(Text("Select video"))
                             .accessibilityHint(Text("Opens a file picker to choose a wallpaper video"))
+                        }
+
+                        if draft.selectedWallpaperType == .scene, let onApplyScene {
+                            Button(action: onApplyScene) {
+                                Image(systemName: "folder.badge.plus")
+                            }
+                            .adaptiveGlassButton(.regular)
+                            .controlSize(.regular)
+                            .help(Text("Apply Project — choose a Wallpaper Engine project folder for this display"))
+                            .accessibilityLabel(Text("Apply project"))
+                            .accessibilityHint(Text("Opens a folder chooser to apply a Wallpaper Engine project"))
                         }
 
                         Button(role: .destructive, action: onClearWallpaper) {
