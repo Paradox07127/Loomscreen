@@ -304,8 +304,9 @@ struct WPESceneDetailView: View {
                 Spacer()
                 statusPill
             }
-            HStack(spacing: 6) {
-                Text("Workshop ID \(origin.workshopID) · capability: \(descriptor.capabilityTier.localizedLabel)", comment: "Scene metadata row. Placeholders are Workshop ID and capability tier.")
+            HStack(spacing: 4) {
+                workshopIDLabel
+                Text("· capability: \(descriptor.capabilityTier.localizedLabel)", comment: "Scene metadata capability suffix. The placeholder is the capability tier.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 4)
@@ -330,6 +331,37 @@ struct WPESceneDetailView: View {
                 Label("Renderer Diagnostics", systemImage: "info.circle")
             }
         }
+    }
+
+    /// Workshop ID — a link to the item's Steam Workshop page (the real detail
+    /// page with author / tags / rating / size) when it's a numeric Steam ID;
+    /// plain text for locally-imported projects whose ID isn't a Steam item.
+    @ViewBuilder
+    private var workshopIDLabel: some View {
+        if isSteamWorkshopID, let url = steamWorkshopURL {
+            Button {
+                NSWorkspace.shared.open(url)
+            } label: {
+                Text("Workshop ID \(origin.workshopID)", comment: "Scene metadata Workshop ID link. The placeholder is the numeric Workshop ID.")
+                    .font(.caption)
+                    .foregroundStyle(Color.accentColor)
+            }
+            .buttonStyle(.plain)
+            .help(Text("Open this item's Steam Workshop page"))
+            .accessibilityLabel(Text("Workshop ID \(origin.workshopID). Opens the Steam Workshop page.", comment: "A11y label for the Workshop ID link. The placeholder is the numeric Workshop ID."))
+        } else {
+            Text("Workshop ID \(origin.workshopID)", comment: "Scene metadata Workshop ID. The placeholder is the Workshop ID.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var isSteamWorkshopID: Bool {
+        !origin.workshopID.isEmpty && origin.workshopID.allSatisfy(\.isNumber)
+    }
+
+    private var steamWorkshopURL: URL? {
+        URL(string: "https://steamcommunity.com/sharedfiles/filedetails/?id=\(origin.workshopID)")
     }
 
     #if DEBUG
