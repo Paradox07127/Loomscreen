@@ -445,6 +445,7 @@ struct GeneralSettingsView: View {
                         Button("Show in Finder") { revealLogFolder() }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
+                            .fixedSize()
                             .accessibilityLabel(Text("Show logs in Finder"))
                             .accessibilityHint(Text("Opens the folder containing the app's log files"))
                     }
@@ -537,6 +538,11 @@ struct GeneralSettingsView: View {
                 Button("Edit…") { showAppExceptions = true }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    // Without fixedSize the SettingRow's flexible title column
+                    // (maxWidth: .infinity, layoutPriority 1) starves the button
+                    // of width and clips its label to an empty border — pin it to
+                    // its intrinsic size like the Backup-tab buttons.
+                    .fixedSize()
                     .accessibilityLabel(Text("Edit application exceptions"))
             }
 

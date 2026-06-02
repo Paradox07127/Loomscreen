@@ -52,7 +52,11 @@ public enum DesignTokens {
         public static let width: CGFloat = 210
         public static let maxWidth: CGFloat = width * 1.15
         public static let sectionHeaderSpacing: CGFloat = 6
-        public static let sectionHeaderBottomPadding: CGFloat = 2
+        public static let sectionHeaderBottomPadding: CGFloat = 0
+        /// Negative inset pulled above each sidebar section header to tighten the
+        /// otherwise-airy default gap between sections (macOS has no public
+        /// `listSectionSpacing`, so we claw it back on the header itself).
+        public static let sectionHeaderTopPadding: CGFloat = -7
         public static let displayHeaderBottomPadding: CGFloat = 6
     }
 

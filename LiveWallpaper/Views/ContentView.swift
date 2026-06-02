@@ -442,6 +442,7 @@ private struct SidebarSectionHeader: View {
             .font(.caption)
             .bold()
             .foregroundStyle(.secondary)
+            .padding(.top, DesignTokens.Sidebar.sectionHeaderTopPadding)
             .padding(.bottom, DesignTokens.Sidebar.sectionHeaderBottomPadding)
     }
 }
