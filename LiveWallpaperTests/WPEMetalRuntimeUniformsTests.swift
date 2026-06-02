@@ -182,6 +182,10 @@ struct WPEMetalRuntimeUniformsTests {
         #expect(values["g_Brightness"]?.numberValue == 1)
         #expect(values["g_PointerPosition"]?.vectorValue == [0.2, 0.8])
         #expect(values["g_ViewProjectionMatrix"]?.vectorValue?.count == 16)
+        // Per-object 2.8 transform uniforms injected from the layer geometry.
+        // `.identity` geometry → identity matrices.
+        #expect(values["g_ModelMatrix"]?.vectorValue == [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])
+        #expect(values["g_NormalModelMatrix"]?.vectorValue == [1, 0, 0, 0, 1, 0, 0, 0, 1])
     }
 
     @Test("Animated single shader constants clamp to final keyframe after their duration")

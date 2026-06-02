@@ -86,6 +86,20 @@ extension WPEPreparedRenderPipeline {
                         for (key, value) in camera.uniformValues {
                             values[key] = value
                         }
+                        // Per-object 2.8 transform uniforms (g_ModelMatrix /
+                        // g_NormalModelMatrix). Object-scoped, so merged from the
+                        // resolved layer geometry here rather than per-frame.
+                        // Identity geometry → identity matrices, and undeclared
+                        // uniforms are dropped at packing, so 2D scenes are
+                        // unaffected.
+                        let geometry = resolvedGraphLayer.geometry
+                        for (key, value) in WPEMetalObjectUniforms.uniformValues(
+                            origin: geometry.origin,
+                            scale: geometry.scale,
+                            angles: geometry.angles
+                        ) {
+                            values[key] = value
+                        }
                         return WPEPreparedRenderPass(
                             pass: pass.pass,
                             shader: pass.shader,
