@@ -8,6 +8,11 @@ import Metal
 /// surfaces as `SceneRenderingError.metalRendererUnsupported`.
 struct WPESwiftShaderCompiler: WPEShaderCompiling {
     let device: MTLDevice
+    /// Fragment-only compiler contract: vertex execution always stays on the
+    /// built-in fullscreen quad. Model/vertex-domain shaders are never compiled
+    /// here — they surface a `.translationFailed`/`.mslLibraryFailed` diagnostic
+    /// and fall back (WebGL) rather than crashing Metal.
+    static let fixedVertexFunctionName = "wpe_fullscreen_vertex"
 
     init(device: MTLDevice) {
         self.device = device
@@ -77,7 +82,7 @@ struct WPESwiftShaderCompiler: WPEShaderCompiling {
 
         return WPEShaderCompileResult(
             library: library,
-            vertexFunctionName: "wpe_fullscreen_vertex",
+            vertexFunctionName: Self.fixedVertexFunctionName,
             fragmentFunctionName: "wpe_translated_fragment",
             mslSource: translation.mslSource,
             diagnostics: [],

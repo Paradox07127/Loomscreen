@@ -83,6 +83,13 @@ final class WPEMetalRenderExecutor {
     /// shaders. Library + blend + format set is the key.
     private var translatedPipelineCache: [TranslatedPipelineKey: MTLRenderPipelineState] = [:]
     private var previousFrameHistory: PreviousFrameHistory?
+    private var msdfTextPipelineCache: [MSDFTextPipelineKey: MTLRenderPipelineState] = [:]
+    private var msdfNeutralWhiteTexture: MTLTexture?
+
+    private struct MSDFTextPipelineKey: Hashable {
+        let libraryID: ObjectIdentifier
+        let colorPixelFormat: UInt
+    }
 
     private struct PreviousFrameHistory {
         let sceneSize: CGSize
@@ -430,6 +437,182 @@ final class WPEMetalRenderExecutor {
         encoder.endEncoding()
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()
+    }
+
+    /// Draw GPU MSDF text: compile the translated `font.frag` (cached per combo
+    /// set), bind per-page glyph quads + atlas texture, pack the font material
+    /// uniforms by slot, and composite with premultiplied alpha onto `output`.
+    func drawMSDFText(
+        payloads: [WPEMSDFTextDrawPayload],
+        sceneSize: CGSize,
+        output: MTLTexture
+    ) throws {
+        guard !payloads.isEmpty else { return }
+        guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+            throw WPEMetalRenderExecutorError.commandBufferFailed
+        }
+        let descriptor = MTLRenderPassDescriptor()
+        descriptor.colorAttachments[0].texture = output
+        descriptor.colorAttachments[0].loadAction = .load
+        descriptor.colorAttachments[0].storeAction = .store
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else {
+            throw WPEMetalRenderExecutorError.commandBufferFailed
+        }
+
+        var sceneSizeValue = SIMD2<Float>(
+            Float(max(sceneSize.width, 1)),
+            Float(max(sceneSize.height, 1))
+        )
+        let whiteTexture = try msdfWhiteTexture()
+        for payload in payloads {
+            let result = try compileMSDFFontShader(payload.shaderRequest)
+            let state = try msdfTextPipelineState(for: result, colorPixelFormat: output.pixelFormat)
+            encoder.setRenderPipelineState(state)
+            encoder.setVertexBytes(&sceneSizeValue, length: MemoryLayout<SIMD2<Float>>.stride, index: 1)
+
+            for page in payload.pages {
+                encoder.setVertexBuffer(page.vertexBuffer, offset: 0, index: 0)
+                encoder.setFragmentTexture(page.texture, index: 0)
+                encoder.setFragmentTexture(whiteTexture, index: 1)
+                var slots = packTranslatedUniforms(
+                    values: payload.uniforms,
+                    layout: result.uniformLayout,
+                    texturesBySlot: [0: page.texture, 1: whiteTexture],
+                    destinationTexture: output
+                )
+                encoder.setFragmentBytes(
+                    &slots,
+                    length: MemoryLayout<SIMD4<Float>>.stride * slots.count,
+                    index: 0
+                )
+                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: page.vertexCount)
+            }
+        }
+        encoder.endEncoding()
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()
+    }
+
+    private func compileMSDFFontShader(_ request: WPEShaderCompileRequest) throws -> WPEShaderCompileResult {
+        if let cached = translatedShaderCache[request.sourceHash] {
+            return cached
+        }
+        let result = try shaderCompiler.compile(request)
+        translatedShaderCache[request.sourceHash] = result
+        return result
+    }
+
+    private func msdfTextPipelineState(
+        for result: WPEShaderCompileResult,
+        colorPixelFormat: MTLPixelFormat
+    ) throws -> MTLRenderPipelineState {
+        let key = MSDFTextPipelineKey(
+            libraryID: ObjectIdentifier(result.library),
+            colorPixelFormat: colorPixelFormat.rawValue
+        )
+        if let cached = msdfTextPipelineCache[key] {
+            return cached
+        }
+        guard let vertex = device.makeDefaultLibrary()?.makeFunction(name: "wpe_msdf_text_vertex"),
+              let fragment = result.library.makeFunction(name: result.fragmentFunctionName) else {
+            throw WPEMetalRenderExecutorError.pipelineUnavailable(result.fragmentFunctionName)
+        }
+        let pipelineDescriptor = MTLRenderPipelineDescriptor()
+        pipelineDescriptor.vertexFunction = vertex
+        pipelineDescriptor.fragmentFunction = fragment
+        guard let attachment = pipelineDescriptor.colorAttachments[0] else {
+            throw WPEMetalRenderExecutorError.pipelineUnavailable(result.fragmentFunctionName)
+        }
+        attachment.pixelFormat = colorPixelFormat
+        attachment.isBlendingEnabled = true
+        attachment.rgbBlendOperation = .add
+        attachment.alphaBlendOperation = .add
+        attachment.sourceRGBBlendFactor = .one
+        attachment.destinationRGBBlendFactor = .oneMinusSourceAlpha
+        attachment.sourceAlphaBlendFactor = .one
+        attachment.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        let state = try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
+        msdfTextPipelineCache[key] = state
+        return state
+    }
+
+    private func msdfWhiteTexture() throws -> MTLTexture {
+        if let msdfNeutralWhiteTexture { return msdfNeutralWhiteTexture }
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .rgba8Unorm,
+            width: 1,
+            height: 1,
+            mipmapped: false
+        )
+        descriptor.usage = [.shaderRead]
+        descriptor.storageMode = .shared
+        guard let texture = device.makeTexture(descriptor: descriptor) else {
+            throw WPEMetalRenderExecutorError.pipelineUnavailable("wpe_msdf_text_white_texture")
+        }
+        texture.label = "WPE MSDF neutral white"
+        WPEMetalTextureMetadataRegistry.shared.register(texture: texture)
+        var pixel: UInt32 = 0xFFFF_FFFF
+        texture.replace(
+            region: MTLRegionMake2D(0, 0, 1, 1),
+            mipmapLevel: 0,
+            withBytes: &pixel,
+            bytesPerRow: 4
+        )
+        msdfNeutralWhiteTexture = texture
+        return texture
+    }
+
+    /// Packs a `[name: value]` uniform dictionary into the translated shader's
+    /// `WPEUniforms.vals[]` array by the slot indices from its uniform layout.
+    /// Mirrors the per-pass packer but takes a standalone values dict (used by
+    /// the MSDF text path, which builds uniforms outside the render graph).
+    func packTranslatedUniforms(
+        values: [String: WPESceneShaderConstantValue],
+        layout: [WPEUniformSlot],
+        texturesBySlot: [Int: MTLTexture] = [:],
+        destinationTexture: MTLTexture? = nil
+    ) -> [SIMD4<Float>] {
+        var slots = [SIMD4<Float>](repeating: SIMD4<Float>(0, 0, 0, 0), count: WPEShaderTranspiler.uniformSlotMaximum)
+        for u in layout {
+            guard u.slot < slots.count else { continue }
+            let value = Self.textureResolutionValue(
+                named: u.name,
+                texturesBySlot: texturesBySlot,
+                destinationTexture: destinationTexture
+            ) ?? Self.firstValue(
+                in: values,
+                matching: Self.translatedUniformNameCandidates(for: u)
+            ) ?? u.defaultValue
+            if let length = u.arrayLength {
+                let flat = Self.vectorValue(value, count: length * 4)
+                for i in 0..<length {
+                    let slotIndex = u.slot + i
+                    guard slotIndex < slots.count else { break }
+                    let base = i * 4
+                    slots[slotIndex] = SIMD4<Float>(
+                        flat.indices.contains(base) ? flat[base] : 0,
+                        flat.indices.contains(base + 1) ? flat[base + 1] : 0,
+                        flat.indices.contains(base + 2) ? flat[base + 2] : 0,
+                        flat.indices.contains(base + 3) ? flat[base + 3] : 0
+                    )
+                }
+                continue
+            }
+            switch u.glslType {
+            case "vec2":
+                let v = Self.vectorValue(value, count: 2)
+                slots[u.slot] = SIMD4<Float>(v[0], v[1], 0, 0)
+            case "vec3":
+                let v = Self.vectorValue(value, count: 3)
+                slots[u.slot] = SIMD4<Float>(v[0], v[1], v[2], 0)
+            case "vec4":
+                let v = Self.vectorValue(value, count: 4)
+                slots[u.slot] = SIMD4<Float>(v[0], v[1], v[2], v[3])
+            default:
+                slots[u.slot].x = Self.scalarValue(value, default: 0)
+            }
+        }
+        return slots
     }
 
     private var textOverlayPipelineCache: [UInt: MTLRenderPipelineState] = [:]

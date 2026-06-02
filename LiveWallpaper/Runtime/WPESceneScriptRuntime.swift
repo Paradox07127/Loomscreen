@@ -30,6 +30,7 @@ final class WPESceneScriptInstance {
         self.lastValue = initialValue
 
         Self.installSandbox(in: context)
+        WPESceneScriptBaseclasses.install(in: context)
         let prepared = Self.preprocess(script: script)
         context.exceptionHandler = { _, ex in
             _ = ex

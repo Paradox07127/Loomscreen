@@ -227,6 +227,56 @@ struct WPESceneDocumentParserTests {
         #expect(text.resolvedAlpha(at: 4) == 0)
     }
 
+    @Test("WPE 2.8 MSDF text effect keys parse into the text object with neutral defaults")
+    func textObjectParsesMSDFEffectKeys() throws {
+        let payload: [String: Any] = [
+            "camera": ["center": "0 0 0"],
+            "general": ["orthogonalprojection": ["width": 1920, "height": 1080, "auto": true]],
+            "objects": [
+                [
+                    "id": "effect-text",
+                    "name": "Effect Text",
+                    "type": "text",
+                    "text": "Glow",
+                    "outlinesize": 3,
+                    "outlinecolor": "1 0 0",
+                    "blursize": 2,
+                    "shadowsize": 4,
+                    "shadowcolor": "0 0 1",
+                    "shadowoffset": "5 -6",
+                    "letterspacing": 1.5
+                ],
+                [
+                    "id": "plain-text",
+                    "name": "Plain Text",
+                    "type": "text",
+                    "text": "Plain"
+                ]
+            ]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+
+        let document = try WPESceneDocumentParser.parse(data: data)
+
+        let effect = try #require(document.textObjects.first { $0.id == "effect-text" })
+        #expect(effect.outlineSize == 3)
+        #expect(effect.outlineColor == SIMD3<Double>(1, 0, 0))
+        #expect(effect.blurSize == 2)
+        #expect(effect.shadowSize == 4)
+        #expect(effect.shadowColor == SIMD3<Double>(0, 0, 1))
+        #expect(effect.shadowOffset == SIMD2<Double>(5, -6))
+        #expect(effect.letterSpacing == 1.5)
+
+        // A 2.7-style text object without effect keys stays neutral, so the
+        // CoreText fallback and existing scenes are unaffected.
+        let plain = try #require(document.textObjects.first { $0.id == "plain-text" })
+        #expect(plain.outlineSize == 0)
+        #expect(plain.blurSize == 0)
+        #expect(plain.shadowSize == 0)
+        #expect(plain.shadowOffset == SIMD2<Double>(0, 0))
+        #expect(plain.letterSpacing == 0)
+    }
+
     @Test("Image object inherits parent transform from non-renderable group object")
     func imageObjectInheritsParentTransform() throws {
         let payload: [String: Any] = [

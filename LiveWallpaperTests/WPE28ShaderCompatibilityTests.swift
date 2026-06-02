@@ -97,6 +97,14 @@ struct WPE28ShaderCompatibilityTests {
         try makeLibrary(result.mslSource)
     }
 
+    @Test("Fragment-only compiler keeps the built-in fullscreen vertex (no model-vertex path)")
+    func fragmentOnlyVertexContract() {
+        // The Swift compiler never owns a vertex stage — model/vertex-domain
+        // shaders fall back rather than crash Metal, so this name is the only
+        // vertex function it ever reports.
+        #expect(WPESwiftShaderCompiler.fixedVertexFunctionName == "wpe_fullscreen_vertex")
+    }
+
     @Test("font.frag non-MSDF raster branch (ConvertSampleR8) translates and compiles")
     func fontRasterBranchCompiles() throws {
         // The COLORFONT=0 raster path of font.frag. ConvertSampleR8 is supplied

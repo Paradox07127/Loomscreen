@@ -1,0 +1,222 @@
+#if !LITE_BUILD
+import CoreGraphics
+import CoreText
+import Foundation
+import simd
+
+final class WPEMSDFGlyphGenerator {
+    private let parameters: WPEMSDFParameters
+    private static let neutralFill = SIMD4<Float>(0.5, 0.5, 0.5, 1)
+
+    init(parameters: WPEMSDFParameters = WPEMSDFParameters()) {
+        self.parameters = parameters
+    }
+
+    func generate(
+        glyph: CGGlyph,
+        font: CTFont,
+        maxCellSide: Int? = nil
+    ) -> (bitmap: WPEMSDFBitmap, metrics: WPEMSDFGlyphMetrics)? {
+        guard let sizing = cellSizing(font: font, maxCellSide: maxCellSide) else { return nil }
+        let padding = sizing.padding
+        let cellSide = sizing.cellSide
+        let advance = advanceForGlyph(glyph, font: font)
+        let pathUnitsToEm = pathUnitsToEmUnits(font: font)
+
+        guard let path = CTFontCreatePathForGlyph(font, glyph, nil) else {
+            return neutralResult(
+                cellSide: cellSide,
+                padding: padding,
+                advance: advance * pathUnitsToEm,
+                emUnitsPerPixel: pathUnitsToEm
+            )
+        }
+
+        var shape = buildShape(from: path)
+        let sourceBounds = shape.bounds()
+        guard !shape.contours.isEmpty, !sourceBounds.isNull else {
+            return neutralResult(
+                cellSide: cellSide,
+                padding: padding,
+                advance: advance * pathUnitsToEm,
+                emUnitsPerPixel: pathUnitsToEm
+            )
+        }
+
+        let sourceWidth = Double(sourceBounds.width)
+        let sourceHeight = Double(sourceBounds.height)
+        let available = max(Double(cellSide - padding * 2), 1)
+        let widthScale = sourceWidth > WPEMSDFGeometryMath.epsilon ? available / sourceWidth : Double.greatestFiniteMagnitude
+        let heightScale = sourceHeight > WPEMSDFGeometryMath.epsilon ? available / sourceHeight : Double.greatestFiniteMagnitude
+        let scale = min(widthScale, heightScale)
+        guard scale.isFinite, scale > WPEMSDFGeometryMath.epsilon else {
+            return neutralResult(
+                cellSide: cellSide,
+                padding: padding,
+                advance: advance * pathUnitsToEm,
+                emUnitsPerPixel: pathUnitsToEm
+            )
+        }
+
+        let contentWidth = sourceWidth * scale
+        let contentHeight = sourceHeight * scale
+        let translate = WPEMSDFPoint(
+            Double(padding) + (available - contentWidth) * 0.5 - Double(sourceBounds.minX) * scale,
+            Double(padding) + (available - contentHeight) * 0.5 - Double(sourceBounds.minY) * scale
+        )
+
+        shape.applyTransform(scale: scale, translate: translate)
+        WPEMSDFEdgeColoring.colorShape(&shape, angleThreshold: parameters.angleThreshold)
+
+        let pixelRange = max(parameters.pixelRange, 0.001)
+        var bitmap = WPEMSDFBitmap(width: cellSide, height: cellSide, fill: Self.neutralFill)
+        for y in 0..<bitmap.height {
+            for x in 0..<bitmap.width {
+                let point = WPEMSDFPoint(Double(x) + 0.5, Double(y) + 0.5)
+                bitmap[x, y] = SIMD4<Float>(
+                    encodedDistance(shape.signedDistance(at: point, channel: .red), pixelRange: pixelRange),
+                    encodedDistance(shape.signedDistance(at: point, channel: .green), pixelRange: pixelRange),
+                    encodedDistance(shape.signedDistance(at: point, channel: .blue), pixelRange: pixelRange),
+                    1
+                )
+            }
+        }
+
+        let cellOrigin = WPEMSDFPoint(-translate.x / scale, -translate.y / scale)
+        let metrics = WPEMSDFGlyphMetrics(
+            cellSize: CGSize(width: cellSide, height: cellSide),
+            bearing: cellOrigin * pathUnitsToEm,
+            advance: advance * pathUnitsToEm,
+            scale: scale,
+            translate: translate,
+            emUnitsPerPixel: pathUnitsToEm / scale
+        )
+        return (bitmap: bitmap, metrics: metrics)
+    }
+
+    /// Resolves the square cell size, rejecting non-finite or overflowing font
+    /// sizes (so `Int(ceil(...))` never traps) and any cell larger than the
+    /// atlas page can hold.
+    private func cellSizing(font: CTFont, maxCellSide: Int?) -> (padding: Int, cellSide: Int)? {
+        let padding = max(parameters.padding, 0)
+        let limit = max(maxCellSide ?? Int.max, 1)
+        let rawSize = CTFontGetSize(font)
+        guard rawSize.isFinite, rawSize > 0 else { return nil }
+        let roundedSize = ceil(rawSize)
+        guard roundedSize <= CGFloat(Int.max) else { return nil }
+        let pointSize = max(Int(roundedSize), 1)
+        guard padding <= (Int.max - pointSize) / 2 else { return nil }
+        let cellSide = pointSize + padding * 2
+        guard cellSide <= limit else { return nil }
+        return (padding, cellSide)
+    }
+
+    private func neutralResult(
+        cellSide: Int,
+        padding: Int,
+        advance: WPEMSDFPoint,
+        emUnitsPerPixel: Double
+    ) -> (bitmap: WPEMSDFBitmap, metrics: WPEMSDFGlyphMetrics) {
+        let metrics = WPEMSDFGlyphMetrics(
+            cellSize: CGSize(width: cellSide, height: cellSide),
+            bearing: WPEMSDFPoint(0, 0),
+            advance: advance,
+            scale: 1,
+            translate: WPEMSDFPoint(Double(padding), Double(padding)),
+            emUnitsPerPixel: emUnitsPerPixel
+        )
+        return (
+            bitmap: WPEMSDFBitmap(width: cellSide, height: cellSide, fill: Self.neutralFill),
+            metrics: metrics
+        )
+    }
+
+    private func buildShape(from path: CGPath) -> WPEMSDFShape {
+        var contours: [WPEMSDFContour] = []
+        var segments: [WPEMSDFSegment] = []
+        var currentPoint: WPEMSDFPoint?
+        var contourStart: WPEMSDFPoint?
+
+        func finishContour() {
+            guard !segments.isEmpty else { return }
+            contours.append(WPEMSDFContour(segments: segments))
+            segments.removeAll(keepingCapacity: true)
+            currentPoint = nil
+            contourStart = nil
+        }
+
+        func closeContourIfNeeded() {
+            guard let currentPoint, let contourStart else { return }
+            if Self.distance(currentPoint, contourStart) > WPEMSDFGeometryMath.epsilon {
+                segments.append(.linear(p0: currentPoint, p1: contourStart, color: .white))
+            }
+        }
+
+        path.applyWithBlock { elementPointer in
+            let element = elementPointer.pointee
+            switch element.type {
+            case .moveToPoint:
+                finishContour()
+                let point = Self.point(from: element.points[0])
+                currentPoint = point
+                contourStart = point
+            case .addLineToPoint:
+                guard let current = currentPoint else { return }
+                let point = Self.point(from: element.points[0])
+                if Self.distance(current, point) > WPEMSDFGeometryMath.epsilon {
+                    segments.append(.linear(p0: current, p1: point, color: .white))
+                }
+                currentPoint = point
+            case .addQuadCurveToPoint:
+                guard let current = currentPoint else { return }
+                let control = Self.point(from: element.points[0])
+                let point = Self.point(from: element.points[1])
+                segments.append(.quadratic(p0: current, c: control, p1: point, color: .white))
+                currentPoint = point
+            case .addCurveToPoint:
+                guard let current = currentPoint else { return }
+                let control0 = Self.point(from: element.points[0])
+                let control1 = Self.point(from: element.points[1])
+                let point = Self.point(from: element.points[2])
+                segments.append(.cubic(p0: current, c0: control0, c1: control1, p1: point, color: .white))
+                currentPoint = point
+            case .closeSubpath:
+                closeContourIfNeeded()
+                finishContour()
+            @unknown default:
+                break
+            }
+        }
+
+        finishContour()
+        return WPEMSDFShape(contours: contours)
+    }
+
+    private func encodedDistance(_ distance: Double, pixelRange: Double) -> Float {
+        let value = 0.5 + distance / pixelRange
+        guard value.isFinite else { return 0.5 }
+        return Float(min(max(value, 0), 1))
+    }
+
+    private func advanceForGlyph(_ glyph: CGGlyph, font: CTFont) -> WPEMSDFPoint {
+        var glyphValue = glyph
+        var advance = CGSize.zero
+        CTFontGetAdvancesForGlyphs(font, .horizontal, &glyphValue, &advance, 1)
+        return WPEMSDFPoint(Double(advance.width), Double(advance.height))
+    }
+
+    private func pathUnitsToEmUnits(font: CTFont) -> Double {
+        let unitsPerEm = max(Double(CTFontGetUnitsPerEm(font)), 1)
+        let fontSize = max(Double(CTFontGetSize(font)), 1.0e-6)
+        return unitsPerEm / fontSize
+    }
+
+    private static func point(from point: CGPoint) -> WPEMSDFPoint {
+        WPEMSDFPoint(Double(point.x), Double(point.y))
+    }
+
+    private static func distance(_ a: WPEMSDFPoint, _ b: WPEMSDFPoint) -> Double {
+        WPEMSDFGeometryMath.length(a - b)
+    }
+}
+#endif
