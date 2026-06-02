@@ -1157,7 +1157,12 @@ final class WPEMetalSceneRenderer: NSObject, WallpaperPerformanceConfigurable, W
             device: executor.textureSourceDevice,
             resolver: resourceResolver
         )
-        if let fontFragmentSource = resolveMSDFFontFragmentSource() {
+        // GPU MSDF text is opt-in until glyph generation moves off the main
+        // thread: synchronous MSDF rasterization of large/CJK glyphs blocks the
+        // first frame. Default OFF → CoreText overlay (the known-good path).
+        // Enable for testing with: defaults write <bundle> WPEEnableMSDFText -bool YES
+        if UserDefaults.standard.bool(forKey: "WPEEnableMSDFText"),
+           let fontFragmentSource = resolveMSDFFontFragmentSource() {
             msdfTextRenderer = WPEMSDFTextRenderer(
                 device: executor.textureSourceDevice,
                 resolver: resourceResolver,
