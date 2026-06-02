@@ -998,68 +998,8 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
             for object in textObjects where liveTextVisibility[object.id] ?? object.visible {
                 let resolvedAlpha = object.resolvedAlpha(at: uniforms.time)
                 guard resolvedAlpha > 0 else { continue }
-                let liveObject: WPESceneTextObject
-                if let instance = textScriptInstances[object.id] {
-                    let updated = instance.tickString()
-                    if updated != object.text {
-                        liveObject = WPESceneTextObject(
-                            id: object.id,
-                            name: object.name,
-                            text: updated,
-                            textScript: object.textScript,
-                            fontRelativePath: object.fontRelativePath,
-                            pointSize: object.pointSize,
-                            color: object.color,
-                            alpha: resolvedAlpha,
-                            alphaAnimation: object.alphaAnimation,
-                            origin: object.origin,
-                            scale: object.scale,
-                            visible: object.visible,
-                            horizontalAlignment: object.horizontalAlignment,
-                            verticalAlignment: object.verticalAlignment,
-                            maxWidth: object.maxWidth,
-                            parallaxDepth: object.parallaxDepth
-                        )
-                    } else {
-                        liveObject = WPESceneTextObject(
-                            id: object.id,
-                            name: object.name,
-                            text: object.text,
-                            textScript: object.textScript,
-                            fontRelativePath: object.fontRelativePath,
-                            pointSize: object.pointSize,
-                            color: object.color,
-                            alpha: resolvedAlpha,
-                            alphaAnimation: object.alphaAnimation,
-                            origin: object.origin,
-                            scale: object.scale,
-                            visible: object.visible,
-                            horizontalAlignment: object.horizontalAlignment,
-                            verticalAlignment: object.verticalAlignment,
-                            maxWidth: object.maxWidth,
-                            parallaxDepth: object.parallaxDepth
-                        )
-                    }
-                } else {
-                    liveObject = WPESceneTextObject(
-                        id: object.id,
-                        name: object.name,
-                        text: object.text,
-                        textScript: object.textScript,
-                        fontRelativePath: object.fontRelativePath,
-                        pointSize: object.pointSize,
-                        color: object.color,
-                        alpha: resolvedAlpha,
-                        alphaAnimation: object.alphaAnimation,
-                        origin: object.origin,
-                        scale: object.scale,
-                        visible: object.visible,
-                        horizontalAlignment: object.horizontalAlignment,
-                        verticalAlignment: object.verticalAlignment,
-                        maxWidth: object.maxWidth,
-                        parallaxDepth: object.parallaxDepth
-                    )
-                }
+                let liveText = textScriptInstances[object.id]?.tickString() ?? object.text
+                let liveObject = object.withLiveText(liveText, alpha: resolvedAlpha)
                 guard let entry = textRenderer.rasterize(liveObject) else { continue }
                 let halfWidth = Double(sceneRenderSize.width) * 0.5
                 let halfHeight = Double(sceneRenderSize.height) * 0.5

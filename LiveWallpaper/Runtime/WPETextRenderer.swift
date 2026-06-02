@@ -45,10 +45,11 @@ final class WPETextRenderer {
     /// Rasterize `object` to an MTLTexture sized to its measured bounds.
     func rasterize(_ object: WPESceneTextObject) -> (texture: MTLTexture, size: CGSize)? {
         ensureFontRegistered(object.fontRelativePath)
+        let fontSize = effectiveFontSize(for: object)
         let key = CacheKey(
             text: object.text,
             fontPath: object.fontRelativePath,
-            pointSize: Int(object.pointSize.rounded()),
+            pointSize: Int(fontSize.rounded()),
             colorRGB: SIMD3<Int>(
                 Int((object.color.x * 255).rounded()),
                 Int((object.color.y * 255).rounded()),
@@ -62,7 +63,7 @@ final class WPETextRenderer {
             return (cached.texture, cached.renderedSize)
         }
 
-        let attrString = makeAttributedString(object: object)
+        let attrString = makeAttributedString(object: object, fontSize: fontSize)
         let bounds = measureBounds(attrString, maxWidth: object.maxWidth)
         let width = max(1, ceil(bounds.width))
         let height = max(1, ceil(bounds.height))
@@ -99,10 +100,28 @@ final class WPETextRenderer {
         unmanagedError?.release()
     }
 
-    private func makeAttributedString(object: WPESceneTextObject) -> NSAttributedString {
+    /// Effective font size: when the object carries a WPE `boxSize`, scale the
+    /// font so the text fills the box minus `padding` (preserving aspect),
+    /// matching WPE which renders text as an image whose texture is `size`.
+    /// Without a box, fall back to the raw authored `pointSize`.
+    private func effectiveFontSize(for object: WPESceneTextObject) -> CGFloat {
+        let base = CGFloat(max(object.pointSize, 1))
+        guard let box = object.boxSize, box.x > 0, box.y > 0 else { return base }
+        let baseAttr = makeAttributedString(object: object, fontSize: base)
+        let natural = measureBounds(baseAttr, maxWidth: object.maxWidth)
+        let innerW = max(box.x - 2 * object.padding, 1)
+        let innerH = max(box.y - 2 * object.padding, 1)
+        let nw = max(Double(natural.width), 0.5)
+        let nh = max(Double(natural.height), 0.5)
+        let fit = min(innerW / nw, innerH / nh)
+        guard fit.isFinite, fit > 0 else { return base }
+        return base * CGFloat(fit)
+    }
+
+    private func makeAttributedString(object: WPESceneTextObject, fontSize: CGFloat) -> NSAttributedString {
         let font = resolveFont(
             relativePath: object.fontRelativePath,
-            size: CGFloat(object.pointSize)
+            size: fontSize
         )
         let color = CGColor(
             srgbRed: CGFloat(object.color.x),

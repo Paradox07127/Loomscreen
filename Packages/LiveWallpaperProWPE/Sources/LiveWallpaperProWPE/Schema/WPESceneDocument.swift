@@ -165,6 +165,13 @@ public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
     public let verticalAlignment: String
     public let maxWidth: Double?
     public let parallaxDepth: Double
+    /// WPE's authored text-box size in scene pixels (`size`). A WPE text object
+    /// is an image layer whose texture is sized to this box; the text fills the
+    /// box minus `padding`, then the layer is placed at `origin × scale`. When
+    /// nil the renderer falls back to the rasterized text bounds.
+    public let boxSize: SIMD2<Double>?
+    /// Transparent margin (scene pixels) inside `boxSize` around the text.
+    public let padding: Double
 
     public init(
         id: String,
@@ -182,7 +189,9 @@ public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
         horizontalAlignment: String,
         verticalAlignment: String,
         maxWidth: Double?,
-        parallaxDepth: Double
+        parallaxDepth: Double,
+        boxSize: SIMD2<Double>? = nil,
+        padding: Double = 0
     ) {
         self.id = id
         self.name = name
@@ -200,10 +209,38 @@ public struct WPESceneTextObject: Equatable, Sendable, Identifiable {
         self.verticalAlignment = verticalAlignment
         self.maxWidth = maxWidth
         self.parallaxDepth = parallaxDepth
+        self.boxSize = boxSize
+        self.padding = padding
     }
 
     public func resolvedAlpha(at time: Double) -> Double {
         alphaAnimation?.scalar(at: time) ?? alpha
+    }
+
+    /// Returns a copy carrying the live (scripted) text + resolved alpha while
+    /// preserving every other field — so the renderer's per-frame copy never
+    /// drops geometry like `boxSize`/`padding`.
+    public func withLiveText(_ liveText: String, alpha liveAlpha: Double) -> WPESceneTextObject {
+        WPESceneTextObject(
+            id: id,
+            name: name,
+            text: liveText,
+            textScript: textScript,
+            fontRelativePath: fontRelativePath,
+            pointSize: pointSize,
+            color: color,
+            alpha: liveAlpha,
+            alphaAnimation: alphaAnimation,
+            origin: origin,
+            scale: scale,
+            visible: visible,
+            horizontalAlignment: horizontalAlignment,
+            verticalAlignment: verticalAlignment,
+            maxWidth: maxWidth,
+            parallaxDepth: parallaxDepth,
+            boxSize: boxSize,
+            padding: padding
+        )
     }
 }
 

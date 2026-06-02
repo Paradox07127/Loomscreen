@@ -395,6 +395,12 @@ enum WPESceneDocumentParser {
         let vert = unwrapString(dict["verticalalign"]) ?? "middle"
         let maxWidth = unwrapDouble(dict["maxwidth"]) ?? unwrapDouble(dict["limitwidth"])
         let parallaxDepth = unwrapDouble(dict["parallaxDepth"]) ?? unwrapDouble(dict["parallaxdepth"]) ?? 0
+        // WPE text-box footprint ("size") + transparent margin ("padding"). A
+        // text object renders like an image layer whose texture is this box, so
+        // the rendered text must fill the box (minus padding) × scale — not the
+        // raw rasterized bounds at pointsize, which are far smaller.
+        let boxSize = parseVector3(dict["size"]).map { SIMD2<Double>($0.x, $0.y) }
+        let padding = parseDouble(dict["padding"]) ?? 0
 
         return WPESceneTextObject(
             id: id,
@@ -412,7 +418,9 @@ enum WPESceneDocumentParser {
             horizontalAlignment: horiz.lowercased(),
             verticalAlignment: vert.lowercased(),
             maxWidth: maxWidth.map { max(1, $0) },
-            parallaxDepth: parallaxDepth
+            parallaxDepth: parallaxDepth,
+            boxSize: (boxSize.map { $0.x > 0 && $0.y > 0 } ?? false) ? boxSize : nil,
+            padding: max(0, padding)
         )
     }
 
