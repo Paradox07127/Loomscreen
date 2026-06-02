@@ -155,6 +155,18 @@ final class WPEParticleSystem {
     /// Camera-parallax depth of the owning particle object; drives the
     /// per-frame parallax translation applied to the whole system at draw time.
     var parallaxDepth: Double = 0
+    /// Live cursor position in the centered render frame (Y-up), or `nil` when
+    /// the scene's "Follow Cursor" toggle is off / no pointer is available. Set
+    /// by the renderer each frame; drives pointer-locked control points
+    /// (emitter-follow + `controlpointattract`).
+    var pointerCentered: SIMD2<Float>?
+
+    private let attractors: [WPEParticleControlPointAttractor]
+    private let emitterTracksPointer: Bool
+    /// Raw control-point offsets keyed by id; pointer-locked ids resolve against
+    /// the live cursor, others against the static scene-object transform.
+    private let controlPointRawOffsets: [Int: SIMD3<Float>]
+    private let pointerLockedControlPointIDs: Set<Int>
 
     private var aliveCount: Int = 0
     private var particles: [Particle]
@@ -236,6 +248,28 @@ final class WPEParticleSystem {
             Float(definition.turbulenceMask.y),
             Float(definition.turbulenceMask.z)
         )
+        self.attractors = definition.attractors
+        self.emitterTracksPointer = definition.emitterTracksPointer
+        var offsets: [Int: SIMD3<Float>] = [:]
+        var pointerIDs: Set<Int> = []
+        for cp in definition.controlPoints {
+            offsets[cp.id] = SIMD3<Float>(Float(cp.offset.x), Float(cp.offset.y), Float(cp.offset.z))
+            if cp.pointerLocked { pointerIDs.insert(cp.id) }
+        }
+        self.controlPointRawOffsets = offsets
+        self.pointerLockedControlPointIDs = pointerIDs
+    }
+
+    /// Resolves a control point's position in the centered render frame.
+    /// Pointer-locked points follow the live cursor (nil when unavailable);
+    /// static points are placed via the scene-object transform.
+    private func controlPointPosition(_ id: Int) -> SIMD3<Float>? {
+        let rawOffset = controlPointRawOffsets[id] ?? .zero
+        if pointerLockedControlPointIDs.contains(id) {
+            guard let p = pointerCentered else { return nil }
+            return SIMD3<Float>(p.x, p.y, 0) + sceneTransform.applyModelDirection(rawOffset)
+        }
+        return sceneTransform.applyModelMatrix(toLocalPoint: rawOffset)
     }
 
     private func uniform(_ low: Double, _ high: Double) -> Double {
@@ -402,6 +436,24 @@ final class WPEParticleSystem {
             // Linear motion with gravity + drag.
             particles[index].velocity += gravity * dt
             if dragScalar < 1 { particles[index].velocity *= dragScalar }
+            // Control-point attract/repel (cursor follow/avoid). Force points
+            // toward the control point; negative `scale` repels. Linear falloff
+            // to zero at `threshold`, in the scene plane.
+            if !attractors.isEmpty {
+                let pos = particles[index].position
+                for attractor in attractors {
+                    guard let cp = controlPointPosition(attractor.controlPointID) else { continue }
+                    let dx = cp.x - pos.x
+                    let dy = cp.y - pos.y
+                    let dist = (dx * dx + dy * dy).squareRoot()
+                    let threshold = Float(attractor.threshold)
+                    guard dist > 1e-3, dist < threshold else { continue }
+                    let falloff = 1 - dist / threshold
+                    let accel = Float(attractor.scale) * falloff / dist
+                    particles[index].velocity.x += dx * accel * dt
+                    particles[index].velocity.y += dy * accel * dt
+                }
+            }
             var step = particles[index].velocity
             if turbulenceEnabled && particles[index].turbulenceSpeed > 0 {
                 let pos = particles[index].position
@@ -489,7 +541,16 @@ final class WPEParticleSystem {
         )
         let localPoint = emitterOriginLocal + dispersal
         let localVelocity = uniformVector(definition.velocityMin, definition.velocityMax)
-        let position = sceneTransform.applyModelMatrix(toLocalPoint: localPoint)
+        // Pointer-locked emitter (control point 0 tracks the cursor): spawn at
+        // the cursor instead of the scene-object origin, keeping the emitter's
+        // local shape (rotation/scale) intact. Falls back to the static origin
+        // when no pointer is available (Follow Cursor off / load-time prewarm).
+        let position: SIMD3<Float>
+        if emitterTracksPointer, let p = pointerCentered {
+            position = SIMD3<Float>(p.x, p.y, 0) + sceneTransform.applyModelDirection(localPoint)
+        } else {
+            position = sceneTransform.applyModelMatrix(toLocalPoint: localPoint)
+        }
         let velocity = sceneTransform.applyModelDirection(localVelocity)
         let sizeScale = sceneTransform.worldSizeMultiplier()
         let size = Float(uniform(definition.sizeMin, definition.sizeMax)) * sizeScale

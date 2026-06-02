@@ -545,4 +545,82 @@ struct WPEParticleSystemTests {
 
         #expect(after > before + 5)
     }
+
+    // MARK: - Mouse interaction: control points (M3)
+
+    @Test("Cursor-follow: control point 0 with flags:1 makes the emitter track the pointer")
+    func parsesCursorFollowControlPoints() throws {
+        let json = #"""
+        {
+            "maxcount": 1000, "material": "materials/particle/halo.json",
+            "controlpoint": [ {"flags":1,"id":0,"offset":"0 0 0"}, {"flags":0,"id":1,"offset":"0 0 0"} ],
+            "emitter": [{"id":6,"name":"boxrandom","rate":200}],
+            "operator": [{"name":"movement","drag":0.4}]
+        }
+        """#
+        let def = try #require(WPEParticleDefinitionParser.parse(data: Data(json.utf8)))
+        #expect(def.controlPoints.count == 2)
+        #expect(def.controlPoints.first(where: { $0.id == 0 })?.pointerLocked == true)
+        #expect(def.controlPoints.first(where: { $0.id == 1 })?.pointerLocked == false)
+        #expect(def.emitterTracksPointer == true)
+        #expect(def.usesPointer == true)
+        #expect(def.attractors.isEmpty)
+    }
+
+    @Test("Cursor-avoid: controlpointattract on a pointer-locked control point")
+    func parsesCursorAvoidAttractor() throws {
+        let json = #"""
+        {
+            "maxcount": 1000, "material": "materials/particle/halo.json",
+            "controlpoint": [ {"flags":0,"id":0,"offset":"0 0 0"}, {"flags":1,"id":1,"offset":"0 0 0"} ],
+            "emitter": [{"id":6,"name":"boxrandom","rate":200}],
+            "operator": [
+                {"name":"movement","drag":2.5},
+                {"name":"controlpointattract","controlpoint":1,"scale":-5000,"threshold":64}
+            ]
+        }
+        """#
+        let def = try #require(WPEParticleDefinitionParser.parse(data: Data(json.utf8)))
+        #expect(def.emitterTracksPointer == false)   // id 0 not locked
+        #expect(def.controlPoints.first(where: { $0.id == 1 })?.pointerLocked == true)
+        let attractor = try #require(def.attractors.first)
+        #expect(def.attractors.count == 1)
+        #expect(attractor.controlPointID == 1)
+        #expect(attractor.scale == -5000)
+        #expect(attractor.threshold == 64)
+        #expect(def.usesPointer == true)            // attractor references pointer-locked id 1
+    }
+
+    @Test("Pointer-locked emitter spawns particles at the cursor")
+    func pointerLockedEmitterSpawnsAtCursor() throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let def = WPEParticleDefinition(
+            materialRelativePath: nil, maxCount: 4,
+            rate: 1000, startDelay: 0,
+            lifetimeMin: 10, lifetimeMax: 10,
+            sizeMin: 1, sizeMax: 1,
+            originOffset: SIMD3(0, 0, 0),
+            dispersalMin: 0, dispersalMax: 0,
+            velocityMin: SIMD3(0, 0, 0), velocityMax: SIMD3(0, 0, 0),
+            colorMin: SIMD3(255, 255, 255), colorMax: SIMD3(255, 255, 255),
+            fadeInSeconds: 0.05,
+            controlPoints: [WPEParticleControlPoint(id: 0, offset: SIMD3(0, 0, 0), pointerLocked: true)]
+        )
+        // Object origin at the scene center → renderOrigin (0,0); no dispersal /
+        // velocity, so a pointer-locked emitter spawns exactly at the cursor.
+        let transform = WPEParticleSceneTransform(
+            sceneSize: SIMD2(1000, 1000),
+            objectOrigin: SIMD3(500, 500, 0),
+            objectScale: SIMD3(1, 1, 1),
+            objectAngleZ: 0
+        )
+        let system = try #require(WPEParticleSystem(definition: def, device: device, sceneTransform: transform))
+        system.pointerCentered = SIMD2(200, 150)
+        system.tick(now: 0)       // dt=0, no spawn yet
+        system.tick(now: 0.02)    // spawns at the cursor
+        let inst = system.instanceBuffer.contents()
+            .bindMemory(to: WPEParticleInstance.self, capacity: 4)[0]
+        #expect(abs(inst.positionAndSize.x - 200) < 1)
+        #expect(abs(inst.positionAndSize.y - 150) < 1)
+    }
 }

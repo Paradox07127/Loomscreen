@@ -19,6 +19,37 @@ public enum WPEParticleBlendMode: String, Sendable, CaseIterable, Equatable {
     }
 }
 
+/// A WPE particle "control point" — a named anchor an emitter or operator can
+/// reference. `id 0` is the emitter's spawn origin by convention. `flags & 1`
+/// means the point tracks the mouse pointer (WPE's "Lock to pointer"); the
+/// runtime feeds it the live cursor position each frame.
+public struct WPEParticleControlPoint: Equatable, Sendable {
+    public let id: Int
+    public let offset: SIMD3<Double>
+    public let pointerLocked: Bool
+
+    public init(id: Int, offset: SIMD3<Double>, pointerLocked: Bool) {
+        self.id = id
+        self.offset = offset
+        self.pointerLocked = pointerLocked
+    }
+}
+
+/// A `controlpointattract` operator: applies a per-frame force pulling particles
+/// toward (`scale > 0`) or away from (`scale < 0`, i.e. "cursor avoid") the
+/// referenced control point, falling off to zero at `threshold` distance.
+public struct WPEParticleControlPointAttractor: Equatable, Sendable {
+    public let controlPointID: Int
+    public let scale: Double
+    public let threshold: Double
+
+    public init(controlPointID: Int, scale: Double, threshold: Double) {
+        self.controlPointID = controlPointID
+        self.scale = scale
+        self.threshold = max(0, threshold)
+    }
+}
+
 /// Lean particle-system descriptor parsed from a WPE `particles/*.json`
 /// file. Fields cover the subset of the WPE DSL the runtime actually
 /// drives — emitter geometry, the random initializers, and the operator
@@ -79,6 +110,25 @@ public struct WPEParticleDefinition: Equatable, Sendable {
     /// runtime can pick a sub-frame index every tick. `1` is the
     /// WPE default; `0` freezes on frame 0.
     public let sequenceMultiplier: Double
+    /// Parsed control points (mouse anchors). `id 0` is the emitter origin.
+    public let controlPoints: [WPEParticleControlPoint]
+    /// `controlpointattract` operators (cursor follow/avoid forces).
+    public let attractors: [WPEParticleControlPointAttractor]
+
+    /// True when the emitter's origin (control point `id 0`) tracks the cursor —
+    /// the canonical "particles spawn at the pointer" / follow behavior.
+    public var emitterTracksPointer: Bool {
+        controlPoints.first(where: { $0.id == 0 })?.pointerLocked ?? false
+    }
+
+    /// Whether the system consumes the pointer at all (follow OR any attractor
+    /// referencing a pointer-locked control point) — lets the runtime skip the
+    /// pointer plumbing for non-interactive emitters.
+    public var usesPointer: Bool {
+        if emitterTracksPointer { return true }
+        let pointerIDs = Set(controlPoints.filter(\.pointerLocked).map(\.id))
+        return attractors.contains { pointerIDs.contains($0.controlPointID) }
+    }
 
     public init(
         materialRelativePath: String?,
@@ -118,7 +168,9 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         turbulenceMask: SIMD3<Double> = SIMD3<Double>(1, 1, 1),
         turbulencePhaseMin: Double = 0,
         turbulencePhaseMax: Double = 0,
-        sequenceMultiplier: Double = 1
+        sequenceMultiplier: Double = 1,
+        controlPoints: [WPEParticleControlPoint] = [],
+        attractors: [WPEParticleControlPointAttractor] = []
     ) {
         self.materialRelativePath = materialRelativePath
         self.childRelativePaths = childRelativePaths
@@ -162,6 +214,8 @@ public struct WPEParticleDefinition: Equatable, Sendable {
         self.turbulencePhaseMin = min(turbulencePhaseMin, turbulencePhaseMax)
         self.turbulencePhaseMax = max(turbulencePhaseMin, turbulencePhaseMax)
         self.sequenceMultiplier = max(0, sequenceMultiplier)
+        self.controlPoints = controlPoints
+        self.attractors = attractors
     }
 
     public func applying(instanceOverride: WPESceneParticleInstanceOverride?) -> WPEParticleDefinition {
@@ -218,7 +272,9 @@ public struct WPEParticleDefinition: Equatable, Sendable {
             turbulenceMask: turbulenceMask,
             turbulencePhaseMin: turbulencePhaseMin,
             turbulencePhaseMax: turbulencePhaseMax,
-            sequenceMultiplier: sequenceMultiplier
+            sequenceMultiplier: sequenceMultiplier,
+            controlPoints: controlPoints,
+            attractors: attractors
         )
     }
 
@@ -380,16 +436,42 @@ public enum WPEParticleDefinitionParser {
             }
         }
 
+        // Control points: `flags & 1` == "locked to pointer". Control point 0 is
+        // the emitter origin by WPE convention, so a pointer-locked id-0 makes
+        // the emitter spawn at the cursor (the "follow" behavior).
+        var controlPoints: [WPEParticleControlPoint] = []
+        if let cps = json["controlpoint"] as? [[String: Any]] {
+            for cp in cps {
+                guard let id = (cp["id"] as? Int) ?? (cp["id"] as? Double).map({ Int($0) }) else { continue }
+                let offset = WPEValueParser.vector3(cp["offset"]) ?? SIMD3(0, 0, 0)
+                let flags = (cp["flags"] as? Int) ?? (cp["flags"] as? Double).map { Int($0) } ?? 0
+                controlPoints.append(WPEParticleControlPoint(
+                    id: id, offset: offset, pointerLocked: (flags & 1) != 0
+                ))
+            }
+        }
+
         var fadeInSeconds: Double = 0.1
         var fadeOutSeconds: Double = 0
         var gravity: SIMD3<Double> = SIMD3(0, 0, 0)
         var drag: Double = 0
         var angularForceZ: Double = 0
         var angularDrag: Double = 0
+        var attractors: [WPEParticleControlPointAttractor] = []
         if let operators = json["operator"] as? [[String: Any]] {
             for entry in operators {
                 guard let name = (entry["name"] as? String)?.lowercased() else { continue }
                 switch name {
+                case "controlpointattract":
+                    let cpID = (entry["controlpoint"] as? Int)
+                        ?? (entry["controlpoint"] as? Double).map { Int($0) } ?? 0
+                    let scale = WPEValueParser.double(entry["scale"]) ?? 0
+                    let threshold = WPEValueParser.double(entry["threshold"]) ?? 0
+                    if scale != 0, threshold > 0 {
+                        attractors.append(WPEParticleControlPointAttractor(
+                            controlPointID: cpID, scale: scale, threshold: threshold
+                        ))
+                    }
                 case "alphafade":
                     fadeInSeconds = WPEValueParser.double(entry["fadeintime"]) ?? fadeInSeconds
                     fadeOutSeconds = WPEValueParser.double(entry["fadeouttime"]) ?? fadeOutSeconds
@@ -458,7 +540,9 @@ public enum WPEParticleDefinitionParser {
             turbulenceMask: turbulenceMask,
             turbulencePhaseMin: turbulencePhaseMin,
             turbulencePhaseMax: turbulencePhaseMax,
-            sequenceMultiplier: sequenceMultiplier
+            sequenceMultiplier: sequenceMultiplier,
+            controlPoints: controlPoints,
+            attractors: attractors
         )
     }
 }

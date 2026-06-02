@@ -1008,7 +1008,18 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
             sceneID: descriptor.workshopID
         )
         if !particleSystems.isEmpty {
+            // Cursor in the centered render frame (Y-up), or nil when Follow
+            // Cursor is off — drives pointer-locked particle control points
+            // (emitter-follow + controlpointattract). Center-relative so it
+            // matches `WPEParticleSceneTransform`'s coordinate space.
+            let particlePointer: SIMD2<Float>? = mouseInteractionEnabled
+                ? SIMD2<Float>(
+                    Float((pointer.x - 0.5) * sceneRenderSize.width),
+                    Float((0.5 - pointer.y) * sceneRenderSize.height)
+                )
+                : nil
             for system in particleSystems {
+                system.pointerCentered = particlePointer
                 system.tick(now: uniforms.time)
             }
             try executor.drawParticles(
