@@ -141,11 +141,27 @@ final class WPEMSDFAtlas {
         }
     }
 
+    private struct GeneratedGlyph: @unchecked Sendable {
+        let bitmap: WPEMSDFBitmap
+        let metrics: WPEMSDFGlyphMetrics
+    }
+
+    /// Wraps the (non-Sendable) CTFont + generator so the background generation
+    /// task can capture them across the @Sendable boundary safely (the inputs
+    /// are only read, and the generator is immutable).
+    private struct GlyphGenerationRequest: @unchecked Sendable {
+        let key: WPEMSDFGlyphKey
+        let generator: WPEMSDFGlyphGenerator
+        let font: CTFont
+        let maxCellSide: Int
+    }
+
     private let device: MTLDevice
     private let pageSize: Int
     private let maxPages: Int
     private var pages: [Page] = []
     private var entries: [WPEMSDFGlyphKey: WPEMSDFAtlasEntry] = [:]
+    private var pending: Set<WPEMSDFGlyphKey> = []
     private var clock: UInt64 = 0
 
     init(device: MTLDevice, pageSize: Int = 1024, maxPages: Int = 4) {
@@ -159,12 +175,65 @@ final class WPEMSDFAtlas {
         generator: WPEMSDFGlyphGenerator,
         font: CTFont
     ) -> WPEMSDFAtlasEntry? {
+        if let cached = cachedEntry(for: key) {
+            return cached
+        }
+        guard let generated = generator.generate(glyph: key.glyph, font: font, maxCellSide: pageSize) else { return nil }
+        return store(
+            generated: GeneratedGlyph(bitmap: generated.bitmap, metrics: generated.metrics),
+            for: key
+        )
+    }
+
+    /// Cache-only lookup (no generation). Cheap; safe to call every frame.
+    func cachedEntry(for key: WPEMSDFGlyphKey) -> WPEMSDFAtlasEntry? {
         if let cached = entries[key], let page = page(for: cached.page) {
             touch(page)
             return cached
         }
+        return nil
+    }
 
-        guard let generated = generator.generate(glyph: key.glyph, font: font, maxCellSide: pageSize) else { return nil }
+    /// Non-blocking entry: returns the cached entry if present, otherwise kicks
+    /// off background glyph generation (deduplicated) and returns nil so the
+    /// caller falls back (CoreText) for this frame. A later frame finds it cached.
+    func requestEntry(
+        for key: WPEMSDFGlyphKey,
+        generator: WPEMSDFGlyphGenerator,
+        font: CTFont
+    ) -> WPEMSDFAtlasEntry? {
+        if let cached = cachedEntry(for: key) {
+            return cached
+        }
+        guard !pending.contains(key) else { return nil }
+        pending.insert(key)
+        let request = GlyphGenerationRequest(
+            key: key,
+            generator: generator,
+            font: font,
+            maxCellSide: pageSize
+        )
+        Task.detached(priority: .utility) { [request, weak self] in
+            let generated = request.generator.generate(
+                glyph: request.key.glyph,
+                font: request.font,
+                maxCellSide: request.maxCellSide
+            ).map { GeneratedGlyph(bitmap: $0.bitmap, metrics: $0.metrics) }
+            await MainActor.run { [weak self] in
+                self?.completeGeneration(generated, for: request.key)
+            }
+        }
+        return nil
+    }
+
+    private func completeGeneration(_ generated: GeneratedGlyph?, for key: WPEMSDFGlyphKey) {
+        defer { pending.remove(key) }
+        guard entries[key] == nil, let generated else { return }
+        _ = store(generated: generated, for: key)
+    }
+
+    @discardableResult
+    private func store(generated: GeneratedGlyph, for key: WPEMSDFGlyphKey) -> WPEMSDFAtlasEntry? {
         let bitmap = generated.bitmap
         guard bitmap.width <= pageSize, bitmap.height <= pageSize else { return nil }
         guard let allocation = allocate(width: bitmap.width, height: bitmap.height) else { return nil }

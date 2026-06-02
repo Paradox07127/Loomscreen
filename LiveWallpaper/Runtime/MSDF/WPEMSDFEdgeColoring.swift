@@ -5,7 +5,7 @@ enum WPEMSDFEdgeColoring {
     private static let palette: [WPEMSDFEdgeColor] = [.yellow, .cyan, .magenta]
 
     static func colorShape(_ shape: inout WPEMSDFShape, angleThreshold: Double) {
-        let threshold = max(angleThreshold, 0)
+        let threshold = WPEMSDFGeometryMath.clamp(angleThreshold, 0, Double.pi)
         for contourIndex in shape.contours.indices {
             colorContour(&shape.contours[contourIndex], angleThreshold: threshold)
         }
@@ -50,25 +50,26 @@ enum WPEMSDFEdgeColoring {
         let count = contour.segments.count
         guard count > 0 else { return [] }
         var indices: [Int] = []
+        let crossThreshold = sin(angleThreshold)
         for index in 0..<count {
             let previous = contour.segments[(index + count - 1) % count]
             let current = contour.segments[index]
-            if cornerAngle(previous: previous, current: current) > angleThreshold {
+            if isCorner(previous: previous, current: current, crossThreshold: crossThreshold) {
                 indices.append(index)
             }
         }
         return indices
     }
 
-    private static func cornerAngle(previous: WPEMSDFSegment, current: WPEMSDFSegment) -> Double {
+    private static func isCorner(previous: WPEMSDFSegment, current: WPEMSDFSegment, crossThreshold: Double) -> Bool {
         let a = previous.direction(at: 1)
         let b = current.direction(at: 0)
         guard WPEMSDFGeometryMath.length(a) > WPEMSDFGeometryMath.epsilon,
               WPEMSDFGeometryMath.length(b) > WPEMSDFGeometryMath.epsilon else {
-            return 0
+            return false
         }
         let dot = WPEMSDFGeometryMath.clamp(WPEMSDFGeometryMath.dot(a, b), -1, 1)
-        return acos(dot)
+        return dot <= 0 || abs(WPEMSDFGeometryMath.cross(a, b)) > crossThreshold
     }
 
     private static func splitIntoThirds(_ segment: WPEMSDFSegment) -> [WPEMSDFSegment] {
@@ -89,11 +90,38 @@ enum WPEMSDFEdgeColoring {
 
     private static func colorsForCornerCount(_ count: Int) -> [WPEMSDFEdgeColor] {
         guard count > 0 else { return [] }
-        var colors = (0..<count).map { palette[$0 % palette.count] }
+        var colors: [WPEMSDFEdgeColor] = []
+        colors.reserveCapacity(count)
+        var color = palette[0]
+        for _ in 0..<count {
+            colors.append(color)
+            color = nextColor(after: color)
+        }
         if count > 1, colors.last == colors.first {
-            colors[colors.count - 1] = .cyan
+            colors[colors.count - 1] = nextColor(after: colors[colors.count - 2], banning: colors[0])
         }
         return colors
+    }
+
+    /// msdfgen-style color switch: pick a color sharing exactly one channel with
+    /// the previous edge so the two edges meeting at each corner differ in one
+    /// channel (which is what makes the median reconstruct a sharp corner).
+    private static func nextColor(
+        after color: WPEMSDFEdgeColor,
+        banning banned: WPEMSDFEdgeColor? = nil
+    ) -> WPEMSDFEdgeColor {
+        let candidates: [WPEMSDFEdgeColor]
+        switch color {
+        case .yellow:
+            candidates = [.cyan, .magenta]
+        case .cyan:
+            candidates = [.magenta, .yellow]
+        case .magenta:
+            candidates = [.yellow, .cyan]
+        default:
+            candidates = palette
+        }
+        return candidates.first { $0 != banned } ?? candidates[0]
     }
 
     private static func assignSpan(

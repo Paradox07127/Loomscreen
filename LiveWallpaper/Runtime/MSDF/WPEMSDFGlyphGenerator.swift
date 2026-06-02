@@ -4,7 +4,7 @@ import CoreText
 import Foundation
 import simd
 
-final class WPEMSDFGlyphGenerator {
+final class WPEMSDFGlyphGenerator: @unchecked Sendable {
     private let parameters: WPEMSDFParameters
     private static let neutralFill = SIMD4<Float>(0.5, 0.5, 0.5, 1)
 
