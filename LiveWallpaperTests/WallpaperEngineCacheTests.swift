@@ -51,6 +51,31 @@ struct WallpaperEngineCacheTests {
         #expect(FileManager.default.fileExists(atPath: sentinel.path))
     }
 
+    @Test("ensureMirroredDirectory refuses to self-mirror when the source IS the cache dir (no data loss)")
+    func mirrorDoesNotSelfDestructWhenSourceIsCache() async throws {
+        let scratch = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WPESelfMirror-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let source = scratch.appendingPathComponent("source", isDirectory: true)
+        let cacheRoot = scratch.appendingPathComponent("cache", isDirectory: true)
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        try Data(#"{ "camera": {}, "general": {}, "objects": [] }"#.utf8)
+            .write(to: source.appendingPathComponent("scene.json"))
+
+        let cache = WallpaperEngineCache(rootURL: cacheRoot)
+        let cached = try await cache.ensureMirroredDirectory(workshopID: "self", sourceFolderURL: source)
+        #expect(FileManager.default.fileExists(atPath: cached.appendingPathComponent("scene.json").path))
+
+        // Mirroring with the cache directory itself as the source must return it
+        // untouched, never removeItem(cacheURL) and wipe its own payload.
+        let again = try await cache.ensureMirroredDirectory(workshopID: "self", sourceFolderURL: cached)
+        #expect(again == cached)
+        #expect(
+            FileManager.default.fileExists(atPath: cached.appendingPathComponent("scene.json").path),
+            "self-mirror must not delete the payload"
+        )
+    }
+
     @Test("Cache miss when source pkg fingerprint changes")
     func cacheMissOnFingerprintChange() async throws {
         let env = try TempCacheEnvironment.make(workshopID: "222")

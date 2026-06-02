@@ -98,6 +98,19 @@ actor WallpaperEngineCache {
 
     func ensureMirroredDirectory(workshopID: String, sourceFolderURL: URL) async throws -> URL {
         let cacheURL = try cacheDirectory(for: workshopID)
+        // Defense-in-depth: if the "source" resolves to our own cache directory
+        // (e.g. a library root misconfigured to point at wpe-cache), the mirror
+        // below would `removeItem(cacheURL)` and wipe the payload it reads from.
+        // Never self-destruct — return the existing cache untouched.
+        let canonicalSource = sourceFolderURL.standardizedFileURL.resolvingSymlinksInPath()
+        let canonicalCache = cacheURL.standardizedFileURL.resolvingSymlinksInPath()
+        if canonicalSource == canonicalCache {
+            guard cacheHasPayload(cacheURL) else {
+                throw WPECacheError.extractionFailed("Source folder is the cache destination and has no payload")
+            }
+            Logger.info("WPE cache self-mirror skipped for workshop \(workshopID)", category: .screenManager)
+            return cacheURL
+        }
         let fingerprint = try fingerprint(forDirectory: sourceFolderURL)
 
         if let manifest = readManifest(in: cacheURL),

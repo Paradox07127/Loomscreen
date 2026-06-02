@@ -120,10 +120,25 @@ final class WorkshopFolderImportCoordinator {
     /// Imports every not-yet-recorded WPE project discovered under the user's
     /// configured Workshop library folder. Returns the number newly added.
     private func importNewProjects(fromWorkshopLibrary rootBookmark: Data, known: Set<String>) async -> Int {
+        guard case .success(let initialRoot) = SecurityScopedBookmarkResolver.shared.resolve(
+            rootBookmark,
+            target: .workshopLibraryRoot
+        ) else { return 0 }
+
+        // Refuse the misconfiguration where the library root IS the app's own
+        // WPE cache: importing from it would feed cache folders back into the
+        // mirror path. (The cache self-protects too, but skip the scan entirely.)
+        let libraryRoot = initialRoot.url.standardizedFileURL.resolvingSymlinksInPath()
+        let appCacheRoot = WallpaperEngineCache.defaultRootURL.standardizedFileURL.resolvingSymlinksInPath()
+        guard libraryRoot != appCacheRoot else {
+            logger.info("Workshop library scan skipped: root points at the app-managed WPE cache")
+            return 0
+        }
+
         let discovered: [WallpaperEngineLibraryScanner.DiscoveredProject]
         do {
             discovered = try await WallpaperEngineLibraryScanner().scan(
-                rootBookmarkData: rootBookmark,
+                rootBookmarkData: initialRoot.bookmarkData,
                 alreadyImportedWorkshopIDs: known
             )
         } catch {
@@ -135,9 +150,10 @@ final class WorkshopFolderImportCoordinator {
         guard !fresh.isEmpty else { return 0 }
 
         // `scan()` releases its own security scope when it returns; re-acquire it
-        // on the root so the per-project import reads (and source bookmarks) work.
+        // using the bookmark the scan resolved (it may have been refreshed) so the
+        // per-project import reads (and source bookmarks) work.
         guard case .success(let resolved) = SecurityScopedBookmarkResolver.shared.resolve(
-            rootBookmark,
+            fresh[0].libraryRootBookmarkData,
             target: .workshopLibraryRoot
         ) else { return 0 }
         let didStart = resolved.url.startAccessingSecurityScopedResource()
