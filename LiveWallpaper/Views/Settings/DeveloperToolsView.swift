@@ -228,7 +228,7 @@ struct DeveloperToolsView: View {
         .init(key: "WPEMetalBypassEffects", title: "Bypass effect passes",
               help: "Draw only base image layers, skipping effects (note: breaks solid-color layers)."),
         .init(key: "WPEPuppetEnableSkinning", title: "Puppet bone skinning",
-              help: "Apply MDLA bone animation to puppets (hierarchy-composed skinning; subtle ≤~11px idle sway). Enable to verify on-device."),
+              help: "Apply MDLA bone animation to puppets (hierarchy-composed skinning; subtle ≤11px idle sway). Enable to verify on-device."),
         .init(key: "WPESceneDebugArtifactsEnabled", title: "Scene debug artifacts",
               help: "Write per-scene logs, first-frame snapshot, and texture metadata to scene-debug."),
         .init(key: "WPEAudioCaptureProbe", title: "Audio capture probe",
