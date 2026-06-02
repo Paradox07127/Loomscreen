@@ -1804,9 +1804,23 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
     /// Visible to `@testable` test suites that probe the candidate generator without spinning up a full renderer fixture.
     func textureCandidates(for path: String) -> [String] {
         let extensionName = (path as NSString).pathExtension.lowercased()
-        if !extensionName.isEmpty,
-           Self.knownRawImageExtensions.contains(extensionName) || extensionName == "tex" || extensionName == "json" {
+        if extensionName == "tex" || extensionName == "json" {
             return [path]
+        }
+        if !extensionName.isEmpty, Self.knownRawImageExtensions.contains(extensionName) {
+            // WPE converts source images to `<name>.<ext>.tex` (e.g. a particle
+            // sprite `workshop/…/雪花.jpg` is stored as
+            // `materials/workshop/…/雪花.jpg.tex`). Try the literal image, then
+            // the converted `.tex`, including under the `materials/` root —
+            // otherwise extension-bearing refs never find their `.tex`.
+            var candidates = [path, "\(path).tex"]
+            let anchored = ["materials/", "models/", "shaders/", "fonts/",
+                            "scripts/", "particles/", "sounds/", "scenes/", "../", "_"]
+            if !anchored.contains(where: path.hasPrefix) {
+                candidates.append("materials/\(path)")
+                candidates.append("materials/\(path).tex")
+            }
+            return candidates
         }
 
         if let dependency = dependencyReference(path) {
