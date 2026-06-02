@@ -10,26 +10,28 @@ actor WallpaperEngineCache {
     private let rootURL: URL
     private let fileManager: FileManager
 
-    init(rootURL: URL? = nil) {
-        self.fileManager = .default
-        if let rootURL {
-            self.rootURL = rootURL
-            return
-        }
-
+    /// The on-disk root where imported Wallpaper Engine projects are extracted
+    /// (`~/Library/Application Support/LiveWallpaper/wpe-cache/`). Exposed so
+    /// non-actor callers (e.g. a "Show in Finder" settings button) can resolve
+    /// it synchronously.
+    nonisolated static var defaultRootURL: URL {
         if let applicationSupport = try? FileManager.default.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
             appropriateFor: nil,
-            create: true
+            create: false
         ) {
-            self.rootURL = applicationSupport
+            return applicationSupport
                 .appendingPathComponent("LiveWallpaper", isDirectory: true)
                 .appendingPathComponent("wpe-cache", isDirectory: true)
-        } else {
-            self.rootURL = URL(fileURLWithPath: NSHomeDirectory())
-                .appendingPathComponent("Library/Application Support/LiveWallpaper/wpe-cache", isDirectory: true)
         }
+        return URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent("Library/Application Support/LiveWallpaper/wpe-cache", isDirectory: true)
+    }
+
+    init(rootURL: URL? = nil) {
+        self.fileManager = .default
+        self.rootURL = rootURL ?? Self.defaultRootURL
     }
 
     func ensureExtracted(workshopID: String, sourcePkgURL: URL) async throws -> URL {

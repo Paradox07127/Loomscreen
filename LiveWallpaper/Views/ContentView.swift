@@ -355,7 +355,7 @@ struct Sidebar: View {
 
             Section {
                 NavigationLink(value: Navigation.bookmarks) {
-                    Label("My Wallpapers", systemImage: "bookmark.fill")
+                    Label("Bookmarks", systemImage: "bookmark.fill")
                 }
                 NavigationLink(value: Navigation.appleAerials) {
                     Label("Apple Aerials", systemImage: "sparkles.tv")

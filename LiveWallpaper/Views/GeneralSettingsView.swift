@@ -450,6 +450,21 @@ struct GeneralSettingsView: View {
                         .accessibilityLabel(Text("Developer Mode"))
                         .accessibilityHint(Text("Reveals diagnostic tools and HTML web inspector. Off by default."))
                 }
+
+                if developerModeEnabled {
+                    SettingRow(
+                        icon: "doc.text.magnifyingglass",
+                        iconColor: .orange,
+                        title: "Log Files",
+                        subtitle: "Open the folder containing the app's diagnostic logs."
+                    ) {
+                        Button("Show in Finder") { revealLogFolder() }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .accessibilityLabel(Text("Show logs in Finder"))
+                            .accessibilityHint(Text("Opens the folder containing the app's log files"))
+                    }
+                }
             } header: {
                 Text("Advanced", comment: "Section header for Developer Mode toggle in General settings.")
             }
@@ -1021,6 +1036,17 @@ struct GeneralSettingsView: View {
         Task { @MainActor in
             NotificationCenter.default.post(name: name, object: nil)
         }
+    }
+
+    private func revealLogFolder() {
+        if let logURL = Logger.persistentLogFileURL {
+            NSWorkspace.shared.activateFileViewerSelecting([logURL])
+            return
+        }
+        let dir = URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent("Library/Logs/LiveWallpaper", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(dir)
     }
 
     private func resetAllSettings() {
