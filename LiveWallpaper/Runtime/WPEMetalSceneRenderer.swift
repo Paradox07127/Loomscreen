@@ -1793,26 +1793,31 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
         guard let videoPayload = payload.videoPayload else {
             throw WPEMetalTextureLoaderError.malformedPayload("missing video payload")
         }
-        let url = try await WPEVideoTextureSource.persistVideoData(
+        // Stage into the per-scene disk cache keyed by workshop ID + content
+        // hash, so repeated extractions dedup and launch GC can reclaim videos
+        // for scenes that are no longer installed.
+        let url = try await WPEVideoTextureDiskCache.shared.store(
             videoPayload.bytes,
-            cacheDirectory: Self.videoCacheDirectory()
+            workshopID: descriptor.workshopID
         )
         do {
             let source = try WPEVideoTextureSource(
                 device: executor.textureSourceDevice,
-                videoURL: url
+                videoURL: url,
+                // Release the lease (keep the file for reuse) rather than
+                // deleting — the cache owns its lifetime now.
+                onInvalidate: { staleURL in
+                    Task.detached(priority: .utility) {
+                        await WPEVideoTextureDiskCache.shared.release(staleURL)
+                    }
+                }
             )
             _ = label
             return source
         } catch {
-            try? FileManager.default.removeItem(at: url)
+            await WPEVideoTextureDiskCache.shared.release(url)
             throw error
         }
-    }
-
-    private static func videoCacheDirectory() -> URL {
-        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("wpe-tex-video", isDirectory: true)
     }
 
     /// Phase 2E: returns a 1×1 transparent texture used as a temporary stand-in for dynamic sources whose first frame has not yet decoded.

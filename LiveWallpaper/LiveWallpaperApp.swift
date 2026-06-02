@@ -139,6 +139,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        #if !LITE_BUILD
+        // Reclaim video-texture cache files for scenes that are no longer
+        // installed. Deferred so it never contends with first-frame work.
+        if !runtimeOptions.isTesting, manager.featureCatalog.isEnabled(.wpeImport) {
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(2))
+                var referenced = Self.referencedWPEWorkshopIDs()
+                referenced.formUnion(await WallpaperEngineCache().listAvailableWorkshopIDs())
+                await WPEVideoTextureDiskCache.shared.collectOrphans(referencedWorkshopIDs: referenced)
+            }
+        }
+        #endif
+
         applyDockVisibility()
         observeDockVisibilityChanges()
         observeShowOnboardingRequests()
@@ -203,6 +216,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NotificationCenter.default.removeObserver(observer)
         }
     }
+
+    #if !LITE_BUILD
+    /// Workshop IDs referenced by any saved screen configuration or recent
+    /// import — every scene the user still has set up or could re-apply.
+    /// Unioned with the extracted-package cache to form the keep-set for
+    /// video-texture cache GC.
+    private static func referencedWPEWorkshopIDs() -> Set<String> {
+        var ids: Set<String> = []
+        for config in SettingsManager.shared.loadConfigurations() {
+            if let descriptor = config.activeWallpaper.sceneDescriptor {
+                ids.insert(descriptor.workshopID)
+                ids.formUnion(descriptor.dependencyWorkshopIDs)
+            }
+            if let origin = config.wpeOrigin {
+                ids.insert(origin.workshopID)
+                ids.formUnion(origin.dependencyWorkshopIDs)
+            }
+        }
+        for entry in SettingsManager.shared.loadGlobalSettings().recentWPEImports {
+            ids.insert(entry.origin.workshopID)
+            ids.formUnion(entry.origin.dependencyWorkshopIDs)
+        }
+        return ids.filter { !$0.isEmpty }
+    }
+    #endif
 
     // MARK: - Dock Visibility
 

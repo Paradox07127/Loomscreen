@@ -34,9 +34,15 @@ final class WPEVideoTextureSource {
     /// `AVAssetResourceLoader.setDelegate(_:queue:)` keeps only a weak
     /// reference; we hold the loader so the in-memory bytes survive.
     private let inMemoryAssetLoader: InMemoryVideoAssetLoader?
-    /// The on-disk staging file written by `persistVideoData`. Removed in
-    /// `invalidate()` so we don't leak temp `.mp4`s across scene swaps.
+    /// The on-disk staging file backing this source. Handled in
+    /// `invalidate()`: released to `WPEVideoTextureDiskCache` (kept for reuse)
+    /// when `onInvalidate` is supplied, otherwise deleted.
     private let cleanupURL: URL?
+    /// Invoked with `cleanupURL` on invalidate when the file is owned by the
+    /// disk cache — the cache keeps it for reuse and reclaims it via LRU/GC.
+    /// `nil` (e.g. in tests that stage a throwaway temp file) restores the
+    /// legacy "unlink the temp file on invalidate" behavior.
+    private let onInvalidate: (@Sendable (URL) -> Void)?
     /// `AVPlayerLooper` mints a fresh `AVPlayerItem` per loop iteration;
     /// `videoOutput` can only be attached to one item at a time, so we
     /// remove it from the previous item before adding it to the new one.
@@ -49,20 +55,13 @@ final class WPEVideoTextureSource {
         let cvTexture: CVMetalTexture
     }
 
-    nonisolated static func persistVideoData(_ data: Data, cacheDirectory: URL) async throws -> URL {
-        try await Task.detached(priority: .utility) {
-            try FileManager.default.createDirectory(
-                at: cacheDirectory,
-                withIntermediateDirectories: true
-            )
-            let url = cacheDirectory.appendingPathComponent("\(UUID().uuidString).mp4")
-            try data.write(to: url, options: [.atomic])
-            return url
-        }.value
-    }
-
-    init(device: MTLDevice, videoURL: URL) throws {
+    init(
+        device: MTLDevice,
+        videoURL: URL,
+        onInvalidate: (@Sendable (URL) -> Void)? = nil
+    ) throws {
         self.cleanupURL = videoURL
+        self.onInvalidate = onInvalidate
 
         var cache: CVMetalTextureCache?
         let status = CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, device, nil, &cache)
@@ -166,7 +165,11 @@ final class WPEVideoTextureSource {
         latest = nil
         CVMetalTextureCacheFlush(textureCache, 0)
         if let cleanupURL {
-            try? FileManager.default.removeItem(at: cleanupURL)
+            if let onInvalidate {
+                onInvalidate(cleanupURL)
+            } else {
+                try? FileManager.default.removeItem(at: cleanupURL)
+            }
         }
     }
 

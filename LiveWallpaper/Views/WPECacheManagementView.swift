@@ -12,6 +12,10 @@ struct WPECacheManagementView: View {
     @State private var lastFreedBytes: UInt64?
     @State private var errorMessage: String?
     @State private var pendingDestructive: PendingDestructive?
+    @State private var videoStats: WPEVideoCacheStats?
+    @State private var isLoadingVideo: Bool = true
+    @State private var showingVideoClearConfirmation: Bool = false
+    @State private var lastVideoFreedBytes: UInt64?
 
     private let cache: WallpaperEngineCache
 
@@ -80,6 +84,8 @@ struct WPECacheManagementView: View {
                     }
                 }
             }
+
+            videoCacheSection
         }
         .settingsFormChrome()
         .onAppear { Task { await refreshStats() } }
@@ -87,7 +93,74 @@ struct WPECacheManagementView: View {
             Task { await refreshStats() }
         }
         .confirmDestructive($pendingDestructive)
+        .confirmationDialog(
+            "Clear scene video texture cache?",
+            isPresented: $showingVideoClearConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Clear", role: .destructive) {
+                Task { await purgeVideoCache() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Deletes every extracted video file. Each scene re-extracts its video the next time it renders.")
+        }
         .errorAlert("Cache Error", message: $errorMessage)
+    }
+
+    /// Surfaces the `wpe-tex-video` folder's *actual* on-disk footprint (the
+    /// `du`-equivalent), which previously went uncounted in Settings.
+    @ViewBuilder
+    private var videoCacheSection: some View {
+        Section {
+            if isLoadingVideo {
+                HStack {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Calculating cache size…")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(byteFormatter.string(fromByteCount: Int64(videoStats?.totalBytes ?? 0)))
+                        .font(.system(size: 22, weight: .semibold, design: .rounded))
+                    Text("Across \(videoStats?.fileCount ?? 0) extracted video file\((videoStats?.fileCount ?? 0) == 1 ? "" : "s")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Button(role: .destructive) {
+                    showingVideoClearConfirmation = true
+                } label: {
+                    Label("Clear video cache", systemImage: "trash")
+                }
+                .destructiveControlTint()
+                .controlSize(.regular)
+                .disabled((videoStats?.totalBytes ?? 0) == 0)
+            }
+        } header: {
+            HStack {
+                Text("Scene Video Texture Cache")
+                Spacer()
+                if let videoStats {
+                    Text(verbatim: "\(byteFormatter.string(fromByteCount: Int64(videoStats.totalBytes))) · \(videoStats.fileCount)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } footer: {
+            if let last = lastVideoFreedBytes, last > 0 {
+                Text("Freed \(Int64(last), format: .byteCount(style: .file)).", comment: "WPE video texture cache footer shown after a purge. Placeholder is the freed byte total.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("MP4 frames extracted from scene video layers, reused across launches. Orphaned scenes are reclaimed automatically at startup.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     // MARK: - Header / rows
@@ -168,6 +241,19 @@ struct WPECacheManagementView: View {
         let snapshot = await cache.stats()
         stats = snapshot
         isLoading = false
+        await refreshVideoStats()
+    }
+
+    private func refreshVideoStats() async {
+        isLoadingVideo = true
+        videoStats = await WPEVideoTextureDiskCache.shared.stats()
+        isLoadingVideo = false
+    }
+
+    private func purgeVideoCache() async {
+        let freed = await WPEVideoTextureDiskCache.shared.purgeAll()
+        lastVideoFreedBytes = freed
+        await refreshVideoStats()
     }
 
     private func purgeAll() async {
