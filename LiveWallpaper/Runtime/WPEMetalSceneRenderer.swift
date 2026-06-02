@@ -1401,10 +1401,21 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
 
     func setMouseInteractionEnabled(_ enabled: Bool) {
         mouseInteractionEnabled = enabled
+        refreshLiveness()
     }
 
     func setClickCaptureEnabled(_ enabled: Bool) {
         mtkView.clickCaptureEnabled = enabled
+        refreshLiveness()
+    }
+
+    /// Re-evaluates the paused/continuous state after a mouse-interaction toggle
+    /// flips at runtime, so turning Follow Cursor / Interactive on un-pauses a
+    /// previously-static scene (and turning them off lets it re-pause).
+    private func refreshLiveness() {
+        guard currentProfile == .quality else { return }
+        mtkView.isPaused = !needsContinuousFrames
+        mtkView.enableSetNeedsDisplay = !needsContinuousFrames
     }
 
     /// Applies the user-selected frame rate ceiling. `.unlimited` falls
@@ -1453,6 +1464,21 @@ final class WPEMetalSceneRenderer: NSObject, WPESceneRenderer, WPEScenePropertyR
         hasAnimatedShaderPasses
             || !dynamicTextureSources.isEmpty
             || !particleSystems.isEmpty
+            || pointerDrivenContent
+    }
+
+    /// The cursor moves between frames, so anything that consumes it needs a
+    /// live frame to re-sample — otherwise a static scene renders once at load
+    /// and never reacts to the mouse again (the "no interaction" bug). Camera
+    /// parallax (gated by the Follow Cursor toggle) and click capture both
+    /// qualify; pointer-only shaders are already "animated" (effects/workshop)
+    /// and covered by `hasAnimatedShaderPasses`.
+    private var pointerDrivenContent: Bool {
+        (mouseInteractionEnabled
+            && cameraParallaxSettings.enabled
+            && cameraParallaxSettings.amount > 0
+            && cameraParallaxSettings.mouseInfluence > 0)
+            || mtkView.clickCaptureEnabled
     }
 
     /// A pass animates per-frame when its shader samples `g_Time` /

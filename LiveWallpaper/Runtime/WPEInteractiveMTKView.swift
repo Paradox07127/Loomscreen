@@ -27,6 +27,26 @@ final class WPEInteractiveMTKView: MTKView {
 
     override var acceptsFirstResponder: Bool { clickCaptureEnabled }
 
+    /// AppKit only delivers `mouseMoved(with:)` to a view that owns a tracking
+    /// area with `.mouseMoved`. Without this, hovering (no button down) never
+    /// updates the captured pointer — only `mouseDragged` would. `.activeAlways`
+    /// because the wallpaper window is never key; the window itself still only
+    /// forwards moved events while capturing (`acceptsMouseMovedEvents`).
+    private var trackingArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea { removeTrackingArea(trackingArea) }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseMoved, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
     /// Top-left-origin normalized UV of an event, matching the scene's UV
     /// convention (same flip as `WPEMetalPointerSampler.normalizedSceneUV`).
     private func uv(for event: NSEvent) -> SIMD2<Double> {
